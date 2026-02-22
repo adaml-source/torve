@@ -1,0 +1,58 @@
+-- Metadata cache for TMDB responses
+CREATE TABLE metadata_cache (
+    id TEXT NOT NULL PRIMARY KEY,
+    type TEXT NOT NULL,
+    json_data TEXT NOT NULL,
+    cached_at INTEGER NOT NULL
+);
+
+getCachedMeta:
+SELECT * FROM metadata_cache WHERE id = ? AND type = ?;
+
+insertCachedMeta:
+INSERT OR REPLACE INTO metadata_cache (id, type, json_data, cached_at) VALUES (?, ?, ?, ?);
+
+deleteStaleMeta:
+DELETE FROM metadata_cache WHERE cached_at < ?;
+
+-- Watch progress tracking
+CREATE TABLE watch_progress (
+    media_id TEXT NOT NULL PRIMARY KEY,
+    media_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    poster_url TEXT,
+    backdrop_url TEXT,
+    position_ms INTEGER NOT NULL DEFAULT 0,
+    duration_ms INTEGER NOT NULL DEFAULT 0,
+    season_number INTEGER,
+    episode_number INTEGER,
+    show_title TEXT,
+    updated_at INTEGER NOT NULL
+);
+
+getInProgress:
+SELECT * FROM watch_progress WHERE position_ms > 0 AND (CAST(position_ms AS REAL) / duration_ms) < 0.9 ORDER BY updated_at DESC LIMIT ?;
+
+getAllProgress:
+SELECT * FROM watch_progress ORDER BY updated_at DESC;
+
+getProgress:
+SELECT * FROM watch_progress WHERE media_id = ?;
+
+upsertProgress:
+INSERT OR REPLACE INTO watch_progress (media_id, media_type, title, poster_url, backdrop_url, position_ms, duration_ms, season_number, episode_number, show_title, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- User preferences key-value store
+CREATE TABLE preference (
+    key TEXT NOT NULL PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+getPreference:
+SELECT value FROM preference WHERE key = ?;
+
+setPreference:
+INSERT OR REPLACE INTO preference (key, value) VALUES (?, ?);
+
+deletePreference:
+DELETE FROM preference WHERE key = ?;
