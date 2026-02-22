@@ -9,10 +9,12 @@ import com.streamvault.data.network.HttpClientFactory
 import com.streamvault.data.progress.PreferencesRepositoryImpl
 import com.streamvault.data.progress.WatchProgressRepositoryImpl
 import com.streamvault.data.trakt.TraktClient
+import com.streamvault.db.StreamVaultDatabase
 import com.streamvault.domain.repository.MetadataRepository
 import com.streamvault.domain.repository.PreferencesRepository
 import com.streamvault.domain.repository.StreamRepository
 import com.streamvault.domain.repository.WatchProgressRepository
+import com.streamvault.platform.DatabaseDriverFactory
 import com.streamvault.presentation.detail.DetailViewModel
 import com.streamvault.presentation.home.HomeViewModel
 import com.streamvault.presentation.search.SearchViewModel
@@ -25,6 +27,10 @@ val sharedModule = module {
     // Network
     single { HttpClientFactory.create() }
     single { HttpClientFactory.json }
+
+    // Database
+    single { get<DatabaseDriverFactory>().createDriver() }
+    single { StreamVaultDatabase(get()) }
 
     // TMDB
     singleOf(::TmdbApiClient)
