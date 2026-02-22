@@ -353,7 +353,11 @@ fun CatalogScreen(
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                             verticalArrangement = Arrangement.spacedBy(16.dp),
                         ) {
-                            items(displayItems, key = { it.id }) { item ->
+                            items(
+                                displayItems.size,
+                                key = { index -> "${displayItems[index].id}_$index" },
+                            ) { index ->
+                                val item = displayItems[index]
                                 PosterCard(
                                     item = item,
                                     size = CardSize.MEDIUM,

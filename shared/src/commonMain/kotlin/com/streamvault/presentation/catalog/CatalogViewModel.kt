@@ -110,9 +110,11 @@ class CatalogViewModel(
                     }
                 }
 
+                val existingIds = _state.value.items.map { it.id }.toSet()
+                val newItems = result.items.filter { it.id !in existingIds }
                 _state.update {
                     it.copy(
-                        items = it.items + result.items,
+                        items = it.items + newItems,
                         isLoadingMore = false,
                         currentPage = result.page,
                         totalPages = result.totalPages,
@@ -134,9 +136,11 @@ class CatalogViewModel(
             try {
                 val nextPage = s.searchPage + 1
                 val result = metadataRepo.searchMultiPaged(s.searchQuery, nextPage, mediaType)
+                val existingIds = _state.value.searchResults.map { it.id }.toSet()
+                val newItems = result.items.filter { it.id !in existingIds }
                 _state.update {
                     it.copy(
-                        searchResults = it.searchResults + result.items,
+                        searchResults = it.searchResults + newItems,
                         isSearchingMore = false,
                         searchPage = result.page,
                         searchHasMore = result.page < result.totalPages,
