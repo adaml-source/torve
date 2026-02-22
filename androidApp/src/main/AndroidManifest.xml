@@ -17,10 +17,11 @@
         android:usesCleartextTraffic="true"
         android:networkSecurityConfig="@xml/network_security_config">
 
-        <!-- Google Cast options provider -->
+        <!-- Google Cast options provider (disabled for emulator testing — causes beeping)
         <meta-data
             android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
             android:value="com.streamvault.android.player.CastOptionsProvider" />
+        -->
 
         <activity
             android:name=".MainActivity"

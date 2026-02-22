@@ -16,18 +16,23 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -96,6 +101,7 @@ fun PlayerScreen(
     var subtitleTracks by remember { mutableStateOf<List<TrackDescription>>(emptyList()) }
     var audioTracks by remember { mutableStateOf<List<TrackDescription>>(emptyList()) }
     var useMpv by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
 
     // Create the player engine (try MPV first, fallback to ExoPlayer)
     val engine = remember(url) {
@@ -147,7 +153,7 @@ fun PlayerScreen(
             }
 
             override fun onError(message: String) {
-                // Could show error UI
+                errorMessage = message
             }
         }
         engine.addListener(listener)
@@ -283,6 +289,66 @@ fun PlayerScreen(
             )
         }
 
+        // Error overlay
+        errorMessage?.let { msg ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.85f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(32.dp),
+                ) {
+                    Icon(
+                        Icons.Default.ErrorOutline,
+                        contentDescription = null,
+                        tint = Color(0xFFE8A838),
+                        modifier = Modifier.size(48.dp),
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        text = "Playback Error",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = Color.White,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = msg,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White.copy(alpha = 0.7f),
+                    )
+                    Spacer(Modifier.height(24.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Button(
+                            onClick = {
+                                errorMessage = null
+                                engine.play(url)
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFE8A838),
+                                contentColor = Color.Black,
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                        ) {
+                            Text("Retry")
+                        }
+                        Button(
+                            onClick = onBack,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF2E2E40),
+                                contentColor = Color.White,
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                        ) {
+                            Text("Go Back")
+                        }
+                    }
+                }
+            }
+        }
+
         // Track selection dialog
         if (showTrackDialog) {
             TrackSelectionDialog(
@@ -316,6 +382,7 @@ fun PlayerScreen(
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .fillMaxWidth()
+                        .statusBarsPadding()
                         .padding(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {

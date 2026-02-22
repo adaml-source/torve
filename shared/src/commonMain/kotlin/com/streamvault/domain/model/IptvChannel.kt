@@ -3,6 +3,11 @@ package com.streamvault.domain.model
 import kotlinx.serialization.Serializable
 
 @Serializable
+enum class IptvContentType {
+    LIVE, VOD_MOVIE, VOD_SERIES, UNKNOWN
+}
+
+@Serializable
 data class IptvChannel(
     val name: String,
     val url: String,
@@ -23,6 +28,7 @@ data class IptvChannel(
     val kodiProps: Map<String, String> = emptyMap(),
     val isFavorite: Boolean = false,
     val playlistId: String = "",
+    val contentType: IptvContentType = IptvContentType.UNKNOWN,
 )
 
 enum class PlaylistType {
@@ -86,4 +92,13 @@ data class EnrichedChannel(
     val channel: IptvChannel,
     val currentProgramme: EpgProgramme? = null,
     val nextProgramme: EpgProgramme? = null,
+)
+
+data class IptvCategory(
+    val name: String,
+    val channelCount: Int,
+    val isExpanded: Boolean = false,
+    val channels: List<EnrichedChannel> = emptyList(),
+    val qualityTags: Set<String> = emptySet(),
+    val countryCode: String? = null,
 )

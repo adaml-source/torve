@@ -2,6 +2,7 @@ package com.streamvault.android.ui.settings
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -79,6 +81,8 @@ fun SettingsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .statusBarsPadding()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
     ) {
@@ -111,8 +115,8 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(24.dp))
 
-        // ── Debrid Section ──
-        SectionHeader(title = "Debrid Service")
+        // ── Cloud Service Section ──
+        SectionHeader(title = "Cloud Service")
         Spacer(Modifier.height(8.dp))
 
         Card(
@@ -620,7 +624,7 @@ fun SettingsScreen(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Cached Only", style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            "Only show debrid-cached streams",
+                            "Only show cached streams for instant playback",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -656,7 +660,7 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(24.dp))
 
-        // ── Addons Section ──
+        // ── Content Sources Section ──
         val addonViewModel: AddonViewModel = koinInject()
         AddonManagerSection(viewModel = addonViewModel)
 
@@ -1042,7 +1046,7 @@ fun SettingsScreen(
                         val shareIntent = Intent(Intent.ACTION_SEND).apply {
                             type = "text/plain"
                             putExtra(Intent.EXTRA_SUBJECT, "StreamVault")
-                            putExtra(Intent.EXTRA_TEXT, "Check out StreamVault - the ultimate streaming companion app! https://streamvault.app")
+                            putExtra(Intent.EXTRA_TEXT, "Check out StreamVault - a beautiful media player and content organizer! https://streamvault.app")
                         }
                         context.startActivity(Intent.createChooser(shareIntent, "Share StreamVault"))
                     },

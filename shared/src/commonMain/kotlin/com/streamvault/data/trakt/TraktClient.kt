@@ -18,16 +18,18 @@ class TraktClient(
 ) {
     companion object {
         const val TRAKT_BASE = "https://api.trakt.tv"
+        const val DEFAULT_CLIENT_ID = "b0db129b5c1a28a04ef433702abe3cbb2dbe37cbb31de2cba4804e0a06f8ee1b"
+        const val DEFAULT_CLIENT_SECRET = "be08c2e7d89da0614ae8949e41c975e6cad32e4d04ded43c18c0e36eee7cfe7c"
     }
 
-    var clientId: String = ""
+    var clientId: String = DEFAULT_CLIENT_ID
         private set
-    var clientSecret: String = ""
+    var clientSecret: String = DEFAULT_CLIENT_SECRET
         private set
 
     fun setCredentials(clientId: String, clientSecret: String) {
-        this.clientId = clientId
-        this.clientSecret = clientSecret
+        this.clientId = clientId.ifBlank { DEFAULT_CLIENT_ID }
+        this.clientSecret = clientSecret.ifBlank { DEFAULT_CLIENT_SECRET }
     }
 
     private fun traktHeaders(accessToken: String? = null): Map<String, String> {

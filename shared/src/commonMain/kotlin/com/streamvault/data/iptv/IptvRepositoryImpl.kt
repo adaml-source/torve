@@ -5,6 +5,7 @@ import com.streamvault.domain.model.EnrichedChannel
 import com.streamvault.domain.model.EpgData
 import com.streamvault.domain.model.EpgProgramme
 import com.streamvault.domain.model.IptvChannel
+import com.streamvault.domain.model.IptvContentType
 import com.streamvault.domain.model.IptvPlaylist
 import com.streamvault.domain.model.PlaylistType
 import com.streamvault.domain.repository.IptvRepository
@@ -319,6 +320,44 @@ class IptvRepositoryImpl(
 
     override suspend fun isFavorite(channelId: String): Boolean {
         return database.streamVaultQueries.isFavorite(channelId).executeAsOne() > 0
+    }
+
+    override suspend fun recordChannelViewed(channel: IptvChannel) {
+        val now = Clock.System.now().toEpochMilliseconds()
+        val channelId = channel.tvgId ?: "${channel.playlistId}_${channel.name}"
+        database.streamVaultQueries.insertRecentChannel(
+            channel_id = channelId,
+            playlist_id = channel.playlistId,
+            name = channel.name,
+            logo_url = channel.tvgLogo,
+            group_title = channel.groupTitle,
+            stream_url = channel.url,
+            viewed_at = now,
+        )
+    }
+
+    override suspend fun getRecentlyViewedChannels(limit: Long): List<IptvChannel> {
+        return database.streamVaultQueries.getRecentChannels(limit).executeAsList().map { row ->
+            // Try to find full channel from cache for complete metadata
+            val fullChannel = playlistCache.values.flatten().find { ch ->
+                (ch.tvgId ?: "${ch.playlistId}_${ch.name}") == row.channel_id
+            }
+            fullChannel ?: IptvChannel(
+                name = row.name,
+                url = row.stream_url,
+                tvgLogo = row.logo_url,
+                groupTitle = row.group_title,
+                playlistId = row.playlist_id,
+            )
+        }
+    }
+
+    override suspend fun getChannelsByContentType(
+        playlistId: String,
+        type: IptvContentType,
+    ): List<EnrichedChannel> {
+        val enriched = getEnrichedChannels(playlistId)
+        return enriched.filter { it.channel.contentType == type }
     }
 
     private fun matchEpgChannel(ch: IptvChannel, epg: EpgData): String? {

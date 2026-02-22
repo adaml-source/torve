@@ -195,7 +195,7 @@ private fun WelcomeStep() {
 
         val features = listOf(
             "Stream movies & TV shows from multiple sources",
-            "Debrid service integration for fast, cached streams",
+            "Cloud service integration for optimized playback",
             "Live TV with IPTV/M3U playlist support",
             "Download content for offline viewing",
             "Track your watchlist with Trakt.tv",
@@ -232,10 +232,10 @@ private fun WelcomeStep() {
 @Composable
 private fun DebridStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
     Column {
-        Text("Debrid Service", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text("Cloud Service", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         Text(
-            "A debrid service provides fast, cached downloads. Connect one to get the best streaming experience.",
+            "Connect your premium cloud storage service for optimized streaming and faster playback.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -331,28 +331,112 @@ private fun TraktStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
         )
         Spacer(Modifier.height(24.dp))
 
-        OutlinedTextField(
-            value = state.traktClientId,
-            onValueChange = { viewModel.setTraktClientId(it) },
-            label = { Text("Client ID") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-        )
-        Spacer(Modifier.height(12.dp))
-        OutlinedTextField(
-            value = state.traktClientSecret,
-            onValueChange = { viewModel.setTraktClientSecret(it) },
-            label = { Text("Client Secret") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-        )
+        when {
+            state.traktConnected -> {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    ),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text("Connected to Trakt!", fontWeight = FontWeight.Medium)
+                            state.traktUsername?.let { username ->
+                                Text(
+                                    "Logged in as $username",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
 
-        Spacer(Modifier.height(16.dp))
-        Text(
-            "You can get these from trakt.tv/oauth/applications",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+            state.traktDeviceCode != null -> {
+                val code = state.traktDeviceCode!!
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    ),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(
+                            "Go to:",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            code.verificationUrl,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            "Enter this code:",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            code.userCode,
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "Waiting for authorization...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+
+            else -> {
+                FilledTonalButton(
+                    onClick = { viewModel.startTraktAuth() },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !state.traktLoading,
+                ) {
+                    if (state.traktLoading) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text("Connect with Trakt.tv")
+                }
+
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "You'll be asked to visit trakt.tv/activate and enter a code to authorize.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        state.traktError?.let { error ->
+            Spacer(Modifier.height(8.dp))
+            Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
     }
 }
 
@@ -407,7 +491,7 @@ private fun QualityStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
             Column(modifier = Modifier.weight(1f)) {
                 Text("Cached Only", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                 Text(
-                    "Only show debrid-cached streams for instant playback",
+                    "Only show cached streams for instant playback",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

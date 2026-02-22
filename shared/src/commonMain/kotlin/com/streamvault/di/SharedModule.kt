@@ -33,6 +33,7 @@ import com.streamvault.domain.repository.WatchProgressRepository
 import com.streamvault.platform.DatabaseDriverFactory
 import com.streamvault.presentation.addon.AddonViewModel
 import com.streamvault.presentation.detail.DetailViewModel
+import com.streamvault.presentation.detail.PersonViewModel
 import com.streamvault.presentation.download.DownloadViewModel
 import com.streamvault.presentation.home.HomeViewModel
 import com.streamvault.presentation.iptv.IptvViewModel
@@ -111,10 +112,11 @@ val sharedModule = module {
     factoryOf(::HomeViewModel)
     factoryOf(::SearchViewModel)
     factory { DetailViewModel(get(), get(), get(), get(), get()) }
+    factoryOf(::PersonViewModel)
     single { SettingsViewModel(get(), get(), get(), get(), get(), get()) }
     factoryOf(::AddonViewModel)
     factory { IptvViewModel(get(), get()) }
     factoryOf(::DownloadViewModel)
     factoryOf(::SubscriptionViewModel)
-    factoryOf(::SetupWizardViewModel)
+    factory { SetupWizardViewModel(get(), get(), get()) }
 }

@@ -49,8 +49,28 @@ class DetailViewModel(
                     val progress = watchProgressRepo.getProgress(item.id)
                     _state.update { it.copy(watchProgress = progress) }
                 }
+
+                // Auto-load first season for TV shows
+                if (type == "tv" && item.seasons.isNotEmpty()) {
+                    val firstReal = item.seasons.firstOrNull { it.seasonNumber > 0 }
+                    if (firstReal != null) {
+                        loadSeasonDetail(id, firstReal.seasonNumber)
+                    }
+                }
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = e.message ?: "Failed to load") }
+            }
+        }
+    }
+
+    fun loadSeasonDetail(tvId: Int, seasonNumber: Int) {
+        scope.launch {
+            _state.update { it.copy(selectedSeason = seasonNumber, isLoadingSeasonDetail = true) }
+            try {
+                val season = metadataRepo.getSeasonDetail(tvId, seasonNumber)
+                _state.update { it.copy(seasonDetail = season, isLoadingSeasonDetail = false) }
+            } catch (_: Exception) {
+                _state.update { it.copy(isLoadingSeasonDetail = false) }
             }
         }
     }
@@ -60,7 +80,15 @@ class DetailViewModel(
         val imdbId = item.imdbId ?: return
 
         scope.launch {
-            _state.update { it.copy(isLoadingStreams = true, streamsError = null, streams = emptyList()) }
+            _state.update {
+                it.copy(
+                    isLoadingStreams = true,
+                    streamsError = null,
+                    streams = emptyList(),
+                    streamContextSeason = season,
+                    streamContextEpisode = episode,
+                )
+            }
             try {
                 val streams = streamRepo.fetchStreams(
                     type = item.type,

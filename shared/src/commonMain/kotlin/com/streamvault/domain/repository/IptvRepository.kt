@@ -4,6 +4,7 @@ import com.streamvault.domain.model.EnrichedChannel
 import com.streamvault.domain.model.EpgData
 import com.streamvault.domain.model.EpgProgramme
 import com.streamvault.domain.model.IptvChannel
+import com.streamvault.domain.model.IptvContentType
 import com.streamvault.domain.model.IptvPlaylist
 
 interface IptvRepository {
@@ -22,4 +23,7 @@ interface IptvRepository {
     suspend fun removeFavorite(channelId: String)
     suspend fun getFavorites(): List<IptvChannel>
     suspend fun isFavorite(channelId: String): Boolean
+    suspend fun recordChannelViewed(channel: IptvChannel)
+    suspend fun getRecentlyViewedChannels(limit: Long = 20): List<IptvChannel>
+    suspend fun getChannelsByContentType(playlistId: String, type: IptvContentType): List<EnrichedChannel>
 }

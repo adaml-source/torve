@@ -5,16 +5,55 @@ import com.streamvault.domain.model.MediaItem
 data class CatalogUiState(
     val items: List<MediaItem> = emptyList(),
     val isLoading: Boolean = false,
+    val isLoadingMore: Boolean = false,
     val error: String? = null,
     val selectedCategory: CatalogCategory = CatalogCategory.TRENDING,
     val selectedGenreId: Int? = null,
     val searchQuery: String = "",
     val searchResults: List<MediaItem> = emptyList(),
     val isSearching: Boolean = false,
+    // Pagination
+    val currentPage: Int = 1,
+    val totalPages: Int = 1,
+    val hasMore: Boolean = false,
+    // Filters
+    val filter: CatalogFilter = CatalogFilter(),
+    val showFilterSheet: Boolean = false,
+    val activeFilterCount: Int = 0,
+    // Search pagination
+    val searchPage: Int = 1,
+    val searchHasMore: Boolean = false,
+    val isSearchingMore: Boolean = false,
 )
 
 enum class CatalogCategory(val label: String) {
     TRENDING("Trending"),
     POPULAR("Popular"),
     TOP_RATED("Top Rated"),
+}
+
+data class CatalogFilter(
+    val minRating: Float? = null,
+    val year: Int? = null,
+    val sortBy: SortOption = SortOption.POPULARITY_DESC,
+) {
+    val isActive: Boolean
+        get() = minRating != null || year != null || sortBy != SortOption.POPULARITY_DESC
+
+    val activeCount: Int
+        get() {
+            var count = 0
+            if (minRating != null) count++
+            if (year != null) count++
+            if (sortBy != SortOption.POPULARITY_DESC) count++
+            return count
+        }
+}
+
+enum class SortOption(val apiValue: String, val label: String) {
+    POPULARITY_DESC("popularity.desc", "Most Popular"),
+    VOTE_AVERAGE_DESC("vote_average.desc", "Highest Rated"),
+    RELEASE_DATE_DESC("primary_release_date.desc", "Newest First"),
+    RELEASE_DATE_ASC("primary_release_date.asc", "Oldest First"),
+    REVENUE_DESC("revenue.desc", "Highest Revenue"),
 }

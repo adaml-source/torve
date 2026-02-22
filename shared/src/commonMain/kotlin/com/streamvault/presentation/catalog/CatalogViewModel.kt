@@ -1,5 +1,7 @@
 package com.streamvault.presentation.catalog
 
+import com.streamvault.domain.model.MediaItem
+import com.streamvault.domain.model.PagedResult
 import com.streamvault.domain.repository.MetadataRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -35,19 +37,113 @@ class CatalogViewModel(
 
     fun loadCatalog() {
         scope.launch {
-            _state.update { it.copy(isLoading = true, error = null) }
+            _state.update { it.copy(isLoading = true, error = null, currentPage = 1) }
             try {
-                val items = when (_state.value.selectedCategory) {
-                    CatalogCategory.TRENDING -> metadataRepo.getTrending(mediaType)
-                    CatalogCategory.POPULAR -> metadataRepo.getPopular(mediaType)
-                    CatalogCategory.TOP_RATED -> metadataRepo.getTopRated(mediaType)
+                val filter = _state.value.filter
+                val genreId = _state.value.selectedGenreId
+
+                val result = if (filter.isActive || genreId != null) {
+                    // Use discover API when any filter or genre is active
+                    metadataRepo.discover(
+                        type = mediaType,
+                        page = 1,
+                        sortBy = filter.sortBy.apiValue,
+                        withGenres = genreId?.toString(),
+                        minRating = filter.minRating,
+                        year = filter.year,
+                    )
+                } else {
+                    // Use curated list endpoints
+                    when (_state.value.selectedCategory) {
+                        CatalogCategory.TRENDING -> metadataRepo.getTrendingPaged(mediaType)
+                        CatalogCategory.POPULAR -> metadataRepo.getPopularPaged(mediaType)
+                        CatalogCategory.TOP_RATED -> metadataRepo.getTopRatedPaged(mediaType)
+                    }
                 }
-                val filtered = _state.value.selectedGenreId?.let { genreId ->
-                    items.filter { it.genreIds.contains(genreId) }
-                } ?: items
-                _state.update { it.copy(items = filtered, isLoading = false) }
+
+                _state.update {
+                    it.copy(
+                        items = result.items,
+                        isLoading = false,
+                        currentPage = result.page,
+                        totalPages = result.totalPages,
+                        hasMore = result.page < result.totalPages,
+                        activeFilterCount = filter.activeCount + (if (genreId != null) 1 else 0),
+                    )
+                }
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = e.message) }
+            }
+        }
+    }
+
+    fun loadMore() {
+        val s = _state.value
+        if (s.isLoadingMore || !s.hasMore || s.isLoading) return
+        // Don't paginate during search
+        if (s.searchQuery.length >= 2) {
+            loadMoreSearch()
+            return
+        }
+
+        scope.launch {
+            _state.update { it.copy(isLoadingMore = true) }
+            try {
+                val nextPage = s.currentPage + 1
+                val filter = s.filter
+                val genreId = s.selectedGenreId
+
+                val result = if (filter.isActive || genreId != null) {
+                    metadataRepo.discover(
+                        type = mediaType,
+                        page = nextPage,
+                        sortBy = filter.sortBy.apiValue,
+                        withGenres = genreId?.toString(),
+                        minRating = filter.minRating,
+                        year = filter.year,
+                    )
+                } else {
+                    when (s.selectedCategory) {
+                        CatalogCategory.TRENDING -> metadataRepo.getTrendingPaged(mediaType, nextPage)
+                        CatalogCategory.POPULAR -> metadataRepo.getPopularPaged(mediaType, nextPage)
+                        CatalogCategory.TOP_RATED -> metadataRepo.getTopRatedPaged(mediaType, nextPage)
+                    }
+                }
+
+                _state.update {
+                    it.copy(
+                        items = it.items + result.items,
+                        isLoadingMore = false,
+                        currentPage = result.page,
+                        totalPages = result.totalPages,
+                        hasMore = result.page < result.totalPages,
+                    )
+                }
+            } catch (_: Exception) {
+                _state.update { it.copy(isLoadingMore = false) }
+            }
+        }
+    }
+
+    private fun loadMoreSearch() {
+        val s = _state.value
+        if (s.isSearchingMore || !s.searchHasMore) return
+
+        scope.launch {
+            _state.update { it.copy(isSearchingMore = true) }
+            try {
+                val nextPage = s.searchPage + 1
+                val result = metadataRepo.searchMultiPaged(s.searchQuery, nextPage, mediaType)
+                _state.update {
+                    it.copy(
+                        searchResults = it.searchResults + result.items,
+                        isSearchingMore = false,
+                        searchPage = result.page,
+                        searchHasMore = result.page < result.totalPages,
+                    )
+                }
+            } catch (_: Exception) {
+                _state.update { it.copy(isSearchingMore = false) }
             }
         }
     }
@@ -60,6 +156,24 @@ class CatalogViewModel(
     fun selectGenre(genreId: Int?) {
         _state.update { it.copy(selectedGenreId = genreId) }
         loadCatalog()
+    }
+
+    fun applyFilter(filter: CatalogFilter) {
+        _state.update { it.copy(filter = filter, showFilterSheet = false) }
+        loadCatalog()
+    }
+
+    fun clearFilters() {
+        _state.update { it.copy(filter = CatalogFilter(), selectedGenreId = null, showFilterSheet = false) }
+        loadCatalog()
+    }
+
+    fun toggleFilterSheet() {
+        _state.update { it.copy(showFilterSheet = !it.showFilterSheet) }
+    }
+
+    fun dismissFilterSheet() {
+        _state.update { it.copy(showFilterSheet = false) }
     }
 
     fun updateSearchQuery(query: String) {
@@ -75,18 +189,17 @@ class CatalogViewModel(
                 .distinctUntilChanged()
                 .filter { it.length >= 2 }
                 .collect { query ->
-                    _state.update { it.copy(isSearching = true) }
+                    _state.update { it.copy(isSearching = true, searchPage = 1) }
                     try {
-                        val results = metadataRepo.searchMulti(query)
-                        // Filter to only the relevant media type
-                        val filtered = results.filter {
-                            when (mediaType) {
-                                "movie" -> it.type == com.streamvault.domain.model.MediaType.MOVIE
-                                "tv" -> it.type == com.streamvault.domain.model.MediaType.SERIES
-                                else -> true
-                            }
+                        val result = metadataRepo.searchMultiPaged(query, 1, mediaType)
+                        _state.update {
+                            it.copy(
+                                searchResults = result.items,
+                                isSearching = false,
+                                searchPage = result.page,
+                                searchHasMore = result.page < result.totalPages,
+                            )
                         }
-                        _state.update { it.copy(searchResults = filtered, isSearching = false) }
                     } catch (_: Exception) {
                         _state.update { it.copy(isSearching = false) }
                     }
@@ -95,7 +208,7 @@ class CatalogViewModel(
     }
 
     fun clearSearch() {
-        _state.update { it.copy(searchQuery = "", searchResults = emptyList()) }
+        _state.update { it.copy(searchQuery = "", searchResults = emptyList(), searchPage = 1, searchHasMore = false) }
         searchQueryFlow.value = ""
     }
 

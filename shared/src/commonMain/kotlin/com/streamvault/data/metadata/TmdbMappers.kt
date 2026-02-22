@@ -21,6 +21,7 @@ object TmdbMappers {
         val trailer = m.videos?.results?.firstOrNull { v ->
             v.site == "YouTube" && v.type == "Trailer"
         }
+        val director = m.credits?.crew?.firstOrNull { it.job == "Director" }
         return MediaItem(
             id = m.id.toString(),
             tmdbId = m.id,
@@ -44,6 +45,8 @@ object TmdbMappers {
                     profileUrl = profileUrl(c.profilePath),
                 )
             },
+            director = director?.name,
+            directorId = director?.id,
             releaseDate = m.releaseDate,
             status = m.status,
             trailerKey = trailer?.key,
@@ -56,6 +59,7 @@ object TmdbMappers {
         val trailer = t.videos?.results?.firstOrNull { v ->
             v.site == "YouTube" && v.type == "Trailer"
         }
+        val director = t.credits?.crew?.firstOrNull { it.job == "Director" }
         return MediaItem(
             id = t.id.toString(),
             tmdbId = t.id,
@@ -78,6 +82,8 @@ object TmdbMappers {
                     profileUrl = profileUrl(c.profilePath),
                 )
             },
+            director = director?.name,
+            directorId = director?.id,
             releaseDate = t.firstAirDate,
             status = t.status,
             trailerKey = trailer?.key,
@@ -93,6 +99,38 @@ object TmdbMappers {
                     airDate = s.airDate,
                 )
             } ?: emptyList(),
+        )
+    }
+
+    fun personCreditToMediaItem(c: TmdbPersonCastCredit): MediaItem {
+        val date = c.releaseDate ?: c.firstAirDate
+        return MediaItem(
+            id = c.id.toString(),
+            tmdbId = c.id,
+            type = if (c.mediaType == "tv") MediaType.SERIES else MediaType.MOVIE,
+            title = c.title ?: c.name ?: "",
+            year = date?.take(4)?.toIntOrNull(),
+            posterUrl = posterUrl(c.posterPath),
+            backdropUrl = backdropUrl(c.backdropPath),
+            rating = c.voteAverage,
+            releaseDate = date,
+            popularity = c.popularity,
+        )
+    }
+
+    fun personCrewCreditToMediaItem(c: TmdbPersonCrewCredit): MediaItem {
+        val date = c.releaseDate ?: c.firstAirDate
+        return MediaItem(
+            id = c.id.toString(),
+            tmdbId = c.id,
+            type = if (c.mediaType == "tv") MediaType.SERIES else MediaType.MOVIE,
+            title = c.title ?: c.name ?: "",
+            year = date?.take(4)?.toIntOrNull(),
+            posterUrl = posterUrl(c.posterPath),
+            backdropUrl = backdropUrl(c.backdropPath),
+            rating = c.voteAverage,
+            releaseDate = date,
+            popularity = c.popularity,
         )
     }
 

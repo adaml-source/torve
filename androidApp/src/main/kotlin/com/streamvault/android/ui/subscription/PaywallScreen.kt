@@ -191,7 +191,7 @@ private fun FeatureComparison() {
         FeatureRow("Stream Playback", free = false, pro = true)
         FeatureRow("Downloads", free = false, pro = true)
         FeatureRow("IPTV / Live TV", free = false, pro = true)
-        FeatureRow("Multi-Debrid", free = false, pro = true)
+        FeatureRow("Multi-Cloud", free = false, pro = true)
         FeatureRow("Advanced Filters", free = false, pro = true)
     }
 }

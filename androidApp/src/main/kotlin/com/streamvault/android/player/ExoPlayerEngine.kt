@@ -3,6 +3,7 @@ package com.streamvault.android.player
 import android.content.Context
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
@@ -50,6 +51,21 @@ class ExoPlayerEngine(
                 _state = _state.copy(durationMs = exoPlayer?.duration ?: 0)
             }
             notifyStateChanged()
+        }
+
+        override fun onPlayerError(error: PlaybackException) {
+            val msg = when (error.errorCode) {
+                PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+                PlaybackException.ERROR_CODE_DECODING_FAILED ->
+                    "Codec error: This format is not supported on this device"
+                PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+                PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ->
+                    "Network error: Could not connect to stream"
+                PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW ->
+                    "Live stream error: Fell behind live window"
+                else -> error.message ?: "Playback error (${error.errorCode})"
+            }
+            listeners.forEach { it.onError(msg) }
         }
 
         override fun onTracksChanged(tracks: Tracks) {

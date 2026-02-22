@@ -6,12 +6,12 @@ plugins {
 
 android {
     namespace = "com.streamvault.android"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.streamvault.android"
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
     }
@@ -25,14 +25,16 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 

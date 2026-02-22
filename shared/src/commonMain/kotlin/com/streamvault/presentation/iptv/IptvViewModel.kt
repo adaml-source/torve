@@ -1,6 +1,10 @@
 package com.streamvault.presentation.iptv
 
 import com.streamvault.domain.model.EnrichedChannel
+import com.streamvault.domain.model.EpgProgramme
+import com.streamvault.domain.model.IptvCategory
+import com.streamvault.domain.model.IptvChannel
+import com.streamvault.domain.model.IptvContentType
 import com.streamvault.domain.repository.IptvRepository
 import com.streamvault.domain.repository.PreferencesRepository
 import kotlinx.coroutines.CoroutineScope
@@ -28,8 +32,10 @@ class IptvViewModel(
 
     init {
         loadSavedFilters()
+        loadHiddenItems()
         loadPlaylists()
         loadFavorites()
+        loadRecentlyViewed()
         observeSearch()
     }
 
@@ -83,6 +89,9 @@ class IptvViewModel(
                         availableCountries = countries,
                     )
                 }
+                // Build categories and guide data
+                buildLiveCategories()
+                buildGuideChannels()
             } catch (e: Exception) {
                 _state.update { it.copy(isLoadingChannels = false, error = e.message) }
             }
@@ -127,10 +136,251 @@ class IptvViewModel(
             }
         }
 
+        // Quality filter
+        when (st.activeFilter) {
+            IptvFilterType.HD -> result = result.filter { matchesQuality(it.channel.name, "hd") }
+            IptvFilterType.FHD -> result = result.filter { matchesQuality(it.channel.name, "fhd") }
+            IptvFilterType.UHD -> result = result.filter { matchesQuality(it.channel.name, "4k", "uhd") }
+            IptvFilterType.FAVORITES -> {
+                val favIds = st.favorites.map { it.tvgId ?: "${it.playlistId}_${it.name}" }.toSet()
+                result = result.filter { enriched ->
+                    val chId = enriched.channel.tvgId ?: "${enriched.channel.playlistId}_${enriched.channel.name}"
+                    chId in favIds
+                }
+            }
+            IptvFilterType.ALL -> { /* no additional filter */ }
+        }
+
+        // Sort
+        result = when (st.activeSort) {
+            IptvSortType.NAME_AZ -> result.sortedBy { it.channel.name.lowercase() }
+            IptvSortType.NAME_ZA -> result.sortedByDescending { it.channel.name.lowercase() }
+            IptvSortType.RECENTLY_ADDED -> result.reversed()
+            IptvSortType.DEFAULT -> result
+        }
+
         return result
     }
 
-    // Add playlist
+    private fun matchesQuality(name: String, vararg tags: String): Boolean {
+        val lower = name.lowercase()
+        return tags.any { tag ->
+            lower.contains(tag) ||
+                lower.contains("[$tag]") ||
+                lower.contains("($tag)") ||
+                lower.contains("|$tag|")
+        }
+    }
+
+    // --- Sub-tab management ---
+
+    fun selectSubTab(tab: IptvSubTab) {
+        _state.update { it.copy(selectedSubTab = tab) }
+    }
+
+    fun toggleViewMode() {
+        _state.update {
+            it.copy(viewMode = if (it.viewMode == IptvViewMode.LIST) IptvViewMode.GRID else IptvViewMode.LIST)
+        }
+    }
+
+    // --- Category management ---
+
+    fun toggleCategoryExpanded(categoryName: String) {
+        _state.update {
+            val expanded = it.expandedCategories.toMutableSet()
+            if (categoryName in expanded) expanded.remove(categoryName) else expanded.add(categoryName)
+            it.copy(expandedCategories = expanded)
+        }
+    }
+
+    private fun buildLiveCategories() {
+        val st = _state.value
+        val filtered = applyFilters(st.channels).filter {
+            it.channel.contentType == IptvContentType.LIVE || it.channel.contentType == IptvContentType.UNKNOWN
+        }.filter {
+            // Filter out hidden channels
+            val chId = it.channel.tvgId ?: "${it.channel.playlistId}_${it.channel.name}"
+            chId !in st.hiddenChannels
+        }
+        val grouped = filtered.groupBy { it.channel.groupTitle ?: "Ungrouped" }
+        val allCategories = CategoryNameCleaner.processCategories(grouped)
+        val hiddenLower = st.hiddenCategories.map { it.lowercase() }.toSet()
+        val visibleCategories = allCategories.filter { it.name.lowercase() !in hiddenLower }
+        _state.update { it.copy(categories = visibleCategories, allCategories = allCategories) }
+    }
+
+    private fun buildGuideChannels() {
+        val st = _state.value
+        val playlistId = st.selectedPlaylistId ?: return
+        // Guide shows channels that have EPG data (current or next programme)
+        val withEpg = st.channels.filter { it.currentProgramme != null || it.nextProgramme != null }
+        // Fall back to all live channels if no EPG data
+        val guide = if (withEpg.isNotEmpty()) withEpg else st.channels.filter {
+            it.channel.contentType == IptvContentType.LIVE || it.channel.contentType == IptvContentType.UNKNOWN
+        }.take(100)
+
+        // Load full programme data for guide timeline
+        scope.launch {
+            try {
+                val epgData = iptvRepo.getEpg(playlistId)
+                val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+                val windowEnd = now + 6 * 3600 * 1000L // 6 hours ahead
+
+                val progMap = mutableMapOf<String, List<EpgProgramme>>()
+                guide.forEach { enriched ->
+                    val epgId = enriched.channel.tvgId
+                        ?: enriched.channel.tvgName
+                        ?: enriched.channel.name
+                    // Find matching EPG channel id
+                    val matchId = epgData.channels.keys.firstOrNull { key ->
+                        key.equals(enriched.channel.tvgId, ignoreCase = true)
+                    } ?: epgData.channels.entries.firstOrNull { (_, epgCh) ->
+                        epgCh.displayName.equals(enriched.channel.tvgName ?: enriched.channel.name, ignoreCase = true)
+                    }?.key
+
+                    if (matchId != null) {
+                        val progs = epgData.programmes
+                            .filter { it.channelId == matchId && it.endTime > now && it.startTime < windowEnd }
+                            .sortedBy { it.startTime }
+                        val chKey = enriched.channel.tvgId ?: "${enriched.channel.playlistId}_${enriched.channel.name}"
+                        progMap[chKey] = progs
+                    }
+                }
+                _state.update { it.copy(guideChannels = guide, guideProgrammes = progMap) }
+            } catch (_: Exception) {
+                _state.update { it.copy(guideChannels = guide) }
+            }
+        }
+    }
+
+    // --- Hidden categories/channels management ---
+
+    private fun loadHiddenItems() {
+        scope.launch {
+            val cats = prefsRepo.getString("iptv_hidden_categories")
+            val chs = prefsRepo.getString("iptv_hidden_channels")
+            _state.update {
+                it.copy(
+                    hiddenCategories = cats?.split("|||")?.filter { c -> c.isNotBlank() }?.toSet() ?: emptySet(),
+                    hiddenChannels = chs?.split("|||")?.filter { c -> c.isNotBlank() }?.toSet() ?: emptySet(),
+                )
+            }
+        }
+    }
+
+    fun toggleHiddenCategory(categoryName: String) {
+        val current = _state.value.hiddenCategories
+        val updated = if (categoryName in current) current - categoryName else current + categoryName
+        _state.update { it.copy(hiddenCategories = updated) }
+        scope.launch {
+            prefsRepo.setString("iptv_hidden_categories", updated.joinToString("|||"))
+        }
+        buildLiveCategories()
+    }
+
+    fun toggleHiddenChannel(channelId: String) {
+        val current = _state.value.hiddenChannels
+        val updated = if (channelId in current) current - channelId else current + channelId
+        _state.update { it.copy(hiddenChannels = updated) }
+        scope.launch {
+            prefsRepo.setString("iptv_hidden_channels", updated.joinToString("|||"))
+        }
+        buildLiveCategories()
+    }
+
+    fun getAllCategoryNames(): List<String> {
+        val st = _state.value
+        return CategoryNameCleaner.processCategories(
+            st.channels.groupBy { it.channel.groupTitle ?: "Ungrouped" },
+        ).map { it.name }
+    }
+
+    fun hideAllCategories() {
+        val allNames = _state.value.allCategories.map { it.name }.toSet()
+        _state.update { it.copy(hiddenCategories = allNames) }
+        scope.launch {
+            prefsRepo.setString("iptv_hidden_categories", allNames.joinToString("|||"))
+        }
+        buildLiveCategories()
+    }
+
+    fun showAllCategories() {
+        _state.update { it.copy(hiddenCategories = emptySet()) }
+        scope.launch {
+            prefsRepo.setString("iptv_hidden_categories", "")
+        }
+        buildLiveCategories()
+    }
+
+    fun hideCountryCategories(countryCode: String) {
+        val matching = _state.value.allCategories
+            .filter { it.countryCode?.equals(countryCode, ignoreCase = true) == true }
+            .map { it.name }
+            .toSet()
+        val updated = _state.value.hiddenCategories + matching
+        _state.update { it.copy(hiddenCategories = updated) }
+        scope.launch {
+            prefsRepo.setString("iptv_hidden_categories", updated.joinToString("|||"))
+        }
+        buildLiveCategories()
+    }
+
+    fun showCountryCategories(countryCode: String) {
+        val matching = _state.value.allCategories
+            .filter { it.countryCode?.equals(countryCode, ignoreCase = true) == true }
+            .map { it.name.lowercase() }
+            .toSet()
+        val updated = _state.value.hiddenCategories.filter { it.lowercase() !in matching }.toSet()
+        _state.update { it.copy(hiddenCategories = updated) }
+        scope.launch {
+            prefsRepo.setString("iptv_hidden_categories", updated.joinToString("|||"))
+        }
+        buildLiveCategories()
+    }
+
+    // --- Recently viewed ---
+
+    fun recordChannelViewed(channel: IptvChannel) {
+        scope.launch {
+            try {
+                iptvRepo.recordChannelViewed(channel)
+                loadRecentlyViewed()
+            } catch (_: Exception) { }
+        }
+    }
+
+    private fun loadRecentlyViewed() {
+        scope.launch {
+            try {
+                val recent = iptvRepo.getRecentlyViewedChannels(20)
+                _state.update { it.copy(recentlyViewedChannels = recent) }
+            } catch (_: Exception) { }
+        }
+    }
+
+    // --- Filter & sort ---
+
+    fun setFilter(filter: IptvFilterType) {
+        _state.update { it.copy(activeFilter = filter) }
+        buildLiveCategories()
+    }
+
+    fun setSort(sort: IptvSortType) {
+        _state.update { it.copy(activeSort = sort) }
+        buildLiveCategories()
+    }
+
+    fun toggleFilterSheet() {
+        _state.update { it.copy(showFilterSheet = !it.showFilterSheet) }
+    }
+
+    fun toggleCategoryManager() {
+        _state.update { it.copy(showCategoryManager = !it.showCategoryManager) }
+    }
+
+    // --- Add playlist ---
+
     fun showAddPlaylistDialog() {
         _state.update { it.copy(showAddPlaylist = true) }
     }
@@ -227,7 +477,8 @@ class IptvViewModel(
         }
     }
 
-    // Country filter
+    // --- Country filter ---
+
     fun toggleCountryFilter() {
         _state.update { it.copy(showCountryFilter = !it.showCountryFilter) }
     }
@@ -278,7 +529,8 @@ class IptvViewModel(
         }
     }
 
-    // Favorites
+    // --- Favorites ---
+
     fun loadFavorites() {
         scope.launch {
             try {
@@ -288,7 +540,7 @@ class IptvViewModel(
         }
     }
 
-    fun toggleFavorite(channel: com.streamvault.domain.model.IptvChannel) {
+    fun toggleFavorite(channel: IptvChannel) {
         val channelId = channel.tvgId ?: "${channel.playlistId}_${channel.name}"
         scope.launch {
             try {
@@ -304,7 +556,8 @@ class IptvViewModel(
         }
     }
 
-    // Search
+    // --- Search ---
+
     fun updateSearchQuery(query: String) {
         _state.update { it.copy(searchQuery = query) }
         searchQueryFlow.value = query
@@ -331,8 +584,9 @@ class IptvViewModel(
         searchQueryFlow.value = ""
     }
 
-    // Channel detail / EPG
-    fun selectChannel(channel: com.streamvault.domain.model.IptvChannel) {
+    // --- Channel detail / EPG ---
+
+    fun selectChannel(channel: IptvChannel) {
         _state.update { it.copy(selectedChannel = channel) }
         val epgId = channel.tvgId ?: return
         scope.launch {

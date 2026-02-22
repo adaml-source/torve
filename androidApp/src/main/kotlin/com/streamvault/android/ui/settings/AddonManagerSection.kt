@@ -42,7 +42,7 @@ fun AddonManagerSection(
 
     Column(modifier = modifier.fillMaxWidth()) {
         Text(
-            text = "Stremio Addons",
+            text = "Content Sources",
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onBackground,
             fontWeight = FontWeight.SemiBold,
@@ -59,7 +59,7 @@ fun AddonManagerSection(
                 // Installed addons
                 if (state.addons.isEmpty() && !state.isLoading) {
                     Text(
-                        "No addons installed. Add one below.",
+                        "No content sources installed. Add one below.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -124,8 +124,8 @@ fun AddonManagerSection(
                     OutlinedTextField(
                         value = state.installUrl,
                         onValueChange = { viewModel.setInstallUrl(it) },
-                        label = { Text("Manifest URL") },
-                        placeholder = { Text("https://addon.example.com/manifest.json") },
+                        label = { Text("Extension URL") },
+                        placeholder = { Text("https://example.com/manifest.json") },
                         modifier = Modifier.weight(1f),
                         singleLine = true,
                     )

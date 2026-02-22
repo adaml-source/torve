@@ -84,12 +84,102 @@ class TmdbApiClient(private val httpClient: HttpClient) {
         }.body()
     }
 
+    suspend fun getTrendingTv(page: Int = 1): TmdbResponse<TmdbTv> {
+        return httpClient.get("$BASE_URL/trending/tv/week") {
+            parameter("api_key", API_KEY)
+            parameter("page", page)
+        }.body()
+    }
+
+    suspend fun getPopularTv(page: Int = 1): TmdbResponse<TmdbTv> {
+        return httpClient.get("$BASE_URL/tv/popular") {
+            parameter("api_key", API_KEY)
+            parameter("page", page)
+        }.body()
+    }
+
+    suspend fun getTopRatedTv(page: Int = 1): TmdbResponse<TmdbTv> {
+        return httpClient.get("$BASE_URL/tv/top_rated") {
+            parameter("api_key", API_KEY)
+            parameter("page", page)
+        }.body()
+    }
+
+    suspend fun getSimilarTv(id: Int, page: Int = 1): TmdbResponse<TmdbTv> {
+        return httpClient.get("$BASE_URL/tv/$id/similar") {
+            parameter("api_key", API_KEY)
+            parameter("page", page)
+        }.body()
+    }
+
+    suspend fun getPersonCredits(personId: Int): TmdbPersonCredits {
+        return httpClient.get("$BASE_URL/person/$personId/combined_credits") {
+            parameter("api_key", API_KEY)
+        }.body()
+    }
+
+    suspend fun getPersonDetail(personId: Int): TmdbPerson {
+        return httpClient.get("$BASE_URL/person/$personId") {
+            parameter("api_key", API_KEY)
+        }.body()
+    }
+
     suspend fun discoverByGenre(type: String, genreId: Int, page: Int = 1): TmdbResponse<TmdbMovie> {
         return httpClient.get("$BASE_URL/discover/$type") {
             parameter("api_key", API_KEY)
             parameter("with_genres", genreId)
             parameter("sort_by", "popularity.desc")
             parameter("page", page)
+        }.body()
+    }
+
+    suspend fun discoverMovies(
+        page: Int = 1,
+        sortBy: String = "popularity.desc",
+        withGenres: String? = null,
+        minRating: Float? = null,
+        year: Int? = null,
+        withCast: String? = null,
+        withCrew: String? = null,
+    ): TmdbResponse<TmdbMovie> {
+        return httpClient.get("$BASE_URL/discover/movie") {
+            parameter("api_key", API_KEY)
+            parameter("page", page)
+            parameter("sort_by", sortBy)
+            withGenres?.let { parameter("with_genres", it) }
+            minRating?.let { parameter("vote_average.gte", it) }
+            year?.let { parameter("primary_release_year", it) }
+            withCast?.let { parameter("with_cast", it) }
+            withCrew?.let { parameter("with_crew", it) }
+            if (minRating != null) parameter("vote_count.gte", 50)
+        }.body()
+    }
+
+    suspend fun discoverTv(
+        page: Int = 1,
+        sortBy: String = "popularity.desc",
+        withGenres: String? = null,
+        minRating: Float? = null,
+        year: Int? = null,
+        withCast: String? = null,
+        withCrew: String? = null,
+    ): TmdbResponse<TmdbTv> {
+        return httpClient.get("$BASE_URL/discover/tv") {
+            parameter("api_key", API_KEY)
+            parameter("page", page)
+            parameter("sort_by", sortBy)
+            withGenres?.let { parameter("with_genres", it) }
+            minRating?.let { parameter("vote_average.gte", it) }
+            year?.let { parameter("first_air_date_year", it) }
+            withCast?.let { parameter("with_cast", it) }
+            withCrew?.let { parameter("with_crew", it) }
+            if (minRating != null) parameter("vote_count.gte", 50)
+        }.body()
+    }
+
+    suspend fun getTvSeasonDetail(tvId: Int, seasonNumber: Int): TmdbSeasonDetail {
+        return httpClient.get("$BASE_URL/tv/$tvId/season/$seasonNumber") {
+            parameter("api_key", API_KEY)
         }.body()
     }
 }

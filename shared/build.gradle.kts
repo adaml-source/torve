@@ -7,10 +7,8 @@ plugins {
 
 kotlin {
     androidTarget {
-        compilations.all {
-            kotlinOptions {
-                jvmTarget = "17"
-            }
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
         }
     }
 
@@ -65,7 +63,7 @@ kotlin {
 
 android {
     namespace = "com.streamvault.shared"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig {
         minSdk = 24
     }

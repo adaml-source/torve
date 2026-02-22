@@ -98,8 +98,18 @@ data class TmdbVideo(
 )
 
 @Serializable
+data class TmdbCrew(
+    val id: Int,
+    val name: String = "",
+    val job: String = "",
+    val department: String = "",
+    @SerialName("profile_path") val profilePath: String? = null,
+)
+
+@Serializable
 data class TmdbCredits(
     val cast: List<TmdbCast> = emptyList(),
+    val crew: List<TmdbCrew> = emptyList(),
 )
 
 @Serializable
@@ -121,4 +131,73 @@ data class TmdbSeason(
 data class TmdbExternalIds(
     @SerialName("imdb_id") val imdbId: String? = null,
     @SerialName("tvdb_id") val tvdbId: Int? = null,
+)
+
+@Serializable
+data class TmdbPerson(
+    val id: Int,
+    val name: String = "",
+    val biography: String = "",
+    @SerialName("profile_path") val profilePath: String? = null,
+    val birthday: String? = null,
+    @SerialName("place_of_birth") val placeOfBirth: String? = null,
+    @SerialName("known_for_department") val knownForDepartment: String? = null,
+)
+
+@Serializable
+data class TmdbPersonCastCredit(
+    val id: Int,
+    val title: String? = null,
+    val name: String? = null,
+    @SerialName("media_type") val mediaType: String = "",
+    val character: String = "",
+    @SerialName("poster_path") val posterPath: String? = null,
+    @SerialName("backdrop_path") val backdropPath: String? = null,
+    @SerialName("vote_average") val voteAverage: Double = 0.0,
+    @SerialName("release_date") val releaseDate: String? = null,
+    @SerialName("first_air_date") val firstAirDate: String? = null,
+    val popularity: Double = 0.0,
+)
+
+@Serializable
+data class TmdbPersonCrewCredit(
+    val id: Int,
+    val title: String? = null,
+    val name: String? = null,
+    @SerialName("media_type") val mediaType: String = "",
+    val job: String = "",
+    @SerialName("poster_path") val posterPath: String? = null,
+    @SerialName("backdrop_path") val backdropPath: String? = null,
+    @SerialName("vote_average") val voteAverage: Double = 0.0,
+    @SerialName("release_date") val releaseDate: String? = null,
+    @SerialName("first_air_date") val firstAirDate: String? = null,
+    val popularity: Double = 0.0,
+)
+
+@Serializable
+data class TmdbPersonCredits(
+    val cast: List<TmdbPersonCastCredit> = emptyList(),
+    val crew: List<TmdbPersonCrewCredit> = emptyList(),
+)
+
+@Serializable
+data class TmdbEpisode(
+    val id: Int,
+    @SerialName("episode_number") val episodeNumber: Int,
+    val name: String = "",
+    val overview: String = "",
+    @SerialName("still_path") val stillPath: String? = null,
+    @SerialName("air_date") val airDate: String? = null,
+    val runtime: Int? = null,
+    @SerialName("vote_average") val voteAverage: Double = 0.0,
+)
+
+@Serializable
+data class TmdbSeasonDetail(
+    val id: Int,
+    @SerialName("season_number") val seasonNumber: Int,
+    val name: String = "",
+    val overview: String = "",
+    val episodes: List<TmdbEpisode> = emptyList(),
+    @SerialName("poster_path") val posterPath: String? = null,
 )

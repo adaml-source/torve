@@ -1,8 +1,10 @@
 package com.streamvault.presentation.detail
 
 import com.streamvault.data.addon.ParsedStream
+import com.streamvault.domain.model.Episode
 import com.streamvault.domain.model.MediaItem
 import com.streamvault.domain.model.ResolvedStream
+import com.streamvault.domain.model.Season
 import com.streamvault.domain.model.WatchProgress
 
 data class DetailUiState(
@@ -24,4 +26,11 @@ data class DetailUiState(
     val showStreamPicker: Boolean = false,
     // Watched status
     val isMarkedWatched: Boolean = false,
+    // Season/Episode details
+    val selectedSeason: Int = 1,
+    val seasonDetail: Season? = null,
+    val isLoadingSeasonDetail: Boolean = false,
+    // Track what we're fetching streams for (for download labeling)
+    val streamContextSeason: Int? = null,
+    val streamContextEpisode: Int? = null,
 )

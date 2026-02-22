@@ -1,7 +1,11 @@
 package com.streamvault.data.metadata
 
 import com.streamvault.domain.model.CatalogShelf
+import com.streamvault.domain.model.Episode
 import com.streamvault.domain.model.MediaItem
+import com.streamvault.domain.model.MediaType
+import com.streamvault.domain.model.PagedResult
+import com.streamvault.domain.model.Season
 import com.streamvault.domain.model.ShelfType
 import com.streamvault.domain.repository.MetadataRepository
 import kotlinx.coroutines.async
@@ -12,19 +16,27 @@ class MetadataRepositoryImpl(
 ) : MetadataRepository {
 
     override suspend fun getTrending(type: String, page: Int): List<MediaItem> {
-        return api.getTrending(type, page).results.map { TmdbMappers.movieToMediaItem(it) }
+        return if (type == "tv") {
+            api.getTrendingTv(page).results.map { TmdbMappers.tvToMediaItem(it) }
+        } else {
+            api.getTrending(type, page).results.map { TmdbMappers.movieToMediaItem(it) }
+        }
     }
 
     override suspend fun getPopular(type: String, page: Int): List<MediaItem> {
         return if (type == "tv") {
-            api.getPopular(type, page).results.map { TmdbMappers.movieToMediaItem(it) }
+            api.getPopularTv(page).results.map { TmdbMappers.tvToMediaItem(it) }
         } else {
             api.getPopular(type, page).results.map { TmdbMappers.movieToMediaItem(it) }
         }
     }
 
     override suspend fun getTopRated(type: String, page: Int): List<MediaItem> {
-        return api.getTopRated(type, page).results.map { TmdbMappers.movieToMediaItem(it) }
+        return if (type == "tv") {
+            api.getTopRatedTv(page).results.map { TmdbMappers.tvToMediaItem(it) }
+        } else {
+            api.getTopRated(type, page).results.map { TmdbMappers.movieToMediaItem(it) }
+        }
     }
 
     override suspend fun getUpcoming(page: Int): List<MediaItem> {
@@ -54,12 +66,162 @@ class MetadataRepositoryImpl(
     }
 
     override suspend fun getSimilar(type: String, id: Int, page: Int): List<MediaItem> {
-        return api.getSimilar(type, id, page).results.map { TmdbMappers.movieToMediaItem(it) }
+        return if (type == "tv") {
+            api.getSimilarTv(id, page).results.map { TmdbMappers.tvToMediaItem(it) }
+        } else {
+            api.getSimilar(type, id, page).results.map { TmdbMappers.movieToMediaItem(it) }
+        }
+    }
+
+    override suspend fun getPersonCredits(personId: Int): List<MediaItem> {
+        val credits = api.getPersonCredits(personId)
+        val castItems = credits.cast.map { TmdbMappers.personCreditToMediaItem(it) }
+        val crewItems = credits.crew.map { TmdbMappers.personCrewCreditToMediaItem(it) }
+        return (castItems + crewItems)
+            .distinctBy { it.tmdbId }
+            .sortedByDescending { it.popularity ?: 0.0 }
+    }
+
+    override suspend fun getPersonDetail(personId: Int): TmdbPerson {
+        return api.getPersonDetail(personId)
+    }
+
+    override suspend fun getSeasonDetail(tvId: Int, seasonNumber: Int): Season {
+        val detail = api.getTvSeasonDetail(tvId, seasonNumber)
+        return Season(
+            seasonNumber = detail.seasonNumber,
+            episodeCount = detail.episodes.size,
+            name = detail.name,
+            posterUrl = TmdbMappers.posterUrl(detail.posterPath),
+            overview = detail.overview,
+            episodes = detail.episodes.map { ep ->
+                Episode(
+                    episodeNumber = ep.episodeNumber,
+                    name = ep.name,
+                    overview = ep.overview,
+                    stillUrl = TmdbMappers.backdropUrl(ep.stillPath, "w300"),
+                    airDate = ep.airDate,
+                    runtime = ep.runtime,
+                    rating = ep.voteAverage,
+                )
+            },
+        )
+    }
+
+    override suspend fun getTrendingPaged(type: String, page: Int): PagedResult {
+        return if (type == "tv") {
+            val resp = api.getTrendingTv(page)
+            PagedResult(
+                items = resp.results.map { TmdbMappers.tvToMediaItem(it) },
+                page = resp.page,
+                totalPages = resp.totalPages,
+                totalResults = resp.totalResults,
+            )
+        } else {
+            val resp = api.getTrending(type, page)
+            PagedResult(
+                items = resp.results.map { TmdbMappers.movieToMediaItem(it) },
+                page = resp.page,
+                totalPages = resp.totalPages,
+                totalResults = resp.totalResults,
+            )
+        }
+    }
+
+    override suspend fun getPopularPaged(type: String, page: Int): PagedResult {
+        return if (type == "tv") {
+            val resp = api.getPopularTv(page)
+            PagedResult(
+                items = resp.results.map { TmdbMappers.tvToMediaItem(it) },
+                page = resp.page,
+                totalPages = resp.totalPages,
+                totalResults = resp.totalResults,
+            )
+        } else {
+            val resp = api.getPopular(type, page)
+            PagedResult(
+                items = resp.results.map { TmdbMappers.movieToMediaItem(it) },
+                page = resp.page,
+                totalPages = resp.totalPages,
+                totalResults = resp.totalResults,
+            )
+        }
+    }
+
+    override suspend fun getTopRatedPaged(type: String, page: Int): PagedResult {
+        return if (type == "tv") {
+            val resp = api.getTopRatedTv(page)
+            PagedResult(
+                items = resp.results.map { TmdbMappers.tvToMediaItem(it) },
+                page = resp.page,
+                totalPages = resp.totalPages,
+                totalResults = resp.totalResults,
+            )
+        } else {
+            val resp = api.getTopRated(type, page)
+            PagedResult(
+                items = resp.results.map { TmdbMappers.movieToMediaItem(it) },
+                page = resp.page,
+                totalPages = resp.totalPages,
+                totalResults = resp.totalResults,
+            )
+        }
+    }
+
+    override suspend fun discover(
+        type: String,
+        page: Int,
+        sortBy: String,
+        withGenres: String?,
+        minRating: Float?,
+        year: Int?,
+        withCast: String?,
+        withCrew: String?,
+    ): PagedResult {
+        return if (type == "tv") {
+            val resp = api.discoverTv(page, sortBy, withGenres, minRating, year, withCast, withCrew)
+            PagedResult(
+                items = resp.results.map { TmdbMappers.tvToMediaItem(it) },
+                page = resp.page,
+                totalPages = resp.totalPages,
+                totalResults = resp.totalResults,
+            )
+        } else {
+            val resp = api.discoverMovies(page, sortBy, withGenres, minRating, year, withCast, withCrew)
+            PagedResult(
+                items = resp.results.map { TmdbMappers.movieToMediaItem(it) },
+                page = resp.page,
+                totalPages = resp.totalPages,
+                totalResults = resp.totalResults,
+            )
+        }
+    }
+
+    override suspend fun searchMultiPaged(query: String, page: Int, type: String?): PagedResult {
+        val resp = api.searchMulti(query, page)
+        val items = resp.results
+            .filter { it.mediaType == "movie" || it.mediaType == "tv" }
+            .let { results ->
+                if (type != null) {
+                    val mt = if (type == "tv") MediaType.SERIES else MediaType.MOVIE
+                    results.filter {
+                        val itemType = if (it.mediaType == "tv") MediaType.SERIES else MediaType.MOVIE
+                        itemType == mt
+                    }
+                } else results
+            }
+            .map { TmdbMappers.multiToMediaItem(it) }
+        return PagedResult(
+            items = items,
+            page = resp.page,
+            totalPages = resp.totalPages,
+            totalResults = resp.totalResults,
+        )
     }
 
     override suspend fun getHomeShelves(): List<CatalogShelf> = coroutineScope {
         val trendingMovies = async { api.getTrending("movie") }
-        val trendingTv = async { api.getTrending("tv") }
+        val trendingTv = async { api.getTrendingTv() }
         val nowPlaying = async { api.getNowPlaying() }
         val popularMovies = async { api.getPopular("movie") }
         val upcoming = async { api.getUpcoming() }
@@ -77,7 +239,7 @@ class MetadataRepositoryImpl(
             CatalogShelf(
                 id = "trending-tv",
                 title = "Trending TV Shows",
-                items = trendingTv.await().results.map { TmdbMappers.movieToMediaItem(it) },
+                items = trendingTv.await().results.map { TmdbMappers.tvToMediaItem(it) },
                 type = ShelfType.POSTER,
             ),
             CatalogShelf(

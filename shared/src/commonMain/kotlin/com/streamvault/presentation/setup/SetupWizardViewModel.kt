@@ -1,12 +1,15 @@
 package com.streamvault.presentation.setup
 
 import com.streamvault.data.debrid.DebridClient
+import com.streamvault.data.trakt.TraktClient
+import com.streamvault.data.trakt.TraktDeviceCode
 import com.streamvault.domain.model.DebridServiceType
 import com.streamvault.domain.model.StreamQuality
 import com.streamvault.domain.repository.PreferencesRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -27,6 +30,10 @@ data class SetupUiState(
     val traktClientId: String = "",
     val traktClientSecret: String = "",
     val traktConnected: Boolean = false,
+    val traktDeviceCode: TraktDeviceCode? = null,
+    val traktLoading: Boolean = false,
+    val traktError: String? = null,
+    val traktUsername: String? = null,
     // Quality
     val maxQuality: StreamQuality = StreamQuality.FHD_1080P,
     val cachedOnly: Boolean = true,
@@ -42,6 +49,7 @@ data class SetupUiState(
 class SetupWizardViewModel(
     private val debridClient: DebridClient,
     private val prefsRepo: PreferencesRepository,
+    private val traktClient: TraktClient,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(SetupUiState())
@@ -111,11 +119,53 @@ class SetupWizardViewModel(
         }
     }
 
-    // Trakt
+    // Trakt — OAuth Device Code Flow
+    fun startTraktAuth() {
+        scope.launch {
+            _state.update { it.copy(traktLoading = true, traktError = null) }
+            try {
+                val code = traktClient.getDeviceCode()
+                _state.update { it.copy(traktDeviceCode = code, traktLoading = false) }
+                pollTraktDevice(code)
+            } catch (e: Exception) {
+                _state.update { it.copy(traktLoading = false, traktError = e.message) }
+            }
+        }
+    }
+
+    private fun pollTraktDevice(code: TraktDeviceCode) {
+        scope.launch {
+            val maxAttempts = code.expiresIn / code.interval
+            for (i in 0 until maxAttempts) {
+                delay(code.interval * 1000L)
+                val tokens = traktClient.pollDeviceToken(code.deviceCode)
+                if (tokens != null) {
+                    prefsRepo.setString("trakt_access_token", tokens.accessToken)
+                    prefsRepo.setString("trakt_refresh_token", tokens.refreshToken)
+                    // Try to get username
+                    val username = try {
+                        traktClient.getUser(tokens.accessToken).username
+                    } catch (_: Exception) { null }
+                    _state.update {
+                        it.copy(
+                            traktConnected = true,
+                            traktDeviceCode = null,
+                            traktUsername = username,
+                        )
+                    }
+                    return@launch
+                }
+            }
+            _state.update { it.copy(traktDeviceCode = null, traktError = "Authorization timed out") }
+        }
+    }
+
+    @Suppress("unused")
     fun setTraktClientId(id: String) {
         _state.update { it.copy(traktClientId = id) }
     }
 
+    @Suppress("unused")
     fun setTraktClientSecret(secret: String) {
         _state.update { it.copy(traktClientSecret = secret) }
     }
