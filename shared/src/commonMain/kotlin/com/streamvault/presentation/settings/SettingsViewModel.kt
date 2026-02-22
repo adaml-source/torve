@@ -1,9 +1,16 @@
 package com.streamvault.presentation.settings
 
 import com.streamvault.data.debrid.DebridClient
+import com.streamvault.data.kodi.KodiClient
+import com.streamvault.data.kodi.KodiHost
+import com.streamvault.data.simkl.SimklClient
 import com.streamvault.data.trakt.TraktClient
+import com.streamvault.db.StreamVaultDatabase
 import com.streamvault.domain.model.DebridServiceType
+import com.streamvault.domain.model.StreamQuality
 import com.streamvault.domain.repository.PreferencesRepository
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -18,6 +25,9 @@ import kotlinx.coroutines.launch
 class SettingsViewModel(
     private val debridClient: DebridClient,
     private val traktClient: TraktClient,
+    private val simklClient: SimklClient,
+    private val kodiClient: KodiClient,
+    private val database: StreamVaultDatabase,
     private val prefsRepo: PreferencesRepository,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -38,6 +48,17 @@ class SettingsViewModel(
         const val KEY_TRAKT_CLIENT_SECRET = "trakt_client_secret"
         const val KEY_TRAKT_ACCESS_TOKEN = "trakt_access_token"
         const val KEY_TRAKT_REFRESH_TOKEN = "trakt_refresh_token"
+        const val KEY_MAX_QUALITY = "stream_max_quality"
+        const val KEY_MIN_QUALITY = "stream_min_quality"
+        const val KEY_MAX_FILE_SIZE_MB = "stream_max_file_size_mb"
+        const val KEY_CACHED_ONLY = "stream_cached_only"
+        const val KEY_HDR_ENABLED = "stream_hdr_enabled"
+        const val KEY_TRAKT_SCROBBLE = "trakt_scrobble_enabled"
+        const val KEY_SIMKL_CLIENT_ID = "simkl_client_id"
+        const val KEY_SIMKL_ACCESS_TOKEN = "simkl_access_token"
+        const val KEY_KODI_HOSTS = "kodi_hosts_json"
+        const val KEY_THEME_MODE = "theme_mode"
+        const val KEY_APP_LANGUAGE = "app_language"
     }
 
     init {
@@ -61,6 +82,35 @@ class SettingsViewModel(
                 traktClient.setCredentials(traktClientId, traktClientSecret)
             }
 
+            val maxQuality = prefsRepo.getString(KEY_MAX_QUALITY)?.let {
+                try { StreamQuality.valueOf(it) } catch (_: Exception) { null }
+            } ?: StreamQuality.REMUX_4K
+            val minQuality = prefsRepo.getString(KEY_MIN_QUALITY)?.let {
+                try { StreamQuality.valueOf(it) } catch (_: Exception) { null }
+            } ?: StreamQuality.SD_480P
+            val maxFileSizeMb = prefsRepo.getString(KEY_MAX_FILE_SIZE_MB)?.toIntOrNull()
+            val cachedOnly = prefsRepo.getString(KEY_CACHED_ONLY)?.toBooleanStrictOrNull() ?: true
+            val hdrEnabled = prefsRepo.getString(KEY_HDR_ENABLED)?.toBooleanStrictOrNull() ?: false
+            val scrobbleEnabled = prefsRepo.getString(KEY_TRAKT_SCROBBLE)?.toBooleanStrictOrNull() ?: true
+            val simklClientId = prefsRepo.getString(KEY_SIMKL_CLIENT_ID) ?: ""
+            val simklAccessToken = prefsRepo.getString(KEY_SIMKL_ACCESS_TOKEN) ?: ""
+            if (simklClientId.isNotBlank()) simklClient.setClientId(simklClientId)
+
+            val kodiHosts = prefsRepo.getString(KEY_KODI_HOSTS)?.let { json ->
+                try {
+                    Json.decodeFromString<List<KodiHostJson>>(json).map {
+                        KodiHost(name = it.name, ip = it.ip, port = it.port)
+                    }
+                } catch (_: Exception) { emptyList() }
+            } ?: emptyList()
+
+            val themeMode = prefsRepo.getString(KEY_THEME_MODE)?.let {
+                try { ThemeMode.valueOf(it) } catch (_: Exception) { null }
+            } ?: ThemeMode.SYSTEM
+            val appLanguage = prefsRepo.getString(KEY_APP_LANGUAGE)?.let {
+                try { AppLanguage.valueOf(it) } catch (_: Exception) { null }
+            } ?: AppLanguage.ENGLISH
+
             _state.update {
                 it.copy(
                     debridProvider = provider,
@@ -71,6 +121,18 @@ class SettingsViewModel(
                     traktAccessToken = traktAccessToken,
                     traktRefreshToken = traktRefreshToken,
                     traktConnected = traktAccessToken.isNotBlank(),
+                    traktScrobbleEnabled = scrobbleEnabled,
+                    simklClientId = simklClientId,
+                    simklAccessToken = simklAccessToken,
+                    simklConnected = simklAccessToken.isNotBlank(),
+                    maxQuality = maxQuality,
+                    minQuality = minQuality,
+                    maxFileSizeMb = maxFileSizeMb,
+                    cachedOnly = cachedOnly,
+                    hdrEnabled = hdrEnabled,
+                    kodiHosts = kodiHosts,
+                    themeMode = themeMode,
+                    appLanguage = appLanguage,
                 )
             }
 
@@ -275,10 +337,46 @@ class SettingsViewModel(
     private suspend fun verifyTraktConnection() {
         try {
             val user = traktClient.getUser(_state.value.traktAccessToken)
-            _state.update { it.copy(traktUser = user, traktConnected = true) }
+            _state.update { it.copy(traktUser = user, traktConnected = true, traktApiStatus = "Online") }
+            // Also load stats
+            loadTraktStats()
         } catch (e: Exception) {
             _state.update {
-                it.copy(traktConnected = false, traktError = e.message)
+                it.copy(traktConnected = false, traktError = e.message, traktApiStatus = "Error")
+            }
+        }
+    }
+
+    fun setTraktScrobbleEnabled(enabled: Boolean) {
+        _state.update { it.copy(traktScrobbleEnabled = enabled) }
+        scope.launch { prefsRepo.setString(KEY_TRAKT_SCROBBLE, enabled.toString()) }
+    }
+
+    fun checkTraktApiStatus() {
+        scope.launch {
+            try {
+                val token = _state.value.traktAccessToken
+                if (token.isBlank()) {
+                    _state.update { it.copy(traktApiStatus = "Not connected") }
+                    return@launch
+                }
+                traktClient.getUser(token)
+                _state.update { it.copy(traktApiStatus = "Online") }
+            } catch (e: Exception) {
+                _state.update { it.copy(traktApiStatus = "Error: ${e.message}") }
+            }
+        }
+    }
+
+    fun loadTraktStats() {
+        scope.launch {
+            try {
+                val token = _state.value.traktAccessToken
+                if (token.isBlank()) return@launch
+                val stats = traktClient.getStats(token)
+                _state.update { it.copy(traktStats = stats) }
+            } catch (_: Exception) {
+                // Stats are optional
             }
         }
     }
@@ -304,6 +402,124 @@ class SettingsViewModel(
     }
 
     // -------------------------------------------------------------------------
+    // SIMKL
+    // -------------------------------------------------------------------------
+
+    fun setSimklClientId(id: String) {
+        simklClient.setClientId(id)
+        _state.update { it.copy(simklClientId = id) }
+        scope.launch { prefsRepo.setString(KEY_SIMKL_CLIENT_ID, id) }
+    }
+
+    fun startSimklDeviceAuth() {
+        if (_state.value.simklClientId.isBlank()) {
+            _state.update { it.copy(simklError = "Set SIMKL Client ID first") }
+            return
+        }
+
+        scope.launch {
+            _state.update { it.copy(simklLoading = true, simklError = null) }
+            try {
+                val code = simklClient.getDeviceCode()
+                _state.update { it.copy(simklDeviceCode = code, simklLoading = false) }
+                pollSimklDevice(code)
+            } catch (e: Exception) {
+                _state.update { it.copy(simklLoading = false, simklError = e.message) }
+            }
+        }
+    }
+
+    private fun pollSimklDevice(code: com.streamvault.data.simkl.SimklDeviceCode) {
+        scope.launch {
+            _state.update { it.copy(isPollingSimkl = true) }
+            val maxAttempts = code.expiresIn / code.interval
+            for (i in 0 until maxAttempts) {
+                delay(code.interval * 1000L)
+                val tokens = simklClient.pollDeviceToken(code.userCode)
+                if (tokens != null) {
+                    prefsRepo.setString(KEY_SIMKL_ACCESS_TOKEN, tokens.accessToken)
+                    _state.update {
+                        it.copy(
+                            simklAccessToken = tokens.accessToken,
+                            simklConnected = true,
+                            simklDeviceCode = null,
+                            isPollingSimkl = false,
+                        )
+                    }
+                    // Verify by fetching user
+                    try {
+                        val user = simklClient.getUser(tokens.accessToken)
+                        _state.update { it.copy(simklUser = user) }
+                    } catch (_: Exception) { }
+                    return@launch
+                }
+            }
+            _state.update { it.copy(isPollingSimkl = false, simklError = "Device auth timed out") }
+        }
+    }
+
+    fun disconnectSimkl() {
+        scope.launch {
+            prefsRepo.remove(KEY_SIMKL_ACCESS_TOKEN)
+        }
+        _state.update {
+            it.copy(
+                simklAccessToken = "",
+                simklConnected = false,
+                simklUser = null,
+                simklDeviceCode = null,
+                isPollingSimkl = false,
+            )
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Stream Quality & Size Restrictions
+    // -------------------------------------------------------------------------
+
+    fun setMaxQuality(quality: StreamQuality) {
+        _state.update { it.copy(maxQuality = quality) }
+        scope.launch { prefsRepo.setString(KEY_MAX_QUALITY, quality.name) }
+    }
+
+    fun setMinQuality(quality: StreamQuality) {
+        _state.update { it.copy(minQuality = quality) }
+        scope.launch { prefsRepo.setString(KEY_MIN_QUALITY, quality.name) }
+    }
+
+    fun setMaxFileSizeMb(sizeMb: Int?) {
+        _state.update { it.copy(maxFileSizeMb = sizeMb) }
+        scope.launch {
+            if (sizeMb != null) {
+                prefsRepo.setString(KEY_MAX_FILE_SIZE_MB, sizeMb.toString())
+            } else {
+                prefsRepo.remove(KEY_MAX_FILE_SIZE_MB)
+            }
+        }
+    }
+
+    fun setCachedOnly(enabled: Boolean) {
+        _state.update { it.copy(cachedOnly = enabled) }
+        scope.launch { prefsRepo.setString(KEY_CACHED_ONLY, enabled.toString()) }
+    }
+
+    fun setHdrEnabled(enabled: Boolean) {
+        _state.update { it.copy(hdrEnabled = enabled) }
+        scope.launch { prefsRepo.setString(KEY_HDR_ENABLED, enabled.toString()) }
+    }
+
+    fun buildStreamPreferences(): com.streamvault.domain.model.StreamPreferences {
+        val s = _state.value
+        return com.streamvault.domain.model.StreamPreferences(
+            maxQuality = s.maxQuality,
+            minQuality = s.minQuality,
+            hdrEnabled = s.hdrEnabled,
+            cachedOnly = s.cachedOnly,
+            maxFileSizeBytes = s.maxFileSizeMb?.let { it.toLong() * 1024 * 1024 },
+        )
+    }
+
+    // -------------------------------------------------------------------------
     // Getters for other ViewModels
     // -------------------------------------------------------------------------
 
@@ -312,4 +528,69 @@ class SettingsViewModel(
     fun isDebridConnected(): Boolean = _state.value.debridConnected
     fun getTraktAccessToken(): String = _state.value.traktAccessToken
     fun isTraktConnected(): Boolean = _state.value.traktConnected
+
+    // -------------------------------------------------------------------------
+    // Kodi
+    // -------------------------------------------------------------------------
+
+    fun addKodiHost(name: String, ip: String, port: Int) {
+        val host = KodiHost(name = name, ip = ip, port = port)
+        val updated = _state.value.kodiHosts + host
+        _state.update { it.copy(kodiHosts = updated) }
+        saveKodiHosts(updated)
+    }
+
+    fun removeKodiHost(host: KodiHost) {
+        val updated = _state.value.kodiHosts.filter { it != host }
+        _state.update { it.copy(kodiHosts = updated) }
+        saveKodiHosts(updated)
+    }
+
+    fun testKodiHost(host: KodiHost) {
+        scope.launch {
+            val key = "${host.ip}:${host.port}"
+            _state.update { it.copy(kodiTestResult = it.kodiTestResult + (key to null)) }
+            val result = kodiClient.ping(host)
+            _state.update { it.copy(kodiTestResult = it.kodiTestResult + (key to result)) }
+        }
+    }
+
+    private fun saveKodiHosts(hosts: List<KodiHost>) {
+        scope.launch {
+            val json = Json.encodeToString(hosts.map { KodiHostJson(it.name, it.ip, it.port) })
+            prefsRepo.setString(KEY_KODI_HOSTS, json)
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Theme & Language
+    // -------------------------------------------------------------------------
+
+    fun setThemeMode(mode: ThemeMode) {
+        _state.update { it.copy(themeMode = mode) }
+        scope.launch { prefsRepo.setString(KEY_THEME_MODE, mode.name) }
+    }
+
+    fun setAppLanguage(language: AppLanguage) {
+        _state.update { it.copy(appLanguage = language) }
+        scope.launch { prefsRepo.setString(KEY_APP_LANGUAGE, language.name) }
+    }
+
+    // -------------------------------------------------------------------------
+    // Clear Cache
+    // -------------------------------------------------------------------------
+
+    fun clearCache() {
+        scope.launch {
+            try {
+                database.streamVaultQueries.deleteAllMetadataCache()
+                _state.update { it.copy(cacheCleared = true) }
+                delay(2000)
+                _state.update { it.copy(cacheCleared = false) }
+            } catch (_: Exception) { }
+        }
+    }
 }
+
+@kotlinx.serialization.Serializable
+private data class KodiHostJson(val name: String, val ip: String, val port: Int)

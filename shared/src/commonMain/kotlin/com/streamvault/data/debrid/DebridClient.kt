@@ -87,6 +87,28 @@ class DebridClient(
     }
 
     /**
+     * Batch check whether infoHashes are cached on the debrid service.
+     * Returns a map of infoHash -> isCached.
+     */
+    suspend fun checkCache(
+        provider: DebridServiceType,
+        apiKey: String,
+        infoHashes: List<String>,
+    ): Map<String, Boolean> {
+        if (infoHashes.isEmpty() || apiKey.isBlank()) return emptyMap()
+        return try {
+            when (provider) {
+                DebridServiceType.REAL_DEBRID -> rdCheckCache(apiKey, infoHashes)
+                DebridServiceType.ALL_DEBRID -> adCheckCache(apiKey, infoHashes)
+                DebridServiceType.PREMIUMIZE -> pmCheckCache(apiKey, infoHashes)
+                DebridServiceType.TORBOX -> tbCheckCache(apiKey, infoHashes)
+            }
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
+
+    /**
      * Resolve a torrent infoHash to playable URLs via the chosen debrid service.
      */
     suspend fun resolveStream(
@@ -136,7 +158,44 @@ class DebridClient(
                     fileName = data.filename,
                 )
             }
-            else -> throw Exception("URL unrestrict not supported for ${provider.label}")
+            DebridServiceType.PREMIUMIZE -> {
+                val resp: PmDirectDlResponse = httpClient.submitForm(
+                    url = "$PM_BASE/transfer/directdl",
+                    formParameters = Parameters.build {
+                        append("apikey", apiKey)
+                        append("src", url)
+                    },
+                ).body()
+                if (resp.status != "success" || resp.content.isEmpty()) {
+                    throw Exception("Premiumize failed to unrestrict link")
+                }
+                val file = resp.content.maxByOrNull { it.size } ?: resp.content.first()
+                ResolvedStream(
+                    url = file.streamLink ?: file.link,
+                    service = provider,
+                    fileName = file.path.substringAfterLast('/'),
+                    fileSize = file.size,
+                )
+            }
+            DebridServiceType.TORBOX -> {
+                val createResp: TbResponse<TbTorrentData> = httpClient.post("$TB_BASE/webdl/createwebdownload") {
+                    header("Authorization", "Bearer $apiKey")
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"url":"$url"}""")
+                }.body()
+                val downloadId = createResp.data?.id ?: throw Exception("TorBox webdl failed")
+                // Get the download link
+                val linkResp: TbResponse<TbDownloadLinkData> =
+                    httpClient.get("$TB_BASE/webdl/requestdl") {
+                        header("Authorization", "Bearer $apiKey")
+                        parameter("web_id", downloadId)
+                    }.body()
+                val downloadUrl = linkResp.data?.data ?: throw Exception("TorBox: no download link")
+                ResolvedStream(
+                    url = downloadUrl,
+                    service = provider,
+                )
+            }
         }
     }
 
@@ -604,6 +663,102 @@ class DebridClient(
         }
 
         throw Exception("TorBox torrent timed out")
+    }
+
+    // -------------------------------------------------------------------------
+    // Cache Check Implementations
+    // -------------------------------------------------------------------------
+
+    private suspend fun rdCheckCache(apiKey: String, hashes: List<String>): Map<String, Boolean> {
+        // RD /torrents/instantAvailability/{hash1}/{hash2}/...
+        val hashPath = hashes.joinToString("/")
+        val respText = httpClient.get("$RD_BASE/torrents/instantAvailability/$hashPath") {
+            header("Authorization", "Bearer $apiKey")
+        }.bodyAsText()
+
+        val result = mutableMapOf<String, Boolean>()
+        val parsed = json.parseToJsonElement(respText)
+        if (parsed is kotlinx.serialization.json.JsonObject) {
+            for (hash in hashes) {
+                val entry = parsed[hash.lowercase()]
+                    ?: parsed[hash.uppercase()]
+                    ?: parsed[hash]
+                // If there's a non-empty "rd" array, the hash is cached
+                val isCached = if (entry is kotlinx.serialization.json.JsonObject) {
+                    val rd = entry["rd"]
+                    rd is kotlinx.serialization.json.JsonArray && rd.isNotEmpty()
+                } else false
+                result[hash] = isCached
+            }
+        }
+        return result
+    }
+
+    private suspend fun adCheckCache(apiKey: String, hashes: List<String>): Map<String, Boolean> {
+        // AD /magnet/instant — magnets[]=hash1&magnets[]=hash2
+        val respText = httpClient.get("$AD_BASE/magnet/instant") {
+            parameter("agent", AD_AGENT)
+            parameter("apikey", apiKey)
+            hashes.forEach { parameter("magnets[]", it) }
+        }.bodyAsText()
+
+        val result = mutableMapOf<String, Boolean>()
+        val parsed = json.parseToJsonElement(respText)
+        if (parsed is kotlinx.serialization.json.JsonObject) {
+            val data = parsed["data"]
+            if (data is kotlinx.serialization.json.JsonObject) {
+                val magnets = data["magnets"]
+                if (magnets is kotlinx.serialization.json.JsonArray) {
+                    magnets.forEachIndexed { index, element ->
+                        if (index < hashes.size && element is kotlinx.serialization.json.JsonObject) {
+                            val instant = element["instant"]
+                            result[hashes[index]] = instant is kotlinx.serialization.json.JsonPrimitive && instant.content == "true"
+                        }
+                    }
+                }
+            }
+        }
+        return result
+    }
+
+    private suspend fun pmCheckCache(apiKey: String, hashes: List<String>): Map<String, Boolean> {
+        // PM /cache/check — items[]=hash1&items[]=hash2
+        val resp: PmCacheCheckResponse = httpClient.get("$PM_BASE/cache/check") {
+            parameter("apikey", apiKey)
+            hashes.forEach { parameter("items[]", it) }
+        }.body()
+
+        val result = mutableMapOf<String, Boolean>()
+        resp.response.forEachIndexed { index, cached ->
+            if (index < hashes.size) {
+                result[hashes[index]] = cached
+            }
+        }
+        return result
+    }
+
+    private suspend fun tbCheckCache(apiKey: String, hashes: List<String>): Map<String, Boolean> {
+        // TB /torrents/checkcached — hash=hash1,hash2,hash3
+        val hashParam = hashes.joinToString(",")
+        val respText = httpClient.get("$TB_BASE/torrents/checkcached") {
+            header("Authorization", "Bearer $apiKey")
+            parameter("hash", hashParam)
+            parameter("list_files", false)
+        }.bodyAsText()
+
+        val result = mutableMapOf<String, Boolean>()
+        val parsed = json.parseToJsonElement(respText)
+        if (parsed is kotlinx.serialization.json.JsonObject) {
+            val data = parsed["data"]
+            if (data is kotlinx.serialization.json.JsonObject) {
+                for (hash in hashes) {
+                    val entry = data[hash.lowercase()] ?: data[hash]
+                    val isCached = entry is kotlinx.serialization.json.JsonArray && entry.isNotEmpty()
+                    result[hash] = isCached
+                }
+            }
+        }
+        return result
     }
 
     // -------------------------------------------------------------------------

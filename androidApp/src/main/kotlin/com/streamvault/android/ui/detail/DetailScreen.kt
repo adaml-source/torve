@@ -21,11 +21,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +39,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -66,19 +72,21 @@ fun DetailScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
+    var showActionSheet by remember { mutableStateOf(false) }
+    var resolvedUrl by remember { mutableStateOf("") }
 
     LaunchedEffect(type, id) {
         viewModel.loadDetail(type, id)
     }
 
-    // Navigate to player when stream is resolved
+    // Show action sheet when stream is resolved
     LaunchedEffect(state.resolvedStream) {
         state.resolvedStream?.let { resolved ->
-            // Prefer transcode mp4 > direct download
             val url = resolved.transcodeUrls?.mp4
                 ?: resolved.transcodeUrls?.hls
                 ?: resolved.url
-            onPlayClick(url)
+            resolvedUrl = url
+            showActionSheet = true
             viewModel.clearResolvedStream()
         }
     }
@@ -237,6 +245,30 @@ fun DetailScreen(
                                 }
                             }
 
+                            // Mark watched / unwatched
+                            if (settingsState.traktConnected) {
+                                Spacer(Modifier.height(8.dp))
+                                OutlinedButton(
+                                    onClick = {
+                                        if (state.isMarkedWatched) viewModel.markUnwatched()
+                                        else viewModel.markWatched()
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Icon(
+                                        if (state.isMarkedWatched) Icons.Default.VisibilityOff
+                                        else Icons.Default.Visibility,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        if (state.isMarkedWatched) "Mark Unwatched"
+                                        else "Mark as Watched",
+                                    )
+                                }
+                            }
+
                             // Stream error
                             state.streamsError?.let { error ->
                                 Spacer(Modifier.height(8.dp))
@@ -359,6 +391,21 @@ fun DetailScreen(
                             )
                         },
                         onDismiss = { viewModel.dismissStreamPicker() },
+                    )
+                }
+
+                // Stream action sheet (after resolution)
+                if (showActionSheet && resolvedUrl.isNotBlank()) {
+                    StreamActionSheet(
+                        url = resolvedUrl,
+                        title = state.mediaItem?.title ?: "",
+                        onPlayInApp = {
+                            onPlayClick(resolvedUrl)
+                        },
+                        onDismiss = {
+                            showActionSheet = false
+                            resolvedUrl = ""
+                        },
                     )
                 }
             }

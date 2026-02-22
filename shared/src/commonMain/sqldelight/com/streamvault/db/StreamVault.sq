@@ -15,6 +15,9 @@ INSERT OR REPLACE INTO metadata_cache (id, type, json_data, cached_at) VALUES (?
 deleteStaleMeta:
 DELETE FROM metadata_cache WHERE cached_at < ?;
 
+deleteAllMetadataCache:
+DELETE FROM metadata_cache;
+
 -- Watch progress tracking
 CREATE TABLE watch_progress (
     media_id TEXT NOT NULL PRIMARY KEY,
@@ -56,3 +59,173 @@ INSERT OR REPLACE INTO preference (key, value) VALUES (?, ?);
 
 deletePreference:
 DELETE FROM preference WHERE key = ?;
+
+-- Installed addons
+CREATE TABLE addon (
+    manifest_url TEXT NOT NULL PRIMARY KEY,
+    id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    version TEXT NOT NULL,
+    description TEXT,
+    logo TEXT,
+    manifest_json TEXT NOT NULL,
+    is_enabled INTEGER NOT NULL DEFAULT 1,
+    priority INTEGER NOT NULL DEFAULT 0,
+    installed_at INTEGER NOT NULL
+);
+
+getAllAddons:
+SELECT * FROM addon ORDER BY priority ASC;
+
+getEnabledAddons:
+SELECT * FROM addon WHERE is_enabled = 1 ORDER BY priority ASC;
+
+getAddonByUrl:
+SELECT * FROM addon WHERE manifest_url = ?;
+
+insertAddon:
+INSERT OR REPLACE INTO addon (manifest_url, id, name, version, description, logo, manifest_json, is_enabled, priority, installed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+updateAddonEnabled:
+UPDATE addon SET is_enabled = ? WHERE manifest_url = ?;
+
+updateAddonPriority:
+UPDATE addon SET priority = ? WHERE manifest_url = ?;
+
+deleteAddon:
+DELETE FROM addon WHERE manifest_url = ?;
+
+-- Debrid accounts
+CREATE TABLE debrid_account (
+    service TEXT NOT NULL PRIMARY KEY,
+    api_key TEXT NOT NULL,
+    username TEXT,
+    email TEXT,
+    premium_until TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1
+);
+
+getActiveDebridAccounts:
+SELECT * FROM debrid_account WHERE is_active = 1;
+
+getDebridAccount:
+SELECT * FROM debrid_account WHERE service = ?;
+
+insertDebridAccount:
+INSERT OR REPLACE INTO debrid_account (service, api_key, username, email, premium_until, is_active) VALUES (?, ?, ?, ?, ?, ?);
+
+deleteDebridAccount:
+DELETE FROM debrid_account WHERE service = ?;
+
+-- IPTV playlists
+CREATE TABLE iptv_playlist (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    url TEXT NOT NULL,
+    epg_url TEXT,
+    channel_count INTEGER NOT NULL DEFAULT 0,
+    last_updated INTEGER,
+    type TEXT NOT NULL DEFAULT 'm3u',
+    server TEXT,
+    username TEXT,
+    password TEXT
+);
+
+getAllPlaylists:
+SELECT * FROM iptv_playlist ORDER BY name ASC;
+
+getPlaylist:
+SELECT * FROM iptv_playlist WHERE id = ?;
+
+insertPlaylist:
+INSERT OR REPLACE INTO iptv_playlist (id, name, url, epg_url, channel_count, last_updated, type, server, username, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+deletePlaylist:
+DELETE FROM iptv_playlist WHERE id = ?;
+
+-- IPTV favorite channels
+CREATE TABLE iptv_favorite (
+    channel_id TEXT NOT NULL PRIMARY KEY,
+    playlist_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    logo_url TEXT,
+    group_title TEXT,
+    added_at INTEGER NOT NULL
+);
+
+getAllFavorites:
+SELECT * FROM iptv_favorite ORDER BY name ASC;
+
+insertFavorite:
+INSERT OR REPLACE INTO iptv_favorite (channel_id, playlist_id, name, logo_url, group_title, added_at) VALUES (?, ?, ?, ?, ?, ?);
+
+deleteFavorite:
+DELETE FROM iptv_favorite WHERE channel_id = ?;
+
+isFavorite:
+SELECT COUNT(*) FROM iptv_favorite WHERE channel_id = ?;
+
+-- Download queue
+CREATE TABLE download_queue (
+    id TEXT NOT NULL PRIMARY KEY,
+    media_id TEXT NOT NULL,
+    media_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    poster_url TEXT,
+    stream_url TEXT NOT NULL,
+    file_path TEXT,
+    file_size_bytes INTEGER,
+    downloaded_bytes INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending',
+    season_number INTEGER,
+    episode_number INTEGER,
+    created_at INTEGER NOT NULL,
+    completed_at INTEGER
+);
+
+getAllDownloads:
+SELECT * FROM download_queue ORDER BY created_at DESC;
+
+getPendingDownloads:
+SELECT * FROM download_queue WHERE status = 'pending' OR status = 'downloading' ORDER BY created_at ASC;
+
+getCompletedDownloads:
+SELECT * FROM download_queue WHERE status = 'completed' ORDER BY completed_at DESC;
+
+getDownload:
+SELECT * FROM download_queue WHERE id = ?;
+
+getDownloadByMediaId:
+SELECT * FROM download_queue WHERE media_id = ?;
+
+insertDownload:
+INSERT OR REPLACE INTO download_queue (id, media_id, media_type, title, poster_url, stream_url, file_path, file_size_bytes, downloaded_bytes, status, season_number, episode_number, created_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+updateDownloadProgress:
+UPDATE download_queue SET downloaded_bytes = ?, status = ? WHERE id = ?;
+
+updateDownloadCompleted:
+UPDATE download_queue SET status = 'completed', file_path = ?, completed_at = ? WHERE id = ?;
+
+deleteDownload:
+DELETE FROM download_queue WHERE id = ?;
+
+-- Subscription
+CREATE TABLE subscription (
+    id TEXT NOT NULL PRIMARY KEY,
+    tier TEXT NOT NULL,
+    purchase_token TEXT,
+    expires_at INTEGER,
+    is_active INTEGER NOT NULL DEFAULT 0,
+    platform TEXT NOT NULL,
+    purchased_at INTEGER NOT NULL
+);
+
+getActiveSubscription:
+SELECT * FROM subscription WHERE is_active = 1 LIMIT 1;
+
+insertSubscription:
+INSERT OR REPLACE INTO subscription (id, tier, purchase_token, expires_at, is_active, platform, purchased_at) VALUES (?, ?, ?, ?, ?, ?, ?);
+
+deactivateAllSubscriptions:
+UPDATE subscription SET is_active = 0;

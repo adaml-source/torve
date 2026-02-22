@@ -112,3 +112,73 @@ data class TraktScrobbleEpisode(
     val season: Int,
     val number: Int,
 )
+
+// Stats
+data class TraktStats(
+    val moviesWatched: Int = 0,
+    val episodesWatched: Int = 0,
+    val showsWatched: Int = 0,
+    val minutesWatched: Int = 0,
+)
+
+@Serializable
+data class TraktStatsResponse(
+    val movies: TraktStatsMovies? = null,
+    val episodes: TraktStatsEpisodes? = null,
+    val shows: TraktStatsShows? = null,
+)
+
+@Serializable
+data class TraktStatsMovies(
+    val plays: Int = 0,
+    val watched: Int = 0,
+    val minutes: Int = 0,
+)
+
+@Serializable
+data class TraktStatsEpisodes(
+    val plays: Int = 0,
+    val watched: Int = 0,
+    val minutes: Int = 0,
+)
+
+@Serializable
+data class TraktStatsShows(
+    val watched: Int = 0,
+)
+
+// Remove from history
+@Serializable
+data class TraktRemoveHistoryBody(
+    val movies: List<TraktHistoryMovie>? = null,
+    val shows: List<TraktHistoryShow>? = null,
+)
+
+// Calendar
+data class TraktCalendarEpisode(
+    val showTitle: String,
+    val season: Int,
+    val episode: Int,
+    val episodeTitle: String,
+    val firstAired: String,
+)
+
+@Serializable
+data class TraktCalendarResponse(
+    @SerialName("first_aired") val firstAired: String = "",
+    val episode: TraktCalendarEpisodeResponse? = null,
+    val show: TraktCalendarShowResponse? = null,
+)
+
+@Serializable
+data class TraktCalendarEpisodeResponse(
+    val season: Int = 0,
+    val number: Int = 0,
+    val title: String = "",
+)
+
+@Serializable
+data class TraktCalendarShowResponse(
+    val title: String = "",
+    val ids: TraktIds? = null,
+)

@@ -1,9 +1,16 @@
 package com.streamvault.presentation.detail
 
 import com.streamvault.data.addon.ParsedStream
+import com.streamvault.data.trakt.TraktClient
+import com.streamvault.data.trakt.TraktHistoryBody
+import com.streamvault.data.trakt.TraktHistoryMovie
+import com.streamvault.data.trakt.TraktHistoryShow
+import com.streamvault.data.trakt.TraktIds
+import com.streamvault.data.trakt.TraktRemoveHistoryBody
 import com.streamvault.domain.model.DebridServiceType
 import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.repository.MetadataRepository
+import com.streamvault.domain.repository.PreferencesRepository
 import com.streamvault.domain.repository.StreamRepository
 import com.streamvault.domain.repository.WatchProgressRepository
 import kotlinx.coroutines.CoroutineScope
@@ -19,6 +26,8 @@ class DetailViewModel(
     private val metadataRepo: MetadataRepository,
     private val streamRepo: StreamRepository,
     private val watchProgressRepo: WatchProgressRepository,
+    private val traktClient: TraktClient,
+    private val prefsRepo: PreferencesRepository,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(DetailUiState())
@@ -104,5 +113,39 @@ class DetailViewModel(
 
     fun clearResolvedStream() {
         _state.update { it.copy(resolvedStream = null) }
+    }
+
+    fun markWatched() {
+        val item = _state.value.mediaItem ?: return
+        scope.launch {
+            try {
+                val token = prefsRepo.getString("trakt_access_token") ?: return@launch
+                val tmdbId = item.tmdbId ?: return@launch
+                val ids = TraktIds(tmdb = tmdbId)
+                if (item.type == MediaType.MOVIE) {
+                    traktClient.addToHistory(token, TraktHistoryBody(movies = listOf(TraktHistoryMovie(ids))))
+                } else {
+                    traktClient.addToHistory(token, TraktHistoryBody(shows = listOf(TraktHistoryShow(ids))))
+                }
+                _state.update { it.copy(isMarkedWatched = true) }
+            } catch (_: Exception) { }
+        }
+    }
+
+    fun markUnwatched() {
+        val item = _state.value.mediaItem ?: return
+        scope.launch {
+            try {
+                val token = prefsRepo.getString("trakt_access_token") ?: return@launch
+                val tmdbId = item.tmdbId ?: return@launch
+                val ids = TraktIds(tmdb = tmdbId)
+                if (item.type == MediaType.MOVIE) {
+                    traktClient.removeFromHistory(token, TraktRemoveHistoryBody(movies = listOf(TraktHistoryMovie(ids))))
+                } else {
+                    traktClient.removeFromHistory(token, TraktRemoveHistoryBody(shows = listOf(TraktHistoryShow(ids))))
+                }
+                _state.update { it.copy(isMarkedWatched = false) }
+            } catch (_: Exception) { }
+        }
     }
 }

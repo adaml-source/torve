@@ -15,29 +15,30 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.streamvault.presentation.addon.AddonViewModel
 
 @Composable
 fun AddonManagerSection(
-    addonUrls: List<String>,
-    onAddAddon: (String) -> Unit,
-    onRemoveAddon: (String) -> Unit,
+    viewModel: AddonViewModel,
     modifier: Modifier = Modifier,
 ) {
-    var newUrl by remember { mutableStateOf("") }
+    val state by viewModel.state.collectAsState()
 
     Column(modifier = modifier.fillMaxWidth()) {
         Text(
@@ -55,62 +56,110 @@ fun AddonManagerSection(
             ),
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                // Current addons
-                addonUrls.forEach { url ->
+                // Installed addons
+                if (state.addons.isEmpty() && !state.isLoading) {
+                    Text(
+                        "No addons installed. Add one below.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                state.addons.forEachIndexed { index, addon ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(
-                            text = url.removePrefix("https://").removePrefix("http://"),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.weight(1f),
-                        )
-                        // Don't allow removing Torrentio (default)
-                        if (!url.contains("torrentio")) {
-                            IconButton(
-                                onClick = { onRemoveAddon(url) },
-                                modifier = Modifier.size(32.dp),
-                            ) {
-                                Icon(
-                                    Icons.Default.Delete,
-                                    contentDescription = "Remove",
-                                    tint = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.size(16.dp),
-                                )
-                            }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = addon.manifest.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = addon.manifest.description.ifBlank {
+                                    addon.manifestUrl.removePrefix("https://").removePrefix("http://")
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
+                        Spacer(Modifier.width(8.dp))
+                        Switch(
+                            checked = addon.isEnabled,
+                            onCheckedChange = { viewModel.toggleAddon(addon.manifestUrl, it) },
+                        )
+                        IconButton(
+                            onClick = { viewModel.removeAddon(addon.manifestUrl) },
+                            modifier = Modifier.size(32.dp),
+                        ) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = "Remove",
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
+                    if (index < state.addons.lastIndex) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(vertical = 4.dp),
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
+                        )
                     }
                 }
 
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(12.dp))
 
-                // Add new addon
+                // Install addon from URL
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     OutlinedTextField(
-                        value = newUrl,
-                        onValueChange = { newUrl = it },
-                        label = { Text("Addon URL") },
-                        placeholder = { Text("https://addon.example.com") },
+                        value = state.installUrl,
+                        onValueChange = { viewModel.setInstallUrl(it) },
+                        label = { Text("Manifest URL") },
+                        placeholder = { Text("https://addon.example.com/manifest.json") },
                         modifier = Modifier.weight(1f),
                         singleLine = true,
                     )
                     Button(
-                        onClick = {
-                            if (newUrl.isNotBlank()) {
-                                onAddAddon(newUrl.trim())
-                                newUrl = ""
-                            }
-                        },
-                        enabled = newUrl.isNotBlank(),
+                        onClick = { viewModel.installAddon() },
+                        enabled = state.installUrl.isNotBlank() && !state.isInstalling,
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = "Add")
+                        if (state.isInstalling) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        } else {
+                            Icon(Icons.Default.Add, contentDescription = "Install")
+                        }
                     }
+                }
+
+                state.installError?.let { error ->
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = error,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+
+                state.error?.let { error ->
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = error,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
                 }
             }
         }

@@ -22,4 +22,6 @@ data class DetailUiState(
     val watchProgress: WatchProgress? = null,
     // Stream picker visibility
     val showStreamPicker: Boolean = false,
+    // Watched status
+    val isMarkedWatched: Boolean = false,
 )

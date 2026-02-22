@@ -11,6 +11,27 @@ enum class StreamQuality {
     SD_480P,
     UNKNOWN;
 
+    val label: String
+        get() = when (this) {
+            REMUX_4K -> "4K Remux"
+            UHD_4K -> "4K"
+            FHD_1080P -> "1080p"
+            HD_720P -> "720p"
+            SD_480P -> "480p"
+            UNKNOWN -> "Any"
+        }
+
+    /** Lower rank = higher quality. UNKNOWN is treated as lowest. */
+    val rank: Int
+        get() = when (this) {
+            REMUX_4K -> 0
+            UHD_4K -> 1
+            FHD_1080P -> 2
+            HD_720P -> 3
+            SD_480P -> 4
+            UNKNOWN -> 5
+        }
+
     companion object {
         fun fromString(text: String): StreamQuality {
             val t = text.uppercase()
@@ -23,6 +44,10 @@ enum class StreamQuality {
                 else -> FHD_1080P
             }
         }
+
+        /** All selectable qualities (excluding UNKNOWN). */
+        val selectable: List<StreamQuality>
+            get() = listOf(REMUX_4K, UHD_4K, FHD_1080P, HD_720P, SD_480P)
     }
 }
 

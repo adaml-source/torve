@@ -172,6 +172,55 @@ class TraktClient(
     }
 
     // -------------------------------------------------------------------------
+    // Stats
+    // -------------------------------------------------------------------------
+
+    suspend fun getStats(accessToken: String): TraktStats {
+        val resp: TraktStatsResponse = httpClient.get("$TRAKT_BASE/users/me/stats") {
+            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
+        }.body()
+        return TraktStats(
+            moviesWatched = resp.movies?.watched ?: 0,
+            episodesWatched = resp.episodes?.watched ?: 0,
+            showsWatched = resp.shows?.watched ?: 0,
+            minutesWatched = (resp.movies?.minutes ?: 0) + (resp.episodes?.minutes ?: 0),
+        )
+    }
+
+    suspend fun removeFromHistory(accessToken: String, body: TraktRemoveHistoryBody) {
+        httpClient.post("$TRAKT_BASE/sync/history/remove") {
+            contentType(ContentType.Application.Json)
+            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
+            setBody(body)
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Calendar (my shows airing today)
+    // -------------------------------------------------------------------------
+
+    suspend fun getCalendar(accessToken: String, days: Int = 1): List<TraktCalendarEpisode> {
+        return try {
+            val resp: List<TraktCalendarResponse> = httpClient.get("$TRAKT_BASE/calendars/my/shows/today/$days") {
+                traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
+            }.body()
+            resp.mapNotNull { item ->
+                val ep = item.episode ?: return@mapNotNull null
+                val show = item.show ?: return@mapNotNull null
+                TraktCalendarEpisode(
+                    showTitle = show.title,
+                    season = ep.season,
+                    episode = ep.number,
+                    episodeTitle = ep.title,
+                    firstAired = item.firstAired,
+                )
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Scrobble
     // -------------------------------------------------------------------------
 

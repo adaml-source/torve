@@ -2,6 +2,7 @@ package com.streamvault.android
 
 import android.app.Application
 import com.streamvault.android.di.androidAppModule
+import com.streamvault.android.notification.EpisodeNotificationWorker
 import com.streamvault.di.sharedModule
 import org.koin.android.ext.koin.androidContext
 import org.koin.android.ext.koin.androidLogger
@@ -15,5 +16,6 @@ class StreamVaultApp : Application() {
             androidContext(this@StreamVaultApp)
             modules(sharedModule, androidAppModule)
         }
+        EpisodeNotificationWorker.schedule(this)
     }
 }

@@ -6,31 +6,42 @@ import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay10
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,13 +54,19 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.media3.common.MediaItem
-import androidx.media3.common.Player
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.MediaSession
 import androidx.media3.ui.PlayerView
+import com.streamvault.android.player.ExoPlayerEngine
+import com.streamvault.android.player.MPVPlayerEngine
+import com.streamvault.android.player.MPVView
 import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.model.WatchProgress
+import com.streamvault.domain.player.PlayerEngine
+import com.streamvault.domain.player.PlayerListener
+import com.streamvault.domain.player.PlayerState
+import com.streamvault.domain.player.TrackDescription
 import com.streamvault.domain.repository.WatchProgressRepository
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -75,32 +92,72 @@ fun PlayerScreen(
     var showControls by remember { mutableStateOf(true) }
     var sliderPosition by remember { mutableFloatStateOf(0f) }
     var isSeeking by remember { mutableStateOf(false) }
+    var showTrackDialog by remember { mutableStateOf(false) }
+    var subtitleTracks by remember { mutableStateOf<List<TrackDescription>>(emptyList()) }
+    var audioTracks by remember { mutableStateOf<List<TrackDescription>>(emptyList()) }
+    var useMpv by remember { mutableStateOf(false) }
 
-    val exoPlayer = remember {
-        ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(url))
-            prepare()
-            playWhenReady = true
+    // Create the player engine (try MPV first, fallback to ExoPlayer)
+    val engine = remember(url) {
+        val mpvEngine = MPVPlayerEngine(context)
+        if (mpvEngine.initialize()) {
+            useMpv = true
+            mpvEngine as PlayerEngine
+        } else {
+            val exoEngine = ExoPlayerEngine(context)
+            exoEngine.initialize()
+            exoEngine as PlayerEngine
         }
     }
 
-    // Track player state
-    DisposableEffect(exoPlayer) {
-        val listener = object : Player.Listener {
-            override fun onIsPlayingChanged(playing: Boolean) {
-                isPlaying = playing
-            }
+    // MediaSession for notification bar / lock screen controls
+    val mediaSession = remember(engine) {
+        val exo = (engine as? ExoPlayerEngine)?.getExoPlayer() ?: return@remember null
+        val metadata = MediaMetadata.Builder()
+            .setTitle(title.ifBlank { "StreamVault" })
+            .build()
+        exo.mediaMetadata // trigger metadata
+        MediaSession.Builder(context, exo)
+            .build()
+    }
 
-            override fun onPlaybackStateChanged(state: Int) {
-                if (state == Player.STATE_READY) {
-                    duration = exoPlayer.duration
+    DisposableEffect(mediaSession) {
+        onDispose {
+            mediaSession?.release()
+        }
+    }
+
+    // Track player state via listener
+    DisposableEffect(engine) {
+        val listener = object : PlayerListener {
+            override fun onStateChanged(state: PlayerState) {
+                isPlaying = state.isPlaying
+                duration = state.durationMs
+                if (!isSeeking) {
+                    currentPosition = state.positionMs
+                    sliderPosition = if (state.durationMs > 0) {
+                        state.positionMs.toFloat() / state.durationMs
+                    } else 0f
                 }
             }
+
+            override fun onTracksChanged(audio: List<TrackDescription>, subtitles: List<TrackDescription>) {
+                audioTracks = audio
+                subtitleTracks = subtitles
+            }
+
+            override fun onError(message: String) {
+                // Could show error UI
+            }
         }
-        exoPlayer.addListener(listener)
+        engine.addListener(listener)
+        engine.play(url)
+
         onDispose {
             // Save final progress on dispose
             if (mediaId.isNotBlank() && duration > 0) {
+                val finalPosition = engine.state.positionMs
+                val finalDuration = duration
                 scope.launch {
                     watchProgressRepo.saveProgress(
                         WatchProgress(
@@ -109,26 +166,28 @@ fun PlayerScreen(
                             title = title,
                             posterUrl = posterUrl.takeIf { it.isNotBlank() },
                             backdropUrl = backdropUrl.takeIf { it.isNotBlank() },
-                            positionMs = exoPlayer.currentPosition,
-                            durationMs = duration,
+                            positionMs = finalPosition,
+                            durationMs = finalDuration,
                         ),
                     )
                 }
             }
-            exoPlayer.removeListener(listener)
-            exoPlayer.release()
+            engine.removeListener(listener)
+            engine.release()
         }
     }
 
-    // Update position periodically and save progress every 10 seconds
-    LaunchedEffect(isPlaying) {
+    // Position updates for ExoPlayer (MPV uses property observers)
+    LaunchedEffect(isPlaying, useMpv) {
+        if (useMpv) return@LaunchedEffect // MPV updates via callbacks
         var saveCounter = 0
         while (isPlaying) {
-            if (!isSeeking) {
-                currentPosition = exoPlayer.currentPosition
+            if (!isSeeking && engine is ExoPlayerEngine) {
+                engine.updatePosition()
+                val st = engine.state
+                currentPosition = st.positionMs
                 sliderPosition = if (duration > 0) currentPosition.toFloat() / duration else 0f
             }
-            // Save progress every 10 seconds (20 * 500ms)
             saveCounter++
             if (saveCounter >= 20 && mediaId.isNotBlank() && duration > 0) {
                 saveCounter = 0
@@ -145,6 +204,27 @@ fun PlayerScreen(
                 )
             }
             delay(500)
+        }
+    }
+
+    // Save progress for MPV engine
+    LaunchedEffect(isPlaying, useMpv) {
+        if (!useMpv) return@LaunchedEffect
+        while (isPlaying) {
+            if (mediaId.isNotBlank() && duration > 0) {
+                watchProgressRepo.saveProgress(
+                    WatchProgress(
+                        mediaId = mediaId,
+                        mediaType = MediaType.fromString(mediaType),
+                        title = title,
+                        posterUrl = posterUrl.takeIf { it.isNotBlank() },
+                        backdropUrl = backdropUrl.takeIf { it.isNotBlank() },
+                        positionMs = currentPosition,
+                        durationMs = duration,
+                    ),
+                )
+            }
+            delay(10_000)
         }
     }
 
@@ -167,20 +247,62 @@ fun PlayerScreen(
                 showControls = !showControls
             },
     ) {
-        // ExoPlayer video view
-        AndroidView(
-            factory = {
-                PlayerView(context).apply {
-                    player = exoPlayer
-                    useController = false
-                    layoutParams = FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                    )
-                }
-            },
-            modifier = Modifier.fillMaxSize(),
-        )
+        // Video surface
+        if (useMpv) {
+            // MPV SurfaceView
+            AndroidView(
+                factory = { ctx ->
+                    MPVView(ctx).apply {
+                        layoutParams = FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            // ExoPlayer PlayerView
+            AndroidView(
+                factory = {
+                    PlayerView(context).apply {
+                        useController = false
+                        layoutParams = FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                        )
+                    }
+                },
+                update = { view ->
+                    view.player = (engine as? ExoPlayerEngine)?.getExoPlayer()
+                },
+                onRelease = { view ->
+                    view.player = null
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+
+        // Track selection dialog
+        if (showTrackDialog) {
+            TrackSelectionDialog(
+                subtitleTracks = subtitleTracks,
+                audioTracks = audioTracks,
+                onSelectSubtitle = { track ->
+                    if (track == null) {
+                        engine.disableSubtitles()
+                    } else {
+                        engine.selectSubtitleTrack(track.id)
+                    }
+                    showTrackDialog = false
+                },
+                onSelectAudio = { track ->
+                    engine.selectAudioTrack(track.id)
+                    showTrackDialog = false
+                },
+                onDismiss = { showTrackDialog = false },
+            )
+        }
 
         // Controls overlay
         if (showControls) {
@@ -189,7 +311,7 @@ fun PlayerScreen(
                     .fillMaxSize()
                     .background(Color.Black.copy(alpha = 0.4f)),
             ) {
-                // Top bar: back + title
+                // Top bar: back + title + settings
                 Row(
                     modifier = Modifier
                         .align(Alignment.TopStart)
@@ -214,6 +336,18 @@ fun PlayerScreen(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f),
                         )
+                    } else {
+                        Spacer(Modifier.weight(1f))
+                    }
+                    if (subtitleTracks.isNotEmpty() || audioTracks.isNotEmpty()) {
+                        IconButton(onClick = { showTrackDialog = true }) {
+                            Icon(
+                                Icons.Default.Settings,
+                                contentDescription = "Track selection",
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
                     }
                 }
 
@@ -224,7 +358,7 @@ fun PlayerScreen(
                 ) {
                     IconButton(
                         onClick = {
-                            exoPlayer.seekTo((exoPlayer.currentPosition - 10000).coerceAtLeast(0))
+                            engine.seekRelative(-10_000)
                             showControls = true
                         },
                     ) {
@@ -240,7 +374,7 @@ fun PlayerScreen(
 
                     IconButton(
                         onClick = {
-                            if (isPlaying) exoPlayer.pause() else exoPlayer.play()
+                            if (isPlaying) engine.pause() else engine.resume()
                             showControls = true
                         },
                     ) {
@@ -256,9 +390,7 @@ fun PlayerScreen(
 
                     IconButton(
                         onClick = {
-                            exoPlayer.seekTo(
-                                (exoPlayer.currentPosition + 10000).coerceAtMost(duration),
-                            )
+                            engine.seekRelative(10_000)
                             showControls = true
                         },
                     ) {
@@ -285,7 +417,7 @@ fun PlayerScreen(
                             sliderPosition = it
                         },
                         onValueChangeFinished = {
-                            exoPlayer.seekTo((sliderPosition * duration).toLong())
+                            engine.seekTo((sliderPosition * duration).toLong())
                             isSeeking = false
                         },
                         modifier = Modifier.fillMaxWidth(),
@@ -319,5 +451,104 @@ private fun formatTime(ms: Long): String {
         "%d:%02d:%02d".format(hours, minutes, seconds)
     } else {
         "%d:%02d".format(minutes, seconds)
+    }
+}
+
+@Composable
+private fun TrackSelectionDialog(
+    subtitleTracks: List<TrackDescription>,
+    audioTracks: List<TrackDescription>,
+    onSelectSubtitle: (TrackDescription?) -> Unit,
+    onSelectAudio: (TrackDescription) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var selectedTab by remember { mutableIntStateOf(0) }
+    val tabs = buildList {
+        if (subtitleTracks.isNotEmpty()) add("Subtitles")
+        if (audioTracks.isNotEmpty()) add("Audio")
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        },
+        title = { Text("Track Selection") },
+        text = {
+            Column {
+                if (tabs.size > 1) {
+                    TabRow(selectedTabIndex = selectedTab) {
+                        tabs.forEachIndexed { index, tabTitle ->
+                            Tab(
+                                selected = selectedTab == index,
+                                onClick = { selectedTab = index },
+                                text = { Text(tabTitle) },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+
+                val showSubtitles = tabs.getOrNull(selectedTab) == "Subtitles"
+
+                LazyColumn {
+                    if (showSubtitles) {
+                        val allOff = subtitleTracks.none { it.isSelected }
+                        item {
+                            TrackRow(
+                                label = "Off",
+                                isSelected = allOff,
+                                onClick = { onSelectSubtitle(null) },
+                            )
+                        }
+                        items(subtitleTracks) { track ->
+                            TrackRow(
+                                label = track.label,
+                                isSelected = track.isSelected,
+                                onClick = { onSelectSubtitle(track) },
+                            )
+                        }
+                    } else {
+                        items(audioTracks) { track ->
+                            TrackRow(
+                                label = track.label,
+                                isSelected = track.isSelected,
+                                onClick = { onSelectAudio(track) },
+                            )
+                        }
+                    }
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun TrackRow(
+    label: String,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp, horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyLarge,
+            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+        )
+        if (isSelected) {
+            Icon(
+                Icons.Default.Check,
+                contentDescription = "Selected",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
+            )
+        }
     }
 }

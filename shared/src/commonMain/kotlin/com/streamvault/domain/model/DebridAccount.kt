@@ -47,8 +47,10 @@ data class TranscodeUrls(
 @Serializable
 data class StreamPreferences(
     val preferredQuality: StreamQuality = StreamQuality.FHD_1080P,
+    val maxQuality: StreamQuality = StreamQuality.REMUX_4K,
     val hdrEnabled: Boolean = false,
     val dvEnabled: Boolean = false,
     val cachedOnly: Boolean = true,
     val minQuality: StreamQuality = StreamQuality.SD_480P,
+    val maxFileSizeBytes: Long? = null,
 )
