@@ -115,7 +115,7 @@ val sharedModule = module {
     single<StreamRepository> { StreamRepositoryImpl(get(), get(), get()) }
 
     // Watch Progress
-    single<WatchProgressRepository> { WatchProgressRepositoryImpl(get()) }
+    single<WatchProgressRepository> { WatchProgressRepositoryImpl(get(), get(), get(), get()) }
 
     // Preferences
     single<PreferencesRepository> { PreferencesRepositoryImpl(get()) }
@@ -139,10 +139,10 @@ val sharedModule = module {
     single<SubscriptionRepository> { SubscriptionRepositoryImpl(get()) }
 
     // Watchlist Repository
-    single<WatchlistRepository> { WatchlistRepositoryImpl(get()) }
+    single<WatchlistRepository> { WatchlistRepositoryImpl(get(), get(), get(), get()) }
 
     // Watch History Repository
-    single<WatchHistoryRepository> { WatchHistoryRepositoryImpl(get()) }
+    single<WatchHistoryRepository> { WatchHistoryRepositoryImpl(get(), get(), get(), get()) }
 
     // Sync Repository
     single<SyncRepository> { SyncRepositoryImpl(get(), get()) }

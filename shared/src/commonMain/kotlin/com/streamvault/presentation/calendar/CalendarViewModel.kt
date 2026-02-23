@@ -49,7 +49,7 @@ class CalendarViewModel(
     private suspend fun loadCalendar(token: String) {
         _state.update { it.copy(isLoading = true, error = null) }
         try {
-            val episodes = traktClient.getCalendar(token, days = 7)
+            val episodes = traktClient.getCalendar(token, days = 33)
             val grouped = groupEpisodesByDate(episodes)
             _state.update {
                 it.copy(

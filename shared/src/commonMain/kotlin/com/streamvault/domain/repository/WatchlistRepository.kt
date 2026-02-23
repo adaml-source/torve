@@ -9,4 +9,5 @@ interface WatchlistRepository {
     suspend fun add(item: WatchlistItem)
     suspend fun remove(mediaId: String)
     suspend fun clear()
+    suspend fun syncFromTrakt()
 }

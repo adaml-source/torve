@@ -1,7 +1,10 @@
 package com.streamvault.android.ui.catalog
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -17,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -55,12 +59,15 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -71,6 +78,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.streamvault.android.R
 import com.streamvault.android.ui.components.CardSize
 import com.streamvault.android.ui.components.PosterCard
 import com.streamvault.android.ui.components.ShimmerBox
@@ -137,6 +145,20 @@ fun CatalogScreen(
     val displayItems = if (isSearchMode) state.searchResults else state.items
     val isLoadingMore = if (isSearchMode) state.isSearchingMore else state.isLoadingMore
 
+    // Track scroll direction for floating search bar visibility
+    val previousScrollOffset = remember { mutableIntStateOf(0) }
+    val previousFirstVisibleItem = remember { mutableIntStateOf(0) }
+    val isSearchBarVisible = remember { derivedStateOf {
+        val firstVisible = gridState.firstVisibleItemIndex
+        val offset = gridState.firstVisibleItemScrollOffset
+        val isScrollingDown = firstVisible > previousFirstVisibleItem.intValue ||
+            (firstVisible == previousFirstVisibleItem.intValue && offset > previousScrollOffset.intValue + 10)
+        previousFirstVisibleItem.intValue = firstVisible
+        previousScrollOffset.intValue = offset
+        // Show search bar when at top or scrolling up, hide when scrolling down
+        !isScrollingDown || firstVisible <= 1
+    } }
+
     Box(modifier = Modifier.fillMaxSize()) {
         when {
             state.isLoading && displayItems.isEmpty() -> {
@@ -149,7 +171,7 @@ fun CatalogScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
-                        "Failed to load",
+                        stringResource(R.string.catalog_failed_to_load),
                         style = MaterialTheme.typography.titleMedium,
                         color = StreamVault.colors.textSecondary,
                     )
@@ -157,7 +179,7 @@ fun CatalogScreen(
                         onClick = { viewModel.refresh() },
                         modifier = Modifier.padding(top = 8.dp),
                     ) {
-                        Text("Retry")
+                        Text(stringResource(R.string.common_retry))
                     }
                 }
             }
@@ -179,6 +201,7 @@ fun CatalogScreen(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .statusBarsPadding()
                                     .padding(vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
@@ -186,7 +209,7 @@ fun CatalogScreen(
                                     IconButton(onClick = onBack) {
                                         Icon(
                                             imageVector = Icons.Rounded.Close,
-                                            contentDescription = "Back",
+                                            contentDescription = stringResource(R.string.common_close),
                                             tint = Snow,
                                         )
                                     }
@@ -214,21 +237,6 @@ fun CatalogScreen(
                                 onItemClick = onMediaClick,
                             )
                         }
-                    }
-
-                    // ── Search Bar + Filter Button ──
-                    item(
-                        key = "search",
-                        span = { GridItemSpan(maxLineSpan) },
-                    ) {
-                        CatalogSearchRow(
-                            searchQuery = state.searchQuery,
-                            activeFilterCount = state.activeFilterCount,
-                            mediaType = mediaType,
-                            onQueryChange = { viewModel.updateSearchQuery(it) },
-                            onClearSearch = { viewModel.clearSearch() },
-                            onFilterClick = { viewModel.toggleFilterSheet() },
-                        )
                     }
 
                     // ── Category Chips ──
@@ -282,7 +290,7 @@ fun CatalogScreen(
                                     selected = selected,
                                     onClick = { viewModel.selectGenre(null) },
                                     label = {
-                                        Text("All", style = MaterialTheme.typography.labelMedium)
+                                        Text(stringResource(R.string.catalog_all), style = MaterialTheme.typography.labelMedium)
                                     },
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = AmberSubtle,
@@ -332,7 +340,7 @@ fun CatalogScreen(
                             span = { GridItemSpan(maxLineSpan) },
                         ) {
                             Text(
-                                text = if (isSearchMode) "Search Results" else state.selectedCategory.label,
+                                text = if (isSearchMode) stringResource(R.string.catalog_search_results) else state.selectedCategory.label,
                                 style = MaterialTheme.typography.headlineSmall,
                                 color = StreamVault.colors.textPrimary,
                             )
@@ -388,7 +396,7 @@ fun CatalogScreen(
                                     )
                                     Spacer(Modifier.height(8.dp))
                                     Text(
-                                        text = "No results found",
+                                        text = stringResource(R.string.catalog_no_results),
                                         style = MaterialTheme.typography.bodyLarge,
                                         color = StreamVault.colors.textTertiary,
                                     )
@@ -397,6 +405,35 @@ fun CatalogScreen(
                         }
                     }
                 }
+            }
+        }
+
+        // ── Floating Search Bar ──
+        AnimatedVisibility(
+            visible = isSearchBarVisible.value,
+            modifier = Modifier.align(Alignment.TopCenter),
+            enter = slideInVertically { -it },
+            exit = slideOutVertically { -it },
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Obsidian, Obsidian, Obsidian.copy(alpha = 0.9f), Color.Transparent),
+                        ),
+                    )
+                    .statusBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                CatalogSearchRow(
+                    searchQuery = state.searchQuery,
+                    activeFilterCount = state.activeFilterCount,
+                    mediaType = mediaType,
+                    onQueryChange = { viewModel.updateSearchQuery(it) },
+                    onClearSearch = { viewModel.clearSearch() },
+                    onFilterClick = { viewModel.toggleFilterSheet() },
+                )
             }
         }
     }
@@ -600,7 +637,7 @@ private fun CatalogSearchRow(
                     Box {
                         if (searchQuery.isEmpty()) {
                             Text(
-                                text = "Search ${if (mediaType == "movie") "movies" else "TV shows"}...",
+                                text = stringResource(if (mediaType == "movie") R.string.catalog_search_movies else R.string.catalog_search_tv),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = StreamVault.colors.textHint,
                             )
@@ -618,7 +655,7 @@ private fun CatalogSearchRow(
                 ) {
                     Icon(
                         Icons.Rounded.Close,
-                        contentDescription = "Clear",
+                        contentDescription = stringResource(R.string.common_close),
                         tint = StreamVault.colors.textTertiary,
                         modifier = Modifier.size(18.dp),
                     )
@@ -648,14 +685,14 @@ private fun CatalogSearchRow(
                 }) {
                     Icon(
                         Icons.Rounded.FilterList,
-                        contentDescription = "Filters",
+                        contentDescription = stringResource(R.string.catalog_filters),
                         tint = Amber,
                     )
                 }
             } else {
                 Icon(
                     Icons.Rounded.FilterList,
-                    contentDescription = "Filters",
+                    contentDescription = stringResource(R.string.catalog_filters),
                     tint = StreamVault.colors.textSecondary,
                 )
             }
@@ -771,13 +808,13 @@ private fun FilterBottomSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "Filters",
+                    stringResource(R.string.catalog_filters),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 TextButton(onClick = onClear) {
-                    Text("Clear All", color = Amber)
+                    Text(stringResource(R.string.catalog_clear_all), color = Amber)
                 }
             }
 
@@ -785,7 +822,7 @@ private fun FilterBottomSheet(
 
             // ── Sort By ──
             Text(
-                "Sort By",
+                stringResource(R.string.catalog_sort_by),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -818,7 +855,7 @@ private fun FilterBottomSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "Minimum Rating",
+                    stringResource(R.string.catalog_min_rating),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface,
@@ -829,7 +866,7 @@ private fun FilterBottomSheet(
                     onClick = { ratingEnabled = !ratingEnabled },
                     label = {
                         Text(
-                            if (ratingEnabled) "%.1f+".format(ratingValue) else "Any",
+                            if (ratingEnabled) "%.1f+".format(ratingValue) else stringResource(R.string.catalog_any),
                             style = MaterialTheme.typography.labelMedium,
                         )
                     },
@@ -867,13 +904,14 @@ private fun FilterBottomSheet(
 
             // ── Year Range ──
             Text(
-                "Release Year",
+                stringResource(R.string.catalog_release_year),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Spacer(Modifier.height(8.dp))
             // Quick preset chips
+            val classicLabel = stringResource(R.string.catalog_classic)
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val currentYear = 2026
                 val presets = listOf(
@@ -882,7 +920,7 @@ private fun FilterBottomSheet(
                     "2020s" to (2020 to 2029),
                     "2010s" to (2010 to 2019),
                     "2000s" to (2000 to 2009),
-                    "Classic" to (1900 to 1999),
+                    classicLabel to (1900 to 1999),
                 )
                 items(presets) { (label, range) ->
                     val selected = yearFromText == range.first.toString() && yearToText == range.second.toString()
@@ -936,7 +974,7 @@ private fun FilterBottomSheet(
                         decorationBox = { innerTextField ->
                             Box {
                                 if (yearFromText.isEmpty()) {
-                                    Text("From", style = MaterialTheme.typography.bodyMedium, color = StreamVault.colors.textHint)
+                                    Text(stringResource(R.string.catalog_from), style = MaterialTheme.typography.bodyMedium, color = StreamVault.colors.textHint)
                                 }
                                 innerTextField()
                             }
@@ -963,7 +1001,7 @@ private fun FilterBottomSheet(
                         decorationBox = { innerTextField ->
                             Box {
                                 if (yearToText.isEmpty()) {
-                                    Text("To", style = MaterialTheme.typography.bodyMedium, color = StreamVault.colors.textHint)
+                                    Text(stringResource(R.string.catalog_to), style = MaterialTheme.typography.bodyMedium, color = StreamVault.colors.textHint)
                                 }
                                 innerTextField()
                             }
@@ -976,7 +1014,7 @@ private fun FilterBottomSheet(
 
             // ── Runtime ──
             Text(
-                "Runtime",
+                stringResource(R.string.catalog_runtime),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -1025,7 +1063,7 @@ private fun FilterBottomSheet(
                 shape = RoundedCornerShape(12.dp),
             ) {
                 Text(
-                    "Apply Filters",
+                    stringResource(R.string.catalog_apply_filters),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )

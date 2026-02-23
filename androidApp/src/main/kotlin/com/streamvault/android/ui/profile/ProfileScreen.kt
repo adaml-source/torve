@@ -1,6 +1,8 @@
 package com.streamvault.android.ui.profile
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.res.stringResource
+import com.streamvault.android.R
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -692,7 +694,7 @@ private fun EditProfileSheet(
                 FilterChip(
                     selected = selectedRating == null,
                     onClick = { selectedRating = null },
-                    label = { Text("No limit") },
+                    label = { Text(stringResource(R.string.settings_no_limit)) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = Amber,
                         selectedLabelColor = Obsidian,
@@ -855,7 +857,7 @@ private fun PinPromptSheet(
             Spacer(Modifier.height(8.dp))
 
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = StreamVault.colors.textSecondary)
+                Text(stringResource(R.string.common_cancel), color = StreamVault.colors.textSecondary)
             }
         }
     }

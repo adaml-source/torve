@@ -32,8 +32,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.streamvault.android.R
 import com.streamvault.android.player.ExternalPlayerLauncher
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Charcoal
@@ -66,7 +68,7 @@ fun StreamActionSheet(
                 .padding(bottom = 32.dp),
         ) {
             Text(
-                text = "Stream Actions",
+                text = stringResource(R.string.action_stream_actions),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 color = Snow,
@@ -76,7 +78,7 @@ fun StreamActionSheet(
             // Play in-app
             ActionItem(
                 icon = Icons.Default.PlayArrow,
-                label = "Play in StreamVault",
+                label = stringResource(R.string.action_play_in_torve),
                 onClick = {
                     onPlayInApp()
                     onDismiss()
@@ -111,7 +113,7 @@ fun StreamActionSheet(
             // External player chooser (always available)
             ActionItem(
                 icon = Icons.Default.OpenInNew,
-                label = "Play in External Player...",
+                label = stringResource(R.string.action_play_external),
                 onClick = {
                     ExternalPlayerLauncher.playWithChooser(context, url, title)
                     onDismiss()
@@ -127,10 +129,10 @@ fun StreamActionSheet(
             if (onDownload != null) {
                 ActionItem(
                     icon = Icons.Default.Download,
-                    label = "Download",
+                    label = stringResource(R.string.action_download),
                     onClick = {
                         onDownload()
-                        Toast.makeText(context, "Download queued", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.action_download_queued), Toast.LENGTH_SHORT).show()
                         onDismiss()
                     },
                 )
@@ -166,10 +168,10 @@ fun StreamActionSheet(
             // Copy URL
             ActionItem(
                 icon = Icons.Default.ContentCopy,
-                label = "Copy URL",
+                label = stringResource(R.string.action_copy_url),
                 onClick = {
                     ExternalPlayerLauncher.copyUrl(context, url)
-                    Toast.makeText(context, "URL copied to clipboard", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.action_url_copied), Toast.LENGTH_SHORT).show()
                     onDismiss()
                 },
             )
@@ -177,7 +179,7 @@ fun StreamActionSheet(
             // Share
             ActionItem(
                 icon = Icons.Default.Share,
-                label = "Share",
+                label = stringResource(R.string.common_share),
                 onClick = {
                     ExternalPlayerLauncher.shareUrl(context, url, title)
                     onDismiss()

@@ -50,14 +50,18 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
+import com.streamvault.android.R
 import coil3.compose.AsyncImage
 import com.streamvault.android.ui.components.CardSize
 import com.streamvault.android.ui.components.PosterCard
 import com.streamvault.android.ui.components.SectionHeader
 import com.streamvault.android.ui.components.ShimmerBox
 import com.streamvault.android.ui.theme.Amber
+import com.streamvault.android.ui.theme.Charcoal
 import com.streamvault.android.ui.theme.HeroGradient
 import com.streamvault.android.ui.theme.Obsidian
 import com.streamvault.android.ui.theme.Snow
@@ -131,7 +135,7 @@ fun HomeScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
-                        text = "Something went wrong",
+                        text = stringResource(R.string.home_something_went_wrong),
                         style = MaterialTheme.typography.titleLarge,
                         color = StreamVault.colors.textPrimary,
                     )
@@ -143,7 +147,7 @@ fun HomeScreen(
                     )
                     Spacer(Modifier.height(16.dp))
                     FilledTonalButton(onClick = { viewModel.refresh() }) {
-                        Text("Try Again")
+                        Text(stringResource(R.string.home_try_again))
                     }
                 }
             }
@@ -182,7 +186,7 @@ fun HomeScreen(
                     // ── Continue Watching ──
                     if (filteredContinueWatching.isNotEmpty()) {
                         item(key = "continue_watching") {
-                            SectionHeader(title = "Continue Watching")
+                            SectionHeader(title = stringResource(R.string.home_continue_watching))
                             LazyRow(
                                 contentPadding = PaddingValues(horizontal = 16.dp),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -195,13 +199,32 @@ fun HomeScreen(
                                 }
                             }
                         }
+                    } else if (mediaType == "all" && !state.isLoading) {
+                        item(key = "continue_watching_empty") {
+                            SectionHeader(title = stringResource(R.string.home_continue_watching))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Charcoal)
+                                    .padding(24.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.home_continue_watching_empty),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = StreamVault.colors.textTertiary,
+                                )
+                            }
+                        }
                     }
 
                     // ── Recommended For You ──
                     if (filteredRecommendations.isNotEmpty()) {
                         item(key = "recommended") {
                             Spacer(Modifier.height(8.dp))
-                            SectionHeader(title = "Recommended For You")
+                            SectionHeader(title = stringResource(R.string.home_recommended))
                             LazyRow(
                                 contentPadding = PaddingValues(horizontal = 16.dp),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -229,6 +252,7 @@ fun HomeScreen(
                                     items = watchlist.items,
                                     shelfType = watchlist.type,
                                     onItemClick = onMediaClick,
+                                    onSeeAll = {},
                                 )
                             }
                         }
@@ -242,6 +266,7 @@ fun HomeScreen(
                             items = shelf.items,
                             shelfType = shelf.type,
                             onItemClick = onMediaClick,
+                            onSeeAll = {},
                         )
                     }
 
@@ -254,6 +279,7 @@ fun HomeScreen(
                                 items = shelf.items,
                                 shelfType = shelf.type,
                                 onItemClick = onMediaClick,
+                                onSeeAll = {},
                             )
                         }
                     }
@@ -268,6 +294,7 @@ fun HomeScreen(
                                     items = gems.items,
                                     shelfType = gems.type,
                                     onItemClick = onMediaClick,
+                                    onSeeAll = {},
                                 )
                             }
                         }
@@ -346,10 +373,11 @@ private fun HeroSlide(
     isInWatchlist: Boolean = false,
     onWatchlistClick: () -> Unit = {},
 ) {
+    val screenHeight = LocalConfiguration.current.screenHeightDp
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(480.dp)
+            .height((screenHeight * 0.55f).dp)
             .clickable(onClick = onClick),
     ) {
         // Backdrop image — full bleed
@@ -447,7 +475,7 @@ private fun HeroSlide(
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        "Details",
+                        stringResource(R.string.common_details),
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.SemiBold,
                     )
@@ -468,7 +496,7 @@ private fun HeroSlide(
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        if (isInWatchlist) "In Watchlist" else "Watchlist",
+                        if (isInWatchlist) stringResource(R.string.home_in_watchlist) else stringResource(R.string.home_watchlist),
                         style = MaterialTheme.typography.labelLarge,
                     )
                 }
@@ -549,7 +577,7 @@ fun ContinueWatchingCard(
             ) {
                 Icon(
                     Icons.Default.PlayArrow,
-                    contentDescription = "Play",
+                    contentDescription = stringResource(R.string.common_play),
                     tint = Snow,
                     modifier = Modifier.size(20.dp),
                 )
@@ -584,6 +612,7 @@ fun CatalogShelf(
     items: List<MediaItem>,
     shelfType: ShelfType = ShelfType.POSTER,
     onItemClick: (MediaItem) -> Unit,
+    onSeeAll: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val cardSize = when (shelfType) {
@@ -592,7 +621,11 @@ fun CatalogShelf(
     }
 
     Column(modifier = modifier) {
-        SectionHeader(title = title)
+        SectionHeader(
+            title = title,
+            action = if (onSeeAll != null) stringResource(R.string.home_see_all) else null,
+            onActionClick = onSeeAll,
+        )
 
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
@@ -645,10 +678,11 @@ fun RecommendationCard(
 private fun HomeSkeletonLoader() {
     Column(modifier = Modifier.fillMaxSize()) {
         // Hero shimmer
+        val screenHeight = LocalConfiguration.current.screenHeightDp
         ShimmerBox(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(480.dp),
+                .height((screenHeight * 0.55f).dp),
         )
         Spacer(Modifier.height(20.dp))
 

@@ -13,15 +13,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -32,9 +35,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.streamvault.android.R
 import com.streamvault.android.ui.components.SectionHeader
 import com.streamvault.android.ui.components.ShimmerBox
 import com.streamvault.android.ui.theme.Amber
@@ -56,6 +61,7 @@ import java.util.Locale
 @Composable
 fun CalendarScreen(
     onEpisodeClick: (tmdbId: Int) -> Unit,
+    onBack: () -> Unit = {},
     viewModel: CalendarViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
@@ -81,13 +87,13 @@ fun CalendarScreen(
                     )
                     Spacer(Modifier.height(16.dp))
                     Text(
-                        text = "Connect Trakt to See Your Calendar",
+                        text = stringResource(R.string.calendar_connect_trakt),
                         style = MaterialTheme.typography.titleMedium,
                         color = StreamVault.colors.textPrimary,
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "Link your Trakt account in Settings to see upcoming episodes from your watchlist.",
+                        text = stringResource(R.string.calendar_connect_trakt_desc),
                         style = MaterialTheme.typography.bodyMedium,
                         color = StreamVault.colors.textSecondary,
                     )
@@ -104,13 +110,13 @@ fun CalendarScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
-                        text = state.error ?: "Error",
+                        text = state.error ?: stringResource(R.string.calendar_error),
                         color = Ruby,
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Spacer(Modifier.height(12.dp))
                     FilledTonalButton(onClick = { viewModel.refresh() }) {
-                        Text("Retry")
+                        Text(stringResource(R.string.common_retry))
                     }
                 }
             }
@@ -130,13 +136,13 @@ fun CalendarScreen(
                     )
                     Spacer(Modifier.height(16.dp))
                     Text(
-                        text = "No Upcoming Episodes",
+                        text = stringResource(R.string.calendar_no_episodes),
                         style = MaterialTheme.typography.titleMedium,
                         color = StreamVault.colors.textPrimary,
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "Episodes from your Trakt watchlist will appear here.",
+                        text = stringResource(R.string.calendar_no_episodes_desc),
                         style = MaterialTheme.typography.bodyMedium,
                         color = StreamVault.colors.textSecondary,
                     )
@@ -163,7 +169,7 @@ fun CalendarScreen(
                                 modifier = Modifier.padding(start = 16.dp, bottom = 16.dp),
                             ) {
                                 Text(
-                                    text = "Calendar",
+                                    text = stringResource(R.string.calendar_title),
                                     style = MaterialTheme.typography.displayMedium,
                                     color = Snow,
                                     fontWeight = FontWeight.Bold,
@@ -201,6 +207,21 @@ fun CalendarScreen(
                     }
                 }
             }
+        }
+
+        // ── Back Button ──
+        IconButton(
+            onClick = onBack,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .statusBarsPadding()
+                .padding(4.dp),
+        ) {
+            Icon(
+                Icons.AutoMirrored.Rounded.ArrowBack,
+                contentDescription = stringResource(R.string.common_back),
+                tint = Snow,
+            )
         }
     }
 }
@@ -254,7 +275,7 @@ private fun CalendarEpisodeCard(
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    text = "S${episode.season}E${episode.episode}" +
+                    text = stringResource(R.string.episode_format, episode.season, episode.episode) +
                         if (episode.episodeTitle.isNotBlank()) " \u2022 ${episode.episodeTitle}" else "",
                     style = MaterialTheme.typography.bodySmall,
                     color = StreamVault.colors.textSecondary,
@@ -275,7 +296,7 @@ private fun CalendarEpisodeCard(
                 color = AmberSubtle,
             ) {
                 Text(
-                    text = "S${episode.season}",
+                    text = stringResource(R.string.episode_season, episode.season),
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                     style = MaterialTheme.typography.labelSmall,
                     color = Amber,

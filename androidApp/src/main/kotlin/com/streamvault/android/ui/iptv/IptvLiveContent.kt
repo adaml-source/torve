@@ -32,6 +32,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.streamvault.android.R
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.StreamVault
 import com.streamvault.domain.model.EnrichedChannel
@@ -114,7 +116,7 @@ fun IptvLiveContent(
                         ) {
                             Icon(
                                 Icons.Rounded.Close,
-                                contentDescription = "Clear",
+                                contentDescription = stringResource(R.string.common_clear),
                                 tint = StreamVault.colors.textTertiary,
                                 modifier = Modifier.size(16.dp),
                             )

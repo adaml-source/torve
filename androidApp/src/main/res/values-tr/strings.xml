@@ -1,0 +1,269 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App -->
+    <string name="app_name">Torve</string>
+    <string name="widget_description">İzlemeye devam listeni gösterir</string>
+    <string name="widget_name">İzlemeye Devam Et</string>
+
+    <!-- Navigation -->
+    <string name="nav_home">Ana Sayfa</string>
+    <string name="nav_movies">Filmler</string>
+    <string name="nav_tv_shows">Diziler</string>
+    <string name="nav_live_tv">Canlı TV</string>
+    <string name="nav_watchlist">İzleme Listesi</string>
+    <string name="nav_profile">Profil</string>
+
+    <!-- Common Actions -->
+    <string name="common_connect">Bağlan</string>
+    <string name="common_disconnect">Bağlantıyı Kes</string>
+    <string name="common_cancel">İptal</string>
+    <string name="common_add">Ekle</string>
+    <string name="common_clear">Temizle</string>
+    <string name="common_retry">Tekrar Dene</string>
+    <string name="common_close">Kapat</string>
+    <string name="common_back">Geri</string>
+    <string name="common_play">Oynat</string>
+    <string name="common_pause">Duraklat</string>
+    <string name="common_delete">Sil</string>
+    <string name="common_remove">Kaldır</string>
+    <string name="common_test">Test Et</string>
+    <string name="common_share">Paylaş</string>
+    <string name="common_search">Ara</string>
+    <string name="common_off">Kapalı</string>
+    <string name="common_details">Ayrıntılar</string>
+    <string name="common_apply">Uygula</string>
+
+    <!-- Home Screen -->
+    <string name="home_something_went_wrong">Bir şeyler ters gitti</string>
+    <string name="home_try_again">Tekrar Dene</string>
+    <string name="home_continue_watching">İzlemeye Devam Et</string>
+    <string name="home_continue_watching_empty">İlerlemenizi burada takip etmek için bir film veya dizi izlemeye başlayın.</string>
+    <string name="home_recommended">Sizin İçin Önerilen</string>
+    <string name="home_see_all">TÜMÜNÜ GÖR →</string>
+    <string name="home_in_watchlist">İzleme Listesinde</string>
+    <string name="home_watchlist">İzleme Listesi</string>
+
+    <!-- Detail Screen -->
+    <string name="detail_connect_cloud">Ayarlar\'dan bulut hizmetini bağlayın</string>
+    <string name="detail_finding_streams">Yayınlar aranıyor…</string>
+    <string name="detail_resolving">Çözümleniyor…</string>
+    <string name="detail_watchlist">İzleme Listesi</string>
+    <string name="detail_in_watchlist">İzleme Listesinde</string>
+    <string name="detail_watched">İzlendi</string>
+    <string name="detail_unwatched">İzlenmedi</string>
+    <string name="detail_watch_trailer">Fragmanı İzle</string>
+    <string name="detail_select_manually">Manuel Seç</string>
+    <string name="detail_director">Yönetmen: </string>
+    <string name="detail_cast">Oyuncular</string>
+    <string name="detail_more_like_this">Benzer İçerikler</string>
+
+    <!-- Player Screen -->
+    <string name="player_playback_error">Oynatma Hatası</string>
+    <string name="player_retry">Tekrar Dene</string>
+    <string name="player_go_back">Geri Dön</string>
+    <string name="player_rewind">10sn Geri</string>
+    <string name="player_forward">10sn İleri</string>
+    <string name="player_track_selection">Parça Seçimi</string>
+    <string name="player_subtitles">Altyazılar</string>
+    <string name="player_audio">Ses</string>
+    <string name="player_selected">Seçili</string>
+
+    <!-- Settings Screen -->
+    <string name="settings_title">Ayarlar</string>
+    <string name="settings_profiles">Profiller</string>
+    <string name="settings_subscription">Abonelik</string>
+    <string name="settings_downloads">İndirmeler</string>
+    <string name="settings_calendar">Takvim</string>
+
+    <string name="settings_cloud_service">Bulut Hizmeti</string>
+    <string name="settings_provider">Sağlayıcı</string>
+    <string name="settings_connected">Bağlı</string>
+    <string name="settings_premium_until">%1$s tarihine kadar Premium</string>
+    <string name="settings_go_to">Şuraya git:</string>
+    <string name="settings_enter_code">Kodu girin:</string>
+    <string name="settings_waiting_auth">Yetkilendirme bekleniyor…</string>
+    <string name="settings_api_key">API Anahtarı</string>
+    <string name="settings_device_auth">Cihaz Yetkilendirme</string>
+
+    <string name="settings_trakt">Trakt.tv</string>
+    <string name="settings_connect_trakt">Trakt Bağla</string>
+    <string name="settings_movies">Filmler</string>
+    <string name="settings_episodes">Bölümler</string>
+    <string name="settings_watch_time">İzleme Süresi</string>
+    <string name="settings_scrobble">Scrobble</string>
+    <string name="settings_scrobble_desc">İzlediklerini otomatik olarak takip et</string>
+    <string name="settings_api_status">API: %1$s</string>
+
+    <string name="settings_simkl">SIMKL</string>
+    <string name="settings_connect_simkl">SIMKL Bağla</string>
+
+    <string name="settings_live_tv">Canlı TV</string>
+    <string name="settings_no_playlists">Yapılandırılmış oynatma listesi yok</string>
+    <string name="settings_channels_count">%1$d kanal</string>
+    <string name="settings_add_playlist">Oynatma Listesi Ekle</string>
+
+    <string name="settings_stream_quality">Yayın Kalitesi</string>
+    <string name="settings_max_quality">Maks. Kalite</string>
+    <string name="settings_min_quality">Min. Kalite</string>
+    <string name="settings_max_file_size">Maks. Dosya Boyutu (MB)</string>
+    <string name="settings_no_limit">Sınır yok</string>
+    <string name="settings_cached_only">Yalnızca Önbelleğe Alınmış</string>
+    <string name="settings_cached_only_desc">Anında oynatma için yalnızca önbelleğe alınmış yayınları göster</string>
+    <string name="settings_hdr_content">HDR İçerik</string>
+    <string name="settings_hdr_content_desc">HDR / Dolby Vision yayınlarını dahil et</string>
+
+    <string name="settings_playback">Oynatma</string>
+    <string name="settings_auto_play">En İyi Yayını Otomatik Oynat</string>
+    <string name="settings_auto_play_desc">En iyi yayını otomatik olarak seç ve oynat</string>
+    <string name="settings_auto_play_next">Sonraki Bölümü Otomatik Oynat</string>
+    <string name="settings_auto_play_next_desc">Mevcut bölüm bittiğinde sonraki bölümü otomatik olarak oynat</string>
+    <string name="settings_codec_preference">Codec Tercihi</string>
+    <string name="settings_hdr_mode">HDR Modu</string>
+
+    <string name="settings_kodi_remote">Kodi Uzaktan Kumanda</string>
+    <string name="settings_no_kodi_hosts">Yapılandırılmış Kodi sunucusu yok</string>
+    <string name="settings_add_kodi_host">Kodi Sunucusu Ekle</string>
+    <string name="settings_kodi_name">Ad</string>
+    <string name="settings_kodi_name_hint">Oturma Odası</string>
+    <string name="settings_kodi_ip">IP Adresi</string>
+    <string name="settings_kodi_port">Port</string>
+
+    <string name="settings_appearance">Görünüm</string>
+    <string name="settings_theme">Tema</string>
+    <string name="settings_language">Dil</string>
+
+    <string name="settings_storage">Depolama</string>
+    <string name="settings_clear_cache">Önbelleği Temizle</string>
+    <string name="settings_clear_cache_desc">Önbelleğe alınmış meta verileri ve resimleri kaldır</string>
+    <string name="settings_cleared">Temizlendi!</string>
+    <string name="settings_clear_cache_confirm">Bu işlem tüm önbelleğe alınmış meta verileri kaldıracaktır. İçeriklerin yeniden yüklenmesi gerekebilir.</string>
+
+    <string name="settings_backup_sync">Yedekleme &amp; Senkronizasyon</string>
+    <string name="settings_last_backup">Son yedekleme: %1$s</string>
+    <string name="settings_export_backup">Yedeği Dışa Aktar</string>
+    <string name="settings_import_backup">Yedeği İçe Aktar</string>
+    <string name="settings_backup_desc">Eklentilerinizi, tercihlerinizi, izleme ilerlemenizi ve IPTV favorilerinizi bir dosyaya aktarın. API anahtarları ve tokenler asla dahil edilmez.</string>
+
+    <string name="settings_account">Hesap</string>
+    <string name="settings_account_coming_soon">Hesap senkronizasyonu yakında</string>
+    <string name="settings_account_desc">Tercihlerinizi cihazlar arasında senkronize etmek için bir hesap oluşturun.</string>
+
+    <string name="settings_about">Hakkında</string>
+    <string name="settings_privacy_policy">Gizlilik Politikası</string>
+    <string name="settings_terms">Şartlar &amp; Koşullar</string>
+    <string name="settings_help">Yardım &amp; Belgeler</string>
+    <string name="settings_share_app">Uygulamayı Paylaş</string>
+    <string name="settings_share_text">Torve\'ye göz atın — harika bir medya oynatıcı ve içerik düzenleyici! https://torve.app</string>
+    <string name="settings_share_title">Torve\'yi Paylaş</string>
+    <string name="settings_version">Torve v%1$s</string>
+
+    <!-- Paywall Screen -->
+    <string name="paywall_title">Torve Pro</string>
+    <string name="paywall_youre_pro">Pro\'sunuz!</string>
+    <string name="paywall_tier">Seviye: %1$s</string>
+    <string name="paywall_cancel">Aboneliği İptal Et</string>
+    <string name="paywall_unlock">Torve Pro\'nun Kilidini Aç</string>
+    <string name="paywall_subtitle">Pro abonelikle yayın izleyin, indirin ve IPTV izleyin</string>
+    <string name="paywall_free">Ücretsiz</string>
+    <string name="paywall_pro">Pro</string>
+    <string name="paywall_search_browse">Ara &amp; Gözat</string>
+    <string name="paywall_stream_playback">Yayın Oynatma</string>
+    <string name="paywall_downloads">İndirmeler</string>
+    <string name="paywall_iptv">IPTV / Canlı TV</string>
+    <string name="paywall_multi_cloud">Çoklu Bulut</string>
+    <string name="paywall_advanced_filters">Gelişmiş Filtreler</string>
+    <string name="paywall_lifetime">Ömür Boyu</string>
+    <string name="paywall_price">€9,99</string>
+    <string name="paywall_one_time">Tek seferlik ödeme, sınırsız erişim</string>
+    <string name="paywall_best_value">EN İYİ DEĞER</string>
+    <string name="paywall_get_lifetime">Ömür Boyu Erişim Al</string>
+    <string name="paywall_restore">Satın Almayı Geri Yükle</string>
+
+    <!-- Catalog Screen -->
+    <string name="catalog_failed_to_load">Yüklenemedi</string>
+    <string name="catalog_search_movies">Film ara…</string>
+    <string name="catalog_search_tv">Dizi ara…</string>
+    <string name="catalog_search_results">Arama Sonuçları</string>
+    <string name="catalog_no_results">Sonuç bulunamadı</string>
+    <string name="catalog_all">Tümü</string>
+    <string name="catalog_filters">Filtreler</string>
+    <string name="catalog_clear_all">Tümünü Temizle</string>
+    <string name="catalog_sort_by">Sıralama</string>
+    <string name="catalog_min_rating">Minimum Puan</string>
+    <string name="catalog_any">Herhangi</string>
+    <string name="catalog_release_year">Yayın Yılı</string>
+    <string name="catalog_from">Başlangıç</string>
+    <string name="catalog_to">Bitiş</string>
+    <string name="catalog_runtime">Süre</string>
+    <string name="catalog_apply_filters">Filtreleri Uygula</string>
+    <string name="catalog_classic">Klasik</string>
+
+    <!-- IPTV Screen -->
+    <string name="iptv_no_playlists">IPTV Oynatma Listesi Yok</string>
+    <string name="iptv_add_playlist_prompt">Başlamak için bir M3U veya Xtream Codes oynatma listesi ekleyin</string>
+    <string name="iptv_add_playlist">Oynatma Listesi Ekle</string>
+    <string name="iptv_add_title">IPTV Oynatma Listesi Ekle</string>
+    <string name="iptv_playlist_name">Oynatma Listesi Adı</string>
+    <string name="iptv_m3u_url">M3U URL</string>
+    <string name="iptv_epg_optional">EPG URL (isteğe bağlı)</string>
+    <string name="iptv_server_url">Sunucu URL</string>
+    <string name="iptv_username">Kullanıcı Adı</string>
+    <string name="iptv_password">Şifre</string>
+    <string name="iptv_manage_categories">Kategorileri Yönet</string>
+    <string name="iptv_refresh">Yenile</string>
+
+    <!-- Downloads Screen -->
+    <string name="download_title">İndirmeler</string>
+    <string name="download_no_downloads">İndirme Yok</string>
+    <string name="download_empty_desc">İndirilen içerikler çevrimdışı izleme için burada görünecektir.</string>
+    <string name="download_queued">Sırada</string>
+    <string name="download_paused">Duraklatıldı</string>
+    <string name="download_completed">Tamamlandı</string>
+    <string name="download_failed">Başarısız</string>
+    <string name="download_resume">Devam Et</string>
+
+    <!-- Stream Actions -->
+    <string name="action_play_in_torve">Torve\'de Oynat</string>
+    <string name="action_play_external">Harici Oynatıcıda Oynat…</string>
+    <string name="action_download">İndir</string>
+    <string name="action_download_queued">İndirme sıraya alındı</string>
+    <string name="action_copy_url">URL Kopyala</string>
+    <string name="action_url_copied">URL panoya kopyalandı</string>
+    <string name="action_stream_actions">Yayın İşlemleri</string>
+
+    <!-- Stream Picker -->
+    <string name="picker_select_stream">Yayın Seç</string>
+    <string name="picker_cached">Önbellekte</string>
+    <string name="picker_streams_found">%1$d yayın bulundu</string>
+
+    <!-- Watchlist Screen -->
+    <string name="watchlist_title">İzleme Listesi</string>
+    <string name="watchlist_all">Tümü</string>
+    <string name="watchlist_movies">Filmler</string>
+    <string name="watchlist_tv_shows">Diziler</string>
+    <string name="watchlist_empty">İzleme listeniz boş</string>
+    <string name="watchlist_empty_desc">İzlemek istediğiniz içerikleri takip etmek için film ve dizileri izleme listenize ekleyin.</string>
+    <string name="watchlist_in_progress">Devam Eden</string>
+    <string name="watchlist_history">Geçmiş</string>
+    <string name="watchlist_nothing_in_progress">Devam eden bir şey yok</string>
+    <string name="watchlist_start_watching">Burada görmek için bir şeyler izlemeye başlayın</string>
+    <string name="watchlist_no_history">Henüz geçmiş yok</string>
+    <string name="watchlist_history_desc">İzlediğiniz içerikler burada görünecek</string>
+    <string name="watchlist_watched_min">%1$d dk izlendi</string>
+    <string name="watchlist_added">İzleme Listesine Eklendi</string>
+    <string name="watchlist_removed">İzleme Listesinden Kaldırıldı</string>
+
+    <!-- Calendar Screen -->
+    <string name="calendar_title">Takvim</string>
+    <string name="calendar_no_episodes">Yaklaşan Bölüm Yok</string>
+    <string name="calendar_no_episodes_desc">Yeni bölümleri burada görmek için Trakt izleme listenize dizi ekleyin.</string>
+    <string name="calendar_connect_trakt">Takviminizi görmek için Trakt bağlayın</string>
+    <string name="calendar_connect_trakt_desc">İzleme listenizdeki yaklaşan bölümleri görmek için Ayarlar\'dan Trakt hesabınızı bağlayın.</string>
+    <string name="calendar_error">Hata</string>
+
+    <!-- Episodes -->
+    <string name="episode_season">Sezon %1$d</string>
+    <string name="episode_all_seasons">Tüm Sezonlar</string>
+    <string name="episode_mark_season_watched">Sezon %1$d izlendi olarak işaretle</string>
+    <string name="episode_format">S%1$dE%2$d</string>
+</resources>

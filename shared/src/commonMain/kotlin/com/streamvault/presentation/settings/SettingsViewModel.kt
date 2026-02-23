@@ -313,24 +313,44 @@ class SettingsViewModel(
         traktPollJob?.cancel()
         traktPollJob = scope.launch {
             _state.update { it.copy(isPollingTrakt = true) }
+            var interval = code.interval.toLong()
             val maxAttempts = code.expiresIn / code.interval
             for (i in 0 until maxAttempts) {
-                delay(code.interval * 1000L)
-                val tokens = traktClient.pollDeviceToken(code.deviceCode)
-                if (tokens != null) {
-                    prefsRepo.setString(KEY_TRAKT_ACCESS_TOKEN, tokens.accessToken)
-                    prefsRepo.setString(KEY_TRAKT_REFRESH_TOKEN, tokens.refreshToken)
-                    _state.update {
-                        it.copy(
-                            traktAccessToken = tokens.accessToken,
-                            traktRefreshToken = tokens.refreshToken,
-                            traktConnected = true,
-                            traktDeviceCode = null,
-                            isPollingTrakt = false,
-                        )
+                delay(interval * 1000L)
+                when (val result = traktClient.pollDeviceToken(code.deviceCode)) {
+                    is com.streamvault.data.trakt.TraktPollResult.Success -> {
+                        prefsRepo.setString(KEY_TRAKT_ACCESS_TOKEN, result.tokens.accessToken)
+                        prefsRepo.setString(KEY_TRAKT_REFRESH_TOKEN, result.tokens.refreshToken)
+                        _state.update {
+                            it.copy(
+                                traktAccessToken = result.tokens.accessToken,
+                                traktRefreshToken = result.tokens.refreshToken,
+                                traktConnected = true,
+                                traktDeviceCode = null,
+                                isPollingTrakt = false,
+                            )
+                        }
+                        verifyTraktConnection()
+                        return@launch
                     }
-                    verifyTraktConnection()
-                    return@launch
+                    is com.streamvault.data.trakt.TraktPollResult.Pending -> { /* Keep polling */ }
+                    is com.streamvault.data.trakt.TraktPollResult.SlowDown -> { interval += 1 }
+                    is com.streamvault.data.trakt.TraktPollResult.Expired -> {
+                        _state.update { it.copy(isPollingTrakt = false, traktDeviceCode = null, traktError = "Code expired. Try again.") }
+                        return@launch
+                    }
+                    is com.streamvault.data.trakt.TraktPollResult.Denied -> {
+                        _state.update { it.copy(isPollingTrakt = false, traktDeviceCode = null, traktError = "Authorization denied.") }
+                        return@launch
+                    }
+                    is com.streamvault.data.trakt.TraktPollResult.AlreadyUsed -> {
+                        _state.update { it.copy(isPollingTrakt = false, traktDeviceCode = null, traktError = "Code already used. Try again.") }
+                        return@launch
+                    }
+                    is com.streamvault.data.trakt.TraktPollResult.Error -> {
+                        _state.update { it.copy(isPollingTrakt = false, traktDeviceCode = null, traktError = result.message) }
+                        return@launch
+                    }
                 }
             }
             _state.update {
@@ -417,11 +437,6 @@ class SettingsViewModel(
     }
 
     fun startSimklDeviceAuth() {
-        if (_state.value.simklClientId.isBlank()) {
-            _state.update { it.copy(simklError = "Set SIMKL Client ID first") }
-            return
-        }
-
         scope.launch {
             _state.update { it.copy(simklLoading = true, simklError = null) }
             try {

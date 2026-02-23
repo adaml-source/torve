@@ -1,6 +1,269 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">StreamVault</string>
+    <!-- App -->
+    <string name="app_name">Torve</string>
     <string name="widget_description">Shows your continue watching list</string>
     <string name="widget_name">Continue Watching</string>
+
+    <!-- Navigation -->
+    <string name="nav_home">Home</string>
+    <string name="nav_movies">Movies</string>
+    <string name="nav_tv_shows">TV Shows</string>
+    <string name="nav_live_tv">Live TV</string>
+    <string name="nav_watchlist">Watchlist</string>
+    <string name="nav_profile">Profile</string>
+
+    <!-- Common Actions -->
+    <string name="common_connect">Connect</string>
+    <string name="common_disconnect">Disconnect</string>
+    <string name="common_cancel">Cancel</string>
+    <string name="common_add">Add</string>
+    <string name="common_clear">Clear</string>
+    <string name="common_retry">Retry</string>
+    <string name="common_close">Close</string>
+    <string name="common_back">Back</string>
+    <string name="common_play">Play</string>
+    <string name="common_pause">Pause</string>
+    <string name="common_delete">Delete</string>
+    <string name="common_remove">Remove</string>
+    <string name="common_test">Test</string>
+    <string name="common_share">Share</string>
+    <string name="common_search">Search</string>
+    <string name="common_off">Off</string>
+    <string name="common_details">Details</string>
+    <string name="common_apply">Apply</string>
+
+    <!-- Home Screen -->
+    <string name="home_something_went_wrong">Something went wrong</string>
+    <string name="home_try_again">Try Again</string>
+    <string name="home_continue_watching">Continue Watching</string>
+    <string name="home_continue_watching_empty">Start watching a movie or show to track your progress here.</string>
+    <string name="home_recommended">Recommended For You</string>
+    <string name="home_see_all">SEE ALL →</string>
+    <string name="home_in_watchlist">In Watchlist</string>
+    <string name="home_watchlist">Watchlist</string>
+
+    <!-- Detail Screen -->
+    <string name="detail_connect_cloud">Connect cloud service in Settings</string>
+    <string name="detail_finding_streams">Finding streams…</string>
+    <string name="detail_resolving">Resolving…</string>
+    <string name="detail_watchlist">Watchlist</string>
+    <string name="detail_in_watchlist">In Watchlist</string>
+    <string name="detail_watched">Watched</string>
+    <string name="detail_unwatched">Unwatched</string>
+    <string name="detail_watch_trailer">Watch Trailer</string>
+    <string name="detail_select_manually">Select Manually</string>
+    <string name="detail_director">Director: </string>
+    <string name="detail_cast">Cast</string>
+    <string name="detail_more_like_this">More Like This</string>
+
+    <!-- Player Screen -->
+    <string name="player_playback_error">Playback Error</string>
+    <string name="player_retry">Retry</string>
+    <string name="player_go_back">Go Back</string>
+    <string name="player_rewind">Rewind 10s</string>
+    <string name="player_forward">Forward 10s</string>
+    <string name="player_track_selection">Track Selection</string>
+    <string name="player_subtitles">Subtitles</string>
+    <string name="player_audio">Audio</string>
+    <string name="player_selected">Selected</string>
+
+    <!-- Settings Screen -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_profiles">Profiles</string>
+    <string name="settings_subscription">Subscription</string>
+    <string name="settings_downloads">Downloads</string>
+    <string name="settings_calendar">Calendar</string>
+
+    <string name="settings_cloud_service">Cloud Service</string>
+    <string name="settings_provider">Provider</string>
+    <string name="settings_connected">Connected</string>
+    <string name="settings_premium_until">Premium until %1$s</string>
+    <string name="settings_go_to">Go to:</string>
+    <string name="settings_enter_code">Enter code:</string>
+    <string name="settings_waiting_auth">Waiting for authorization…</string>
+    <string name="settings_api_key">API Key</string>
+    <string name="settings_device_auth">Device Auth</string>
+
+    <string name="settings_trakt">Trakt.tv</string>
+    <string name="settings_connect_trakt">Connect Trakt</string>
+    <string name="settings_movies">Movies</string>
+    <string name="settings_episodes">Episodes</string>
+    <string name="settings_watch_time">Watch Time</string>
+    <string name="settings_scrobble">Scrobble</string>
+    <string name="settings_scrobble_desc">Auto-track what you watch</string>
+    <string name="settings_api_status">API: %1$s</string>
+
+    <string name="settings_simkl">SIMKL</string>
+    <string name="settings_connect_simkl">Connect SIMKL</string>
+
+    <string name="settings_live_tv">Live TV</string>
+    <string name="settings_no_playlists">No playlists configured</string>
+    <string name="settings_channels_count">%1$d channels</string>
+    <string name="settings_add_playlist">Add Playlist</string>
+
+    <string name="settings_stream_quality">Stream Quality</string>
+    <string name="settings_max_quality">Max Quality</string>
+    <string name="settings_min_quality">Min Quality</string>
+    <string name="settings_max_file_size">Max File Size (MB)</string>
+    <string name="settings_no_limit">No limit</string>
+    <string name="settings_cached_only">Cached Only</string>
+    <string name="settings_cached_only_desc">Only show cached streams for instant playback</string>
+    <string name="settings_hdr_content">HDR Content</string>
+    <string name="settings_hdr_content_desc">Include HDR / Dolby Vision streams</string>
+
+    <string name="settings_playback">Playback</string>
+    <string name="settings_auto_play">Auto-Play Best Stream</string>
+    <string name="settings_auto_play_desc">Automatically pick and play the best stream</string>
+    <string name="settings_auto_play_next">Auto-Play Next Episode</string>
+    <string name="settings_auto_play_next_desc">Automatically play the next episode when current finishes</string>
+    <string name="settings_codec_preference">Codec Preference</string>
+    <string name="settings_hdr_mode">HDR Mode</string>
+
+    <string name="settings_kodi_remote">Kodi Remote</string>
+    <string name="settings_no_kodi_hosts">No Kodi hosts configured</string>
+    <string name="settings_add_kodi_host">Add Kodi Host</string>
+    <string name="settings_kodi_name">Name</string>
+    <string name="settings_kodi_name_hint">Living Room</string>
+    <string name="settings_kodi_ip">IP Address</string>
+    <string name="settings_kodi_port">Port</string>
+
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_theme">Theme</string>
+    <string name="settings_language">Language</string>
+
+    <string name="settings_storage">Storage</string>
+    <string name="settings_clear_cache">Clear Cache</string>
+    <string name="settings_clear_cache_desc">Remove cached metadata and images</string>
+    <string name="settings_cleared">Cleared!</string>
+    <string name="settings_clear_cache_confirm">This will remove all cached metadata. You may need to reload content.</string>
+
+    <string name="settings_backup_sync">Backup &amp; Sync</string>
+    <string name="settings_last_backup">Last backup: %1$s</string>
+    <string name="settings_export_backup">Export Backup</string>
+    <string name="settings_import_backup">Import Backup</string>
+    <string name="settings_backup_desc">Export your addons, preferences, watch progress, and IPTV favorites to a file. API keys and tokens are never included.</string>
+
+    <string name="settings_account">Account</string>
+    <string name="settings_account_coming_soon">Account sync coming soon</string>
+    <string name="settings_account_desc">Create an account to sync your preferences across devices.</string>
+
+    <string name="settings_about">About</string>
+    <string name="settings_privacy_policy">Privacy Policy</string>
+    <string name="settings_terms">Terms &amp; Conditions</string>
+    <string name="settings_help">Help &amp; Documentation</string>
+    <string name="settings_share_app">Share App</string>
+    <string name="settings_share_text">Check out Torve — a beautiful media player and content organizer! https://torve.app</string>
+    <string name="settings_share_title">Share Torve</string>
+    <string name="settings_version">Torve v%1$s</string>
+
+    <!-- Paywall Screen -->
+    <string name="paywall_title">Torve Pro</string>
+    <string name="paywall_youre_pro">You\'re a Pro!</string>
+    <string name="paywall_tier">Tier: %1$s</string>
+    <string name="paywall_cancel">Cancel Subscription</string>
+    <string name="paywall_unlock">Unlock Torve Pro</string>
+    <string name="paywall_subtitle">Stream, download, and watch IPTV with a Pro subscription</string>
+    <string name="paywall_free">Free</string>
+    <string name="paywall_pro">Pro</string>
+    <string name="paywall_search_browse">Search &amp; Browse</string>
+    <string name="paywall_stream_playback">Stream Playback</string>
+    <string name="paywall_downloads">Downloads</string>
+    <string name="paywall_iptv">IPTV / Live TV</string>
+    <string name="paywall_multi_cloud">Multi-Cloud</string>
+    <string name="paywall_advanced_filters">Advanced Filters</string>
+    <string name="paywall_lifetime">Lifetime</string>
+    <string name="paywall_price">€9.99</string>
+    <string name="paywall_one_time">One-time payment, forever access</string>
+    <string name="paywall_best_value">BEST VALUE</string>
+    <string name="paywall_get_lifetime">Get Lifetime Access</string>
+    <string name="paywall_restore">Restore Purchase</string>
+
+    <!-- Catalog Screen -->
+    <string name="catalog_failed_to_load">Failed to load</string>
+    <string name="catalog_search_movies">Search movies…</string>
+    <string name="catalog_search_tv">Search TV shows…</string>
+    <string name="catalog_search_results">Search Results</string>
+    <string name="catalog_no_results">No results found</string>
+    <string name="catalog_all">All</string>
+    <string name="catalog_filters">Filters</string>
+    <string name="catalog_clear_all">Clear All</string>
+    <string name="catalog_sort_by">Sort By</string>
+    <string name="catalog_min_rating">Minimum Rating</string>
+    <string name="catalog_any">Any</string>
+    <string name="catalog_release_year">Release Year</string>
+    <string name="catalog_from">From</string>
+    <string name="catalog_to">To</string>
+    <string name="catalog_runtime">Runtime</string>
+    <string name="catalog_apply_filters">Apply Filters</string>
+    <string name="catalog_classic">Classic</string>
+
+    <!-- IPTV Screen -->
+    <string name="iptv_no_playlists">No IPTV Playlists</string>
+    <string name="iptv_add_playlist_prompt">Add an M3U or Xtream Codes playlist to get started</string>
+    <string name="iptv_add_playlist">Add Playlist</string>
+    <string name="iptv_add_title">Add IPTV Playlist</string>
+    <string name="iptv_playlist_name">Playlist Name</string>
+    <string name="iptv_m3u_url">M3U URL</string>
+    <string name="iptv_epg_optional">EPG URL (optional)</string>
+    <string name="iptv_server_url">Server URL</string>
+    <string name="iptv_username">Username</string>
+    <string name="iptv_password">Password</string>
+    <string name="iptv_manage_categories">Manage Categories</string>
+    <string name="iptv_refresh">Refresh</string>
+
+    <!-- Downloads Screen -->
+    <string name="download_title">Downloads</string>
+    <string name="download_no_downloads">No Downloads</string>
+    <string name="download_empty_desc">Downloaded content will appear here for offline viewing.</string>
+    <string name="download_queued">Queued</string>
+    <string name="download_paused">Paused</string>
+    <string name="download_completed">Completed</string>
+    <string name="download_failed">Failed</string>
+    <string name="download_resume">Resume</string>
+
+    <!-- Stream Actions -->
+    <string name="action_play_in_torve">Play in Torve</string>
+    <string name="action_play_external">Play in External Player…</string>
+    <string name="action_download">Download</string>
+    <string name="action_download_queued">Download queued</string>
+    <string name="action_copy_url">Copy URL</string>
+    <string name="action_url_copied">URL copied to clipboard</string>
+    <string name="action_stream_actions">Stream Actions</string>
+
+    <!-- Stream Picker -->
+    <string name="picker_select_stream">Select Stream</string>
+    <string name="picker_cached">Cached</string>
+    <string name="picker_streams_found">%1$d streams found</string>
+
+    <!-- Watchlist Screen -->
+    <string name="watchlist_title">Watchlist</string>
+    <string name="watchlist_all">All</string>
+    <string name="watchlist_movies">Movies</string>
+    <string name="watchlist_tv_shows">TV Shows</string>
+    <string name="watchlist_empty">Your watchlist is empty</string>
+    <string name="watchlist_empty_desc">Add movies and shows to your watchlist to keep track of what you want to watch.</string>
+    <string name="watchlist_in_progress">In Progress</string>
+    <string name="watchlist_history">History</string>
+    <string name="watchlist_nothing_in_progress">Nothing in progress</string>
+    <string name="watchlist_start_watching">Start watching something to see it here</string>
+    <string name="watchlist_no_history">No watch history yet</string>
+    <string name="watchlist_history_desc">Your watched items will appear here</string>
+    <string name="watchlist_watched_min">Watched %1$dmin</string>
+    <string name="watchlist_added">Added to Watchlist</string>
+    <string name="watchlist_removed">Removed from Watchlist</string>
+
+    <!-- Calendar Screen -->
+    <string name="calendar_title">Calendar</string>
+    <string name="calendar_no_episodes">No Upcoming Episodes</string>
+    <string name="calendar_no_episodes_desc">Add TV shows to your Trakt watchlist to see new episodes here.</string>
+    <string name="calendar_connect_trakt_desc">Link your Trakt account in Settings to see upcoming episodes from your watchlist.</string>
+    <string name="calendar_error">Error</string>
+    <string name="calendar_connect_trakt">Connect Trakt to see your calendar</string>
+
+    <!-- Episodes -->
+    <string name="episode_season">Season %1$d</string>
+    <string name="episode_all_seasons">All Seasons</string>
+    <string name="episode_mark_season_watched">Mark Season %1$d Watched</string>
+    <string name="episode_format">S%1$dE%2$d</string>
 </resources>

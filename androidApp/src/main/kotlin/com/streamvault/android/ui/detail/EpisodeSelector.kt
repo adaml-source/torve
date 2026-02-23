@@ -39,11 +39,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.streamvault.android.R
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.StreamVault
 import com.streamvault.domain.model.Episode
@@ -72,7 +74,7 @@ fun EpisodeSelector(
 
     Column(modifier = modifier.fillMaxWidth()) {
         Text(
-            text = "Episodes",
+            text = stringResource(R.string.settings_episodes),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onBackground,
@@ -85,7 +87,7 @@ fun EpisodeSelector(
             onExpandedChange = { seasonExpanded = !seasonExpanded },
         ) {
             OutlinedTextField(
-                value = "Season $selectedSeason",
+                value = stringResource(R.string.episode_season, selectedSeason),
                 onValueChange = {},
                 readOnly = true,
                 trailingIcon = {
@@ -103,7 +105,7 @@ fun EpisodeSelector(
                     DropdownMenuItem(
                         text = {
                             Text(
-                                "Season ${season.seasonNumber}" +
+                                stringResource(R.string.episode_season, season.seasonNumber) +
                                     if (season.episodeCount > 0) " (${season.episodeCount} eps)" else "",
                             )
                         },
@@ -160,7 +162,7 @@ fun EpisodeSelector(
             ) {
                 Icon(Icons.Rounded.Download, null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("Season $selectedSeason", style = MaterialTheme.typography.labelMedium)
+                Text(stringResource(R.string.episode_season, selectedSeason), style = MaterialTheme.typography.labelMedium)
             }
             if (filteredSeasons.size > 1) {
                 OutlinedButton(
@@ -170,7 +172,7 @@ fun EpisodeSelector(
                 ) {
                     Icon(Icons.Rounded.FileDownload, null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("All Seasons", style = MaterialTheme.typography.labelMedium)
+                    Text(stringResource(R.string.episode_all_seasons), style = MaterialTheme.typography.labelMedium)
                 }
             }
         }
@@ -183,7 +185,7 @@ fun EpisodeSelector(
         ) {
             Icon(Icons.Default.CheckCircle, null, modifier = Modifier.size(16.dp), tint = Amber)
             Spacer(Modifier.width(6.dp))
-            Text("Mark Season $selectedSeason Watched", style = MaterialTheme.typography.labelMedium)
+            Text(stringResource(R.string.episode_mark_season_watched, selectedSeason), style = MaterialTheme.typography.labelMedium)
         }
 
         Spacer(Modifier.height(12.dp))
@@ -270,7 +272,7 @@ private fun EpisodeCard(
             // Play overlay
             Icon(
                 Icons.Default.PlayArrow,
-                contentDescription = "Play",
+                contentDescription = stringResource(R.string.common_play),
                 modifier = Modifier.size(28.dp),
                 tint = Amber.copy(alpha = 0.9f),
             )
@@ -284,7 +286,7 @@ private fun EpisodeCard(
                 if (isWatched) {
                     Icon(
                         Icons.Default.CheckCircle,
-                        contentDescription = "Watched",
+                        contentDescription = stringResource(R.string.detail_watched),
                         tint = Amber,
                         modifier = Modifier.size(16.dp),
                     )
@@ -325,7 +327,7 @@ private fun EpisodeCard(
         IconButton(onClick = onDownload, modifier = Modifier.size(36.dp)) {
             Icon(
                 Icons.Rounded.Download,
-                contentDescription = "Download",
+                contentDescription = stringResource(R.string.action_download),
                 tint = Amber,
                 modifier = Modifier.size(20.dp),
             )

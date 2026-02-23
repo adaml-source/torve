@@ -134,7 +134,7 @@ fun IptvHomeContent(
             }
         }
 
-        Spacer(Modifier.height(80.dp)) // Space for FAB
+        Spacer(Modifier.height(24.dp))
     }
 }
 

@@ -11,10 +11,10 @@ enum class DebridServiceType {
 
     val label: String
         get() = when (this) {
-            REAL_DEBRID -> "RD Cloud"
-            ALL_DEBRID -> "AD Cloud"
-            PREMIUMIZE -> "PM Cloud"
-            TORBOX -> "TB Cloud"
+            REAL_DEBRID -> "Real-Debrid"
+            ALL_DEBRID -> "AllDebrid"
+            PREMIUMIZE -> "Premiumize"
+            TORBOX -> "TorBox"
         }
 }
 

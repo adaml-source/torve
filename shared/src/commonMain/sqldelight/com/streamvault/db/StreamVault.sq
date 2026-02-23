@@ -353,6 +353,9 @@ SELECT COUNT(*) FROM watchlist WHERE media_id = ?;
 insertWatchlistItem:
 INSERT OR REPLACE INTO watchlist (media_id, media_type, tmdb_id, imdb_id, title, poster_url, backdrop_url, rating, year, genres, added_at, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
+updateWatchlistMeta:
+UPDATE watchlist SET poster_url = ?, backdrop_url = ?, rating = ?, genres = ? WHERE media_id = ?;
+
 removeFromWatchlist:
 DELETE FROM watchlist WHERE media_id = ?;
 

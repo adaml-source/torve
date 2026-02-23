@@ -10,4 +10,5 @@ interface WatchHistoryRepository {
     suspend fun delete(id: String)
     suspend fun clearAll()
     suspend fun getCount(): Long
+    suspend fun syncFromTrakt()
 }

@@ -40,8 +40,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.streamvault.android.R
 import com.streamvault.android.ui.components.CardSize
 import com.streamvault.android.ui.components.PosterCard
 import com.streamvault.android.ui.theme.Amber
@@ -71,7 +73,11 @@ fun WatchlistScreen(
 ) {
     val watchlistState by watchlistViewModel.state.collectAsState()
     var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("Watchlist", "In Progress", "History")
+    val tabs = listOf(
+        stringResource(R.string.watchlist_title),
+        stringResource(R.string.watchlist_in_progress),
+        stringResource(R.string.watchlist_history),
+    )
 
     // Load in-progress and history data
     var inProgress by remember { mutableIntStateOf(0) }
@@ -83,6 +89,7 @@ fun WatchlistScreen(
     LaunchedEffect(selectedTab) {
         if (selectedTab == 1 && !progressLoaded) {
             withContext(Dispatchers.Default) {
+                watchProgressRepo.syncFromTrakt()
                 val items = watchProgressRepo.getInProgress(50)
                 inProgressItems.clear()
                 inProgressItems.addAll(items)
@@ -91,6 +98,7 @@ fun WatchlistScreen(
         }
         if (selectedTab == 2 && !historyLoaded) {
             withContext(Dispatchers.Default) {
+                watchHistoryRepo.syncFromTrakt()
                 val items = watchHistoryRepo.getRecent(100)
                 historyItems.clear()
                 historyItems.addAll(items)
@@ -107,7 +115,7 @@ fun WatchlistScreen(
     ) {
         // Header
         Text(
-            text = "My Library",
+            text = stringResource(R.string.watchlist_title),
             style = MaterialTheme.typography.headlineLarge,
             color = Snow,
             fontWeight = FontWeight.Bold,
@@ -178,13 +186,13 @@ private fun WatchlistTab(
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    "Your watchlist is empty",
+                    stringResource(R.string.watchlist_empty),
                     style = MaterialTheme.typography.titleMedium,
                     color = StreamVault.colors.textSecondary,
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Add movies and shows to watch later",
+                    stringResource(R.string.watchlist_empty_desc),
                     style = MaterialTheme.typography.bodyMedium,
                     color = StreamVault.colors.textTertiary,
                 )
@@ -203,7 +211,7 @@ private fun WatchlistTab(
         if (movies.isNotEmpty()) {
             item {
                 Text(
-                    "Movies (${movies.size})",
+                    "${stringResource(R.string.watchlist_movies)} (${movies.size})",
                     style = MaterialTheme.typography.titleMedium,
                     color = Amber,
                     fontWeight = FontWeight.SemiBold,
@@ -240,7 +248,7 @@ private fun WatchlistTab(
         if (shows.isNotEmpty()) {
             item {
                 Text(
-                    "TV Shows (${shows.size})",
+                    "${stringResource(R.string.watchlist_tv_shows)} (${shows.size})",
                     style = MaterialTheme.typography.titleMedium,
                     color = Amber,
                     fontWeight = FontWeight.SemiBold,
@@ -292,13 +300,13 @@ private fun InProgressTab(
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    "Nothing in progress",
+                    stringResource(R.string.watchlist_nothing_in_progress),
                     style = MaterialTheme.typography.titleMedium,
                     color = StreamVault.colors.textSecondary,
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Start watching something to see it here",
+                    stringResource(R.string.watchlist_start_watching),
                     style = MaterialTheme.typography.bodyMedium,
                     color = StreamVault.colors.textTertiary,
                 )
@@ -359,7 +367,7 @@ private fun ContinueWatchingCard(
             )
             if (progress.seasonNumber != null && progress.episodeNumber != null) {
                 Text(
-                    "S${progress.seasonNumber} E${progress.episodeNumber}",
+                    stringResource(R.string.episode_format, progress.seasonNumber!!, progress.episodeNumber!!),
                     style = MaterialTheme.typography.bodySmall,
                     color = Amber,
                 )
@@ -406,13 +414,13 @@ private fun HistoryTab(
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    "No watch history yet",
+                    stringResource(R.string.watchlist_no_history),
                     style = MaterialTheme.typography.titleMedium,
                     color = StreamVault.colors.textSecondary,
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Your watched items will appear here",
+                    stringResource(R.string.watchlist_history_desc),
                     style = MaterialTheme.typography.bodyMedium,
                     color = StreamVault.colors.textTertiary,
                 )
@@ -472,7 +480,7 @@ private fun HistoryEntryCard(
             )
             if (entry.seasonNumber != null && entry.episodeNumber != null) {
                 Text(
-                    "${entry.showTitle ?: ""} S${entry.seasonNumber} E${entry.episodeNumber}",
+                    "${entry.showTitle ?: ""} ${stringResource(R.string.episode_format, entry.seasonNumber!!, entry.episodeNumber!!)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = StreamVault.colors.textSecondary,
                     maxLines = 1,
@@ -481,7 +489,7 @@ private fun HistoryEntryCard(
             val durationMin = (entry.durationWatchedMs / 60000).toInt()
             if (durationMin > 0) {
                 Text(
-                    "Watched ${durationMin}min",
+                    stringResource(R.string.watchlist_watched_min, durationMin),
                     style = MaterialTheme.typography.labelSmall,
                     color = StreamVault.colors.textTertiary,
                 )

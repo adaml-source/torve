@@ -12,6 +12,7 @@ lifecycle = "2.8.7"
 navigation = "2.8.5"
 coil = "3.0.4"
 activity-compose = "1.9.3"
+appcompat = "1.7.0"
 
 [libraries]
 # Ktor
@@ -62,6 +63,9 @@ coil-network = { module = "io.coil-kt.coil3:coil-network-ktor3", version.ref = "
 
 # Activity
 activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activity-compose" }
+
+# AppCompat
+appcompat = { module = "androidx.appcompat:appcompat", version.ref = "appcompat" }
 
 # Testing
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }

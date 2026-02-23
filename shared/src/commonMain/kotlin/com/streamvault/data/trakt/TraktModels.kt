@@ -18,6 +18,16 @@ data class TraktTokens(
     val createdAt: Long,
 )
 
+sealed class TraktPollResult {
+    data class Success(val tokens: TraktTokens) : TraktPollResult()
+    data object Pending : TraktPollResult()
+    data object SlowDown : TraktPollResult()
+    data object Expired : TraktPollResult()
+    data object AlreadyUsed : TraktPollResult()
+    data object Denied : TraktPollResult()
+    data class Error(val message: String) : TraktPollResult()
+}
+
 data class TraktUser(
     val username: String,
     val name: String? = null,
@@ -152,6 +162,63 @@ data class TraktStatsShows(
 data class TraktRemoveHistoryBody(
     val movies: List<TraktHistoryMovie>? = null,
     val shows: List<TraktHistoryShow>? = null,
+)
+
+// Watchlist (reuses TraktHistoryMovie/Show for items)
+@Serializable
+data class TraktWatchlistBody(
+    val movies: List<TraktHistoryMovie>? = null,
+    val shows: List<TraktHistoryShow>? = null,
+)
+
+// Watchlist GET response
+@Serializable
+data class TraktWatchlistItemResponse(
+    val rank: Int = 0,
+    val id: Long = 0,
+    @SerialName("listed_at") val listedAt: String = "",
+    val type: String = "",
+    val movie: TraktWatchlistMediaResponse? = null,
+    val show: TraktWatchlistMediaResponse? = null,
+)
+
+@Serializable
+data class TraktWatchlistMediaResponse(
+    val title: String = "",
+    val year: Int? = null,
+    val ids: TraktIds? = null,
+)
+
+// Watch history response
+@Serializable
+data class TraktHistoryResponse(
+    val id: Long = 0,
+    @SerialName("watched_at") val watchedAt: String = "",
+    val action: String = "",
+    val type: String = "",
+    val movie: TraktWatchlistMediaResponse? = null,
+    val show: TraktWatchlistMediaResponse? = null,
+    val episode: TraktPlaybackEpisode? = null,
+)
+
+// Playback progress (in-progress items)
+@Serializable
+data class TraktPlaybackResponse(
+    val progress: Double = 0.0,
+    @SerialName("paused_at") val pausedAt: String = "",
+    val id: Long = 0,
+    val type: String = "",
+    val movie: TraktWatchlistMediaResponse? = null,
+    val show: TraktWatchlistMediaResponse? = null,
+    val episode: TraktPlaybackEpisode? = null,
+)
+
+@Serializable
+data class TraktPlaybackEpisode(
+    val season: Int = 0,
+    val number: Int = 0,
+    val title: String = "",
+    val ids: TraktIds? = null,
 )
 
 // Calendar

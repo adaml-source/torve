@@ -46,8 +46,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.streamvault.android.R
 import com.streamvault.android.download.DownloadWorker
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Charcoal
@@ -117,14 +119,14 @@ fun DownloadScreen(
                 IconButton(onClick = onBack) {
                     Icon(
                         Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = "Back",
+                        contentDescription = stringResource(R.string.common_back),
                         tint = Snow,
                     )
                 }
                 Spacer(Modifier.width(4.dp))
                 Column {
                     Text(
-                        text = "Downloads",
+                        text = stringResource(R.string.download_title),
                         style = MaterialTheme.typography.headlineMedium,
                         color = Snow,
                         fontWeight = FontWeight.Bold,
@@ -203,13 +205,13 @@ fun DownloadScreen(
                     )
                     Spacer(Modifier.height(16.dp))
                     Text(
-                        text = "No Downloads",
+                        text = stringResource(R.string.download_no_downloads),
                         style = MaterialTheme.typography.titleMedium,
                         color = StreamVault.colors.textPrimary,
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "Downloaded content will appear here for offline viewing.",
+                        text = stringResource(R.string.download_empty_desc),
                         style = MaterialTheme.typography.bodyMedium,
                         color = StreamVault.colors.textSecondary,
                         textAlign = TextAlign.Center,
@@ -289,7 +291,7 @@ private fun DownloadCard(
                         ) {
                             Icon(
                                 Icons.Rounded.PlayArrow,
-                                contentDescription = "Play",
+                                contentDescription = stringResource(R.string.common_play),
                                 tint = Obsidian,
                                 modifier = Modifier.size(16.dp),
                             )
@@ -313,7 +315,7 @@ private fun DownloadCard(
                 download.seasonNumber?.let { s ->
                     download.episodeNumber?.let { e ->
                         Text(
-                            text = "S${s}E${e}",
+                            text = stringResource(R.string.episode_format, s, e),
                             style = MaterialTheme.typography.bodySmall,
                             color = StreamVault.colors.textTertiary,
                         )
@@ -330,11 +332,11 @@ private fun DownloadCard(
                     else -> StreamVault.colors.textTertiary
                 }
                 val statusText = when (download.status) {
-                    DownloadStatus.PENDING -> "Queued"
+                    DownloadStatus.PENDING -> stringResource(R.string.download_queued)
                     DownloadStatus.DOWNLOADING -> "${(download.progressPercent * 100).toInt()}%"
-                    DownloadStatus.PAUSED -> "Paused"
-                    DownloadStatus.COMPLETED -> "Completed"
-                    DownloadStatus.FAILED -> "Failed"
+                    DownloadStatus.PAUSED -> stringResource(R.string.download_paused)
+                    DownloadStatus.COMPLETED -> stringResource(R.string.download_completed)
+                    DownloadStatus.FAILED -> stringResource(R.string.download_failed)
                 }
 
                 Surface(
@@ -378,7 +380,7 @@ private fun DownloadCard(
                             IconButton(onClick = onPlay, modifier = Modifier.size(36.dp)) {
                                 Icon(
                                     Icons.Rounded.PlayArrow,
-                                    contentDescription = "Play",
+                                    contentDescription = stringResource(R.string.common_play),
                                     tint = Amber,
                                     modifier = Modifier.size(22.dp),
                                 )
@@ -389,7 +391,7 @@ private fun DownloadCard(
                         IconButton(onClick = onPause, modifier = Modifier.size(36.dp)) {
                             Icon(
                                 Icons.Rounded.Pause,
-                                contentDescription = "Pause",
+                                contentDescription = stringResource(R.string.common_pause),
                                 tint = StreamVault.colors.textSecondary,
                                 modifier = Modifier.size(20.dp),
                             )
@@ -399,7 +401,7 @@ private fun DownloadCard(
                         IconButton(onClick = onResume, modifier = Modifier.size(36.dp)) {
                             Icon(
                                 Icons.Rounded.PlayArrow,
-                                contentDescription = "Resume",
+                                contentDescription = stringResource(R.string.download_resume),
                                 tint = Amber,
                                 modifier = Modifier.size(20.dp),
                             )
@@ -410,7 +412,7 @@ private fun DownloadCard(
                 IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
                     Icon(
                         Icons.Rounded.Delete,
-                        contentDescription = "Delete",
+                        contentDescription = stringResource(R.string.common_delete),
                         tint = Ruby.copy(alpha = 0.7f),
                         modifier = Modifier.size(18.dp),
                     )

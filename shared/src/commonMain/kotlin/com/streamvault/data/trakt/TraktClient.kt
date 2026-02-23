@@ -7,9 +7,14 @@ import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import io.ktor.http.isSuccess
+import kotlinx.datetime.Clock
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.Json
 
 class TraktClient(
@@ -18,8 +23,8 @@ class TraktClient(
 ) {
     companion object {
         const val TRAKT_BASE = "https://api.trakt.tv"
-        const val DEFAULT_CLIENT_ID = "b0db129b5c1a28a04ef433702abe3cbb2dbe37cbb31de2cba4804e0a06f8ee1b"
-        const val DEFAULT_CLIENT_SECRET = "be08c2e7d89da0614ae8949e41c975e6cad32e4d04ded43c18c0e36eee7cfe7c"
+        const val DEFAULT_CLIENT_ID = "1e8d7696fb3bae585a4036fd03569e68426aa4b540b2911180ec9f540688ac6a"
+        const val DEFAULT_CLIENT_SECRET = "4fd2e66df137b876575ff390a1c8d46f27c9b4a4db08f40d4c9867ce6d65e6a3"
     }
 
     var clientId: String = DEFAULT_CLIENT_ID
@@ -34,7 +39,6 @@ class TraktClient(
 
     private fun traktHeaders(accessToken: String? = null): Map<String, String> {
         val headers = mutableMapOf(
-            "Content-Type" to "application/json",
             "trakt-api-version" to "2",
             "trakt-api-key" to clientId,
         )
@@ -52,11 +56,24 @@ class TraktClient(
         if (clientId.isBlank()) {
             throw Exception("Trakt Client ID not configured. Set it in Settings.")
         }
-        val resp: TraktDeviceCodeResponse = httpClient.post("$TRAKT_BASE/oauth/device/code") {
+        val response: HttpResponse = httpClient.post("$TRAKT_BASE/oauth/device/code") {
             contentType(ContentType.Application.Json)
             traktHeaders().forEach { (k, v) -> header(k, v) }
-            setBody(mapOf("client_id" to clientId))
-        }.body()
+            setBody(
+                json.encodeToString(
+                    kotlinx.serialization.serializer<Map<String, String>>(),
+                    mapOf("client_id" to clientId),
+                ),
+            )
+        }
+        if (!response.status.isSuccess()) {
+            val body = try { response.bodyAsText().take(200) } catch (_: Exception) { "" }
+            throw Exception("Trakt API error ${response.status.value}: $body")
+        }
+        val resp: TraktDeviceCodeResponse = response.body()
+        if (resp.userCode.isBlank() || resp.verificationUrl.isBlank()) {
+            throw Exception("Trakt returned empty device code fields.")
+        }
         return TraktDeviceCode(
             deviceCode = resp.deviceCode,
             userCode = resp.userCode,
@@ -66,11 +83,11 @@ class TraktClient(
         )
     }
 
-    suspend fun pollDeviceToken(deviceCode: String): TraktTokens? {
+    suspend fun pollDeviceToken(deviceCode: String): TraktPollResult {
         return try {
-            val resp: TraktTokenResponse = httpClient.post("$TRAKT_BASE/oauth/device/token") {
+            val response: HttpResponse = httpClient.post("$TRAKT_BASE/oauth/device/token") {
                 contentType(ContentType.Application.Json)
-                header("Content-Type", "application/json")
+                traktHeaders().forEach { (k, v) -> header(k, v) }
                 setBody(
                     json.encodeToString(
                         kotlinx.serialization.serializer<Map<String, String>>(),
@@ -81,15 +98,30 @@ class TraktClient(
                         ),
                     ),
                 )
-            }.body()
-            TraktTokens(
-                accessToken = resp.accessToken,
-                refreshToken = resp.refreshToken,
-                expiresIn = resp.expiresIn,
-                createdAt = resp.createdAt,
-            )
-        } catch (_: Exception) {
-            null // Still pending or error
+            }
+            when (response.status.value) {
+                200 -> {
+                    val resp: TraktTokenResponse = response.body()
+                    TraktPollResult.Success(
+                        TraktTokens(
+                            accessToken = resp.accessToken,
+                            refreshToken = resp.refreshToken,
+                            expiresIn = resp.expiresIn,
+                            createdAt = resp.createdAt,
+                        ),
+                    )
+                }
+                400 -> TraktPollResult.Pending
+                403 -> TraktPollResult.SlowDown
+                404, 410 -> TraktPollResult.Expired
+                409 -> TraktPollResult.AlreadyUsed
+                418 -> TraktPollResult.Denied
+                429 -> TraktPollResult.SlowDown
+                in 500..599 -> TraktPollResult.Error("Server error: ${response.status.value}")
+                else -> TraktPollResult.Error("HTTP ${response.status.value}")
+            }
+        } catch (e: Exception) {
+            TraktPollResult.Error(e.message ?: "Unknown error")
         }
     }
 
@@ -198,28 +230,86 @@ class TraktClient(
     }
 
     // -------------------------------------------------------------------------
+    // Watchlist
+    // -------------------------------------------------------------------------
+
+    suspend fun getWatchlist(accessToken: String): List<TraktWatchlistItemResponse> {
+        return try {
+            httpClient.get("$TRAKT_BASE/sync/watchlist") {
+                traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
+                parameter("extended", "full")
+            }.body()
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun addToWatchlist(accessToken: String, body: TraktWatchlistBody) {
+        httpClient.post("$TRAKT_BASE/sync/watchlist") {
+            contentType(ContentType.Application.Json)
+            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
+            setBody(body)
+        }
+    }
+
+    suspend fun removeFromWatchlist(accessToken: String, body: TraktWatchlistBody) {
+        httpClient.post("$TRAKT_BASE/sync/watchlist/remove") {
+            contentType(ContentType.Application.Json)
+            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
+            setBody(body)
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Watch History
+    // -------------------------------------------------------------------------
+
+    suspend fun getHistory(accessToken: String, limit: Int = 50): List<TraktHistoryResponse> {
+        return try {
+            httpClient.get("$TRAKT_BASE/sync/history") {
+                traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
+                parameter("page", 1)
+                parameter("limit", limit)
+            }.body()
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Playback Progress (in-progress / paused items)
+    // -------------------------------------------------------------------------
+
+    suspend fun getPlaybackProgress(accessToken: String): List<TraktPlaybackResponse> {
+        return try {
+            httpClient.get("$TRAKT_BASE/sync/playback") {
+                traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
+            }.body()
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Calendar (my shows airing today)
     // -------------------------------------------------------------------------
 
     suspend fun getCalendar(accessToken: String, days: Int = 7): List<TraktCalendarEpisode> {
-        return try {
-            val resp: List<TraktCalendarResponse> = httpClient.get("$TRAKT_BASE/calendars/my/shows/today/$days") {
-                traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
-            }.body()
-            resp.mapNotNull { item ->
-                val ep = item.episode ?: return@mapNotNull null
-                val show = item.show ?: return@mapNotNull null
-                TraktCalendarEpisode(
-                    showTitle = show.title,
-                    season = ep.season,
-                    episode = ep.number,
-                    episodeTitle = ep.title,
-                    firstAired = item.firstAired,
-                    showTmdbId = show.ids?.tmdb,
-                )
-            }
-        } catch (_: Exception) {
-            emptyList()
+        val today = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date
+        val resp: List<TraktCalendarResponse> = httpClient.get("$TRAKT_BASE/calendars/my/shows/$today/$days") {
+            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
+        }.body()
+        return resp.mapNotNull { item ->
+            val ep = item.episode ?: return@mapNotNull null
+            val show = item.show ?: return@mapNotNull null
+            TraktCalendarEpisode(
+                showTitle = show.title,
+                season = ep.season,
+                episode = ep.number,
+                episodeTitle = ep.title,
+                firstAired = item.firstAired,
+                showTmdbId = show.ids?.tmdb,
+            )
         }
     }
 

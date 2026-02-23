@@ -31,10 +31,12 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.streamvault.android.R
 import com.streamvault.android.ui.components.QualityBadge
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Charcoal
@@ -86,12 +88,12 @@ fun StreamPickerSheet(
             ) {
                 Column {
                     Text(
-                        text = "Select Stream",
+                        text = stringResource(R.string.picker_select_stream),
                         style = MaterialTheme.typography.headlineSmall,
                         color = Snow,
                     )
                     Text(
-                        text = "${streams.size} sources found",
+                        text = stringResource(R.string.picker_streams_found, streams.size),
                         style = MaterialTheme.typography.bodySmall,
                         color = StreamVault.colors.textTertiary,
                     )
@@ -99,7 +101,7 @@ fun StreamPickerSheet(
                 IconButton(onClick = onDismiss) {
                     Icon(
                         Icons.Rounded.Close,
-                        contentDescription = "Close",
+                        contentDescription = stringResource(R.string.common_close),
                         tint = StreamVault.colors.textTertiary,
                     )
                 }
@@ -258,7 +260,7 @@ private fun StreamItem(
                     Spacer(Modifier.height(2.dp))
                     Icon(
                         Icons.Rounded.CloudDone,
-                        contentDescription = "Cached",
+                        contentDescription = stringResource(R.string.picker_cached),
                         modifier = Modifier.size(14.dp),
                         tint = Emerald,
                     )

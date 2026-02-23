@@ -64,6 +64,9 @@ dependencies {
     // Activity
     implementation(libs.activity.compose)
 
+    // AppCompat (locale switching)
+    implementation(libs.appcompat)
+
     // Koin
     implementation(libs.koin.android)
     implementation(libs.koin.compose)

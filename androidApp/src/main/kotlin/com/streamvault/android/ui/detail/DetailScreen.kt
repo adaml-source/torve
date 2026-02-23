@@ -24,6 +24,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.BookmarkBorder
 import androidx.compose.material.icons.rounded.Star
@@ -52,6 +53,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.streamvault.android.R
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -102,6 +105,7 @@ fun DetailScreen(
     val watchlistState by watchlistViewModel.state.collectAsState()
     var showActionSheet by remember { mutableStateOf(false) }
     var resolvedUrl by remember { mutableStateOf("") }
+    var showTrailer by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
     // Wire download callbacks to trigger WorkManager
@@ -176,7 +180,7 @@ fun DetailScreen(
                                 IconButton(onClick = onBack) {
                                     Icon(
                                         Icons.AutoMirrored.Rounded.ArrowBack,
-                                        contentDescription = "Back",
+                                        contentDescription = stringResource(R.string.common_back),
                                         tint = Snow,
                                     )
                                 }
@@ -274,7 +278,7 @@ fun DetailScreen(
                                     )
                                     Spacer(Modifier.width(8.dp))
                                     Text(
-                                        if (state.isResolving) "Resolving..." else "Finding streams...",
+                                        if (state.isResolving) stringResource(R.string.detail_resolving) else stringResource(R.string.detail_finding_streams),
                                         style = MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.Bold,
                                     )
@@ -286,7 +290,7 @@ fun DetailScreen(
                                     )
                                     Spacer(Modifier.width(8.dp))
                                     Text(
-                                        if (settingsState.debridConnected) "Play" else "Connect cloud service in Settings",
+                                        if (settingsState.debridConnected) stringResource(R.string.common_play) else stringResource(R.string.detail_connect_cloud),
                                         style = MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.Bold,
                                     )
@@ -319,7 +323,7 @@ fun DetailScreen(
                                     )
                                     Spacer(Modifier.width(6.dp))
                                     Text(
-                                        if (isInWatchlist) "In Watchlist" else "Watchlist",
+                                        if (isInWatchlist) stringResource(R.string.detail_in_watchlist) else stringResource(R.string.detail_watchlist),
                                         style = MaterialTheme.typography.labelLarge,
                                     )
                                 }
@@ -346,10 +350,31 @@ fun DetailScreen(
                                         )
                                         Spacer(Modifier.width(6.dp))
                                         Text(
-                                            if (state.isMarkedWatched) "Unwatched" else "Watched",
+                                            if (state.isMarkedWatched) stringResource(R.string.detail_unwatched) else stringResource(R.string.detail_watched),
                                             style = MaterialTheme.typography.labelLarge,
                                         )
                                     }
+                                }
+                            }
+
+                            // Watch Trailer button
+                            state.mediaItem?.trailerKey?.let {
+                                Spacer(Modifier.height(10.dp))
+                                OutlinedButton(
+                                    onClick = { showTrailer = true },
+                                    modifier = Modifier.fillMaxWidth().height(44.dp),
+                                    shape = RoundedCornerShape(10.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.Movie,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        stringResource(R.string.detail_watch_trailer),
+                                        style = MaterialTheme.typography.labelLarge,
+                                    )
                                 }
                             }
 
@@ -393,7 +418,7 @@ fun DetailScreen(
                             Spacer(Modifier.height(16.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    text = "Director: ",
+                                    text = stringResource(R.string.detail_director),
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = StreamVault.colors.textTertiary,
                                     fontWeight = FontWeight.Medium,
@@ -456,7 +481,7 @@ fun DetailScreen(
                         if (item.cast.isNotEmpty()) {
                             Spacer(Modifier.height(24.dp))
                             SectionHeader(
-                                title = "Cast",
+                                title = stringResource(R.string.detail_cast),
                                 modifier = Modifier.padding(horizontal = 0.dp),
                             )
                             LazyRow(
@@ -480,7 +505,7 @@ fun DetailScreen(
                         if (state.similar.isNotEmpty()) {
                             Spacer(Modifier.height(24.dp))
                             SectionHeader(
-                                title = "More Like This",
+                                title = stringResource(R.string.detail_more_like_this),
                                 modifier = Modifier.padding(horizontal = 0.dp),
                             )
                             LazyRow(
@@ -515,7 +540,7 @@ fun DetailScreen(
                             action = if (state.autoPlayFailed) {
                                 {
                                     TextButton(onClick = { viewModel.showManualPicker() }) {
-                                        Text("Select Manually", color = Amber)
+                                        Text(stringResource(R.string.detail_select_manually), color = Amber)
                                     }
                                 }
                             } else null,
@@ -560,6 +585,16 @@ fun DetailScreen(
                         },
                         onDismiss = { viewModel.dismissStreamPicker() },
                     )
+                }
+
+                // Trailer dialog
+                if (showTrailer) {
+                    state.mediaItem?.trailerKey?.let { key ->
+                        TrailerPlayerDialog(
+                            youtubeKey = key,
+                            onDismiss = { showTrailer = false },
+                        )
+                    }
                 }
 
                 // Action sheet after resolution

@@ -135,25 +135,38 @@ class SetupWizardViewModel(
 
     private fun pollTraktDevice(code: TraktDeviceCode) {
         scope.launch {
+            var interval = code.interval.toLong()
             val maxAttempts = code.expiresIn / code.interval
             for (i in 0 until maxAttempts) {
-                delay(code.interval * 1000L)
-                val tokens = traktClient.pollDeviceToken(code.deviceCode)
-                if (tokens != null) {
-                    prefsRepo.setString("trakt_access_token", tokens.accessToken)
-                    prefsRepo.setString("trakt_refresh_token", tokens.refreshToken)
-                    // Try to get username
-                    val username = try {
-                        traktClient.getUser(tokens.accessToken).username
-                    } catch (_: Exception) { null }
-                    _state.update {
-                        it.copy(
-                            traktConnected = true,
-                            traktDeviceCode = null,
-                            traktUsername = username,
-                        )
+                delay(interval * 1000L)
+                when (val result = traktClient.pollDeviceToken(code.deviceCode)) {
+                    is com.streamvault.data.trakt.TraktPollResult.Success -> {
+                        prefsRepo.setString("trakt_access_token", result.tokens.accessToken)
+                        prefsRepo.setString("trakt_refresh_token", result.tokens.refreshToken)
+                        val username = try {
+                            traktClient.getUser(result.tokens.accessToken).username
+                        } catch (_: Exception) { null }
+                        _state.update {
+                            it.copy(
+                                traktConnected = true,
+                                traktDeviceCode = null,
+                                traktUsername = username,
+                            )
+                        }
+                        return@launch
                     }
-                    return@launch
+                    is com.streamvault.data.trakt.TraktPollResult.Pending -> { /* Keep polling */ }
+                    is com.streamvault.data.trakt.TraktPollResult.SlowDown -> { interval += 1 }
+                    is com.streamvault.data.trakt.TraktPollResult.Expired,
+                    is com.streamvault.data.trakt.TraktPollResult.Denied,
+                    is com.streamvault.data.trakt.TraktPollResult.AlreadyUsed -> {
+                        _state.update { it.copy(traktDeviceCode = null, traktError = "Authorization failed. Try again.") }
+                        return@launch
+                    }
+                    is com.streamvault.data.trakt.TraktPollResult.Error -> {
+                        _state.update { it.copy(traktDeviceCode = null, traktError = result.message) }
+                        return@launch
+                    }
                 }
             }
             _state.update { it.copy(traktDeviceCode = null, traktError = "Authorization timed out") }

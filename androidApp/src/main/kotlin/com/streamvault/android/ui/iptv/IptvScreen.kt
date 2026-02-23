@@ -46,6 +46,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.streamvault.android.R
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.AmberSubtle
 import com.streamvault.android.ui.theme.Gunmetal
@@ -86,13 +88,13 @@ fun IptvScreen(
                 )
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    text = "No IPTV Playlists",
+                    text = stringResource(R.string.iptv_no_playlists),
                     style = MaterialTheme.typography.headlineSmall,
                     color = StreamVault.colors.textPrimary,
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "Add an M3U or Xtream Codes playlist to get started",
+                    text = stringResource(R.string.iptv_add_playlist_prompt),
                     style = MaterialTheme.typography.bodyMedium,
                     color = StreamVault.colors.textTertiary,
                 )
@@ -107,7 +109,7 @@ fun IptvScreen(
                 ) {
                     Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.size(6.dp))
-                    Text("Add Playlist", fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.iptv_add_playlist), fontWeight = FontWeight.SemiBold)
                 }
             }
         } else {
@@ -116,49 +118,53 @@ fun IptvScreen(
                     .fillMaxSize()
                     .statusBarsPadding(), // ← KEY FIX: push content below status bar
             ) {
-                // ── Playlist Selector Row ──
+                // ── Playlist Selector Row (only shown if multiple playlists) ──
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    LazyRow(
-                        modifier = Modifier.weight(1f),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        items(state.playlists) { playlist ->
-                            val selected = state.selectedPlaylistId == playlist.id
-                            FilterChip(
-                                selected = selected,
-                                onClick = { viewModel.selectPlaylist(playlist.id) },
-                                label = {
-                                    Text(
-                                        playlist.name,
-                                        style = MaterialTheme.typography.labelLarge,
-                                        color = if (selected) Amber else Snow,
-                                    )
-                                },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = AmberSubtle,
-                                    selectedLabelColor = Amber,
-                                    containerColor = Gunmetal,
-                                    labelColor = Snow,
-                                ),
-                                border = FilterChipDefaults.filterChipBorder(
-                                    borderColor = MaterialTheme.colorScheme.background,
-                                    selectedBorderColor = Amber.copy(alpha = 0.3f),
-                                    enabled = true,
+                    if (state.playlists.size > 1) {
+                        LazyRow(
+                            modifier = Modifier.weight(1f),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            items(state.playlists) { playlist ->
+                                val selected = state.selectedPlaylistId == playlist.id
+                                FilterChip(
                                     selected = selected,
-                                ),
-                                shape = RoundedCornerShape(16.dp),
-                            )
+                                    onClick = { viewModel.selectPlaylist(playlist.id) },
+                                    label = {
+                                        Text(
+                                            playlist.name,
+                                            style = MaterialTheme.typography.labelLarge,
+                                            color = if (selected) Amber else Snow,
+                                        )
+                                    },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = AmberSubtle,
+                                        selectedLabelColor = Amber,
+                                        containerColor = Gunmetal,
+                                        labelColor = Snow,
+                                    ),
+                                    border = FilterChipDefaults.filterChipBorder(
+                                        borderColor = MaterialTheme.colorScheme.background,
+                                        selectedBorderColor = Amber.copy(alpha = 0.3f),
+                                        enabled = true,
+                                        selected = selected,
+                                    ),
+                                    shape = RoundedCornerShape(16.dp),
+                                )
+                            }
                         }
+                    } else {
+                        Spacer(Modifier.weight(1f))
                     }
                     IconButton(onClick = { viewModel.toggleCategoryManager() }) {
                         Icon(
                             Icons.Rounded.Tune,
-                            contentDescription = "Manage Categories",
+                            contentDescription = stringResource(R.string.iptv_manage_categories),
                             tint = StreamVault.colors.textSecondary,
                             modifier = Modifier.size(22.dp),
                         )
@@ -166,7 +172,7 @@ fun IptvScreen(
                     IconButton(onClick = { viewModel.refreshPlaylist() }) {
                         Icon(
                             Icons.Rounded.Refresh,
-                            contentDescription = "Refresh",
+                            contentDescription = stringResource(R.string.iptv_refresh),
                             tint = StreamVault.colors.textSecondary,
                             modifier = Modifier.size(22.dp),
                         )
@@ -181,16 +187,6 @@ fun IptvScreen(
 
                 // ── Content ──
                 when (state.selectedSubTab) {
-                    IptvSubTab.HOME -> IptvHomeContent(
-                        recentlyViewed = state.recentlyViewedChannels,
-                        favorites = state.favorites,
-                        liveCategories = state.categories,
-                        onChannelPlay = { channel ->
-                            viewModel.recordChannelViewed(channel)
-                            onChannelPlay(channel)
-                        },
-                    )
-
                     IptvSubTab.LIVE -> IptvLiveContent(
                         categories = state.categories,
                         expandedCategories = state.expandedCategories,
@@ -210,32 +206,15 @@ fun IptvScreen(
                         onChannelFavorite = { viewModel.toggleFavorite(it) },
                     )
 
-                    IptvSubTab.GUIDE -> IptvGuideContent(
-                        channels = state.guideChannels,
-                        guideProgrammes = state.guideProgrammes,
-                        isLoading = state.isLoadingChannels,
+                    IptvSubTab.FAVOURITES -> IptvFavouritesContent(
+                        favorites = state.favorites,
                         onChannelPlay = { channel ->
                             viewModel.recordChannelViewed(channel)
                             onChannelPlay(channel)
                         },
+                        onChannelFavorite = { viewModel.toggleFavorite(it) },
                     )
                 }
-            }
-        }
-
-        // ── FAB ──
-        if (state.playlists.isNotEmpty()) {
-            FloatingActionButton(
-                onClick = { viewModel.showAddPlaylistDialog() },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(16.dp),
-                containerColor = Amber,
-                contentColor = Obsidian,
-                elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 4.dp),
-                shape = RoundedCornerShape(14.dp),
-            ) {
-                Icon(Icons.Rounded.Add, contentDescription = "Add Playlist")
             }
         }
 
@@ -295,7 +274,7 @@ fun IptvScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AddPlaylistDialog(
+internal fun AddPlaylistDialog(
     name: String,
     url: String,
     epgUrl: String,
@@ -328,7 +307,7 @@ private fun AddPlaylistDialog(
         textContentColor = MaterialTheme.colorScheme.onSurface,
         title = {
             Text(
-                "Add IPTV Playlist",
+                stringResource(R.string.iptv_add_title),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onBackground,
@@ -349,15 +328,15 @@ private fun AddPlaylistDialog(
                     ) { Text("Xtream Codes", color = MaterialTheme.colorScheme.onSurface) }
                 }
 
-                StyledTextField(value = name, onValueChange = onNameChange, label = "Playlist Name")
+                StyledTextField(value = name, onValueChange = onNameChange, label = stringResource(R.string.iptv_playlist_name))
 
                 if (isXtream) {
-                    StyledTextField(value = xtreamServer, onValueChange = onXtreamServerChange, label = "Server URL", placeholder = "http://example.com:8080")
-                    StyledTextField(value = xtreamUsername, onValueChange = onXtreamUsernameChange, label = "Username")
-                    StyledTextField(value = xtreamPassword, onValueChange = onXtreamPasswordChange, label = "Password")
+                    StyledTextField(value = xtreamServer, onValueChange = onXtreamServerChange, label = stringResource(R.string.iptv_server_url), placeholder = "http://example.com:8080")
+                    StyledTextField(value = xtreamUsername, onValueChange = onXtreamUsernameChange, label = stringResource(R.string.iptv_username))
+                    StyledTextField(value = xtreamPassword, onValueChange = onXtreamPasswordChange, label = stringResource(R.string.iptv_password))
                 } else {
-                    StyledTextField(value = url, onValueChange = onUrlChange, label = "M3U URL")
-                    StyledTextField(value = epgUrl, onValueChange = onEpgUrlChange, label = "EPG URL (optional)")
+                    StyledTextField(value = url, onValueChange = onUrlChange, label = stringResource(R.string.iptv_m3u_url))
+                    StyledTextField(value = epgUrl, onValueChange = onEpgUrlChange, label = stringResource(R.string.iptv_epg_optional))
                 }
             }
         },
@@ -379,13 +358,13 @@ private fun AddPlaylistDialog(
                         color = MaterialTheme.colorScheme.background,
                     )
                 } else {
-                    Text("Add", fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.common_add), fontWeight = FontWeight.SemiBold)
                 }
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = StreamVault.colors.textTertiary)
+                Text(stringResource(R.string.common_cancel), color = StreamVault.colors.textTertiary)
             }
         },
     )

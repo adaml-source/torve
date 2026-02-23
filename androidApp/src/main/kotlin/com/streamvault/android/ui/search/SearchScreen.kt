@@ -1,6 +1,8 @@
 package com.streamvault.android.ui.search
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.res.stringResource
+import com.streamvault.android.R
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -417,7 +419,7 @@ private fun SearchFilterSheet(
                     selectedRuntime = null
                     selectedSort = SortOption.POPULARITY_DESC
                 }) {
-                    Text("Clear All", color = Amber)
+                    Text(stringResource(R.string.catalog_clear_all), color = Amber)
                 }
             }
 
@@ -626,7 +628,7 @@ private fun SearchFilterSheet(
                         decorationBox = { innerTextField ->
                             Box {
                                 if (yearFromText.isEmpty()) {
-                                    Text("From", style = MaterialTheme.typography.bodyMedium, color = StreamVault.colors.textHint)
+                                    Text(stringResource(R.string.catalog_from), style = MaterialTheme.typography.bodyMedium, color = StreamVault.colors.textHint)
                                 }
                                 innerTextField()
                             }
@@ -651,7 +653,7 @@ private fun SearchFilterSheet(
                         decorationBox = { innerTextField ->
                             Box {
                                 if (yearToText.isEmpty()) {
-                                    Text("To", style = MaterialTheme.typography.bodyMedium, color = StreamVault.colors.textHint)
+                                    Text(stringResource(R.string.catalog_to), style = MaterialTheme.typography.bodyMedium, color = StreamVault.colors.textHint)
                                 }
                                 innerTextField()
                             }

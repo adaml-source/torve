@@ -1,7 +1,13 @@
 package com.streamvault.android.ui.player
 
+import android.app.Activity
+import android.content.pm.ActivityInfo
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.FrameLayout
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -57,9 +63,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.streamvault.android.R
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaSession
@@ -116,6 +124,29 @@ fun PlayerScreen(
     traktClient: TraktClient = koinInject(),
 ) {
     val context = LocalContext.current
+
+    // Immersive fullscreen + landscape + keep screen on
+    DisposableEffect(Unit) {
+        val activity = context as? Activity ?: return@DisposableEffect onDispose {}
+        val window = activity.window
+        val originalOrientation = activity.requestedOrientation
+        val controller = WindowInsetsControllerCompat(window, window.decorView)
+
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        controller.hide(WindowInsetsCompat.Type.systemBars())
+        controller.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        onDispose {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+            WindowCompat.setDecorFitsSystemWindows(window, true)
+            activity.requestedOrientation = originalOrientation
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
     val scope = rememberCoroutineScope()
     var isPlaying by remember { mutableStateOf(false) }
     var currentPosition by remember { mutableLongStateOf(0L) }
@@ -287,7 +318,7 @@ fun PlayerScreen(
     val mediaSession = remember(engine) {
         val exo = (engine as? ExoPlayerEngine)?.getExoPlayer() ?: return@remember null
         val metadata = MediaMetadata.Builder()
-            .setTitle(title.ifBlank { "StreamVault" })
+            .setTitle(title.ifBlank { "Torve" })
             .build()
         exo.mediaMetadata // trigger metadata
         MediaSession.Builder(context, exo)
@@ -368,6 +399,7 @@ fun PlayerScreen(
             }
 
             override fun onError(message: String) {
+                android.util.Log.e("Player", "Playback error for URL: $currentUrl — $message")
                 errorMessage = message
             }
         }
@@ -593,7 +625,7 @@ fun PlayerScreen(
                     )
                     Spacer(Modifier.height(16.dp))
                     Text(
-                        text = "Playback Error",
+                        text = stringResource(R.string.player_playback_error),
                         style = MaterialTheme.typography.headlineSmall,
                         color = Color.White,
                     )
@@ -603,6 +635,15 @@ fun PlayerScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         color = Color.White.copy(alpha = 0.7f),
                     )
+                    if (currentUrl.isNotBlank()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = currentUrl.take(80) + if (currentUrl.length > 80) "..." else "",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.3f),
+                            maxLines = 2,
+                        )
+                    }
                     Spacer(Modifier.height(24.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Button(
@@ -616,7 +657,7 @@ fun PlayerScreen(
                             ),
                             shape = RoundedCornerShape(8.dp),
                         ) {
-                            Text("Retry")
+                            Text(stringResource(R.string.player_retry))
                         }
                         Button(
                             onClick = onBack,
@@ -626,7 +667,7 @@ fun PlayerScreen(
                             ),
                             shape = RoundedCornerShape(8.dp),
                         ) {
-                            Text("Go Back")
+                            Text(stringResource(R.string.player_go_back))
                         }
                     }
                 }
@@ -748,14 +789,13 @@ fun PlayerScreen(
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .fillMaxWidth()
-                        .statusBarsPadding()
                         .padding(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     IconButton(onClick = onBack) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
+                            contentDescription = stringResource(R.string.common_back),
                             tint = Color.White,
                             modifier = Modifier.size(28.dp),
                         )
@@ -776,7 +816,7 @@ fun PlayerScreen(
                         IconButton(onClick = { showTrackDialog = true }) {
                             Icon(
                                 Icons.Default.Settings,
-                                contentDescription = "Track selection",
+                                contentDescription = stringResource(R.string.player_track_selection),
                                 tint = Color.White,
                                 modifier = Modifier.size(24.dp),
                             )
@@ -797,7 +837,7 @@ fun PlayerScreen(
                     ) {
                         Icon(
                             Icons.Default.Replay10,
-                            contentDescription = "Rewind 10s",
+                            contentDescription = stringResource(R.string.player_rewind),
                             tint = Color.White,
                             modifier = Modifier.size(40.dp),
                         )
@@ -839,7 +879,7 @@ fun PlayerScreen(
                     ) {
                         Icon(
                             imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (isPlaying) "Pause" else "Play",
+                            contentDescription = if (isPlaying) stringResource(R.string.common_pause) else stringResource(R.string.common_play),
                             tint = Color.White,
                             modifier = Modifier.size(56.dp),
                         )
@@ -855,7 +895,7 @@ fun PlayerScreen(
                     ) {
                         Icon(
                             Icons.Default.Forward10,
-                            contentDescription = "Forward 10s",
+                            contentDescription = stringResource(R.string.player_forward),
                             tint = Color.White,
                             modifier = Modifier.size(40.dp),
                         )
@@ -1032,17 +1072,19 @@ private fun TrackSelectionDialog(
     onDismiss: () -> Unit,
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
+    val subtitlesLabel = stringResource(R.string.player_subtitles)
+    val audioLabel = stringResource(R.string.player_audio)
     val tabs = buildList {
-        if (subtitleTracks.isNotEmpty()) add("Subtitles")
-        if (audioTracks.isNotEmpty()) add("Audio")
+        if (subtitleTracks.isNotEmpty()) add(subtitlesLabel)
+        if (audioTracks.isNotEmpty()) add(audioLabel)
     }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Close") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_close)) }
         },
-        title = { Text("Track Selection") },
+        title = { Text(stringResource(R.string.player_track_selection)) },
         text = {
             Column {
                 if (tabs.size > 1) {
@@ -1058,14 +1100,14 @@ private fun TrackSelectionDialog(
                     Spacer(Modifier.height(8.dp))
                 }
 
-                val showSubtitles = tabs.getOrNull(selectedTab) == "Subtitles"
+                val showSubtitles = tabs.getOrNull(selectedTab) == subtitlesLabel
 
                 LazyColumn {
                     if (showSubtitles) {
                         val allOff = subtitleTracks.none { it.isSelected }
                         item {
                             TrackRow(
-                                label = "Off",
+                                label = stringResource(R.string.common_off),
                                 isSelected = allOff,
                                 onClick = { onSelectSubtitle(null) },
                             )
@@ -1114,7 +1156,7 @@ private fun TrackRow(
         if (isSelected) {
             Icon(
                 Icons.Default.Check,
-                contentDescription = "Selected",
+                contentDescription = stringResource(R.string.player_selected),
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(20.dp),
             )

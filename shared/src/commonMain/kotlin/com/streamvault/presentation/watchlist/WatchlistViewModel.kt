@@ -31,6 +31,8 @@ class WatchlistViewModel(
         scope.launch {
             _state.update { it.copy(isLoading = true) }
             try {
+                // Pull from Trakt first if connected, then load local
+                watchlistRepo.syncFromTrakt()
                 val items = watchlistRepo.getAll()
                 _state.update {
                     it.copy(

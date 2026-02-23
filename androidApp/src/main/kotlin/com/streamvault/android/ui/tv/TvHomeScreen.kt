@@ -60,7 +60,7 @@ fun TvHomeScreen(
     ) {
         // App title
         Text(
-            "StreamVault",
+            "Torve",
             style = MaterialTheme.typography.headlineLarge,
             color = Color.White,
             fontWeight = FontWeight.Bold,

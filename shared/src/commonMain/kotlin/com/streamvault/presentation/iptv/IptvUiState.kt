@@ -6,7 +6,7 @@ import com.streamvault.domain.model.IptvCategory
 import com.streamvault.domain.model.IptvChannel
 import com.streamvault.domain.model.IptvPlaylist
 
-enum class IptvSubTab { HOME, LIVE, GUIDE }
+enum class IptvSubTab { LIVE, FAVOURITES }
 
 enum class IptvViewMode { LIST, GRID }
 

@@ -33,9 +33,8 @@ import com.streamvault.android.ui.theme.StreamVault
 import com.streamvault.presentation.iptv.IptvSubTab
 
 private val tabs = listOf(
-    IptvSubTab.HOME to "HOME",
     IptvSubTab.LIVE to "LIVE",
-    IptvSubTab.GUIDE to "GUIDE",
+    IptvSubTab.FAVOURITES to "FAVOURITES",
 )
 
 @Composable

@@ -6,8 +6,11 @@ import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -20,13 +23,14 @@ class SimklClient(
 ) {
     companion object {
         const val BASE_URL = "https://api.simkl.com"
+        const val DEFAULT_CLIENT_ID = "a1ed8e154e3f526ed28d3e5edcfde96f6bbe168f830faa5412563b996e5330aa"
     }
 
-    var clientId: String = ""
+    var clientId: String = DEFAULT_CLIENT_ID
         private set
 
     fun setClientId(id: String) {
-        this.clientId = id
+        this.clientId = id.ifBlank { DEFAULT_CLIENT_ID }
     }
 
     // -------------------------------------------------------------------------
@@ -34,7 +38,15 @@ class SimklClient(
     // -------------------------------------------------------------------------
 
     suspend fun getDeviceCode(): SimklDeviceCode {
-        val resp: SimklDeviceCodeResponse = httpClient.get("$BASE_URL/oauth/pin?client_id=$clientId").body()
+        val response: HttpResponse = httpClient.get("$BASE_URL/oauth/pin?client_id=$clientId")
+        if (!response.status.isSuccess()) {
+            val body = try { response.bodyAsText().take(200) } catch (_: Exception) { "" }
+            throw Exception("SIMKL API error ${response.status.value}: $body")
+        }
+        val resp: SimklDeviceCodeResponse = response.body()
+        if (resp.userCode.isBlank() || resp.verificationUrl.isBlank()) {
+            throw Exception("SIMKL returned empty device code. Check Client ID.")
+        }
         return SimklDeviceCode(
             userCode = resp.userCode,
             verificationUrl = resp.verificationUrl,
@@ -45,9 +57,11 @@ class SimklClient(
 
     suspend fun pollDeviceToken(userCode: String): SimklTokens? {
         return try {
-            val resp: SimklPinStatusResponse = httpClient.get(
+            val response: HttpResponse = httpClient.get(
                 "$BASE_URL/oauth/pin/$userCode?client_id=$clientId",
-            ).body()
+            )
+            if (!response.status.isSuccess()) return null
+            val resp: SimklPinStatusResponse = response.body()
             if (resp.result == "OK" && resp.accessToken != null) {
                 SimklTokens(accessToken = resp.accessToken)
             } else {

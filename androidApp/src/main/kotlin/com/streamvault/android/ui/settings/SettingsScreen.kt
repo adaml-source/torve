@@ -59,8 +59,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import android.app.LocaleManager
+import android.os.Build
+import android.os.LocaleList
+import com.streamvault.android.R
 import com.streamvault.domain.model.DebridServiceType
 import com.streamvault.domain.model.StreamQuality
 import com.streamvault.data.auth.AuthClient
@@ -78,6 +83,7 @@ import com.streamvault.android.ui.theme.Snow
 import com.streamvault.android.ui.theme.Steel
 import com.streamvault.android.ui.theme.StreamVault
 import com.streamvault.presentation.addon.AddonViewModel
+import com.streamvault.presentation.iptv.IptvViewModel
 import com.streamvault.presentation.settings.AppLanguage
 import com.streamvault.presentation.settings.SettingsViewModel
 import com.streamvault.presentation.settings.ThemeMode
@@ -107,7 +113,7 @@ fun SettingsScreen(
             .padding(16.dp),
     ) {
         Text(
-            text = "Settings",
+            text = stringResource(R.string.settings_title),
             style = MaterialTheme.typography.displayMedium,
             color = Snow,
             fontWeight = FontWeight.Bold,
@@ -125,14 +131,14 @@ fun SettingsScreen(
                 modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
             ) {
-                Text("Profiles")
+                Text(stringResource(R.string.settings_profiles))
             }
             OutlinedButton(
                 onClick = onSubscriptionClick,
                 modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
             ) {
-                Text("Subscription")
+                Text(stringResource(R.string.settings_subscription))
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -145,21 +151,21 @@ fun SettingsScreen(
                 modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
             ) {
-                Text("Downloads")
+                Text(stringResource(R.string.settings_downloads))
             }
             OutlinedButton(
                 onClick = onCalendarClick,
                 modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
             ) {
-                Text("Calendar")
+                Text(stringResource(R.string.settings_calendar))
             }
         }
 
         Spacer(Modifier.height(24.dp))
 
         // ── Cloud Service Section ──
-        SectionHeader(title = "Cloud Service")
+        SectionHeader(title = stringResource(R.string.settings_cloud_service))
         Spacer(Modifier.height(8.dp))
 
         Card(
@@ -187,7 +193,7 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("Provider", style = MaterialTheme.typography.bodySmall, color = StreamVault.colors.textSecondary)
+                                Text(stringResource(R.string.settings_provider), style = MaterialTheme.typography.bodySmall, color = StreamVault.colors.textSecondary)
                                 Spacer(Modifier.height(2.dp))
                                 Text(state.debridProvider.label, style = MaterialTheme.typography.bodyMedium, color = Snow)
                             }
@@ -215,8 +221,8 @@ fun SettingsScreen(
                 if (state.debridConnected) {
                     ConnectionStatus(
                         connected = true,
-                        label = state.debridUser?.username ?: "Connected",
-                        sublabel = state.debridUser?.expiresAt?.let { "Premium until $it" },
+                        label = state.debridUser?.username ?: stringResource(R.string.settings_connected),
+                        sublabel = state.debridUser?.expiresAt?.let { stringResource(R.string.settings_premium_until, it) },
                     )
                     Spacer(Modifier.height(8.dp))
                     OutlinedButton(
@@ -224,14 +230,14 @@ fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Ruby),
                     ) {
-                        Text("Disconnect")
+                        Text(stringResource(R.string.common_disconnect))
                     }
                 } else if (state.debridDeviceCode != null) {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Text("Go to:", style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(R.string.settings_go_to), style = MaterialTheme.typography.bodyMedium)
                         Text(
                             text = state.debridDeviceCode!!.verificationUrl,
                             style = MaterialTheme.typography.bodyMedium,
@@ -240,7 +246,7 @@ fun SettingsScreen(
                         )
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            text = "Enter code: ${state.debridDeviceCode!!.userCode}",
+                            text = "${stringResource(R.string.settings_enter_code)} ${state.debridDeviceCode!!.userCode}",
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
                         )
@@ -248,7 +254,7 @@ fun SettingsScreen(
                             Spacer(Modifier.height(8.dp))
                             CircularProgressIndicator(modifier = Modifier.size(24.dp))
                             Text(
-                                "Waiting for authorization...",
+                                stringResource(R.string.settings_waiting_auth),
                                 style = MaterialTheme.typography.bodySmall,
                             )
                         }
@@ -257,7 +263,7 @@ fun SettingsScreen(
                     SettingsTextField(
                         value = state.debridApiKey,
                         onValueChange = { viewModel.setDebridApiKey(it) },
-                        label = "API Key",
+                        label = stringResource(R.string.settings_api_key),
                     )
                     Spacer(Modifier.height(8.dp))
                     Row(
@@ -280,7 +286,7 @@ fun SettingsScreen(
                                     color = Obsidian,
                                 )
                             } else {
-                                Text("Connect")
+                                Text(stringResource(R.string.common_connect))
                             }
                         }
                         if (state.debridProvider == DebridServiceType.REAL_DEBRID ||
@@ -291,7 +297,7 @@ fun SettingsScreen(
                                 modifier = Modifier.weight(1f),
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
                             ) {
-                                Text("Device Auth")
+                                Text(stringResource(R.string.settings_device_auth))
                             }
                         }
                     }
@@ -311,7 +317,7 @@ fun SettingsScreen(
         Spacer(Modifier.height(24.dp))
 
         // ── Trakt Section ──
-        SectionHeader(title = "Trakt.tv")
+        SectionHeader(title = stringResource(R.string.settings_trakt))
         Spacer(Modifier.height(8.dp))
 
         Card(
@@ -322,7 +328,7 @@ fun SettingsScreen(
                 if (state.traktConnected) {
                     ConnectionStatus(
                         connected = true,
-                        label = state.traktUser?.username ?: "Connected",
+                        label = state.traktUser?.username ?: stringResource(R.string.settings_connected),
                         sublabel = if (state.traktUser?.vip == true) "VIP" else null,
                     )
 
@@ -339,7 +345,7 @@ fun SettingsScreen(
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                 )
-                                Text("Movies", style = MaterialTheme.typography.bodySmall)
+                                Text(stringResource(R.string.settings_movies), style = MaterialTheme.typography.bodySmall)
                             }
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(
@@ -347,7 +353,7 @@ fun SettingsScreen(
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                 )
-                                Text("Episodes", style = MaterialTheme.typography.bodySmall)
+                                Text(stringResource(R.string.settings_episodes), style = MaterialTheme.typography.bodySmall)
                             }
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(
@@ -355,7 +361,7 @@ fun SettingsScreen(
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                 )
-                                Text("Watch Time", style = MaterialTheme.typography.bodySmall)
+                                Text(stringResource(R.string.settings_watch_time), style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }
@@ -368,9 +374,9 @@ fun SettingsScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Scrobble", style = MaterialTheme.typography.bodyMedium)
+                            Text(stringResource(R.string.settings_scrobble), style = MaterialTheme.typography.bodyMedium)
                             Text(
-                                "Auto-track what you watch",
+                                stringResource(R.string.settings_scrobble_desc),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = StreamVault.colors.textSecondary,
                             )
@@ -399,7 +405,7 @@ fun SettingsScreen(
                             )
                             Spacer(Modifier.width(4.dp))
                             Text(
-                                "API: $status",
+                                stringResource(R.string.settings_api_status, status),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = StreamVault.colors.textSecondary,
                             )
@@ -412,14 +418,14 @@ fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Ruby),
                     ) {
-                        Text("Disconnect")
+                        Text(stringResource(R.string.common_disconnect))
                     }
                 } else if (state.traktDeviceCode != null) {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Text("Go to:", style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(R.string.settings_go_to), style = MaterialTheme.typography.bodyMedium)
                         Text(
                             text = state.traktDeviceCode!!.verificationUrl,
                             style = MaterialTheme.typography.bodyMedium,
@@ -428,7 +434,7 @@ fun SettingsScreen(
                         )
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            text = "Enter code: ${state.traktDeviceCode!!.userCode}",
+                            text = "${stringResource(R.string.settings_enter_code)} ${state.traktDeviceCode!!.userCode}",
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
                         )
@@ -436,7 +442,7 @@ fun SettingsScreen(
                             Spacer(Modifier.height(8.dp))
                             CircularProgressIndicator(modifier = Modifier.size(24.dp))
                             Text(
-                                "Waiting for authorization...",
+                                stringResource(R.string.settings_waiting_auth),
                                 style = MaterialTheme.typography.bodySmall,
                             )
                         }
@@ -458,7 +464,7 @@ fun SettingsScreen(
                                 color = Obsidian,
                             )
                         } else {
-                            Text("Connect Trakt")
+                            Text(stringResource(R.string.settings_connect_trakt))
                         }
                     }
                 }
@@ -477,7 +483,7 @@ fun SettingsScreen(
         Spacer(Modifier.height(24.dp))
 
         // ── SIMKL Section ──
-        SectionHeader(title = "SIMKL")
+        SectionHeader(title = stringResource(R.string.settings_simkl))
         Spacer(Modifier.height(8.dp))
 
         Card(
@@ -488,7 +494,7 @@ fun SettingsScreen(
                 if (state.simklConnected) {
                     ConnectionStatus(
                         connected = true,
-                        label = state.simklUser?.username ?: "Connected",
+                        label = state.simklUser?.username ?: stringResource(R.string.settings_connected),
                     )
                     Spacer(Modifier.height(8.dp))
                     OutlinedButton(
@@ -496,14 +502,14 @@ fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Ruby),
                     ) {
-                        Text("Disconnect")
+                        Text(stringResource(R.string.common_disconnect))
                     }
                 } else if (state.simklDeviceCode != null) {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Text("Go to:", style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(R.string.settings_go_to), style = MaterialTheme.typography.bodyMedium)
                         Text(
                             text = state.simklDeviceCode!!.verificationUrl,
                             style = MaterialTheme.typography.bodyMedium,
@@ -512,27 +518,21 @@ fun SettingsScreen(
                         )
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            text = "Enter code: ${state.simklDeviceCode!!.userCode}",
+                            text = "${stringResource(R.string.settings_enter_code)} ${state.simklDeviceCode!!.userCode}",
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
                         )
                         if (state.isPollingSimkl) {
                             Spacer(Modifier.height(8.dp))
                             CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                            Text("Waiting for authorization...", style = MaterialTheme.typography.bodySmall)
+                            Text(stringResource(R.string.settings_waiting_auth), style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 } else {
-                    SettingsTextField(
-                        value = state.simklClientId,
-                        onValueChange = { viewModel.setSimklClientId(it) },
-                        label = "Client ID",
-                    )
-                    Spacer(Modifier.height(8.dp))
                     Button(
                         onClick = { viewModel.startSimklDeviceAuth() },
                         modifier = Modifier.fillMaxWidth(),
-                        enabled = !state.simklLoading && state.simklClientId.isNotBlank(),
+                        enabled = !state.simklLoading,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Amber,
                             contentColor = Obsidian,
@@ -541,7 +541,7 @@ fun SettingsScreen(
                         if (state.simklLoading) {
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Obsidian)
                         } else {
-                            Text("Authorize with SIMKL")
+                            Text(stringResource(R.string.settings_connect_simkl))
                         }
                     }
                 }
@@ -555,8 +555,13 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(24.dp))
 
+        // ── Live TV / IPTV Section ──
+        LiveTvSettingsSection()
+
+        Spacer(Modifier.height(24.dp))
+
         // ── Stream Quality & Size ──
-        SectionHeader(title = "Stream Quality")
+        SectionHeader(title = stringResource(R.string.settings_stream_quality))
         Spacer(Modifier.height(8.dp))
 
         Card(
@@ -584,7 +589,7 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("Max Quality", style = MaterialTheme.typography.bodySmall, color = StreamVault.colors.textSecondary)
+                                Text(stringResource(R.string.settings_max_quality), style = MaterialTheme.typography.bodySmall, color = StreamVault.colors.textSecondary)
                                 Spacer(Modifier.height(2.dp))
                                 Text(state.maxQuality.label, style = MaterialTheme.typography.bodyMedium, color = Snow)
                             }
@@ -629,7 +634,7 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("Min Quality", style = MaterialTheme.typography.bodySmall, color = StreamVault.colors.textSecondary)
+                                Text(stringResource(R.string.settings_min_quality), style = MaterialTheme.typography.bodySmall, color = StreamVault.colors.textSecondary)
                                 Spacer(Modifier.height(2.dp))
                                 Text(state.minQuality.label, style = MaterialTheme.typography.bodyMedium, color = Snow)
                             }
@@ -665,8 +670,8 @@ fun SettingsScreen(
                         val value = fileSizeText.toIntOrNull()
                         viewModel.setMaxFileSizeMb(value)
                     },
-                    label = "Max File Size (MB)",
-                    placeholder = "No limit",
+                    label = stringResource(R.string.settings_max_file_size),
+                    placeholder = stringResource(R.string.settings_no_limit),
                 )
 
                 Spacer(Modifier.height(12.dp))
@@ -677,9 +682,9 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Cached Only", style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(R.string.settings_cached_only), style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            "Only show cached streams for instant playback",
+                            stringResource(R.string.settings_cached_only_desc),
                             style = MaterialTheme.typography.bodySmall,
                             color = StreamVault.colors.textSecondary,
                         )
@@ -704,9 +709,9 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("HDR Content", style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(R.string.settings_hdr_content), style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            "Include HDR / Dolby Vision streams",
+                            stringResource(R.string.settings_hdr_content_desc),
                             style = MaterialTheme.typography.bodySmall,
                             color = StreamVault.colors.textSecondary,
                         )
@@ -728,7 +733,7 @@ fun SettingsScreen(
         Spacer(Modifier.height(24.dp))
 
         // ── Playback Section ──
-        SectionHeader(title = "Playback")
+        SectionHeader(title = stringResource(R.string.settings_playback))
         Spacer(Modifier.height(8.dp))
 
         Card(
@@ -742,9 +747,9 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Auto-Play Best Stream", style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(R.string.settings_auto_play), style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            "Automatically pick and play the best stream",
+                            stringResource(R.string.settings_auto_play_desc),
                             style = MaterialTheme.typography.bodySmall,
                             color = StreamVault.colors.textSecondary,
                         )
@@ -769,9 +774,9 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Auto-Play Next Episode", style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(R.string.settings_auto_play_next), style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            "Automatically play the next episode when current finishes",
+                            stringResource(R.string.settings_auto_play_next_desc),
                             style = MaterialTheme.typography.bodySmall,
                             color = StreamVault.colors.textSecondary,
                         )
@@ -810,7 +815,7 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("Codec Preference", style = MaterialTheme.typography.bodySmall, color = StreamVault.colors.textSecondary)
+                                Text(stringResource(R.string.settings_codec_preference), style = MaterialTheme.typography.bodySmall, color = StreamVault.colors.textSecondary)
                                 Spacer(Modifier.height(2.dp))
                                 Text(state.codecPreference.label, style = MaterialTheme.typography.bodyMedium, color = Snow)
                             }
@@ -855,7 +860,7 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("HDR Mode", style = MaterialTheme.typography.bodySmall, color = StreamVault.colors.textSecondary)
+                                Text(stringResource(R.string.settings_hdr_mode), style = MaterialTheme.typography.bodySmall, color = StreamVault.colors.textSecondary)
                                 Spacer(Modifier.height(2.dp))
                                 Text(state.hdrMode.label, style = MaterialTheme.typography.bodyMedium, color = Snow)
                             }
@@ -889,7 +894,7 @@ fun SettingsScreen(
         Spacer(Modifier.height(24.dp))
 
         // ── Kodi Remote ──
-        SectionHeader(title = "Kodi Remote")
+        SectionHeader(title = stringResource(R.string.settings_kodi_remote))
         Spacer(Modifier.height(8.dp))
 
         Card(
@@ -899,7 +904,7 @@ fun SettingsScreen(
             Column(modifier = Modifier.padding(16.dp)) {
                 if (state.kodiHosts.isEmpty()) {
                     Text(
-                        "No Kodi hosts configured",
+                        stringResource(R.string.settings_no_kodi_hosts),
                         style = MaterialTheme.typography.bodyMedium,
                         color = StreamVault.colors.textSecondary,
                     )
@@ -925,10 +930,10 @@ fun SettingsScreen(
                                 Spacer(Modifier.width(4.dp))
                             }
                             TextButton(onClick = { viewModel.testKodiHost(host) }) {
-                                Text("Test", color = Amber)
+                                Text(stringResource(R.string.common_test), color = Amber)
                             }
                             IconButton(onClick = { viewModel.removeKodiHost(host) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Remove", modifier = Modifier.size(18.dp), tint = Ruby)
+                                Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.common_remove), modifier = Modifier.size(18.dp), tint = Ruby)
                             }
                         }
                         Spacer(Modifier.height(4.dp))
@@ -947,22 +952,22 @@ fun SettingsScreen(
                     SettingsTextField(
                         value = kodiName,
                         onValueChange = { kodiName = it },
-                        label = "Name",
-                        placeholder = "Living Room",
+                        label = stringResource(R.string.settings_kodi_name),
+                        placeholder = stringResource(R.string.settings_kodi_name_hint),
                     )
                     Spacer(Modifier.height(4.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         SettingsTextField(
                             value = kodiIp,
                             onValueChange = { kodiIp = it },
-                            label = "IP Address",
+                            label = stringResource(R.string.settings_kodi_ip),
                             placeholder = "192.168.1.100",
                             modifier = Modifier.weight(2f),
                         )
                         SettingsTextField(
                             value = kodiPort,
                             onValueChange = { kodiPort = it.filter { c -> c.isDigit() } },
-                            label = "Port",
+                            label = stringResource(R.string.settings_kodi_port),
                             modifier = Modifier.weight(1f),
                         )
                     }
@@ -980,13 +985,13 @@ fun SettingsScreen(
                                 contentColor = Obsidian,
                             ),
                         ) {
-                            Text("Add")
+                            Text(stringResource(R.string.common_add))
                         }
                         OutlinedButton(
                             onClick = { showAddKodi = false },
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
                         ) {
-                            Text("Cancel")
+                            Text(stringResource(R.string.common_cancel))
                         }
                     }
                 } else {
@@ -997,7 +1002,7 @@ fun SettingsScreen(
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("Add Kodi Host")
+                        Text(stringResource(R.string.settings_add_kodi_host))
                     }
                 }
             }
@@ -1006,7 +1011,7 @@ fun SettingsScreen(
         Spacer(Modifier.height(24.dp))
 
         // ── Appearance ──
-        SectionHeader(title = "Appearance")
+        SectionHeader(title = stringResource(R.string.settings_appearance))
         Spacer(Modifier.height(8.dp))
 
         Card(
@@ -1034,7 +1039,7 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("Theme", style = MaterialTheme.typography.bodySmall, color = StreamVault.colors.textSecondary)
+                                Text(stringResource(R.string.settings_theme), style = MaterialTheme.typography.bodySmall, color = StreamVault.colors.textSecondary)
                                 Spacer(Modifier.height(2.dp))
                                 Text(
                                     state.themeMode.name.lowercase().replaceFirstChar { it.uppercase() },
@@ -1058,54 +1063,64 @@ fun SettingsScreen(
                     }
                 }
 
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(12.dp))
 
-                // Language
-                var langExpanded by remember { mutableStateOf(false) }
+                // Language selector
+                val languageContext = LocalContext.current
+                var languageExpanded by remember { mutableStateOf(false) }
                 ExposedDropdownMenuBox(
-                    expanded = langExpanded,
-                    onExpandedChange = { langExpanded = !langExpanded },
+                    expanded = languageExpanded,
+                    onExpandedChange = { languageExpanded = !languageExpanded },
                 ) {
                     Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .menuAnchor(),
+                        modifier = Modifier.fillMaxWidth().menuAnchor(),
                         shape = RoundedCornerShape(8.dp),
                         color = Gunmetal,
                     ) {
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("Language", style = MaterialTheme.typography.bodySmall, color = StreamVault.colors.textSecondary)
+                                Text(
+                                    stringResource(R.string.settings_language),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = StreamVault.colors.textSecondary,
+                                )
                                 Spacer(Modifier.height(2.dp))
-                                Text(state.appLanguage.displayName, style = MaterialTheme.typography.bodyMedium, color = Snow)
+                                Text(
+                                    state.appLanguage.displayName,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Snow,
+                                )
                             }
                             Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = StreamVault.colors.textSecondary, modifier = Modifier.size(20.dp))
                         }
                     }
-                    ExposedDropdownMenu(expanded = langExpanded, onDismissRequest = { langExpanded = false }) {
+                    ExposedDropdownMenu(expanded = languageExpanded, onDismissRequest = { languageExpanded = false }) {
                         AppLanguage.entries.forEach { lang ->
                             DropdownMenuItem(
                                 text = { Text(lang.displayName) },
                                 onClick = {
                                     viewModel.setAppLanguage(lang)
-                                    langExpanded = false
+                                    languageExpanded = false
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                        val lm = languageContext.getSystemService(LocaleManager::class.java)
+                                        lm.applicationLocales = LocaleList.forLanguageTags(lang.code)
+                                    }
                                 },
                             )
                         }
                     }
                 }
+
             }
         }
 
         Spacer(Modifier.height(24.dp))
 
         // ── Storage & Cache ──
-        SectionHeader(title = "Storage")
+        SectionHeader(title = stringResource(R.string.settings_storage))
         Spacer(Modifier.height(8.dp))
 
         Card(
@@ -1119,21 +1134,21 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Clear Cache", style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(R.string.settings_clear_cache), style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            "Remove cached metadata and images",
+                            stringResource(R.string.settings_clear_cache_desc),
                             style = MaterialTheme.typography.bodySmall,
                             color = StreamVault.colors.textSecondary,
                         )
                     }
                     if (state.cacheCleared) {
-                        Text("Cleared!", style = MaterialTheme.typography.bodySmall, color = Emerald)
+                        Text(stringResource(R.string.settings_cleared), style = MaterialTheme.typography.bodySmall, color = Emerald)
                     } else {
                         OutlinedButton(
                             onClick = { showClearConfirm = true },
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
                         ) {
-                            Text("Clear")
+                            Text(stringResource(R.string.common_clear))
                         }
                     }
                 }
@@ -1142,8 +1157,8 @@ fun SettingsScreen(
                     AlertDialog(
                         onDismissRequest = { showClearConfirm = false },
                         containerColor = Charcoal,
-                        title = { Text("Clear Cache", color = Snow) },
-                        text = { Text("This will remove all cached metadata. You may need to reload content.", color = StreamVault.colors.textSecondary) },
+                        title = { Text(stringResource(R.string.settings_clear_cache), color = Snow) },
+                        text = { Text(stringResource(R.string.settings_clear_cache_confirm), color = StreamVault.colors.textSecondary) },
                         confirmButton = {
                             Button(
                                 onClick = {
@@ -1152,12 +1167,12 @@ fun SettingsScreen(
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = Ruby, contentColor = Snow),
                             ) {
-                                Text("Clear")
+                                Text(stringResource(R.string.common_clear))
                             }
                         },
                         dismissButton = {
                             TextButton(onClick = { showClearConfirm = false }) {
-                                Text("Cancel", color = StreamVault.colors.textSecondary)
+                                Text(stringResource(R.string.common_cancel), color = StreamVault.colors.textSecondary)
                             }
                         },
                     )
@@ -1168,7 +1183,7 @@ fun SettingsScreen(
         Spacer(Modifier.height(24.dp))
 
         // ── Backup & Sync ──
-        SectionHeader(title = "Backup & Sync")
+        SectionHeader(title = stringResource(R.string.settings_backup_sync))
         Spacer(Modifier.height(8.dp))
 
         Card(
@@ -1214,7 +1229,7 @@ fun SettingsScreen(
                             .format(java.util.Date(time))
                     }
                     Text(
-                        "Last backup: $dateStr",
+                        stringResource(R.string.settings_last_backup, dateStr),
                         style = MaterialTheme.typography.bodySmall,
                         color = StreamVault.colors.textSecondary,
                     )
@@ -1243,7 +1258,7 @@ fun SettingsScreen(
                             color = Obsidian,
                         )
                     } else {
-                        Text("Export Backup")
+                        Text(stringResource(R.string.settings_export_backup))
                     }
                 }
 
@@ -1256,7 +1271,7 @@ fun SettingsScreen(
                     enabled = !state.isSyncing,
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
                 ) {
-                    Text("Import Backup")
+                    Text(stringResource(R.string.settings_import_backup))
                 }
 
                 // Success message
@@ -1281,7 +1296,7 @@ fun SettingsScreen(
 
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "Export your addons, preferences, watch progress, and IPTV favorites to a file. API keys and tokens are never included.",
+                    stringResource(R.string.settings_backup_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = StreamVault.colors.textSecondary,
                 )
@@ -1291,16 +1306,7 @@ fun SettingsScreen(
         Spacer(Modifier.height(24.dp))
 
         // ── Account ──
-        val authClient: AuthClient = koinInject()
-        val scope = rememberCoroutineScope()
-        var authUser by remember { mutableStateOf<AuthUser?>(null) }
-        var showDeleteConfirm by remember { mutableStateOf(false) }
-
-        LaunchedEffect(Unit) {
-            authUser = authClient.getCurrentUser()
-        }
-
-        SectionHeader(title = "Account")
+        SectionHeader(title = stringResource(R.string.settings_account))
         Spacer(Modifier.height(8.dp))
 
         Card(
@@ -1308,86 +1314,24 @@ fun SettingsScreen(
             colors = CardDefaults.cardColors(containerColor = Charcoal),
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                if (authUser != null) {
-                    Text(
-                        authUser!!.displayName ?: authUser!!.email,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
-                    )
-                    Text(
-                        authUser!!.email,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = StreamVault.colors.textSecondary,
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    OutlinedButton(
-                        onClick = {
-                            scope.launch {
-                                authClient.logout()
-                                authUser = null
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
-                    ) {
-                        Text("Log Out")
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = { showDeleteConfirm = true },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Ruby),
-                    ) {
-                        Text("Delete Account")
-                    }
-
-                    if (showDeleteConfirm) {
-                        AlertDialog(
-                            onDismissRequest = { showDeleteConfirm = false },
-                            containerColor = Charcoal,
-                            title = { Text("Delete Account", color = Snow) },
-                            text = { Text("This will permanently delete your account and all associated data. This action cannot be undone.", color = StreamVault.colors.textSecondary) },
-                            confirmButton = {
-                                Button(
-                                    onClick = {
-                                        scope.launch {
-                                            authClient.deleteAccount()
-                                            authUser = null
-                                            showDeleteConfirm = false
-                                        }
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Ruby, contentColor = Snow),
-                                ) {
-                                    Text("Delete")
-                                }
-                            },
-                            dismissButton = {
-                                TextButton(onClick = { showDeleteConfirm = false }) {
-                                    Text("Cancel", color = StreamVault.colors.textSecondary)
-                                }
-                            },
-                        )
-                    }
-                } else {
-                    Text(
-                        "Not logged in",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = StreamVault.colors.textSecondary,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "Create an account to sync your preferences across devices.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = StreamVault.colors.textSecondary,
-                    )
-                }
+                Text(
+                    stringResource(R.string.settings_account_coming_soon),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = StreamVault.colors.textSecondary,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    stringResource(R.string.settings_account_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = StreamVault.colors.textTertiary,
+                )
             }
         }
 
         Spacer(Modifier.height(24.dp))
 
         // ── About & Legal ──
-        SectionHeader(title = "About")
+        SectionHeader(title = stringResource(R.string.settings_about))
         Spacer(Modifier.height(8.dp))
 
         val context = LocalContext.current
@@ -1398,29 +1342,31 @@ fun SettingsScreen(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 SettingsLinkItem(
-                    title = "Privacy Policy",
+                    title = stringResource(R.string.settings_privacy_policy),
                     onClick = onPrivacyPolicyClick,
                 )
                 HorizontalDivider(color = Steel.copy(alpha = 0.3f))
                 SettingsLinkItem(
-                    title = "Terms & Conditions",
+                    title = stringResource(R.string.settings_terms),
                     onClick = onTermsClick,
                 )
                 HorizontalDivider(color = Steel.copy(alpha = 0.3f))
                 SettingsLinkItem(
-                    title = "Help & Documentation",
+                    title = stringResource(R.string.settings_help),
                     onClick = onHelpClick,
                 )
                 HorizontalDivider(color = Steel.copy(alpha = 0.3f))
                 SettingsLinkItem(
-                    title = "Share App",
+                    title = stringResource(R.string.settings_share_app),
                     onClick = {
+                        val shareTitle = context.getString(R.string.settings_share_title)
+                        val shareText = context.getString(R.string.settings_share_text)
                         val shareIntent = Intent(Intent.ACTION_SEND).apply {
                             type = "text/plain"
-                            putExtra(Intent.EXTRA_SUBJECT, "Torve")
-                            putExtra(Intent.EXTRA_TEXT, "Check out Torve - a beautiful media player and content organizer! https://torve.app")
+                            putExtra(Intent.EXTRA_SUBJECT, context.getString(R.string.app_name))
+                            putExtra(Intent.EXTRA_TEXT, shareText)
                         }
-                        context.startActivity(Intent.createChooser(shareIntent, "Share Torve"))
+                        context.startActivity(Intent.createChooser(shareIntent, shareTitle))
                     },
                 )
             }
@@ -1431,7 +1377,7 @@ fun SettingsScreen(
         Spacer(Modifier.height(16.dp))
 
         Text(
-            text = "Torve v0.5.0",
+            text = stringResource(R.string.settings_version, "0.5.0"),
             style = MaterialTheme.typography.bodySmall,
             color = StreamVault.colors.textTertiary,
         )
@@ -1536,6 +1482,101 @@ private fun SettingsTextField(
                     innerTextField()
                 }
             },
+        )
+    }
+}
+
+@Composable
+private fun LiveTvSettingsSection() {
+    val iptvViewModel: IptvViewModel = koinInject()
+    val iptvState by iptvViewModel.state.collectAsState()
+
+    SectionHeader(title = stringResource(R.string.settings_live_tv))
+    Spacer(Modifier.height(8.dp))
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Charcoal),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            if (iptvState.playlists.isEmpty()) {
+                Text(
+                    text = stringResource(R.string.settings_no_playlists),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = StreamVault.colors.textTertiary,
+                )
+            } else {
+                iptvState.playlists.forEach { playlist ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = playlist.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Snow,
+                            )
+                            Text(
+                                text = stringResource(R.string.settings_channels_count, playlist.channelCount),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = StreamVault.colors.textTertiary,
+                            )
+                        }
+                        IconButton(
+                            onClick = { iptvViewModel.deletePlaylist(playlist.id) },
+                        ) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = stringResource(R.string.common_delete),
+                                tint = Ruby,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            Button(
+                onClick = { iptvViewModel.showAddPlaylistDialog() },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Amber,
+                    contentColor = Obsidian,
+                ),
+                shape = RoundedCornerShape(10.dp),
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(stringResource(R.string.settings_add_playlist), fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+
+    // Add Playlist Dialog (shared with IptvScreen)
+    if (iptvState.showAddPlaylist) {
+        com.streamvault.android.ui.iptv.AddPlaylistDialog(
+            name = iptvState.newPlaylistName,
+            url = iptvState.newPlaylistUrl,
+            epgUrl = iptvState.newPlaylistEpgUrl,
+            playlistType = iptvState.newPlaylistType,
+            xtreamServer = iptvState.newXtreamServer,
+            xtreamUsername = iptvState.newXtreamUsername,
+            xtreamPassword = iptvState.newXtreamPassword,
+            isLoading = iptvState.isAddingPlaylist,
+            onNameChange = { iptvViewModel.setNewPlaylistName(it) },
+            onUrlChange = { iptvViewModel.setNewPlaylistUrl(it) },
+            onEpgUrlChange = { iptvViewModel.setNewPlaylistEpgUrl(it) },
+            onTypeChange = { iptvViewModel.setNewPlaylistType(it) },
+            onXtreamServerChange = { iptvViewModel.setNewXtreamServer(it) },
+            onXtreamUsernameChange = { iptvViewModel.setNewXtreamUsername(it) },
+            onXtreamPasswordChange = { iptvViewModel.setNewXtreamPassword(it) },
+            onConfirm = { iptvViewModel.addPlaylist() },
+            onDismiss = { iptvViewModel.dismissAddPlaylistDialog() },
         )
     }
 }

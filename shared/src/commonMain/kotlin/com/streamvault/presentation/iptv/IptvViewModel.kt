@@ -531,6 +531,15 @@ class IptvViewModel(
         }
     }
 
+    fun deletePlaylist(id: String) {
+        scope.launch {
+            try {
+                iptvRepo.removePlaylist(id)
+                loadPlaylists()
+            } catch (_: Exception) { }
+        }
+    }
+
     // --- Favorites ---
 
     fun loadFavorites() {

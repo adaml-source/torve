@@ -181,7 +181,7 @@ private fun WelcomeStep() {
         verticalArrangement = Arrangement.Center,
     ) {
         Text(
-            text = "StreamVault",
+            text = "Torve",
             style = MaterialTheme.typography.displaySmall,
             fontWeight = FontWeight.Bold,
         )
@@ -604,7 +604,7 @@ private fun DoneStep() {
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            "StreamVault is ready. You can adjust settings anytime from the Settings tab.",
+            "Torve is ready. You can adjust settings anytime from the Settings tab.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,

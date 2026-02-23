@@ -21,15 +21,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.LiveTv
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.outlined.BookmarkBorder
-import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.LiveTv
+import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.Person
-import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Tv
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -44,7 +46,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.streamvault.android.R
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -65,7 +70,7 @@ import com.streamvault.android.ui.legal.LegalScreen
 import com.streamvault.android.ui.mood.MoodMatcherScreen
 import com.streamvault.android.ui.player.PlayerScreen
 import com.streamvault.android.ui.profile.ProfileScreen
-import com.streamvault.android.ui.profile.ProfileTabScreen
+
 import com.streamvault.android.ui.search.SearchScreen
 import com.streamvault.android.ui.settings.SettingsScreen
 import com.streamvault.android.ui.stats.StatsScreen
@@ -88,17 +93,18 @@ import org.koin.compose.koinInject
 
 data class NavTab(
     val route: String,
-    val label: String,
+    val labelResId: Int,
     val iconSelected: ImageVector,
     val iconUnselected: ImageVector,
 )
 
-val navTabs = listOf(
-    NavTab("home", "Home", Icons.Filled.Home, Icons.Outlined.Home),
-    NavTab("discover", "Discover", Icons.Filled.Explore, Icons.Outlined.Explore),
-    NavTab("search", "Search", Icons.Filled.Search, Icons.Outlined.Search),
-    NavTab("watchlist_tab", "Watchlist", Icons.Filled.Bookmark, Icons.Outlined.BookmarkBorder),
-    NavTab("profile_tab", "Profile", Icons.Filled.Person, Icons.Outlined.Person),
+private val navTabDefs = listOf(
+    NavTab("home", R.string.nav_home, Icons.Filled.Home, Icons.Outlined.Home),
+    NavTab("movies", R.string.nav_movies, Icons.Filled.Movie, Icons.Outlined.Movie),
+    NavTab("tv_shows", R.string.nav_tv_shows, Icons.Filled.Tv, Icons.Outlined.Tv),
+    NavTab("live_tv", R.string.nav_live_tv, Icons.Filled.LiveTv, Icons.Outlined.LiveTv),
+    NavTab("watchlist_tab", R.string.nav_watchlist, Icons.Filled.Bookmark, Icons.Outlined.BookmarkBorder),
+    NavTab("profile_tab", R.string.nav_profile, Icons.Filled.Person, Icons.Outlined.Person),
 )
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -113,19 +119,10 @@ fun StreamVaultNavGraph(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
-    val showBottomBar = !isTvMode && currentRoute in navTabs.map { it.route }
+    val showBottomBar = !isTvMode && currentRoute in navTabDefs.map { it.route }
 
     val setupViewModel: SetupWizardViewModel = koinInject()
-    val startDestination = remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(Unit) {
-        startDestination.value = when {
-            !setupViewModel.isSetupCompleted() -> "setup"
-            isTvMode -> "tv_home"
-            else -> "home"
-        }
-    }
-
-    val dest = startDestination.value ?: return
+    val dest = if (isTvMode) "tv_home" else "home"
 
     Box(modifier = Modifier.fillMaxSize()) {
         // Main content
@@ -135,7 +132,7 @@ fun StreamVaultNavGraph(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(
-                    bottom = if (showBottomBar) 72.dp else 0.dp,
+                    bottom = if (showBottomBar) 56.dp else 0.dp,
                 ),
         ) {
             // Setup wizard
@@ -175,7 +172,51 @@ fun StreamVaultNavGraph(
                 )
             }
 
-            // IPTV tab
+            // Movies tab — CatalogScreen for movies
+            composable("movies") {
+                val metadataRepo: MetadataRepository = koinInject()
+                val catalogViewModel = remember { CatalogViewModel(metadataRepo, "movie") }
+                CatalogScreen(
+                    viewModel = catalogViewModel,
+                    mediaType = "movie",
+                    onMediaClick = { item ->
+                        val type = if (item.type == MediaType.SERIES) "tv" else "movie"
+                        navController.navigate("detail/$type/${item.tmdbId}")
+                    },
+                )
+            }
+
+            // TV Shows tab — CatalogScreen for TV
+            composable("tv_shows") {
+                val metadataRepo: MetadataRepository = koinInject()
+                val catalogViewModel = remember { CatalogViewModel(metadataRepo, "tv") }
+                CatalogScreen(
+                    viewModel = catalogViewModel,
+                    mediaType = "tv",
+                    onMediaClick = { item ->
+                        val type = if (item.type == MediaType.SERIES) "tv" else "movie"
+                        navController.navigate("detail/$type/${item.tmdbId}")
+                    },
+                )
+            }
+
+            // Live TV tab
+            composable("live_tv") {
+                IptvScreen(
+                    onChannelPlay = { channel ->
+                        navController.navigate(
+                            "player?url=${Uri.encode(channel.url)}" +
+                                "&title=${Uri.encode(channel.name)}" +
+                                "&mediaId=" +
+                                "&mediaType=live" +
+                                "&posterUrl=${Uri.encode(channel.tvgLogo ?: "")}" +
+                                "&backdropUrl=",
+                        )
+                    },
+                )
+            }
+
+            // IPTV (also accessible via non-tab navigation)
             composable("iptv") {
                 IptvScreen(
                     onChannelPlay = { channel ->
@@ -247,6 +288,7 @@ fun StreamVaultNavGraph(
                     onEpisodeClick = { tmdbId ->
                         navController.navigate("detail/tv/$tmdbId")
                     },
+                    onBack = { navController.popBackStack() },
                 )
             }
 
@@ -285,16 +327,16 @@ fun StreamVaultNavGraph(
                 )
             }
 
-            // Profile tab — Hub linking to Settings, Calendar, Downloads, etc.
+            // Profile tab — Settings screen with all navigation callbacks
             composable("profile_tab") {
-                ProfileTabScreen(
-                    onSettingsClick = { navController.navigate("settings") },
-                    onCalendarClick = { navController.navigate("calendar") },
+                SettingsScreen(
                     onDownloadsClick = { navController.navigate("downloads") },
                     onSubscriptionClick = { navController.navigate("paywall") },
                     onProfilesClick = { navController.navigate("profiles") },
-                    onIptvClick = { navController.navigate("iptv") },
-                    onStatsClick = { navController.navigate("stats") },
+                    onCalendarClick = { navController.navigate("calendar") },
+                    onPrivacyPolicyClick = { navController.navigate("legal/privacy") },
+                    onTermsClick = { navController.navigate("legal/terms") },
+                    onHelpClick = { navController.navigate("legal/help") },
                 )
             }
 
@@ -478,7 +520,7 @@ fun StreamVaultNavGraph(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(24.dp)
+                        .height(12.dp)
                         .background(
                             Brush.verticalGradient(
                                 listOf(Color.Transparent, Obsidian),
@@ -492,11 +534,11 @@ fun StreamVaultNavGraph(
                         .fillMaxWidth()
                         .background(Obsidian)
                         .navigationBarsPadding()
-                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    navTabs.forEach { tab ->
+                    navTabDefs.forEach { tab ->
                         val selected = currentRoute == tab.route
                         NavBarItem(
                             tab = tab,
@@ -524,6 +566,7 @@ private fun NavBarItem(
 ) {
     val icon = if (selected) tab.iconSelected else tab.iconUnselected
     val color = if (selected) Amber else StreamVault.colors.textTertiary
+    val label = stringResource(tab.labelResId)
 
     Column(
         modifier = Modifier
@@ -532,30 +575,21 @@ private fun NavBarItem(
                 indication = null,
                 interactionSource = remember { MutableInteractionSource() },
             )
-            .padding(horizontal = 16.dp, vertical = 6.dp),
+            .padding(horizontal = 10.dp, vertical = 2.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Icon(
             imageVector = icon,
-            contentDescription = tab.label,
+            contentDescription = label,
             tint = color,
-            modifier = Modifier.size(22.dp),
+            modifier = Modifier.size(20.dp),
         )
-        Spacer(Modifier.height(3.dp))
+        Spacer(Modifier.height(1.dp))
         Text(
-            text = tab.label,
+            text = label,
             style = MaterialTheme.typography.labelSmall,
             color = color,
+            fontSize = 10.sp,
         )
-        // Active indicator — small amber dot under selected tab
-        if (selected) {
-            Spacer(Modifier.height(3.dp))
-            Box(
-                modifier = Modifier
-                    .size(4.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(Amber),
-            )
-        }
     }
 }

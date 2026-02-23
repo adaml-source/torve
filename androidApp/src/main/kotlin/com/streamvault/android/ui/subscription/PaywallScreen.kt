@@ -37,9 +37,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.streamvault.android.R
+import com.streamvault.android.ui.theme.Amber
+import com.streamvault.android.ui.theme.Snow
 import com.streamvault.domain.model.SubscriptionTier
 import com.streamvault.presentation.subscription.SubscriptionViewModel
 import org.koin.compose.koinInject
@@ -58,16 +62,15 @@ fun PaywallScreen(
             .verticalScroll(rememberScrollState()),
     ) {
         TopAppBar(
-            title = { Text("StreamVault Pro") },
+            title = { Text(stringResource(R.string.paywall_title)) },
             navigationIcon = {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back))
                 }
             },
         )
 
         if (state.isPro) {
-            // Already subscribed
             Card(
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
@@ -77,36 +80,35 @@ fun PaywallScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
-                        text = "You're a Pro!",
+                        text = stringResource(R.string.paywall_youre_pro),
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "Tier: ${state.subscription?.tier?.label ?: "Pro"}",
+                        text = stringResource(R.string.paywall_tier, state.subscription?.tier?.label ?: "Pro"),
                         style = MaterialTheme.typography.bodyLarge,
                     )
                     Spacer(Modifier.height(16.dp))
                     TextButton(onClick = { viewModel.deactivate() }) {
-                        Text("Cancel Subscription", color = MaterialTheme.colorScheme.error)
+                        Text(stringResource(R.string.paywall_cancel), color = MaterialTheme.colorScheme.error)
                     }
                 }
             }
         } else {
-            // Paywall
             Column(
                 modifier = Modifier.padding(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
-                    text = "Unlock StreamVault Pro",
+                    text = stringResource(R.string.paywall_unlock),
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center,
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "Stream, download, and watch IPTV with a Pro subscription",
+                    text = stringResource(R.string.paywall_subtitle),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
@@ -114,27 +116,15 @@ fun PaywallScreen(
 
                 Spacer(Modifier.height(24.dp))
 
-                // Feature comparison
                 FeatureComparison()
 
                 Spacer(Modifier.height(24.dp))
 
-                // Pricing cards
                 PricingCard(
-                    title = "Monthly",
-                    price = "\$4.99/mo",
-                    description = "Billed monthly, cancel anytime",
-                    selected = state.selectedTier == SubscriptionTier.MONTHLY,
-                    onClick = { viewModel.selectTier(SubscriptionTier.MONTHLY) },
-                )
-
-                Spacer(Modifier.height(12.dp))
-
-                PricingCard(
-                    title = "Lifetime",
-                    price = "\$29.99",
-                    description = "One-time payment, forever access",
-                    selected = state.selectedTier == SubscriptionTier.LIFETIME,
+                    title = stringResource(R.string.paywall_lifetime),
+                    price = stringResource(R.string.paywall_price),
+                    description = stringResource(R.string.paywall_one_time),
+                    selected = true,
                     highlighted = true,
                     onClick = { viewModel.selectTier(SubscriptionTier.LIFETIME) },
                 )
@@ -143,7 +133,6 @@ fun PaywallScreen(
 
                 Button(
                     onClick = {
-                        // In production, this would trigger Google Play billing
                         viewModel.purchase("mock_token_${System.currentTimeMillis()}")
                     },
                     modifier = Modifier.fillMaxWidth().height(56.dp),
@@ -157,7 +146,7 @@ fun PaywallScreen(
                         )
                     } else {
                         Text(
-                            text = "Subscribe Now",
+                            text = stringResource(R.string.paywall_get_lifetime),
                             style = MaterialTheme.typography.titleMedium,
                         )
                     }
@@ -168,7 +157,7 @@ fun PaywallScreen(
                 TextButton(onClick = {
                     viewModel.restorePurchase("restore_token")
                 }) {
-                    Text("Restore Purchase")
+                    Text(stringResource(R.string.paywall_restore))
                 }
 
                 state.error?.let { error ->
@@ -187,12 +176,26 @@ fun PaywallScreen(
 @Composable
 private fun FeatureComparison() {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        FeatureRow("Search & Browse", free = true, pro = true)
-        FeatureRow("Stream Playback", free = false, pro = true)
-        FeatureRow("Downloads", free = false, pro = true)
-        FeatureRow("IPTV / Live TV", free = false, pro = true)
-        FeatureRow("Multi-Cloud", free = false, pro = true)
-        FeatureRow("Advanced Filters", free = false, pro = true)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Spacer(Modifier.weight(1f))
+            Box(modifier = Modifier.width(60.dp), contentAlignment = Alignment.Center) {
+                Text(stringResource(R.string.paywall_free), style = MaterialTheme.typography.labelMedium, color = Snow, fontWeight = FontWeight.Bold)
+            }
+            Box(modifier = Modifier.width(60.dp), contentAlignment = Alignment.Center) {
+                Text(stringResource(R.string.paywall_pro), style = MaterialTheme.typography.labelMedium, color = Amber, fontWeight = FontWeight.Bold)
+            }
+        }
+        FeatureRow(stringResource(R.string.paywall_search_browse), free = true, pro = true)
+        FeatureRow(stringResource(R.string.paywall_stream_playback), free = false, pro = true)
+        FeatureRow(stringResource(R.string.paywall_downloads), free = false, pro = true)
+        FeatureRow(stringResource(R.string.paywall_iptv), free = false, pro = true)
+        FeatureRow(stringResource(R.string.paywall_multi_cloud), free = false, pro = true)
+        FeatureRow(stringResource(R.string.paywall_advanced_filters), free = false, pro = true)
     }
 }
 
@@ -207,6 +210,7 @@ private fun FeatureRow(feature: String, free: Boolean, pro: Boolean) {
         Text(
             text = feature,
             style = MaterialTheme.typography.bodyMedium,
+            color = Snow,
             modifier = Modifier.weight(1f),
         )
         Box(modifier = Modifier.width(60.dp), contentAlignment = Alignment.Center) {
@@ -265,7 +269,7 @@ private fun PricingCard(
                             shape = RoundedCornerShape(4.dp),
                         ) {
                             Text(
-                                text = "BEST VALUE",
+                                text = stringResource(R.string.paywall_best_value),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onPrimary,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
