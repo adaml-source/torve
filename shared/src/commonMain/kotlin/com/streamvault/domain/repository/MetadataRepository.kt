@@ -16,6 +16,7 @@ interface MetadataRepository {
     suspend fun searchMulti(query: String, page: Int = 1): List<MediaItem>
     suspend fun getDetail(type: String, id: Int): MediaItem
     suspend fun getSimilar(type: String, id: Int, page: Int = 1): List<MediaItem>
+    suspend fun getRecommendations(type: String, id: Int, page: Int = 1): List<MediaItem>
     suspend fun getHomeShelves(): List<CatalogShelf>
     suspend fun getPersonCredits(personId: Int): List<MediaItem>
     suspend fun getPersonDetail(personId: Int): TmdbPerson

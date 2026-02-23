@@ -69,6 +69,10 @@ class DownloadRepositoryImpl(
         )
     }
 
+    override suspend fun updateFileSize(id: String, fileSizeBytes: Long) {
+        database.streamVaultQueries.updateDownloadFileSize(fileSizeBytes, id)
+    }
+
     override suspend fun deleteDownload(id: String) {
         database.streamVaultQueries.deleteDownload(id)
     }

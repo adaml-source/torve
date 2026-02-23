@@ -20,10 +20,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.LiveTv
 import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.Settings
@@ -52,13 +54,16 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.streamvault.android.ui.auth.LoginScreen
+import com.streamvault.android.ui.calendar.CalendarScreen
 import com.streamvault.android.ui.catalog.CatalogScreen
 import com.streamvault.android.ui.detail.DetailScreen
+import com.streamvault.android.ui.home.HomeScreen
 import com.streamvault.android.ui.detail.PersonScreen
 import com.streamvault.android.ui.download.DownloadScreen
 import com.streamvault.android.ui.iptv.IptvScreen
 import com.streamvault.android.ui.legal.LegalScreen
 import com.streamvault.android.ui.player.PlayerScreen
+import com.streamvault.android.ui.profile.ProfileScreen
 import com.streamvault.android.ui.settings.SettingsScreen
 import com.streamvault.android.ui.setup.SetupWizardScreen
 import com.streamvault.android.ui.subscription.PaywallScreen
@@ -87,6 +92,7 @@ val navTabs = listOf(
     NavTab("movies", "Movies", Icons.Filled.Movie, Icons.Outlined.Movie),
     NavTab("tvshows", "TV Shows", Icons.Filled.Tv, Icons.Outlined.Tv),
     NavTab("iptv", "Live TV", Icons.Filled.LiveTv, Icons.Outlined.LiveTv),
+    NavTab("calendar", "Calendar", Icons.Filled.CalendarMonth, Icons.Outlined.CalendarMonth),
     NavTab("settings", "Settings", Icons.Filled.Settings, Icons.Outlined.Settings),
 )
 
@@ -150,16 +156,16 @@ fun StreamVaultNavGraph(
                 )
             }
 
-            // Movies tab
+            // Movies tab — Full HomeScreen with hero, recommendations, shelves
             composable("movies") {
-                val metadataRepo: MetadataRepository = koinInject()
-                val viewModel = remember { CatalogViewModel(metadataRepo, "movie") }
-                CatalogScreen(
-                    viewModel = viewModel,
-                    mediaType = "movie",
+                HomeScreen(
                     onMediaClick = { item ->
                         val type = if (item.type == MediaType.SERIES) "tv" else "movie"
                         navController.navigate("detail/$type/${item.tmdbId}")
+                    },
+                    onContinueWatchingClick = { progress ->
+                        val type = if (progress.mediaType == MediaType.SERIES) "tv" else "movie"
+                        navController.navigate("detail/$type/${progress.mediaId}")
                     },
                 )
             }
@@ -194,11 +200,21 @@ fun StreamVaultNavGraph(
                 )
             }
 
+            // Calendar tab
+            composable("calendar") {
+                CalendarScreen(
+                    onEpisodeClick = { tmdbId ->
+                        navController.navigate("detail/tv/$tmdbId")
+                    },
+                )
+            }
+
             // Settings tab
             composable("settings") {
                 SettingsScreen(
                     onDownloadsClick = { navController.navigate("downloads") },
                     onSubscriptionClick = { navController.navigate("paywall") },
+                    onProfilesClick = { navController.navigate("profiles") },
                     onPrivacyPolicyClick = { navController.navigate("legal/privacy") },
                     onTermsClick = { navController.navigate("legal/terms") },
                     onHelpClick = { navController.navigate("legal/help") },
@@ -218,14 +234,18 @@ fun StreamVaultNavGraph(
                 DetailScreen(
                     type = detailType,
                     id = detailId,
-                    onPlayClick = { url ->
+                    onPlayClick = { url, season, episode, imdbId ->
                         navController.navigate(
                             "player?url=${Uri.encode(url)}" +
                                 "&title=${Uri.encode("")}" +
-                                "&mediaId=" +
+                                "&mediaId=$detailId" +
                                 "&mediaType=$detailType" +
                                 "&posterUrl=${Uri.encode("")}" +
-                                "&backdropUrl=${Uri.encode("")}",
+                                "&backdropUrl=${Uri.encode("")}" +
+                                "&seasonNumber=${season ?: -1}" +
+                                "&episodeNumber=${episode ?: -1}" +
+                                "&showTmdbId=${if (detailType == "tv") detailId else -1}" +
+                                "&showImdbId=${Uri.encode(imdbId ?: "")}",
                         )
                     },
                     onBack = { navController.popBackStack() },
@@ -259,7 +279,10 @@ fun StreamVaultNavGraph(
 
             // Player screen
             composable(
-                route = "player?url={url}&title={title}&mediaId={mediaId}&mediaType={mediaType}&posterUrl={posterUrl}&backdropUrl={backdropUrl}",
+                route = "player?url={url}&title={title}&mediaId={mediaId}&mediaType={mediaType}" +
+                    "&posterUrl={posterUrl}&backdropUrl={backdropUrl}" +
+                    "&seasonNumber={seasonNumber}&episodeNumber={episodeNumber}" +
+                    "&showTmdbId={showTmdbId}&showImdbId={showImdbId}",
                 arguments = listOf(
                     navArgument("url") { type = NavType.StringType; defaultValue = "" },
                     navArgument("title") { type = NavType.StringType; defaultValue = "" },
@@ -267,6 +290,10 @@ fun StreamVaultNavGraph(
                     navArgument("mediaType") { type = NavType.StringType; defaultValue = "movie" },
                     navArgument("posterUrl") { type = NavType.StringType; defaultValue = "" },
                     navArgument("backdropUrl") { type = NavType.StringType; defaultValue = "" },
+                    navArgument("seasonNumber") { type = NavType.IntType; defaultValue = -1 },
+                    navArgument("episodeNumber") { type = NavType.IntType; defaultValue = -1 },
+                    navArgument("showTmdbId") { type = NavType.IntType; defaultValue = -1 },
+                    navArgument("showImdbId") { type = NavType.StringType; defaultValue = "" },
                 ),
             ) { backStackEntry ->
                 PlayerScreen(
@@ -276,13 +303,38 @@ fun StreamVaultNavGraph(
                     mediaType = backStackEntry.arguments?.getString("mediaType") ?: "movie",
                     posterUrl = backStackEntry.arguments?.getString("posterUrl") ?: "",
                     backdropUrl = backStackEntry.arguments?.getString("backdropUrl") ?: "",
+                    seasonNumber = backStackEntry.arguments?.getInt("seasonNumber")?.takeIf { it > 0 },
+                    episodeNumber = backStackEntry.arguments?.getInt("episodeNumber")?.takeIf { it > 0 },
+                    showTmdbId = backStackEntry.arguments?.getInt("showTmdbId")?.takeIf { it > 0 },
+                    showImdbId = backStackEntry.arguments?.getString("showImdbId")?.takeIf { it.isNotBlank() },
                     onBack = { navController.popBackStack() },
                 )
             }
 
             // Downloads
             composable("downloads") {
-                DownloadScreen(onBack = { navController.popBackStack() })
+                DownloadScreen(
+                    onBack = { navController.popBackStack() },
+                    onPlayOffline = { download ->
+                        navController.navigate(
+                            "player?url=${Uri.encode("file://${download.filePath}")}" +
+                                "&title=${Uri.encode(download.title)}" +
+                                "&mediaId=${download.mediaId}" +
+                                "&mediaType=${download.mediaType.name.lowercase()}" +
+                                "&posterUrl=${Uri.encode(download.posterUrl ?: "")}" +
+                                "&backdropUrl=" +
+                                "&seasonNumber=${download.seasonNumber ?: -1}" +
+                                "&episodeNumber=${download.episodeNumber ?: -1}" +
+                                "&showTmdbId=-1" +
+                                "&showImdbId=",
+                        )
+                    },
+                )
+            }
+
+            // Profiles
+            composable("profiles") {
+                ProfileScreen(onBack = { navController.popBackStack() })
             }
 
             // Paywall

@@ -31,29 +31,60 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.streamvault.android.download.DownloadWorker
 import com.streamvault.domain.model.Download
 import com.streamvault.domain.model.DownloadStatus
 import com.streamvault.presentation.download.DownloadTab
 import com.streamvault.presentation.download.DownloadViewModel
+import kotlinx.coroutines.delay
 import org.koin.compose.koinInject
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DownloadScreen(
     onBack: () -> Unit,
+    onPlayOffline: ((Download) -> Unit)? = null,
     viewModel: DownloadViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
+    val context = LocalContext.current
+
+    // Wire platform callbacks to trigger WorkManager
+    LaunchedEffect(viewModel) {
+        viewModel.onDownloadEnqueued = { downloadId ->
+            DownloadWorker.enqueue(context, downloadId)
+        }
+        viewModel.onDownloadCancelled = { downloadId ->
+            DownloadWorker.cancel(context, downloadId)
+        }
+        viewModel.onFileDelete = { filePath ->
+            File(filePath).delete()
+        }
+    }
+
+    // Poll for progress updates while there are active downloads
+    val hasActive = state.activeDownloads.isNotEmpty()
+    LaunchedEffect(hasActive) {
+        if (hasActive) {
+            while (true) {
+                delay(2000)
+                viewModel.loadDownloads()
+            }
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         TopAppBar(
@@ -103,6 +134,11 @@ fun DownloadScreen(
                         onPause = { viewModel.pauseDownload(download.id) },
                         onResume = { viewModel.resumeDownload(download.id) },
                         onDelete = { viewModel.deleteDownload(download.id) },
+                        onPlay = {
+                            if (download.status == DownloadStatus.COMPLETED && download.filePath != null) {
+                                onPlayOffline?.invoke(download)
+                            }
+                        },
                     )
                 }
             }
@@ -116,6 +152,7 @@ private fun DownloadCard(
     onPause: () -> Unit,
     onResume: () -> Unit,
     onDelete: () -> Unit,
+    onPlay: () -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -187,9 +224,13 @@ private fun DownloadCard(
 
             // Actions
             Column {
-                if (download.status == DownloadStatus.DOWNLOADING) {
+                if (download.status == DownloadStatus.COMPLETED && download.filePath != null) {
+                    IconButton(onClick = onPlay) {
+                        Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = MaterialTheme.colorScheme.primary)
+                    }
+                } else if (download.status == DownloadStatus.DOWNLOADING) {
                     IconButton(onClick = onPause) {
-                        Text("⏸", style = MaterialTheme.typography.titleMedium)
+                        Text("\u23F8", style = MaterialTheme.typography.titleMedium)
                     }
                 } else if (download.status == DownloadStatus.PAUSED || download.status == DownloadStatus.PENDING) {
                     IconButton(onClick = onResume) {

@@ -33,4 +33,9 @@ data class DetailUiState(
     // Track what we're fetching streams for (for download labeling)
     val streamContextSeason: Int? = null,
     val streamContextEpisode: Int? = null,
+    // Auto-play
+    val autoPlayStream: ParsedStream? = null,
+    val autoPlayMessage: String? = null,
+    val fallbackAttempt: Int = 0,
+    val autoPlayFailed: Boolean = false,
 )

@@ -48,10 +48,74 @@ class SearchViewModel(
     private suspend fun performSearch(query: String) {
         _state.update { it.copy(isSearching = true, error = null) }
         try {
-            val results = metadataRepo.searchMulti(query)
-            _state.update { it.copy(results = results, isSearching = false) }
+            val filter = _state.value.filter
+            val results = if (filter.mediaType != null) {
+                // Search within specific type
+                metadataRepo.searchMultiPaged(query, 1, filter.mediaType).items
+            } else {
+                metadataRepo.searchMulti(query)
+            }
+
+            // Apply client-side filters
+            val filtered = results.filter { item ->
+                val genreMatch = filter.genreId == null || filter.genreId in item.genreIds
+                val ratingMatch = filter.minRating == null || (item.rating ?: 0.0) >= filter.minRating
+                val yearMatch = filter.year == null || item.year == filter.year
+                genreMatch && ratingMatch && yearMatch
+            }
+
+            _state.update { it.copy(results = filtered, isSearching = false) }
         } catch (e: Exception) {
             _state.update { it.copy(isSearching = false, error = e.message) }
+        }
+    }
+
+    fun applyFilter(filter: SearchFilter) {
+        _state.update { it.copy(filter = filter, showFilterSheet = false) }
+        // Re-run search with filters if there's a query
+        if (_state.value.query.length >= 2) {
+            scope.launch { performSearch(_state.value.query) }
+        } else if (filter.isActive) {
+            // No text query but filters active — use discover API
+            discoverWithFilters(filter)
+        }
+    }
+
+    private fun discoverWithFilters(filter: SearchFilter) {
+        scope.launch {
+            _state.update { it.copy(isDiscovering = true, error = null) }
+            try {
+                val type = filter.mediaType ?: "movie"
+                val result = metadataRepo.discover(
+                    type = type,
+                    withGenres = filter.genreId?.toString(),
+                    minRating = filter.minRating,
+                    year = filter.year,
+                )
+                _state.update {
+                    it.copy(
+                        discoverResults = result.items,
+                        isDiscovering = false,
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update { it.copy(isDiscovering = false, error = e.message) }
+            }
+        }
+    }
+
+    fun toggleFilterSheet() {
+        _state.update { it.copy(showFilterSheet = !it.showFilterSheet) }
+    }
+
+    fun dismissFilterSheet() {
+        _state.update { it.copy(showFilterSheet = false) }
+    }
+
+    fun clearFilters() {
+        _state.update { it.copy(filter = SearchFilter(), discoverResults = emptyList()) }
+        if (_state.value.query.length >= 2) {
+            scope.launch { performSearch(_state.value.query) }
         }
     }
 

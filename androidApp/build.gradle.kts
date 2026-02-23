@@ -78,6 +78,10 @@ dependencies {
     // WorkManager — background tasks (notifications)
     implementation("androidx.work:work-runtime-ktx:2.10.0")
 
+    // Glance — App Widgets
+    implementation("androidx.glance:glance-appwidget:1.1.1")
+    implementation("androidx.glance:glance-material3:1.1.1")
+
     // Google Cast (Chromecast)
     implementation("com.google.android.gms:play-services-cast-framework:22.0.0")
     implementation("androidx.mediarouter:mediarouter:1.7.0")

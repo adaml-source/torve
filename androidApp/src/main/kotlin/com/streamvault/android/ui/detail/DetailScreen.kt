@@ -38,7 +38,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -68,6 +70,8 @@ import com.streamvault.android.ui.theme.HeroGradient
 import com.streamvault.android.ui.theme.Obsidian
 import com.streamvault.android.ui.theme.Snow
 import com.streamvault.android.ui.theme.StreamVault
+import com.streamvault.android.download.DownloadWorker
+import androidx.compose.ui.platform.LocalContext
 import com.streamvault.domain.model.Download
 import com.streamvault.domain.model.DownloadStatus
 import com.streamvault.domain.model.MediaItem
@@ -83,7 +87,7 @@ import org.koin.compose.koinInject
 fun DetailScreen(
     type: String,
     id: Int,
-    onPlayClick: (String) -> Unit,
+    onPlayClick: (url: String, season: Int?, episode: Int?, imdbId: String?) -> Unit,
     onBack: () -> Unit,
     onMediaClick: (MediaItem) -> Unit,
     onPersonClick: ((Int) -> Unit)? = null,
@@ -95,7 +99,16 @@ fun DetailScreen(
     val settingsState by settingsViewModel.state.collectAsState()
     var showActionSheet by remember { mutableStateOf(false) }
     var resolvedUrl by remember { mutableStateOf("") }
+    val context = LocalContext.current
 
+    // Wire download callbacks to trigger WorkManager
+    LaunchedEffect(downloadViewModel) {
+        downloadViewModel.onDownloadEnqueued = { downloadId ->
+            DownloadWorker.enqueue(context, downloadId)
+        }
+    }
+
+    LaunchedEffect(Unit) { viewModel.setSettingsProvider { settingsViewModel } }
     LaunchedEffect(type, id) { viewModel.loadDetail(type, id) }
 
     LaunchedEffect(state.resolvedStream) {
@@ -477,6 +490,30 @@ fun DetailScreen(
                     }
                 }
 
+                // Auto-play message snackbar
+                state.autoPlayMessage?.let { message ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp)
+                            .align(Alignment.BottomCenter),
+                    ) {
+                        Snackbar(
+                            containerColor = Graphite,
+                            contentColor = Snow,
+                            action = if (state.autoPlayFailed) {
+                                {
+                                    TextButton(onClick = { viewModel.showManualPicker() }) {
+                                        Text("Select Manually", color = Amber)
+                                    }
+                                }
+                            } else null,
+                        ) {
+                            Text(text = message, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+
                 // Stream picker
                 if (state.showStreamPicker && state.streams.isNotEmpty()) {
                     StreamPickerSheet(
@@ -506,7 +543,7 @@ fun DetailScreen(
                     StreamActionSheet(
                         url = resolvedUrl,
                         title = dlTitle,
-                        onPlayInApp = { onPlayClick(resolvedUrl) },
+                        onPlayInApp = { onPlayClick(resolvedUrl, ctxSeason, ctxEpisode, item?.imdbId) },
                         onDownload = {
                             if (item != null) {
                                 downloadViewModel.enqueueDownload(

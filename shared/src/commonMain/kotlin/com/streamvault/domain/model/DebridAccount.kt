@@ -53,4 +53,23 @@ data class StreamPreferences(
     val cachedOnly: Boolean = true,
     val minQuality: StreamQuality = StreamQuality.SD_480P,
     val maxFileSizeBytes: Long? = null,
+    val autoPlayEnabled: Boolean = true,
+    val codecPreference: CodecPreference = CodecPreference.HEVC_PREFERRED,
+    val hdrMode: HdrMode = HdrMode.AUTO,
+    val maxFallbackAttempts: Int = 3,
+    val autoPlayNextEpisodeEnabled: Boolean = true,
 )
+
+@Serializable
+enum class CodecPreference(val label: String) {
+    HEVC_PREFERRED("HEVC Preferred"),
+    H264_ONLY("H.264 Only"),
+    ANY("Any"),
+}
+
+@Serializable
+enum class HdrMode(val label: String) {
+    PREFER_HDR("Prefer HDR"),
+    SDR_ONLY("SDR Only"),
+    AUTO("Auto (match display)"),
+}

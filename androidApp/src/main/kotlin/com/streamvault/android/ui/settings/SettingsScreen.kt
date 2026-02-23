@@ -2,6 +2,8 @@ package com.streamvault.android.ui.settings
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -59,6 +61,8 @@ import com.streamvault.domain.model.DebridServiceType
 import com.streamvault.domain.model.StreamQuality
 import com.streamvault.data.auth.AuthClient
 import com.streamvault.data.auth.AuthUser
+import com.streamvault.domain.model.CodecPreference
+import com.streamvault.domain.model.HdrMode
 import com.streamvault.presentation.addon.AddonViewModel
 import com.streamvault.presentation.settings.AppLanguage
 import com.streamvault.presentation.settings.SettingsViewModel
@@ -71,6 +75,7 @@ import org.koin.compose.koinInject
 fun SettingsScreen(
     onDownloadsClick: () -> Unit = {},
     onSubscriptionClick: () -> Unit = {},
+    onProfilesClick: () -> Unit = {},
     onPrivacyPolicyClick: () -> Unit = {},
     onTermsClick: () -> Unit = {},
     onHelpClick: () -> Unit = {},
@@ -99,6 +104,12 @@ fun SettingsScreen(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            OutlinedButton(
+                onClick = onProfilesClick,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Profiles")
+            }
             OutlinedButton(
                 onClick = onSubscriptionClick,
                 modifier = Modifier.weight(1f),
@@ -660,6 +671,133 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(24.dp))
 
+        // ── Playback Section ──
+        SectionHeader(title = "Playback")
+        Spacer(Modifier.height(8.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+            ),
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                // Auto-Play toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Auto-Play Best Stream", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Automatically pick and play the best stream",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = state.autoPlayEnabled,
+                        onCheckedChange = { viewModel.setAutoPlayEnabled(it) },
+                    )
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                // Auto-Play Next Episode toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Auto-Play Next Episode", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Automatically play the next episode when current finishes",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = state.autoPlayNextEpisodeEnabled,
+                        onCheckedChange = { viewModel.setAutoPlayNextEpisodeEnabled(it) },
+                    )
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                // Codec Preference dropdown
+                var codecExpanded by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(
+                    expanded = codecExpanded,
+                    onExpandedChange = { codecExpanded = !codecExpanded },
+                ) {
+                    OutlinedTextField(
+                        value = state.codecPreference.label,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Codec Preference") },
+                        trailingIcon = {
+                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = codecExpanded)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor(),
+                    )
+                    ExposedDropdownMenu(
+                        expanded = codecExpanded,
+                        onDismissRequest = { codecExpanded = false },
+                    ) {
+                        CodecPreference.entries.forEach { pref ->
+                            DropdownMenuItem(
+                                text = { Text(pref.label) },
+                                onClick = {
+                                    viewModel.setCodecPreference(pref)
+                                    codecExpanded = false
+                                },
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                // HDR Mode dropdown
+                var hdrModeExpanded by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(
+                    expanded = hdrModeExpanded,
+                    onExpandedChange = { hdrModeExpanded = !hdrModeExpanded },
+                ) {
+                    OutlinedTextField(
+                        value = state.hdrMode.label,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("HDR Mode") },
+                        trailingIcon = {
+                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = hdrModeExpanded)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor(),
+                    )
+                    ExposedDropdownMenu(
+                        expanded = hdrModeExpanded,
+                        onDismissRequest = { hdrModeExpanded = false },
+                    ) {
+                        HdrMode.entries.forEach { mode ->
+                            DropdownMenuItem(
+                                text = { Text(mode.label) },
+                                onClick = {
+                                    viewModel.setHdrMode(mode)
+                                    hdrModeExpanded = false
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+
         // ── Content Sources Section ──
         val addonViewModel: AddonViewModel = koinInject()
         AddonManagerSection(viewModel = addonViewModel)
@@ -907,6 +1045,125 @@ fun SettingsScreen(
                         },
                     )
                 }
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        // ── Backup & Sync ──
+        SectionHeader(title = "Backup & Sync")
+        Spacer(Modifier.height(8.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+            ),
+        ) {
+            val backupContext = LocalContext.current
+
+            // File picker for import
+            val importLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.OpenDocument(),
+            ) { uri ->
+                uri?.let {
+                    try {
+                        val jsonStr = backupContext.contentResolver.openInputStream(it)
+                            ?.bufferedReader()?.use { r -> r.readText() } ?: return@let
+                        viewModel.importBackup(jsonStr)
+                    } catch (_: Exception) { }
+                }
+            }
+
+            // File creator for export
+            var pendingExportJson by remember { mutableStateOf<String?>(null) }
+            val exportLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.CreateDocument("application/json"),
+            ) { uri ->
+                uri?.let {
+                    try {
+                        val json = pendingExportJson ?: return@let
+                        backupContext.contentResolver.openOutputStream(it)?.use { out ->
+                            out.write(json.toByteArray())
+                        }
+                        pendingExportJson = null
+                    } catch (_: Exception) { }
+                }
+            }
+
+            Column(modifier = Modifier.padding(16.dp)) {
+                // Last sync time
+                state.lastSyncTime?.let { time ->
+                    val dateStr = remember(time) {
+                        java.text.SimpleDateFormat("MMM d, yyyy 'at' h:mm a", java.util.Locale.getDefault())
+                            .format(java.util.Date(time))
+                    }
+                    Text(
+                        "Last backup: $dateStr",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                }
+
+                // Export button
+                Button(
+                    onClick = {
+                        viewModel.exportBackup { json ->
+                            pendingExportJson = json
+                            exportLauncher.launch("streamvault_backup.json")
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !state.isSyncing,
+                ) {
+                    if (state.isSyncing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
+                        Text("Export Backup")
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                // Import button
+                OutlinedButton(
+                    onClick = { importLauncher.launch(arrayOf("application/json", "*/*")) },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !state.isSyncing,
+                ) {
+                    Text("Import Backup")
+                }
+
+                // Success message
+                state.syncSuccess?.let { msg ->
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        msg,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF4CAF50),
+                    )
+                }
+
+                // Error message
+                state.syncError?.let { error ->
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        error,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Export your addons, preferences, watch progress, and IPTV favorites to a file. API keys and tokens are never included.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
 

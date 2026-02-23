@@ -8,7 +8,9 @@ import com.streamvault.data.simkl.SimklUser
 import com.streamvault.data.trakt.TraktDeviceCode
 import com.streamvault.data.trakt.TraktStats
 import com.streamvault.data.trakt.TraktUser
+import com.streamvault.domain.model.CodecPreference
 import com.streamvault.domain.model.DebridServiceType
+import com.streamvault.domain.model.HdrMode
 import com.streamvault.domain.model.StreamQuality
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
@@ -65,6 +67,11 @@ data class SettingsUiState(
     val maxFileSizeMb: Int? = null,
     val cachedOnly: Boolean = true,
     val hdrEnabled: Boolean = false,
+    // Playback
+    val autoPlayEnabled: Boolean = true,
+    val codecPreference: CodecPreference = CodecPreference.HEVC_PREFERRED,
+    val hdrMode: HdrMode = HdrMode.AUTO,
+    val autoPlayNextEpisodeEnabled: Boolean = true,
     // Kodi
     val kodiHosts: List<KodiHost> = emptyList(),
     val kodiTestResult: Map<String, Boolean?> = emptyMap(),
@@ -73,4 +80,9 @@ data class SettingsUiState(
     val appLanguage: AppLanguage = AppLanguage.ENGLISH,
     // Cache
     val cacheCleared: Boolean = false,
+    // Sync / Backup
+    val lastSyncTime: Long? = null,
+    val isSyncing: Boolean = false,
+    val syncError: String? = null,
+    val syncSuccess: String? = null,
 )

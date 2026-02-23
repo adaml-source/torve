@@ -6,9 +6,15 @@ import com.streamvault.data.kodi.KodiHost
 import com.streamvault.data.simkl.SimklClient
 import com.streamvault.data.trakt.TraktClient
 import com.streamvault.db.StreamVaultDatabase
+import com.streamvault.domain.model.CodecPreference
 import com.streamvault.domain.model.DebridServiceType
+import com.streamvault.domain.model.HdrMode
+import com.streamvault.domain.model.StreamPreferences
 import com.streamvault.domain.model.StreamQuality
 import com.streamvault.domain.repository.PreferencesRepository
+import com.streamvault.domain.sync.SyncRepository
+import com.streamvault.platform.NetworkMonitor
+import com.streamvault.platform.recommendedMaxQuality
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.coroutines.CoroutineScope
@@ -29,6 +35,8 @@ class SettingsViewModel(
     private val kodiClient: KodiClient,
     private val database: StreamVaultDatabase,
     private val prefsRepo: PreferencesRepository,
+    private val syncRepo: SyncRepository,
+    private val networkMonitor: NetworkMonitor,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(SettingsUiState())
@@ -59,6 +67,11 @@ class SettingsViewModel(
         const val KEY_KODI_HOSTS = "kodi_hosts_json"
         const val KEY_THEME_MODE = "theme_mode"
         const val KEY_APP_LANGUAGE = "app_language"
+        const val KEY_AUTO_PLAY_ENABLED = "auto_play_enabled"
+        const val KEY_CODEC_PREFERENCE = "codec_preference"
+        const val KEY_HDR_MODE = "hdr_mode"
+        const val KEY_AUTO_PLAY_NEXT_EPISODE = "auto_play_next_episode"
+        const val KEY_LAST_SYNC_TIME = "last_sync_time"
     }
 
     init {
@@ -111,6 +124,16 @@ class SettingsViewModel(
                 try { AppLanguage.valueOf(it) } catch (_: Exception) { null }
             } ?: AppLanguage.ENGLISH
 
+            val autoPlayEnabled = prefsRepo.getString(KEY_AUTO_PLAY_ENABLED)?.toBooleanStrictOrNull() ?: true
+            val autoPlayNextEpisodeEnabled = prefsRepo.getString(KEY_AUTO_PLAY_NEXT_EPISODE)?.toBooleanStrictOrNull() ?: true
+            val lastSyncTime = prefsRepo.getString(KEY_LAST_SYNC_TIME)?.toLongOrNull()
+            val codecPreference = prefsRepo.getString(KEY_CODEC_PREFERENCE)?.let {
+                try { CodecPreference.valueOf(it) } catch (_: Exception) { null }
+            } ?: CodecPreference.HEVC_PREFERRED
+            val hdrMode = prefsRepo.getString(KEY_HDR_MODE)?.let {
+                try { HdrMode.valueOf(it) } catch (_: Exception) { null }
+            } ?: HdrMode.AUTO
+
             _state.update {
                 it.copy(
                     debridProvider = provider,
@@ -133,6 +156,11 @@ class SettingsViewModel(
                     kodiHosts = kodiHosts,
                     themeMode = themeMode,
                     appLanguage = appLanguage,
+                    autoPlayEnabled = autoPlayEnabled,
+                    autoPlayNextEpisodeEnabled = autoPlayNextEpisodeEnabled,
+                    codecPreference = codecPreference,
+                    hdrMode = hdrMode,
+                    lastSyncTime = lastSyncTime,
                 )
             }
 
@@ -508,15 +536,46 @@ class SettingsViewModel(
         scope.launch { prefsRepo.setString(KEY_HDR_ENABLED, enabled.toString()) }
     }
 
-    fun buildStreamPreferences(): com.streamvault.domain.model.StreamPreferences {
+    fun setAutoPlayEnabled(enabled: Boolean) {
+        _state.update { it.copy(autoPlayEnabled = enabled) }
+        scope.launch { prefsRepo.setString(KEY_AUTO_PLAY_ENABLED, enabled.toString()) }
+    }
+
+    fun setCodecPreference(pref: CodecPreference) {
+        _state.update { it.copy(codecPreference = pref) }
+        scope.launch { prefsRepo.setString(KEY_CODEC_PREFERENCE, pref.name) }
+    }
+
+    fun setHdrMode(mode: HdrMode) {
+        _state.update { it.copy(hdrMode = mode) }
+        scope.launch { prefsRepo.setString(KEY_HDR_MODE, mode.name) }
+    }
+
+    fun setAutoPlayNextEpisodeEnabled(enabled: Boolean) {
+        _state.update { it.copy(autoPlayNextEpisodeEnabled = enabled) }
+        scope.launch { prefsRepo.setString(KEY_AUTO_PLAY_NEXT_EPISODE, enabled.toString()) }
+    }
+
+    fun buildStreamPreferences(): StreamPreferences {
         val s = _state.value
-        return com.streamvault.domain.model.StreamPreferences(
-            maxQuality = s.maxQuality,
+        // Network-aware: cap quality on cellular
+        val effectiveMaxQuality = networkMonitor.recommendedMaxQuality(s.maxQuality)
+        return StreamPreferences(
+            preferredQuality = effectiveMaxQuality,
+            maxQuality = effectiveMaxQuality,
             minQuality = s.minQuality,
             hdrEnabled = s.hdrEnabled,
             cachedOnly = s.cachedOnly,
             maxFileSizeBytes = s.maxFileSizeMb?.let { it.toLong() * 1024 * 1024 },
+            autoPlayEnabled = s.autoPlayEnabled,
+            autoPlayNextEpisodeEnabled = s.autoPlayNextEpisodeEnabled,
+            codecPreference = s.codecPreference,
+            hdrMode = s.hdrMode,
         )
+    }
+
+    fun getCurrentNetworkType(): com.streamvault.platform.NetworkType {
+        return networkMonitor.currentNetworkType()
     }
 
     // -------------------------------------------------------------------------
@@ -528,6 +587,15 @@ class SettingsViewModel(
     fun isDebridConnected(): Boolean = _state.value.debridConnected
     fun getTraktAccessToken(): String = _state.value.traktAccessToken
     fun isTraktConnected(): Boolean = _state.value.traktConnected
+
+    fun getDebridAccounts(): Map<DebridServiceType, String> {
+        val s = _state.value
+        return if (s.debridConnected && s.debridApiKey.isNotBlank()) {
+            mapOf(s.debridProvider to s.debridApiKey)
+        } else {
+            emptyMap()
+        }
+    }
 
     // -------------------------------------------------------------------------
     // Kodi
@@ -574,6 +642,61 @@ class SettingsViewModel(
     fun setAppLanguage(language: AppLanguage) {
         _state.update { it.copy(appLanguage = language) }
         scope.launch { prefsRepo.setString(KEY_APP_LANGUAGE, language.name) }
+    }
+
+    // -------------------------------------------------------------------------
+    // Backup & Sync
+    // -------------------------------------------------------------------------
+
+    fun exportBackup(onResult: (String) -> Unit) {
+        scope.launch {
+            _state.update { it.copy(isSyncing = true, syncError = null, syncSuccess = null) }
+            try {
+                val jsonStr = syncRepo.exportToJson()
+                val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+                prefsRepo.setString(KEY_LAST_SYNC_TIME, now.toString())
+                _state.update { it.copy(isSyncing = false, lastSyncTime = now, syncSuccess = "Backup exported") }
+                onResult(jsonStr)
+                delay(3000)
+                _state.update { it.copy(syncSuccess = null) }
+            } catch (e: Exception) {
+                _state.update { it.copy(isSyncing = false, syncError = e.message ?: "Export failed") }
+                delay(3000)
+                _state.update { it.copy(syncError = null) }
+            }
+        }
+    }
+
+    fun importBackup(jsonStr: String) {
+        scope.launch {
+            _state.update { it.copy(isSyncing = true, syncError = null, syncSuccess = null) }
+            try {
+                val result = syncRepo.importFromJson(jsonStr)
+                val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+                prefsRepo.setString(KEY_LAST_SYNC_TIME, now.toString())
+                val msg = buildString {
+                    append("Imported: ")
+                    val parts = mutableListOf<String>()
+                    if (result.addonsImported > 0) parts += "${result.addonsImported} addons"
+                    if (result.preferencesImported > 0) parts += "${result.preferencesImported} preferences"
+                    if (result.progressImported > 0) parts += "${result.progressImported} progress entries"
+                    if (result.playlistsImported > 0) parts += "${result.playlistsImported} playlists"
+                    if (result.favoritesImported > 0) parts += "${result.favoritesImported} favorites"
+                    if (parts.isEmpty()) append("no new data")
+                    else append(parts.joinToString(", "))
+                    if (result.conflicts > 0) append(" (${result.conflicts} kept local)")
+                }
+                _state.update { it.copy(isSyncing = false, lastSyncTime = now, syncSuccess = msg) }
+                // Reload settings to pick up imported preferences
+                loadSavedSettings()
+                delay(5000)
+                _state.update { it.copy(syncSuccess = null) }
+            } catch (e: Exception) {
+                _state.update { it.copy(isSyncing = false, syncError = e.message ?: "Import failed") }
+                delay(3000)
+                _state.update { it.copy(syncError = null) }
+            }
+        }
     }
 
     // -------------------------------------------------------------------------

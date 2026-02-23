@@ -34,6 +34,10 @@ object StreamParser {
             lines.last().replace(Regex("[⚙️]"), "").trim().takeIf { it.isNotBlank() }
         } else null
 
+        val fullText = title
+        val hdr = extractHdr(fullText)
+        val audioCodec = extractAudioCodec(fullText)
+
         return ParsedStream(
             addonName = addonName,
             quality = quality,
@@ -45,6 +49,8 @@ object StreamParser {
             codec = codec,
             seeds = seeds,
             source = source,
+            hdr = hdr,
+            audioCodec = audioCodec,
         )
     }
 
@@ -66,6 +72,34 @@ object StreamParser {
             t.contains("AV1") -> "AV1"
             t.contains("H.264") || t.contains("H264") || t.contains("X264") || t.contains("AVC") -> "H.264"
             else -> ""
+        }
+    }
+
+    fun extractHdr(text: String): String? {
+        val t = text.uppercase()
+        return when {
+            (t.contains("DOVI") || t.contains("DOLBY VISION") || t.contains("DOLBYVISION")) &&
+                (t.contains("HDR10") || t.contains("HDR")) -> "DV HDR"
+            t.contains("DOVI") || t.contains("DOLBY VISION") || t.contains("DOLBYVISION") ||
+                Regex("\\bDV\\b").containsMatchIn(t) -> "DV"
+            t.contains("HDR10+") -> "HDR10+"
+            t.contains("HDR10") -> "HDR10"
+            Regex("\\bHDR\\b").containsMatchIn(t) -> "HDR"
+            else -> null
+        }
+    }
+
+    fun extractAudioCodec(text: String): String? {
+        val t = text.uppercase()
+        return when {
+            t.contains("ATMOS") -> "Atmos"
+            t.contains("TRUEHD") || t.contains("TRUE HD") || t.contains("TRUE.HD") -> "TrueHD"
+            Regex("DTS[.\\- ]?HD[.\\- ]?MA", RegexOption.IGNORE_CASE).containsMatchIn(text) -> "DTS-HD MA"
+            Regex("\\bDTS\\b").containsMatchIn(t) -> "DTS"
+            t.contains("EAC3") || t.contains("EAC-3") || t.contains("DD+") || t.contains("DDP") ||
+                Regex("\\bE-?AC-?3\\b").containsMatchIn(t) -> "EAC3"
+            Regex("\\bAAC\\b").containsMatchIn(t) -> "AAC"
+            else -> null
         }
     }
 }

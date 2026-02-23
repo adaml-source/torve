@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">StreamVault</string>
+    <string name="widget_description">Shows your continue watching list</string>
+    <string name="widget_name">Continue Watching</string>
+</resources>

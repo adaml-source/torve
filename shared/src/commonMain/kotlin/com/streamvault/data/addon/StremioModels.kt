@@ -35,6 +35,10 @@ data class ParsedStream(
     val codec: String? = null,
     val seeds: Int? = null,
     val source: String? = null,
+    val isCached: Boolean = false,
+    val score: Int = 0,
+    val hdr: String? = null,
+    val audioCodec: String? = null,
 )
 
 @Serializable

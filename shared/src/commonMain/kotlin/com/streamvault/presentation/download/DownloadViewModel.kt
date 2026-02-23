@@ -19,6 +19,11 @@ class DownloadViewModel(
     private val _state = MutableStateFlow(DownloadUiState())
     val state: StateFlow<DownloadUiState> = _state.asStateFlow()
 
+    // Platform callbacks — set from Android composable code to trigger WorkManager
+    var onDownloadEnqueued: ((downloadId: String) -> Unit)? = null
+    var onDownloadCancelled: ((downloadId: String) -> Unit)? = null
+    var onFileDelete: ((filePath: String) -> Unit)? = null
+
     init {
         loadDownloads()
     }
@@ -47,7 +52,8 @@ class DownloadViewModel(
     fun enqueueDownload(download: Download) {
         scope.launch {
             try {
-                downloadRepo.enqueueDownload(download)
+                val saved = downloadRepo.enqueueDownload(download)
+                onDownloadEnqueued?.invoke(saved.id)
                 loadDownloads()
             } catch (e: Exception) {
                 _state.update { it.copy(error = e.message) }
@@ -59,6 +65,7 @@ class DownloadViewModel(
         scope.launch {
             try {
                 downloadRepo.pauseDownload(id)
+                onDownloadCancelled?.invoke(id)
                 loadDownloads()
             } catch (e: Exception) {
                 _state.update { it.copy(error = e.message) }
@@ -70,6 +77,7 @@ class DownloadViewModel(
         scope.launch {
             try {
                 downloadRepo.resumeDownload(id)
+                onDownloadEnqueued?.invoke(id)
                 loadDownloads()
             } catch (e: Exception) {
                 _state.update { it.copy(error = e.message) }
@@ -80,7 +88,10 @@ class DownloadViewModel(
     fun deleteDownload(id: String) {
         scope.launch {
             try {
+                val download = downloadRepo.getDownload(id)
+                onDownloadCancelled?.invoke(id)
                 downloadRepo.deleteDownload(id)
+                download?.filePath?.let { onFileDelete?.invoke(it) }
                 loadDownloads()
             } catch (e: Exception) {
                 _state.update { it.copy(error = e.message) }

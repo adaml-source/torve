@@ -201,7 +201,7 @@ class TraktClient(
     // Calendar (my shows airing today)
     // -------------------------------------------------------------------------
 
-    suspend fun getCalendar(accessToken: String, days: Int = 1): List<TraktCalendarEpisode> {
+    suspend fun getCalendar(accessToken: String, days: Int = 7): List<TraktCalendarEpisode> {
         return try {
             val resp: List<TraktCalendarResponse> = httpClient.get("$TRAKT_BASE/calendars/my/shows/today/$days") {
                 traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
@@ -215,6 +215,7 @@ class TraktClient(
                     episode = ep.number,
                     episodeTitle = ep.title,
                     firstAired = item.firstAired,
+                    showTmdbId = show.ids?.tmdb,
                 )
             }
         } catch (_: Exception) {

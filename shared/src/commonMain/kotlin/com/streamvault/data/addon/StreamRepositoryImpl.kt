@@ -2,35 +2,36 @@ package com.streamvault.data.addon
 
 import com.streamvault.data.debrid.DebridClient
 import com.streamvault.domain.model.DebridServiceType
+import com.streamvault.domain.model.InstalledAddon
 import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.model.ResolvedStream
+import com.streamvault.domain.model.StreamPreferences
 import com.streamvault.domain.repository.StreamRepository
 
 class StreamRepositoryImpl(
     private val addonClient: StremioAddonClient,
     private val debridClient: DebridClient,
+    private val streamAggregator: StreamAggregator,
 ) : StreamRepository {
-
-    // Default addon URLs; user can add more from settings
-    private val addonUrls = mutableListOf(StremioAddonClient.TORRENTIO_BASE)
-
-    fun addAddonUrl(url: String) {
-        if (url !in addonUrls) addonUrls.add(url)
-    }
-
-    fun removeAddonUrl(url: String) {
-        addonUrls.remove(url)
-    }
-
-    fun getAddonUrls(): List<String> = addonUrls.toList()
 
     override suspend fun fetchStreams(
         type: MediaType,
         imdbId: String,
         season: Int?,
         episode: Int?,
+        addons: List<InstalledAddon>,
+        debridAccounts: Map<DebridServiceType, String>,
+        preferences: StreamPreferences,
     ): List<ParsedStream> {
-        return addonClient.fetchAllStreams(addonUrls, type, imdbId, season, episode)
+        return streamAggregator.resolveStreams(
+            addons = addons,
+            type = type,
+            imdbId = imdbId,
+            season = season,
+            episode = episode,
+            debridAccounts = debridAccounts,
+            preferences = preferences,
+        )
     }
 
     override suspend fun resolveStream(

@@ -62,6 +62,7 @@ import com.streamvault.android.ui.theme.StreamVault
 import com.streamvault.domain.model.MediaItem
 import com.streamvault.domain.model.ShelfType
 import com.streamvault.domain.model.WatchProgress
+import com.streamvault.domain.recommendation.ScoredMediaItem
 import com.streamvault.presentation.home.HomeViewModel
 import kotlinx.coroutines.delay
 import org.koin.compose.koinInject
@@ -146,6 +147,28 @@ fun HomeScreen(
                                     ContinueWatchingCard(
                                         progress = progress,
                                         onClick = { onContinueWatchingClick(progress) },
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // ── Recommended For You ──
+                    if (state.recommendedItems.isNotEmpty()) {
+                        item(key = "recommended") {
+                            Spacer(Modifier.height(8.dp))
+                            SectionHeader(title = "Recommended For You")
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                items(
+                                    state.recommendedItems,
+                                    key = { it.item.id },
+                                ) { scored ->
+                                    RecommendationCard(
+                                        scored = scored,
+                                        onClick = { onMediaClick(scored.item) },
                                     )
                                 }
                             }
@@ -490,6 +513,34 @@ fun CatalogShelf(
                 )
             }
         }
+    }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Recommendation Card — Poster with "Because you like…" label
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@Composable
+fun RecommendationCard(
+    scored: ScoredMediaItem,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier.width(120.dp)) {
+        PosterCard(
+            item = scored.item,
+            size = CardSize.MEDIUM,
+            onClick = onClick,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = scored.reason,
+            style = MaterialTheme.typography.labelSmall,
+            color = Amber,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 2.dp),
+        )
     }
 }
 

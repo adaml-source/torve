@@ -112,6 +112,20 @@ class TmdbApiClient(private val httpClient: HttpClient) {
         }.body()
     }
 
+    suspend fun getRecommendations(type: String, id: Int, page: Int = 1): TmdbResponse<TmdbMovie> {
+        return httpClient.get("$BASE_URL/$type/$id/recommendations") {
+            parameter("api_key", API_KEY)
+            parameter("page", page)
+        }.body()
+    }
+
+    suspend fun getRecommendationsTv(id: Int, page: Int = 1): TmdbResponse<TmdbTv> {
+        return httpClient.get("$BASE_URL/tv/$id/recommendations") {
+            parameter("api_key", API_KEY)
+            parameter("page", page)
+        }.body()
+    }
+
     suspend fun getPersonCredits(personId: Int): TmdbPersonCredits {
         return httpClient.get("$BASE_URL/person/$personId/combined_credits") {
             parameter("api_key", API_KEY)

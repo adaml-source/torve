@@ -73,6 +73,14 @@ class MetadataRepositoryImpl(
         }
     }
 
+    override suspend fun getRecommendations(type: String, id: Int, page: Int): List<MediaItem> {
+        return if (type == "tv") {
+            api.getRecommendationsTv(id, page).results.map { TmdbMappers.tvToMediaItem(it) }
+        } else {
+            api.getRecommendations(type, id, page).results.map { TmdbMappers.movieToMediaItem(it) }
+        }
+    }
+
     override suspend fun getPersonCredits(personId: Int): List<MediaItem> {
         val credits = api.getPersonCredits(personId)
         val castItems = credits.cast.map { TmdbMappers.personCreditToMediaItem(it) }

@@ -2,18 +2,25 @@ package com.streamvault.domain.repository
 
 import com.streamvault.data.addon.ParsedStream
 import com.streamvault.domain.model.DebridServiceType
+import com.streamvault.domain.model.InstalledAddon
 import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.model.ResolvedStream
+import com.streamvault.domain.model.StreamPreferences
 
 interface StreamRepository {
     /**
      * Fetch available streams from all configured addons for a given media item.
+     * When [addons], [debridAccounts], or [preferences] are provided, the full
+     * aggregation pipeline runs: deduplicate, cache check, filter, score, sort.
      */
     suspend fun fetchStreams(
         type: MediaType,
         imdbId: String,
         season: Int? = null,
         episode: Int? = null,
+        addons: List<InstalledAddon> = emptyList(),
+        debridAccounts: Map<DebridServiceType, String> = emptyMap(),
+        preferences: StreamPreferences = StreamPreferences(),
     ): List<ParsedStream>
 
     /**

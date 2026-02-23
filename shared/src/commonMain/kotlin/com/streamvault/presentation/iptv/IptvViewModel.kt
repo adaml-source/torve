@@ -5,6 +5,7 @@ import com.streamvault.domain.model.EpgProgramme
 import com.streamvault.domain.model.IptvCategory
 import com.streamvault.domain.model.IptvChannel
 import com.streamvault.domain.model.IptvContentType
+import com.streamvault.data.iptv.CatchupResolver
 import com.streamvault.domain.repository.IptvRepository
 import com.streamvault.domain.repository.PreferencesRepository
 import kotlinx.coroutines.CoroutineScope
@@ -23,6 +24,7 @@ import kotlinx.coroutines.launch
 class IptvViewModel(
     private val iptvRepo: IptvRepository,
     private val prefsRepo: PreferencesRepository,
+    private val catchupResolver: CatchupResolver = CatchupResolver(),
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(IptvUiState())
@@ -599,5 +601,15 @@ class IptvViewModel(
 
     fun clearSelectedChannel() {
         _state.update { it.copy(selectedChannel = null, programmes = emptyList()) }
+    }
+
+    // --- Catchup / Timeshift ---
+
+    fun canCatchup(channel: IptvChannel): Boolean {
+        return catchupResolver.canCatchup(channel)
+    }
+
+    fun resolveCatchupUrl(channel: IptvChannel, programme: EpgProgramme): String? {
+        return catchupResolver.resolve(channel, programme)
     }
 }

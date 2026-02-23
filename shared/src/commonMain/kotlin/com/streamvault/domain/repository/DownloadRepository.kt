@@ -12,6 +12,7 @@ interface DownloadRepository {
     suspend fun getDownloadByMediaId(mediaId: String): Download?
     suspend fun updateProgress(id: String, downloadedBytes: Long, status: DownloadStatus)
     suspend fun markCompleted(id: String, filePath: String)
+    suspend fun updateFileSize(id: String, fileSizeBytes: Long)
     suspend fun deleteDownload(id: String)
     suspend fun pauseDownload(id: String)
     suspend fun resumeDownload(id: String)

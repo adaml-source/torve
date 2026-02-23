@@ -161,6 +161,7 @@ data class TraktCalendarEpisode(
     val episode: Int,
     val episodeTitle: String,
     val firstAired: String,
+    val showTmdbId: Int? = null,
 )
 
 @Serializable

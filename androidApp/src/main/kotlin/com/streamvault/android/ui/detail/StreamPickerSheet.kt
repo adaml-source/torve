@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -15,10 +14,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -35,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.streamvault.android.ui.components.QualityBadge
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Charcoal
@@ -55,13 +55,15 @@ fun StreamPickerSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
+    val bestMatch = streams.filter { it.score >= 70 }
+    val other = streams.filter { it.score < 70 }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = Charcoal,
         shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
         dragHandle = {
-            // Custom drag handle
             Box(
                 modifier = Modifier
                     .padding(top = 10.dp)
@@ -132,16 +134,43 @@ fun StreamPickerSheet(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp),
                 ) {
-                    items(streams) { stream ->
-                        StreamItem(
-                            stream = stream,
-                            onClick = { onStreamSelected(stream) },
-                        )
+                    if (bestMatch.isNotEmpty()) {
+                        item {
+                            GroupHeader("Best Match")
+                        }
+                        items(bestMatch) { stream ->
+                            StreamItem(
+                                stream = stream,
+                                onClick = { onStreamSelected(stream) },
+                            )
+                        }
+                    }
+                    if (other.isNotEmpty()) {
+                        item {
+                            GroupHeader(if (bestMatch.isNotEmpty()) "Other Options" else "Available Streams")
+                        }
+                        items(other) { stream ->
+                            StreamItem(
+                                stream = stream,
+                                onClick = { onStreamSelected(stream) },
+                            )
+                        }
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun GroupHeader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.labelMedium,
+        color = Amber,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+    )
 }
 
 @Composable
@@ -160,12 +189,41 @@ private fun StreamItem(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Quality badge — left aligned, visually prominent
+            // Score badge
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .background(
+                        color = when {
+                            stream.score >= 80 -> Emerald.copy(alpha = 0.2f)
+                            stream.score >= 60 -> Amber.copy(alpha = 0.2f)
+                            else -> StreamVault.colors.border
+                        },
+                        shape = CircleShape,
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "${stream.score}",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp,
+                    color = when {
+                        stream.score >= 80 -> Emerald
+                        stream.score >= 60 -> Amber
+                        else -> StreamVault.colors.textTertiary
+                    },
+                )
+            }
+
+            Spacer(Modifier.width(8.dp))
+
+            // Quality badge
             QualityBadge(quality = stream.quality)
 
             Spacer(Modifier.width(10.dp))
 
-            // Stream info — takes remaining space
+            // Stream info
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = stream.title,
@@ -179,15 +237,11 @@ private fun StreamItem(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    stream.size?.let {
-                        MetaChip(it)
-                    }
-                    if (!stream.codec.isNullOrBlank()) {
-                        MetaChip(stream.codec!!)
-                    }
-                    stream.seeds?.let {
-                        MetaChip("$it seeds")
-                    }
+                    stream.size?.let { MetaChip(it) }
+                    if (!stream.codec.isNullOrBlank()) MetaChip(stream.codec!!)
+                    stream.hdr?.let { MetaChip(it) }
+                    stream.audioCodec?.let { MetaChip(it) }
+                    stream.seeds?.let { MetaChip("$it seeds") }
                 }
             }
 
@@ -200,7 +254,15 @@ private fun StreamItem(
                     style = MaterialTheme.typography.labelSmall,
                     color = Amber,
                 )
-                // TODO: Add cached indicator when ParsedStream gains isCached field
+                if (stream.isCached) {
+                    Spacer(Modifier.height(2.dp))
+                    Icon(
+                        Icons.Rounded.CloudDone,
+                        contentDescription = "Cached",
+                        modifier = Modifier.size(14.dp),
+                        tint = Emerald,
+                    )
+                }
             }
         }
     }

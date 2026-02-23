@@ -57,6 +57,9 @@ SELECT value FROM preference WHERE key = ?;
 setPreference:
 INSERT OR REPLACE INTO preference (key, value) VALUES (?, ?);
 
+getAllPreferences:
+SELECT * FROM preference;
+
 deletePreference:
 DELETE FROM preference WHERE key = ?;
 
@@ -242,6 +245,9 @@ UPDATE download_queue SET downloaded_bytes = ?, status = ? WHERE id = ?;
 updateDownloadCompleted:
 UPDATE download_queue SET status = 'completed', file_path = ?, completed_at = ? WHERE id = ?;
 
+updateDownloadFileSize:
+UPDATE download_queue SET file_size_bytes = ? WHERE id = ?;
+
 deleteDownload:
 DELETE FROM download_queue WHERE id = ?;
 
@@ -264,3 +270,57 @@ INSERT OR REPLACE INTO subscription (id, tier, purchase_token, expires_at, is_ac
 
 deactivateAllSubscriptions:
 UPDATE subscription SET is_active = 0;
+
+-- User Profiles
+CREATE TABLE user_profile (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    avatar_index INTEGER NOT NULL DEFAULT 0,
+    is_active INTEGER NOT NULL DEFAULT 0,
+    pin TEXT,
+    max_content_rating TEXT,
+    created_at INTEGER NOT NULL
+);
+
+getAllProfiles:
+SELECT * FROM user_profile ORDER BY created_at ASC;
+
+getActiveProfile:
+SELECT * FROM user_profile WHERE is_active = 1 LIMIT 1;
+
+getProfile:
+SELECT * FROM user_profile WHERE id = ?;
+
+insertProfile:
+INSERT OR REPLACE INTO user_profile (id, name, avatar_index, is_active, pin, max_content_rating, created_at) VALUES (?, ?, ?, ?, ?, ?, ?);
+
+setActiveProfile:
+UPDATE user_profile SET is_active = CASE WHEN id = ? THEN 1 ELSE 0 END;
+
+updateProfileName:
+UPDATE user_profile SET name = ? WHERE id = ?;
+
+updateProfilePin:
+UPDATE user_profile SET pin = ? WHERE id = ?;
+
+updateProfileRating:
+UPDATE user_profile SET max_content_rating = ? WHERE id = ?;
+
+deleteProfile:
+DELETE FROM user_profile WHERE id = ?;
+
+-- Home Shelf Config
+CREATE TABLE home_shelf_config (
+    shelf_id TEXT NOT NULL PRIMARY KEY,
+    is_visible INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+getAllShelfConfigs:
+SELECT * FROM home_shelf_config ORDER BY sort_order ASC;
+
+getShelfConfig:
+SELECT * FROM home_shelf_config WHERE shelf_id = ?;
+
+upsertShelfConfig:
+INSERT OR REPLACE INTO home_shelf_config (shelf_id, is_visible, sort_order) VALUES (?, ?, ?);

@@ -42,6 +42,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -66,13 +67,28 @@ import androidx.media3.ui.PlayerView
 import com.streamvault.android.player.ExoPlayerEngine
 import com.streamvault.android.player.MPVPlayerEngine
 import com.streamvault.android.player.MPVView
+import com.streamvault.data.trakt.TraktClient
+import com.streamvault.data.trakt.TraktHistoryBody
+import com.streamvault.data.trakt.TraktHistoryMovie
+import com.streamvault.data.trakt.TraktHistoryShow
+import com.streamvault.data.trakt.TraktIds
 import com.streamvault.domain.model.MediaType
+import com.streamvault.domain.model.Season
 import com.streamvault.domain.model.WatchProgress
+import com.streamvault.domain.player.NextEpisodeHelper
+import com.streamvault.domain.player.NextEpisodeInfo
 import com.streamvault.domain.player.PlayerEngine
+import com.streamvault.domain.player.SkipSegment
+import com.streamvault.domain.player.SkipSegmentDetector
 import com.streamvault.domain.player.PlayerListener
 import com.streamvault.domain.player.PlayerState
 import com.streamvault.domain.player.TrackDescription
+import com.streamvault.domain.repository.AddonRepository
+import com.streamvault.domain.repository.MetadataRepository
+import com.streamvault.domain.repository.StreamRepository
 import com.streamvault.domain.repository.WatchProgressRepository
+import com.streamvault.presentation.player.TraktScrobbler
+import com.streamvault.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
@@ -86,8 +102,18 @@ fun PlayerScreen(
     mediaType: String = "movie",
     posterUrl: String = "",
     backdropUrl: String = "",
+    seasonNumber: Int? = null,
+    episodeNumber: Int? = null,
+    showTmdbId: Int? = null,
+    showImdbId: String? = null,
     onBack: () -> Unit,
     watchProgressRepo: WatchProgressRepository = koinInject(),
+    metadataRepo: MetadataRepository = koinInject(),
+    streamRepo: StreamRepository = koinInject(),
+    addonRepo: AddonRepository = koinInject(),
+    settingsViewModel: SettingsViewModel = koinInject(),
+    traktScrobbler: TraktScrobbler = koinInject(),
+    traktClient: TraktClient = koinInject(),
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -103,8 +129,41 @@ fun PlayerScreen(
     var useMpv by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    // Create the player engine (try MPV first, fallback to ExoPlayer)
-    val engine = remember(url) {
+    // Mutable episode state — updated when swapping to next episode
+    var currentSeasonNumber by remember { mutableStateOf(seasonNumber) }
+    var currentEpisodeNumber by remember { mutableStateOf(episodeNumber) }
+    var currentUrl by remember { mutableStateOf(url) }
+    var currentTitle by remember { mutableStateOf(title) }
+
+    // Season data for next-episode calculation
+    var loadedSeasons by remember { mutableStateOf<List<Season>>(emptyList()) }
+
+    // Next episode overlay state
+    var nextEpisodeInfo by remember { mutableStateOf<NextEpisodeInfo?>(null) }
+    var showNextEpisodeOverlay by remember { mutableStateOf(false) }
+    var nextEpisodeCountdown by remember { mutableIntStateOf(15) }
+    var nextEpisodeCancelled by remember { mutableStateOf(false) }
+    var isResolvingNextEpisode by remember { mutableStateOf(false) }
+    var completionDetected by remember { mutableStateOf(false) }
+
+    // Skip intro/credits segments
+    var skipSegments by remember { mutableStateOf<List<SkipSegment>>(emptyList()) }
+    var activeSkipSegment by remember { mutableStateOf<SkipSegment?>(null) }
+    var dismissedSkipSegments by remember { mutableStateOf<Set<String>>(emptySet()) }
+
+    // Trakt scrobble state
+    val settingsState by settingsViewModel.state.collectAsState()
+    val traktAccessToken = settingsState.traktAccessToken
+    val traktScrobbleEnabled = settingsState.traktScrobbleEnabled
+    val tmdbId = mediaId.toIntOrNull() ?: 0
+    val parsedMediaType = MediaType.fromString(mediaType)
+    var hasMarkedWatched by remember { mutableStateOf(false) }
+
+    // Helper to check if scrobbling should fire
+    val canScrobble = traktScrobbleEnabled && traktAccessToken.isNotBlank() && tmdbId > 0
+
+    // Create the player engine once (not keyed on URL for in-place swaps)
+    val engine = remember {
         val mpvEngine = MPVPlayerEngine(context)
         if (mpvEngine.initialize()) {
             useMpv = true
@@ -114,6 +173,114 @@ fun PlayerScreen(
             exoEngine.initialize()
             exoEngine as PlayerEngine
         }
+    }
+
+    // Load season data for next-episode calculation (TV shows only)
+    LaunchedEffect(showTmdbId, currentSeasonNumber) {
+        if (showTmdbId == null || showTmdbId <= 0 || mediaType != "tv") return@LaunchedEffect
+        if (currentSeasonNumber == null) return@LaunchedEffect
+
+        try {
+            val detail = metadataRepo.getDetail("tv", showTmdbId)
+            val validSeasons = detail?.seasons
+                ?.filter { it.seasonNumber > 0 }
+                ?.sortedBy { it.seasonNumber }
+                ?: return@LaunchedEffect
+
+            // Only load current season and next season to avoid excess API calls
+            val seasonsToLoad = validSeasons.filter {
+                it.seasonNumber == currentSeasonNumber || it.seasonNumber == currentSeasonNumber!! + 1
+            }
+            val loaded = seasonsToLoad.map { season ->
+                try {
+                    metadataRepo.getSeasonDetail(showTmdbId, season.seasonNumber)
+                } catch (_: Exception) {
+                    season
+                }
+            }
+            loadedSeasons = loaded
+        } catch (_: Exception) { }
+    }
+
+    // Detect near-completion for next-episode trigger
+    LaunchedEffect(currentPosition, duration, completionDetected) {
+        if (currentSeasonNumber == null || currentEpisodeNumber == null) return@LaunchedEffect
+        if (duration <= 0 || completionDetected || nextEpisodeCancelled) return@LaunchedEffect
+
+        val prefs = settingsViewModel.buildStreamPreferences()
+        if (!prefs.autoPlayNextEpisodeEnabled) return@LaunchedEffect
+
+        val remainingMs = duration - currentPosition
+        val progressPercent = currentPosition.toFloat() / duration
+
+        val nearComplete = progressPercent >= 0.95f || (remainingMs in 1..30_000)
+
+        if (nearComplete && !showNextEpisodeOverlay) {
+            val nextEp = NextEpisodeHelper.getNextEpisode(
+                currentSeason = currentSeasonNumber!!,
+                currentEpisode = currentEpisodeNumber!!,
+                seasons = loadedSeasons,
+            )
+            if (nextEp != null) {
+                nextEpisodeInfo = nextEp
+                showNextEpisodeOverlay = true
+                completionDetected = true
+                nextEpisodeCountdown = 15
+            }
+        }
+    }
+
+    // Countdown timer for next episode overlay
+    LaunchedEffect(showNextEpisodeOverlay) {
+        if (!showNextEpisodeOverlay) return@LaunchedEffect
+        for (i in 15 downTo 1) {
+            nextEpisodeCountdown = i
+            delay(1000)
+            if (!showNextEpisodeOverlay) return@LaunchedEffect
+        }
+        nextEpisodeCountdown = 0
+        // Auto-trigger next episode
+        resolveAndPlayNextEpisode(
+            nextEpisodeInfo = nextEpisodeInfo,
+            showImdbId = showImdbId,
+            engine = engine,
+            streamRepo = streamRepo,
+            addonRepo = addonRepo,
+            settingsViewModel = settingsViewModel,
+            watchProgressRepo = watchProgressRepo,
+            mediaId = mediaId,
+            mediaType = mediaType,
+            posterUrl = posterUrl,
+            backdropUrl = backdropUrl,
+            currentTitle = currentTitle,
+            currentPosition = currentPosition,
+            duration = duration,
+            currentSeasonNumber = currentSeasonNumber,
+            currentEpisodeNumber = currentEpisodeNumber,
+            onStateUpdate = { newSeason, newEpisode, newUrl, newTitle ->
+                currentSeasonNumber = newSeason
+                currentEpisodeNumber = newEpisode
+                currentUrl = newUrl
+                currentTitle = newTitle
+                currentPosition = 0L
+                duration = 0L
+                sliderPosition = 0f
+                showNextEpisodeOverlay = false
+                nextEpisodeCancelled = false
+                completionDetected = false
+                isResolvingNextEpisode = false
+                nextEpisodeInfo = null
+                hasMarkedWatched = false
+            },
+            onResolvingChange = { isResolvingNextEpisode = it },
+            onFailed = {
+                isResolvingNextEpisode = false
+                showNextEpisodeOverlay = false
+            },
+            traktScrobbler = if (canScrobble) traktScrobbler else null,
+            traktAccessToken = traktAccessToken,
+            tmdbId = tmdbId,
+        )
     }
 
     // MediaSession for notification bar / lock screen controls
@@ -145,6 +312,54 @@ fun PlayerScreen(
                         state.positionMs.toFloat() / state.durationMs
                     } else 0f
                 }
+                // Content ended while countdown was active — trigger immediately
+                if (state.isIdle && !state.isBuffering && completionDetected &&
+                    showNextEpisodeOverlay && !isResolvingNextEpisode
+                ) {
+                    scope.launch {
+                        resolveAndPlayNextEpisode(
+                            nextEpisodeInfo = nextEpisodeInfo,
+                            showImdbId = showImdbId,
+                            engine = engine,
+                            streamRepo = streamRepo,
+                            addonRepo = addonRepo,
+                            settingsViewModel = settingsViewModel,
+                            watchProgressRepo = watchProgressRepo,
+                            mediaId = mediaId,
+                            mediaType = mediaType,
+                            posterUrl = posterUrl,
+                            backdropUrl = backdropUrl,
+                            currentTitle = currentTitle,
+                            currentPosition = currentPosition,
+                            duration = duration,
+                            currentSeasonNumber = currentSeasonNumber,
+                            currentEpisodeNumber = currentEpisodeNumber,
+                            onStateUpdate = { newSeason, newEpisode, newUrl, newTitle ->
+                                currentSeasonNumber = newSeason
+                                currentEpisodeNumber = newEpisode
+                                currentUrl = newUrl
+                                currentTitle = newTitle
+                                currentPosition = 0L
+                                this@DisposableEffect.run { duration = 0L }
+                                sliderPosition = 0f
+                                showNextEpisodeOverlay = false
+                                nextEpisodeCancelled = false
+                                completionDetected = false
+                                isResolvingNextEpisode = false
+                                nextEpisodeInfo = null
+                                hasMarkedWatched = false
+                            },
+                            onResolvingChange = { isResolvingNextEpisode = it },
+                            onFailed = {
+                                isResolvingNextEpisode = false
+                                showNextEpisodeOverlay = false
+                            },
+                            traktScrobbler = if (canScrobble) traktScrobbler else null,
+                            traktAccessToken = traktAccessToken,
+                            tmdbId = tmdbId,
+                        )
+                    }
+                }
             }
 
             override fun onTracksChanged(audio: List<TrackDescription>, subtitles: List<TrackDescription>) {
@@ -157,24 +372,48 @@ fun PlayerScreen(
             }
         }
         engine.addListener(listener)
-        engine.play(url)
+        engine.play(currentUrl)
+
+        // Scrobble start on initial playback
+        if (canScrobble) {
+            scope.launch {
+                traktScrobbler.start(
+                    traktAccessToken, tmdbId, parsedMediaType, 0.0,
+                    currentSeasonNumber, currentEpisodeNumber,
+                )
+            }
+        }
 
         onDispose {
             // Save final progress on dispose
-            if (mediaId.isNotBlank() && duration > 0) {
-                val finalPosition = engine.state.positionMs
-                val finalDuration = duration
+            val finalPosition = engine.state.positionMs
+            val finalDuration = duration
+            if (mediaId.isNotBlank() && finalDuration > 0) {
                 scope.launch {
                     watchProgressRepo.saveProgress(
                         WatchProgress(
                             mediaId = mediaId,
                             mediaType = MediaType.fromString(mediaType),
-                            title = title,
+                            title = currentTitle,
                             posterUrl = posterUrl.takeIf { it.isNotBlank() },
                             backdropUrl = backdropUrl.takeIf { it.isNotBlank() },
                             positionMs = finalPosition,
                             durationMs = finalDuration,
+                            seasonNumber = currentSeasonNumber,
+                            episodeNumber = currentEpisodeNumber,
                         ),
+                    )
+                }
+            }
+            // Scrobble stop on dispose
+            if (canScrobble) {
+                val progress = if (finalDuration > 0) {
+                    (finalPosition.toDouble() / finalDuration * 100).coerceIn(0.0, 100.0)
+                } else 0.0
+                scope.launch {
+                    traktScrobbler.stop(
+                        traktAccessToken, tmdbId, parsedMediaType, progress,
+                        currentSeasonNumber, currentEpisodeNumber,
                     )
                 }
             }
@@ -201,11 +440,13 @@ fun PlayerScreen(
                     WatchProgress(
                         mediaId = mediaId,
                         mediaType = MediaType.fromString(mediaType),
-                        title = title,
+                        title = currentTitle,
                         posterUrl = posterUrl.takeIf { it.isNotBlank() },
                         backdropUrl = backdropUrl.takeIf { it.isNotBlank() },
                         positionMs = currentPosition,
                         durationMs = duration,
+                        seasonNumber = currentSeasonNumber,
+                        episodeNumber = currentEpisodeNumber,
                     ),
                 )
             }
@@ -222,16 +463,59 @@ fun PlayerScreen(
                     WatchProgress(
                         mediaId = mediaId,
                         mediaType = MediaType.fromString(mediaType),
-                        title = title,
+                        title = currentTitle,
                         posterUrl = posterUrl.takeIf { it.isNotBlank() },
                         backdropUrl = backdropUrl.takeIf { it.isNotBlank() },
                         positionMs = currentPosition,
                         durationMs = duration,
+                        seasonNumber = currentSeasonNumber,
+                        episodeNumber = currentEpisodeNumber,
                     ),
                 )
             }
             delay(10_000)
         }
+    }
+
+    // Auto-mark watched on Trakt at >80% progress
+    LaunchedEffect(currentPosition, duration, hasMarkedWatched) {
+        if (hasMarkedWatched || !canScrobble) return@LaunchedEffect
+        if (duration <= 0) return@LaunchedEffect
+        val progressPercent = currentPosition.toDouble() / duration
+        if (progressPercent > 0.80) {
+            hasMarkedWatched = true
+            try {
+                val ids = TraktIds(tmdb = tmdbId)
+                val body = if (parsedMediaType == MediaType.MOVIE) {
+                    TraktHistoryBody(movies = listOf(TraktHistoryMovie(ids = ids)))
+                } else {
+                    TraktHistoryBody(shows = listOf(TraktHistoryShow(ids = ids)))
+                }
+                traktClient.addToHistory(traktAccessToken, body)
+            } catch (_: Exception) {
+                // Best-effort — don't crash the player
+            }
+        }
+    }
+
+    // Detect skip segments when duration becomes available
+    LaunchedEffect(duration, currentEpisodeNumber) {
+        if (duration <= 0) return@LaunchedEffect
+        val isEpisode = mediaType == "tv" && currentSeasonNumber != null
+        skipSegments = SkipSegmentDetector.detectSegments(
+            isEpisode = isEpisode,
+            durationMs = duration,
+            episodeNumber = currentEpisodeNumber,
+        )
+        dismissedSkipSegments = emptySet()
+    }
+
+    // Check for active skip segment at current position
+    LaunchedEffect(currentPosition, skipSegments, dismissedSkipSegments) {
+        val segment = SkipSegmentDetector.findActiveSegment(skipSegments, currentPosition)
+        activeSkipSegment = if (segment != null && segment.type.name !in dismissedSkipSegments) {
+            segment
+        } else null
     }
 
     // Auto-hide controls
@@ -324,7 +608,7 @@ fun PlayerScreen(
                         Button(
                             onClick = {
                                 errorMessage = null
-                                engine.play(url)
+                                engine.play(currentUrl)
                             },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = Color(0xFFE8A838),
@@ -370,6 +654,88 @@ fun PlayerScreen(
             )
         }
 
+        // Skip Intro/Credits button
+        activeSkipSegment?.let { segment ->
+            Button(
+                onClick = {
+                    engine.seekTo(segment.endMs)
+                    dismissedSkipSegments = dismissedSkipSegments + segment.type.name
+                    activeSkipSegment = null
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 24.dp, bottom = 80.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.White.copy(alpha = 0.9f),
+                    contentColor = Color.Black,
+                ),
+                shape = RoundedCornerShape(8.dp),
+            ) {
+                Text(
+                    text = segment.label,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+        }
+
+        // Next Episode overlay
+        if (showNextEpisodeOverlay && nextEpisodeInfo != null) {
+            NextEpisodeOverlay(
+                nextEpisodeInfo = nextEpisodeInfo!!,
+                countdown = nextEpisodeCountdown,
+                isResolving = isResolvingNextEpisode,
+                onPlayNow = {
+                    scope.launch {
+                        resolveAndPlayNextEpisode(
+                            nextEpisodeInfo = nextEpisodeInfo,
+                            showImdbId = showImdbId,
+                            engine = engine,
+                            streamRepo = streamRepo,
+                            addonRepo = addonRepo,
+                            settingsViewModel = settingsViewModel,
+                            watchProgressRepo = watchProgressRepo,
+                            mediaId = mediaId,
+                            mediaType = mediaType,
+                            posterUrl = posterUrl,
+                            backdropUrl = backdropUrl,
+                            currentTitle = currentTitle,
+                            currentPosition = currentPosition,
+                            duration = duration,
+                            currentSeasonNumber = currentSeasonNumber,
+                            currentEpisodeNumber = currentEpisodeNumber,
+                            onStateUpdate = { newSeason, newEpisode, newUrl, newTitle ->
+                                currentSeasonNumber = newSeason
+                                currentEpisodeNumber = newEpisode
+                                currentUrl = newUrl
+                                currentTitle = newTitle
+                                currentPosition = 0L
+                                duration = 0L
+                                sliderPosition = 0f
+                                showNextEpisodeOverlay = false
+                                nextEpisodeCancelled = false
+                                completionDetected = false
+                                isResolvingNextEpisode = false
+                                nextEpisodeInfo = null
+                                hasMarkedWatched = false
+                            },
+                            onResolvingChange = { isResolvingNextEpisode = it },
+                            onFailed = {
+                                isResolvingNextEpisode = false
+                                showNextEpisodeOverlay = false
+                            },
+                            traktScrobbler = if (canScrobble) traktScrobbler else null,
+                            traktAccessToken = traktAccessToken,
+                            tmdbId = tmdbId,
+                        )
+                    }
+                },
+                onCancel = {
+                    showNextEpisodeOverlay = false
+                    nextEpisodeCancelled = true
+                },
+            )
+        }
+
         // Controls overlay
         if (showControls) {
             Box(
@@ -394,9 +760,9 @@ fun PlayerScreen(
                             modifier = Modifier.size(28.dp),
                         )
                     }
-                    if (title.isNotBlank()) {
+                    if (currentTitle.isNotBlank()) {
                         Text(
-                            text = title,
+                            text = currentTitle,
                             style = MaterialTheme.typography.titleMedium,
                             color = Color.White,
                             maxLines = 1,
@@ -441,7 +807,33 @@ fun PlayerScreen(
 
                     IconButton(
                         onClick = {
-                            if (isPlaying) engine.pause() else engine.resume()
+                            if (isPlaying) {
+                                engine.pause()
+                                if (canScrobble) {
+                                    val progress = if (duration > 0) {
+                                        (currentPosition.toDouble() / duration * 100).coerceIn(0.0, 100.0)
+                                    } else 0.0
+                                    scope.launch {
+                                        traktScrobbler.pause(
+                                            traktAccessToken, tmdbId, parsedMediaType, progress,
+                                            currentSeasonNumber, currentEpisodeNumber,
+                                        )
+                                    }
+                                }
+                            } else {
+                                engine.resume()
+                                if (canScrobble) {
+                                    val progress = if (duration > 0) {
+                                        (currentPosition.toDouble() / duration * 100).coerceIn(0.0, 100.0)
+                                    } else 0.0
+                                    scope.launch {
+                                        traktScrobbler.start(
+                                            traktAccessToken, tmdbId, parsedMediaType, progress,
+                                            currentSeasonNumber, currentEpisodeNumber,
+                                        )
+                                    }
+                                }
+                            }
                             showControls = true
                         },
                     ) {
@@ -505,6 +897,116 @@ fun PlayerScreen(
                 }
             }
         }
+    }
+}
+
+private suspend fun resolveAndPlayNextEpisode(
+    nextEpisodeInfo: NextEpisodeInfo?,
+    showImdbId: String?,
+    engine: PlayerEngine,
+    streamRepo: StreamRepository,
+    addonRepo: AddonRepository,
+    settingsViewModel: SettingsViewModel,
+    watchProgressRepo: WatchProgressRepository,
+    mediaId: String,
+    mediaType: String,
+    posterUrl: String,
+    backdropUrl: String,
+    currentTitle: String,
+    currentPosition: Long,
+    duration: Long,
+    currentSeasonNumber: Int?,
+    currentEpisodeNumber: Int?,
+    onStateUpdate: (newSeason: Int, newEpisode: Int, newUrl: String, newTitle: String) -> Unit,
+    onResolvingChange: (Boolean) -> Unit,
+    onFailed: () -> Unit,
+    traktScrobbler: TraktScrobbler? = null,
+    traktAccessToken: String = "",
+    tmdbId: Int = 0,
+) {
+    val nextEp = nextEpisodeInfo ?: run { onFailed(); return }
+    val imdbId = showImdbId ?: run { onFailed(); return }
+
+    onResolvingChange(true)
+    try {
+        val preferences = settingsViewModel.buildStreamPreferences()
+        val addons = try { addonRepo.getInstalledAddons() } catch (_: Exception) { emptyList() }
+        val debridAccounts = settingsViewModel.getDebridAccounts()
+
+        val streams = streamRepo.fetchStreams(
+            type = MediaType.SERIES,
+            imdbId = imdbId,
+            season = nextEp.seasonNumber,
+            episode = nextEp.episodeNumber,
+            addons = addons,
+            debridAccounts = debridAccounts,
+            preferences = preferences,
+        )
+
+        if (streams.isEmpty()) {
+            onFailed()
+            return
+        }
+
+        val provider = settingsViewModel.getDebridProvider()
+        val apiKey = settingsViewModel.getDebridApiKey()
+        val resolved = streamRepo.resolveStream(streams.first(), provider, apiKey)
+        val playUrl = resolved.transcodeUrls?.mp4
+            ?: resolved.transcodeUrls?.hls
+            ?: resolved.url
+
+        // Save progress for the current episode before switching
+        if (mediaId.isNotBlank() && duration > 0) {
+            watchProgressRepo.saveProgress(
+                WatchProgress(
+                    mediaId = mediaId,
+                    mediaType = MediaType.fromString(mediaType),
+                    title = currentTitle,
+                    posterUrl = posterUrl.takeIf { it.isNotBlank() },
+                    backdropUrl = backdropUrl.takeIf { it.isNotBlank() },
+                    positionMs = currentPosition,
+                    durationMs = duration,
+                    seasonNumber = currentSeasonNumber,
+                    episodeNumber = currentEpisodeNumber,
+                ),
+            )
+        }
+
+        // Build new title
+        val sNum = nextEp.seasonNumber.toString().padStart(2, '0')
+        val eNum = nextEp.episodeNumber.toString().padStart(2, '0')
+        val newTitle = if (nextEp.episodeName.isNotBlank()) {
+            "S${sNum}E${eNum} - ${nextEp.episodeName}"
+        } else {
+            "S${sNum}E${eNum}"
+        }
+
+        // Scrobble stop for current episode before switching
+        if (traktScrobbler != null && traktAccessToken.isNotBlank() && tmdbId > 0) {
+            try {
+                traktScrobbler.stop(
+                    traktAccessToken, tmdbId, MediaType.SERIES, 100.0,
+                    currentSeasonNumber, currentEpisodeNumber,
+                )
+            } catch (_: Exception) {}
+        }
+
+        // Stop current and play new
+        engine.stop()
+        onStateUpdate(nextEp.seasonNumber, nextEp.episodeNumber, playUrl, newTitle)
+        engine.play(playUrl)
+
+        // Scrobble start for new episode
+        if (traktScrobbler != null && traktAccessToken.isNotBlank() && tmdbId > 0) {
+            try {
+                traktScrobbler.start(
+                    traktAccessToken, tmdbId, MediaType.SERIES, 0.0,
+                    nextEp.seasonNumber, nextEp.episodeNumber,
+                )
+            } catch (_: Exception) {}
+        }
+    } catch (_: Exception) {
+        onFailed()
     }
 }
 
