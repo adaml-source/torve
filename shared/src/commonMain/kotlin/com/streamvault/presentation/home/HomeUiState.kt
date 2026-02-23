@@ -11,5 +11,8 @@ data class HomeUiState(
     val heroItem: MediaItem? = null,
     val continueWatching: List<WatchProgress> = emptyList(),
     val recommendedItems: List<ScoredMediaItem> = emptyList(),
+    val watchlistShelf: CatalogShelf? = null,
+    val becauseYouWatched: List<CatalogShelf> = emptyList(),
+    val hiddenGemsShelf: CatalogShelf? = null,
     val error: String? = null,
 )

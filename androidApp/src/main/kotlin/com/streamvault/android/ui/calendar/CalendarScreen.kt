@@ -13,31 +13,38 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CalendarMonth
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.streamvault.android.ui.components.SectionHeader
+import com.streamvault.android.ui.components.ShimmerBox
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.AmberSubtle
 import com.streamvault.android.ui.theme.Charcoal
+import com.streamvault.android.ui.theme.Graphite
+import com.streamvault.android.ui.theme.Gunmetal
+import com.streamvault.android.ui.theme.Obsidian
 import com.streamvault.android.ui.theme.Ruby
+import com.streamvault.android.ui.theme.Snow
 import com.streamvault.android.ui.theme.StreamVault
 import com.streamvault.data.trakt.TraktCalendarEpisode
 import com.streamvault.presentation.calendar.CalendarViewModel
@@ -70,7 +77,7 @@ fun CalendarScreen(
                         Icons.Rounded.CalendarMonth,
                         contentDescription = null,
                         modifier = Modifier.size(64.dp),
-                        tint = StreamVault.colors.textTertiary,
+                        tint = StreamVault.colors.textHint,
                     )
                     Spacer(Modifier.height(16.dp))
                     Text(
@@ -88,10 +95,7 @@ fun CalendarScreen(
             }
 
             state.isLoading -> {
-                CircularProgressIndicator(
-                    modifier = Modifier.align(Alignment.Center),
-                    color = Amber,
-                )
+                CalendarSkeletonLoader()
             }
 
             state.error != null -> {
@@ -104,9 +108,9 @@ fun CalendarScreen(
                         color = Ruby,
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    Spacer(Modifier.height(8.dp))
-                    TextButton(onClick = { viewModel.refresh() }) {
-                        Text("Retry", color = Amber)
+                    Spacer(Modifier.height(12.dp))
+                    FilledTonalButton(onClick = { viewModel.refresh() }) {
+                        Text("Retry")
                     }
                 }
             }
@@ -122,7 +126,7 @@ fun CalendarScreen(
                         Icons.Rounded.CalendarMonth,
                         contentDescription = null,
                         modifier = Modifier.size(64.dp),
-                        tint = StreamVault.colors.textTertiary,
+                        tint = StreamVault.colors.textHint,
                     )
                     Spacer(Modifier.height(16.dp))
                     Text(
@@ -141,19 +145,37 @@ fun CalendarScreen(
 
             else -> {
                 LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .statusBarsPadding(),
+                    modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = 80.dp),
                 ) {
-                    item(key = "title") {
-                        Text(
-                            text = "Calendar",
-                            style = MaterialTheme.typography.headlineMedium,
-                            color = StreamVault.colors.textPrimary,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
-                        )
+                    // ── Cinematic Header ──
+                    item(key = "header") {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(140.dp)
+                                .background(
+                                    Brush.verticalGradient(listOf(Graphite, Obsidian)),
+                                ),
+                            contentAlignment = Alignment.BottomStart,
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(start = 16.dp, bottom = 16.dp),
+                            ) {
+                                Text(
+                                    text = "Calendar",
+                                    style = MaterialTheme.typography.displayMedium,
+                                    color = Snow,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = "${state.episodes.size} upcoming episodes",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Amber,
+                                )
+                            }
+                        }
                     }
 
                     state.groupedEpisodes.forEach { (dateLabel, episodes) ->
@@ -201,8 +223,26 @@ private fun CalendarEpisodeCard(
                 .fillMaxWidth()
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
+            // Play icon
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Gunmetal),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Rounded.PlayArrow,
+                    contentDescription = null,
+                    tint = Amber,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+
+            Spacer(Modifier.width(12.dp))
+
+            // Content
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = episode.showTitle,
@@ -229,6 +269,7 @@ private fun CalendarEpisodeCard(
                 )
             }
 
+            // Season badge
             Surface(
                 shape = RoundedCornerShape(6.dp),
                 color = AmberSubtle,
@@ -241,6 +282,42 @@ private fun CalendarEpisodeCard(
                     fontWeight = FontWeight.Bold,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun CalendarSkeletonLoader() {
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Header shimmer
+        ShimmerBox(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(140.dp),
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        // Section header shimmer
+        ShimmerBox(
+            modifier = Modifier
+                .padding(horizontal = 16.dp)
+                .width(100.dp)
+                .height(18.dp)
+                .clip(RoundedCornerShape(4.dp)),
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        // Card shimmers
+        repeat(6) {
+            ShimmerBox(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .height(68.dp)
+                    .clip(RoundedCornerShape(12.dp)),
+            )
         }
     }
 }

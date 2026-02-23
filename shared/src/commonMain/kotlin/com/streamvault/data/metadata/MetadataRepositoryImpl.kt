@@ -183,11 +183,14 @@ class MetadataRepositoryImpl(
         withGenres: String?,
         minRating: Float?,
         year: Int?,
+        yearTo: Int?,
+        runtimeGte: Int?,
+        runtimeLte: Int?,
         withCast: String?,
         withCrew: String?,
     ): PagedResult {
         return if (type == "tv") {
-            val resp = api.discoverTv(page, sortBy, withGenres, minRating, year, withCast, withCrew)
+            val resp = api.discoverTv(page, sortBy, withGenres, minRating, year, yearTo, runtimeGte, runtimeLte, withCast, withCrew)
             PagedResult(
                 items = resp.results.map { TmdbMappers.tvToMediaItem(it) },
                 page = resp.page,
@@ -195,7 +198,7 @@ class MetadataRepositoryImpl(
                 totalResults = resp.totalResults,
             )
         } else {
-            val resp = api.discoverMovies(page, sortBy, withGenres, minRating, year, withCast, withCrew)
+            val resp = api.discoverMovies(page, sortBy, withGenres, minRating, year, yearTo, runtimeGte, runtimeLte, withCast, withCrew)
             PagedResult(
                 items = resp.results.map { TmdbMappers.movieToMediaItem(it) },
                 page = resp.page,

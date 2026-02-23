@@ -1,12 +1,17 @@
 package com.streamvault.presentation.home
 
+import com.streamvault.domain.model.CatalogShelf
+import com.streamvault.domain.model.MediaItem
+import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.model.ParentalFilter
 import com.streamvault.domain.model.ShelfConfig
 import com.streamvault.domain.recommendation.GetRecommendationsUseCase
 import com.streamvault.domain.repository.MetadataRepository
 import com.streamvault.domain.repository.ProfileRepository
 import com.streamvault.domain.repository.ShelfConfigRepository
+import com.streamvault.domain.repository.WatchHistoryRepository
 import com.streamvault.domain.repository.WatchProgressRepository
+import com.streamvault.domain.repository.WatchlistRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -23,6 +28,8 @@ class HomeViewModel(
     private val recommendationsUseCase: GetRecommendationsUseCase,
     private val profileRepo: ProfileRepository,
     private val shelfConfigRepo: ShelfConfigRepository,
+    private val watchlistRepo: WatchlistRepository,
+    private val watchHistoryRepo: WatchHistoryRepository,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(HomeUiState())
@@ -45,10 +52,86 @@ class HomeViewModel(
                         emptyList()
                     }
                 }
+                val watchlistDeferred = async {
+                    try {
+                        watchlistRepo.getAll().take(20)
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                }
+                val historyDeferred = async {
+                    try {
+                        watchHistoryRepo.getRecent(3)
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                }
+                val hiddenGemsDeferred = async {
+                    try {
+                        metadataRepo.discover(
+                            type = "movie",
+                            sortBy = "vote_average.desc",
+                            minRating = 7.5f,
+                            page = 1,
+                        ).items.take(20)
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                }
 
                 val shelves = shelvesDeferred.await()
                 val continueWatching = continueWatchingDeferred.await()
                 val recommendations = recommendationsDeferred.await()
+                val watchlistItems = watchlistDeferred.await()
+                val recentHistory = historyDeferred.await()
+                val hiddenGems = hiddenGemsDeferred.await()
+
+                // Build watchlist shelf
+                val watchlistShelf = if (watchlistItems.isNotEmpty()) {
+                    CatalogShelf(
+                        id = "your_watchlist",
+                        title = "Your Watchlist",
+                        items = watchlistItems.map { wl ->
+                            MediaItem(
+                                id = wl.mediaId,
+                                tmdbId = wl.tmdbId,
+                                title = wl.title,
+                                posterUrl = wl.posterUrl,
+                                backdropUrl = wl.backdropUrl,
+                                rating = wl.rating,
+                                year = wl.year,
+                                type = wl.mediaType,
+                            )
+                        },
+                    )
+                } else null
+
+                // Build "Because You Watched" shelves from recent history
+                val becauseYouWatched = recentHistory.mapNotNull { entry ->
+                    try {
+                        val type = if (entry.mediaType == MediaType.SERIES.name || entry.mediaType == "tv") "tv" else "movie"
+                        val tmdbId = entry.mediaId.substringAfterLast("_", entry.mediaId).toIntOrNull() ?: return@mapNotNull null
+                        val similar = metadataRepo.getSimilar(type, tmdbId).take(15)
+                        if (similar.isNotEmpty()) {
+                            CatalogShelf(
+                                id = "because_${entry.mediaId}",
+                                title = "Because You Watched ${entry.title}",
+                                items = similar,
+                            )
+                        } else null
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
+
+                // Build hidden gems shelf
+                val hiddenGemsShelf = if (hiddenGems.isNotEmpty()) {
+                    CatalogShelf(
+                        id = "hidden_gems",
+                        title = "Hidden Gems",
+                        items = hiddenGems,
+                    )
+                } else null
 
                 // Apply shelf visibility and ordering
                 val shelfConfigs = try { shelfConfigRepo.getAllConfigs() } catch (_: Exception) { emptyList() }
@@ -75,6 +158,9 @@ class HomeViewModel(
                         heroItem = filteredShelves.firstOrNull()?.items?.firstOrNull(),
                         continueWatching = continueWatching,
                         recommendedItems = filteredRecommendations,
+                        watchlistShelf = watchlistShelf,
+                        becauseYouWatched = becauseYouWatched,
+                        hiddenGemsShelf = hiddenGemsShelf,
                         isLoading = false,
                     )
                 }

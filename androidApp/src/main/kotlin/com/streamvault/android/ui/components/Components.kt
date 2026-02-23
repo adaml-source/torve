@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -82,6 +83,7 @@ fun PosterCard(
     size: CardSize = CardSize.MEDIUM,
     showTitle: Boolean = true,
     showRating: Boolean = true,
+    isDownloaded: Boolean = false,
 ) {
     Column(
         modifier = modifier.width(size.width),
@@ -130,6 +132,26 @@ fun PosterCard(
                                 .padding(6.dp),
                         )
                     }
+                }
+            }
+
+            // Downloaded badge — top left
+            if (isDownloaded) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(6.dp)
+                        .size(22.dp)
+                        .clip(CircleShape)
+                        .background(Amber),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Rounded.DownloadDone,
+                        contentDescription = "Downloaded",
+                        tint = Obsidian,
+                        modifier = Modifier.size(14.dp),
+                    )
                 }
             }
 

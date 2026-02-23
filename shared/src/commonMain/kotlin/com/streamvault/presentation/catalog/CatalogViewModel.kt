@@ -1,12 +1,15 @@
 package com.streamvault.presentation.catalog
 
 import com.streamvault.domain.model.MediaItem
+import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.model.PagedResult
 import com.streamvault.domain.repository.MetadataRepository
+import com.streamvault.domain.repository.WatchProgressRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,6 +26,7 @@ import kotlinx.coroutines.launch
 class CatalogViewModel(
     private val metadataRepo: MetadataRepository,
     private val mediaType: String, // "movie" or "tv"
+    private val watchProgressRepo: WatchProgressRepository? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(CatalogUiState())
@@ -32,7 +36,40 @@ class CatalogViewModel(
 
     init {
         loadCatalog()
+        loadShelves()
         observeSearch()
+    }
+
+    private fun loadShelves() {
+        if (watchProgressRepo == null) return
+        scope.launch {
+            try {
+                val targetType = if (mediaType == "tv") MediaType.SERIES else MediaType.MOVIE
+
+                val continueDeferred = async { watchProgressRepo.getInProgress(20) }
+                val trendingDeferred = async { metadataRepo.getTrending(mediaType) }
+                val popularDeferred = async { metadataRepo.getPopular(mediaType) }
+                val topRatedDeferred = async { metadataRepo.getTopRated(mediaType) }
+
+                val continueWatching = continueDeferred.await()
+                    .filter { it.mediaType == targetType }
+                val trending = trendingDeferred.await()
+                val popular = popularDeferred.await()
+                val topRated = topRatedDeferred.await()
+
+                _state.update {
+                    it.copy(
+                        continueWatching = continueWatching,
+                        trendingItems = trending,
+                        popularItems = popular,
+                        topRatedItems = topRated,
+                        shelvesLoaded = true,
+                    )
+                }
+            } catch (_: Exception) {
+                _state.update { it.copy(shelvesLoaded = true) }
+            }
+        }
     }
 
     fun loadCatalog() {
@@ -51,6 +88,9 @@ class CatalogViewModel(
                         withGenres = genreId?.toString(),
                         minRating = filter.minRating,
                         year = filter.year,
+                        yearTo = filter.yearTo,
+                        runtimeGte = filter.runtimeFilter?.minMinutes,
+                        runtimeLte = filter.runtimeFilter?.maxMinutes,
                     )
                 } else {
                     // Use curated list endpoints
@@ -101,6 +141,9 @@ class CatalogViewModel(
                         withGenres = genreId?.toString(),
                         minRating = filter.minRating,
                         year = filter.year,
+                        yearTo = filter.yearTo,
+                        runtimeGte = filter.runtimeFilter?.minMinutes,
+                        runtimeLte = filter.runtimeFilter?.maxMinutes,
                     )
                 } else {
                     when (s.selectedCategory) {

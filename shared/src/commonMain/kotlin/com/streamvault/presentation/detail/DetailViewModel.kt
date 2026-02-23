@@ -10,13 +10,16 @@ import com.streamvault.data.trakt.TraktRemoveHistoryBody
 import com.streamvault.domain.model.DebridServiceType
 import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.model.StreamPreferences
+import com.streamvault.domain.model.WatchHistoryEntry
 import com.streamvault.domain.repository.AddonRepository
 import com.streamvault.domain.repository.MetadataRepository
 import com.streamvault.domain.repository.PreferencesRepository
 import com.streamvault.domain.repository.StreamRepository
+import com.streamvault.domain.repository.WatchHistoryRepository
 import com.streamvault.domain.repository.WatchProgressRepository
 import com.streamvault.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.datetime.Clock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,6 +36,7 @@ class DetailViewModel(
     private val traktClient: TraktClient,
     private val prefsRepo: PreferencesRepository,
     private val addonRepo: AddonRepository,
+    private val watchHistoryRepo: WatchHistoryRepository,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(DetailUiState())
@@ -68,6 +72,7 @@ class DetailViewModel(
                     if (firstReal != null) {
                         loadSeasonDetail(id, firstReal.seasonNumber)
                     }
+                    loadWatchedEpisodes()
                 }
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = e.message ?: "Failed to load") }
@@ -300,6 +305,56 @@ class DetailViewModel(
                     traktClient.removeFromHistory(token, TraktRemoveHistoryBody(shows = listOf(TraktHistoryShow(ids))))
                 }
                 _state.update { it.copy(isMarkedWatched = false) }
+            } catch (_: Exception) { }
+        }
+    }
+
+    fun markSeasonWatched(seasonNumber: Int) {
+        val item = _state.value.mediaItem ?: return
+        val seasonDetail = _state.value.seasonDetail
+        val episodeCount = seasonDetail?.episodes?.size
+            ?: item.seasons.find { it.seasonNumber == seasonNumber }?.episodeCount
+            ?: return
+
+        scope.launch {
+            try {
+                val now = Clock.System.now().toEpochMilliseconds()
+                for (ep in 1..episodeCount) {
+                    val entry = WatchHistoryEntry(
+                        id = "${item.id}_s${seasonNumber}e$ep",
+                        mediaId = item.id,
+                        mediaType = MediaType.SERIES.name,
+                        title = seasonDetail?.episodes?.getOrNull(ep - 1)?.name ?: "Episode $ep",
+                        posterUrl = item.posterUrl,
+                        backdropUrl = item.backdropUrl,
+                        watchedAt = now,
+                        durationWatchedMs = 0,
+                        seasonNumber = seasonNumber,
+                        episodeNumber = ep,
+                        showTitle = item.title,
+                    )
+                    watchHistoryRepo.record(entry)
+                }
+                // Update watched episodes set
+                val newWatched = _state.value.watchedEpisodes.toMutableSet()
+                for (ep in 1..episodeCount) {
+                    newWatched.add("s${seasonNumber}e$ep")
+                }
+                _state.update { it.copy(watchedEpisodes = newWatched) }
+            } catch (_: Exception) { }
+        }
+    }
+
+    fun loadWatchedEpisodes() {
+        val item = _state.value.mediaItem ?: return
+        scope.launch {
+            try {
+                val history = watchHistoryRepo.getAll()
+                val watched = history
+                    .filter { it.mediaId == item.id && it.seasonNumber != null && it.episodeNumber != null }
+                    .map { "s${it.seasonNumber}e${it.episodeNumber}" }
+                    .toSet()
+                _state.update { it.copy(watchedEpisodes = watched) }
             } catch (_: Exception) { }
         }
     }

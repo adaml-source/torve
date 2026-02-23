@@ -32,6 +32,9 @@ interface MetadataRepository {
         withGenres: String? = null,
         minRating: Float? = null,
         year: Int? = null,
+        yearTo: Int? = null,
+        runtimeGte: Int? = null,
+        runtimeLte: Int? = null,
         withCast: String? = null,
         withCrew: String? = null,
     ): PagedResult

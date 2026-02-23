@@ -7,10 +7,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -23,6 +27,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.streamvault.android.ui.theme.Amber
+import com.streamvault.android.ui.theme.Gunmetal
+import com.streamvault.android.ui.theme.Snow
 import com.streamvault.android.ui.theme.StreamVault
 import com.streamvault.presentation.iptv.IptvSubTab
 
@@ -48,7 +54,7 @@ fun IptvSubTabBar(
         tabs.forEach { (tab, label) ->
             val selected = tab == selectedTab
             val bgColor by animateColorAsState(
-                if (selected) Amber else MaterialTheme.colorScheme.surfaceVariant,
+                if (selected) Amber else Gunmetal,
                 animationSpec = tween(200),
                 label = "tab_bg",
             )
@@ -58,25 +64,44 @@ fun IptvSubTabBar(
                 label = "tab_text",
             )
 
-            Box(
+            Column(
                 modifier = Modifier
                     .weight(1f)
-                    .height(36.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(bgColor)
                     .clickable(
                         onClick = { onTabSelected(tab) },
                         indication = null,
                         interactionSource = remember { MutableInteractionSource() },
                     ),
-                contentAlignment = Alignment.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                    color = textColor,
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(36.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(bgColor),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                        color = textColor,
+                    )
+                }
+
+                // Active indicator dot
+                Spacer(Modifier.height(4.dp))
+                if (selected) {
+                    Box(
+                        modifier = Modifier
+                            .size(4.dp)
+                            .clip(CircleShape)
+                            .background(Amber),
+                    )
+                } else {
+                    Spacer(Modifier.height(4.dp))
+                }
             }
         }
     }

@@ -24,8 +24,11 @@ import com.streamvault.data.network.HttpClientFactory
 import com.streamvault.data.progress.PreferencesRepositoryImpl
 import com.streamvault.data.progress.WatchProgressRepositoryImpl
 import com.streamvault.data.subscription.SubscriptionRepositoryImpl
+import com.streamvault.data.history.WatchHistoryRepositoryImpl
 import com.streamvault.data.sync.SyncRepositoryImpl
+import com.streamvault.data.watchlist.WatchlistRepositoryImpl
 import com.streamvault.domain.recommendation.GetRecommendationsUseCase
+import com.streamvault.domain.recommendation.MoodMatcher
 import com.streamvault.data.trakt.TraktClient
 import com.streamvault.presentation.player.TraktScrobbler
 import com.streamvault.db.StreamVaultDatabase
@@ -38,7 +41,9 @@ import com.streamvault.domain.repository.ShelfConfigRepository
 import com.streamvault.domain.repository.PreferencesRepository
 import com.streamvault.domain.repository.StreamRepository
 import com.streamvault.domain.repository.SubscriptionRepository
+import com.streamvault.domain.repository.WatchHistoryRepository
 import com.streamvault.domain.repository.WatchProgressRepository
+import com.streamvault.domain.repository.WatchlistRepository
 import com.streamvault.domain.sync.SyncRepository
 import com.streamvault.platform.DatabaseDriverFactory
 import com.streamvault.presentation.addon.AddonViewModel
@@ -52,7 +57,11 @@ import com.streamvault.presentation.iptv.IptvViewModel
 import com.streamvault.presentation.search.SearchViewModel
 import com.streamvault.presentation.settings.SettingsViewModel
 import com.streamvault.presentation.setup.SetupWizardViewModel
+import com.streamvault.presentation.discover.DiscoverViewModel
+import com.streamvault.presentation.mood.MoodMatcherViewModel
+import com.streamvault.presentation.stats.StatsViewModel
 import com.streamvault.presentation.subscription.SubscriptionViewModel
+import com.streamvault.presentation.watchlist.WatchlistViewModel
 import org.koin.core.module.dsl.factoryOf
 import org.koin.core.module.dsl.singleOf
 import org.koin.dsl.module
@@ -129,16 +138,23 @@ val sharedModule = module {
     // Subscription Repository
     single<SubscriptionRepository> { SubscriptionRepositoryImpl(get()) }
 
+    // Watchlist Repository
+    single<WatchlistRepository> { WatchlistRepositoryImpl(get()) }
+
+    // Watch History Repository
+    single<WatchHistoryRepository> { WatchHistoryRepositoryImpl(get()) }
+
     // Sync Repository
     single<SyncRepository> { SyncRepositoryImpl(get(), get()) }
 
     // Use Cases
     factory { GetRecommendationsUseCase(get(), get()) }
+    factory { MoodMatcher(get()) }
 
     // ViewModels
     factoryOf(::HomeViewModel)
     factoryOf(::SearchViewModel)
-    factory { DetailViewModel(get(), get(), get(), get(), get(), get()) }
+    factory { DetailViewModel(get(), get(), get(), get(), get(), get(), get()) }
     factoryOf(::PersonViewModel)
     single { SettingsViewModel(get(), get(), get(), get(), get(), get(), get(), get()) }
     factoryOf(::AddonViewModel)
@@ -148,4 +164,8 @@ val sharedModule = module {
     factoryOf(::ProfileViewModel)
     factoryOf(::SubscriptionViewModel)
     factory { SetupWizardViewModel(get(), get(), get()) }
+    single { WatchlistViewModel(get(), get()) }
+    factory { DiscoverViewModel() }
+    factoryOf(::MoodMatcherViewModel)
+    factoryOf(::StatsViewModel)
 }

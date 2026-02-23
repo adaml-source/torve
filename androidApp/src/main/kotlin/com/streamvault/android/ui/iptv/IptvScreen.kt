@@ -48,6 +48,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.AmberSubtle
+import com.streamvault.android.ui.theme.Gunmetal
+import com.streamvault.android.ui.theme.Obsidian
+import com.streamvault.android.ui.theme.Snow
 import com.streamvault.android.ui.theme.StreamVault
 import com.streamvault.domain.model.IptvChannel
 import com.streamvault.presentation.iptv.IptvSubTab
@@ -85,7 +88,7 @@ fun IptvScreen(
                 Text(
                     text = "No IPTV Playlists",
                     style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.onBackground,
+                    color = StreamVault.colors.textPrimary,
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
@@ -98,7 +101,7 @@ fun IptvScreen(
                     onClick = { viewModel.showAddPlaylistDialog() },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Amber,
-                        contentColor = MaterialTheme.colorScheme.background,
+                        contentColor = Obsidian,
                     ),
                     shape = RoundedCornerShape(10.dp),
                 ) {
@@ -133,14 +136,14 @@ fun IptvScreen(
                                     Text(
                                         playlist.name,
                                         style = MaterialTheme.typography.labelLarge,
-                                        color = if (selected) Amber else MaterialTheme.colorScheme.onBackground,
+                                        color = if (selected) Amber else Snow,
                                     )
                                 },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = AmberSubtle,
                                     selectedLabelColor = Amber,
-                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                    labelColor = MaterialTheme.colorScheme.onBackground,
+                                    containerColor = Gunmetal,
+                                    labelColor = Snow,
                                 ),
                                 border = FilterChipDefaults.filterChipBorder(
                                     borderColor = MaterialTheme.colorScheme.background,
@@ -156,7 +159,7 @@ fun IptvScreen(
                         Icon(
                             Icons.Rounded.Tune,
                             contentDescription = "Manage Categories",
-                            tint = MaterialTheme.colorScheme.onBackground,
+                            tint = StreamVault.colors.textSecondary,
                             modifier = Modifier.size(22.dp),
                         )
                     }
@@ -164,7 +167,7 @@ fun IptvScreen(
                         Icon(
                             Icons.Rounded.Refresh,
                             contentDescription = "Refresh",
-                            tint = MaterialTheme.colorScheme.onBackground,
+                            tint = StreamVault.colors.textSecondary,
                             modifier = Modifier.size(22.dp),
                         )
                     }
@@ -228,7 +231,7 @@ fun IptvScreen(
                     .align(Alignment.BottomEnd)
                     .padding(16.dp),
                 containerColor = Amber,
-                contentColor = MaterialTheme.colorScheme.background,
+                contentColor = Obsidian,
                 elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 4.dp),
                 shape = RoundedCornerShape(14.dp),
             ) {

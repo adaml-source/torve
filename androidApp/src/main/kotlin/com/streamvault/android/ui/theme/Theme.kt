@@ -219,11 +219,7 @@ fun StreamVaultTheme(
     themeMode: ThemeMode = ThemeMode.SYSTEM,
     content: @Composable () -> Unit,
 ) {
-    val isDark = when (themeMode) {
-        ThemeMode.DARK -> true
-        ThemeMode.LIGHT -> false
-        ThemeMode.SYSTEM -> isSystemInDarkTheme()
-    }
+    val isDark = true
 
     val colorScheme = if (isDark) DarkColorScheme else LightColorScheme
 

@@ -1,0 +1,491 @@
+package com.streamvault.android.ui.watchlist
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import coil3.compose.AsyncImage
+import com.streamvault.android.ui.components.CardSize
+import com.streamvault.android.ui.components.PosterCard
+import com.streamvault.android.ui.theme.Amber
+import com.streamvault.android.ui.theme.Gunmetal
+import com.streamvault.android.ui.theme.Obsidian
+import com.streamvault.android.ui.theme.Snow
+import com.streamvault.android.ui.theme.StreamVault
+import com.streamvault.domain.model.MediaItem
+import com.streamvault.domain.model.MediaType
+import com.streamvault.domain.model.WatchHistoryEntry
+import com.streamvault.domain.model.WatchProgress
+import com.streamvault.domain.repository.WatchHistoryRepository
+import com.streamvault.domain.repository.WatchProgressRepository
+import com.streamvault.presentation.watchlist.WatchlistViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.koin.compose.koinInject
+
+@Composable
+fun WatchlistScreen(
+    onMediaClick: (MediaItem) -> Unit,
+    onContinueWatchingClick: (WatchProgress) -> Unit = {},
+    onHistoryItemClick: (WatchHistoryEntry) -> Unit = {},
+    watchlistViewModel: WatchlistViewModel = koinInject(),
+    watchProgressRepo: WatchProgressRepository = koinInject(),
+    watchHistoryRepo: WatchHistoryRepository = koinInject(),
+) {
+    val watchlistState by watchlistViewModel.state.collectAsState()
+    var selectedTab by remember { mutableIntStateOf(0) }
+    val tabs = listOf("Watchlist", "In Progress", "History")
+
+    // Load in-progress and history data
+    var inProgress by remember { mutableIntStateOf(0) }
+    var inProgressItems = remember { mutableListOf<WatchProgress>() }
+    var historyItems = remember { mutableListOf<WatchHistoryEntry>() }
+    var progressLoaded by remember { androidx.compose.runtime.mutableStateOf(false) }
+    var historyLoaded by remember { androidx.compose.runtime.mutableStateOf(false) }
+
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == 1 && !progressLoaded) {
+            withContext(Dispatchers.Default) {
+                val items = watchProgressRepo.getInProgress(50)
+                inProgressItems.clear()
+                inProgressItems.addAll(items)
+                progressLoaded = true
+            }
+        }
+        if (selectedTab == 2 && !historyLoaded) {
+            withContext(Dispatchers.Default) {
+                val items = watchHistoryRepo.getRecent(100)
+                historyItems.clear()
+                historyItems.addAll(items)
+                historyLoaded = true
+            }
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Obsidian)
+            .statusBarsPadding(),
+    ) {
+        // Header
+        Text(
+            text = "My Library",
+            style = MaterialTheme.typography.headlineLarge,
+            color = Snow,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+        )
+
+        // Sub-tabs
+        SingleChoiceSegmentedButtonRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
+        ) {
+            tabs.forEachIndexed { index, label ->
+                SegmentedButton(
+                    selected = selectedTab == index,
+                    onClick = { selectedTab = index },
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = tabs.size),
+                    colors = SegmentedButtonDefaults.colors(
+                        activeContainerColor = Amber.copy(alpha = 0.2f),
+                        activeContentColor = Amber,
+                        inactiveContainerColor = Gunmetal,
+                        inactiveContentColor = StreamVault.colors.textSecondary,
+                        activeBorderColor = Amber.copy(alpha = 0.4f),
+                        inactiveBorderColor = Gunmetal,
+                    ),
+                ) {
+                    Text(label, style = MaterialTheme.typography.labelLarge)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        when (selectedTab) {
+            0 -> WatchlistTab(
+                items = watchlistState.items,
+                isLoading = watchlistState.isLoading,
+                onMediaClick = onMediaClick,
+            )
+            1 -> InProgressTab(
+                items = inProgressItems,
+                isLoaded = progressLoaded,
+                onItemClick = onContinueWatchingClick,
+            )
+            2 -> HistoryTab(
+                items = historyItems,
+                isLoaded = historyLoaded,
+                onItemClick = onHistoryItemClick,
+            )
+        }
+    }
+}
+
+@Composable
+private fun WatchlistTab(
+    items: List<com.streamvault.domain.model.WatchlistItem>,
+    isLoading: Boolean,
+    onMediaClick: (MediaItem) -> Unit,
+) {
+    if (isLoading) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = Amber, modifier = Modifier.size(40.dp))
+        }
+        return
+    }
+
+    if (items.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    "Your watchlist is empty",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = StreamVault.colors.textSecondary,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Add movies and shows to watch later",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = StreamVault.colors.textTertiary,
+                )
+            }
+        }
+        return
+    }
+
+    val movies = items.filter { it.mediaType == MediaType.MOVIE }
+    val shows = items.filter { it.mediaType == MediaType.SERIES }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = 24.dp),
+    ) {
+        if (movies.isNotEmpty()) {
+            item {
+                Text(
+                    "Movies (${movies.size})",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Amber,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                )
+            }
+            item {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(movies, key = { it.mediaId }) { wlItem ->
+                        val mediaItem = MediaItem(
+                            id = wlItem.mediaId,
+                            tmdbId = wlItem.tmdbId.toInt(),
+                            title = wlItem.title,
+                            posterUrl = wlItem.posterUrl,
+                            backdropUrl = wlItem.backdropUrl,
+                            rating = wlItem.rating,
+                            year = wlItem.year,
+                            type = MediaType.MOVIE,
+                        )
+                        PosterCard(
+                            item = mediaItem,
+                            onClick = { onMediaClick(mediaItem) },
+                            size = CardSize.MEDIUM,
+                        )
+                    }
+                }
+            }
+            item { Spacer(Modifier.height(16.dp)) }
+        }
+
+        if (shows.isNotEmpty()) {
+            item {
+                Text(
+                    "TV Shows (${shows.size})",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Amber,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                )
+            }
+            item {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(shows, key = { it.mediaId }) { wlItem ->
+                        val mediaItem = MediaItem(
+                            id = wlItem.mediaId,
+                            tmdbId = wlItem.tmdbId.toInt(),
+                            title = wlItem.title,
+                            posterUrl = wlItem.posterUrl,
+                            backdropUrl = wlItem.backdropUrl,
+                            rating = wlItem.rating,
+                            year = wlItem.year,
+                            type = MediaType.SERIES,
+                        )
+                        PosterCard(
+                            item = mediaItem,
+                            onClick = { onMediaClick(mediaItem) },
+                            size = CardSize.MEDIUM,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun InProgressTab(
+    items: List<WatchProgress>,
+    isLoaded: Boolean,
+    onItemClick: (WatchProgress) -> Unit,
+) {
+    if (!isLoaded) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = Amber, modifier = Modifier.size(40.dp))
+        }
+        return
+    }
+
+    if (items.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    "Nothing in progress",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = StreamVault.colors.textSecondary,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Start watching something to see it here",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = StreamVault.colors.textTertiary,
+                )
+            }
+        }
+        return
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        items(items, key = { it.mediaId }) { progress ->
+            ContinueWatchingCard(
+                progress = progress,
+                onClick = { onItemClick(progress) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ContinueWatchingCard(
+    progress: WatchProgress,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Gunmetal)
+            .clickable(onClick = onClick)
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Poster
+        AsyncImage(
+            model = progress.posterUrl,
+            contentDescription = progress.title,
+            modifier = Modifier
+                .width(70.dp)
+                .aspectRatio(2f / 3f)
+                .clip(RoundedCornerShape(8.dp)),
+            contentScale = ContentScale.Crop,
+        )
+
+        Spacer(Modifier.width(12.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = progress.title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = Snow,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (progress.seasonNumber != null && progress.episodeNumber != null) {
+                Text(
+                    "S${progress.seasonNumber} E${progress.episodeNumber}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Amber,
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            // Progress bar
+            val progressPercent = if (progress.durationMs > 0) {
+                (progress.positionMs.toFloat() / progress.durationMs).coerceIn(0f, 1f)
+            } else 0f
+            LinearProgressIndicator(
+                progress = { progressPercent },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp)),
+                color = Amber,
+                trackColor = Obsidian,
+            )
+            Spacer(Modifier.height(4.dp))
+            val remaining = ((progress.durationMs - progress.positionMs) / 60000).toInt()
+            Text(
+                "${remaining}min remaining",
+                style = MaterialTheme.typography.labelSmall,
+                color = StreamVault.colors.textTertiary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun HistoryTab(
+    items: List<WatchHistoryEntry>,
+    isLoaded: Boolean,
+    onItemClick: (WatchHistoryEntry) -> Unit,
+) {
+    if (!isLoaded) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = Amber, modifier = Modifier.size(40.dp))
+        }
+        return
+    }
+
+    if (items.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    "No watch history yet",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = StreamVault.colors.textSecondary,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Your watched items will appear here",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = StreamVault.colors.textTertiary,
+                )
+            }
+        }
+        return
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(items, key = { it.id }) { entry ->
+            HistoryEntryCard(
+                entry = entry,
+                onClick = { onItemClick(entry) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun HistoryEntryCard(
+    entry: WatchHistoryEntry,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(Gunmetal)
+            .clickable(onClick = onClick)
+            .padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AsyncImage(
+            model = entry.posterUrl,
+            contentDescription = entry.title,
+            modifier = Modifier
+                .width(50.dp)
+                .aspectRatio(2f / 3f)
+                .clip(RoundedCornerShape(6.dp)),
+            contentScale = ContentScale.Crop,
+        )
+
+        Spacer(Modifier.width(12.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = entry.title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = Snow,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (entry.seasonNumber != null && entry.episodeNumber != null) {
+                Text(
+                    "${entry.showTitle ?: ""} S${entry.seasonNumber} E${entry.episodeNumber}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = StreamVault.colors.textSecondary,
+                    maxLines = 1,
+                )
+            }
+            val durationMin = (entry.durationWatchedMs / 60000).toInt()
+            if (durationMin > 0) {
+                Text(
+                    "Watched ${durationMin}min",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = StreamVault.colors.textTertiary,
+                )
+            }
+        }
+    }
+}

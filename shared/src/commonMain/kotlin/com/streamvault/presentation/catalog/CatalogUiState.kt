@@ -1,6 +1,7 @@
 package com.streamvault.presentation.catalog
 
 import com.streamvault.domain.model.MediaItem
+import com.streamvault.domain.model.WatchProgress
 
 data class CatalogUiState(
     val items: List<MediaItem> = emptyList(),
@@ -24,6 +25,12 @@ data class CatalogUiState(
     val searchPage: Int = 1,
     val searchHasMore: Boolean = false,
     val isSearchingMore: Boolean = false,
+    // Home-style shelves
+    val continueWatching: List<WatchProgress> = emptyList(),
+    val trendingItems: List<MediaItem> = emptyList(),
+    val popularItems: List<MediaItem> = emptyList(),
+    val topRatedItems: List<MediaItem> = emptyList(),
+    val shelvesLoaded: Boolean = false,
 )
 
 enum class CatalogCategory(val label: String) {
@@ -35,24 +42,35 @@ enum class CatalogCategory(val label: String) {
 data class CatalogFilter(
     val minRating: Float? = null,
     val year: Int? = null,
+    val yearTo: Int? = null,
+    val runtimeFilter: RuntimeFilter? = null,
     val sortBy: SortOption = SortOption.POPULARITY_DESC,
 ) {
     val isActive: Boolean
-        get() = minRating != null || year != null || sortBy != SortOption.POPULARITY_DESC
+        get() = minRating != null || year != null || yearTo != null ||
+            runtimeFilter != null || sortBy != SortOption.POPULARITY_DESC
 
     val activeCount: Int
         get() {
             var count = 0
             if (minRating != null) count++
-            if (year != null) count++
+            if (year != null || yearTo != null) count++
+            if (runtimeFilter != null) count++
             if (sortBy != SortOption.POPULARITY_DESC) count++
             return count
         }
 }
 
+enum class RuntimeFilter(val label: String, val minMinutes: Int?, val maxMinutes: Int?) {
+    SHORT("Short (<90min)", null, 90),
+    STANDARD("Standard (90-150min)", 90, 150),
+    LONG("Long (>150min)", 150, null),
+}
+
 enum class SortOption(val apiValue: String, val label: String) {
     POPULARITY_DESC("popularity.desc", "Most Popular"),
     VOTE_AVERAGE_DESC("vote_average.desc", "Highest Rated"),
+    VOTE_COUNT_DESC("vote_count.desc", "Most Votes"),
     RELEASE_DATE_DESC("primary_release_date.desc", "Newest First"),
     RELEASE_DATE_ASC("primary_release_date.asc", "Oldest First"),
     REVENUE_DESC("revenue.desc", "Highest Revenue"),

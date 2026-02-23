@@ -79,6 +79,7 @@ import com.streamvault.domain.model.MediaType
 import com.streamvault.presentation.detail.DetailViewModel
 import com.streamvault.presentation.download.DownloadViewModel
 import com.streamvault.presentation.settings.SettingsViewModel
+import com.streamvault.presentation.watchlist.WatchlistViewModel
 import com.streamvault.util.FormatUtil
 import org.koin.compose.koinInject
 
@@ -94,9 +95,11 @@ fun DetailScreen(
     viewModel: DetailViewModel = koinInject(),
     settingsViewModel: SettingsViewModel = koinInject(),
     downloadViewModel: DownloadViewModel = koinInject(),
+    watchlistViewModel: WatchlistViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
+    val watchlistState by watchlistViewModel.state.collectAsState()
     var showActionSheet by remember { mutableStateOf(false) }
     var resolvedUrl by remember { mutableStateOf("") }
     val context = LocalContext.current
@@ -297,22 +300,28 @@ fun DetailScreen(
                                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
                                 // Watchlist button
+                                val isInWatchlist = state.mediaItem?.let {
+                                    watchlistState.watchlistIds.contains(it.id)
+                                } ?: false
                                 FilledTonalButton(
-                                    onClick = { /* Toggle watchlist */ },
+                                    onClick = { state.mediaItem?.let { watchlistViewModel.toggleWatchlist(it) } },
                                     modifier = Modifier.weight(1f).height(44.dp),
                                     shape = RoundedCornerShape(10.dp),
                                     colors = ButtonDefaults.filledTonalButtonColors(
-                                        containerColor = Graphite,
-                                        contentColor = Snow,
+                                        containerColor = if (isInWatchlist) Amber.copy(alpha = 0.2f) else Graphite,
+                                        contentColor = if (isInWatchlist) Amber else Snow,
                                     ),
                                 ) {
                                     Icon(
-                                        Icons.Rounded.BookmarkBorder,
+                                        if (isInWatchlist) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder,
                                         contentDescription = null,
                                         modifier = Modifier.size(18.dp),
                                     )
                                     Spacer(Modifier.width(6.dp))
-                                    Text("Watchlist", style = MaterialTheme.typography.labelLarge)
+                                    Text(
+                                        if (isInWatchlist) "In Watchlist" else "Watchlist",
+                                        style = MaterialTheme.typography.labelLarge,
+                                    )
                                 }
 
                                 // Mark watched (only if Trakt connected)
@@ -411,6 +420,7 @@ fun DetailScreen(
                                 selectedSeason = state.selectedSeason,
                                 seasonDetail = state.seasonDetail,
                                 isLoadingSeasonDetail = state.isLoadingSeasonDetail,
+                                watchedEpisodes = state.watchedEpisodes,
                                 onSeasonSelected = { seasonNum ->
                                     item.tmdbId?.let { tvId ->
                                         viewModel.loadSeasonDetail(tvId, seasonNum)
@@ -428,15 +438,16 @@ fun DetailScreen(
                                 },
                                 onDownloadSeason = { season ->
                                     if (settingsState.debridConnected) {
-                                        // Fetch streams for episode 1 of the season as entry point
                                         viewModel.fetchStreams(season = season, episode = 1)
                                     }
                                 },
                                 onDownloadAll = {
                                     if (settingsState.debridConnected) {
-                                        // Fetch streams for S01E01 as entry point
                                         viewModel.fetchStreams(season = 1, episode = 1)
                                     }
+                                },
+                                onMarkSeasonWatched = { season ->
+                                    viewModel.markSeasonWatched(season)
                                 },
                             )
                         }
@@ -511,6 +522,27 @@ fun DetailScreen(
                         ) {
                             Text(text = message, style = MaterialTheme.typography.bodySmall)
                         }
+                    }
+                }
+
+                // Watchlist snackbar
+                watchlistState.snackbarMessage?.let { message ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp)
+                            .align(Alignment.BottomCenter),
+                    ) {
+                        Snackbar(
+                            containerColor = Graphite,
+                            contentColor = Snow,
+                        ) {
+                            Text(text = message, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                    LaunchedEffect(message) {
+                        kotlinx.coroutines.delay(2000)
+                        watchlistViewModel.clearSnackbar()
                     }
                 }
 

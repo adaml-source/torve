@@ -27,6 +27,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Bookmark
+import androidx.compose.material.icons.rounded.BookmarkBorder
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -40,6 +42,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,10 +63,12 @@ import com.streamvault.android.ui.theme.Obsidian
 import com.streamvault.android.ui.theme.Snow
 import com.streamvault.android.ui.theme.StreamVault
 import com.streamvault.domain.model.MediaItem
+import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.model.ShelfType
 import com.streamvault.domain.model.WatchProgress
 import com.streamvault.domain.recommendation.ScoredMediaItem
 import com.streamvault.presentation.home.HomeViewModel
+import com.streamvault.presentation.watchlist.WatchlistViewModel
 import kotlinx.coroutines.delay
 import org.koin.compose.koinInject
 
@@ -72,9 +77,46 @@ import org.koin.compose.koinInject
 fun HomeScreen(
     onMediaClick: (MediaItem) -> Unit,
     onContinueWatchingClick: (WatchProgress) -> Unit = {},
+    mediaType: String = "all",
     viewModel: HomeViewModel = koinInject(),
+    watchlistViewModel: WatchlistViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
+    val watchlistState by watchlistViewModel.state.collectAsState()
+
+    // Filter by media type for TV Shows / Movies tab reuse
+    val filteredShelves = remember(state.shelves, mediaType) {
+        if (mediaType == "all") state.shelves
+        else state.shelves.map { shelf ->
+            shelf.copy(items = shelf.items.filter { item ->
+                when (mediaType) {
+                    "tv" -> item.type == MediaType.SERIES
+                    "movie" -> item.type == MediaType.MOVIE
+                    else -> true
+                }
+            })
+        }.filter { it.items.isNotEmpty() }
+    }
+    val filteredContinueWatching = remember(state.continueWatching, mediaType) {
+        if (mediaType == "all") state.continueWatching
+        else state.continueWatching.filter { progress ->
+            when (mediaType) {
+                "tv" -> progress.mediaType == MediaType.SERIES
+                "movie" -> progress.mediaType == MediaType.MOVIE
+                else -> true
+            }
+        }
+    }
+    val filteredRecommendations = remember(state.recommendedItems, mediaType) {
+        if (mediaType == "all") state.recommendedItems
+        else state.recommendedItems.filter { scored ->
+            when (mediaType) {
+                "tv" -> scored.item.type == MediaType.SERIES
+                "movie" -> scored.item.type == MediaType.MOVIE
+                else -> true
+            }
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         when {
@@ -117,13 +159,15 @@ fun HomeScreen(
                     // Shows top 5 trending items with backdrop, gradient overlay,
                     // title, tagline, and Play/Watchlist buttons.
                     item(key = "hero") {
-                        val heroItems = state.shelves
+                        val heroItems = filteredShelves
                             .firstOrNull()?.items?.take(5) ?: emptyList()
 
                         if (heroItems.isNotEmpty()) {
                             HeroPager(
                                 items = heroItems,
                                 onItemClick = onMediaClick,
+                                watchlistIds = watchlistState.watchlistIds,
+                                onWatchlistClick = { watchlistViewModel.toggleWatchlist(it) },
                             )
                         } else {
                             state.heroItem?.let { hero ->
@@ -136,14 +180,14 @@ fun HomeScreen(
                     }
 
                     // ── Continue Watching ──
-                    if (state.continueWatching.isNotEmpty()) {
+                    if (filteredContinueWatching.isNotEmpty()) {
                         item(key = "continue_watching") {
                             SectionHeader(title = "Continue Watching")
                             LazyRow(
                                 contentPadding = PaddingValues(horizontal = 16.dp),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
-                                items(state.continueWatching, key = { it.mediaId }) { progress ->
+                                items(filteredContinueWatching, key = { it.mediaId }) { progress ->
                                     ContinueWatchingCard(
                                         progress = progress,
                                         onClick = { onContinueWatchingClick(progress) },
@@ -154,7 +198,7 @@ fun HomeScreen(
                     }
 
                     // ── Recommended For You ──
-                    if (state.recommendedItems.isNotEmpty()) {
+                    if (filteredRecommendations.isNotEmpty()) {
                         item(key = "recommended") {
                             Spacer(Modifier.height(8.dp))
                             SectionHeader(title = "Recommended For You")
@@ -163,7 +207,7 @@ fun HomeScreen(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
                                 items(
-                                    state.recommendedItems,
+                                    filteredRecommendations,
                                     key = { it.item.id },
                                 ) { scored ->
                                     RecommendationCard(
@@ -175,8 +219,23 @@ fun HomeScreen(
                         }
                     }
 
+                    // ── Your Watchlist ──
+                    state.watchlistShelf?.let { watchlist ->
+                        if (watchlist.items.isNotEmpty()) {
+                            item(key = "your_watchlist") {
+                                Spacer(Modifier.height(8.dp))
+                                CatalogShelf(
+                                    title = watchlist.title,
+                                    items = watchlist.items,
+                                    shelfType = watchlist.type,
+                                    onItemClick = onMediaClick,
+                                )
+                            }
+                        }
+                    }
+
                     // ── Catalog Shelves ──
-                    items(state.shelves, key = { it.id }) { shelf ->
+                    items(filteredShelves, key = { it.id }) { shelf ->
                         Spacer(Modifier.height(8.dp))
                         CatalogShelf(
                             title = shelf.title,
@@ -184,6 +243,34 @@ fun HomeScreen(
                             shelfType = shelf.type,
                             onItemClick = onMediaClick,
                         )
+                    }
+
+                    // ── Because You Watched ──
+                    state.becauseYouWatched.forEach { shelf ->
+                        item(key = shelf.id) {
+                            Spacer(Modifier.height(8.dp))
+                            CatalogShelf(
+                                title = shelf.title,
+                                items = shelf.items,
+                                shelfType = shelf.type,
+                                onItemClick = onMediaClick,
+                            )
+                        }
+                    }
+
+                    // ── Hidden Gems ──
+                    state.hiddenGemsShelf?.let { gems ->
+                        if (gems.items.isNotEmpty()) {
+                            item(key = "hidden_gems") {
+                                Spacer(Modifier.height(8.dp))
+                                CatalogShelf(
+                                    title = gems.title,
+                                    items = gems.items,
+                                    shelfType = gems.type,
+                                    onItemClick = onMediaClick,
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -200,6 +287,8 @@ fun HomeScreen(
 private fun HeroPager(
     items: List<MediaItem>,
     onItemClick: (MediaItem) -> Unit,
+    watchlistIds: Set<String> = emptySet(),
+    onWatchlistClick: (MediaItem) -> Unit = {},
 ) {
     val pagerState = rememberPagerState(pageCount = { items.size })
 
@@ -221,6 +310,8 @@ private fun HeroPager(
             HeroSlide(
                 item = item,
                 onClick = { onItemClick(item) },
+                isInWatchlist = watchlistIds.contains(item.id),
+                onWatchlistClick = { onWatchlistClick(item) },
             )
         }
 
@@ -252,6 +343,8 @@ private fun HeroPager(
 private fun HeroSlide(
     item: MediaItem,
     onClick: () -> Unit,
+    isInWatchlist: Boolean = false,
+    onWatchlistClick: () -> Unit = {},
 ) {
     Box(
         modifier = Modifier
@@ -360,22 +453,22 @@ private fun HeroSlide(
                     )
                 }
                 FilledTonalButton(
-                    onClick = { /* Add to watchlist */ },
+                    onClick = onWatchlistClick,
                     shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = Snow.copy(alpha = 0.15f),
-                        contentColor = Snow,
+                        containerColor = if (isInWatchlist) Amber.copy(alpha = 0.25f) else Snow.copy(alpha = 0.15f),
+                        contentColor = if (isInWatchlist) Amber else Snow,
                     ),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                 ) {
                     Icon(
-                        Icons.Rounded.Add,
+                        if (isInWatchlist) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp),
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        "Watchlist",
+                        if (isInWatchlist) "In Watchlist" else "Watchlist",
                         style = MaterialTheme.typography.labelLarge,
                     )
                 }

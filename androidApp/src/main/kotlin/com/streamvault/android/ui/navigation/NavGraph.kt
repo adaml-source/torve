@@ -20,19 +20,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.LiveTv
-import androidx.compose.material.icons.filled.Movie
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Tv
-import androidx.compose.material.icons.outlined.CalendarMonth
-import androidx.compose.material.icons.outlined.LiveTv
-import androidx.compose.material.icons.outlined.Movie
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.Tv
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.Explore
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -57,14 +56,20 @@ import com.streamvault.android.ui.auth.LoginScreen
 import com.streamvault.android.ui.calendar.CalendarScreen
 import com.streamvault.android.ui.catalog.CatalogScreen
 import com.streamvault.android.ui.detail.DetailScreen
+import com.streamvault.android.ui.discover.DiscoverScreen
 import com.streamvault.android.ui.home.HomeScreen
 import com.streamvault.android.ui.detail.PersonScreen
 import com.streamvault.android.ui.download.DownloadScreen
 import com.streamvault.android.ui.iptv.IptvScreen
 import com.streamvault.android.ui.legal.LegalScreen
+import com.streamvault.android.ui.mood.MoodMatcherScreen
 import com.streamvault.android.ui.player.PlayerScreen
 import com.streamvault.android.ui.profile.ProfileScreen
+import com.streamvault.android.ui.profile.ProfileTabScreen
+import com.streamvault.android.ui.search.SearchScreen
 import com.streamvault.android.ui.settings.SettingsScreen
+import com.streamvault.android.ui.stats.StatsScreen
+import com.streamvault.android.ui.watchlist.WatchlistScreen
 import com.streamvault.android.ui.setup.SetupWizardScreen
 import com.streamvault.android.ui.subscription.PaywallScreen
 import com.streamvault.android.ui.tv.TvHomeScreen
@@ -89,11 +94,11 @@ data class NavTab(
 )
 
 val navTabs = listOf(
-    NavTab("movies", "Movies", Icons.Filled.Movie, Icons.Outlined.Movie),
-    NavTab("tvshows", "TV Shows", Icons.Filled.Tv, Icons.Outlined.Tv),
-    NavTab("iptv", "Live TV", Icons.Filled.LiveTv, Icons.Outlined.LiveTv),
-    NavTab("calendar", "Calendar", Icons.Filled.CalendarMonth, Icons.Outlined.CalendarMonth),
-    NavTab("settings", "Settings", Icons.Filled.Settings, Icons.Outlined.Settings),
+    NavTab("home", "Home", Icons.Filled.Home, Icons.Outlined.Home),
+    NavTab("discover", "Discover", Icons.Filled.Explore, Icons.Outlined.Explore),
+    NavTab("search", "Search", Icons.Filled.Search, Icons.Outlined.Search),
+    NavTab("watchlist_tab", "Watchlist", Icons.Filled.Bookmark, Icons.Outlined.BookmarkBorder),
+    NavTab("profile_tab", "Profile", Icons.Filled.Person, Icons.Outlined.Person),
 )
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -116,7 +121,7 @@ fun StreamVaultNavGraph(
         startDestination.value = when {
             !setupViewModel.isSetupCompleted() -> "setup"
             isTvMode -> "tv_home"
-            else -> "movies"
+            else -> "home"
         }
     }
 
@@ -138,7 +143,7 @@ fun StreamVaultNavGraph(
                 SetupWizardScreen(
                     viewModel = setupViewModel,
                     onComplete = {
-                        val target = if (isTvMode) "tv_home" else "movies"
+                        val target = if (isTvMode) "tv_home" else "home"
                         navController.navigate(target) {
                             popUpTo("setup") { inclusive = true }
                         }
@@ -156,8 +161,8 @@ fun StreamVaultNavGraph(
                 )
             }
 
-            // Movies tab — Full HomeScreen with hero, recommendations, shelves
-            composable("movies") {
+            // Home tab — Unified HomeScreen with all content (movies + TV)
+            composable("home") {
                 HomeScreen(
                     onMediaClick = { item ->
                         val type = if (item.type == MediaType.SERIES) "tv" else "movie"
@@ -166,20 +171,6 @@ fun StreamVaultNavGraph(
                     onContinueWatchingClick = { progress ->
                         val type = if (progress.mediaType == MediaType.SERIES) "tv" else "movie"
                         navController.navigate("detail/$type/${progress.mediaId}")
-                    },
-                )
-            }
-
-            // TV Shows tab
-            composable("tvshows") {
-                val metadataRepo: MetadataRepository = koinInject()
-                val viewModel = remember { CatalogViewModel(metadataRepo, "tv") }
-                CatalogScreen(
-                    viewModel = viewModel,
-                    mediaType = "tv",
-                    onMediaClick = { item ->
-                        val type = if (item.type == MediaType.SERIES) "tv" else "movie"
-                        navController.navigate("detail/$type/${item.tmdbId}")
                     },
                 )
             }
@@ -200,7 +191,57 @@ fun StreamVaultNavGraph(
                 )
             }
 
-            // Calendar tab
+            // Discover tab — Genre browsing hub
+            composable("discover") {
+                DiscoverScreen(
+                    onGenreClick = { genreId, genreName, mediaType ->
+                        navController.navigate("catalog/$mediaType/$genreId/${Uri.encode(genreName)}")
+                    },
+                    onMoodClick = { navController.navigate("mood") },
+                )
+            }
+
+            // Search tab — Global search
+            composable("search") {
+                SearchScreen(
+                    onMediaClick = { item ->
+                        val type = if (item.type == MediaType.SERIES) "tv" else "movie"
+                        navController.navigate("detail/$type/${item.tmdbId}")
+                    },
+                )
+            }
+
+            // Catalog screen — Genre-filtered browsing (opened from Discover)
+            composable(
+                route = "catalog/{mediaType}/{genreId}/{genreName}",
+                arguments = listOf(
+                    navArgument("mediaType") { type = NavType.StringType },
+                    navArgument("genreId") { type = NavType.IntType },
+                    navArgument("genreName") { type = NavType.StringType },
+                ),
+            ) { backStackEntry ->
+                val mediaType = backStackEntry.arguments?.getString("mediaType") ?: "movie"
+                val genreId = backStackEntry.arguments?.getInt("genreId") ?: 0
+                val genreName = backStackEntry.arguments?.getString("genreName") ?: ""
+                val metadataRepo: MetadataRepository = koinInject()
+                val catalogViewModel = remember {
+                    CatalogViewModel(metadataRepo, mediaType).also {
+                        if (genreId > 0) it.selectGenre(genreId)
+                    }
+                }
+                CatalogScreen(
+                    viewModel = catalogViewModel,
+                    mediaType = mediaType,
+                    onMediaClick = { item ->
+                        val t = if (item.type == MediaType.SERIES) "tv" else "movie"
+                        navController.navigate("detail/$t/${item.tmdbId}")
+                    },
+                    onBack = { navController.popBackStack() },
+                    title = genreName.ifBlank { null },
+                )
+            }
+
+            // Calendar (accessible via navigation, no longer in bottom nav)
             composable("calendar") {
                 CalendarScreen(
                     onEpisodeClick = { tmdbId ->
@@ -209,12 +250,61 @@ fun StreamVaultNavGraph(
                 )
             }
 
-            // Settings tab
+            // Mood Matcher — "What should I watch?"
+            composable("mood") {
+                MoodMatcherScreen(
+                    onMediaClick = { item ->
+                        val type = if (item.type == MediaType.SERIES) "tv" else "movie"
+                        navController.navigate("detail/$type/${item.tmdbId}")
+                    },
+                    onBack = { navController.popBackStack() },
+                )
+            }
+
+            // Stats — Watch activity stats
+            composable("stats") {
+                StatsScreen(
+                    onBack = { navController.popBackStack() },
+                )
+            }
+
+            // Watchlist tab — 3 sub-tabs: Watchlist, In Progress, History
+            composable("watchlist_tab") {
+                WatchlistScreen(
+                    onMediaClick = { item ->
+                        val type = if (item.type == MediaType.SERIES) "tv" else "movie"
+                        navController.navigate("detail/$type/${item.tmdbId}")
+                    },
+                    onContinueWatchingClick = { progress ->
+                        val type = if (progress.mediaType == MediaType.SERIES) "tv" else "movie"
+                        navController.navigate("detail/$type/${progress.mediaId}")
+                    },
+                    onHistoryItemClick = { entry ->
+                        navController.navigate("detail/${entry.mediaType}/${entry.mediaId}")
+                    },
+                )
+            }
+
+            // Profile tab — Hub linking to Settings, Calendar, Downloads, etc.
+            composable("profile_tab") {
+                ProfileTabScreen(
+                    onSettingsClick = { navController.navigate("settings") },
+                    onCalendarClick = { navController.navigate("calendar") },
+                    onDownloadsClick = { navController.navigate("downloads") },
+                    onSubscriptionClick = { navController.navigate("paywall") },
+                    onProfilesClick = { navController.navigate("profiles") },
+                    onIptvClick = { navController.navigate("iptv") },
+                    onStatsClick = { navController.navigate("stats") },
+                )
+            }
+
+            // Settings (accessible from Profile, not in bottom nav)
             composable("settings") {
                 SettingsScreen(
                     onDownloadsClick = { navController.navigate("downloads") },
                     onSubscriptionClick = { navController.navigate("paywall") },
                     onProfilesClick = { navController.navigate("profiles") },
+                    onCalendarClick = { navController.navigate("calendar") },
                     onPrivacyPolicyClick = { navController.navigate("legal/privacy") },
                     onTermsClick = { navController.navigate("legal/terms") },
                     onHelpClick = { navController.navigate("legal/help") },
@@ -413,7 +503,7 @@ fun StreamVaultNavGraph(
                             selected = selected,
                             onClick = {
                                 navController.navigate(tab.route) {
-                                    popUpTo("movies") { saveState = true }
+                                    popUpTo("home") { saveState = true }
                                     launchSingleTop = true
                                     restoreState = true
                                 }

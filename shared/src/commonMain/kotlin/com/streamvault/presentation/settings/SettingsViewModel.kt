@@ -85,15 +85,8 @@ class SettingsViewModel(
             } ?: DebridServiceType.REAL_DEBRID
 
             val apiKey = prefsRepo.getString(KEY_DEBRID_API_KEY) ?: ""
-            val traktClientId = prefsRepo.getString(KEY_TRAKT_CLIENT_ID) ?: ""
-            val traktClientSecret = prefsRepo.getString(KEY_TRAKT_CLIENT_SECRET) ?: ""
             val traktAccessToken = prefsRepo.getString(KEY_TRAKT_ACCESS_TOKEN) ?: ""
             val traktRefreshToken = prefsRepo.getString(KEY_TRAKT_REFRESH_TOKEN) ?: ""
-
-            // Set Trakt credentials
-            if (traktClientId.isNotBlank()) {
-                traktClient.setCredentials(traktClientId, traktClientSecret)
-            }
 
             val maxQuality = prefsRepo.getString(KEY_MAX_QUALITY)?.let {
                 try { StreamQuality.valueOf(it) } catch (_: Exception) { null }
@@ -139,8 +132,6 @@ class SettingsViewModel(
                     debridProvider = provider,
                     debridApiKey = apiKey,
                     debridConnected = apiKey.isNotBlank(),
-                    traktClientId = traktClientId,
-                    traktClientSecret = traktClientSecret,
                     traktAccessToken = traktAccessToken,
                     traktRefreshToken = traktRefreshToken,
                     traktConnected = traktAccessToken.isNotBlank(),
@@ -305,21 +296,7 @@ class SettingsViewModel(
     // Trakt
     // -------------------------------------------------------------------------
 
-    fun setTraktCredentials(clientId: String, clientSecret: String) {
-        traktClient.setCredentials(clientId, clientSecret)
-        _state.update { it.copy(traktClientId = clientId, traktClientSecret = clientSecret) }
-        scope.launch {
-            prefsRepo.setString(KEY_TRAKT_CLIENT_ID, clientId)
-            prefsRepo.setString(KEY_TRAKT_CLIENT_SECRET, clientSecret)
-        }
-    }
-
     fun startTraktDeviceAuth() {
-        if (_state.value.traktClientId.isBlank()) {
-            _state.update { it.copy(traktError = "Set Trakt Client ID first") }
-            return
-        }
-
         scope.launch {
             _state.update { it.copy(traktLoading = true, traktError = null) }
             try {

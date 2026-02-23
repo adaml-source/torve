@@ -7,6 +7,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,9 +19,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -33,14 +37,14 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -53,7 +57,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -63,6 +67,16 @@ import com.streamvault.data.auth.AuthClient
 import com.streamvault.data.auth.AuthUser
 import com.streamvault.domain.model.CodecPreference
 import com.streamvault.domain.model.HdrMode
+import com.streamvault.android.ui.theme.Amber
+import com.streamvault.android.ui.theme.Charcoal
+import com.streamvault.android.ui.theme.Emerald
+import com.streamvault.android.ui.theme.Gunmetal
+import com.streamvault.android.ui.theme.Obsidian
+import com.streamvault.android.ui.theme.Ruby
+import com.streamvault.android.ui.theme.Silver
+import com.streamvault.android.ui.theme.Snow
+import com.streamvault.android.ui.theme.Steel
+import com.streamvault.android.ui.theme.StreamVault
 import com.streamvault.presentation.addon.AddonViewModel
 import com.streamvault.presentation.settings.AppLanguage
 import com.streamvault.presentation.settings.SettingsViewModel
@@ -76,6 +90,7 @@ fun SettingsScreen(
     onDownloadsClick: () -> Unit = {},
     onSubscriptionClick: () -> Unit = {},
     onProfilesClick: () -> Unit = {},
+    onCalendarClick: () -> Unit = {},
     onPrivacyPolicyClick: () -> Unit = {},
     onTermsClick: () -> Unit = {},
     onHelpClick: () -> Unit = {},
@@ -86,15 +101,16 @@ fun SettingsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(Obsidian)
             .statusBarsPadding()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
     ) {
         Text(
             text = "Settings",
-            style = MaterialTheme.typography.headlineMedium,
-            color = MaterialTheme.colorScheme.onBackground,
+            style = MaterialTheme.typography.displayMedium,
+            color = Snow,
+            fontWeight = FontWeight.Bold,
         )
 
         Spacer(Modifier.height(16.dp))
@@ -107,20 +123,36 @@ fun SettingsScreen(
             OutlinedButton(
                 onClick = onProfilesClick,
                 modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
             ) {
                 Text("Profiles")
             }
             OutlinedButton(
                 onClick = onSubscriptionClick,
                 modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
             ) {
                 Text("Subscription")
             }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
             OutlinedButton(
                 onClick = onDownloadsClick,
                 modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
             ) {
                 Text("Downloads")
+            }
+            OutlinedButton(
+                onClick = onCalendarClick,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
+            ) {
+                Text("Calendar")
             }
         }
 
@@ -132,9 +164,7 @@ fun SettingsScreen(
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-            ),
+            colors = CardDefaults.cardColors(containerColor = Charcoal),
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 // Provider selector
@@ -143,18 +173,27 @@ fun SettingsScreen(
                     expanded = providerExpanded,
                     onExpandedChange = { providerExpanded = !providerExpanded },
                 ) {
-                    OutlinedTextField(
-                        value = state.debridProvider.label,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Provider") },
-                        trailingIcon = {
-                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = providerExpanded)
-                        },
+                    Surface(
                         modifier = Modifier
                             .fillMaxWidth()
                             .menuAnchor(),
-                    )
+                        shape = RoundedCornerShape(8.dp),
+                        color = Gunmetal,
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Provider", style = MaterialTheme.typography.bodySmall, color = StreamVault.colors.textSecondary)
+                                Spacer(Modifier.height(2.dp))
+                                Text(state.debridProvider.label, style = MaterialTheme.typography.bodyMedium, color = Snow)
+                            }
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = StreamVault.colors.textSecondary, modifier = Modifier.size(20.dp))
+                        }
+                    }
                     ExposedDropdownMenu(
                         expanded = providerExpanded,
                         onDismissRequest = { providerExpanded = false },
@@ -183,9 +222,7 @@ fun SettingsScreen(
                     OutlinedButton(
                         onClick = { viewModel.disconnectDebrid() },
                         modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = MaterialTheme.colorScheme.error,
-                        ),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Ruby),
                     ) {
                         Text("Disconnect")
                     }
@@ -198,7 +235,7 @@ fun SettingsScreen(
                         Text(
                             text = state.debridDeviceCode!!.verificationUrl,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = Amber,
                             fontWeight = FontWeight.Bold,
                         )
                         Spacer(Modifier.height(8.dp))
@@ -217,12 +254,10 @@ fun SettingsScreen(
                         }
                     }
                 } else {
-                    OutlinedTextField(
+                    SettingsTextField(
                         value = state.debridApiKey,
                         onValueChange = { viewModel.setDebridApiKey(it) },
-                        label = { Text("API Key") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
+                        label = "API Key",
                     )
                     Spacer(Modifier.height(8.dp))
                     Row(
@@ -233,11 +268,16 @@ fun SettingsScreen(
                             onClick = { viewModel.connectDebridWithApiKey() },
                             modifier = Modifier.weight(1f),
                             enabled = !state.debridLoading,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Amber,
+                                contentColor = Obsidian,
+                            ),
                         ) {
                             if (state.debridLoading) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(16.dp),
                                     strokeWidth = 2.dp,
+                                    color = Obsidian,
                                 )
                             } else {
                                 Text("Connect")
@@ -249,6 +289,7 @@ fun SettingsScreen(
                             OutlinedButton(
                                 onClick = { viewModel.startDebridDeviceAuth() },
                                 modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
                             ) {
                                 Text("Device Auth")
                             }
@@ -261,7 +302,7 @@ fun SettingsScreen(
                     Text(
                         text = error,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
+                        color = Ruby,
                     )
                 }
             }
@@ -275,9 +316,7 @@ fun SettingsScreen(
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-            ),
+            colors = CardDefaults.cardColors(containerColor = Charcoal),
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 if (state.traktConnected) {
@@ -333,12 +372,18 @@ fun SettingsScreen(
                             Text(
                                 "Auto-track what you watch",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = StreamVault.colors.textSecondary,
                             )
                         }
                         Switch(
                             checked = state.traktScrobbleEnabled,
                             onCheckedChange = { viewModel.setTraktScrobbleEnabled(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Amber,
+                                checkedTrackColor = Amber.copy(alpha = 0.3f),
+                                uncheckedThumbColor = Silver,
+                                uncheckedTrackColor = Gunmetal,
+                            ),
                         )
                     }
 
@@ -350,13 +395,13 @@ fun SettingsScreen(
                                 if (status == "Online") Icons.Default.Check else Icons.Default.Close,
                                 contentDescription = null,
                                 modifier = Modifier.size(16.dp),
-                                tint = if (status == "Online") Color(0xFF4CAF50) else MaterialTheme.colorScheme.error,
+                                tint = if (status == "Online") Emerald else Ruby,
                             )
                             Spacer(Modifier.width(4.dp))
                             Text(
                                 "API: $status",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = StreamVault.colors.textSecondary,
                             )
                         }
                     }
@@ -365,9 +410,7 @@ fun SettingsScreen(
                     OutlinedButton(
                         onClick = { viewModel.disconnectTrakt() },
                         modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = MaterialTheme.colorScheme.error,
-                        ),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Ruby),
                     ) {
                         Text("Disconnect")
                     }
@@ -380,7 +423,7 @@ fun SettingsScreen(
                         Text(
                             text = state.traktDeviceCode!!.verificationUrl,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = Amber,
                             fontWeight = FontWeight.Bold,
                         )
                         Spacer(Modifier.height(8.dp))
@@ -399,34 +442,23 @@ fun SettingsScreen(
                         }
                     }
                 } else {
-                    OutlinedTextField(
-                        value = state.traktClientId,
-                        onValueChange = { viewModel.setTraktCredentials(it, state.traktClientSecret) },
-                        label = { Text("Client ID") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = state.traktClientSecret,
-                        onValueChange = { viewModel.setTraktCredentials(state.traktClientId, it) },
-                        label = { Text("Client Secret") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                    )
-                    Spacer(Modifier.height(8.dp))
                     Button(
                         onClick = { viewModel.startTraktDeviceAuth() },
                         modifier = Modifier.fillMaxWidth(),
-                        enabled = !state.traktLoading && state.traktClientId.isNotBlank(),
+                        enabled = !state.traktLoading,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Amber,
+                            contentColor = Obsidian,
+                        ),
                     ) {
                         if (state.traktLoading) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(16.dp),
                                 strokeWidth = 2.dp,
+                                color = Obsidian,
                             )
                         } else {
-                            Text("Authorize with Trakt")
+                            Text("Connect Trakt")
                         }
                     }
                 }
@@ -436,7 +468,7 @@ fun SettingsScreen(
                     Text(
                         text = error,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
+                        color = Ruby,
                     )
                 }
             }
@@ -450,9 +482,7 @@ fun SettingsScreen(
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-            ),
+            colors = CardDefaults.cardColors(containerColor = Charcoal),
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 if (state.simklConnected) {
@@ -464,9 +494,7 @@ fun SettingsScreen(
                     OutlinedButton(
                         onClick = { viewModel.disconnectSimkl() },
                         modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = MaterialTheme.colorScheme.error,
-                        ),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Ruby),
                     ) {
                         Text("Disconnect")
                     }
@@ -479,7 +507,7 @@ fun SettingsScreen(
                         Text(
                             text = state.simklDeviceCode!!.verificationUrl,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = Amber,
                             fontWeight = FontWeight.Bold,
                         )
                         Spacer(Modifier.height(8.dp))
@@ -495,21 +523,23 @@ fun SettingsScreen(
                         }
                     }
                 } else {
-                    OutlinedTextField(
+                    SettingsTextField(
                         value = state.simklClientId,
                         onValueChange = { viewModel.setSimklClientId(it) },
-                        label = { Text("Client ID") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
+                        label = "Client ID",
                     )
                     Spacer(Modifier.height(8.dp))
                     Button(
                         onClick = { viewModel.startSimklDeviceAuth() },
                         modifier = Modifier.fillMaxWidth(),
                         enabled = !state.simklLoading && state.simklClientId.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Amber,
+                            contentColor = Obsidian,
+                        ),
                     ) {
                         if (state.simklLoading) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Obsidian)
                         } else {
                             Text("Authorize with SIMKL")
                         }
@@ -518,7 +548,7 @@ fun SettingsScreen(
 
                 state.simklError?.let { error ->
                     Spacer(Modifier.height(8.dp))
-                    Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    Text(error, style = MaterialTheme.typography.bodySmall, color = Ruby)
                 }
             }
         }
@@ -531,9 +561,7 @@ fun SettingsScreen(
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-            ),
+            colors = CardDefaults.cardColors(containerColor = Charcoal),
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 // Max quality dropdown
@@ -542,18 +570,27 @@ fun SettingsScreen(
                     expanded = maxQualityExpanded,
                     onExpandedChange = { maxQualityExpanded = !maxQualityExpanded },
                 ) {
-                    OutlinedTextField(
-                        value = state.maxQuality.label,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Max Quality") },
-                        trailingIcon = {
-                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = maxQualityExpanded)
-                        },
+                    Surface(
                         modifier = Modifier
                             .fillMaxWidth()
                             .menuAnchor(),
-                    )
+                        shape = RoundedCornerShape(8.dp),
+                        color = Gunmetal,
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Max Quality", style = MaterialTheme.typography.bodySmall, color = StreamVault.colors.textSecondary)
+                                Spacer(Modifier.height(2.dp))
+                                Text(state.maxQuality.label, style = MaterialTheme.typography.bodyMedium, color = Snow)
+                            }
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = StreamVault.colors.textSecondary, modifier = Modifier.size(20.dp))
+                        }
+                    }
                     ExposedDropdownMenu(
                         expanded = maxQualityExpanded,
                         onDismissRequest = { maxQualityExpanded = false },
@@ -578,18 +615,27 @@ fun SettingsScreen(
                     expanded = minQualityExpanded,
                     onExpandedChange = { minQualityExpanded = !minQualityExpanded },
                 ) {
-                    OutlinedTextField(
-                        value = state.minQuality.label,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Min Quality") },
-                        trailingIcon = {
-                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = minQualityExpanded)
-                        },
+                    Surface(
                         modifier = Modifier
                             .fillMaxWidth()
                             .menuAnchor(),
-                    )
+                        shape = RoundedCornerShape(8.dp),
+                        color = Gunmetal,
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Min Quality", style = MaterialTheme.typography.bodySmall, color = StreamVault.colors.textSecondary)
+                                Spacer(Modifier.height(2.dp))
+                                Text(state.minQuality.label, style = MaterialTheme.typography.bodyMedium, color = Snow)
+                            }
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = StreamVault.colors.textSecondary, modifier = Modifier.size(20.dp))
+                        }
+                    }
                     ExposedDropdownMenu(
                         expanded = minQualityExpanded,
                         onDismissRequest = { minQualityExpanded = false },
@@ -612,17 +658,15 @@ fun SettingsScreen(
                 var fileSizeText by remember(state.maxFileSizeMb) {
                     mutableStateOf(state.maxFileSizeMb?.toString() ?: "")
                 }
-                OutlinedTextField(
+                SettingsTextField(
                     value = fileSizeText,
                     onValueChange = { text ->
                         fileSizeText = text.filter { it.isDigit() }
                         val value = fileSizeText.toIntOrNull()
                         viewModel.setMaxFileSizeMb(value)
                     },
-                    label = { Text("Max File Size (MB)") },
-                    placeholder = { Text("No limit") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
+                    label = "Max File Size (MB)",
+                    placeholder = "No limit",
                 )
 
                 Spacer(Modifier.height(12.dp))
@@ -637,12 +681,18 @@ fun SettingsScreen(
                         Text(
                             "Only show cached streams for instant playback",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = StreamVault.colors.textSecondary,
                         )
                     }
                     Switch(
                         checked = state.cachedOnly,
                         onCheckedChange = { viewModel.setCachedOnly(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Amber,
+                            checkedTrackColor = Amber.copy(alpha = 0.3f),
+                            uncheckedThumbColor = Silver,
+                            uncheckedTrackColor = Gunmetal,
+                        ),
                     )
                 }
 
@@ -658,12 +708,18 @@ fun SettingsScreen(
                         Text(
                             "Include HDR / Dolby Vision streams",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = StreamVault.colors.textSecondary,
                         )
                     }
                     Switch(
                         checked = state.hdrEnabled,
                         onCheckedChange = { viewModel.setHdrEnabled(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Amber,
+                            checkedTrackColor = Amber.copy(alpha = 0.3f),
+                            uncheckedThumbColor = Silver,
+                            uncheckedTrackColor = Gunmetal,
+                        ),
                     )
                 }
             }
@@ -677,9 +733,7 @@ fun SettingsScreen(
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-            ),
+            colors = CardDefaults.cardColors(containerColor = Charcoal),
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 // Auto-Play toggle
@@ -692,12 +746,18 @@ fun SettingsScreen(
                         Text(
                             "Automatically pick and play the best stream",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = StreamVault.colors.textSecondary,
                         )
                     }
                     Switch(
                         checked = state.autoPlayEnabled,
                         onCheckedChange = { viewModel.setAutoPlayEnabled(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Amber,
+                            checkedTrackColor = Amber.copy(alpha = 0.3f),
+                            uncheckedThumbColor = Silver,
+                            uncheckedTrackColor = Gunmetal,
+                        ),
                     )
                 }
 
@@ -713,12 +773,18 @@ fun SettingsScreen(
                         Text(
                             "Automatically play the next episode when current finishes",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = StreamVault.colors.textSecondary,
                         )
                     }
                     Switch(
                         checked = state.autoPlayNextEpisodeEnabled,
                         onCheckedChange = { viewModel.setAutoPlayNextEpisodeEnabled(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Amber,
+                            checkedTrackColor = Amber.copy(alpha = 0.3f),
+                            uncheckedThumbColor = Silver,
+                            uncheckedTrackColor = Gunmetal,
+                        ),
                     )
                 }
 
@@ -730,18 +796,27 @@ fun SettingsScreen(
                     expanded = codecExpanded,
                     onExpandedChange = { codecExpanded = !codecExpanded },
                 ) {
-                    OutlinedTextField(
-                        value = state.codecPreference.label,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Codec Preference") },
-                        trailingIcon = {
-                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = codecExpanded)
-                        },
+                    Surface(
                         modifier = Modifier
                             .fillMaxWidth()
                             .menuAnchor(),
-                    )
+                        shape = RoundedCornerShape(8.dp),
+                        color = Gunmetal,
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Codec Preference", style = MaterialTheme.typography.bodySmall, color = StreamVault.colors.textSecondary)
+                                Spacer(Modifier.height(2.dp))
+                                Text(state.codecPreference.label, style = MaterialTheme.typography.bodyMedium, color = Snow)
+                            }
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = StreamVault.colors.textSecondary, modifier = Modifier.size(20.dp))
+                        }
+                    }
                     ExposedDropdownMenu(
                         expanded = codecExpanded,
                         onDismissRequest = { codecExpanded = false },
@@ -766,18 +841,27 @@ fun SettingsScreen(
                     expanded = hdrModeExpanded,
                     onExpandedChange = { hdrModeExpanded = !hdrModeExpanded },
                 ) {
-                    OutlinedTextField(
-                        value = state.hdrMode.label,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("HDR Mode") },
-                        trailingIcon = {
-                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = hdrModeExpanded)
-                        },
+                    Surface(
                         modifier = Modifier
                             .fillMaxWidth()
                             .menuAnchor(),
-                    )
+                        shape = RoundedCornerShape(8.dp),
+                        color = Gunmetal,
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("HDR Mode", style = MaterialTheme.typography.bodySmall, color = StreamVault.colors.textSecondary)
+                                Spacer(Modifier.height(2.dp))
+                                Text(state.hdrMode.label, style = MaterialTheme.typography.bodyMedium, color = Snow)
+                            }
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = StreamVault.colors.textSecondary, modifier = Modifier.size(20.dp))
+                        }
+                    }
                     ExposedDropdownMenu(
                         expanded = hdrModeExpanded,
                         onDismissRequest = { hdrModeExpanded = false },
@@ -810,16 +894,14 @@ fun SettingsScreen(
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-            ),
+            colors = CardDefaults.cardColors(containerColor = Charcoal),
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 if (state.kodiHosts.isEmpty()) {
                     Text(
                         "No Kodi hosts configured",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = StreamVault.colors.textSecondary,
                     )
                 } else {
                     state.kodiHosts.forEach { host ->
@@ -831,22 +913,22 @@ fun SettingsScreen(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(host.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                                Text(host.jsonRpcUrl, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(host.jsonRpcUrl, style = MaterialTheme.typography.bodySmall, color = StreamVault.colors.textSecondary)
                             }
                             if (testResult != null) {
                                 Icon(
                                     if (testResult) Icons.Default.Check else Icons.Default.Close,
                                     contentDescription = null,
                                     modifier = Modifier.size(16.dp),
-                                    tint = if (testResult) Color(0xFF4CAF50) else MaterialTheme.colorScheme.error,
+                                    tint = if (testResult) Emerald else Ruby,
                                 )
                                 Spacer(Modifier.width(4.dp))
                             }
                             TextButton(onClick = { viewModel.testKodiHost(host) }) {
-                                Text("Test")
+                                Text("Test", color = Amber)
                             }
                             IconButton(onClick = { viewModel.removeKodiHost(host) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Remove", modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.Delete, contentDescription = "Remove", modifier = Modifier.size(18.dp), tint = Ruby)
                             }
                         }
                         Spacer(Modifier.height(4.dp))
@@ -862,30 +944,26 @@ fun SettingsScreen(
                     var kodiIp by remember { mutableStateOf("") }
                     var kodiPort by remember { mutableStateOf("8080") }
 
-                    OutlinedTextField(
+                    SettingsTextField(
                         value = kodiName,
                         onValueChange = { kodiName = it },
-                        label = { Text("Name") },
-                        placeholder = { Text("Living Room") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
+                        label = "Name",
+                        placeholder = "Living Room",
                     )
                     Spacer(Modifier.height(4.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
+                        SettingsTextField(
                             value = kodiIp,
                             onValueChange = { kodiIp = it },
-                            label = { Text("IP Address") },
-                            placeholder = { Text("192.168.1.100") },
+                            label = "IP Address",
+                            placeholder = "192.168.1.100",
                             modifier = Modifier.weight(2f),
-                            singleLine = true,
                         )
-                        OutlinedTextField(
+                        SettingsTextField(
                             value = kodiPort,
                             onValueChange = { kodiPort = it.filter { c -> c.isDigit() } },
-                            label = { Text("Port") },
+                            label = "Port",
                             modifier = Modifier.weight(1f),
-                            singleLine = true,
                         )
                     }
                     Spacer(Modifier.height(8.dp))
@@ -897,10 +975,17 @@ fun SettingsScreen(
                                     showAddKodi = false
                                 }
                             },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Amber,
+                                contentColor = Obsidian,
+                            ),
                         ) {
                             Text("Add")
                         }
-                        OutlinedButton(onClick = { showAddKodi = false }) {
+                        OutlinedButton(
+                            onClick = { showAddKodi = false },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
+                        ) {
                             Text("Cancel")
                         }
                     }
@@ -908,6 +993,7 @@ fun SettingsScreen(
                     OutlinedButton(
                         onClick = { showAddKodi = true },
                         modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(4.dp))
@@ -925,26 +1011,40 @@ fun SettingsScreen(
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-            ),
+            colors = CardDefaults.cardColors(containerColor = Charcoal),
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 // Theme mode
-                Text("Theme", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                Spacer(Modifier.height(4.dp))
                 var themeExpanded by remember { mutableStateOf(false) }
                 ExposedDropdownMenuBox(
                     expanded = themeExpanded,
                     onExpandedChange = { themeExpanded = !themeExpanded },
                 ) {
-                    OutlinedTextField(
-                        value = state.themeMode.name.lowercase().replaceFirstChar { it.uppercase() },
-                        onValueChange = {},
-                        readOnly = true,
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = themeExpanded) },
-                        modifier = Modifier.fillMaxWidth().menuAnchor(),
-                    )
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor(),
+                        shape = RoundedCornerShape(8.dp),
+                        color = Gunmetal,
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Theme", style = MaterialTheme.typography.bodySmall, color = StreamVault.colors.textSecondary)
+                                Spacer(Modifier.height(2.dp))
+                                Text(
+                                    state.themeMode.name.lowercase().replaceFirstChar { it.uppercase() },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Snow,
+                                )
+                            }
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = StreamVault.colors.textSecondary, modifier = Modifier.size(20.dp))
+                        }
+                    }
                     ExposedDropdownMenu(expanded = themeExpanded, onDismissRequest = { themeExpanded = false }) {
                         ThemeMode.entries.forEach { mode ->
                             DropdownMenuItem(
@@ -961,20 +1061,32 @@ fun SettingsScreen(
                 Spacer(Modifier.height(16.dp))
 
                 // Language
-                Text("Language", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                Spacer(Modifier.height(4.dp))
                 var langExpanded by remember { mutableStateOf(false) }
                 ExposedDropdownMenuBox(
                     expanded = langExpanded,
                     onExpandedChange = { langExpanded = !langExpanded },
                 ) {
-                    OutlinedTextField(
-                        value = state.appLanguage.displayName,
-                        onValueChange = {},
-                        readOnly = true,
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = langExpanded) },
-                        modifier = Modifier.fillMaxWidth().menuAnchor(),
-                    )
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor(),
+                        shape = RoundedCornerShape(8.dp),
+                        color = Gunmetal,
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Language", style = MaterialTheme.typography.bodySmall, color = StreamVault.colors.textSecondary)
+                                Spacer(Modifier.height(2.dp))
+                                Text(state.appLanguage.displayName, style = MaterialTheme.typography.bodyMedium, color = Snow)
+                            }
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = StreamVault.colors.textSecondary, modifier = Modifier.size(20.dp))
+                        }
+                    }
                     ExposedDropdownMenu(expanded = langExpanded, onDismissRequest = { langExpanded = false }) {
                         AppLanguage.entries.forEach { lang ->
                             DropdownMenuItem(
@@ -998,9 +1110,7 @@ fun SettingsScreen(
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-            ),
+            colors = CardDefaults.cardColors(containerColor = Charcoal),
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 var showClearConfirm by remember { mutableStateOf(false) }
@@ -1013,13 +1123,16 @@ fun SettingsScreen(
                         Text(
                             "Remove cached metadata and images",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = StreamVault.colors.textSecondary,
                         )
                     }
                     if (state.cacheCleared) {
-                        Text("Cleared!", style = MaterialTheme.typography.bodySmall, color = Color(0xFF4CAF50))
+                        Text("Cleared!", style = MaterialTheme.typography.bodySmall, color = Emerald)
                     } else {
-                        OutlinedButton(onClick = { showClearConfirm = true }) {
+                        OutlinedButton(
+                            onClick = { showClearConfirm = true },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
+                        ) {
                             Text("Clear")
                         }
                     }
@@ -1028,19 +1141,23 @@ fun SettingsScreen(
                 if (showClearConfirm) {
                     AlertDialog(
                         onDismissRequest = { showClearConfirm = false },
-                        title = { Text("Clear Cache") },
-                        text = { Text("This will remove all cached metadata. You may need to reload content.") },
+                        containerColor = Charcoal,
+                        title = { Text("Clear Cache", color = Snow) },
+                        text = { Text("This will remove all cached metadata. You may need to reload content.", color = StreamVault.colors.textSecondary) },
                         confirmButton = {
-                            Button(onClick = {
-                                viewModel.clearCache()
-                                showClearConfirm = false
-                            }) {
+                            Button(
+                                onClick = {
+                                    viewModel.clearCache()
+                                    showClearConfirm = false
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Ruby, contentColor = Snow),
+                            ) {
                                 Text("Clear")
                             }
                         },
                         dismissButton = {
                             TextButton(onClick = { showClearConfirm = false }) {
-                                Text("Cancel")
+                                Text("Cancel", color = StreamVault.colors.textSecondary)
                             }
                         },
                     )
@@ -1056,9 +1173,7 @@ fun SettingsScreen(
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-            ),
+            colors = CardDefaults.cardColors(containerColor = Charcoal),
         ) {
             val backupContext = LocalContext.current
 
@@ -1101,7 +1216,7 @@ fun SettingsScreen(
                     Text(
                         "Last backup: $dateStr",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = StreamVault.colors.textSecondary,
                     )
                     Spacer(Modifier.height(12.dp))
                 }
@@ -1111,16 +1226,21 @@ fun SettingsScreen(
                     onClick = {
                         viewModel.exportBackup { json ->
                             pendingExportJson = json
-                            exportLauncher.launch("streamvault_backup.json")
+                            exportLauncher.launch("torve_backup.json")
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !state.isSyncing,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Amber,
+                        contentColor = Obsidian,
+                    ),
                 ) {
                     if (state.isSyncing) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(16.dp),
                             strokeWidth = 2.dp,
+                            color = Obsidian,
                         )
                     } else {
                         Text("Export Backup")
@@ -1134,6 +1254,7 @@ fun SettingsScreen(
                     onClick = { importLauncher.launch(arrayOf("application/json", "*/*")) },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !state.isSyncing,
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
                 ) {
                     Text("Import Backup")
                 }
@@ -1144,7 +1265,7 @@ fun SettingsScreen(
                     Text(
                         msg,
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFF4CAF50),
+                        color = Emerald,
                     )
                 }
 
@@ -1154,7 +1275,7 @@ fun SettingsScreen(
                     Text(
                         error,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
+                        color = Ruby,
                     )
                 }
 
@@ -1162,7 +1283,7 @@ fun SettingsScreen(
                 Text(
                     "Export your addons, preferences, watch progress, and IPTV favorites to a file. API keys and tokens are never included.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = StreamVault.colors.textSecondary,
                 )
             }
         }
@@ -1184,9 +1305,7 @@ fun SettingsScreen(
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-            ),
+            colors = CardDefaults.cardColors(containerColor = Charcoal),
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 if (authUser != null) {
@@ -1198,7 +1317,7 @@ fun SettingsScreen(
                     Text(
                         authUser!!.email,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = StreamVault.colors.textSecondary,
                     )
                     Spacer(Modifier.height(12.dp))
                     OutlinedButton(
@@ -1209,6 +1328,7 @@ fun SettingsScreen(
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
                     ) {
                         Text("Log Out")
                     }
@@ -1216,9 +1336,7 @@ fun SettingsScreen(
                     OutlinedButton(
                         onClick = { showDeleteConfirm = true },
                         modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = MaterialTheme.colorScheme.error,
-                        ),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Ruby),
                     ) {
                         Text("Delete Account")
                     }
@@ -1226,8 +1344,9 @@ fun SettingsScreen(
                     if (showDeleteConfirm) {
                         AlertDialog(
                             onDismissRequest = { showDeleteConfirm = false },
-                            title = { Text("Delete Account") },
-                            text = { Text("This will permanently delete your account and all associated data. This action cannot be undone.") },
+                            containerColor = Charcoal,
+                            title = { Text("Delete Account", color = Snow) },
+                            text = { Text("This will permanently delete your account and all associated data. This action cannot be undone.", color = StreamVault.colors.textSecondary) },
                             confirmButton = {
                                 Button(
                                     onClick = {
@@ -1237,16 +1356,14 @@ fun SettingsScreen(
                                             showDeleteConfirm = false
                                         }
                                     },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.error,
-                                    ),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Ruby, contentColor = Snow),
                                 ) {
                                     Text("Delete")
                                 }
                             },
                             dismissButton = {
                                 TextButton(onClick = { showDeleteConfirm = false }) {
-                                    Text("Cancel")
+                                    Text("Cancel", color = StreamVault.colors.textSecondary)
                                 }
                             },
                         )
@@ -1255,13 +1372,13 @@ fun SettingsScreen(
                     Text(
                         "Not logged in",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = StreamVault.colors.textSecondary,
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
                         "Create an account to sync your preferences across devices.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = StreamVault.colors.textSecondary,
                     )
                 }
             }
@@ -1277,48 +1394,46 @@ fun SettingsScreen(
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-            ),
+            colors = CardDefaults.cardColors(containerColor = Charcoal),
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 SettingsLinkItem(
                     title = "Privacy Policy",
                     onClick = onPrivacyPolicyClick,
                 )
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+                HorizontalDivider(color = Steel.copy(alpha = 0.3f))
                 SettingsLinkItem(
                     title = "Terms & Conditions",
                     onClick = onTermsClick,
                 )
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+                HorizontalDivider(color = Steel.copy(alpha = 0.3f))
                 SettingsLinkItem(
                     title = "Help & Documentation",
                     onClick = onHelpClick,
                 )
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+                HorizontalDivider(color = Steel.copy(alpha = 0.3f))
                 SettingsLinkItem(
                     title = "Share App",
                     onClick = {
                         val shareIntent = Intent(Intent.ACTION_SEND).apply {
                             type = "text/plain"
-                            putExtra(Intent.EXTRA_SUBJECT, "StreamVault")
-                            putExtra(Intent.EXTRA_TEXT, "Check out StreamVault - a beautiful media player and content organizer! https://streamvault.app")
+                            putExtra(Intent.EXTRA_SUBJECT, "Torve")
+                            putExtra(Intent.EXTRA_TEXT, "Check out Torve - a beautiful media player and content organizer! https://torve.app")
                         }
-                        context.startActivity(Intent.createChooser(shareIntent, "Share StreamVault"))
+                        context.startActivity(Intent.createChooser(shareIntent, "Share Torve"))
                     },
                 )
             }
         }
 
         Spacer(Modifier.height(24.dp))
-        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+        HorizontalDivider(color = Steel.copy(alpha = 0.3f))
         Spacer(Modifier.height(16.dp))
 
         Text(
-            text = "StreamVault v0.5.0",
+            text = "Torve v0.5.0",
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = StreamVault.colors.textTertiary,
         )
     }
 }
@@ -1328,7 +1443,7 @@ private fun SectionHeader(title: String) {
     Text(
         text = title,
         style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.onBackground,
+        color = Amber,
         fontWeight = FontWeight.SemiBold,
     )
 }
@@ -1348,12 +1463,13 @@ private fun SettingsLinkItem(
         Text(
             text = title,
             style = MaterialTheme.typography.bodyMedium,
+            color = StreamVault.colors.textPrimary,
             modifier = Modifier.weight(1f),
         )
         Text(
             text = ">",
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = StreamVault.colors.textTertiary,
         )
     }
 }
@@ -1369,7 +1485,7 @@ private fun ConnectionStatus(
             imageVector = if (connected) Icons.Default.Check else Icons.Default.Close,
             contentDescription = null,
             modifier = Modifier.size(20.dp),
-            tint = if (connected) Color(0xFF4CAF50) else MaterialTheme.colorScheme.error,
+            tint = if (connected) Emerald else Ruby,
         )
         Spacer(Modifier.width(8.dp))
         Column {
@@ -1382,9 +1498,44 @@ private fun ConnectionStatus(
                 Text(
                     text = it,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = StreamVault.colors.textSecondary,
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun SettingsTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    placeholder: String = label,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        Text(label, style = MaterialTheme.typography.bodySmall, color = StreamVault.colors.textSecondary)
+        Spacer(Modifier.height(4.dp))
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier.fillMaxWidth(),
+            textStyle = MaterialTheme.typography.bodyMedium.copy(color = Snow),
+            singleLine = true,
+            cursorBrush = SolidColor(Amber),
+            decorationBox = { innerTextField ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Gunmetal, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                ) {
+                    if (value.isEmpty()) {
+                        Text(placeholder, style = MaterialTheme.typography.bodyMedium, color = StreamVault.colors.textHint)
+                    }
+                    innerTextField()
+                }
+            },
+        )
     }
 }

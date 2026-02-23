@@ -153,6 +153,9 @@ class TmdbApiClient(private val httpClient: HttpClient) {
         withGenres: String? = null,
         minRating: Float? = null,
         year: Int? = null,
+        yearTo: Int? = null,
+        runtimeGte: Int? = null,
+        runtimeLte: Int? = null,
         withCast: String? = null,
         withCrew: String? = null,
     ): TmdbResponse<TmdbMovie> {
@@ -162,7 +165,10 @@ class TmdbApiClient(private val httpClient: HttpClient) {
             parameter("sort_by", sortBy)
             withGenres?.let { parameter("with_genres", it) }
             minRating?.let { parameter("vote_average.gte", it) }
-            year?.let { parameter("primary_release_year", it) }
+            year?.let { parameter("primary_release_date.gte", "$it-01-01") }
+            yearTo?.let { parameter("primary_release_date.lte", "$it-12-31") }
+            runtimeGte?.let { parameter("with_runtime.gte", it) }
+            runtimeLte?.let { parameter("with_runtime.lte", it) }
             withCast?.let { parameter("with_cast", it) }
             withCrew?.let { parameter("with_crew", it) }
             if (minRating != null) parameter("vote_count.gte", 50)
@@ -175,6 +181,9 @@ class TmdbApiClient(private val httpClient: HttpClient) {
         withGenres: String? = null,
         minRating: Float? = null,
         year: Int? = null,
+        yearTo: Int? = null,
+        runtimeGte: Int? = null,
+        runtimeLte: Int? = null,
         withCast: String? = null,
         withCrew: String? = null,
     ): TmdbResponse<TmdbTv> {
@@ -184,7 +193,10 @@ class TmdbApiClient(private val httpClient: HttpClient) {
             parameter("sort_by", sortBy)
             withGenres?.let { parameter("with_genres", it) }
             minRating?.let { parameter("vote_average.gte", it) }
-            year?.let { parameter("first_air_date_year", it) }
+            year?.let { parameter("first_air_date.gte", "$it-01-01") }
+            yearTo?.let { parameter("first_air_date.lte", "$it-12-31") }
+            runtimeGte?.let { parameter("with_runtime.gte", it) }
+            runtimeLte?.let { parameter("with_runtime.lte", it) }
             withCast?.let { parameter("with_cast", it) }
             withCrew?.let { parameter("with_crew", it) }
             if (minRating != null) parameter("vote_count.gte", 50)

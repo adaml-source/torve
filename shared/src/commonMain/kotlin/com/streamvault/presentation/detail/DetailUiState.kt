@@ -30,6 +30,8 @@ data class DetailUiState(
     val selectedSeason: Int = 1,
     val seasonDetail: Season? = null,
     val isLoadingSeasonDetail: Boolean = false,
+    // Episode tracking: keys like "s1e1", "s1e2", etc.
+    val watchedEpisodes: Set<String> = emptySet(),
     // Track what we're fetching streams for (for download labeling)
     val streamContextSeason: Int? = null,
     val streamContextEpisode: Int? = null,

@@ -58,10 +58,11 @@ class SearchViewModel(
 
             // Apply client-side filters
             val filtered = results.filter { item ->
-                val genreMatch = filter.genreId == null || filter.genreId in item.genreIds
+                val genreMatch = filter.genreIds.isEmpty() || filter.genreIds.any { it in item.genreIds }
                 val ratingMatch = filter.minRating == null || (item.rating ?: 0.0) >= filter.minRating
-                val yearMatch = filter.year == null || item.year == filter.year
-                genreMatch && ratingMatch && yearMatch
+                val yearFromMatch = filter.yearFrom == null || (item.year ?: 0) >= filter.yearFrom
+                val yearToMatch = filter.yearTo == null || (item.year ?: Int.MAX_VALUE) <= filter.yearTo
+                genreMatch && ratingMatch && yearFromMatch && yearToMatch
             }
 
             _state.update { it.copy(results = filtered, isSearching = false) }
@@ -86,11 +87,17 @@ class SearchViewModel(
             _state.update { it.copy(isDiscovering = true, error = null) }
             try {
                 val type = filter.mediaType ?: "movie"
+                val genresParam = filter.genreIds.takeIf { it.isNotEmpty() }
+                    ?.joinToString(",")
                 val result = metadataRepo.discover(
                     type = type,
-                    withGenres = filter.genreId?.toString(),
+                    sortBy = filter.sortBy.apiValue,
+                    withGenres = genresParam,
                     minRating = filter.minRating,
-                    year = filter.year,
+                    year = filter.yearFrom,
+                    yearTo = filter.yearTo,
+                    runtimeGte = filter.runtimeFilter?.minMinutes,
+                    runtimeLte = filter.runtimeFilter?.maxMinutes,
                 )
                 _state.update {
                     it.copy(

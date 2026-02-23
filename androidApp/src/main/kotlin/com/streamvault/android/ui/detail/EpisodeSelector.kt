@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.FileDownload
@@ -26,6 +27,7 @@ import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -54,11 +56,13 @@ fun EpisodeSelector(
     selectedSeason: Int,
     seasonDetail: Season?,
     isLoadingSeasonDetail: Boolean,
+    watchedEpisodes: Set<String> = emptySet(),
     onSeasonSelected: (Int) -> Unit,
     onEpisodePlay: (season: Int, episode: Int) -> Unit,
     onEpisodeDownload: (season: Int, episode: Int) -> Unit,
     onDownloadSeason: (season: Int) -> Unit,
     onDownloadAll: () -> Unit,
+    onMarkSeasonWatched: (season: Int) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     if (seasons.isEmpty()) return
@@ -112,9 +116,39 @@ fun EpisodeSelector(
             }
         }
 
+        // Season progress bar
+        val currentSeasonObj = seasons.find { it.seasonNumber == selectedSeason }
+        val totalEps = currentSeasonObj?.episodeCount ?: seasonDetail?.episodes?.size ?: 0
+        if (totalEps > 0) {
+            val watchedCount = (1..totalEps).count { ep ->
+                watchedEpisodes.contains("s${selectedSeason}e$ep")
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                LinearProgressIndicator(
+                    progress = { if (totalEps > 0) watchedCount.toFloat() / totalEps else 0f },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp)),
+                    color = Amber,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                )
+                Text(
+                    text = "$watchedCount/$totalEps",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = StreamVault.colors.textSecondary,
+                )
+            }
+        }
+
         Spacer(Modifier.height(12.dp))
 
-        // Download buttons row
+        // Download & Mark Watched buttons row
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -139,6 +173,17 @@ fun EpisodeSelector(
                     Text("All Seasons", style = MaterialTheme.typography.labelMedium)
                 }
             }
+        }
+
+        // Mark Season Watched button
+        OutlinedButton(
+            onClick = { onMarkSeasonWatched(selectedSeason) },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(8.dp),
+        ) {
+            Icon(Icons.Default.CheckCircle, null, modifier = Modifier.size(16.dp), tint = Amber)
+            Spacer(Modifier.width(6.dp))
+            Text("Mark Season $selectedSeason Watched", style = MaterialTheme.typography.labelMedium)
         }
 
         Spacer(Modifier.height(12.dp))
@@ -171,9 +216,11 @@ fun EpisodeSelector(
                 // Rich episode cards
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     episodes.forEach { episode ->
+                        val key = "s${selectedSeason}e${episode.episodeNumber}"
                         EpisodeCard(
                             episode = episode,
                             season = selectedSeason,
+                            isWatched = watchedEpisodes.contains(key),
                             onPlay = { onEpisodePlay(selectedSeason, episode.episodeNumber) },
                             onDownload = { onEpisodeDownload(selectedSeason, episode.episodeNumber) },
                         )
@@ -188,6 +235,7 @@ fun EpisodeSelector(
 private fun EpisodeCard(
     episode: Episode,
     season: Int,
+    isWatched: Boolean = false,
     onPlay: () -> Unit,
     onDownload: () -> Unit,
 ) {
@@ -232,14 +280,25 @@ private fun EpisodeCard(
 
         // Episode info
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "E${episode.episodeNumber} · ${episode.name}",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = StreamVault.colors.textPrimary,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (isWatched) {
+                    Icon(
+                        Icons.Default.CheckCircle,
+                        contentDescription = "Watched",
+                        tint = Amber,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                }
+                Text(
+                    text = "E${episode.episodeNumber} · ${episode.name}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (isWatched) StreamVault.colors.textSecondary else StreamVault.colors.textPrimary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             if (episode.overview.isNotBlank()) {
                 Spacer(Modifier.height(2.dp))
                 Text(

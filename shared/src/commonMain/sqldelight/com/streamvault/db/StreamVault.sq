@@ -324,3 +324,77 @@ SELECT * FROM home_shelf_config WHERE shelf_id = ?;
 
 upsertShelfConfig:
 INSERT OR REPLACE INTO home_shelf_config (shelf_id, is_visible, sort_order) VALUES (?, ?, ?);
+
+-- Watchlist
+CREATE TABLE watchlist (
+    media_id TEXT NOT NULL PRIMARY KEY,
+    media_type TEXT NOT NULL,
+    tmdb_id INTEGER NOT NULL,
+    imdb_id TEXT,
+    title TEXT NOT NULL,
+    poster_url TEXT,
+    backdrop_url TEXT,
+    rating REAL,
+    year INTEGER,
+    genres TEXT,
+    added_at INTEGER NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+getAllWatchlist:
+SELECT * FROM watchlist ORDER BY added_at DESC;
+
+getWatchlistByType:
+SELECT * FROM watchlist WHERE media_type = ? ORDER BY added_at DESC;
+
+isInWatchlist:
+SELECT COUNT(*) FROM watchlist WHERE media_id = ?;
+
+insertWatchlistItem:
+INSERT OR REPLACE INTO watchlist (media_id, media_type, tmdb_id, imdb_id, title, poster_url, backdrop_url, rating, year, genres, added_at, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+removeFromWatchlist:
+DELETE FROM watchlist WHERE media_id = ?;
+
+clearWatchlist:
+DELETE FROM watchlist;
+
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- Watch History
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+CREATE TABLE IF NOT EXISTS watch_history (
+    id TEXT NOT NULL PRIMARY KEY,
+    media_id TEXT NOT NULL,
+    media_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    poster_url TEXT,
+    backdrop_url TEXT,
+    watched_at INTEGER NOT NULL,
+    duration_watched_ms INTEGER NOT NULL DEFAULT 0,
+    season_number INTEGER,
+    episode_number INTEGER,
+    show_title TEXT
+);
+
+getRecentHistory:
+SELECT * FROM watch_history ORDER BY watched_at DESC LIMIT :limit;
+
+getHistoryByDate:
+SELECT * FROM watch_history WHERE watched_at >= :startMs AND watched_at <= :endMs ORDER BY watched_at DESC;
+
+getAllHistory:
+SELECT * FROM watch_history ORDER BY watched_at DESC;
+
+insertHistory:
+INSERT OR REPLACE INTO watch_history (id, media_id, media_type, title, poster_url, backdrop_url, watched_at, duration_watched_ms, season_number, episode_number, show_title)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+deleteHistory:
+DELETE FROM watch_history WHERE id = ?;
+
+clearAllHistory:
+DELETE FROM watch_history;
+
+getHistoryCount:
+SELECT COUNT(*) FROM watch_history;
