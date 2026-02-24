@@ -97,6 +97,9 @@ dependencies {
     implementation("androidx.tv:tv-foundation:1.0.0-alpha11")
     implementation("androidx.tv:tv-material:1.0.0-rc02")
 
+    // YouTube Player (in-app trailer playback)
+    implementation("com.pierfrancescosoffritti.androidyoutubeplayer:core:12.1.0")
+
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
 

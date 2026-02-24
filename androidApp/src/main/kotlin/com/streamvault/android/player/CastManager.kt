@@ -19,12 +19,22 @@ class CastManager(context: Context) {
     private var castContext: CastContext? = null
     private var sessionManager: SessionManager? = null
     private var currentSession: CastSession? = null
+    private var pendingMedia: PendingMedia? = null
 
     private val listeners = mutableListOf<CastListener>()
 
     private val sessionManagerListener = object : SessionManagerListener<CastSession> {
         override fun onSessionStarted(session: CastSession, sessionId: String) {
             currentSession = session
+            pendingMedia?.let { pending ->
+                castMedia(
+                    url = pending.url,
+                    title = pending.title,
+                    posterUrl = pending.posterUrl,
+                    contentType = pending.contentType,
+                )
+                pendingMedia = null
+            }
             listeners.forEach { it.onCastSessionStarted() }
         }
 
@@ -35,6 +45,15 @@ class CastManager(context: Context) {
 
         override fun onSessionResumed(session: CastSession, wasSuspended: Boolean) {
             currentSession = session
+            pendingMedia?.let { pending ->
+                castMedia(
+                    url = pending.url,
+                    title = pending.title,
+                    posterUrl = pending.posterUrl,
+                    contentType = pending.contentType,
+                )
+                pendingMedia = null
+            }
         }
 
         override fun onSessionStarting(session: CastSession) {}
@@ -56,6 +75,19 @@ class CastManager(context: Context) {
     }
 
     val isCasting: Boolean get() = currentSession?.isConnected == true
+
+    fun requestCast(
+        url: String,
+        title: String = "",
+        posterUrl: String? = null,
+    ) {
+        val contentType = inferContentType(url)
+        if (isCasting) {
+            castMedia(url, title, posterUrl, contentType)
+        } else {
+            pendingMedia = PendingMedia(url, title, posterUrl, contentType)
+        }
+    }
 
     fun castMedia(
         url: String,
@@ -108,5 +140,22 @@ class CastManager(context: Context) {
     interface CastListener {
         fun onCastSessionStarted() {}
         fun onCastSessionEnded() {}
+    }
+
+    private data class PendingMedia(
+        val url: String,
+        val title: String,
+        val posterUrl: String?,
+        val contentType: String,
+    )
+
+    private fun inferContentType(url: String): String {
+        val lower = url.lowercase()
+        return when {
+            lower.contains(".m3u8") -> "application/x-mpegURL"
+            lower.contains(".mpd") -> "application/dash+xml"
+            lower.contains(".webm") -> "video/webm"
+            else -> "video/mp4"
+        }
     }
 }

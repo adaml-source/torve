@@ -4,6 +4,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.get
 import io.ktor.client.request.parameter
+import io.ktor.http.appendPathSegments
 
 class TmdbApiClient(private val httpClient: HttpClient) {
 
@@ -171,6 +172,12 @@ class TmdbApiClient(private val httpClient: HttpClient) {
         yearTo: Int? = null,
         runtimeGte: Int? = null,
         runtimeLte: Int? = null,
+        originCountries: String? = null,
+        originalLanguage: String? = null,
+        certification: String? = null,
+        certificationGte: String? = null,
+        certificationLte: String? = null,
+        certificationCountry: String? = null,
         withCast: String? = null,
         withCrew: String? = null,
         withWatchProviders: String? = null,
@@ -187,6 +194,12 @@ class TmdbApiClient(private val httpClient: HttpClient) {
             yearTo?.let { parameter("primary_release_date.lte", "$it-12-31") }
             runtimeGte?.let { parameter("with_runtime.gte", it) }
             runtimeLte?.let { parameter("with_runtime.lte", it) }
+            originCountries?.let { parameter("with_origin_country", it) }
+            originalLanguage?.let { parameter("with_original_language", it) }
+            certificationCountry?.let { parameter("certification_country", it) }
+            certification?.let { parameter("certification", it) }
+            certificationGte?.let { parameter("certification.gte", it) }
+            certificationLte?.let { parameter("certification.lte", it) }
             withCast?.let { parameter("with_cast", it) }
             withCrew?.let { parameter("with_crew", it) }
             withWatchProviders?.let { parameter("with_watch_providers", it) }
@@ -205,6 +218,8 @@ class TmdbApiClient(private val httpClient: HttpClient) {
         yearTo: Int? = null,
         runtimeGte: Int? = null,
         runtimeLte: Int? = null,
+        originCountries: String? = null,
+        originalLanguage: String? = null,
         withCast: String? = null,
         withCrew: String? = null,
         withWatchProviders: String? = null,
@@ -221,6 +236,8 @@ class TmdbApiClient(private val httpClient: HttpClient) {
             yearTo?.let { parameter("first_air_date.lte", "$it-12-31") }
             runtimeGte?.let { parameter("with_runtime.gte", it) }
             runtimeLte?.let { parameter("with_runtime.lte", it) }
+            originCountries?.let { parameter("with_origin_country", it) }
+            originalLanguage?.let { parameter("with_original_language", it) }
             withCast?.let { parameter("with_cast", it) }
             withCrew?.let { parameter("with_crew", it) }
             withWatchProviders?.let { parameter("with_watch_providers", it) }
@@ -248,5 +265,20 @@ class TmdbApiClient(private val httpClient: HttpClient) {
             parameter("api_key", API_KEY)
             parameter("watch_region", region)
         }.body()
+    }
+
+    suspend fun getWatchProviderLogosFromBackend(
+        baseUrl: String,
+        type: String,
+        region: String,
+    ): Map<Int, String> {
+        val response: Map<String, String> = httpClient.get(baseUrl) {
+            url { appendPathSegments("tmdb", "providers", "logos") }
+            parameter("type", type)
+            parameter("region", region)
+        }.body()
+        return response.mapNotNull { (key, value) ->
+            key.toIntOrNull()?.let { it to value }
+        }.toMap()
     }
 }

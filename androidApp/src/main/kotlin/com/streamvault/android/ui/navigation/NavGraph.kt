@@ -37,6 +37,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -94,6 +95,8 @@ import com.streamvault.data.ai.KeywordSearchService
 import com.streamvault.domain.repository.MetadataRepository
 import com.streamvault.presentation.catalog.CatalogViewModel
 import com.streamvault.presentation.setup.SetupWizardViewModel
+import com.streamvault.presentation.watchlist.WatchlistViewModel
+import com.streamvault.presentation.home.HomeViewModel
 import org.koin.compose.koinInject
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -131,7 +134,22 @@ fun StreamVaultNavGraph(
     val showBottomBar = !isTvMode && currentRoute in navTabDefs.map { it.route }
 
     val setupViewModel: SetupWizardViewModel = koinInject()
+    val watchlistViewModel: WatchlistViewModel = koinInject()
+    val homeViewModel: HomeViewModel = koinInject()
+    val watchlistState by watchlistViewModel.state.collectAsState()
+    var didInitialWatchlistSync by remember { mutableStateOf(false) }
     val dest = if (isTvMode) "tv_home" else "home"
+
+    LaunchedEffect(Unit) {
+        watchlistViewModel.loadWatchlist()
+    }
+
+    LaunchedEffect(watchlistState.isLoading, watchlistState.items.size) {
+        if (!watchlistState.isLoading && !didInitialWatchlistSync) {
+            didInitialWatchlistSync = true
+            homeViewModel.refresh()
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         // Main content
@@ -179,7 +197,7 @@ fun StreamVaultNavGraph(
                         navController.navigate("detail/$type/${progress.mediaId}")
                     },
                     onSeeAllClick = { sectionId ->
-                        navController.navigate("seeall/$sectionId")
+                        navController.navigate("seeall/${Uri.encode(sectionId)}")
                     },
                     onProviderClick = { providerId, providerName ->
                         navController.navigate("provider/$providerId/${Uri.encode(providerName)}")
@@ -194,7 +212,8 @@ fun StreamVaultNavGraph(
             composable("movies") {
                 val metadataRepo: MetadataRepository = koinInject()
                 val keywordSearchService: KeywordSearchService = koinInject()
-                val catalogViewModel = remember { CatalogViewModel(metadataRepo, "movie", keywordSearchService = keywordSearchService) }
+                val prefsRepo: com.streamvault.domain.repository.PreferencesRepository = koinInject()
+                val catalogViewModel = remember { CatalogViewModel(metadataRepo, "movie", keywordSearchService = keywordSearchService, prefsRepo = prefsRepo) }
                 CatalogScreen(
                     viewModel = catalogViewModel,
                     mediaType = "movie",
@@ -209,7 +228,8 @@ fun StreamVaultNavGraph(
             composable("tv_shows") {
                 val metadataRepo: MetadataRepository = koinInject()
                 val keywordSearchService: KeywordSearchService = koinInject()
-                val catalogViewModel = remember { CatalogViewModel(metadataRepo, "tv", keywordSearchService = keywordSearchService) }
+                val prefsRepo: com.streamvault.domain.repository.PreferencesRepository = koinInject()
+                val catalogViewModel = remember { CatalogViewModel(metadataRepo, "tv", keywordSearchService = keywordSearchService, prefsRepo = prefsRepo) }
                 CatalogScreen(
                     viewModel = catalogViewModel,
                     mediaType = "tv",
@@ -552,7 +572,7 @@ fun StreamVaultNavGraph(
                 route = "seeall/{sectionId}",
                 arguments = listOf(navArgument("sectionId") { type = NavType.StringType }),
             ) { backStackEntry ->
-                val sectionId = backStackEntry.arguments?.getString("sectionId") ?: return@composable
+                val sectionId = Uri.decode(backStackEntry.arguments?.getString("sectionId") ?: return@composable)
                 SeeAllScreen(
                     sectionId = sectionId,
                     onBack = { navController.popBackStack() },

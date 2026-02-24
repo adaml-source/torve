@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -54,6 +56,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -81,7 +84,13 @@ fun HomeCustomizeSheet(
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var orderedSections by remember { mutableStateOf(sections.sortedBy { it.order }) }
+    var orderedSections by remember {
+        mutableStateOf(
+            sections
+                .filter { it.section != HomeSection.DIRECTORS }
+                .sortedBy { it.order }
+        )
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -111,9 +120,10 @@ fun HomeCustomizeSheet(
                 )
                 TextButton(onClick = {
                     onReset()
-                    orderedSections = HomeSection.entries.map {
-                        HomeSectionConfig(it, it.defaultEnabled, it.defaultOrder)
-                    }.sortedBy { it.order }
+                    orderedSections = HomeSection.entries
+                        .filter { it != HomeSection.DIRECTORS }
+                        .map { HomeSectionConfig(it, it.defaultEnabled, it.defaultOrder) }
+                        .sortedBy { it.order }
                 }) {
                     Text("Reset", color = Amber)
                 }
@@ -282,6 +292,8 @@ fun HomeSection.icon(): ImageVector = when (this) {
     HomeSection.ACTORS -> Icons.Rounded.Star
     HomeSection.DIRECTORS -> Icons.Rounded.Theaters
     HomeSection.HIDDEN_GEMS -> Icons.Rounded.AutoAwesome
+    HomeSection.ADDON_SHELVES -> Icons.Rounded.Subscriptions
+    HomeSection.BECAUSE_YOU_WATCHED -> Icons.Rounded.History
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -335,24 +347,29 @@ fun StreamingServicesRow(
                 val logoUrl = providerLogos[service.tmdbProviderId]
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.width(160.dp),
+                    modifier = Modifier.width(220.dp),
                 ) {
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(100.dp),
-                        shape = RoundedCornerShape(16.dp),
+                            .height(120.dp),
+                        shape = RoundedCornerShape(14.dp),
                         color = service.brandColor,
                         onClick = { onProviderClick(service.tmdbProviderId, service.name) },
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(120.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
                             if (logoUrl != null) {
                                 coil3.compose.AsyncImage(
                                     model = logoUrl,
                                     contentDescription = service.name,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(20.dp),
+                                        .padding(horizontal = 24.dp, vertical = 20.dp),
                                     contentScale = androidx.compose.ui.layout.ContentScale.Fit,
                                 )
                             } else {
@@ -365,15 +382,16 @@ fun StreamingServicesRow(
                             }
                         }
                     }
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        service.name,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Silver,
-                    )
                 }
             }
         }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = "Data provided by TMDB",
+            style = MaterialTheme.typography.labelSmall,
+            color = Silver,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
     }
 }
 

@@ -3,10 +3,13 @@ package com.streamvault.presentation.catalog
 import com.streamvault.data.ai.AiProvider
 import com.streamvault.data.ai.KeywordSearchService
 import com.streamvault.domain.model.MediaItem
+import com.streamvault.domain.model.dedupeByStableKey
 import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.model.PagedResult
 import com.streamvault.domain.repository.MetadataRepository
+import com.streamvault.domain.repository.PreferencesRepository
 import com.streamvault.domain.repository.WatchProgressRepository
+import com.streamvault.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -30,6 +33,7 @@ class CatalogViewModel(
     private val mediaType: String, // "movie" or "tv"
     private val watchProgressRepo: WatchProgressRepository? = null,
     private val keywordSearchService: KeywordSearchService? = null,
+    private val prefsRepo: PreferencesRepository? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(CatalogUiState())
@@ -112,9 +116,10 @@ class CatalogViewModel(
                     }
                 }
 
+                val finalItems = if (shouldDedupe()) result.items.dedupeByStableKey() else result.items
                 _state.update {
                     it.copy(
-                        items = result.items,
+                        items = finalItems,
                         isLoading = false,
                         currentPage = result.page,
                         totalPages = result.totalPages,
@@ -167,11 +172,11 @@ class CatalogViewModel(
                     }
                 }
 
-                val existingIds = _state.value.items.map { it.id }.toSet()
-                val newItems = result.items.filter { it.id !in existingIds }
+                val combined = _state.value.items + result.items
+                val newItems = if (shouldDedupe()) combined.dedupeByStableKey() else combined
                 _state.update {
                     it.copy(
-                        items = it.items + newItems,
+                        items = newItems,
                         isLoadingMore = false,
                         currentPage = result.page,
                         totalPages = result.totalPages,
@@ -193,11 +198,11 @@ class CatalogViewModel(
             try {
                 val nextPage = s.searchPage + 1
                 val result = metadataRepo.searchMultiPaged(s.searchQuery, nextPage, mediaType)
-                val existingIds = _state.value.searchResults.map { it.id }.toSet()
-                val newItems = result.items.filter { it.id !in existingIds }
+                val combined = _state.value.searchResults + result.items
+                val newItems = if (shouldDedupe()) combined.dedupeByStableKey() else combined
                 _state.update {
                     it.copy(
-                        searchResults = it.searchResults + newItems,
+                        searchResults = newItems,
                         isSearchingMore = false,
                         searchPage = result.page,
                         searchHasMore = result.page < result.totalPages,
@@ -253,9 +258,10 @@ class CatalogViewModel(
                     _state.update { it.copy(isSearching = true, searchPage = 1) }
                     try {
                         val result = metadataRepo.searchMultiPaged(query, 1, mediaType)
+                        val finalResults = if (shouldDedupe()) result.items.dedupeByStableKey() else result.items
                         _state.update {
                             it.copy(
-                                searchResults = result.items,
+                                searchResults = finalResults,
                                 isSearching = false,
                                 searchPage = result.page,
                                 searchHasMore = result.page < result.totalPages,
@@ -312,9 +318,10 @@ class CatalogViewModel(
                     ).items
                 }
 
+                val finalItems = if (shouldDedupe()) items.dedupeByStableKey() else items
                 _state.update {
                     it.copy(
-                        searchResults = items,
+                        searchResults = finalItems,
                         isAiSearching = false,
                         aiSearchLabel = result.title,
                         aiSearchError = null,
@@ -343,5 +350,9 @@ class CatalogViewModel(
 
     fun refresh() {
         loadCatalog()
+    }
+
+    private suspend fun shouldDedupe(): Boolean {
+        return prefsRepo?.getString(SettingsViewModel.KEY_DEDUPE_RESULTS)?.toBooleanStrictOrNull() ?: true
     }
 }

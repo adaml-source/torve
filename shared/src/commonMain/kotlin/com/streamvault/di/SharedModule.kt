@@ -162,7 +162,7 @@ val sharedModule = module {
 
     // ViewModels
     single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
-    factoryOf(::SearchViewModel)
+    factory { SearchViewModel(get(), get()) }
     factory { DetailViewModel(get(), get(), get(), get(), get(), get(), get()) }
     factoryOf(::PersonViewModel)
     single { SettingsViewModel(get(), get(), get(), get(), get(), get(), get(), get()) }

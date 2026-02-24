@@ -16,9 +16,12 @@ class AddonRepositoryImpl(
 ) : AddonRepository {
 
     override suspend fun installAddon(url: String): InstalledAddon {
-        val baseUrl = url.trimEnd('/')
+        val baseUrl = url.trimEnd('/').removeSuffix("/manifest.json")
         val stremioManifest = addonClient.getManifest(baseUrl)
-        val manifest = stremioManifest.toDomain()
+        val manifest = stremioManifest.toDomain(
+            fallbackId = baseUrl,
+            fallbackName = fallbackNameFromUrl(baseUrl),
+        )
         val manifestUrl = "$baseUrl/manifest.json"
         val now = Clock.System.now().toEpochMilliseconds()
         val manifestJson = json.encodeToString(AddonManifest.serializer(), manifest)
@@ -103,13 +106,22 @@ class AddonRepositoryImpl(
     }
 
     override suspend fun getManifest(url: String): AddonManifest {
-        return addonClient.getManifest(url).toDomain()
+        val baseUrl = url.trimEnd('/').removeSuffix("/manifest.json")
+        return addonClient.getManifest(baseUrl).toDomain(
+            fallbackId = baseUrl,
+            fallbackName = fallbackNameFromUrl(baseUrl),
+        )
     }
 
-    private fun StremioManifest.toDomain(): AddonManifest {
+    private fun StremioManifest.toDomain(
+        fallbackId: String,
+        fallbackName: String,
+    ): AddonManifest {
+        val safeId = id.ifBlank { fallbackId }
+        val safeName = name.ifBlank { fallbackName }
         return AddonManifest(
-            id = id,
-            name = name,
+            id = safeId,
+            name = safeName,
             version = version,
             description = description,
             logo = logo,
@@ -128,5 +140,10 @@ class AddonRepositoryImpl(
             },
             idPrefixes = idPrefixes,
         )
+    }
+
+    private fun fallbackNameFromUrl(url: String): String {
+        val host = url.substringAfter("://").substringBefore("/").trim()
+        return if (host.isNotBlank()) host else "Unknown Addon"
     }
 }

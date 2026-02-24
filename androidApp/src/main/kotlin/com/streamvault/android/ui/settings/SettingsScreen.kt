@@ -732,6 +732,33 @@ fun SettingsScreen(
                         ),
                     )
                 }
+
+                Spacer(Modifier.height(8.dp))
+
+                // Deduplicate results toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(stringResource(R.string.settings_dedupe_results), style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            stringResource(R.string.settings_dedupe_results_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = StreamVault.colors.textSecondary,
+                        )
+                    }
+                    Switch(
+                        checked = state.dedupeResults,
+                        onCheckedChange = { viewModel.setDedupeResultsEnabled(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Amber,
+                            checkedTrackColor = Amber.copy(alpha = 0.3f),
+                            uncheckedThumbColor = Silver,
+                            uncheckedTrackColor = Gunmetal,
+                        ),
+                    )
+                }
             }
         }
 
@@ -1064,7 +1091,7 @@ fun SettingsScreen(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    "Choose your AI provider and add your API key to enable AI-powered search.",
+                    "Choose your AI provider and add your API key to enable AI-powered search. Your provider account must have active billing or credits.",
                     style = MaterialTheme.typography.bodySmall,
                     color = Silver,
                 )
@@ -1119,6 +1146,12 @@ fun SettingsScreen(
                     onValueChange = { viewModel.setActiveAiApiKey(it) },
                     label = "${state.aiProvider.label} API Key",
                     placeholder = state.aiProvider.keyPlaceholder,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "API keys only work when the provider account has funds. If your balance is zero, AI search will fail.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = StreamVault.colors.textSecondary,
                 )
                 if (state.activeAiApiKey.isNotBlank()) {
                     Spacer(Modifier.height(4.dp))

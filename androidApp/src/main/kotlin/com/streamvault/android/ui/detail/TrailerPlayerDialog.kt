@@ -1,14 +1,9 @@
 package com.streamvault.android.ui.detail
 
-import android.annotation.SuppressLint
 import android.view.ViewGroup
-import android.webkit.WebChromeClient
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -23,36 +18,37 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.YouTubePlayer
+import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.listeners.AbstractYouTubePlayerListener
+import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.views.YouTubePlayerView
 
-@SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun TrailerPlayerDialog(
     youtubeKey: String,
     onDismiss: () -> Unit,
+    onOpenExternal: () -> Unit = {},
 ) {
     val context = LocalContext.current
-    val webView = remember {
-        WebView(context).apply {
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val playerView = remember {
+        YouTubePlayerView(context).apply {
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT,
             )
-            settings.javaScriptEnabled = true
-            settings.mediaPlaybackRequiresUserGesture = false
-            webChromeClient = WebChromeClient()
-            webViewClient = WebViewClient()
-            setBackgroundColor(android.graphics.Color.BLACK)
         }
     }
 
-    DisposableEffect(Unit) {
+    DisposableEffect(lifecycle, playerView) {
+        lifecycle.addObserver(playerView)
         onDispose {
-            webView.loadUrl("about:blank")
-            webView.destroy()
+            lifecycle.removeObserver(playerView)
+            playerView.release()
         }
     }
 
@@ -62,27 +58,37 @@ fun TrailerPlayerDialog(
     ) {
         Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp)
+                .fillMaxSize()
                 .background(Color.Black),
         ) {
             AndroidView(
                 factory = {
-                    webView.apply {
-                        loadUrl("https://www.youtube.com/embed/$youtubeKey?autoplay=1&rel=0")
+                    playerView.apply {
+                        addYouTubePlayerListener(object : AbstractYouTubePlayerListener() {
+                            override fun onReady(youTubePlayer: YouTubePlayer) {
+                                youTubePlayer.loadVideo(youtubeKey, 0f)
+                            }
+
+                            override fun onError(
+                                youTubePlayer: YouTubePlayer,
+                                error: com.pierfrancescosoffritti.androidyoutubeplayer.core.player.PlayerConstants.PlayerError,
+                            ) {
+                                onDismiss()
+                                onOpenExternal()
+                            }
+                        })
+
                     }
                 },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(16f / 9f),
+                modifier = Modifier.fillMaxSize(),
             )
 
             IconButton(
                 onClick = onDismiss,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(4.dp)
-                    .size(32.dp)
+                    .padding(8.dp)
+                    .size(36.dp)
                     .background(Color.Black.copy(alpha = 0.6f), CircleShape),
             ) {
                 Icon(

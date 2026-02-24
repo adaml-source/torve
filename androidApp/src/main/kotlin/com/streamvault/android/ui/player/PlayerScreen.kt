@@ -5,6 +5,7 @@ import android.content.pm.ActivityInfo
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
+import android.widget.Toast
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -37,6 +38,8 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Tv
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -171,10 +174,12 @@ fun PlayerScreen(
     var sliderPosition by remember { mutableFloatStateOf(0f) }
     var isSeeking by remember { mutableStateOf(false) }
     var showTrackDialog by remember { mutableStateOf(false) }
+    var showAudioDelayDialog by remember { mutableStateOf(false) }
     var subtitleTracks by remember { mutableStateOf<List<TrackDescription>>(emptyList()) }
     var audioTracks by remember { mutableStateOf<List<TrackDescription>>(emptyList()) }
     var useMpv by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var audioDelayMs by remember { mutableIntStateOf(0) }
 
     // Mutable episode state — updated when swapping to next episode
     var currentSeasonNumber by remember { mutableStateOf(seasonNumber) }
@@ -220,6 +225,10 @@ fun PlayerScreen(
             exoEngine.initialize()
             exoEngine as PlayerEngine
         }
+    }
+
+    LaunchedEffect(engine) {
+        audioDelayMs = (engine as? MPVPlayerEngine)?.getAudioDelayMs() ?: 0
     }
 
     // Load season data for next-episode calculation (TV shows only)
@@ -711,6 +720,22 @@ fun PlayerScreen(
             )
         }
 
+        if (showAudioDelayDialog) {
+            AudioDelayDialog(
+                currentDelayMs = audioDelayMs,
+                supportsDelay = engine is MPVPlayerEngine,
+                onDelayChange = { newDelay ->
+                    audioDelayMs = newDelay
+                    (engine as? MPVPlayerEngine)?.setAudioDelayMs(newDelay)
+                },
+                onReset = {
+                    audioDelayMs = 0
+                    (engine as? MPVPlayerEngine)?.setAudioDelayMs(0)
+                },
+                onDismiss = { showAudioDelayDialog = false },
+            )
+        }
+
         // Skip Intro/Credits button
         activeSkipSegment?.let { segment ->
             Button(
@@ -832,6 +857,13 @@ fun PlayerScreen(
                     if (castAvailable) {
                         IconButton(onClick = {
                             try {
+                                if (currentUrl.isNotBlank()) {
+                                    castManager?.requestCast(
+                                        url = currentUrl,
+                                        title = currentTitle,
+                                        posterUrl = posterUrl.ifBlank { null },
+                                    )
+                                }
                                 val routeBtn = androidx.mediarouter.app.MediaRouteButton(context)
                                 com.google.android.gms.cast.framework.CastButtonFactory.setUpMediaRouteButton(context, routeBtn)
                                 routeBtn.performClick()
@@ -855,6 +887,15 @@ fun PlayerScreen(
                                 modifier = Modifier.size(24.dp),
                             )
                         }
+                    }
+
+                    IconButton(onClick = { showAudioDelayDialog = true }) {
+                        Icon(
+                            Icons.Default.Tune,
+                            contentDescription = "Audio delay",
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp),
+                        )
                     }
                 }
 
@@ -1196,4 +1237,49 @@ private fun TrackRow(
             )
         }
     }
+}
+
+@Composable
+private fun AudioDelayDialog(
+    currentDelayMs: Int,
+    supportsDelay: Boolean,
+    onDelayChange: (Int) -> Unit,
+    onReset: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var localDelay by remember { mutableIntStateOf(currentDelayMs) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_close)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onReset) { Text("Reset") }
+        },
+        title = { Text("Audio Delay") },
+        text = {
+            Column {
+                if (!supportsDelay) {
+                    Text("Audio delay adjustment requires the MPV engine.")
+                    return@Column
+                }
+                Text("Delay: ${localDelay} ms")
+                Slider(
+                    value = localDelay.toFloat(),
+                    onValueChange = {
+                        val v = it.toInt()
+                        localDelay = v
+                        onDelayChange(v)
+                    },
+                    valueRange = -2000f..2000f,
+                    steps = 39,
+                )
+                Text(
+                    "Use positive values if audio is ahead, negative if audio is behind.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        },
+    )
 }

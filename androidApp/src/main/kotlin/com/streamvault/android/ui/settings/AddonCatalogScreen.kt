@@ -34,9 +34,11 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -46,9 +48,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import android.content.Intent
+import android.net.Uri
 import com.streamvault.android.ui.components.BackButton
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Ash
@@ -128,13 +134,6 @@ val POPULAR_ADDONS = listOf(
         "https://comet.elfhosted.com/static/images/comet.png",
     ),
     PopularAddon(
-        "CyberFlix",
-        "Large catalog with multiple streaming sources",
-        "https://cyberflix.elfhosted.com/manifest.json",
-        listOf(AddonCategory.STREAMS, AddonCategory.CATALOGS),
-        "https://cyberflix.elfhosted.com/static/images/cyberflix.png",
-    ),
-    PopularAddon(
         "Jackettio",
         "Streams via Jackett indexers — requires Jackett setup",
         "https://jackettio.elfhosted.com/manifest.json",
@@ -147,13 +146,6 @@ val POPULAR_ADDONS = listOf(
         "https://peerflix-addon.elfhosted.com/manifest.json",
         listOf(AddonCategory.STREAMS),
         "https://peerflix-addon.elfhosted.com/static/images/peerflix.png",
-    ),
-    PopularAddon(
-        "Annatar",
-        "Stream finder with debrid cache lookup",
-        "https://annatar.elfhosted.com/manifest.json",
-        listOf(AddonCategory.STREAMS),
-        "https://annatar.elfhosted.com/static/images/annatar.png",
     ),
     // ── Subtitles ──
     PopularAddon(
@@ -192,11 +184,19 @@ fun AddonCatalogScreen(
     viewModel: AddonViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf(AddonCategory.ALL) }
 
     val installedUrls = remember(state.addons) {
-        state.addons.map { it.manifestUrl }.toSet()
+        state.addons
+            .flatMap { addon ->
+                val manifestUrl = addon.manifestUrl.trimEnd('/')
+                val baseUrl = manifestUrl.removeSuffix("/manifest.json")
+                listOf(manifestUrl, baseUrl)
+            }
+            .toSet()
     }
 
     val filtered = remember(searchQuery, selectedCategory) {
@@ -208,7 +208,11 @@ fun AddonCatalogScreen(
     }
 
     val availableAddons = remember(filtered, installedUrls) {
-        filtered.filter { it.url !in installedUrls }
+        filtered.filter { addon ->
+            val manifestUrl = addon.url.trimEnd('/')
+            val baseUrl = manifestUrl.removeSuffix("/manifest.json")
+            manifestUrl !in installedUrls && baseUrl !in installedUrls
+        }
     }
 
     Column(
@@ -449,6 +453,39 @@ fun AddonCatalogScreen(
                         color = Ruby,
                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
                     )
+                    val lastUrl = state.lastInstallUrl
+                    if (lastUrl.isNotBlank()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 4.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(lastUrl))
+                                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    context.startActivity(intent)
+                                },
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
+                            ) {
+                                Text("Open in Browser")
+                            }
+                            TextButton(
+                                onClick = {
+                                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(lastUrl))
+                                },
+                            ) {
+                                Text("Copy URL", color = Amber)
+                            }
+                        }
+                        Text(
+                            text = "If the page shows a JSON manifest, copy its URL and try again.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Silver,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                        )
+                    }
                 }
             }
         }

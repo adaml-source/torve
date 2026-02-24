@@ -113,13 +113,18 @@ fun StreamActionSheet(
                     label = if (castManager.isCasting) "Cast (Connected)" else "Cast to Device",
                     onClick = {
                         if (castManager.isCasting) {
-                            castManager.castMedia(
+                            castManager.requestCast(
                                 url = url,
                                 title = title,
                                 posterUrl = posterUrl.ifBlank { null },
                             )
                             onDismiss()
                         } else {
+                            castManager.requestCast(
+                                url = url,
+                                title = title,
+                                posterUrl = posterUrl.ifBlank { null },
+                            )
                             // Open the Cast dialog via MediaRouteButton programmatically
                             try {
                                 val castContext = CastContext.getSharedInstance(context)
@@ -239,6 +244,7 @@ fun StreamActionSheet(
             )
         }
     }
+
 }
 
 @Composable
@@ -266,6 +272,7 @@ private fun ActionItem(
             text = label,
             style = MaterialTheme.typography.bodyLarge,
             color = if (accentColor) Amber else Snow,
-        )
-    }
+    )
+}
+
 }

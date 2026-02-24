@@ -42,7 +42,7 @@ class AddonViewModel(
         if (url.isBlank()) return
 
         scope.launch {
-            _state.update { it.copy(isInstalling = true, installingUrl = url, installError = null) }
+            _state.update { it.copy(isInstalling = true, installingUrl = url, lastInstallUrl = url, installError = null) }
             try {
                 addonRepo.installAddon(url)
                 val addons = addonRepo.getInstalledAddons()

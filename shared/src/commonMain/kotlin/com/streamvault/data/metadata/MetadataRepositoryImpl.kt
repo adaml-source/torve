@@ -15,6 +15,7 @@ import kotlinx.coroutines.coroutineScope
 class MetadataRepositoryImpl(
     private val api: TmdbApiClient,
 ) : MetadataRepository {
+    private val providerLogosBackendBaseUrl: String = "" // Set your backend base URL when available.
 
     override suspend fun getTrending(type: String, page: Int): List<MediaItem> {
         return if (type == "tv") {
@@ -187,6 +188,12 @@ class MetadataRepositoryImpl(
         yearTo: Int?,
         runtimeGte: Int?,
         runtimeLte: Int?,
+        originCountries: String?,
+        originalLanguage: String?,
+        certification: String?,
+        certificationGte: String?,
+        certificationLte: String?,
+        certificationCountry: String?,
         withCast: String?,
         withCrew: String?,
         withWatchProviders: String?,
@@ -194,7 +201,23 @@ class MetadataRepositoryImpl(
         withKeywords: String?,
     ): PagedResult {
         return if (type == "tv") {
-            val resp = api.discoverTv(page, sortBy, withGenres, minRating, year, yearTo, runtimeGte, runtimeLte, withCast, withCrew, withWatchProviders, watchRegion, withKeywords)
+            val resp = api.discoverTv(
+                page,
+                sortBy,
+                withGenres,
+                minRating,
+                year,
+                yearTo,
+                runtimeGte,
+                runtimeLte,
+                originCountries,
+                originalLanguage,
+                withCast,
+                withCrew,
+                withWatchProviders,
+                watchRegion,
+                withKeywords,
+            )
             PagedResult(
                 items = resp.results.map { TmdbMappers.tvToMediaItem(it) },
                 page = resp.page,
@@ -202,7 +225,27 @@ class MetadataRepositoryImpl(
                 totalResults = resp.totalResults,
             )
         } else {
-            val resp = api.discoverMovies(page, sortBy, withGenres, minRating, year, yearTo, runtimeGte, runtimeLte, withCast, withCrew, withWatchProviders, watchRegion, withKeywords)
+            val resp = api.discoverMovies(
+                page,
+                sortBy,
+                withGenres,
+                minRating,
+                year,
+                yearTo,
+                runtimeGte,
+                runtimeLte,
+                originCountries,
+                originalLanguage,
+                certification,
+                certificationGte,
+                certificationLte,
+                certificationCountry,
+                withCast,
+                withCrew,
+                withWatchProviders,
+                watchRegion,
+                withKeywords,
+            )
             PagedResult(
                 items = resp.results.map { TmdbMappers.movieToMediaItem(it) },
                 page = resp.page,
@@ -247,6 +290,11 @@ class MetadataRepositoryImpl(
     }
 
     override suspend fun getWatchProviderLogos(type: String, region: String): Map<Int, String> {
+        if (providerLogosBackendBaseUrl.isNotBlank()) {
+            try {
+                return api.getWatchProviderLogosFromBackend(providerLogosBackendBaseUrl, type, region)
+            } catch (_: Exception) { /* fallback */ }
+        }
         val response = api.getWatchProviders(type, region)
         return response.results.mapNotNull { provider ->
             provider.logoPath?.let { path ->

@@ -1,6 +1,7 @@
 package com.streamvault.android.ui.settings
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -23,13 +24,16 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import coil3.compose.AsyncImage
 import com.streamvault.android.ui.components.BackButton
 import com.streamvault.android.ui.home.ALL_STREAMING_SERVICES
 import com.streamvault.android.ui.theme.Amber
@@ -47,6 +51,10 @@ fun StreamingServicesSettingsScreen(
     viewModel: HomeViewModel = koinInject(),
 ) {
     val enabledIds by viewModel.enabledServiceIds.collectAsState()
+    val providerLogos by viewModel.providerLogos.collectAsState()
+    LaunchedEffect(providerLogos.isEmpty()) {
+        if (providerLogos.isEmpty()) viewModel.refreshProviderLogos()
+    }
 
     Column(
         Modifier
@@ -84,6 +92,7 @@ fun StreamingServicesSettingsScreen(
         ) {
             items(ALL_STREAMING_SERVICES) { service ->
                 val enabled = enabledIds.contains(service.tmdbProviderId)
+                val logoUrl = providerLogos[service.tmdbProviderId]
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -91,17 +100,35 @@ fun StreamingServicesSettingsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Surface(
-                        Modifier.size(40.dp),
-                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .width(110.dp)
+                            .height(68.dp),
+                        shape = RoundedCornerShape(12.dp),
                         color = service.brandColor,
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text(
-                                service.name.take(1),
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.titleMedium,
-                            )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (logoUrl != null) {
+                                AsyncImage(
+                                    model = logoUrl,
+                                    contentDescription = service.name,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                                )
+                            } else {
+                                Text(
+                                    service.name,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    maxLines = 1,
+                                )
+                            }
                         }
                     }
 
@@ -129,5 +156,12 @@ fun StreamingServicesSettingsScreen(
                 HorizontalDivider(color = Steel.copy(alpha = 0.2f))
             }
         }
+
+        Text(
+            "Data provided by TMDB",
+            style = MaterialTheme.typography.labelSmall,
+            color = Silver,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+        )
     }
 }

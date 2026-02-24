@@ -129,6 +129,10 @@ class WatchlistRepositoryImpl(
 
         try {
             val traktItems = traktClient.getWatchlist(token)
+            val traktIds = traktItems.mapNotNull { item ->
+                val media = if (item.type == "movie") item.movie else item.show
+                media?.ids?.tmdb?.toString()
+            }.toSet()
 
             // Get existing local IDs to avoid duplicating
             val localIds = database.streamVaultQueries.getAllWatchlist().executeAsList()
@@ -166,8 +170,14 @@ class WatchlistRepositoryImpl(
                     sort_order = item.rank.toLong(),
                 )
             }
+
+            // Remove local items that no longer exist in Trakt
+            val toRemove = localIds - traktIds
+            toRemove.forEach { mediaId ->
+                database.streamVaultQueries.removeFromWatchlist(mediaId)
+            }
         } catch (_: Exception) {
-            // Non-critical — don't block UI if sync fails
+            // Non-critical - don't block UI if sync fails
         }
 
         // Enrich items missing poster URLs from TMDB

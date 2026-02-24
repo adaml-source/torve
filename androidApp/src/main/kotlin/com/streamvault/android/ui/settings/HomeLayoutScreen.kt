@@ -5,6 +5,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -77,6 +78,18 @@ import com.streamvault.domain.model.PosterSize
 import com.streamvault.presentation.home.HomeViewModel
 import org.koin.compose.koinInject
 
+private sealed interface HomeLayoutItem {
+    val order: Int
+}
+
+private data class SectionItem(val config: HomeSectionConfig) : HomeLayoutItem {
+    override val order: Int = config.order
+}
+
+private data class CustomItem(val section: CustomSection) : HomeLayoutItem {
+    override val order: Int = section.order
+}
+
 @Composable
 fun HomeLayoutScreen(
     onBack: () -> Unit,
@@ -86,8 +99,20 @@ fun HomeLayoutScreen(
 ) {
     val sectionConfigs by viewModel.sectionConfigs.collectAsState()
     val customSections by viewModel.customSections.collectAsState()
-    var orderedSections by remember(sectionConfigs) {
-        mutableStateOf(sectionConfigs.sortedBy { it.order })
+    var orderedItems by remember(sectionConfigs, customSections) {
+        mutableStateOf(
+            buildList {
+                sectionConfigs
+                    .filter { it.section != HomeSection.DIRECTORS }
+                    .forEach { add(SectionItem(it)) }
+                customSections.forEach { add(CustomItem(it)) }
+            }.sortedWith(compareBy<HomeLayoutItem> { it.order }.thenBy {
+                when (it) {
+                    is SectionItem -> 0
+                    is CustomItem -> 1
+                }
+            })
+        )
     }
     var expandedSection by remember { mutableStateOf<HomeSection?>(null) }
 
@@ -120,9 +145,26 @@ fun HomeLayoutScreen(
             )
             TextButton(onClick = {
                 viewModel.resetSections()
-                orderedSections = HomeSection.entries.map {
-                    HomeSectionConfig(it, it.defaultEnabled, it.defaultOrder)
-                }.sortedBy { it.order }
+                orderedItems = buildList {
+                    HomeSection.entries
+                        .filter { it != HomeSection.DIRECTORS }
+                        .map { HomeSectionConfig(it, it.defaultEnabled, it.defaultOrder) }
+                        .forEach { add(SectionItem(it)) }
+                    customSections.forEach { add(CustomItem(it)) }
+                }.sortedWith(compareBy<HomeLayoutItem> { it.order }.thenBy {
+                    when (it) {
+                        is SectionItem -> 0
+                        is CustomItem -> 1
+                    }
+                })
+                viewModel.updateHomeLayoutOrder(
+                    orderedItems.map {
+                        when (it) {
+                            is SectionItem -> "section:${it.config.section.name}"
+                            is CustomItem -> "custom:${it.section.id}"
+                        }
+                    },
+                )
                 expandedSection = null
             }) {
                 Text("Reset", color = Amber)
@@ -143,110 +185,139 @@ fun HomeLayoutScreen(
             }
 
             itemsIndexed(
-                items = orderedSections,
-                key = { _, item -> item.section.name },
-            ) { index, config ->
-                val isHero = index == 0
+                items = orderedItems,
+                key = { _, item ->
+                    when (item) {
+                        is SectionItem -> "section_${item.config.section.name}"
+                        is CustomItem -> "custom_${item.section.id}"
+                    }
+                },
+            ) { index, item ->
+                val isHero = index == 0 && item is SectionItem && item.config.section == HomeSection.HERO
                 val isDragged = draggedIndex == index
-
-                SectionRow(
-                    config = config,
-                    isHero = isHero,
-                    isExpanded = expandedSection == config.section,
-                    isDragged = isDragged,
-                    dragOffset = if (isDragged) dragOffset else 0f,
-                    onToggle = { enabled ->
-                        val updated = orderedSections.map {
-                            if (it.section == config.section) it.copy(enabled = enabled) else it
-                        }
-                        orderedSections = updated
-                        viewModel.toggleSection(config.section, enabled)
-                    },
-                    onExpandToggle = {
-                        expandedSection = if (expandedSection == config.section) null else config.section
-                    },
-                    onOrientationChange = { orientation ->
-                        val updated = orderedSections.map {
-                            if (it.section == config.section) it.copy(orientation = orientation) else it
-                        }
-                        orderedSections = updated
-                        viewModel.updateSectionLayout(config.section, orientation, config.size)
-                    },
-                    onSizeChange = { size ->
-                        val updated = orderedSections.map {
-                            if (it.section == config.section) it.copy(size = size) else it
-                        }
-                        orderedSections = updated
-                        viewModel.updateSectionLayout(config.section, config.orientation, size)
-                    },
-                    onDragStart = {
-                        if (!isHero) draggedIndex = index
-                    },
-                    onDrag = { delta ->
-                        if (draggedIndex < 0) return@SectionRow
-                        dragOffset += delta
-                        val currentItem = listState.layoutInfo.visibleItemsInfo
-                            .find { it.index == draggedIndex + 1 } // +1 for header item
-                            ?: return@SectionRow
-                        val itemHeight = currentItem.size.toFloat()
-                        // Check if we should swap
-                        if (dragOffset > itemHeight * 0.5f && draggedIndex < orderedSections.size - 1) {
-                            val list = orderedSections.toMutableList()
-                            val item = list.removeAt(draggedIndex)
-                            list.add(draggedIndex + 1, item)
-                            orderedSections = list.mapIndexed { i, it -> it.copy(order = i) }
-                            draggedIndex += 1
-                            dragOffset -= itemHeight
-                        } else if (dragOffset < -itemHeight * 0.5f && draggedIndex > 1) {
-                            val list = orderedSections.toMutableList()
-                            val item = list.removeAt(draggedIndex)
-                            list.add(draggedIndex - 1, item)
-                            orderedSections = list.mapIndexed { i, it -> it.copy(order = i) }
-                            draggedIndex -= 1
-                            dragOffset += itemHeight
-                        }
-                    },
-                    onDragEnd = {
-                        if (draggedIndex >= 0) {
-                            viewModel.updateSectionOrder(orderedSections)
-                        }
-                        draggedIndex = -1
-                        dragOffset = 0f
-                    },
-                    modifier = Modifier.animateItem(),
-                )
-            }
-
-            // Custom sections header
-            if (customSections.isNotEmpty()) {
-                item(key = "custom_header") {
-                    Text(
-                        "Custom Sections",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = Amber,
-                        modifier = Modifier.padding(start = 20.dp, top = 20.dp, bottom = 8.dp),
-                    )
+                when (item) {
+                    is SectionItem -> {
+                        val config = item.config
+                        SectionRow(
+                            config = config,
+                            isHero = isHero,
+                            isExpanded = expandedSection == config.section,
+                            isDragged = isDragged,
+                            dragOffset = if (isDragged) dragOffset else 0f,
+                            onToggle = { enabled ->
+                                val updated = orderedItems.map {
+                                    if (it is SectionItem && it.config.section == config.section) {
+                                        it.copy(config = it.config.copy(enabled = enabled))
+                                    } else it
+                                }
+                                orderedItems = updated
+                                viewModel.toggleSection(config.section, enabled)
+                            },
+                            onExpandToggle = {
+                                expandedSection = if (expandedSection == config.section) null else config.section
+                            },
+                            onOrientationChange = { orientation ->
+                                val updated = orderedItems.map {
+                                    if (it is SectionItem && it.config.section == config.section) {
+                                        it.copy(config = it.config.copy(orientation = orientation))
+                                    } else it
+                                }
+                                orderedItems = updated
+                                viewModel.updateSectionLayout(config.section, orientation, config.size)
+                            },
+                            onSizeChange = { size ->
+                                val updated = orderedItems.map {
+                                    if (it is SectionItem && it.config.section == config.section) {
+                                        it.copy(config = it.config.copy(size = size))
+                                    } else it
+                                }
+                                orderedItems = updated
+                                viewModel.updateSectionLayout(config.section, config.orientation, size)
+                            },
+                            onDragStart = {
+                                if (!isHero) draggedIndex = index
+                            },
+                            onDrag = { delta ->
+                                if (draggedIndex < 0) return@SectionRow
+                                dragOffset += delta
+                                val currentItem = listState.layoutInfo.visibleItemsInfo
+                                    .find { it.index == draggedIndex + 1 } // +1 for header item
+                                    ?: return@SectionRow
+                                val itemHeight = currentItem.size.toFloat()
+                                val list = orderedItems.toMutableList()
+                                if (dragOffset > itemHeight * 0.5f && draggedIndex < list.size - 1) {
+                                    val moved = list.removeAt(draggedIndex)
+                                    list.add(draggedIndex + 1, moved)
+                                    orderedItems = list.mapIndexed { i, it -> it.withOrder(i) }
+                                    draggedIndex += 1
+                                    dragOffset -= itemHeight
+                                } else if (dragOffset < -itemHeight * 0.5f && draggedIndex > 1) {
+                                    val moved = list.removeAt(draggedIndex)
+                                    list.add(draggedIndex - 1, moved)
+                                    orderedItems = list.mapIndexed { i, it -> it.withOrder(i) }
+                                    draggedIndex -= 1
+                                    dragOffset += itemHeight
+                                }
+                            },
+                            onDragEnd = {
+                                if (draggedIndex >= 0) {
+                                    persistOrder(viewModel, orderedItems)
+                                }
+                                draggedIndex = -1
+                                dragOffset = 0f
+                            },
+                            modifier = Modifier.animateItem(),
+                        )
+                    }
+                    is CustomItem -> {
+                        CustomSectionRow(
+                            section = item.section,
+                            isDragged = isDragged,
+                            dragOffset = if (isDragged) dragOffset else 0f,
+                            onToggle = { enabled ->
+                                val updated = orderedItems.map {
+                                    if (it is CustomItem && it.section.id == item.section.id) {
+                                        it.copy(section = it.section.copy(enabled = enabled))
+                                    } else it
+                                }
+                                orderedItems = updated
+                                viewModel.updateCustomSection(item.section.copy(enabled = enabled))
+                            },
+                            onEdit = { onEditCustomSection(item.section.id) },
+                            onDragStart = { draggedIndex = index },
+                            onDrag = { delta ->
+                                if (draggedIndex < 0) return@CustomSectionRow
+                                dragOffset += delta
+                                val currentItem = listState.layoutInfo.visibleItemsInfo
+                                    .find { it.index == draggedIndex + 1 } // +1 for header item
+                                    ?: return@CustomSectionRow
+                                val itemHeight = currentItem.size.toFloat()
+                                val list = orderedItems.toMutableList()
+                                if (dragOffset > itemHeight * 0.5f && draggedIndex < list.size - 1) {
+                                    val moved = list.removeAt(draggedIndex)
+                                    list.add(draggedIndex + 1, moved)
+                                    orderedItems = list.mapIndexed { i, it -> it.withOrder(i) }
+                                    draggedIndex += 1
+                                    dragOffset -= itemHeight
+                                } else if (dragOffset < -itemHeight * 0.5f && draggedIndex > 1) {
+                                    val moved = list.removeAt(draggedIndex)
+                                    list.add(draggedIndex - 1, moved)
+                                    orderedItems = list.mapIndexed { i, it -> it.withOrder(i) }
+                                    draggedIndex -= 1
+                                    dragOffset += itemHeight
+                                }
+                            },
+                            onDragEnd = {
+                                if (draggedIndex >= 0) {
+                                    persistOrder(viewModel, orderedItems)
+                                }
+                                draggedIndex = -1
+                                dragOffset = 0f
+                            },
+                            modifier = Modifier.animateItem(),
+                        )
+                    }
                 }
-            }
-
-            // Custom section rows
-            val sortedCustomSections = customSections.sortedBy { it.order }
-            itemsIndexed(
-                items = sortedCustomSections,
-                key = { _, item -> "custom_${item.id}" },
-            ) { index, section ->
-                CustomSectionRow(
-                    section = section,
-                    isFirst = index == 0,
-                    isLast = index == sortedCustomSections.size - 1,
-                    onToggle = { enabled ->
-                        viewModel.updateCustomSection(section.copy(enabled = enabled))
-                    },
-                    onEdit = { onEditCustomSection(section.id) },
-                    onMoveUp = { viewModel.moveCustomSection(section.id, -1) },
-                    onMoveDown = { viewModel.moveCustomSection(section.id, 1) },
-                )
             }
 
             // Add custom section button
@@ -289,46 +360,45 @@ fun HomeLayoutScreen(
 @Composable
 private fun CustomSectionRow(
     section: CustomSection,
-    isFirst: Boolean,
-    isLast: Boolean,
     onToggle: (Boolean) -> Unit,
     onEdit: () -> Unit,
-    onMoveUp: () -> Unit,
-    onMoveDown: () -> Unit,
+    isDragged: Boolean,
+    dragOffset: Float,
+    onDragStart: () -> Unit,
+    onDrag: (Float) -> Unit,
+    onDragEnd: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
+            .zIndex(if (isDragged) 1f else 0f)
+            .graphicsLayer {
+                translationY = dragOffset
+                shadowElevation = if (isDragged) 8f else 0f
+            }
             .fillMaxWidth()
             .padding(start = 12.dp, end = 20.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Up/Down arrows
-        Column {
-            IconButton(
-                onClick = onMoveUp,
-                enabled = !isFirst,
-                modifier = Modifier.size(24.dp),
-            ) {
-                Icon(
-                    Icons.Rounded.KeyboardArrowUp,
-                    contentDescription = "Move up",
-                    tint = if (!isFirst) Silver else Smoke,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
-            IconButton(
-                onClick = onMoveDown,
-                enabled = !isLast,
-                modifier = Modifier.size(24.dp),
-            ) {
-                Icon(
-                    Icons.Rounded.KeyboardArrowDown,
-                    contentDescription = "Move down",
-                    tint = if (!isLast) Silver else Smoke,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
-        }
+        // Drag handle (same behavior as default sections)
+        Icon(
+            Icons.Rounded.DragHandle,
+            contentDescription = "Drag to reorder",
+            tint = Silver,
+            modifier = Modifier
+                .size(32.dp)
+                .padding(4.dp)
+                .pointerInput(Unit) {
+                    detectDragGestures(
+                        onDragStart = { onDragStart() },
+                        onDragEnd = { onDragEnd() },
+                        onDragCancel = { onDragEnd() },
+                        onDrag = { _, dragAmount ->
+                            onDrag(dragAmount.y)
+                        },
+                    )
+                },
+        )
 
         Spacer(Modifier.width(8.dp))
 
@@ -362,6 +432,27 @@ private fun CustomSectionRow(
                 uncheckedTrackColor = Gunmetal,
             ),
         )
+    }
+}
+
+private fun HomeLayoutItem.withOrder(order: Int): HomeLayoutItem = when (this) {
+    is SectionItem -> copy(config = config.copy(order = order))
+    is CustomItem -> copy(section = section.copy(order = order))
+}
+
+private fun persistOrder(viewModel: HomeViewModel, items: List<HomeLayoutItem>) {
+    val sections = items.filterIsInstance<SectionItem>().map { it.config }
+    viewModel.updateSectionOrder(sections)
+    viewModel.updateHomeLayoutOrder(
+        items.map {
+            when (it) {
+                is SectionItem -> "section:${it.config.section.name}"
+                is CustomItem -> "custom:${it.section.id}"
+            }
+        },
+    )
+    items.filterIsInstance<CustomItem>().forEach { item ->
+        viewModel.updateCustomSection(item.section)
     }
 }
 

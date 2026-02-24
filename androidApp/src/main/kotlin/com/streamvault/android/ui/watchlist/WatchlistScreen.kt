@@ -79,6 +79,10 @@ fun WatchlistScreen(
         stringResource(R.string.watchlist_history),
     )
 
+    LaunchedEffect(Unit) {
+        watchlistViewModel.loadWatchlist()
+    }
+
     // Load in-progress and history data
     var inProgress by remember { mutableIntStateOf(0) }
     var inProgressItems = remember { mutableListOf<WatchProgress>() }

@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -151,7 +152,6 @@ fun TorveSplashScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Void)
-            .scale(zoomScale)
             .alpha(zoomAlpha),
         contentAlignment = Alignment.Center,
     ) {
@@ -161,144 +161,148 @@ fun TorveSplashScreen(
         ) {
             val cx = size.width / 2
             val cy = size.height / 2
+            val zoomPivot = Offset(cx, cy)
 
-            // 1. Ambient glow
-            val ambientAlpha = elementAlpha(AMBIENT_START, 1500L)
-            if (ambientAlpha > 0f) {
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(AmberMain.copy(alpha = 0.06f * ambientAlpha), Color.Transparent),
-                        center = Offset(cx, cy),
+            // Draw all vector elements in draw scope with scale so zoom stays crisp.
+            scale(zoomScale, zoomScale, pivot = zoomPivot) {
+                // 1. Ambient glow
+                val ambientAlpha = elementAlpha(AMBIENT_START, 1500L)
+                if (ambientAlpha > 0f) {
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(AmberMain.copy(alpha = 0.06f * ambientAlpha), Color.Transparent),
+                            center = Offset(cx, cy),
+                            radius = size.width * 0.8f,
+                        ),
                         radius = size.width * 0.8f,
-                    ),
-                    radius = size.width * 0.8f,
-                    center = Offset(cx, cy),
-                )
-            }
+                        center = Offset(cx, cy),
+                    )
+                }
 
-            // 2. Orbiting elliptical rings (dashed stroke)
-            fun drawOrbitRing(
-                rx: Float, ry: Float, tiltDeg: Float,
-                rotationDeg: Float, startMs: Long, dashOn: Float, dashOff: Float,
-                strokeW: Float = 1.5f, alphaMax: Float = 1f,
-            ) {
-                val alpha = elementAlpha(startMs, 800L) * alphaMax
-                if (alpha <= 0f) return
+                // 2. Orbiting elliptical rings (dashed stroke)
+                fun drawOrbitRing(
+                    rx: Float, ry: Float, tiltDeg: Float,
+                    rotationDeg: Float, startMs: Long, dashOn: Float, dashOff: Float,
+                    strokeW: Float = 1.5f, alphaMax: Float = 1f,
+                ) {
+                    val alpha = elementAlpha(startMs, 800L) * alphaMax
+                    if (alpha <= 0f) return
 
-                // When zooming, rings shrink
-                val ringScale = if (isZooming) {
-                    val zoomProgress = ((elapsedMs - ZOOM_START).toFloat() / 800f).coerceIn(0f, 1f)
-                    1f - zoomProgress
-                } else 1f
+                    // When zooming, rings shrink
+                    val ringScale = if (isZooming) {
+                        val zoomProgress = ((elapsedMs - ZOOM_START).toFloat() / 800f).coerceIn(0f, 1f)
+                        1f - zoomProgress
+                    } else 1f
 
-                if (ringScale <= 0.01f) return
+                    if (ringScale <= 0.01f) return
 
-                // When zooming, rings spin faster
-                val speedMult = if (isZooming) {
-                    val zoomProgress = ((elapsedMs - ZOOM_START).toFloat() / 800f).coerceIn(0f, 1f)
-                    1f + zoomProgress * 8f
-                } else 1f
+                    // When zooming, rings spin faster
+                    val speedMult = if (isZooming) {
+                        val zoomProgress = ((elapsedMs - ZOOM_START).toFloat() / 800f).coerceIn(0f, 1f)
+                        1f + zoomProgress * 8f
+                    } else 1f
 
-                rotate(tiltDeg + rotationDeg * speedMult, pivot = Offset(cx, cy)) {
-                    drawOval(
-                        brush = Brush.linearGradient(
-                            colors = listOf(
-                                AmberHot.copy(alpha = 0.7f * alpha),
-                                AmberDeep.copy(alpha = 0.3f * alpha),
+                    rotate(tiltDeg + rotationDeg * speedMult, pivot = Offset(cx, cy)) {
+                        drawOval(
+                            brush = Brush.linearGradient(
+                                colors = listOf(
+                                    AmberHot.copy(alpha = 0.7f * alpha),
+                                    AmberDeep.copy(alpha = 0.3f * alpha),
+                                ),
                             ),
-                        ),
-                        topLeft = Offset(cx - rx * ringScale, cy - ry * ringScale),
-                        size = Size(rx * 2 * ringScale, ry * 2 * ringScale),
-                        style = Stroke(
-                            width = strokeW,
-                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(dashOn, dashOff)),
-                        ),
-                    )
-                }
-            }
-
-            val dp1 = 1.dp.toPx()
-            drawOrbitRing(95f * dp1 / 2, 52f * dp1 / 2, 15f, orbit1Angle, ORBIT1_START, 8f, 12f)
-            drawOrbitRing(78f * dp1 / 2, 44f * dp1 / 2, -30f, orbit2Angle, ORBIT2_START, 6f, 10f)
-            drawOrbitRing(62f * dp1 / 2, 36f * dp1 / 2, 60f, orbit3Angle, ORBIT3_START, 4f, 8f)
-
-            // 3. Iris ring
-            val irisAlpha = elementAlpha(IRIS_START, 600L) * 0.4f
-            if (irisAlpha > 0f) {
-                drawCircle(
-                    color = AmberHot.copy(alpha = irisAlpha),
-                    radius = 42f * dp1 / 2,
-                    center = Offset(cx, cy),
-                    style = Stroke(width = 1.5f),
-                )
-            }
-
-            // 4. Diamond pupil
-            val diamondAlpha = elementAlpha(DIAMOND_START, 500L)
-            if (diamondAlpha > 0f) {
-                val diamondScale = 0.3f + 0.7f * diamondAlpha
-                val diamondRotation = 90f * (1f - diamondAlpha)
-                val diamondR = 38f * dp1 / 2 * diamondScale
-
-                rotate(diamondRotation, pivot = Offset(cx, cy)) {
-                    val diamondPath = Path().apply {
-                        moveTo(cx, cy - diamondR)
-                        lineTo(cx + diamondR, cy)
-                        lineTo(cx, cy + diamondR)
-                        lineTo(cx - diamondR, cy)
-                        close()
+                            topLeft = Offset(cx - rx * ringScale, cy - ry * ringScale),
+                            size = Size(rx * 2 * ringScale, ry * 2 * ringScale),
+                            style = Stroke(
+                                width = strokeW,
+                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(dashOn, dashOff)),
+                            ),
+                        )
                     }
-                    drawPath(
-                        path = diamondPath,
-                        brush = Brush.linearGradient(
-                            colors = listOf(AmberHot, AmberDeep),
-                            start = Offset(cx - diamondR, cy - diamondR),
-                            end = Offset(cx + diamondR, cy + diamondR),
-                        ),
-                        alpha = diamondAlpha * 0.92f,
+                }
+
+                val dp1 = 1.dp.toPx()
+                drawOrbitRing(95f * dp1 / 2, 52f * dp1 / 2, 15f, orbit1Angle, ORBIT1_START, 8f, 12f)
+                drawOrbitRing(78f * dp1 / 2, 44f * dp1 / 2, -30f, orbit2Angle, ORBIT2_START, 6f, 10f)
+                drawOrbitRing(62f * dp1 / 2, 36f * dp1 / 2, 60f, orbit3Angle, ORBIT3_START, 4f, 8f)
+
+                // 3. Iris ring
+                val irisAlpha = elementAlpha(IRIS_START, 600L) * 0.4f
+                if (irisAlpha > 0f) {
+                    drawCircle(
+                        color = AmberHot.copy(alpha = irisAlpha),
+                        radius = 42f * dp1 / 2,
+                        center = Offset(cx, cy),
+                        style = Stroke(width = 1.5f),
                     )
                 }
-            }
 
-            // 5. Void center
-            val voidAlpha = elementAlpha(VOID_START, 400L)
-            if (voidAlpha > 0f) {
-                drawCircle(color = Void, radius = 10f * dp1 / 2, center = Offset(cx, cy), alpha = voidAlpha)
-            }
+                // 4. Diamond pupil
+                val diamondAlpha = elementAlpha(DIAMOND_START, 500L)
+                if (diamondAlpha > 0f) {
+                    val diamondScale = 0.3f + 0.7f * diamondAlpha
+                    val diamondRotation = 90f * (1f - diamondAlpha)
+                    val diamondR = 38f * dp1 / 2 * diamondScale
 
-            // 6. Inner core
-            val coreAlpha = elementAlpha(CORE_START, 300L)
-            if (coreAlpha > 0f) {
-                val coreScale = coreAlpha
-                drawCircle(
-                    brush = Brush.linearGradient(listOf(AmberHot, AmberMain)),
-                    radius = 4.5f * dp1 / 2 * coreScale,
-                    center = Offset(cx, cy),
-                    alpha = coreAlpha * 0.9f,
-                )
-            }
+                    rotate(diamondRotation, pivot = Offset(cx, cy)) {
+                        val diamondPath = Path().apply {
+                            moveTo(cx, cy - diamondR)
+                            lineTo(cx + diamondR, cy)
+                            lineTo(cx, cy + diamondR)
+                            lineTo(cx - diamondR, cy)
+                            close()
+                        }
+                        drawPath(
+                            path = diamondPath,
+                            brush = Brush.linearGradient(
+                                colors = listOf(AmberHot, AmberDeep),
+                                start = Offset(cx - diamondR, cy - diamondR),
+                                end = Offset(cx + diamondR, cy + diamondR),
+                            ),
+                            alpha = diamondAlpha * 0.92f,
+                        )
+                    }
+                }
 
-            // 7. Specular highlights
-            val specAlpha = elementAlpha(SPECULAR_START, 300L)
-            if (specAlpha > 0f) {
-                drawCircle(
-                    color = AmberHot.copy(alpha = 0.5f * specAlpha),
-                    radius = 6f * dp1 / 2,
-                    center = Offset(cx + 13 * dp1, cy - 16 * dp1),
-                )
-                drawCircle(
-                    color = Color.White.copy(alpha = 0.6f * specAlpha),
-                    radius = 2f * dp1 / 2,
-                    center = Offset(cx + 15 * dp1, cy - 18 * dp1),
-                )
-            }
+                // 5. Void center
+                val voidAlpha = elementAlpha(VOID_START, 400L)
+                if (voidAlpha > 0f) {
+                    drawCircle(color = Void, radius = 10f * dp1 / 2, center = Offset(cx, cy), alpha = voidAlpha)
+                }
 
-            // 8. Scan lines
-            val scanAlpha = elementAlpha(SCAN_START, 400L) * 0.2f
-            if (scanAlpha > 0f) {
-                val scanPaint = AmberHot.copy(alpha = scanAlpha)
-                drawLine(scanPaint, Offset(cx - 100 * dp1, cy), Offset(cx - 72 * dp1, cy), strokeWidth = 0.8f)
-                drawLine(scanPaint, Offset(cx + 72 * dp1, cy), Offset(cx + 100 * dp1, cy), strokeWidth = 0.8f)
+                // 6. Inner core
+                val coreAlpha = elementAlpha(CORE_START, 300L)
+                if (coreAlpha > 0f) {
+                    val coreScale = coreAlpha
+                    drawCircle(
+                        brush = Brush.linearGradient(listOf(AmberHot, AmberMain)),
+                        radius = 4.5f * dp1 / 2 * coreScale,
+                        center = Offset(cx, cy),
+                        alpha = coreAlpha * 0.9f,
+                    )
+                }
+
+                // 7. Specular highlights
+                val specAlpha = elementAlpha(SPECULAR_START, 300L)
+                if (specAlpha > 0f) {
+                    drawCircle(
+                        color = AmberHot.copy(alpha = 0.5f * specAlpha),
+                        radius = 6f * dp1 / 2,
+                        center = Offset(cx + 13 * dp1, cy - 16 * dp1),
+                    )
+                    drawCircle(
+                        color = Color.White.copy(alpha = 0.6f * specAlpha),
+                        radius = 2f * dp1 / 2,
+                        center = Offset(cx + 15 * dp1, cy - 18 * dp1),
+                    )
+                }
+
+                // 8. Scan lines
+                val scanAlpha = elementAlpha(SCAN_START, 400L) * 0.2f
+                if (scanAlpha > 0f) {
+                    val scanPaint = AmberHot.copy(alpha = scanAlpha)
+                    drawLine(scanPaint, Offset(cx - 100 * dp1, cy), Offset(cx - 72 * dp1, cy), strokeWidth = 0.8f)
+                    drawLine(scanPaint, Offset(cx + 72 * dp1, cy), Offset(cx + 100 * dp1, cy), strokeWidth = 0.8f)
+                }
             }
         }
 

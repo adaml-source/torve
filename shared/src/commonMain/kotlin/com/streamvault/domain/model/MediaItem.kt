@@ -93,3 +93,55 @@ data class PagedResult(
     val totalPages: Int,
     val totalResults: Int,
 )
+
+private fun MediaItem.stableKey(): String {
+    val idPart = tmdbId?.toString() ?: id
+    return "${type.name}:$idPart"
+}
+
+private fun mergeMediaItems(primary: MediaItem, other: MediaItem): MediaItem {
+    fun preferString(a: String?, b: String?): String? =
+        if (!a.isNullOrBlank()) a else b
+    fun preferInt(a: Int?, b: Int?): Int? = a ?: b
+    fun preferDouble(a: Double?, b: Double?): Double? = a ?: b
+
+    return primary.copy(
+        tmdbId = primary.tmdbId ?: other.tmdbId,
+        imdbId = preferString(primary.imdbId, other.imdbId),
+        title = if (primary.title.isNotBlank()) primary.title else other.title,
+        year = preferInt(primary.year, other.year),
+        overview = preferString(primary.overview, other.overview),
+        posterUrl = preferString(primary.posterUrl, other.posterUrl),
+        backdropUrl = preferString(primary.backdropUrl, other.backdropUrl),
+        rating = preferDouble(primary.rating, other.rating),
+        voteCount = preferInt(primary.voteCount, other.voteCount),
+        runtime = preferInt(primary.runtime, other.runtime),
+        genres = if (primary.genres.isNotEmpty()) primary.genres else other.genres,
+        genreIds = if (primary.genreIds.isNotEmpty()) primary.genreIds else other.genreIds,
+        cast = if (primary.cast.isNotEmpty()) primary.cast else other.cast,
+        director = preferString(primary.director, other.director),
+        directorId = preferInt(primary.directorId, other.directorId),
+        releaseDate = preferString(primary.releaseDate, other.releaseDate),
+        status = preferString(primary.status, other.status),
+        trailerKey = preferString(primary.trailerKey, other.trailerKey),
+        seasons = if (primary.seasons.isNotEmpty()) primary.seasons else other.seasons,
+        tagline = preferString(primary.tagline, other.tagline),
+        popularity = preferDouble(primary.popularity, other.popularity),
+    )
+}
+
+fun List<MediaItem>.dedupeByStableKey(): List<MediaItem> {
+    val map = LinkedHashMap<String, MediaItem>()
+    for (item in this) {
+        val key = item.stableKey()
+        val existing = map[key]
+        if (existing == null) {
+            map[key] = item
+        } else {
+            val primary = if (existing.tmdbId != null || item.tmdbId == null) existing else item
+            val secondary = if (primary === existing) item else existing
+            map[key] = mergeMediaItems(primary, secondary)
+        }
+    }
+    return map.values.toList()
+}

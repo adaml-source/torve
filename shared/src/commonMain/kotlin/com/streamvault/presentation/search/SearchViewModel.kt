@@ -1,6 +1,9 @@
 package com.streamvault.presentation.search
 
+import com.streamvault.domain.model.dedupeByStableKey
 import com.streamvault.domain.repository.MetadataRepository
+import com.streamvault.domain.repository.PreferencesRepository
+import com.streamvault.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -16,6 +19,7 @@ import kotlinx.coroutines.launch
 
 class SearchViewModel(
     private val metadataRepo: MetadataRepository,
+    private val prefsRepo: PreferencesRepository,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(SearchUiState())
@@ -65,7 +69,8 @@ class SearchViewModel(
                 genreMatch && ratingMatch && yearFromMatch && yearToMatch
             }
 
-            _state.update { it.copy(results = filtered, isSearching = false) }
+            val finalResults = if (shouldDedupe()) filtered.dedupeByStableKey() else filtered
+            _state.update { it.copy(results = finalResults, isSearching = false) }
         } catch (e: Exception) {
             _state.update { it.copy(isSearching = false, error = e.message) }
         }
@@ -99,9 +104,10 @@ class SearchViewModel(
                     runtimeGte = filter.runtimeFilter?.minMinutes,
                     runtimeLte = filter.runtimeFilter?.maxMinutes,
                 )
+                val finalResults = if (shouldDedupe()) result.items.dedupeByStableKey() else result.items
                 _state.update {
                     it.copy(
-                        discoverResults = result.items,
+                        discoverResults = finalResults,
                         isDiscovering = false,
                     )
                 }
@@ -129,5 +135,9 @@ class SearchViewModel(
     fun clearSearch() {
         _state.update { SearchUiState() }
         queryFlow.value = ""
+    }
+
+    private suspend fun shouldDedupe(): Boolean {
+        return prefsRepo.getString(SettingsViewModel.KEY_DEDUPE_RESULTS)?.toBooleanStrictOrNull() ?: true
     }
 }

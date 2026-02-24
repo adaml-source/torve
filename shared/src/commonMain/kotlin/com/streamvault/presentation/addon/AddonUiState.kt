@@ -7,6 +7,7 @@ data class AddonUiState(
     val isLoading: Boolean = false,
     val isInstalling: Boolean = false,
     val installingUrl: String = "",
+    val lastInstallUrl: String = "",
     val installUrl: String = "",
     val error: String? = null,
     val installError: String? = null,

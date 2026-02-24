@@ -78,6 +78,7 @@ class SettingsViewModel(
         const val KEY_LAST_SYNC_TIME = "last_sync_time"
         const val KEY_REGEX_PATTERNS = "regex_patterns"
         const val KEY_STREAM_GROUPS = "stream_groups"
+        const val KEY_DEDUPE_RESULTS = "dedupe_results"
         const val KEY_CLAUDE_API_KEY = "claude_api_key"
         const val KEY_AI_PROVIDER = "ai_provider"
         const val KEY_CHATGPT_API_KEY = "chatgpt_api_key"
@@ -147,6 +148,7 @@ class SettingsViewModel(
             val streamGroups = prefsRepo.getString(KEY_STREAM_GROUPS)?.let {
                 try { jsonParser.decodeFromString<List<StreamGroup>>(it) } catch (_: Exception) { DEFAULT_STREAM_GROUPS }
             } ?: DEFAULT_STREAM_GROUPS
+            val dedupeResults = prefsRepo.getString(KEY_DEDUPE_RESULTS)?.toBooleanStrictOrNull() ?: true
 
             val claudeApiKey = prefsRepo.getString(KEY_CLAUDE_API_KEY) ?: ""
             val aiProvider = prefsRepo.getString(KEY_AI_PROVIDER)?.let {
@@ -184,6 +186,7 @@ class SettingsViewModel(
                     lastSyncTime = lastSyncTime,
                     regexPatterns = regexPatterns,
                     streamGroups = streamGroups,
+                    dedupeResults = dedupeResults,
                     aiProvider = aiProvider,
                     claudeApiKey = claudeApiKey,
                     chatGptApiKey = chatGptApiKey,
@@ -720,6 +723,11 @@ class SettingsViewModel(
     fun setAppLanguage(language: AppLanguage) {
         _state.update { it.copy(appLanguage = language) }
         scope.launch { prefsRepo.setString(KEY_APP_LANGUAGE, language.name) }
+    }
+
+    fun setDedupeResultsEnabled(enabled: Boolean) {
+        _state.update { it.copy(dedupeResults = enabled) }
+        scope.launch { prefsRepo.setString(KEY_DEDUPE_RESULTS, enabled.toString()) }
     }
 
     // -------------------------------------------------------------------------

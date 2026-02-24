@@ -70,6 +70,7 @@ import com.streamvault.domain.model.SpecificTmdbItem
 import com.streamvault.domain.repository.MetadataRepository
 import com.streamvault.presentation.home.HomeViewModel
 import com.streamvault.presentation.settings.SettingsViewModel
+import java.time.LocalDate
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
@@ -99,6 +100,14 @@ fun CustomSectionEditorScreen(
     var minRating by remember { mutableStateOf(existingSection?.filters?.minRating?.toString() ?: "") }
     var yearFrom by remember { mutableStateOf(existingSection?.filters?.yearFrom?.toString() ?: "") }
     var yearTo by remember { mutableStateOf(existingSection?.filters?.yearTo?.toString() ?: "") }
+    var originCountries by remember { mutableStateOf(existingSection?.filters?.originCountries ?: emptyList()) }
+    var originalLanguage by remember { mutableStateOf(existingSection?.filters?.originalLanguage ?: "") }
+    var runtimeGte by remember { mutableStateOf(existingSection?.filters?.runtimeGte?.toString() ?: "") }
+    var runtimeLte by remember { mutableStateOf(existingSection?.filters?.runtimeLte?.toString() ?: "") }
+    var certification by remember { mutableStateOf(existingSection?.filters?.certification ?: "") }
+    var certificationGte by remember { mutableStateOf(existingSection?.filters?.certificationGte ?: "") }
+    var certificationLte by remember { mutableStateOf(existingSection?.filters?.certificationLte ?: "") }
+    var certificationCountry by remember { mutableStateOf(existingSection?.filters?.certificationCountry ?: "US") }
     var castPersons by remember { mutableStateOf(existingSection?.filters?.withCast ?: emptyList()) }
     var crewPersons by remember { mutableStateOf(existingSection?.filters?.withCrew ?: emptyList()) }
     var keywordIds by remember { mutableStateOf(existingSection?.filters?.withKeywords ?: emptyList()) }
@@ -113,6 +122,7 @@ fun CustomSectionEditorScreen(
     var aiSearchQuery by remember { mutableStateOf("") }
     var isAiSearching by remember { mutableStateOf(false) }
     var aiSearchError by remember { mutableStateOf<String?>(null) }
+    var inferredKeywordTerms by remember { mutableStateOf<List<String>>(emptyList()) }
 
     // Person search state
     var personSearchQuery by remember { mutableStateOf("") }
@@ -150,10 +160,11 @@ fun CustomSectionEditorScreen(
         scope.launch {
             try {
                 val aiKey = settingsState.activeAiApiKey
+                val normalizedQuery = normalizeAiQuery(aiSearchQuery)
                 val result = if (aiKey.isNotBlank()) {
-                    keywordSearchService.searchWithAi(settingsState.aiProvider, aiKey, aiSearchQuery)
+                    keywordSearchService.searchWithAi(settingsState.aiProvider, aiKey, normalizedQuery)
                 } else {
-                    keywordSearchService.searchWithTmdbFallback(aiSearchQuery)
+                    keywordSearchService.searchWithTmdbFallback(normalizedQuery)
                 }
 
                 if (result.mode == "specific" && result.specificItems.isNotEmpty()) {
@@ -162,6 +173,7 @@ fun CustomSectionEditorScreen(
                     if (result.title.isNotBlank()) title = result.title
                     selectedGenres = emptyList()
                     keywordIds = emptyList()
+                    inferredKeywordTerms = result.inferredKeywordTerms
                     yearFrom = ""
                     yearTo = ""
                     minRating = ""
@@ -172,11 +184,203 @@ fun CustomSectionEditorScreen(
                     if (result.title.isNotBlank()) title = result.title
                     if (result.genreIds.isNotEmpty()) selectedGenres = result.genreIds
                     if (result.keywordIds.isNotEmpty()) keywordIds = result.keywordIds
+                    inferredKeywordTerms = result.inferredKeywordTerms
                     result.yearFrom?.let { yearFrom = it.toString() }
                     result.yearTo?.let { yearTo = it.toString() }
                     if (result.sortBy.isNotBlank()) sortBy = result.sortBy
                     result.minRating?.let { minRating = it.toString() }
                     result.mediaType?.let { mediaType = it }
+
+                    val lowered = normalizedQuery.lowercase()
+
+                    // Country / region parsing (origin country)
+                    val countryMap = mapOf(
+                        "united states" to "US",
+                        "usa" to "US",
+                        "us" to "US",
+                        "america" to "US",
+                        "united kingdom" to "GB",
+                        "uk" to "GB",
+                        "british" to "GB",
+                        "germany" to "DE",
+                        "german" to "DE",
+                        "france" to "FR",
+                        "french" to "FR",
+                        "italy" to "IT",
+                        "italian" to "IT",
+                        "spain" to "ES",
+                        "spanish" to "ES",
+                        "japan" to "JP",
+                        "japanese" to "JP",
+                        "korea" to "KR",
+                        "korean" to "KR",
+                        "china" to "CN",
+                        "chinese" to "CN",
+                        "india" to "IN",
+                        "hindi" to "IN",
+                        "canada" to "CA",
+                        "canadian" to "CA",
+                        "australia" to "AU",
+                        "australian" to "AU",
+                        "mexico" to "MX",
+                        "mexican" to "MX",
+                        "brazil" to "BR",
+                        "brazilian" to "BR",
+                        "russia" to "RU",
+                        "russian" to "RU",
+                    )
+                    val countryMatches = countryMap.filterKeys { key ->
+                        if (key == "us" || key == "uk") Regex("\\b$key\\b").containsMatchIn(lowered) else lowered.contains(key)
+                    }.values.toSet()
+                    if (countryMatches.isNotEmpty()) {
+                        originCountries = countryMatches.toList()
+                    }
+
+                    // Language parsing
+                    val languageMap = mapOf(
+                        "english" to "en",
+                        "german" to "de",
+                        "french" to "fr",
+                        "spanish" to "es",
+                        "italian" to "it",
+                        "japanese" to "ja",
+                        "korean" to "ko",
+                        "chinese" to "zh",
+                        "hindi" to "hi",
+                        "russian" to "ru",
+                        "portuguese" to "pt",
+                    )
+                    val langMatch = languageMap.keys.firstOrNull { lowered.contains("in $it") || lowered.contains("$it language") || lowered.contains("$it audio") || lowered.contains("$it-speaking") }
+                    if (langMatch != null) {
+                        originalLanguage = languageMap[langMatch] ?: ""
+                    }
+
+                    // Runtime parsing
+                    val underMinutes = Regex("""under (\d{2,3}) (?:minutes|min)""").find(lowered)?.groupValues?.get(1)?.toIntOrNull()
+                    val overMinutes = Regex("""over (\d{2,3}) (?:minutes|min)""").find(lowered)?.groupValues?.get(1)?.toIntOrNull()
+                    val underHours = Regex("""under (\d{1,2}) hours?""").find(lowered)?.groupValues?.get(1)?.toIntOrNull()
+                    val overHours = Regex("""over (\d{1,2}) hours?""").find(lowered)?.groupValues?.get(1)?.toIntOrNull()
+                    val betweenMinutes = Regex("""between (\d{2,3}) and (\d{2,3}) (?:minutes|min)""")
+                        .find(lowered)?.groupValues
+                    if (underMinutes != null) runtimeLte = underMinutes.toString()
+                    if (overMinutes != null) runtimeGte = overMinutes.toString()
+                    if (underHours != null) runtimeLte = (underHours * 60).toString()
+                    if (overHours != null) runtimeGte = (overHours * 60).toString()
+                    if (betweenMinutes != null && betweenMinutes.size >= 3) {
+                        runtimeGte = betweenMinutes[1]
+                        runtimeLte = betweenMinutes[2]
+                    }
+                    if (lowered.contains("short")) runtimeLte = "90"
+                    if (lowered.contains("long")) runtimeGte = "140"
+
+                    // Certification / age restriction parsing (US default)
+                    if (lowered.contains("pg-13")) certification = "PG-13"
+                    else if (Regex("\\bpg\\b").containsMatchIn(lowered)) certification = "PG"
+                    else if (Regex("\\br\\b").containsMatchIn(lowered)) certification = "R"
+                    else if (lowered.contains("nc-17")) certification = "NC-17"
+                    else if (Regex("\\bg\\b").containsMatchIn(lowered)) certification = "G"
+
+                    if (lowered.contains("family") || lowered.contains("kids") || lowered.contains("children") || lowered.contains("child")) {
+                        certificationLte = "PG"
+                        certificationCountry = "US"
+                    }
+                    if (lowered.contains("no r") || lowered.contains("not r") || lowered.contains("without r")) {
+                        certificationLte = "PG-13"
+                        certificationCountry = "US"
+                    }
+                    if (lowered.contains("18+")) {
+                        certificationGte = "R"
+                        certificationCountry = "US"
+                    }
+                    if (certification.isNotBlank()) {
+                        certificationCountry = "US"
+                    }
+
+                    // Director parsing
+                    val directorMatch = Regex("""(?:directed by|by)\s+([a-zA-Z .'\-]+)""")
+                        .find(normalizedQuery)
+                        ?.groupValues
+                        ?.get(1)
+                        ?.trim()
+                    if (!directorMatch.isNullOrBlank()) {
+                        val director = try { metadataRepo.searchPerson(directorMatch).firstOrNull() } catch (_: Exception) { null }
+                        director?.let { person ->
+                            crewPersons = (crewPersons + SavedPerson(person.id, person.name)).distinctBy { it.id }
+                        }
+                    }
+
+                    // If the prompt mentions people, auto-add them as cast filters.
+                    val personTrigger = listOf("with ", "featuring ", "starring ", "starring:", "feat ", "feat.")
+                    if (personTrigger.any { lowered.contains(it) }) {
+                        val tail = lowered
+                            .substringAfter("with ", lowered)
+                            .substringAfter("featuring ", lowered)
+                            .substringAfter("starring ", lowered)
+                            .substringAfter("starring:", lowered)
+                            .substringAfter("feat ", lowered)
+                            .substringAfter("feat.", lowered)
+                        val names = tail
+                            .split(" and ", " or ", ",", "&")
+                            .map { it.trim() }
+                            .filter { it.length >= 3 }
+                            .take(3)
+                        val found = names.mapNotNull { name ->
+                            try {
+                                metadataRepo.searchPerson(name).firstOrNull()
+                            } catch (_: Exception) { null }
+                        }.map { SavedPerson(it.id, it.name) }
+                        if (found.isNotEmpty()) {
+                            castPersons = (castPersons + found).distinctBy { it.id }
+                        }
+                    }
+
+                    // Parse common age/decade constraints (override AI when explicit)
+                    val now = LocalDate.now().year
+                    val pastYears = Regex("""(?:past|last)\s+(\d{1,2})\s+years?""")
+                        .find(lowered)?.groupValues?.get(1)?.toIntOrNull()
+                    if (pastYears != null) {
+                        yearFrom = (now - pastYears + 1).toString()
+                        yearTo = now.toString()
+                    }
+
+                    val ageLimit = Regex("""no (?:movies?|films?) older than (\d{1,2}) years?""")
+                        .find(lowered)?.groupValues?.get(1)?.toIntOrNull()
+                    if (ageLimit != null) {
+                        yearFrom = (now - ageLimit).toString()
+                    }
+
+                    val decade = Regex("""from the (\d{2})s|(\d{4})s""").find(lowered)
+                    val decadeTwo = decade?.groupValues?.get(1)?.toIntOrNull()
+                    val decadeFour = decade?.groupValues?.get(2)?.toIntOrNull()
+                    val decadeStart = when {
+                        decadeFour != null -> decadeFour
+                        decadeTwo != null -> 1900 + decadeTwo
+                        else -> null
+                    }
+                    if (decadeStart != null) {
+                        yearFrom = decadeStart.toString()
+                        yearTo = (decadeStart + 9).toString()
+                    }
+
+                    // Parse rating constraints if AI didn't set them
+                    if (result.minRating == null) {
+                        val ratingMatch = Regex("""(?:not rated below|at least|minimum|>=)\s*([0-9]+(?:\.[0-9])?)""")
+                            .find(lowered)
+                        val starsMatch = Regex("""([0-9]+(?:\.[0-9])?)\s*stars?""").find(lowered)
+                        val rating = ratingMatch?.groupValues?.get(1)?.toFloatOrNull()
+                            ?: starsMatch?.groupValues?.get(1)?.toFloatOrNull()
+                        if (rating != null) {
+                            minRating = rating.toString()
+                        }
+                    }
+
+                    // If user explicitly wants documentaries + movies, ensure genre/media type reflect that
+                    if (result.genreIds.isEmpty() && (lowered.contains("documentary") || lowered.contains("documentaries"))) {
+                        selectedGenres = (selectedGenres + 99).distinct()
+                    }
+                    if (result.mediaType.isNullOrBlank() && (lowered.contains("documentary") || lowered.contains("documentaries"))) {
+                        mediaType = if (lowered.contains("movie") || lowered.contains("movies")) "both" else "movie"
+                    }
                 }
             } catch (e: Exception) {
                 aiSearchError = e.message ?: "Search failed"
@@ -262,6 +466,25 @@ fun CustomSectionEditorScreen(
                     color = Silver.copy(alpha = 0.6f),
                     modifier = Modifier.padding(top = 4.dp),
                 )
+            }
+
+            if (inferredKeywordTerms.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                SectionLabel("Inferred Keywords")
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    inferredKeywordTerms.take(10).forEach { term ->
+                        FilterChip(
+                            selected = true,
+                            onClick = {},
+                            label = { Text(term) },
+                            colors = chipColors(),
+                            shape = RoundedCornerShape(20.dp),
+                        )
+                    }
+                }
             }
 
             aiSearchError?.let { error ->
@@ -486,6 +709,14 @@ fun CustomSectionEditorScreen(
                             minRating = minRating.toFloatOrNull(),
                             yearFrom = yearFrom.toIntOrNull(),
                             yearTo = yearTo.toIntOrNull(),
+                            originCountries = if (originCountries.isEmpty()) listOf("US") else originCountries,
+                            originalLanguage = originalLanguage.takeIf { it.isNotBlank() },
+                            runtimeGte = runtimeGte.toIntOrNull(),
+                            runtimeLte = runtimeLte.toIntOrNull(),
+                            certification = certification.takeIf { it.isNotBlank() },
+                            certificationGte = certificationGte.takeIf { it.isNotBlank() },
+                            certificationLte = certificationLte.takeIf { it.isNotBlank() },
+                            certificationCountry = certificationCountry.takeIf { it.isNotBlank() } ?: "US",
                             withCast = castPersons,
                             withCrew = crewPersons,
                             withKeywords = keywordIds,
@@ -525,6 +756,82 @@ fun CustomSectionEditorScreen(
         }
     }
 }
+
+private fun normalizeAiQuery(input: String): String {
+    val wordRegex = Regex("\\b[\\p{L}']+\\b")
+    val sb = StringBuilder()
+    var last = 0
+    for (m in wordRegex.findAll(input)) {
+        sb.append(input.substring(last, m.range.first))
+        val original = m.value
+        val lower = original.lowercase()
+        val corrected = correctToken(lower)
+        sb.append(corrected)
+        last = m.range.last + 1
+    }
+    if (last < input.length) sb.append(input.substring(last))
+    return sb.toString()
+}
+
+private fun correctToken(token: String): String {
+    if (token.length < 4) return token
+    if (SPELLING_DICT.contains(token)) return token
+    var best = token
+    var bestDist = 3
+    for (candidate in SPELLING_DICT) {
+        val dist = editDistance(token, candidate)
+        if (dist < bestDist) {
+            bestDist = dist
+            best = candidate
+            if (bestDist == 1) break
+        }
+    }
+    return if (bestDist <= 2) best else token
+}
+
+private fun editDistance(a: String, b: String): Int {
+    val n = a.length
+    val m = b.length
+    if (n == 0) return m
+    if (m == 0) return n
+    val dp = IntArray(m + 1) { it }
+    for (i in 1..n) {
+        var prev = dp[0]
+        dp[0] = i
+        for (j in 1..m) {
+            val tmp = dp[j]
+            val cost = if (a[i - 1] == b[j - 1]) 0 else 1
+            dp[j] = minOf(
+                dp[j] + 1,
+                dp[j - 1] + 1,
+                prev + cost,
+            )
+            prev = tmp
+        }
+    }
+    return dp[m]
+}
+
+private val SPELLING_DICT = setOf(
+    "beach", "island", "jungle", "forest", "desert", "ocean", "sea", "underwater",
+    "space", "spaceship", "rocketship", "mountain", "snow", "ice",
+    "spiritual", "spirituality", "meditation", "mindfulness", "zen", "retreat",
+    "buddhism", "buddhist", "monk", "monastery", "dharma", "tibet", "dalai", "lama",
+    "faith", "religion", "enlightenment",
+    "action", "adventure", "animation", "animated", "anime", "comedy", "crime",
+    "documentary", "documentaries", "drama", "family", "fantasy", "history",
+    "historical", "horror", "music", "musical", "mystery", "romance",
+    "romantic", "sci", "scifi", "science", "fiction", "thriller", "war", "western",
+    "nudity", "sexuality", "erotic", "adult",
+    "united", "states", "america", "usa", "us", "kingdom", "uk", "british",
+    "germany", "german", "france", "french", "italy", "italian", "spain", "spanish",
+    "japan", "japanese", "korea", "korean", "china", "chinese", "india", "hindi",
+    "canada", "canadian", "australia", "australian", "mexico", "mexican",
+    "brazil", "brazilian", "russia", "russian",
+    "english", "german", "french", "spanish", "italian", "japanese", "korean",
+    "chinese", "hindi", "russian", "portuguese",
+    "pg", "pg-13", "r", "nc-17", "g",
+)
 
 @Composable
 private fun SectionLabel(text: String) {

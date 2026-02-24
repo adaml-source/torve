@@ -2,6 +2,7 @@ package com.streamvault.presentation.seeall
 
 import com.streamvault.domain.model.MediaItem
 import com.streamvault.domain.model.MediaType
+import com.streamvault.domain.model.CustomSection
 import com.streamvault.domain.repository.MetadataRepository
 import com.streamvault.domain.repository.PreferencesRepository
 import com.streamvault.domain.repository.WatchHistoryRepository
@@ -14,6 +15,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
 
 data class SeeAllUiState(
     val title: String = "",
@@ -33,6 +35,7 @@ class SeeAllViewModel(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(SeeAllUiState())
     val state: StateFlow<SeeAllUiState> = _state.asStateFlow()
+    private val json = Json { ignoreUnknownKeys = true }
 
     fun loadSection(sectionId: String) {
         _state.update { it.copy(sectionId = sectionId, isLoading = true) }
@@ -79,6 +82,14 @@ class SeeAllViewModel(
     }
 
     private suspend fun fetchSection(sectionId: String, page: Int): Triple<String, List<MediaItem>, Boolean> {
+        if (sectionId.startsWith("custom:")) {
+            val customId = sectionId.removePrefix("custom:")
+            val section = loadCustomSections().firstOrNull { it.id == customId }
+                ?: return Triple("Custom Section", emptyList(), false)
+            val (items, hasMore) = fetchCustomSection(section, page)
+            return Triple(section.title, items, hasMore)
+        }
+
         return when (sectionId) {
             "TRENDING_MOVIES" -> {
                 val result = metadataRepo.getTrendingPaged("movie", page)
@@ -148,6 +159,67 @@ class SeeAllViewModel(
                 Triple("Recently Watched", items, false)
             }
             else -> Triple(sectionId.replace("_", " "), emptyList(), false)
+        }
+    }
+
+    private suspend fun loadCustomSections(): List<CustomSection> {
+        val saved = try { prefsRepo.getString("custom_sections") } catch (_: Exception) { null }
+        return if (saved != null) {
+            try {
+                json.decodeFromString<List<CustomSection>>(saved)
+            } catch (_: Exception) {
+                emptyList()
+            }
+        } else emptyList()
+    }
+
+    private suspend fun fetchCustomSection(section: CustomSection, page: Int): Pair<List<MediaItem>, Boolean> {
+        val f = section.filters
+        return if (f.specificTmdbIds.isNotEmpty()) {
+            val items = f.specificTmdbIds.mapNotNull { spec ->
+                try {
+                    metadataRepo.getDetail(spec.mediaType, spec.tmdbId)
+                } catch (_: Exception) { null }
+            }
+            items to false
+        } else {
+            val castIds = f.withCast.takeIf { it.isNotEmpty() }?.joinToString(",") { it.id.toString() }
+            val crewIds = f.withCrew.takeIf { it.isNotEmpty() }?.joinToString(",") { it.id.toString() }
+            val genres = f.genreIds.takeIf { it.isNotEmpty() }?.joinToString(",")
+            val providers = f.withWatchProviders.takeIf { it.isNotEmpty() }?.joinToString(",")
+            val keywords = f.withKeywords.takeIf { it.isNotEmpty() }?.joinToString("|")
+            val types = if (section.mediaType == "both") listOf("movie", "tv") else listOf(section.mediaType)
+            val results = types.mapNotNull { type ->
+                try {
+                    metadataRepo.discover(
+                        type = type,
+                        sortBy = f.sortBy,
+                        withGenres = genres,
+                        minRating = f.minRating,
+                        year = f.yearFrom,
+                        yearTo = f.yearTo,
+                        runtimeGte = f.runtimeGte,
+                        runtimeLte = f.runtimeLte,
+                        originCountries = f.originCountries.takeIf { it.isNotEmpty() }?.joinToString("|"),
+                        originalLanguage = f.originalLanguage,
+                        certification = f.certification,
+                        certificationGte = f.certificationGte,
+                        certificationLte = f.certificationLte,
+                        certificationCountry = f.certificationCountry,
+                        withCast = castIds,
+                        withCrew = crewIds,
+                        withWatchProviders = providers,
+                        watchRegion = f.watchRegion,
+                        withKeywords = keywords,
+                        page = page,
+                    )
+                } catch (_: Exception) {
+                    null
+                }
+            }
+            val items = results.flatMap { it.items }.distinctBy { it.id }
+            val hasMore = results.any { it.page < it.totalPages }
+            items to hasMore
         }
     }
 }

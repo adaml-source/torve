@@ -8,6 +8,7 @@ data class KeywordSearchResult(
     val mode: String = "discover", // "discover" or "specific"
     val genreIds: List<Int> = emptyList(),
     val keywordIds: List<Int> = emptyList(),
+    val inferredKeywordTerms: List<String> = emptyList(),
     val yearFrom: Int? = null,
     val yearTo: Int? = null,
     val sortBy: String = "popularity.desc",
@@ -30,6 +31,7 @@ class KeywordSearchService(
      * Primary path: AI interprets the phrase, choosing discover or specific mode.
      */
     suspend fun searchWithAi(provider: AiProvider, apiKey: String, phrase: String): KeywordSearchResult {
+        val normalizedPhrase = normalizePhrase(phrase)
         val suggestion = aiSuggestClient.suggest(provider, apiKey, phrase)
         val title = suggestion.title.ifBlank { phrase.replaceFirstChar { it.uppercase() } }
 
@@ -67,7 +69,14 @@ class KeywordSearchService(
         }
 
         // Discover mode: resolve keyword terms to TMDB keyword IDs
-        val keywordIds = suggestion.keywordTerms.mapNotNull { term ->
+        val extraKeywordTerms = extractSettingKeywords(normalizedPhrase)
+        val fallbackTerms = extractSearchTerms(normalizedPhrase)
+        val keywordTerms = (suggestion.keywordTerms + extraKeywordTerms + fallbackTerms)
+            .map { normalizeTerm(it) }
+            .flatMap { expandThemeSynonyms(it) }
+            .distinct()
+            .take(10)
+        val keywordIds = keywordTerms.mapNotNull { term ->
             try {
                 val results = metadataRepo.searchKeywords(term)
                 results.firstOrNull { it.name.equals(term, ignoreCase = true) }?.id
@@ -82,6 +91,7 @@ class KeywordSearchService(
             mode = "discover",
             genreIds = suggestion.genreIds,
             keywordIds = keywordIds,
+            inferredKeywordTerms = keywordTerms,
             yearFrom = suggestion.yearFrom,
             yearTo = suggestion.yearTo,
             sortBy = suggestion.sortBy,
@@ -95,8 +105,9 @@ class KeywordSearchService(
      * search TMDB keyword API for specific terms.
      */
     suspend fun searchWithTmdbFallback(phrase: String): KeywordSearchResult {
-        val lower = phrase.lowercase()
-        val terms = extractSearchTerms(phrase)
+        val normalizedPhrase = normalizePhrase(phrase)
+        val lower = normalizedPhrase.lowercase()
+        val terms = extractSearchTerms(normalizedPhrase)
 
         // Infer genres from phrase
         val genreIds = inferGenres(lower)
@@ -105,9 +116,10 @@ class KeywordSearchService(
         val genreWords = GENRE_WORD_MAP.keys
         val keywordTerms = terms.filter { term ->
             term.split(" ").none { it in genreWords }
-        }
+        }.map { normalizeTerm(it) }
+        val expandedTerms = keywordTerms.flatMap { expandThemeSynonyms(it) }.distinct().take(10)
 
-        val keywordIds = keywordTerms.mapNotNull { term ->
+        val keywordIds = expandedTerms.mapNotNull { term ->
             try {
                 val results = metadataRepo.searchKeywords(term)
                 results.firstOrNull { it.name.equals(term, ignoreCase = true) }?.id
@@ -121,6 +133,7 @@ class KeywordSearchService(
             title = phrase.split(" ").joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } },
             genreIds = genreIds,
             keywordIds = keywordIds,
+            inferredKeywordTerms = expandedTerms,
         )
     }
 
@@ -163,6 +176,122 @@ class KeywordSearchService(
         return terms.distinct().take(5)
     }
 
+    private fun extractSettingKeywords(phrase: String): List<String> {
+        val lower = phrase.lowercase()
+        val terms = mutableSetOf<String>()
+
+        fun addIfContains(token: String, keyword: String = token) {
+            if (lower.contains(token)) terms.add(keyword)
+        }
+
+        addIfContains("beach")
+        addIfContains("island")
+        addIfContains("jungle")
+        addIfContains("forest")
+        addIfContains("desert")
+        if (lower.contains("ocean") || lower.contains("sea")) terms.add("ocean")
+        addIfContains("underwater")
+        if (lower.contains("space") || lower.contains("outer space")) terms.add("space")
+        if (lower.contains("spaceship") || lower.contains("space ship") || lower.contains("rocketship") || lower.contains("rocket ship")) terms.add("spaceship")
+        addIfContains("mountain")
+        if (lower.contains("snow") || lower.contains("ice")) terms.add("snow")
+
+        // Spiritual / meditation themes
+        if (lower.contains("buddhism") || lower.contains("buddhist")) terms.add("buddhism")
+        if (lower.contains("meditation") || lower.contains("meditate") || lower.contains("meditating")) terms.add("meditation")
+        if (lower.contains("spiritual") || lower.contains("spirituality")) terms.add("spirituality")
+        if (lower.contains("dalai lama") || lower.contains("dalai-lama")) terms.add("dalai lama")
+
+        // Gendered/targeted phrases (soft heuristics)
+        if (lower.contains("for girls") || lower.contains("for women") || lower.contains("chick flick")) {
+            terms.addAll(listOf("romance", "coming of age", "friendship", "drama"))
+        }
+        if (lower.contains("for guys") || lower.contains("for men") || lower.contains("bro movie")) {
+            terms.addAll(listOf("action", "crime", "war", "sports"))
+        }
+
+        // Sexuality / nudity
+        if (lower.contains("nudity") || lower.contains("sexual") || lower.contains("erotic")) {
+            terms.addAll(listOf("nudity", "sexuality"))
+        }
+
+        // Animation / anime
+        if (lower.contains("anime")) terms.add("anime")
+        if (lower.contains("animation") || lower.contains("animated")) terms.add("animation")
+
+        return terms.toList()
+    }
+
+    private fun normalizePhrase(phrase: String): String {
+        val wordRegex = Regex("\\b[\\p{L}']+\\b")
+        val sb = StringBuilder()
+        var last = 0
+        for (m in wordRegex.findAll(phrase)) {
+            sb.append(phrase.substring(last, m.range.first))
+            val original = m.value
+            val lower = original.lowercase()
+            val corrected = correctToken(lower)
+            sb.append(corrected)
+            last = m.range.last + 1
+        }
+        if (last < phrase.length) sb.append(phrase.substring(last))
+        return sb.toString()
+    }
+
+    private fun normalizeTerm(term: String): String {
+        val trimmed = term.trim()
+        if (trimmed.isBlank()) return trimmed
+        val lower = trimmed.lowercase()
+        val corrected = correctToken(lower)
+        return corrected
+    }
+
+    private fun correctToken(token: String): String {
+        if (token.length < 4) return token
+        if (SPELLING_DICT.contains(token)) return token
+        var best = token
+        var bestDist = 3
+        for (candidate in SPELLING_DICT) {
+            val dist = editDistance(token, candidate)
+            if (dist < bestDist) {
+                bestDist = dist
+                best = candidate
+                if (bestDist == 1) break
+            }
+        }
+        return if (bestDist <= 2) best else token
+    }
+
+    private fun editDistance(a: String, b: String): Int {
+        val n = a.length
+        val m = b.length
+        if (n == 0) return m
+        if (m == 0) return n
+        val dp = IntArray(m + 1) { it }
+        for (i in 1..n) {
+            var prev = dp[0]
+            dp[0] = i
+            for (j in 1..m) {
+                val tmp = dp[j]
+                val cost = if (a[i - 1] == b[j - 1]) 0 else 1
+                dp[j] = minOf(
+                    dp[j] + 1,
+                    dp[j - 1] + 1,
+                    prev + cost,
+                )
+                prev = tmp
+            }
+        }
+        return dp[m]
+    }
+
+    private fun expandThemeSynonyms(term: String): List<String> {
+        val lower = term.lowercase().trim()
+        val out = mutableSetOf(lower)
+        THEME_SYNONYMS[lower]?.forEach { out.add(it) }
+        return out.toList()
+    }
+
     companion object {
         /** Common words → TMDB movie genre IDs for fallback inference. */
         private val GENRE_WORD_MAP = mapOf(
@@ -194,6 +323,54 @@ class KeywordSearchService(
             "thriller" to 53,
             "war" to 10752,
             "western" to 37,
+        )
+
+        private val THEME_SYNONYMS = mapOf(
+            "spirituality" to listOf("spiritual", "faith", "religion", "enlightenment"),
+            "spiritual" to listOf("spirituality", "faith", "religion", "enlightenment"),
+            "meditation" to listOf("mindfulness", "zen", "retreat"),
+            "buddhism" to listOf("buddhist", "monk", "monastery", "dharma"),
+            "buddhist" to listOf("buddhism", "monk", "monastery", "dharma"),
+            "dalai lama" to listOf("tibet", "lama"),
+            "beach" to listOf("coast", "seaside"),
+            "island" to listOf("tropical", "deserted island"),
+            "space" to listOf("sci-fi", "astronaut"),
+            "spaceship" to listOf("space ship", "starship", "rocketship"),
+            "jungle" to listOf("rainforest", "amazon"),
+            "forest" to listOf("woods", "woodland"),
+            "desert" to listOf("dune"),
+            "ocean" to listOf("sea"),
+            "nudity" to listOf("sexuality", "erotic", "adult"),
+            "sexuality" to listOf("nudity", "erotic", "adult"),
+            "anime" to listOf("animation", "manga"),
+        )
+
+        private val SPELLING_DICT = setOf(
+            // settings
+            "beach", "island", "jungle", "forest", "desert", "ocean", "sea", "underwater",
+            "space", "spaceship", "rocketship", "mountain", "snow", "ice",
+            // themes
+            "spiritual", "spirituality", "meditation", "mindfulness", "zen", "retreat",
+            "buddhism", "buddhist", "monk", "monastery", "dharma", "tibet", "dalai", "lama",
+            "faith", "religion", "enlightenment",
+            // genres / types
+            "action", "adventure", "animation", "animated", "anime", "comedy", "crime",
+            "documentary", "documentaries", "drama", "family", "fantasy", "history",
+            "historical", "horror", "music", "musical", "mystery", "romance",
+            "romantic", "sci", "scifi", "science", "fiction", "thriller", "war", "western",
+            // content
+            "nudity", "sexuality", "erotic", "adult",
+            // countries
+            "united", "states", "america", "usa", "us", "kingdom", "uk", "british",
+            "germany", "german", "france", "french", "italy", "italian", "spain", "spanish",
+            "japan", "japanese", "korea", "korean", "china", "chinese", "india", "hindi",
+            "canada", "canadian", "australia", "australian", "mexico", "mexican",
+            "brazil", "brazilian", "russia", "russian",
+            // languages
+            "english", "german", "french", "spanish", "italian", "japanese", "korean",
+            "chinese", "hindi", "russian", "portuguese",
+            // ratings
+            "pg", "pg-13", "r", "nc-17", "g",
         )
     }
 }

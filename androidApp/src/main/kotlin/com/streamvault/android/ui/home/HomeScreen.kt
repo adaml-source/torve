@@ -88,6 +88,10 @@ import com.streamvault.presentation.watchlist.WatchlistViewModel
 import kotlinx.coroutines.delay
 import org.koin.compose.koinInject
 
+private sealed interface HomeRenderItem { val order: Int }
+private data class BuiltInItem(val config: HomeSectionConfig) : HomeRenderItem { override val order = config.order }
+private data class CustomItem(val section: CustomSection) : HomeRenderItem { override val order = section.order }
+
 private fun HomeSectionConfig.toCardSize(): CardSize = when (orientation) {
     PosterOrientation.LANDSCAPE -> CardSize.LANDSCAPE
     PosterOrientation.PORTRAIT -> when (size) {
@@ -114,6 +118,7 @@ fun HomeScreen(
     val sectionConfigs by viewModel.sectionConfigs.collectAsState()
     val enabledServiceIds by viewModel.enabledServiceIds.collectAsState()
     val customSections by viewModel.customSections.collectAsState()
+    val homeLayoutOrder by viewModel.homeLayoutOrder.collectAsState()
     val activeStreamingServices = remember(enabledServiceIds) {
         ALL_STREAMING_SERVICES.filter { it.tmdbProviderId in enabledServiceIds }
     }
@@ -183,17 +188,32 @@ fun HomeScreen(
             }
 
             else -> {
+                // Render sections (built-in + custom) in user-defined order
+                val enabledItems = remember(sectionConfigs, customSections, homeLayoutOrder) {
+                    val orderIndex = homeLayoutOrder.withIndex().associate { it.value to it.index }
+                    fun itemKey(item: HomeRenderItem): String = when (item) {
+                        is BuiltInItem -> "section:${item.config.section.name}"
+                        is CustomItem -> "custom:${item.section.id}"
+                    }
+                    buildList<HomeRenderItem> {
+                        sectionConfigs.filter { it.enabled }.forEach { add(BuiltInItem(it)) }
+                        customSections.filter { it.enabled }.forEach { add(CustomItem(it)) }
+                    }.sortedWith(
+                        compareBy<HomeRenderItem> { item ->
+                            orderIndex[itemKey(item)] ?: (10_000 + item.order)
+                        }.thenBy { it.order },
+                    )
+                }
+
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = 24.dp),
                 ) {
-                    // Render sections in user-defined order
-                    val enabledSections = sectionConfigs
-                        .filter { it.enabled }
-                        .sortedBy { it.order }
-
-                    enabledSections.forEach { config ->
-                        when (config.section) {
+                    enabledItems.forEach { item ->
+                        when (item) {
+                            is BuiltInItem -> {
+                                val config = item.config
+                                when (config.section) {
                             HomeSection.HERO -> {
                                 item(key = "hero") {
                                     val heroItems = filteredShelves
@@ -393,24 +413,7 @@ fun HomeScreen(
                             }
 
                             HomeSection.DIRECTORS -> {
-                                if (state.popularDirectors.isNotEmpty()) {
-                                    item(key = "directors") {
-                                        SectionHeader(
-                                            title = config.customTitle ?: "Popular Directors",
-                                        )
-                                        LazyRow(
-                                            contentPadding = PaddingValues(horizontal = 16.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                        ) {
-                                            items(state.popularDirectors, key = { it.id }) { person ->
-                                                PersonAvatarCard(
-                                                    person = person,
-                                                    onClick = { onPersonClick(person.id) },
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
+                                // Directors section removed by request.
                             }
 
                             HomeSection.HIDDEN_GEMS -> {
@@ -430,59 +433,70 @@ fun HomeScreen(
                                     }
                                 }
                             }
-                        }
-                    }
 
-                    // ── Custom Sections ──
-                    customSections
-                        .filter { it.enabled }
-                        .sortedBy { it.order }
-                        .forEach { section ->
-                            val items = state.customShelves[section.id]
-                            if (!items.isNullOrEmpty()) {
-                                item(key = "custom_${section.id}") {
-                                    Spacer(Modifier.height(8.dp))
-                                    CatalogShelf(
-                                        title = section.title,
-                                        items = items,
-                                        onItemClick = onMediaClick,
-                                        cardSizeOverride = when (section.orientation) {
-                                            PosterOrientation.LANDSCAPE -> CardSize.LANDSCAPE
-                                            PosterOrientation.PORTRAIT -> when (section.size) {
-                                                PosterSize.SMALL -> CardSize.SMALL
-                                                PosterSize.MEDIUM -> CardSize.MEDIUM
-                                                PosterSize.LARGE -> CardSize.LARGE
+                            HomeSection.ADDON_SHELVES -> {
+                                if (state.addonShelves.isNotEmpty()) {
+                                    item(key = "addon_shelves") {
+                                        Spacer(Modifier.height(8.dp))
+                                        Column {
+                                            state.addonShelves.forEach { shelf ->
+                                                CatalogShelf(
+                                                    title = shelf.title,
+                                                    items = shelf.items,
+                                                    onItemClick = onMediaClick,
+                                                    onSeeAll = {},
+                                                )
+                                                Spacer(Modifier.height(8.dp))
                                             }
-                                        },
-                                    )
+                                        }
+                                    }
+                                }
+                            }
+
+                            HomeSection.BECAUSE_YOU_WATCHED -> {
+                                if (state.becauseYouWatched.isNotEmpty()) {
+                                    item(key = "because_you_watched") {
+                                        Spacer(Modifier.height(8.dp))
+                                        Column {
+                                            state.becauseYouWatched.forEach { shelf ->
+                                                CatalogShelf(
+                                                    title = shelf.title,
+                                                    items = shelf.items,
+                                                    shelfType = shelf.type,
+                                                    onItemClick = onMediaClick,
+                                                    onSeeAll = {},
+                                                )
+                                                Spacer(Modifier.height(8.dp))
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
-
-                    // ── Addon Catalog Shelves ──
-                    state.addonShelves.forEach { shelf ->
-                        item(key = "addon_${shelf.id}") {
-                            Spacer(Modifier.height(8.dp))
-                            CatalogShelf(
-                                title = shelf.title,
-                                items = shelf.items,
-                                onItemClick = onMediaClick,
-                                onSeeAll = {},
-                            )
-                        }
                     }
-
-                    // ── Because You Watched (not in section config — always at end) ──
-                    state.becauseYouWatched.forEach { shelf ->
-                        item(key = shelf.id) {
-                            Spacer(Modifier.height(8.dp))
-                            CatalogShelf(
-                                title = shelf.title,
-                                items = shelf.items,
-                                shelfType = shelf.type,
-                                onItemClick = onMediaClick,
-                                onSeeAll = {},
-                            )
+                    is CustomItem -> {
+                                val section = item.section
+                                val items = state.customShelves[section.id]
+                                if (!items.isNullOrEmpty()) {
+                                    item(key = "custom_${section.id}") {
+                                        Spacer(Modifier.height(8.dp))
+                                        CatalogShelf(
+                                            title = section.title,
+                                            items = items,
+                                            onItemClick = onMediaClick,
+                                            onSeeAll = { onSeeAllClick("custom:${section.id}") },
+                                            cardSizeOverride = when (section.orientation) {
+                                                PosterOrientation.LANDSCAPE -> CardSize.LANDSCAPE
+                                                PosterOrientation.PORTRAIT -> when (section.size) {
+                                                    PosterSize.SMALL -> CardSize.SMALL
+                                                    PosterSize.MEDIUM -> CardSize.MEDIUM
+                                                    PosterSize.LARGE -> CardSize.LARGE
+                                                }
+                                            },
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -874,20 +888,38 @@ fun PersonAvatarCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var showFallback by remember(person.profileUrl) { mutableStateOf(person.profileUrl == null) }
     Column(
         modifier = modifier
             .width(80.dp)
             .clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        AsyncImage(
-            model = person.profileUrl,
-            contentDescription = person.name,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .size(72.dp)
-                .clip(CircleShape),
-        )
+        if (!showFallback && person.profileUrl != null) {
+            AsyncImage(
+                model = person.profileUrl,
+                contentDescription = person.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(CircleShape),
+                onError = { showFallback = true },
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(CircleShape)
+                    .background(Gunmetal),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = person.name.split(" ").mapNotNull { it.firstOrNull()?.toString() }.take(2).joinToString(""),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = StreamVault.colors.textTertiary,
+                )
+            }
+        }
         Spacer(Modifier.height(6.dp))
         Text(
             text = person.name,

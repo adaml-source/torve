@@ -10,6 +10,8 @@ import com.streamvault.domain.model.MediaItem
 import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.model.ParentalFilter
 import com.streamvault.domain.model.ShelfConfig
+import com.streamvault.domain.model.dedupeByStableKey
+import com.streamvault.domain.recommendation.ScoredMediaItem
 import com.streamvault.domain.recommendation.GetRecommendationsUseCase
 import com.streamvault.domain.repository.MetadataRepository
 import com.streamvault.domain.repository.PreferencesRepository
@@ -20,6 +22,7 @@ import com.streamvault.domain.repository.WatchHistoryRepository
 import com.streamvault.domain.repository.WatchProgressRepository
 import com.streamvault.domain.repository.WatchlistRepository
 import com.streamvault.data.addon.CatalogAggregator
+import com.streamvault.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -68,11 +71,16 @@ class HomeViewModel(
     private val _providerLogos = MutableStateFlow<Map<Int, String>>(emptyMap())
     val providerLogos: StateFlow<Map<Int, String>> = _providerLogos.asStateFlow()
 
+    // Combined home layout ordering (built-in + custom)
+    private val _homeLayoutOrder = MutableStateFlow<List<String>>(emptyList())
+    val homeLayoutOrder: StateFlow<List<String>> = _homeLayoutOrder.asStateFlow()
+
     init {
         scope.launch {
             _sectionConfigs.value = loadSectionConfigs()
             _enabledServiceIds.value = loadEnabledServiceIds()
             _customSections.value = loadCustomSections()
+            _homeLayoutOrder.value = loadHomeLayoutOrder()
             loadHomeScreen()
         }
         loadProviderLogos()
@@ -86,11 +94,18 @@ class HomeViewModel(
         }
     }
 
+    fun refreshProviderLogos() {
+        loadProviderLogos()
+    }
+
     private suspend fun loadSectionConfigs(): List<HomeSectionConfig> {
         val saved = try { prefsRepo.getString("home_section_configs") } catch (_: Exception) { null }
         return if (saved != null) {
             try {
-                json.decodeFromString<List<HomeSectionConfig>>(saved)
+                val decoded = json.decodeFromString<List<HomeSectionConfig>>(saved)
+                val defaults = defaultSectionConfigs()
+                val bySection = decoded.associateBy { it.section }
+                defaults.map { def -> bySection[def.section] ?: def }
             } catch (_: Exception) {
                 defaultSectionConfigs()
             }
@@ -176,6 +191,25 @@ class HomeViewModel(
         }
     }
 
+    private suspend fun loadHomeLayoutOrder(): List<String> {
+        val saved = try { prefsRepo.getString("home_layout_order") } catch (_: Exception) { null }
+        return if (saved != null) {
+            try {
+                json.decodeFromString<List<String>>(saved)
+            } catch (_: Exception) {
+                emptyList()
+            }
+        } else emptyList()
+    }
+
+    fun updateHomeLayoutOrder(order: List<String>) {
+        _homeLayoutOrder.value = order
+        scope.launch {
+            try { prefsRepo.setString("home_layout_order", json.encodeToString(order)) }
+            catch (_: Exception) { /* ignore */ }
+        }
+    }
+
     fun addCustomSection(section: CustomSection) {
         val updated = _customSections.value + section
         _customSections.value = updated
@@ -223,6 +257,7 @@ class HomeViewModel(
         scope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
             try {
+                val dedupe = shouldDedupe()
                 val shelvesDeferred = async { metadataRepo.getHomeShelves() }
                 val continueWatchingDeferred = async { watchProgressRepo.getInProgress(20) }
                 val recommendationsDeferred = async {
@@ -303,7 +338,14 @@ class HomeViewModel(
                 val recentlyWatched = recentlyWatchedDeferred.await()
                 val popularPeople = popularPeopleDeferred.await()
                 val popularActors = popularPeople.filter { it.knownForDepartment == "Acting" }.take(20)
-                val popularDirectors = popularPeople.filter { it.knownForDepartment == "Directing" }.take(20)
+                val directorDepartments = setOf("Directing", "Production", "Writing")
+                val popularDirectors = popularPeople
+                    .filter { it.knownForDepartment in directorDepartments }
+                    .ifEmpty {
+                        popularPeople.filter { it.knownForDepartment != "Acting" }
+                    }
+                    .ifEmpty { popularPeople }
+                    .take(20)
                 val addonShelves = addonShelvesDeferred.await()
 
                 // Load custom section content (parallel)
@@ -313,6 +355,7 @@ class HomeViewModel(
                     async {
                         try {
                             val f = section.filters
+                            val customLimit = 40
                             val items = if (f.specificTmdbIds.isNotEmpty()) {
                                 // Specific mode: fetch each item by TMDB ID
                                 f.specificTmdbIds.mapNotNull { spec ->
@@ -329,20 +372,52 @@ class HomeViewModel(
                                 val keywords = f.withKeywords.takeIf { it.isNotEmpty() }?.joinToString("|")
                                 val types = if (section.mediaType == "both") listOf("movie", "tv") else listOf(section.mediaType)
                                 types.flatMap { type ->
-                                    metadataRepo.discover(
+                                    val page1 = metadataRepo.discover(
                                         type = type,
                                         sortBy = f.sortBy,
                                         withGenres = genres,
                                         minRating = f.minRating,
                                         year = f.yearFrom,
                                         yearTo = f.yearTo,
+                                        runtimeGte = f.runtimeGte,
+                                        runtimeLte = f.runtimeLte,
+                                        originCountries = f.originCountries.takeIf { it.isNotEmpty() }?.joinToString("|"),
+                                        originalLanguage = f.originalLanguage,
+                                        certification = f.certification,
+                                        certificationGte = f.certificationGte,
+                                        certificationLte = f.certificationLte,
+                                        certificationCountry = f.certificationCountry,
                                         withCast = castIds,
                                         withCrew = crewIds,
                                         withWatchProviders = providers,
                                         watchRegion = f.watchRegion,
                                         withKeywords = keywords,
+                                        page = 1,
                                     ).items
-                                }.distinctBy { it.id }.take(20)
+                                    val page2 = metadataRepo.discover(
+                                        type = type,
+                                        sortBy = f.sortBy,
+                                        withGenres = genres,
+                                        minRating = f.minRating,
+                                        year = f.yearFrom,
+                                        yearTo = f.yearTo,
+                                        runtimeGte = f.runtimeGte,
+                                        runtimeLte = f.runtimeLte,
+                                        originCountries = f.originCountries.takeIf { it.isNotEmpty() }?.joinToString("|"),
+                                        originalLanguage = f.originalLanguage,
+                                        certification = f.certification,
+                                        certificationGte = f.certificationGte,
+                                        certificationLte = f.certificationLte,
+                                        certificationCountry = f.certificationCountry,
+                                        withCast = castIds,
+                                        withCrew = crewIds,
+                                        withWatchProviders = providers,
+                                        watchRegion = f.watchRegion,
+                                        withKeywords = keywords,
+                                        page = 2,
+                                    ).items
+                                    page1 + page2
+                                }.distinctBy { it.id }.take(customLimit)
                             }
                             section.id to items
                         } catch (_: Exception) {
@@ -415,29 +490,57 @@ class HomeViewModel(
                 val activeProfile = try { profileRepo.getActiveProfile() } catch (_: Exception) { null }
                 val maxRating = activeProfile?.maxContentRating
                 val filteredShelves = orderedShelves.map { shelf ->
-                    shelf.copy(items = ParentalFilter.filter(shelf.items, maxRating))
+                    val items = ParentalFilter.filter(shelf.items, maxRating)
+                    shelf.copy(items = if (dedupe) items.dedupeByStableKey() else items)
                 }
                 val filteredRecommendations = if (maxRating != null) {
                     recommendations.filter { scored ->
                         ParentalFilter.filter(listOf(scored.item), maxRating).isNotEmpty()
                     }
                 } else recommendations
+                val dedupedRecommendations = if (dedupe) {
+                    val map = LinkedHashMap<String, ScoredMediaItem>()
+                    for (scored in filteredRecommendations) {
+                        val key = "${scored.item.type.name}:${scored.item.tmdbId ?: scored.item.id}"
+                        if (!map.containsKey(key)) {
+                            map[key] = scored
+                        }
+                    }
+                    map.values.toList()
+                } else filteredRecommendations
+
+                val finalWatchlistItems = if (dedupe) watchlistMediaItems.dedupeByStableKey() else watchlistMediaItems
+                val finalHiddenGemsShelf = hiddenGemsShelf?.let { shelf ->
+                    shelf.copy(items = if (dedupe) shelf.items.dedupeByStableKey() else shelf.items)
+                }
+                val finalRecentlyWatched = if (dedupe) recentlyWatched.dedupeByStableKey() else recentlyWatched
+                val finalBecauseYouWatched = if (dedupe) {
+                    becauseYouWatched.map { shelf ->
+                        shelf.copy(items = shelf.items.dedupeByStableKey())
+                    }
+                } else becauseYouWatched
+                val finalAddonShelves = if (dedupe) {
+                    addonShelves.map { shelf -> shelf.copy(items = shelf.items.dedupeByStableKey()) }
+                } else addonShelves
+                val finalCustomShelves = if (dedupe) {
+                    customShelves.mapValues { (_, items) -> items.dedupeByStableKey() }.toMutableMap()
+                } else customShelves
 
                 _state.update {
                     it.copy(
                         shelves = filteredShelves,
                         heroItem = filteredShelves.firstOrNull()?.items?.firstOrNull(),
                         continueWatching = continueWatching,
-                        recommendedItems = filteredRecommendations,
+                        recommendedItems = dedupedRecommendations,
                         watchlistShelf = watchlistShelf,
-                        watchlistItems = watchlistMediaItems,
-                        becauseYouWatched = becauseYouWatched,
-                        hiddenGemsShelf = hiddenGemsShelf,
-                        recentlyWatched = recentlyWatched,
+                        watchlistItems = finalWatchlistItems,
+                        becauseYouWatched = finalBecauseYouWatched,
+                        hiddenGemsShelf = finalHiddenGemsShelf,
+                        recentlyWatched = finalRecentlyWatched,
                         popularActors = popularActors,
                         popularDirectors = popularDirectors,
-                        customShelves = customShelves,
-                        addonShelves = addonShelves,
+                        customShelves = finalCustomShelves,
+                        addonShelves = finalAddonShelves,
                         isLoading = false,
                     )
                 }
@@ -449,6 +552,10 @@ class HomeViewModel(
 
     fun refresh() {
         loadHomeScreen()
+    }
+
+    private suspend fun shouldDedupe(): Boolean {
+        return prefsRepo.getString(SettingsViewModel.KEY_DEDUPE_RESULTS)?.toBooleanStrictOrNull() ?: true
     }
 
     fun toggleShelfVisibility(shelfId: String) {

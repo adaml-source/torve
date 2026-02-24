@@ -111,6 +111,8 @@
     <string name="settings_cached_only_desc">Only show cached streams for instant playback</string>
     <string name="settings_hdr_content">HDR Content</string>
     <string name="settings_hdr_content_desc">Include HDR / Dolby Vision streams</string>
+    <string name="settings_dedupe_results">Deduplicate Results</string>
+    <string name="settings_dedupe_results_desc">Hide repeated movies or shows in lists</string>
 
     <string name="settings_playback">Playback</string>
     <string name="settings_auto_play">Auto-Play Best Stream</string>

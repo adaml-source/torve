@@ -3,6 +3,7 @@ package com.streamvault.data.ai
 import com.streamvault.data.metadata.TmdbGenres
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
+import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -143,17 +144,69 @@ class AiSuggestClient(private val httpClient: HttpClient) {
                 ),
             ),
         )
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey"
-        val httpResponse = httpClient.post(url) {
-            header("content-type", "application/json")
-            setBody(requestBody)
+        val candidateModels = buildList {
+            pickGeminiModel(apiKey)?.let { add(it) }
+            addAll(
+                listOf(
+                    "gemini-2.5-flash",
+                    "gemini-2.5-flash-lite",
+                    "gemini-2.5-pro",
+                ),
+            )
+        }.distinct()
+
+        var lastError: String? = null
+        for (model in candidateModels) {
+            val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+            val httpResponse = httpClient.post(url) {
+                header("content-type", "application/json")
+                setBody(requestBody)
+            }
+            if (!httpResponse.status.isSuccess()) {
+                val errorBody = httpResponse.bodyAsText()
+                lastError = errorBody
+                if (httpResponse.status.value == 404 && isModelNotFound(errorBody)) {
+                    continue
+                }
+                throw Exception("Gemini API error (${httpResponse.status.value}): ${extractErrorMessage(errorBody)}")
+            }
+            val response: GeminiResponse = httpResponse.body()
+            return response.candidates.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: "{}"
         }
-        if (!httpResponse.status.isSuccess()) {
-            val errorBody = httpResponse.bodyAsText()
-            throw Exception("Gemini API error (${httpResponse.status.value}): ${extractErrorMessage(errorBody)}")
+
+        throw Exception("Gemini API error: ${extractErrorMessage(lastError ?: "Model not available")}")
+    }
+
+    private suspend fun pickGeminiModel(apiKey: String): String {
+        val fallback = "gemini-2.5-flash"
+        return try {
+            val url = "https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey"
+            val response = httpClient.get(url).bodyAsText()
+            val parsed = jsonParser.decodeFromString(GeminiModelsResponse.serializer(), response)
+            val candidates = parsed.models
+                .filter { it.supportedGenerationMethods.contains("generateContent") }
+                .mapNotNull { it.name?.removePrefix("models/") }
+            selectCheapestGemini(candidates) ?: fallback
+        } catch (_: Exception) {
+            fallback
         }
-        val response: GeminiResponse = httpResponse.body()
-        return response.candidates.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: "{}"
+    }
+
+    private fun selectCheapestGemini(models: List<String>): String? {
+        if (models.isEmpty()) return null
+        val preferred = listOf(
+            "gemini-2.5-flash-lite",
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+        )
+        return preferred.firstOrNull { pref ->
+            models.any { it.startsWith(pref) }
+        } ?: models.firstOrNull { it.startsWith("gemini-2.5") }
+    }
+
+    private fun isModelNotFound(errorBody: String): Boolean {
+        val lower = errorBody.lowercase()
+        return lower.contains("model") && (lower.contains("not found") || lower.contains("no longer available"))
     }
 
     // ── System Prompt ──
@@ -185,9 +238,11 @@ For SPECIFIC mode:
 
 DISCOVER mode rules:
 - Use genreIds as PRIMARY filter — more reliable than keywords
-- keywordTerms: only 1-3 SPECIFIC single-word terms for themes not covered by genres
+- keywordTerms: use 1-8 SPECIFIC terms (single words or short phrases) for themes not covered by genres
 - Do NOT add redundant keywords that overlap with genres
 - For decade references like "90s", use yearFrom=1990, yearTo=1999
+- If the user mentions a SETTING (beach, island, jungle, forest, desert, ocean/sea, underwater, space, spaceship/rocketship, mountain, snow/ice),
+  include those as keywordTerms (single words)
 
 SPECIFIC mode rules:
 - Return 1-10 titles that match the description
@@ -221,9 +276,26 @@ How to choose the mode:
     private fun extractJson(text: String): String {
         val trimmed = text.trim()
         if (trimmed.startsWith("{")) return trimmed
-        val jsonMatch = Regex("```(?:json)?\\s*\\n?(\\{.*?})\\s*```", RegexOption.DOT_MATCHES_ALL)
-            .find(trimmed)
-        return jsonMatch?.groupValues?.get(1) ?: trimmed
+        // Try to pull JSON from a fenced code block without regex to avoid PatternSyntax issues
+        val fenceStart = trimmed.indexOf("```")
+        if (fenceStart >= 0) {
+            val fenceEnd = trimmed.indexOf("```", fenceStart + 3)
+            val inside = if (fenceEnd > fenceStart) {
+                trimmed.substring(fenceStart + 3, fenceEnd)
+            } else {
+                trimmed.substring(fenceStart + 3)
+            }
+            val jsonStart = inside.indexOf('{')
+            val jsonEnd = inside.lastIndexOf('}')
+            if (jsonStart >= 0 && jsonEnd > jsonStart) {
+                return inside.substring(jsonStart, jsonEnd + 1).trim()
+            }
+        }
+
+        // Fallback: first "{" to last "}"
+        val start = trimmed.indexOf('{')
+        val end = trimmed.lastIndexOf('}')
+        return if (start >= 0 && end > start) trimmed.substring(start, end + 1) else trimmed
     }
 }
 
@@ -307,4 +379,16 @@ data class GeminiResponse(
 @Serializable
 data class GeminiCandidate(
     val content: GeminiContent? = null,
+)
+
+@Serializable
+data class GeminiModelsResponse(
+    val models: List<GeminiModel> = emptyList(),
+)
+
+@Serializable
+data class GeminiModel(
+    val name: String? = null,
+    @SerialName("supportedGenerationMethods")
+    val supportedGenerationMethods: List<String> = emptyList(),
 )

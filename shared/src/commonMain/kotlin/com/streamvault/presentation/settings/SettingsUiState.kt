@@ -99,6 +99,8 @@ data class SettingsUiState(
     val regexPatterns: List<RegexPattern> = emptyList(),
     // Stream Groups
     val streamGroups: List<StreamGroup> = emptyList(),
+    // Browse
+    val dedupeResults: Boolean = true,
 ) {
     val activeAiApiKey: String get() = when (aiProvider) {
         AiProvider.CLAUDE -> claudeApiKey

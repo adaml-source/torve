@@ -76,6 +76,8 @@ import com.streamvault.android.ui.theme.Snow
 import com.streamvault.android.ui.theme.StreamVault
 import com.streamvault.android.download.DownloadWorker
 import androidx.compose.ui.platform.LocalContext
+import android.content.Intent
+import android.net.Uri
 import com.streamvault.domain.model.Download
 import com.streamvault.domain.model.DownloadStatus
 import com.streamvault.domain.model.MediaItem
@@ -582,16 +584,6 @@ fun DetailScreen(
                     )
                 }
 
-                // Trailer dialog
-                if (showTrailer) {
-                    state.mediaItem?.trailerKey?.let { key ->
-                        TrailerPlayerDialog(
-                            youtubeKey = key,
-                            onDismiss = { showTrailer = false },
-                        )
-                    }
-                }
-
                 // Action sheet after resolution
                 if (showActionSheet && resolvedUrl.isNotBlank()) {
                     val item = state.mediaItem
@@ -634,8 +626,34 @@ fun DetailScreen(
                         },
                     )
                 }
+
+                // Trailer dialog
+                if (showTrailer) {
+                    state.mediaItem?.trailerKey?.let { key ->
+                        TrailerPlayerDialog(
+                            youtubeKey = key,
+                            onDismiss = { showTrailer = false },
+                            onOpenExternal = { launchTrailer(context, key) },
+                        )
+                    }
+                }
             }
         }
+    }
+}
+
+private fun launchTrailer(context: android.content.Context, youtubeKey: String) {
+    val youtubeIntent = Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$youtubeKey")).apply {
+        setPackage("com.google.android.youtube")
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$youtubeKey")).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    try {
+        context.startActivity(youtubeIntent)
+    } catch (_: Exception) {
+        context.startActivity(webIntent)
     }
 }
 
