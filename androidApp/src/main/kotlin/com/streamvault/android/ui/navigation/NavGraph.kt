@@ -24,13 +24,13 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Movie
-import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.LiveTv
 import androidx.compose.material.icons.outlined.Movie
-import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Tv
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -40,6 +40,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -72,7 +73,14 @@ import com.streamvault.android.ui.player.PlayerScreen
 import com.streamvault.android.ui.profile.ProfileScreen
 
 import com.streamvault.android.ui.search.SearchScreen
+import com.streamvault.android.ui.seeall.SeeAllScreen
+import com.streamvault.android.ui.settings.AddonCatalogScreen
+import com.streamvault.android.ui.settings.RegexPatternsScreen
 import com.streamvault.android.ui.settings.SettingsScreen
+import com.streamvault.android.ui.settings.StreamGroupsScreen
+import com.streamvault.android.ui.settings.CustomSectionEditorScreen
+import com.streamvault.android.ui.settings.HomeLayoutScreen
+import com.streamvault.android.ui.settings.StreamingServicesSettingsScreen
 import com.streamvault.android.ui.stats.StatsScreen
 import com.streamvault.android.ui.watchlist.WatchlistScreen
 import com.streamvault.android.ui.setup.SetupWizardScreen
@@ -82,6 +90,7 @@ import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Obsidian
 import com.streamvault.android.ui.theme.StreamVault
 import com.streamvault.domain.model.MediaType
+import com.streamvault.data.ai.KeywordSearchService
 import com.streamvault.domain.repository.MetadataRepository
 import com.streamvault.presentation.catalog.CatalogViewModel
 import com.streamvault.presentation.setup.SetupWizardViewModel
@@ -104,7 +113,7 @@ private val navTabDefs = listOf(
     NavTab("tv_shows", R.string.nav_tv_shows, Icons.Filled.Tv, Icons.Outlined.Tv),
     NavTab("live_tv", R.string.nav_live_tv, Icons.Filled.LiveTv, Icons.Outlined.LiveTv),
     NavTab("watchlist_tab", R.string.nav_watchlist, Icons.Filled.Bookmark, Icons.Outlined.BookmarkBorder),
-    NavTab("profile_tab", R.string.nav_profile, Icons.Filled.Person, Icons.Outlined.Person),
+    NavTab("profile_tab", R.string.nav_settings, Icons.Filled.Settings, Icons.Outlined.Settings),
 )
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -169,13 +178,23 @@ fun StreamVaultNavGraph(
                         val type = if (progress.mediaType == MediaType.SERIES) "tv" else "movie"
                         navController.navigate("detail/$type/${progress.mediaId}")
                     },
+                    onSeeAllClick = { sectionId ->
+                        navController.navigate("seeall/$sectionId")
+                    },
+                    onProviderClick = { providerId, providerName ->
+                        navController.navigate("provider/$providerId/${Uri.encode(providerName)}")
+                    },
+                    onPersonClick = { personId ->
+                        navController.navigate("person/$personId")
+                    },
                 )
             }
 
             // Movies tab — CatalogScreen for movies
             composable("movies") {
                 val metadataRepo: MetadataRepository = koinInject()
-                val catalogViewModel = remember { CatalogViewModel(metadataRepo, "movie") }
+                val keywordSearchService: KeywordSearchService = koinInject()
+                val catalogViewModel = remember { CatalogViewModel(metadataRepo, "movie", keywordSearchService = keywordSearchService) }
                 CatalogScreen(
                     viewModel = catalogViewModel,
                     mediaType = "movie",
@@ -189,7 +208,8 @@ fun StreamVaultNavGraph(
             // TV Shows tab — CatalogScreen for TV
             composable("tv_shows") {
                 val metadataRepo: MetadataRepository = koinInject()
-                val catalogViewModel = remember { CatalogViewModel(metadataRepo, "tv") }
+                val keywordSearchService: KeywordSearchService = koinInject()
+                val catalogViewModel = remember { CatalogViewModel(metadataRepo, "tv", keywordSearchService = keywordSearchService) }
                 CatalogScreen(
                     viewModel = catalogViewModel,
                     mediaType = "tv",
@@ -265,8 +285,9 @@ fun StreamVaultNavGraph(
                 val genreId = backStackEntry.arguments?.getInt("genreId") ?: 0
                 val genreName = backStackEntry.arguments?.getString("genreName") ?: ""
                 val metadataRepo: MetadataRepository = koinInject()
+                val keywordSearchService: KeywordSearchService = koinInject()
                 val catalogViewModel = remember {
-                    CatalogViewModel(metadataRepo, mediaType).also {
+                    CatalogViewModel(metadataRepo, mediaType, keywordSearchService = keywordSearchService).also {
                         if (genreId > 0) it.selectGenre(genreId)
                     }
                 }
@@ -279,6 +300,37 @@ fun StreamVaultNavGraph(
                     },
                     onBack = { navController.popBackStack() },
                     title = genreName.ifBlank { null },
+                )
+            }
+
+            // Provider catalog — filtered by streaming service (TMDB watch provider)
+            composable(
+                route = "provider/{providerId}/{providerName}",
+                arguments = listOf(
+                    navArgument("providerId") { type = NavType.IntType },
+                    navArgument("providerName") { type = NavType.StringType },
+                ),
+            ) { backStackEntry ->
+                val providerId = backStackEntry.arguments?.getInt("providerId") ?: 0
+                val providerName = backStackEntry.arguments?.getString("providerName") ?: ""
+                val metadataRepo: MetadataRepository = koinInject()
+                val keywordSearchService: KeywordSearchService = koinInject()
+                var selectedMediaType by remember { mutableStateOf("movie") }
+                val catalogViewModel = remember(selectedMediaType) {
+                    CatalogViewModel(metadataRepo, selectedMediaType, keywordSearchService = keywordSearchService).also {
+                        it.setProvider(providerId)
+                    }
+                }
+                CatalogScreen(
+                    viewModel = catalogViewModel,
+                    mediaType = selectedMediaType,
+                    onMediaClick = { item ->
+                        val t = if (item.type == MediaType.SERIES) "tv" else "movie"
+                        navController.navigate("detail/$t/${item.tmdbId}")
+                    },
+                    onBack = { navController.popBackStack() },
+                    title = providerName,
+                    onMediaTypeChange = { selectedMediaType = it },
                 )
             }
 
@@ -337,6 +389,11 @@ fun StreamVaultNavGraph(
                     onPrivacyPolicyClick = { navController.navigate("legal/privacy") },
                     onTermsClick = { navController.navigate("legal/terms") },
                     onHelpClick = { navController.navigate("legal/help") },
+                    onStreamingServicesClick = { navController.navigate("streaming_services_settings") },
+                    onAddonCatalogClick = { navController.navigate("addon_catalog") },
+                    onRegexPatternsClick = { navController.navigate("regex_patterns") },
+                    onStreamGroupsClick = { navController.navigate("stream_groups") },
+                    onHomeLayoutClick = { navController.navigate("home_layout") },
                 )
             }
 
@@ -350,6 +407,11 @@ fun StreamVaultNavGraph(
                     onPrivacyPolicyClick = { navController.navigate("legal/privacy") },
                     onTermsClick = { navController.navigate("legal/terms") },
                     onHelpClick = { navController.navigate("legal/help") },
+                    onStreamingServicesClick = { navController.navigate("streaming_services_settings") },
+                    onAddonCatalogClick = { navController.navigate("addon_catalog") },
+                    onRegexPatternsClick = { navController.navigate("regex_patterns") },
+                    onStreamGroupsClick = { navController.navigate("stream_groups") },
+                    onHomeLayoutClick = { navController.navigate("home_layout") },
                 )
             }
 
@@ -387,6 +449,9 @@ fun StreamVaultNavGraph(
                     },
                     onPersonClick = { personId ->
                         navController.navigate("person/$personId")
+                    },
+                    onSettingsClick = {
+                        navController.navigate("settings")
                     },
                 )
             }
@@ -479,6 +544,79 @@ fun StreamVaultNavGraph(
                 LoginScreen(
                     onLoginSuccess = { navController.popBackStack() },
                     onSkip = { navController.popBackStack() },
+                )
+            }
+
+            // See All screen — paginated grid for any section
+            composable(
+                route = "seeall/{sectionId}",
+                arguments = listOf(navArgument("sectionId") { type = NavType.StringType }),
+            ) { backStackEntry ->
+                val sectionId = backStackEntry.arguments?.getString("sectionId") ?: return@composable
+                SeeAllScreen(
+                    sectionId = sectionId,
+                    onBack = { navController.popBackStack() },
+                    onMediaClick = { item ->
+                        val type = if (item.type == MediaType.SERIES) "tv" else "movie"
+                        navController.navigate("detail/$type/${item.tmdbId}")
+                    },
+                )
+            }
+
+            // Streaming Services Settings
+            composable("streaming_services_settings") {
+                StreamingServicesSettingsScreen(
+                    onBack = { navController.popBackStack() },
+                )
+            }
+
+            // Addon Catalog
+            composable("addon_catalog") {
+                AddonCatalogScreen(
+                    onBack = { navController.popBackStack() },
+                )
+            }
+
+            // Regex Patterns
+            composable("regex_patterns") {
+                RegexPatternsScreen(
+                    onBack = { navController.popBackStack() },
+                )
+            }
+
+            // Stream Groups
+            composable("stream_groups") {
+                StreamGroupsScreen(
+                    onBack = { navController.popBackStack() },
+                )
+            }
+
+            // Home Layout
+            composable("home_layout") {
+                HomeLayoutScreen(
+                    onBack = { navController.popBackStack() },
+                    onAddCustomSection = { navController.navigate("custom_section_editor") },
+                    onEditCustomSection = { sectionId ->
+                        navController.navigate("custom_section_editor?sectionId=$sectionId")
+                    },
+                )
+            }
+
+            // Custom Section Editor
+            composable(
+                route = "custom_section_editor?sectionId={sectionId}",
+                arguments = listOf(
+                    navArgument("sectionId") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    },
+                ),
+            ) { backStackEntry ->
+                val sectionId = backStackEntry.arguments?.getString("sectionId")
+                CustomSectionEditorScreen(
+                    sectionId = sectionId,
+                    onBack = { navController.popBackStack() },
                 )
             }
 

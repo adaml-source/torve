@@ -5,6 +5,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.encodeURLPathPart
 import kotlinx.serialization.json.Json
 
 /**
@@ -90,6 +91,73 @@ class StremioAddonClient(
             } catch (_: Exception) {
                 emptyList()
             }
+        }
+    }
+
+    /**
+     * Fetch catalog items from a Stremio addon.
+     * URL pattern: /catalog/{type}/{id}.json or /catalog/{type}/{id}/{extras}.json
+     */
+    suspend fun fetchCatalog(
+        baseUrl: String,
+        type: String,
+        catalogId: String,
+        skip: Int? = null,
+        genre: String? = null,
+        search: String? = null,
+    ): StremioCatalogResponse {
+        val base = baseUrl.trimEnd('/')
+        val extras = buildList {
+            genre?.let { add("genre=${it.encodeURLPathPart()}") }
+            search?.let { add("search=${it.encodeURLPathPart()}") }
+            skip?.let { add("skip=$it") }
+        }
+        val url = if (extras.isNotEmpty()) {
+            "$base/catalog/$type/$catalogId/${extras.joinToString("&")}.json"
+        } else {
+            "$base/catalog/$type/$catalogId.json"
+        }
+        return try {
+            val response = httpClient.get(url)
+            json.decodeFromString(response.bodyAsText())
+        } catch (_: Exception) {
+            StremioCatalogResponse()
+        }
+    }
+
+    /**
+     * Fetch detailed metadata for a single item.
+     * URL pattern: /meta/{type}/{id}.json
+     */
+    suspend fun fetchMeta(
+        baseUrl: String,
+        type: String,
+        id: String,
+    ): StremioMetaResponse {
+        val url = "${baseUrl.trimEnd('/')}/meta/$type/$id.json"
+        return try {
+            val response = httpClient.get(url)
+            json.decodeFromString(response.bodyAsText())
+        } catch (_: Exception) {
+            StremioMetaResponse()
+        }
+    }
+
+    /**
+     * Fetch subtitles for a media item from a subtitle addon.
+     * URL pattern: /subtitles/{type}/{id}.json
+     */
+    suspend fun fetchSubtitles(
+        baseUrl: String,
+        type: String,
+        id: String,
+    ): StremioSubtitleResponse {
+        val url = "${baseUrl.trimEnd('/')}/subtitles/$type/$id.json"
+        return try {
+            val response = httpClient.get(url)
+            json.decodeFromString(response.bodyAsText())
+        } catch (_: Exception) {
+            StremioSubtitleResponse()
         }
     }
 }

@@ -234,14 +234,9 @@ class TraktClient(
     // -------------------------------------------------------------------------
 
     suspend fun getWatchlist(accessToken: String): List<TraktWatchlistItemResponse> {
-        return try {
-            httpClient.get("$TRAKT_BASE/sync/watchlist") {
-                traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
-                parameter("extended", "full")
-            }.body()
-        } catch (_: Exception) {
-            emptyList()
-        }
+        return httpClient.get("$TRAKT_BASE/sync/watchlist") {
+            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
+        }.body()
     }
 
     suspend fun addToWatchlist(accessToken: String, body: TraktWatchlistBody) {

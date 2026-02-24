@@ -11,7 +11,7 @@
     <string name="nav_tv_shows">TV Shows</string>
     <string name="nav_live_tv">Live TV</string>
     <string name="nav_watchlist">Watchlist</string>
-    <string name="nav_profile">Profile</string>
+    <string name="nav_settings">Settings</string>
 
     <!-- Common Actions -->
     <string name="common_connect">Connect</string>

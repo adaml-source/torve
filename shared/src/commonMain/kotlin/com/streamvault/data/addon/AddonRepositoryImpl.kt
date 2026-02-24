@@ -2,6 +2,7 @@ package com.streamvault.data.addon
 
 import com.streamvault.db.StreamVaultDatabase
 import com.streamvault.domain.model.AddonCatalog
+import com.streamvault.domain.model.AddonExtra
 import com.streamvault.domain.model.AddonManifest
 import com.streamvault.domain.model.InstalledAddon
 import com.streamvault.domain.repository.AddonRepository
@@ -31,7 +32,7 @@ class AddonRepositoryImpl(
             name = manifest.name,
             version = manifest.version,
             description = manifest.description,
-            logo = null,
+            logo = manifest.logo,
             manifest_json = manifestJson,
             is_enabled = 1,
             priority = maxPriority + 1,
@@ -111,10 +112,19 @@ class AddonRepositoryImpl(
             name = name,
             version = version,
             description = description,
+            logo = logo,
             resources = resources.map { it.name },
             types = types,
             catalogs = catalogs.map { cat ->
-                AddonCatalog(type = cat.type, id = cat.id, name = cat.name.ifEmpty { null })
+                AddonCatalog(
+                    type = cat.type,
+                    id = cat.id,
+                    name = cat.name.ifEmpty { null },
+                    extra = cat.extra.map { e ->
+                        AddonExtra(name = e.name, isRequired = e.isRequired, options = e.options)
+                    },
+                    genres = cat.genres,
+                )
             },
             idPrefixes = idPrefixes,
         )

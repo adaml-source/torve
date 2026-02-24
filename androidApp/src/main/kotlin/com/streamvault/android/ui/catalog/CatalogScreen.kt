@@ -1,5 +1,6 @@
 package com.streamvault.android.ui.catalog
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -35,6 +37,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.Search
@@ -87,12 +91,15 @@ import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.AmberSubtle
 import com.streamvault.android.ui.theme.Gunmetal
 import com.streamvault.android.ui.theme.Obsidian
+import com.streamvault.android.ui.theme.Silver
 import com.streamvault.android.ui.theme.Snow
 import com.streamvault.android.ui.theme.StreamVault
 import com.streamvault.domain.model.MediaItem
 import com.streamvault.presentation.catalog.CatalogCategory
 import com.streamvault.presentation.catalog.CatalogFilter
 import com.streamvault.presentation.catalog.CatalogViewModel
+import com.streamvault.presentation.settings.SettingsViewModel
+import org.koin.compose.koinInject
 import com.streamvault.presentation.catalog.RuntimeFilter
 import com.streamvault.presentation.catalog.SortOption
 import kotlinx.coroutines.delay
@@ -120,10 +127,17 @@ fun CatalogScreen(
     onMediaClick: (MediaItem) -> Unit,
     onBack: (() -> Unit)? = null,
     title: String? = null,
+    onMediaTypeChange: ((String) -> Unit)? = null,
+    settingsViewModel: SettingsViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
+    val settingsState by settingsViewModel.state.collectAsState()
     val genres = if (mediaType == "movie") MOVIE_GENRES else TV_GENRES
     val gridState = rememberLazyGridState()
+
+    if (onBack != null) {
+        BackHandler(onBack = onBack)
+    }
 
     // Infinite scroll: trigger loadMore when near the bottom
     LaunchedEffect(gridState) {
@@ -192,39 +206,6 @@ fun CatalogScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    // ── Back + Title bar when navigated from Discover ──
-                    if (onBack != null || title != null) {
-                        item(
-                            key = "title_bar",
-                            span = { GridItemSpan(maxLineSpan) },
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .statusBarsPadding()
-                                    .padding(vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                if (onBack != null) {
-                                    IconButton(onClick = onBack) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.Close,
-                                            contentDescription = stringResource(R.string.common_close),
-                                            tint = Snow,
-                                        )
-                                    }
-                                }
-                                if (title != null) {
-                                    Text(
-                                        text = title,
-                                        style = MaterialTheme.typography.titleLarge,
-                                        color = Snow,
-                                        fontWeight = FontWeight.Bold,
-                                    )
-                                }
-                            }
-                        }
-                    }
 
                     // ── Featured Hero Pager ──
                     if (!isSearchMode && displayItems.size >= 3) {
@@ -340,7 +321,11 @@ fun CatalogScreen(
                             span = { GridItemSpan(maxLineSpan) },
                         ) {
                             Text(
-                                text = if (isSearchMode) stringResource(R.string.catalog_search_results) else state.selectedCategory.label,
+                                text = if (isSearchMode) {
+                                    state.aiSearchLabel ?: stringResource(R.string.catalog_search_results)
+                                } else {
+                                    state.selectedCategory.label
+                                },
                                 style = MaterialTheme.typography.headlineSmall,
                                 color = StreamVault.colors.textPrimary,
                             )
@@ -415,7 +400,7 @@ fun CatalogScreen(
             enter = slideInVertically { -it },
             exit = slideOutVertically { -it },
         ) {
-            Box(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(
@@ -423,17 +408,99 @@ fun CatalogScreen(
                             listOf(Obsidian, Obsidian, Obsidian.copy(alpha = 0.9f), Color.Transparent),
                         ),
                     )
-                    .statusBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .statusBarsPadding(),
             ) {
-                CatalogSearchRow(
-                    searchQuery = state.searchQuery,
-                    activeFilterCount = state.activeFilterCount,
-                    mediaType = mediaType,
-                    onQueryChange = { viewModel.updateSearchQuery(it) },
-                    onClearSearch = { viewModel.clearSearch() },
-                    onFilterClick = { viewModel.toggleFilterSheet() },
-                )
+                // Back + Title row when navigated from provider/genre
+                if (onBack != null || title != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (onBack != null) {
+                            com.streamvault.android.ui.components.BackButton(onClick = onBack)
+                            Spacer(Modifier.width(12.dp))
+                        }
+                        if (title != null) {
+                            Text(
+                                text = title,
+                                style = MaterialTheme.typography.titleLarge,
+                                color = Snow,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        if (onMediaTypeChange != null) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                val isMovie = mediaType == "movie"
+                                FilterChip(
+                                    selected = isMovie,
+                                    onClick = { onMediaTypeChange("movie") },
+                                    label = { Text("Movies", style = MaterialTheme.typography.labelMedium) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = Amber,
+                                        selectedLabelColor = Obsidian,
+                                        containerColor = Gunmetal,
+                                        labelColor = Silver,
+                                    ),
+                                    border = FilterChipDefaults.filterChipBorder(
+                                        borderColor = Color.Transparent,
+                                        selectedBorderColor = Amber,
+                                        enabled = true,
+                                        selected = isMovie,
+                                    ),
+                                    shape = RoundedCornerShape(20.dp),
+                                )
+                                FilterChip(
+                                    selected = !isMovie,
+                                    onClick = { onMediaTypeChange("tv") },
+                                    label = { Text("TV", style = MaterialTheme.typography.labelMedium) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = Amber,
+                                        selectedLabelColor = Obsidian,
+                                        containerColor = Gunmetal,
+                                        labelColor = Silver,
+                                    ),
+                                    border = FilterChipDefaults.filterChipBorder(
+                                        borderColor = Color.Transparent,
+                                        selectedBorderColor = Amber,
+                                        enabled = true,
+                                        selected = !isMovie,
+                                    ),
+                                    shape = RoundedCornerShape(20.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                ) {
+                    CatalogSearchRow(
+                        searchQuery = state.searchQuery,
+                        activeFilterCount = state.activeFilterCount,
+                        mediaType = mediaType,
+                        onQueryChange = { viewModel.updateSearchQuery(it) },
+                        onClearSearch = { viewModel.clearSearch() },
+                        onFilterClick = { viewModel.toggleFilterSheet() },
+                        isAiSearching = state.isAiSearching,
+                        onAiSearchClick = { viewModel.searchWithAi(settingsState.aiProvider, settingsState.activeAiApiKey) },
+                    )
+                    // AI search hint / error
+                    state.aiSearchError?.let { hint ->
+                        Text(
+                            text = hint,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Amber.copy(alpha = 0.7f),
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                }
             }
         }
     }
@@ -614,6 +681,8 @@ private fun CatalogSearchRow(
     onQueryChange: (String) -> Unit,
     onClearSearch: () -> Unit,
     onFilterClick: () -> Unit,
+    isAiSearching: Boolean = false,
+    onAiSearchClick: () -> Unit = {},
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -672,7 +741,29 @@ private fun CatalogSearchRow(
             }
         }
 
-        Spacer(Modifier.width(8.dp))
+        // AI sparkle button — visible when query has text
+        if (searchQuery.length >= 2) {
+            IconButton(
+                onClick = onAiSearchClick,
+                enabled = !isAiSearching,
+            ) {
+                if (isAiSearching) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = Amber,
+                    )
+                } else {
+                    Icon(
+                        Icons.Rounded.AutoAwesome,
+                        contentDescription = "AI Search",
+                        tint = Amber,
+                    )
+                }
+            }
+        } else {
+            Spacer(Modifier.width(8.dp))
+        }
 
         // Filter button with badge
         IconButton(onClick = onFilterClick) {

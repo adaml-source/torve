@@ -249,11 +249,22 @@ class IptvRepositoryImpl(
 
     override suspend fun getEnrichedChannels(playlistId: String): List<EnrichedChannel> {
         val channels = getChannels(playlistId)
-        val epg = epgCache[playlistId] ?: return channels.map { EnrichedChannel(it) }
+
+        // Load favorite IDs to mark channels
+        val favoriteIds = database.streamVaultQueries.getAllFavorites().executeAsList()
+            .map { it.channel_id }
+            .toSet()
+
+        val epg = epgCache[playlistId]
         val now = Clock.System.now().toEpochMilliseconds()
 
         return channels.map { ch ->
-            val epgId = matchEpgChannel(ch, epg)
+            val channelId = ch.tvgId ?: "${ch.playlistId}_${ch.name}"
+            val markedCh = if (channelId in favoriteIds) ch.copy(isFavorite = true) else ch
+
+            if (epg == null) return@map EnrichedChannel(markedCh)
+
+            val epgId = matchEpgChannel(markedCh, epg)
             val current = epgId?.let { id ->
                 epg.programmes.find { it.channelId == id && it.startTime <= now && it.endTime > now }
             }
@@ -261,7 +272,7 @@ class IptvRepositoryImpl(
                 epg.programmes.filter { it.channelId == id && it.startTime > now }
                     .minByOrNull { it.startTime }
             }
-            EnrichedChannel(ch, current, next)
+            EnrichedChannel(markedCh, current, next)
         }
     }
 

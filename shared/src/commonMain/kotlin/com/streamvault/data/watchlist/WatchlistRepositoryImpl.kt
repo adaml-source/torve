@@ -2,6 +2,10 @@ package com.streamvault.data.watchlist
 
 import com.streamvault.data.metadata.TmdbApiClient
 import com.streamvault.data.metadata.TmdbMappers
+import com.streamvault.data.simkl.SimklClient
+import com.streamvault.data.simkl.SimklIds
+import com.streamvault.data.simkl.SimklSyncBody
+import com.streamvault.data.simkl.SimklSyncItem
 import com.streamvault.data.trakt.TraktClient
 import com.streamvault.data.trakt.TraktHistoryMovie
 import com.streamvault.data.trakt.TraktHistoryShow
@@ -25,6 +29,7 @@ class WatchlistRepositoryImpl(
     private val traktClient: TraktClient,
     private val prefsRepo: PreferencesRepository,
     private val tmdbClient: TmdbApiClient,
+    private val simklClient: SimklClient,
 ) : WatchlistRepository {
 
     private val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -90,15 +95,21 @@ class WatchlistRepositoryImpl(
             sort_order = item.sortOrder.toLong(),
         )
         syncTraktAdd(item)
+        syncSimklAdd(item)
     }
 
     override suspend fun remove(mediaId: String) {
-        // Read item before deleting so we can sync to Trakt
+        // Read item before deleting so we can sync to Trakt/Simkl
         val item = database.streamVaultQueries.getAllWatchlist().executeAsList()
             .firstOrNull { it.media_id == mediaId }
         database.streamVaultQueries.removeFromWatchlist(mediaId)
         item?.let {
             syncTraktRemove(
+                tmdbId = it.tmdb_id.toInt(),
+                imdbId = it.imdb_id,
+                isMovie = it.media_type == "movie",
+            )
+            syncSimklRemove(
                 tmdbId = it.tmdb_id.toInt(),
                 imdbId = it.imdb_id,
                 isMovie = it.media_type == "movie",
@@ -111,12 +122,13 @@ class WatchlistRepositoryImpl(
     }
 
     override suspend fun syncFromTrakt() {
-        try {
-            val token = prefsRepo.getString(SettingsViewModel.KEY_TRAKT_ACCESS_TOKEN) ?: return
-            if (token.isBlank()) return
+        val token = try {
+            prefsRepo.getString(SettingsViewModel.KEY_TRAKT_ACCESS_TOKEN)
+        } catch (_: Exception) { null }
+        if (token.isNullOrBlank()) return
 
+        try {
             val traktItems = traktClient.getWatchlist(token)
-            if (traktItems.isEmpty()) return
 
             // Get existing local IDs to avoid duplicating
             val localIds = database.streamVaultQueries.getAllWatchlist().executeAsList()
@@ -232,6 +244,42 @@ class WatchlistRepositoryImpl(
                 traktClient.removeFromWatchlist(token, body)
             } catch (_: Exception) {
                 // Fire-and-forget — don't block local operation
+            }
+        }
+    }
+
+    private fun syncSimklAdd(item: WatchlistItem) {
+        syncScope.launch {
+            try {
+                val token = prefsRepo.getString("simkl_access_token") ?: return@launch
+                if (token.isBlank()) return@launch
+                val ids = SimklIds(tmdb = item.tmdbId, imdb = item.imdbId)
+                val body = if (item.mediaType == MediaType.MOVIE) {
+                    SimklSyncBody(movies = listOf(SimklSyncItem(ids)))
+                } else {
+                    SimklSyncBody(shows = listOf(SimklSyncItem(ids)))
+                }
+                simklClient.addToWatchlist(token, body)
+            } catch (_: Exception) {
+                // Fire-and-forget
+            }
+        }
+    }
+
+    private fun syncSimklRemove(tmdbId: Int, imdbId: String?, isMovie: Boolean) {
+        syncScope.launch {
+            try {
+                val token = prefsRepo.getString("simkl_access_token") ?: return@launch
+                if (token.isBlank()) return@launch
+                val ids = SimklIds(tmdb = tmdbId, imdb = imdbId)
+                val body = if (isMovie) {
+                    SimklSyncBody(movies = listOf(SimklSyncItem(ids)))
+                } else {
+                    SimklSyncBody(shows = listOf(SimklSyncItem(ids)))
+                }
+                simklClient.removeFromWatchlist(token, body)
+            } catch (_: Exception) {
+                // Fire-and-forget
             }
         }
     }

@@ -12,6 +12,12 @@ data class TmdbResponse<T>(
 )
 
 @Serializable
+data class TmdbKeyword(
+    val id: Int,
+    val name: String = "",
+)
+
+@Serializable
 data class TmdbMovie(
     val id: Int,
     val title: String = "",
@@ -175,6 +181,15 @@ data class TmdbPersonCrewCredit(
 )
 
 @Serializable
+data class TmdbPersonSummary(
+    val id: Int,
+    val name: String = "",
+    @SerialName("profile_path") val profilePath: String? = null,
+    @SerialName("known_for_department") val knownForDepartment: String? = null,
+    val popularity: Double = 0.0,
+)
+
+@Serializable
 data class TmdbPersonCredits(
     val cast: List<TmdbPersonCastCredit> = emptyList(),
     val crew: List<TmdbPersonCrewCredit> = emptyList(),
@@ -200,4 +215,16 @@ data class TmdbSeasonDetail(
     val overview: String = "",
     val episodes: List<TmdbEpisode> = emptyList(),
     @SerialName("poster_path") val posterPath: String? = null,
+)
+
+@Serializable
+data class TmdbWatchProvidersResponse(
+    val results: List<TmdbWatchProvider> = emptyList(),
+)
+
+@Serializable
+data class TmdbWatchProvider(
+    @SerialName("provider_id") val providerId: Int,
+    @SerialName("provider_name") val providerName: String = "",
+    @SerialName("logo_path") val logoPath: String? = null,
 )

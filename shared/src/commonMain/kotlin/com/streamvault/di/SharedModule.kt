@@ -1,10 +1,13 @@
 package com.streamvault.di
 
+import com.streamvault.data.ai.AiSuggestClient
+import com.streamvault.data.ai.KeywordSearchService
 import com.streamvault.data.addon.AddonRepositoryImpl
 import com.streamvault.data.addon.CatalogAggregator
 import com.streamvault.data.addon.StreamAggregator
 import com.streamvault.data.addon.StreamScorer
 import com.streamvault.data.addon.StremioAddonClient
+import com.streamvault.data.addon.SubtitleAggregator
 import com.streamvault.data.addon.StreamRepositoryImpl
 import com.streamvault.data.auth.AuthClient
 import com.streamvault.data.debrid.DebridClient
@@ -59,6 +62,7 @@ import com.streamvault.presentation.settings.SettingsViewModel
 import com.streamvault.presentation.setup.SetupWizardViewModel
 import com.streamvault.presentation.discover.DiscoverViewModel
 import com.streamvault.presentation.mood.MoodMatcherViewModel
+import com.streamvault.presentation.seeall.SeeAllViewModel
 import com.streamvault.presentation.stats.StatsViewModel
 import com.streamvault.presentation.subscription.SubscriptionViewModel
 import com.streamvault.presentation.watchlist.WatchlistViewModel
@@ -78,6 +82,10 @@ val sharedModule = module {
     // TMDB
     singleOf(::TmdbApiClient)
     single<MetadataRepository> { MetadataRepositoryImpl(get()) }
+
+    // AI Suggest
+    single { AiSuggestClient(get()) }
+    single { KeywordSearchService(get(), get()) }
 
     // Stremio Addons
     single { StremioAddonClient(get(), get()) }
@@ -109,6 +117,7 @@ val sharedModule = module {
     // Scoring & Aggregation
     single { StreamScorer() }
     single { CatalogAggregator(get()) }
+    single { SubtitleAggregator(get()) }
     single { StreamAggregator(get(), get(), get()) }
 
     // Stream Repository
@@ -139,7 +148,7 @@ val sharedModule = module {
     single<SubscriptionRepository> { SubscriptionRepositoryImpl(get()) }
 
     // Watchlist Repository
-    single<WatchlistRepository> { WatchlistRepositoryImpl(get(), get(), get(), get()) }
+    single<WatchlistRepository> { WatchlistRepositoryImpl(get(), get(), get(), get(), get()) }
 
     // Watch History Repository
     single<WatchHistoryRepository> { WatchHistoryRepositoryImpl(get(), get(), get(), get()) }
@@ -152,13 +161,13 @@ val sharedModule = module {
     factory { MoodMatcher(get()) }
 
     // ViewModels
-    factoryOf(::HomeViewModel)
+    single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     factoryOf(::SearchViewModel)
     factory { DetailViewModel(get(), get(), get(), get(), get(), get(), get()) }
     factoryOf(::PersonViewModel)
     single { SettingsViewModel(get(), get(), get(), get(), get(), get(), get(), get()) }
     factoryOf(::AddonViewModel)
-    factory { IptvViewModel(get(), get(), get()) }
+    single { IptvViewModel(get(), get(), get()) }
     factory { CalendarViewModel(get(), get()) }
     factoryOf(::DownloadViewModel)
     factoryOf(::ProfileViewModel)
@@ -168,4 +177,5 @@ val sharedModule = module {
     factory { DiscoverViewModel() }
     factoryOf(::MoodMatcherViewModel)
     factoryOf(::StatsViewModel)
+    factory { SeeAllViewModel(get(), get(), get(), get()) }
 }

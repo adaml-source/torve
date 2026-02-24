@@ -4,6 +4,7 @@ import com.streamvault.domain.model.CastMember
 import com.streamvault.domain.model.Genre
 import com.streamvault.domain.model.MediaItem
 import com.streamvault.domain.model.MediaType
+import com.streamvault.domain.model.PersonSummary
 import com.streamvault.domain.model.Season
 
 object TmdbMappers {
@@ -117,6 +118,13 @@ object TmdbMappers {
             popularity = c.popularity,
         )
     }
+
+    fun personSummaryToDomain(p: TmdbPersonSummary): PersonSummary = PersonSummary(
+        id = p.id,
+        name = p.name,
+        profileUrl = profileUrl(p.profilePath),
+        knownForDepartment = p.knownForDepartment,
+    )
 
     fun personCrewCreditToMediaItem(c: TmdbPersonCrewCredit): MediaItem {
         val date = c.releaseDate ?: c.firstAirDate

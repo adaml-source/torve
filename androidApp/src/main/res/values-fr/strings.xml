@@ -11,7 +11,7 @@
     <string name="nav_tv_shows">Séries TV</string>
     <string name="nav_live_tv">TV en direct</string>
     <string name="nav_watchlist">Liste de suivi</string>
-    <string name="nav_profile">Profil</string>
+    <string name="nav_settings">Paramètres</string>
 
     <!-- Common Actions -->
     <string name="common_connect">Connecter</string>

@@ -42,7 +42,7 @@ class AddonViewModel(
         if (url.isBlank()) return
 
         scope.launch {
-            _state.update { it.copy(isInstalling = true, installError = null) }
+            _state.update { it.copy(isInstalling = true, installingUrl = url, installError = null) }
             try {
                 addonRepo.installAddon(url)
                 val addons = addonRepo.getInstalledAddons()
@@ -50,11 +50,12 @@ class AddonViewModel(
                     it.copy(
                         addons = addons,
                         isInstalling = false,
+                        installingUrl = "",
                         installUrl = "",
                     )
                 }
             } catch (e: Exception) {
-                _state.update { it.copy(isInstalling = false, installError = e.message) }
+                _state.update { it.copy(isInstalling = false, installingUrl = "", installError = e.message) }
             }
         }
     }

@@ -1,0 +1,310 @@
+package com.streamvault.data.ai
+
+import com.streamvault.data.metadata.TmdbGenres
+import io.ktor.client.HttpClient
+import io.ktor.client.call.body
+import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.isSuccess
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+
+@Serializable
+data class AiSuggestResult(
+    val mode: String = "discover", // "discover" or "specific"
+    val title: String = "",
+    val genreIds: List<Int> = emptyList(),
+    val keywordTerms: List<String> = emptyList(),
+    val yearFrom: Int? = null,
+    val yearTo: Int? = null,
+    val sortBy: String = "popularity.desc",
+    val minRating: Float? = null,
+    val mediaType: String? = null,
+    val specificTitles: List<AiSpecificTitle> = emptyList(),
+)
+
+@Serializable
+data class AiSpecificTitle(
+    val title: String = "",
+    val year: Int? = null,
+    val mediaType: String? = null,
+)
+
+class AiSuggestClient(private val httpClient: HttpClient) {
+
+    private val jsonParser = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+        coerceInputValues = true
+    }
+
+    suspend fun suggest(provider: AiProvider, apiKey: String, phrase: String): AiSuggestResult {
+        val systemPrompt = buildSystemPrompt()
+
+        val text = when (provider) {
+            AiProvider.CLAUDE -> callClaude(apiKey, systemPrompt, phrase)
+            AiProvider.CHATGPT -> callOpenAiCompatible(
+                url = "https://api.openai.com/v1/chat/completions",
+                model = "gpt-4o-mini",
+                apiKey = apiKey,
+                systemPrompt = systemPrompt,
+                userMessage = phrase,
+            )
+            AiProvider.GEMINI -> callGemini(apiKey, systemPrompt, phrase)
+            AiProvider.PERPLEXITY -> callOpenAiCompatible(
+                url = "https://api.perplexity.ai/chat/completions",
+                model = "sonar",
+                apiKey = apiKey,
+                systemPrompt = systemPrompt,
+                userMessage = phrase,
+            )
+            AiProvider.DEEPSEEK -> callOpenAiCompatible(
+                url = "https://api.deepseek.com/chat/completions",
+                model = "deepseek-chat",
+                apiKey = apiKey,
+                systemPrompt = systemPrompt,
+                userMessage = phrase,
+            )
+        }
+
+        println("AI_DEBUG: raw response text=$text")
+        val jsonStr = extractJson(text)
+        val result = jsonParser.decodeFromString<AiSuggestResult>(jsonStr)
+        println("AI_DEBUG: parsed mode=${result.mode}, specificTitles=${result.specificTitles.map { it.title }}")
+        return result
+    }
+
+    // ── Claude Messages API ──
+
+    private suspend fun callClaude(apiKey: String, systemPrompt: String, phrase: String): String {
+        val requestBody = ClaudeMessagesRequest(
+            model = "claude-haiku-4-5-20251001",
+            maxTokens = 500,
+            system = systemPrompt,
+            messages = listOf(ClaudeMessage(role = "user", content = phrase)),
+        )
+        val httpResponse = httpClient.post("https://api.anthropic.com/v1/messages") {
+            header("x-api-key", apiKey)
+            header("anthropic-version", "2023-06-01")
+            header("content-type", "application/json")
+            setBody(requestBody)
+        }
+        if (!httpResponse.status.isSuccess()) {
+            val errorBody = httpResponse.bodyAsText()
+            throw Exception("Claude API error (${httpResponse.status.value}): ${extractErrorMessage(errorBody)}")
+        }
+        val response: ClaudeMessagesResponse = httpResponse.body()
+        return response.content.firstOrNull()?.text ?: "{}"
+    }
+
+    // ── OpenAI-compatible API (ChatGPT, Perplexity, DeepSeek) ──
+
+    private suspend fun callOpenAiCompatible(
+        url: String,
+        model: String,
+        apiKey: String,
+        systemPrompt: String,
+        userMessage: String,
+    ): String {
+        val requestBody = OpenAiChatRequest(
+            model = model,
+            messages = listOf(
+                OpenAiMessage(role = "system", content = systemPrompt),
+                OpenAiMessage(role = "user", content = userMessage),
+            ),
+            maxTokens = 500,
+        )
+        val httpResponse = httpClient.post(url) {
+            header("Authorization", "Bearer $apiKey")
+            header("content-type", "application/json")
+            setBody(requestBody)
+        }
+        if (!httpResponse.status.isSuccess()) {
+            val errorBody = httpResponse.bodyAsText()
+            throw Exception("API error (${httpResponse.status.value}): ${extractErrorMessage(errorBody)}")
+        }
+        val response: OpenAiChatResponse = httpResponse.body()
+        return response.choices.firstOrNull()?.message?.content ?: "{}"
+    }
+
+    // ── Google Gemini API ──
+
+    private suspend fun callGemini(apiKey: String, systemPrompt: String, phrase: String): String {
+        val requestBody = GeminiRequest(
+            contents = listOf(
+                GeminiContent(
+                    role = "user",
+                    parts = listOf(GeminiPart(text = "$systemPrompt\n\n$phrase")),
+                ),
+            ),
+        )
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey"
+        val httpResponse = httpClient.post(url) {
+            header("content-type", "application/json")
+            setBody(requestBody)
+        }
+        if (!httpResponse.status.isSuccess()) {
+            val errorBody = httpResponse.bodyAsText()
+            throw Exception("Gemini API error (${httpResponse.status.value}): ${extractErrorMessage(errorBody)}")
+        }
+        val response: GeminiResponse = httpResponse.body()
+        return response.candidates.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: "{}"
+    }
+
+    // ── System Prompt ──
+
+    private fun buildSystemPrompt(): String {
+        val movieGenres = TmdbGenres.MOVIE_GENRES.entries
+            .joinToString(", ") { "${it.key}=${it.value}" }
+        val tvGenres = TmdbGenres.TV_GENRES.entries
+            .joinToString(", ") { "${it.key}=${it.value}" }
+
+        return """You are a movie/TV show discovery assistant. You operate in TWO modes.
+
+MODE 1 — "discover": The user describes a CATEGORY, GENRE, MOOD, ERA, or THEME.
+Use TMDB discover parameters to find matching content.
+
+MODE 2 — "specific": The user describes a SPECIFIC movie/show by its PLOT, SCENE, SETTING, CHARACTERS, or MEMORABLE MOMENTS.
+Identify the exact title(s) they're looking for.
+
+Available MOVIE genre IDs: $movieGenres
+Available TV genre IDs: $tvGenres
+
+Respond ONLY with a JSON object (no markdown, no explanation).
+
+For DISCOVER mode:
+{"mode":"discover","title":"Section Title","genreIds":[28,53],"keywordTerms":["keyword"],"yearFrom":null,"yearTo":null,"sortBy":"popularity.desc","minRating":null,"mediaType":null,"specificTitles":[]}
+
+For SPECIFIC mode:
+{"mode":"specific","title":"Section Title","genreIds":[],"keywordTerms":[],"yearFrom":null,"yearTo":null,"sortBy":"popularity.desc","minRating":null,"mediaType":null,"specificTitles":[{"title":"Movie Name","year":1998,"mediaType":"movie"}]}
+
+DISCOVER mode rules:
+- Use genreIds as PRIMARY filter — more reliable than keywords
+- keywordTerms: only 1-3 SPECIFIC single-word terms for themes not covered by genres
+- Do NOT add redundant keywords that overlap with genres
+- For decade references like "90s", use yearFrom=1990, yearTo=1999
+
+SPECIFIC mode rules:
+- Return 1-10 titles that match the description
+- Include the release year for each title to help disambiguation
+- Set mediaType to "movie" or "tv" for each title
+- If the description could match multiple movies/shows, include all likely matches
+
+How to choose the mode:
+- "romantic comedy on the beach" → DISCOVER (category/theme)
+- "the one where they search for a missing soldier in WW2" → SPECIFIC (plot description)
+- "movies set on an island" → DISCOVER (setting as theme)
+- "that movie where a guy wakes up reliving the same day" → SPECIFIC (Groundhog Day)
+- "dark sci-fi thriller" → DISCOVER (genre/mood)
+- "the show about a chemistry teacher who becomes a drug lord" → SPECIFIC (Breaking Bad)
+- "christmas movies" → DISCOVER (theme)
+- "movies like Inception" → SPECIFIC (identify similar specific titles)"""
+    }
+
+    private fun extractErrorMessage(body: String): String {
+        return try {
+            val json = jsonParser.parseToJsonElement(body)
+            val error = json.jsonObject["error"]?.jsonObject
+            error?.get("message")?.jsonPrimitive?.content
+                ?: json.jsonObject["message"]?.jsonPrimitive?.content
+                ?: body.take(200)
+        } catch (_: Exception) {
+            body.take(200)
+        }
+    }
+
+    private fun extractJson(text: String): String {
+        val trimmed = text.trim()
+        if (trimmed.startsWith("{")) return trimmed
+        val jsonMatch = Regex("```(?:json)?\\s*\\n?(\\{.*?})\\s*```", RegexOption.DOT_MATCHES_ALL)
+            .find(trimmed)
+        return jsonMatch?.groupValues?.get(1) ?: trimmed
+    }
+}
+
+// ── Claude data classes ──
+
+@Serializable
+data class ClaudeMessagesRequest(
+    val model: String,
+    @SerialName("max_tokens")
+    val maxTokens: Int,
+    val system: String? = null,
+    val messages: List<ClaudeMessage>,
+)
+
+@Serializable
+data class ClaudeMessage(
+    val role: String,
+    val content: String,
+)
+
+@Serializable
+data class ClaudeMessagesResponse(
+    val content: List<ClaudeContentBlock> = emptyList(),
+)
+
+@Serializable
+data class ClaudeContentBlock(
+    val type: String = "",
+    val text: String = "",
+)
+
+// ── OpenAI-compatible data classes (ChatGPT, Perplexity, DeepSeek) ──
+
+@Serializable
+data class OpenAiChatRequest(
+    val model: String,
+    val messages: List<OpenAiMessage>,
+    @SerialName("max_tokens")
+    val maxTokens: Int,
+)
+
+@Serializable
+data class OpenAiMessage(
+    val role: String,
+    val content: String,
+)
+
+@Serializable
+data class OpenAiChatResponse(
+    val choices: List<OpenAiChoice> = emptyList(),
+)
+
+@Serializable
+data class OpenAiChoice(
+    val message: OpenAiMessage? = null,
+)
+
+// ── Gemini data classes ──
+
+@Serializable
+data class GeminiRequest(
+    val contents: List<GeminiContent>,
+)
+
+@Serializable
+data class GeminiContent(
+    val role: String? = null,
+    val parts: List<GeminiPart> = emptyList(),
+)
+
+@Serializable
+data class GeminiPart(
+    val text: String = "",
+)
+
+@Serializable
+data class GeminiResponse(
+    val candidates: List<GeminiCandidate> = emptyList(),
+)
+
+@Serializable
+data class GeminiCandidate(
+    val content: GeminiContent? = null,
+)

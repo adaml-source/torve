@@ -79,6 +79,14 @@ data class Episode(
     val rating: Double = 0.0,
 )
 
+@Serializable
+data class PersonSummary(
+    val id: Int,
+    val name: String,
+    val profileUrl: String? = null,
+    val knownForDepartment: String? = null,
+)
+
 data class PagedResult(
     val items: List<MediaItem>,
     val page: Int,

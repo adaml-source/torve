@@ -1,5 +1,7 @@
 package com.streamvault.presentation.catalog
 
+import com.streamvault.data.ai.AiProvider
+import com.streamvault.data.ai.KeywordSearchService
 import com.streamvault.domain.model.MediaItem
 import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.model.PagedResult
@@ -27,6 +29,7 @@ class CatalogViewModel(
     private val metadataRepo: MetadataRepository,
     private val mediaType: String, // "movie" or "tv"
     private val watchProgressRepo: WatchProgressRepository? = null,
+    private val keywordSearchService: KeywordSearchService? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(CatalogUiState())
@@ -72,15 +75,21 @@ class CatalogViewModel(
         }
     }
 
+    fun setProvider(providerId: Int) {
+        _state.update { it.copy(providerId = providerId) }
+        loadCatalog()
+    }
+
     fun loadCatalog() {
         scope.launch {
             _state.update { it.copy(isLoading = true, error = null, currentPage = 1) }
             try {
                 val filter = _state.value.filter
                 val genreId = _state.value.selectedGenreId
+                val providerId = _state.value.providerId
 
-                val result = if (filter.isActive || genreId != null) {
-                    // Use discover API when any filter or genre is active
+                val result = if (filter.isActive || genreId != null || providerId != null) {
+                    // Use discover API when any filter, genre, or provider is active
                     metadataRepo.discover(
                         type = mediaType,
                         page = 1,
@@ -91,6 +100,8 @@ class CatalogViewModel(
                         yearTo = filter.yearTo,
                         runtimeGte = filter.runtimeFilter?.minMinutes,
                         runtimeLte = filter.runtimeFilter?.maxMinutes,
+                        withWatchProviders = providerId?.toString(),
+                        watchRegion = if (providerId != null) "US" else null,
                     )
                 } else {
                     // Use curated list endpoints
@@ -132,8 +143,9 @@ class CatalogViewModel(
                 val nextPage = s.currentPage + 1
                 val filter = s.filter
                 val genreId = s.selectedGenreId
+                val providerId = s.providerId
 
-                val result = if (filter.isActive || genreId != null) {
+                val result = if (filter.isActive || genreId != null || providerId != null) {
                     metadataRepo.discover(
                         type = mediaType,
                         page = nextPage,
@@ -144,6 +156,8 @@ class CatalogViewModel(
                         yearTo = filter.yearTo,
                         runtimeGte = filter.runtimeFilter?.minMinutes,
                         runtimeLte = filter.runtimeFilter?.maxMinutes,
+                        withWatchProviders = providerId?.toString(),
+                        watchRegion = if (providerId != null) "US" else null,
                     )
                 } else {
                     when (s.selectedCategory) {
@@ -254,8 +268,76 @@ class CatalogViewModel(
         }
     }
 
+    fun searchWithAi(provider: AiProvider, apiKey: String) {
+        val query = _state.value.searchQuery
+        if (query.isBlank() || keywordSearchService == null) return
+
+        if (apiKey.isBlank()) {
+            _state.update {
+                it.copy(aiSearchError = "Set a ${provider.label} API key in Settings to use AI search")
+            }
+            return
+        }
+
+        scope.launch {
+            _state.update { it.copy(isAiSearching = true, aiSearchError = null) }
+            try {
+                println("AI_DEBUG: provider=$provider, keyLen=${apiKey.length}, query='$query'")
+                val result = keywordSearchService.searchWithAi(provider, apiKey, query)
+                println("AI_DEBUG: mode=${result.mode}, specificItems=${result.specificItems.size}, genreIds=${result.genreIds}, keywordIds=${result.keywordIds}, title=${result.title}")
+
+                val items: List<MediaItem> = if (result.mode == "specific" && result.specificItems.isNotEmpty()) {
+                    println("AI_DEBUG: fetching ${result.specificItems.size} specific items: ${result.specificItems.map { "${it.title}(${it.tmdbId})" }}")
+                    result.specificItems.mapNotNull { specific ->
+                        try {
+                            val detail = metadataRepo.getDetail(specific.mediaType, specific.tmdbId)
+                            println("AI_DEBUG: got detail: ${detail.title}")
+                            detail
+                        } catch (e: Exception) {
+                            println("AI_DEBUG: getDetail FAILED for ${specific.title}: ${e.message}")
+                            null
+                        }
+                    }
+                } else {
+                    val type = result.mediaType ?: mediaType
+                    metadataRepo.discover(
+                        type = type,
+                        page = 1,
+                        sortBy = result.sortBy,
+                        withGenres = result.genreIds.takeIf { it.isNotEmpty() }?.joinToString(","),
+                        minRating = result.minRating,
+                        year = result.yearFrom,
+                        yearTo = result.yearTo,
+                        withKeywords = result.keywordIds.takeIf { it.isNotEmpty() }?.joinToString("|"),
+                    ).items
+                }
+
+                _state.update {
+                    it.copy(
+                        searchResults = items,
+                        isAiSearching = false,
+                        aiSearchLabel = result.title,
+                        aiSearchError = null,
+                        isSearching = false,
+                        searchHasMore = false,
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(isAiSearching = false, aiSearchError = e.message ?: "AI search failed")
+                }
+            }
+        }
+    }
+
     fun clearSearch() {
-        _state.update { it.copy(searchQuery = "", searchResults = emptyList(), searchPage = 1, searchHasMore = false) }
+        _state.update {
+            it.copy(
+                searchQuery = "", searchResults = emptyList(),
+                searchPage = 1, searchHasMore = false,
+                aiSearchLabel = null, aiSearchError = null,
+            )
+        }
         searchQueryFlow.value = ""
     }
 

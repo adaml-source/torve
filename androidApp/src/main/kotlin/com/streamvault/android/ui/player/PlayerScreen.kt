@@ -28,6 +28,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Cast
+import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Forward10
@@ -72,6 +74,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaSession
 import androidx.media3.ui.PlayerView
+import com.streamvault.android.player.CastManager
 import com.streamvault.android.player.ExoPlayerEngine
 import com.streamvault.android.player.MPVPlayerEngine
 import com.streamvault.android.player.MPVView
@@ -124,6 +127,19 @@ fun PlayerScreen(
     traktClient: TraktClient = koinInject(),
 ) {
     val context = LocalContext.current
+
+    // Google Cast
+    val castManager = remember {
+        try { CastManager(context) } catch (_: Exception) { null }
+    }
+    val castAvailable = remember {
+        try {
+            com.google.android.gms.cast.framework.CastContext.getSharedInstance(context)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
 
     // Immersive fullscreen + landscape + keep screen on
     DisposableEffect(Unit) {
@@ -812,6 +828,24 @@ fun PlayerScreen(
                     } else {
                         Spacer(Modifier.weight(1f))
                     }
+                    // Cast button
+                    if (castAvailable) {
+                        IconButton(onClick = {
+                            try {
+                                val routeBtn = androidx.mediarouter.app.MediaRouteButton(context)
+                                com.google.android.gms.cast.framework.CastButtonFactory.setUpMediaRouteButton(context, routeBtn)
+                                routeBtn.performClick()
+                            } catch (_: Exception) { }
+                        }) {
+                            Icon(
+                                if (castManager?.isCasting == true) Icons.Default.CastConnected else Icons.Default.Cast,
+                                contentDescription = "Cast",
+                                tint = if (castManager?.isCasting == true) com.streamvault.android.ui.theme.Amber else Color.White,
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
+                    }
+
                     if (subtitleTracks.isNotEmpty() || audioTracks.isNotEmpty()) {
                         IconButton(onClick = { showTrackDialog = true }) {
                             Icon(

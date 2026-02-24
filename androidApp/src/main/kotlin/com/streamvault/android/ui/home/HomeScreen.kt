@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -31,9 +32,9 @@ import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.BookmarkBorder
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -42,51 +43,81 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.streamvault.android.R
 import coil3.compose.AsyncImage
+import com.streamvault.android.R
 import com.streamvault.android.ui.components.CardSize
 import com.streamvault.android.ui.components.PosterCard
 import com.streamvault.android.ui.components.SectionHeader
 import com.streamvault.android.ui.components.ShimmerBox
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Charcoal
+import com.streamvault.android.ui.theme.Gunmetal
 import com.streamvault.android.ui.theme.HeroGradient
 import com.streamvault.android.ui.theme.Obsidian
 import com.streamvault.android.ui.theme.Snow
 import com.streamvault.android.ui.theme.StreamVault
+import com.streamvault.domain.model.CatalogShelf
+import com.streamvault.domain.model.CustomSection
+import com.streamvault.domain.model.HomeSection
+import com.streamvault.domain.model.HomeSectionConfig
 import com.streamvault.domain.model.MediaItem
+import com.streamvault.domain.model.PersonSummary
 import com.streamvault.domain.model.MediaType
+import com.streamvault.domain.model.PosterOrientation
+import com.streamvault.domain.model.PosterSize
 import com.streamvault.domain.model.ShelfType
 import com.streamvault.domain.model.WatchProgress
+import com.streamvault.domain.model.matchesSection
 import com.streamvault.domain.recommendation.ScoredMediaItem
 import com.streamvault.presentation.home.HomeViewModel
 import com.streamvault.presentation.watchlist.WatchlistViewModel
 import kotlinx.coroutines.delay
 import org.koin.compose.koinInject
 
+private fun HomeSectionConfig.toCardSize(): CardSize = when (orientation) {
+    PosterOrientation.LANDSCAPE -> CardSize.LANDSCAPE
+    PosterOrientation.PORTRAIT -> when (size) {
+        PosterSize.SMALL -> CardSize.SMALL
+        PosterSize.MEDIUM -> CardSize.MEDIUM
+        PosterSize.LARGE -> CardSize.LARGE
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     onMediaClick: (MediaItem) -> Unit,
     onContinueWatchingClick: (WatchProgress) -> Unit = {},
+    onSeeAllClick: (String) -> Unit = {},
+    onProviderClick: (providerId: Int, providerName: String) -> Unit = { _, _ -> },
+    onPersonClick: (Int) -> Unit = {},
     mediaType: String = "all",
     viewModel: HomeViewModel = koinInject(),
     watchlistViewModel: WatchlistViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
     val watchlistState by watchlistViewModel.state.collectAsState()
+    val sectionConfigs by viewModel.sectionConfigs.collectAsState()
+    val enabledServiceIds by viewModel.enabledServiceIds.collectAsState()
+    val customSections by viewModel.customSections.collectAsState()
+    val activeStreamingServices = remember(enabledServiceIds) {
+        ALL_STREAMING_SERVICES.filter { it.tmdbProviderId in enabledServiceIds }
+    }
+    val providerLogos by viewModel.providerLogos.collectAsState()
 
     // Filter by media type for TV Shows / Movies tab reuse
     val filteredShelves = remember(state.shelves, mediaType) {
@@ -122,10 +153,9 @@ fun HomeScreen(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         when {
             state.isLoading -> {
-                // Shimmer loading skeleton
                 HomeSkeletonLoader()
             }
 
@@ -155,122 +185,294 @@ fun HomeScreen(
             else -> {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    // No top padding — hero bleeds to top edge under status bar
                     contentPadding = PaddingValues(bottom = 24.dp),
                 ) {
-                    // ── Hero Banner (Full-Bleed Pager) ──
-                    // Takes up ~60% of screen height. Auto-pages every 6 seconds.
-                    // Shows top 5 trending items with backdrop, gradient overlay,
-                    // title, tagline, and Play/Watchlist buttons.
-                    item(key = "hero") {
-                        val heroItems = filteredShelves
-                            .firstOrNull()?.items?.take(5) ?: emptyList()
+                    // Render sections in user-defined order
+                    val enabledSections = sectionConfigs
+                        .filter { it.enabled }
+                        .sortedBy { it.order }
 
-                        if (heroItems.isNotEmpty()) {
-                            HeroPager(
-                                items = heroItems,
-                                onItemClick = onMediaClick,
-                                watchlistIds = watchlistState.watchlistIds,
-                                onWatchlistClick = { watchlistViewModel.toggleWatchlist(it) },
-                            )
-                        } else {
-                            state.heroItem?.let { hero ->
-                                SingleHeroBanner(
-                                    item = hero,
-                                    onClick = { onMediaClick(hero) },
-                                )
+                    enabledSections.forEach { config ->
+                        when (config.section) {
+                            HomeSection.HERO -> {
+                                item(key = "hero") {
+                                    val heroItems = filteredShelves
+                                        .firstOrNull()?.items?.take(5) ?: emptyList()
+                                    if (heroItems.isNotEmpty()) {
+                                        HeroPager(
+                                            items = heroItems,
+                                            onItemClick = onMediaClick,
+                                            watchlistIds = watchlistState.watchlistIds,
+                                            onWatchlistClick = { watchlistViewModel.toggleWatchlist(it) },
+                                        )
+                                    } else {
+                                        state.heroItem?.let { hero ->
+                                            SingleHeroBanner(
+                                                item = hero,
+                                                onClick = { onMediaClick(hero) },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            HomeSection.CONTINUE_WATCHING -> {
+                                if (filteredContinueWatching.isNotEmpty()) {
+                                    item(key = "continue_watching") {
+                                        SectionHeader(
+                                            title = config.customTitle ?: stringResource(R.string.home_continue_watching),
+                                            action = stringResource(R.string.home_see_all),
+                                            onActionClick = { onSeeAllClick("continue_watching") },
+                                        )
+                                        LazyRow(
+                                            contentPadding = PaddingValues(horizontal = 16.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        ) {
+                                            items(filteredContinueWatching, key = { it.mediaId }) { progress ->
+                                                ContinueWatchingCard(
+                                                    progress = progress,
+                                                    onClick = { onContinueWatchingClick(progress) },
+                                                )
+                                            }
+                                        }
+                                    }
+                                } else if (mediaType == "all" && !state.isLoading) {
+                                    item(key = "continue_watching_empty") {
+                                        SectionHeader(
+                                            title = config.customTitle ?: stringResource(R.string.home_continue_watching),
+                                        )
+                                        EmptySectionHint(
+                                            text = stringResource(R.string.home_continue_watching_empty),
+                                            icon = Icons.Rounded.BookmarkBorder,
+                                        )
+                                    }
+                                }
+                            }
+
+                            HomeSection.WATCHLIST -> {
+                                item(key = "watchlist") {
+                                    SectionHeader(
+                                        title = config.customTitle ?: "My Watchlist",
+                                        action = stringResource(R.string.home_see_all),
+                                        onActionClick = { onSeeAllClick("watchlist") },
+                                    )
+                                    if (state.watchlistItems.isNotEmpty()) {
+                                        LazyRow(
+                                            contentPadding = PaddingValues(horizontal = 16.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        ) {
+                                            items(
+                                                state.watchlistItems.size,
+                                                key = { index -> "wl_${state.watchlistItems[index].id}_$index" },
+                                            ) { index ->
+                                                PosterCard(
+                                                    item = state.watchlistItems[index],
+                                                    size = config.toCardSize(),
+                                                    onClick = { onMediaClick(state.watchlistItems[index]) },
+                                                )
+                                            }
+                                        }
+                                    } else {
+                                        EmptySectionHint(
+                                            text = "Add movies and shows to your watchlist",
+                                            icon = Icons.Rounded.BookmarkBorder,
+                                        )
+                                    }
+                                }
+                            }
+
+                            HomeSection.RECOMMENDED -> {
+                                if (filteredRecommendations.isNotEmpty()) {
+                                    item(key = "recommended") {
+                                        Spacer(Modifier.height(8.dp))
+                                        SectionHeader(
+                                            title = config.customTitle ?: stringResource(R.string.home_recommended),
+                                            action = stringResource(R.string.home_see_all),
+                                            onActionClick = { onSeeAllClick("recommended") },
+                                        )
+                                        LazyRow(
+                                            contentPadding = PaddingValues(horizontal = 16.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        ) {
+                                            items(
+                                                filteredRecommendations.size,
+                                                key = { index -> "rec_${filteredRecommendations[index].item.id}_$index" },
+                                            ) { index ->
+                                                RecommendationCard(
+                                                    scored = filteredRecommendations[index],
+                                                    cardSize = config.toCardSize(),
+                                                    onClick = { onMediaClick(filteredRecommendations[index].item) },
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // All catalog shelf sections
+                            HomeSection.TRENDING_MOVIES,
+                            HomeSection.TRENDING_TV,
+                            HomeSection.POPULAR_MOVIES,
+                            HomeSection.NOW_PLAYING,
+                            HomeSection.NEW_RELEASES,
+                            HomeSection.TOP_RATED -> {
+                                val shelf = filteredShelves.find { it.matchesSection(config.section) }
+                                if (shelf != null && shelf.items.isNotEmpty()) {
+                                    item(key = config.section.name) {
+                                        Spacer(Modifier.height(8.dp))
+                                        CatalogShelf(
+                                            title = config.customTitle ?: shelf.title,
+                                            items = shelf.items,
+                                            shelfType = shelf.type,
+                                            onItemClick = onMediaClick,
+                                            onSeeAll = { onSeeAllClick(config.section.name) },
+                                            cardSizeOverride = config.toCardSize(),
+                                        )
+                                    }
+                                }
+                            }
+
+                            HomeSection.STREAMING_SERVICES -> {
+                                if (activeStreamingServices.isNotEmpty()) {
+                                    item(key = "streaming_services") {
+                                        StreamingServicesRow(
+                                            services = activeStreamingServices,
+                                            providerLogos = providerLogos,
+                                            onProviderClick = onProviderClick,
+                                        )
+                                    }
+                                }
+                            }
+
+                            HomeSection.RECENTLY_WATCHED -> {
+                                if (state.recentlyWatched.isNotEmpty()) {
+                                    item(key = "recently_watched") {
+                                        SectionHeader(
+                                            title = config.customTitle ?: "Recently Watched",
+                                            action = stringResource(R.string.home_see_all),
+                                            onActionClick = { onSeeAllClick("recently_watched") },
+                                        )
+                                        LazyRow(
+                                            contentPadding = PaddingValues(horizontal = 16.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        ) {
+                                            items(
+                                                state.recentlyWatched.size,
+                                                key = { index -> "rw_${state.recentlyWatched[index].id}_$index" },
+                                            ) { index ->
+                                                PosterCard(
+                                                    item = state.recentlyWatched[index],
+                                                    size = config.toCardSize(),
+                                                    onClick = { onMediaClick(state.recentlyWatched[index]) },
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            HomeSection.ACTORS -> {
+                                if (state.popularActors.isNotEmpty()) {
+                                    item(key = "actors") {
+                                        SectionHeader(
+                                            title = config.customTitle ?: "Popular Actors",
+                                        )
+                                        LazyRow(
+                                            contentPadding = PaddingValues(horizontal = 16.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                        ) {
+                                            items(state.popularActors, key = { it.id }) { person ->
+                                                PersonAvatarCard(
+                                                    person = person,
+                                                    onClick = { onPersonClick(person.id) },
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            HomeSection.DIRECTORS -> {
+                                if (state.popularDirectors.isNotEmpty()) {
+                                    item(key = "directors") {
+                                        SectionHeader(
+                                            title = config.customTitle ?: "Popular Directors",
+                                        )
+                                        LazyRow(
+                                            contentPadding = PaddingValues(horizontal = 16.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                        ) {
+                                            items(state.popularDirectors, key = { it.id }) { person ->
+                                                PersonAvatarCard(
+                                                    person = person,
+                                                    onClick = { onPersonClick(person.id) },
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            HomeSection.HIDDEN_GEMS -> {
+                                state.hiddenGemsShelf?.let { gems ->
+                                    if (gems.items.isNotEmpty()) {
+                                        item(key = "hidden_gems") {
+                                            Spacer(Modifier.height(8.dp))
+                                            CatalogShelf(
+                                                title = config.customTitle ?: gems.title,
+                                                items = gems.items,
+                                                shelfType = gems.type,
+                                                onItemClick = onMediaClick,
+                                                onSeeAll = {},
+                                                cardSizeOverride = config.toCardSize(),
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
 
-                    // ── Continue Watching ──
-                    if (filteredContinueWatching.isNotEmpty()) {
-                        item(key = "continue_watching") {
-                            SectionHeader(title = stringResource(R.string.home_continue_watching))
-                            LazyRow(
-                                contentPadding = PaddingValues(horizontal = 16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                items(filteredContinueWatching, key = { it.mediaId }) { progress ->
-                                    ContinueWatchingCard(
-                                        progress = progress,
-                                        onClick = { onContinueWatchingClick(progress) },
+                    // ── Custom Sections ──
+                    customSections
+                        .filter { it.enabled }
+                        .sortedBy { it.order }
+                        .forEach { section ->
+                            val items = state.customShelves[section.id]
+                            if (!items.isNullOrEmpty()) {
+                                item(key = "custom_${section.id}") {
+                                    Spacer(Modifier.height(8.dp))
+                                    CatalogShelf(
+                                        title = section.title,
+                                        items = items,
+                                        onItemClick = onMediaClick,
+                                        cardSizeOverride = when (section.orientation) {
+                                            PosterOrientation.LANDSCAPE -> CardSize.LANDSCAPE
+                                            PosterOrientation.PORTRAIT -> when (section.size) {
+                                                PosterSize.SMALL -> CardSize.SMALL
+                                                PosterSize.MEDIUM -> CardSize.MEDIUM
+                                                PosterSize.LARGE -> CardSize.LARGE
+                                            }
+                                        },
                                     )
                                 }
                             }
                         }
-                    } else if (mediaType == "all" && !state.isLoading) {
-                        item(key = "continue_watching_empty") {
-                            SectionHeader(title = stringResource(R.string.home_continue_watching))
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(Charcoal)
-                                    .padding(24.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    text = stringResource(R.string.home_continue_watching_empty),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = StreamVault.colors.textTertiary,
-                                )
-                            }
-                        }
-                    }
 
-                    // ── Recommended For You ──
-                    if (filteredRecommendations.isNotEmpty()) {
-                        item(key = "recommended") {
+                    // ── Addon Catalog Shelves ──
+                    state.addonShelves.forEach { shelf ->
+                        item(key = "addon_${shelf.id}") {
                             Spacer(Modifier.height(8.dp))
-                            SectionHeader(title = stringResource(R.string.home_recommended))
-                            LazyRow(
-                                contentPadding = PaddingValues(horizontal = 16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                items(
-                                    filteredRecommendations,
-                                    key = { it.item.id },
-                                ) { scored ->
-                                    RecommendationCard(
-                                        scored = scored,
-                                        onClick = { onMediaClick(scored.item) },
-                                    )
-                                }
-                            }
+                            CatalogShelf(
+                                title = shelf.title,
+                                items = shelf.items,
+                                onItemClick = onMediaClick,
+                                onSeeAll = {},
+                            )
                         }
                     }
 
-                    // ── Your Watchlist ──
-                    state.watchlistShelf?.let { watchlist ->
-                        if (watchlist.items.isNotEmpty()) {
-                            item(key = "your_watchlist") {
-                                Spacer(Modifier.height(8.dp))
-                                CatalogShelf(
-                                    title = watchlist.title,
-                                    items = watchlist.items,
-                                    shelfType = watchlist.type,
-                                    onItemClick = onMediaClick,
-                                    onSeeAll = {},
-                                )
-                            }
-                        }
-                    }
-
-                    // ── Catalog Shelves ──
-                    items(filteredShelves, key = { it.id }) { shelf ->
-                        Spacer(Modifier.height(8.dp))
-                        CatalogShelf(
-                            title = shelf.title,
-                            items = shelf.items,
-                            shelfType = shelf.type,
-                            onItemClick = onMediaClick,
-                            onSeeAll = {},
-                        )
-                    }
-
-                    // ── Because You Watched ──
+                    // ── Because You Watched (not in section config — always at end) ──
                     state.becauseYouWatched.forEach { shelf ->
                         item(key = shelf.id) {
                             Spacer(Modifier.height(8.dp))
@@ -284,24 +486,11 @@ fun HomeScreen(
                         }
                     }
 
-                    // ── Hidden Gems ──
-                    state.hiddenGemsShelf?.let { gems ->
-                        if (gems.items.isNotEmpty()) {
-                            item(key = "hidden_gems") {
-                                Spacer(Modifier.height(8.dp))
-                                CatalogShelf(
-                                    title = gems.title,
-                                    items = gems.items,
-                                    shelfType = gems.type,
-                                    onItemClick = onMediaClick,
-                                    onSeeAll = {},
-                                )
-                            }
-                        }
-                    }
+                    // (Hidden Gems is now part of the section config loop above)
                 }
             }
         }
+
     }
 }
 
@@ -404,7 +593,7 @@ private fun HeroSlide(
             // Genre tags
             if (item.genres.isNotEmpty()) {
                 Text(
-                    text = item.genres.take(3).joinToString(" • ") { it.name },
+                    text = item.genres.take(3).joinToString(" \u2022 ") { it.name },
                     style = MaterialTheme.typography.labelMedium,
                     color = Amber,
                     letterSpacing = MaterialTheme.typography.labelMedium.letterSpacing,
@@ -434,7 +623,7 @@ private fun HeroSlide(
                 item.rating?.let { rating ->
                     if (rating > 0) {
                         Text(
-                            text = "  •  ★ ${"%.1f".format(rating)}",
+                            text = "  \u2022  \u2605 ${"%.1f".format(rating)}",
                             style = MaterialTheme.typography.bodyMedium,
                             color = Amber.copy(alpha = 0.9f),
                         )
@@ -613,9 +802,10 @@ fun CatalogShelf(
     shelfType: ShelfType = ShelfType.POSTER,
     onItemClick: (MediaItem) -> Unit,
     onSeeAll: (() -> Unit)? = null,
+    cardSizeOverride: CardSize? = null,
     modifier: Modifier = Modifier,
 ) {
-    val cardSize = when (shelfType) {
+    val cardSize = cardSizeOverride ?: when (shelfType) {
         ShelfType.LANDSCAPE, ShelfType.WIDE -> CardSize.LANDSCAPE
         else -> CardSize.MEDIUM
     }
@@ -631,11 +821,14 @@ fun CatalogShelf(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            items(items, key = { it.id }) { item ->
+            items(
+                items.size,
+                key = { index -> "${items[index].id}_$index" },
+            ) { index ->
                 PosterCard(
-                    item = item,
+                    item = items[index],
                     size = cardSize,
-                    onClick = { onItemClick(item) },
+                    onClick = { onItemClick(items[index]) },
                 )
             }
         }
@@ -643,19 +836,20 @@ fun CatalogShelf(
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Recommendation Card — Poster with "Because you like…" label
+// Recommendation Card — Poster with "Because you like..." label
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @Composable
 fun RecommendationCard(
     scored: ScoredMediaItem,
     onClick: () -> Unit,
+    cardSize: CardSize = CardSize.MEDIUM,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier = modifier.width(120.dp)) {
+    Column(modifier = modifier.width(cardSize.width)) {
         PosterCard(
             item = scored.item,
-            size = CardSize.MEDIUM,
+            size = cardSize,
             onClick = onClick,
         )
         Spacer(Modifier.height(4.dp))
@@ -666,6 +860,43 @@ fun RecommendationCard(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 2.dp),
+        )
+    }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Person Avatar Card — Circular avatar with name
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@Composable
+fun PersonAvatarCard(
+    person: PersonSummary,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .width(80.dp)
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        AsyncImage(
+            model = person.profileUrl,
+            contentDescription = person.name,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(72.dp)
+                .clip(CircleShape),
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = person.name,
+            style = MaterialTheme.typography.labelSmall,
+            color = Snow,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth(),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
     }
 }

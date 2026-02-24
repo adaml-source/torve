@@ -1,9 +1,11 @@
 package com.streamvault.domain.repository
 
+import com.streamvault.data.metadata.TmdbKeyword
 import com.streamvault.data.metadata.TmdbPerson
 import com.streamvault.domain.model.CatalogShelf
 import com.streamvault.domain.model.MediaItem
 import com.streamvault.domain.model.PagedResult
+import com.streamvault.domain.model.PersonSummary
 import com.streamvault.domain.model.Season
 
 interface MetadataRepository {
@@ -37,6 +39,13 @@ interface MetadataRepository {
         runtimeLte: Int? = null,
         withCast: String? = null,
         withCrew: String? = null,
+        withWatchProviders: String? = null,
+        watchRegion: String? = null,
+        withKeywords: String? = null,
     ): PagedResult
+    suspend fun searchKeywords(query: String): List<TmdbKeyword>
     suspend fun searchMultiPaged(query: String, page: Int = 1, type: String? = null): PagedResult
+    suspend fun getPopularPeople(page: Int = 1): List<PersonSummary>
+    suspend fun searchPerson(query: String, page: Int = 1): List<PersonSummary>
+    suspend fun getWatchProviderLogos(type: String = "movie", region: String = "US"): Map<Int, String>
 }

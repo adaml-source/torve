@@ -24,45 +24,97 @@ class CatalogAggregator(
         val enabledAddons = addons.filter { it.isEnabled }
         if (enabledAddons.isEmpty()) return@coroutineScope emptyList()
 
-        enabledAddons.map { addon ->
-            async {
-                try {
-                    withTimeout(10_000) {
-                        val baseUrl = addon.manifestUrl
-                            .removeSuffix("/manifest.json")
-                            .removeSuffix("/")
-                        val manifest = addon.manifest
-                        val catalogs = manifest.catalogs.filter { it.type == type }
+        enabledAddons.flatMap { addon ->
+            val baseUrl = addon.manifestUrl
+                .removeSuffix("/manifest.json")
+                .removeSuffix("/")
+            val manifest = addon.manifest
+            val catalogs = manifest.catalogs.filter { it.type == type }
+                .filter { cat ->
+                    // Skip search-only catalogs
+                    val searchRequired = cat.extra.any { it.name == "search" && it.isRequired }
+                    !searchRequired
+                }
 
-                        catalogs.mapNotNull { catalog ->
-                            try {
-                                val items = fetchCatalogItems(baseUrl, type, catalog.id)
-                                if (items.isNotEmpty()) {
-                                    CatalogShelf(
-                                        id = "${manifest.id}-${catalog.id}",
-                                        title = catalog.name ?: "${manifest.name} - ${catalog.id}",
-                                        items = items,
-                                    )
-                                } else null
-                            } catch (_: Exception) {
-                                null
-                            }
+            catalogs.map { catalog ->
+                async {
+                    try {
+                        withTimeout(10_000) {
+                            val items = fetchCatalogItems(baseUrl, type, catalog.id)
+                            if (items.isNotEmpty()) {
+                                CatalogShelf(
+                                    id = "${manifest.id}-${catalog.id}",
+                                    title = catalog.name?.ifEmpty { null }
+                                        ?: "${manifest.name} - ${catalog.id}",
+                                    items = items.take(20),
+                                )
+                            } else null
                         }
+                    } catch (_: Exception) {
+                        null
                     }
-                } catch (_: Exception) {
-                    emptyList()
                 }
             }
-        }.awaitAll().flatten()
+        }.awaitAll().filterNotNull()
     }
 
     private suspend fun fetchCatalogItems(
         baseUrl: String,
         type: String,
         catalogId: String,
+        genre: String? = null,
+        search: String? = null,
+        skip: Int? = null,
     ): List<MediaItem> {
-        // TODO: Implement catalog item fetching from Stremio addons
-        // GET {baseUrl}/catalog/{type}/{catalogId}.json
-        return emptyList()
+        return try {
+            val response = addonClient.fetchCatalog(
+                baseUrl = baseUrl,
+                type = type,
+                catalogId = catalogId,
+                genre = genre,
+                search = search,
+                skip = skip,
+            )
+            response.metas.map { it.toMediaItem() }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    /**
+     * Search across all enabled addon catalogs that support search.
+     */
+    suspend fun searchAll(
+        addons: List<InstalledAddon>,
+        query: String,
+        type: String = "movie",
+    ): List<MediaItem> = coroutineScope {
+        val enabledAddons = addons.filter { it.isEnabled }
+        if (enabledAddons.isEmpty() || query.isBlank()) return@coroutineScope emptyList()
+
+        enabledAddons.flatMap { addon ->
+            val baseUrl = addon.manifestUrl
+                .removeSuffix("/manifest.json")
+                .removeSuffix("/")
+            val catalogs = addon.manifest.catalogs.filter { cat ->
+                cat.type == type && cat.extra.any { it.name == "search" }
+            }
+            catalogs.map { catalog ->
+                async {
+                    try {
+                        withTimeout(10_000) {
+                            fetchCatalogItems(
+                                baseUrl = baseUrl,
+                                type = type,
+                                catalogId = catalog.id,
+                                search = query,
+                            )
+                        }
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                }
+            }
+        }.awaitAll().flatten().distinctBy { it.id }
     }
 }

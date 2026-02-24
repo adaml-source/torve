@@ -64,6 +64,9 @@ dependencies {
     // Activity
     implementation(libs.activity.compose)
 
+    // Splash screen (Android 12+ native splash)
+    implementation("androidx.core:core-splashscreen:1.0.1")
+
     // AppCompat (locale switching)
     implementation(libs.appcompat)
 

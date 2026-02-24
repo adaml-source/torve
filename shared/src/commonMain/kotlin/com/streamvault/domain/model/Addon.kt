@@ -8,6 +8,7 @@ data class AddonManifest(
     val name: String,
     val version: String,
     val description: String = "",
+    val logo: String? = null,
     val resources: List<String> = emptyList(),
     val types: List<String> = emptyList(),
     val catalogs: List<AddonCatalog> = emptyList(),
@@ -20,6 +21,7 @@ data class AddonCatalog(
     val id: String,
     val name: String? = null,
     val extra: List<AddonExtra> = emptyList(),
+    val genres: List<String> = emptyList(),
 )
 
 @Serializable

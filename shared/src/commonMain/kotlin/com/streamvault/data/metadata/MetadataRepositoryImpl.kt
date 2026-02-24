@@ -5,6 +5,7 @@ import com.streamvault.domain.model.Episode
 import com.streamvault.domain.model.MediaItem
 import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.model.PagedResult
+import com.streamvault.domain.model.PersonSummary
 import com.streamvault.domain.model.Season
 import com.streamvault.domain.model.ShelfType
 import com.streamvault.domain.repository.MetadataRepository
@@ -188,9 +189,12 @@ class MetadataRepositoryImpl(
         runtimeLte: Int?,
         withCast: String?,
         withCrew: String?,
+        withWatchProviders: String?,
+        watchRegion: String?,
+        withKeywords: String?,
     ): PagedResult {
         return if (type == "tv") {
-            val resp = api.discoverTv(page, sortBy, withGenres, minRating, year, yearTo, runtimeGte, runtimeLte, withCast, withCrew)
+            val resp = api.discoverTv(page, sortBy, withGenres, minRating, year, yearTo, runtimeGte, runtimeLte, withCast, withCrew, withWatchProviders, watchRegion, withKeywords)
             PagedResult(
                 items = resp.results.map { TmdbMappers.tvToMediaItem(it) },
                 page = resp.page,
@@ -198,7 +202,7 @@ class MetadataRepositoryImpl(
                 totalResults = resp.totalResults,
             )
         } else {
-            val resp = api.discoverMovies(page, sortBy, withGenres, minRating, year, yearTo, runtimeGte, runtimeLte, withCast, withCrew)
+            val resp = api.discoverMovies(page, sortBy, withGenres, minRating, year, yearTo, runtimeGte, runtimeLte, withCast, withCrew, withWatchProviders, watchRegion, withKeywords)
             PagedResult(
                 items = resp.results.map { TmdbMappers.movieToMediaItem(it) },
                 page = resp.page,
@@ -206,6 +210,10 @@ class MetadataRepositoryImpl(
                 totalResults = resp.totalResults,
             )
         }
+    }
+
+    override suspend fun searchKeywords(query: String): List<TmdbKeyword> {
+        return api.searchKeywords(query).results
     }
 
     override suspend fun searchMultiPaged(query: String, page: Int, type: String?): PagedResult {
@@ -228,6 +236,23 @@ class MetadataRepositoryImpl(
             totalPages = resp.totalPages,
             totalResults = resp.totalResults,
         )
+    }
+
+    override suspend fun getPopularPeople(page: Int): List<PersonSummary> {
+        return api.getPopularPeople(page).results.map { TmdbMappers.personSummaryToDomain(it) }
+    }
+
+    override suspend fun searchPerson(query: String, page: Int): List<PersonSummary> {
+        return api.searchPerson(query, page).results.map { TmdbMappers.personSummaryToDomain(it) }
+    }
+
+    override suspend fun getWatchProviderLogos(type: String, region: String): Map<Int, String> {
+        val response = api.getWatchProviders(type, region)
+        return response.results.mapNotNull { provider ->
+            provider.logoPath?.let { path ->
+                provider.providerId to "${TmdbApiClient.IMAGE_BASE}/w154$path"
+            }
+        }.toMap()
     }
 
     override suspend fun getHomeShelves(): List<CatalogShelf> = coroutineScope {

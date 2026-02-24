@@ -31,6 +31,12 @@ data class CatalogUiState(
     val popularItems: List<MediaItem> = emptyList(),
     val topRatedItems: List<MediaItem> = emptyList(),
     val shelvesLoaded: Boolean = false,
+    // Provider filter (TMDB watch provider ID)
+    val providerId: Int? = null,
+    // AI search
+    val isAiSearching: Boolean = false,
+    val aiSearchLabel: String? = null,
+    val aiSearchError: String? = null,
 )
 
 enum class CatalogCategory(val label: String) {

@@ -1,5 +1,6 @@
 package com.streamvault.presentation.settings
 
+import com.streamvault.data.ai.AiProvider
 import com.streamvault.data.debrid.DebridClient
 import com.streamvault.data.kodi.KodiClient
 import com.streamvault.data.kodi.KodiHost
@@ -7,8 +8,11 @@ import com.streamvault.data.simkl.SimklClient
 import com.streamvault.data.trakt.TraktClient
 import com.streamvault.db.StreamVaultDatabase
 import com.streamvault.domain.model.CodecPreference
+import com.streamvault.domain.model.DEFAULT_STREAM_GROUPS
 import com.streamvault.domain.model.DebridServiceType
 import com.streamvault.domain.model.HdrMode
+import com.streamvault.domain.model.RegexPattern
+import com.streamvault.domain.model.StreamGroup
 import com.streamvault.domain.model.StreamPreferences
 import com.streamvault.domain.model.StreamQuality
 import com.streamvault.domain.repository.PreferencesRepository
@@ -72,7 +76,17 @@ class SettingsViewModel(
         const val KEY_HDR_MODE = "hdr_mode"
         const val KEY_AUTO_PLAY_NEXT_EPISODE = "auto_play_next_episode"
         const val KEY_LAST_SYNC_TIME = "last_sync_time"
+        const val KEY_REGEX_PATTERNS = "regex_patterns"
+        const val KEY_STREAM_GROUPS = "stream_groups"
+        const val KEY_CLAUDE_API_KEY = "claude_api_key"
+        const val KEY_AI_PROVIDER = "ai_provider"
+        const val KEY_CHATGPT_API_KEY = "chatgpt_api_key"
+        const val KEY_GEMINI_API_KEY = "gemini_api_key"
+        const val KEY_PERPLEXITY_API_KEY = "perplexity_api_key"
+        const val KEY_DEEPSEEK_API_KEY = "deepseek_api_key"
     }
+
+    private val jsonParser = Json { ignoreUnknownKeys = true }
 
     init {
         loadSavedSettings()
@@ -127,6 +141,22 @@ class SettingsViewModel(
                 try { HdrMode.valueOf(it) } catch (_: Exception) { null }
             } ?: HdrMode.AUTO
 
+            val regexPatterns = prefsRepo.getString(KEY_REGEX_PATTERNS)?.let {
+                try { jsonParser.decodeFromString<List<RegexPattern>>(it) } catch (_: Exception) { emptyList() }
+            } ?: emptyList()
+            val streamGroups = prefsRepo.getString(KEY_STREAM_GROUPS)?.let {
+                try { jsonParser.decodeFromString<List<StreamGroup>>(it) } catch (_: Exception) { DEFAULT_STREAM_GROUPS }
+            } ?: DEFAULT_STREAM_GROUPS
+
+            val claudeApiKey = prefsRepo.getString(KEY_CLAUDE_API_KEY) ?: ""
+            val aiProvider = prefsRepo.getString(KEY_AI_PROVIDER)?.let {
+                try { AiProvider.valueOf(it) } catch (_: Exception) { null }
+            } ?: AiProvider.CLAUDE
+            val chatGptApiKey = prefsRepo.getString(KEY_CHATGPT_API_KEY) ?: ""
+            val geminiApiKey = prefsRepo.getString(KEY_GEMINI_API_KEY) ?: ""
+            val perplexityApiKey = prefsRepo.getString(KEY_PERPLEXITY_API_KEY) ?: ""
+            val deepSeekApiKey = prefsRepo.getString(KEY_DEEPSEEK_API_KEY) ?: ""
+
             _state.update {
                 it.copy(
                     debridProvider = provider,
@@ -152,6 +182,14 @@ class SettingsViewModel(
                     codecPreference = codecPreference,
                     hdrMode = hdrMode,
                     lastSyncTime = lastSyncTime,
+                    regexPatterns = regexPatterns,
+                    streamGroups = streamGroups,
+                    aiProvider = aiProvider,
+                    claudeApiKey = claudeApiKey,
+                    chatGptApiKey = chatGptApiKey,
+                    geminiApiKey = geminiApiKey,
+                    perplexityApiKey = perplexityApiKey,
+                    deepSeekApiKey = deepSeekApiKey,
                 )
             }
 
@@ -423,6 +461,54 @@ class SettingsViewModel(
                 traktDeviceCode = null,
                 isPollingTrakt = false,
             )
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // SIMKL
+    // -------------------------------------------------------------------------
+
+    // -------------------------------------------------------------------------
+    // AI Provider
+    // -------------------------------------------------------------------------
+
+    fun setAiProvider(provider: AiProvider) {
+        _state.update { it.copy(aiProvider = provider) }
+        scope.launch { prefsRepo.setString(KEY_AI_PROVIDER, provider.name) }
+    }
+
+    fun setClaudeApiKey(key: String) {
+        _state.update { it.copy(claudeApiKey = key) }
+        scope.launch { prefsRepo.setString(KEY_CLAUDE_API_KEY, key) }
+    }
+
+    fun setChatGptApiKey(key: String) {
+        _state.update { it.copy(chatGptApiKey = key) }
+        scope.launch { prefsRepo.setString(KEY_CHATGPT_API_KEY, key) }
+    }
+
+    fun setGeminiApiKey(key: String) {
+        _state.update { it.copy(geminiApiKey = key) }
+        scope.launch { prefsRepo.setString(KEY_GEMINI_API_KEY, key) }
+    }
+
+    fun setPerplexityApiKey(key: String) {
+        _state.update { it.copy(perplexityApiKey = key) }
+        scope.launch { prefsRepo.setString(KEY_PERPLEXITY_API_KEY, key) }
+    }
+
+    fun setDeepSeekApiKey(key: String) {
+        _state.update { it.copy(deepSeekApiKey = key) }
+        scope.launch { prefsRepo.setString(KEY_DEEPSEEK_API_KEY, key) }
+    }
+
+    fun setActiveAiApiKey(key: String) {
+        when (_state.value.aiProvider) {
+            AiProvider.CLAUDE -> setClaudeApiKey(key)
+            AiProvider.CHATGPT -> setChatGptApiKey(key)
+            AiProvider.GEMINI -> setGeminiApiKey(key)
+            AiProvider.PERPLEXITY -> setPerplexityApiKey(key)
+            AiProvider.DEEPSEEK -> setDeepSeekApiKey(key)
         }
     }
 
@@ -703,6 +789,83 @@ class SettingsViewModel(
                 delay(2000)
                 _state.update { it.copy(cacheCleared = false) }
             } catch (_: Exception) { }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Regex Patterns
+    // -------------------------------------------------------------------------
+
+    fun addRegexPattern(label: String = "", pattern: String = "") {
+        val updated = _state.value.regexPatterns + RegexPattern(label, pattern)
+        _state.update { it.copy(regexPatterns = updated) }
+        saveRegexPatterns(updated)
+    }
+
+    fun updateRegexPattern(index: Int, pattern: RegexPattern) {
+        val updated = _state.value.regexPatterns.toMutableList().also { it[index] = pattern }
+        _state.update { it.copy(regexPatterns = updated) }
+        saveRegexPatterns(updated)
+    }
+
+    fun removeRegexPattern(index: Int) {
+        val updated = _state.value.regexPatterns.toMutableList().also { it.removeAt(index) }
+        _state.update { it.copy(regexPatterns = updated) }
+        saveRegexPatterns(updated)
+    }
+
+    fun removeRegexPatternByValue(patternValue: String) {
+        val updated = _state.value.regexPatterns.filter { it.pattern != patternValue }
+        _state.update { it.copy(regexPatterns = updated) }
+        saveRegexPatterns(updated)
+    }
+
+    fun toggleRegexPattern(index: Int) {
+        val current = _state.value.regexPatterns[index]
+        updateRegexPattern(index, current.copy(enabled = !current.enabled))
+    }
+
+    private fun saveRegexPatterns(patterns: List<RegexPattern>) {
+        scope.launch {
+            prefsRepo.setString(KEY_REGEX_PATTERNS, jsonParser.encodeToString(patterns))
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Stream Groups
+    // -------------------------------------------------------------------------
+
+    fun addStreamGroup(name: String = "", matchPattern: String = "", priority: Int = 99) {
+        val updated = _state.value.streamGroups + StreamGroup(name, matchPattern, priority)
+        _state.update { it.copy(streamGroups = updated) }
+        saveStreamGroups(updated)
+    }
+
+    fun updateStreamGroup(index: Int, group: StreamGroup) {
+        val updated = _state.value.streamGroups.toMutableList().also { it[index] = group }
+        _state.update { it.copy(streamGroups = updated) }
+        saveStreamGroups(updated)
+    }
+
+    fun removeStreamGroup(index: Int) {
+        val updated = _state.value.streamGroups.toMutableList().also { it.removeAt(index) }
+        _state.update { it.copy(streamGroups = updated) }
+        saveStreamGroups(updated)
+    }
+
+    fun toggleStreamGroup(index: Int) {
+        val current = _state.value.streamGroups[index]
+        updateStreamGroup(index, current.copy(enabled = !current.enabled))
+    }
+
+    fun resetStreamGroups() {
+        _state.update { it.copy(streamGroups = DEFAULT_STREAM_GROUPS) }
+        saveStreamGroups(DEFAULT_STREAM_GROUPS)
+    }
+
+    private fun saveStreamGroups(groups: List<StreamGroup>) {
+        scope.launch {
+            prefsRepo.setString(KEY_STREAM_GROUPS, jsonParser.encodeToString(groups))
         }
     }
 }

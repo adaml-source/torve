@@ -11,6 +11,9 @@ import com.streamvault.data.trakt.TraktUser
 import com.streamvault.domain.model.CodecPreference
 import com.streamvault.domain.model.DebridServiceType
 import com.streamvault.domain.model.HdrMode
+import com.streamvault.data.ai.AiProvider
+import com.streamvault.domain.model.RegexPattern
+import com.streamvault.domain.model.StreamGroup
 import com.streamvault.domain.model.StreamQuality
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
@@ -61,6 +64,13 @@ data class SettingsUiState(
     val simklLoading: Boolean = false,
     val simklDeviceCode: SimklDeviceCode? = null,
     val isPollingSimkl: Boolean = false,
+    // AI Provider
+    val aiProvider: AiProvider = AiProvider.CLAUDE,
+    val claudeApiKey: String = "",
+    val chatGptApiKey: String = "",
+    val geminiApiKey: String = "",
+    val perplexityApiKey: String = "",
+    val deepSeekApiKey: String = "",
     // Stream quality & size restrictions
     val maxQuality: StreamQuality = StreamQuality.REMUX_4K,
     val minQuality: StreamQuality = StreamQuality.SD_480P,
@@ -85,4 +95,16 @@ data class SettingsUiState(
     val isSyncing: Boolean = false,
     val syncError: String? = null,
     val syncSuccess: String? = null,
-)
+    // Regex Patterns
+    val regexPatterns: List<RegexPattern> = emptyList(),
+    // Stream Groups
+    val streamGroups: List<StreamGroup> = emptyList(),
+) {
+    val activeAiApiKey: String get() = when (aiProvider) {
+        AiProvider.CLAUDE -> claudeApiKey
+        AiProvider.CHATGPT -> chatGptApiKey
+        AiProvider.GEMINI -> geminiApiKey
+        AiProvider.PERPLEXITY -> perplexityApiKey
+        AiProvider.DEEPSEEK -> deepSeekApiKey
+    }
+}

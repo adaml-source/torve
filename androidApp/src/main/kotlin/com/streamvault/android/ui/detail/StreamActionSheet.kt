@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Cast
+import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.OpenInNew
@@ -28,6 +30,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -35,7 +38,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.mediarouter.app.MediaRouteButton
+import com.google.android.gms.cast.framework.CastButtonFactory
+import com.google.android.gms.cast.framework.CastContext
 import com.streamvault.android.R
+import com.streamvault.android.player.CastManager
 import com.streamvault.android.player.ExternalPlayerLauncher
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Charcoal
@@ -48,6 +55,7 @@ import com.streamvault.android.ui.theme.StreamVault
 fun StreamActionSheet(
     url: String,
     title: String,
+    posterUrl: String = "",
     onPlayInApp: () -> Unit,
     onDownload: (() -> Unit)? = null,
     onDismiss: () -> Unit,
@@ -55,6 +63,19 @@ fun StreamActionSheet(
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val installedPlayers = ExternalPlayerLauncher.getInstalledPlayers(context)
+
+    // Google Cast
+    val castManager = remember {
+        try { CastManager(context) } catch (_: Exception) { null }
+    }
+    val castAvailable = remember {
+        try {
+            CastContext.getSharedInstance(context)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -84,6 +105,37 @@ fun StreamActionSheet(
                     onDismiss()
                 },
             )
+
+            // Cast to device
+            if (castAvailable && castManager != null) {
+                ActionItem(
+                    icon = if (castManager.isCasting) Icons.Default.CastConnected else Icons.Default.Cast,
+                    label = if (castManager.isCasting) "Cast (Connected)" else "Cast to Device",
+                    onClick = {
+                        if (castManager.isCasting) {
+                            castManager.castMedia(
+                                url = url,
+                                title = title,
+                                posterUrl = posterUrl.ifBlank { null },
+                            )
+                            onDismiss()
+                        } else {
+                            // Open the Cast dialog via MediaRouteButton programmatically
+                            try {
+                                val castContext = CastContext.getSharedInstance(context)
+                                val routeSelector = castContext.mergedSelector
+                                if (routeSelector != null) {
+                                    val mediaRouteButton = MediaRouteButton(context)
+                                    CastButtonFactory.setUpMediaRouteButton(context, mediaRouteButton)
+                                    mediaRouteButton.performClick()
+                                }
+                            } catch (_: Exception) {
+                                Toast.makeText(context, "Cast not available", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                )
+            }
 
             HorizontalDivider(
                 color = Steel.copy(alpha = 0.3f),

@@ -100,6 +100,11 @@ fun SettingsScreen(
     onPrivacyPolicyClick: () -> Unit = {},
     onTermsClick: () -> Unit = {},
     onHelpClick: () -> Unit = {},
+    onStreamingServicesClick: () -> Unit = {},
+    onAddonCatalogClick: () -> Unit = {},
+    onRegexPatternsClick: () -> Unit = {},
+    onStreamGroupsClick: () -> Unit = {},
+    onHomeLayoutClick: () -> Unit = {},
     viewModel: SettingsViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
@@ -887,9 +892,48 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(24.dp))
 
-        // ── Content Sources Section ──
+        // ── Content Management ──
         val addonViewModel: AddonViewModel = koinInject()
-        AddonManagerSection(viewModel = addonViewModel)
+        val addonState by addonViewModel.state.collectAsState()
+        SectionHeader(title = "Content Management")
+        Spacer(Modifier.height(8.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Charcoal),
+        ) {
+            Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                SettingsNavRow(
+                    title = "Home Layout",
+                    subtitle = "Section order & poster style",
+                    onClick = onHomeLayoutClick,
+                )
+                HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
+                SettingsNavRow(
+                    title = "Addons & Content Sources",
+                    subtitle = "${addonState.addons.size} installed · Browse & manage",
+                    onClick = onAddonCatalogClick,
+                )
+                HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
+                SettingsNavRow(
+                    title = "Streaming Services",
+                    subtitle = "Personalize home services",
+                    onClick = onStreamingServicesClick,
+                )
+                HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
+                SettingsNavRow(
+                    title = "Stream Groups",
+                    subtitle = "${state.streamGroups.size} groups",
+                    onClick = onStreamGroupsClick,
+                )
+                HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
+                SettingsNavRow(
+                    title = "Regex Patterns",
+                    subtitle = "${state.regexPatterns.size} patterns",
+                    onClick = onRegexPatternsClick,
+                )
+            }
+        }
 
         Spacer(Modifier.height(24.dp))
 
@@ -1004,6 +1048,85 @@ fun SettingsScreen(
                         Spacer(Modifier.width(4.dp))
                         Text(stringResource(R.string.settings_add_kodi_host))
                     }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        // ── AI Features ──
+        SectionHeader(title = "AI Features")
+        Spacer(Modifier.height(8.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Charcoal),
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    "Choose your AI provider and add your API key to enable AI-powered search.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Silver,
+                )
+                Spacer(Modifier.height(8.dp))
+
+                // Provider selector
+                var aiProviderExpanded by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(
+                    expanded = aiProviderExpanded,
+                    onExpandedChange = { aiProviderExpanded = !aiProviderExpanded },
+                ) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor(),
+                        shape = RoundedCornerShape(8.dp),
+                        color = Gunmetal,
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("AI Provider", style = MaterialTheme.typography.bodySmall, color = StreamVault.colors.textSecondary)
+                                Spacer(Modifier.height(2.dp))
+                                Text(state.aiProvider.label, style = MaterialTheme.typography.bodyMedium, color = Snow)
+                            }
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = StreamVault.colors.textSecondary, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                    ExposedDropdownMenu(
+                        expanded = aiProviderExpanded,
+                        onDismissRequest = { aiProviderExpanded = false },
+                    ) {
+                        com.streamvault.data.ai.AiProvider.entries.forEach { provider ->
+                            DropdownMenuItem(
+                                text = { Text(provider.label) },
+                                onClick = {
+                                    viewModel.setAiProvider(provider)
+                                    aiProviderExpanded = false
+                                },
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+                SettingsTextField(
+                    value = state.activeAiApiKey,
+                    onValueChange = { viewModel.setActiveAiApiKey(it) },
+                    label = "${state.aiProvider.label} API Key",
+                    placeholder = state.aiProvider.keyPlaceholder,
+                )
+                if (state.activeAiApiKey.isNotBlank()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "AI search enabled (${state.aiProvider.label})",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Emerald,
+                    )
                 }
             }
         }
@@ -1483,6 +1606,36 @@ private fun SettingsTextField(
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun SettingsNavRow(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = Snow,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = StreamVault.colors.textSecondary,
+            )
+        }
+        Text(">", style = MaterialTheme.typography.bodyMedium, color = StreamVault.colors.textTertiary)
     }
 }
 

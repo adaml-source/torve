@@ -126,6 +126,21 @@ class TmdbApiClient(private val httpClient: HttpClient) {
         }.body()
     }
 
+    suspend fun getPopularPeople(page: Int = 1): TmdbResponse<TmdbPersonSummary> {
+        return httpClient.get("$BASE_URL/person/popular") {
+            parameter("api_key", API_KEY)
+            parameter("page", page)
+        }.body()
+    }
+
+    suspend fun searchPerson(query: String, page: Int = 1): TmdbResponse<TmdbPersonSummary> {
+        return httpClient.get("$BASE_URL/search/person") {
+            parameter("api_key", API_KEY)
+            parameter("query", query)
+            parameter("page", page)
+        }.body()
+    }
+
     suspend fun getPersonCredits(personId: Int): TmdbPersonCredits {
         return httpClient.get("$BASE_URL/person/$personId/combined_credits") {
             parameter("api_key", API_KEY)
@@ -158,6 +173,9 @@ class TmdbApiClient(private val httpClient: HttpClient) {
         runtimeLte: Int? = null,
         withCast: String? = null,
         withCrew: String? = null,
+        withWatchProviders: String? = null,
+        watchRegion: String? = null,
+        withKeywords: String? = null,
     ): TmdbResponse<TmdbMovie> {
         return httpClient.get("$BASE_URL/discover/movie") {
             parameter("api_key", API_KEY)
@@ -171,6 +189,9 @@ class TmdbApiClient(private val httpClient: HttpClient) {
             runtimeLte?.let { parameter("with_runtime.lte", it) }
             withCast?.let { parameter("with_cast", it) }
             withCrew?.let { parameter("with_crew", it) }
+            withWatchProviders?.let { parameter("with_watch_providers", it) }
+            watchRegion?.let { parameter("watch_region", it) }
+            withKeywords?.let { parameter("with_keywords", it) }
             if (minRating != null) parameter("vote_count.gte", 50)
         }.body()
     }
@@ -186,6 +207,9 @@ class TmdbApiClient(private val httpClient: HttpClient) {
         runtimeLte: Int? = null,
         withCast: String? = null,
         withCrew: String? = null,
+        withWatchProviders: String? = null,
+        watchRegion: String? = null,
+        withKeywords: String? = null,
     ): TmdbResponse<TmdbTv> {
         return httpClient.get("$BASE_URL/discover/tv") {
             parameter("api_key", API_KEY)
@@ -199,6 +223,9 @@ class TmdbApiClient(private val httpClient: HttpClient) {
             runtimeLte?.let { parameter("with_runtime.lte", it) }
             withCast?.let { parameter("with_cast", it) }
             withCrew?.let { parameter("with_crew", it) }
+            withWatchProviders?.let { parameter("with_watch_providers", it) }
+            watchRegion?.let { parameter("watch_region", it) }
+            withKeywords?.let { parameter("with_keywords", it) }
             if (minRating != null) parameter("vote_count.gte", 50)
         }.body()
     }
@@ -206,6 +233,20 @@ class TmdbApiClient(private val httpClient: HttpClient) {
     suspend fun getTvSeasonDetail(tvId: Int, seasonNumber: Int): TmdbSeasonDetail {
         return httpClient.get("$BASE_URL/tv/$tvId/season/$seasonNumber") {
             parameter("api_key", API_KEY)
+        }.body()
+    }
+
+    suspend fun searchKeywords(query: String): TmdbResponse<TmdbKeyword> {
+        return httpClient.get("$BASE_URL/search/keyword") {
+            parameter("api_key", API_KEY)
+            parameter("query", query)
+        }.body()
+    }
+
+    suspend fun getWatchProviders(type: String = "movie", region: String = "US"): TmdbWatchProvidersResponse {
+        return httpClient.get("$BASE_URL/watch/providers/$type") {
+            parameter("api_key", API_KEY)
+            parameter("watch_region", region)
         }.body()
     }
 }

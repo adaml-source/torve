@@ -99,6 +99,24 @@ class SimklClient(
             setBody(body)
         }
     }
+
+    suspend fun addToWatchlist(accessToken: String, body: SimklSyncBody) {
+        httpClient.post("$BASE_URL/sync/add-to-list") {
+            contentType(ContentType.Application.Json)
+            header("Authorization", "Bearer $accessToken")
+            header("simkl-api-key", clientId)
+            setBody(body)
+        }
+    }
+
+    suspend fun removeFromWatchlist(accessToken: String, body: SimklSyncBody) {
+        httpClient.post("$BASE_URL/sync/remove-from-list") {
+            contentType(ContentType.Application.Json)
+            header("Authorization", "Bearer $accessToken")
+            header("simkl-api-key", clientId)
+            setBody(body)
+        }
+    }
 }
 
 // --- Data Classes ---

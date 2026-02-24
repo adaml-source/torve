@@ -2,6 +2,7 @@ package com.streamvault.android.ui.detail
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -95,6 +96,7 @@ fun DetailScreen(
     onBack: () -> Unit,
     onMediaClick: (MediaItem) -> Unit,
     onPersonClick: ((Int) -> Unit)? = null,
+    onSettingsClick: (() -> Unit)? = null,
     viewModel: DetailViewModel = koinInject(),
     settingsViewModel: SettingsViewModel = koinInject(),
     downloadViewModel: DownloadViewModel = koinInject(),
@@ -174,20 +176,11 @@ fun DetailScreen(
                         )
 
                         // Back button
-                        TopAppBar(
-                            title = {},
-                            navigationIcon = {
-                                IconButton(onClick = onBack) {
-                                    Icon(
-                                        Icons.AutoMirrored.Rounded.ArrowBack,
-                                        contentDescription = stringResource(R.string.common_back),
-                                        tint = Snow,
-                                    )
-                                }
-                            },
-                            colors = TopAppBarDefaults.topAppBarColors(
-                                containerColor = Color.Transparent,
-                            ),
+                        com.streamvault.android.ui.components.BackButton(
+                            onClick = onBack,
+                            modifier = Modifier
+                                .statusBarsPadding()
+                                .padding(start = 12.dp, top = 8.dp),
                         )
                     }
 
@@ -257,6 +250,8 @@ fun DetailScreen(
                                 onClick = {
                                     if (settingsState.debridConnected) {
                                         viewModel.fetchStreams()
+                                    } else {
+                                        onSettingsClick?.invoke()
                                     }
                                 },
                                 modifier = Modifier
@@ -610,6 +605,7 @@ fun DetailScreen(
                     StreamActionSheet(
                         url = resolvedUrl,
                         title = dlTitle,
+                        posterUrl = item?.posterUrl ?: "",
                         onPlayInApp = { onPlayClick(resolvedUrl, ctxSeason, ctxEpisode, item?.imdbId) },
                         onDownload = {
                             if (item != null) {

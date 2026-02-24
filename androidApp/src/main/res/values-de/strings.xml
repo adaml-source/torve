@@ -10,7 +10,7 @@
     <string name="nav_tv_shows">Serien</string>
     <string name="nav_live_tv">Live-TV</string>
     <string name="nav_watchlist">Merkliste</string>
-    <string name="nav_profile">Profil</string>
+    <string name="nav_settings">Einstellungen</string>
 
     <!-- Common -->
     <string name="common_connect">Verbinden</string>

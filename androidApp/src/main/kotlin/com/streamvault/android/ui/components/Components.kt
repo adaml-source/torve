@@ -23,8 +23,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -46,6 +48,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import coil3.compose.SubcomposeAsyncImage
 import com.streamvault.android.ui.theme.Amber
+import com.streamvault.android.ui.theme.Ash
 import com.streamvault.android.ui.theme.Badge1080p
 import com.streamvault.android.ui.theme.Badge4K
 import com.streamvault.android.ui.theme.Badge720p
@@ -399,19 +402,33 @@ fun SectionHeader(
     modifier: Modifier = Modifier,
     action: String? = null,
     onActionClick: (() -> Unit)? = null,
+    showCustomize: Boolean = false,
+    onCustomizeClick: (() -> Unit)? = null,
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Text(
             text = title,
             style = MaterialTheme.typography.headlineSmall,
             color = StreamVault.colors.textPrimary,
+            modifier = Modifier.weight(1f),
         )
+        if (showCustomize && onCustomizeClick != null) {
+            Icon(
+                Icons.Rounded.Tune,
+                contentDescription = "Customize",
+                tint = Ash,
+                modifier = Modifier
+                    .size(18.dp)
+                    .clickable(onClick = onCustomizeClick)
+                    .padding(end = 0.dp),
+            )
+            Spacer(Modifier.width(12.dp))
+        }
         if (action != null && onActionClick != null) {
             Text(
                 text = action,
@@ -420,6 +437,32 @@ fun SectionHeader(
                 modifier = Modifier.clickable(onClick = onActionClick),
             )
         }
+    }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Back Button — Circular translucent navigation button
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@Composable
+fun BackButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(Gunmetal.copy(alpha = 0.65f))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+            contentDescription = "Back",
+            tint = Snow,
+            modifier = Modifier.size(20.dp),
+        )
     }
 }
 
