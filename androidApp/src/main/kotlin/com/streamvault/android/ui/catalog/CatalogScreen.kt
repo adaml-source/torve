@@ -139,8 +139,14 @@ fun CatalogScreen(
         BackHandler(onBack = onBack)
     }
 
+    // Reset grid scroll position when viewModel changes (e.g. provider type switch)
+    LaunchedEffect(viewModel) {
+        gridState.scrollToItem(0)
+    }
+
     // Infinite scroll: trigger loadMore when near the bottom
-    LaunchedEffect(gridState) {
+    // Key includes viewModel so it restarts when VM changes (provider Movies→TV switch)
+    LaunchedEffect(gridState, viewModel) {
         snapshotFlow {
             val layoutInfo = gridState.layoutInfo
             val totalItems = layoutInfo.totalItemsCount
@@ -155,7 +161,7 @@ fun CatalogScreen(
             }
     }
 
-    val isSearchMode = state.searchQuery.length >= 2
+    val isSearchMode = state.searchQuery.length >= 2 || state.hasActiveSearch
     val displayItems = if (isSearchMode) state.searchResults else state.items
     val isLoadingMore = if (isSearchMode) state.isSearchingMore else state.isLoadingMore
 
@@ -490,6 +496,7 @@ fun CatalogScreen(
                         onFilterClick = { viewModel.toggleFilterSheet() },
                         isAiSearching = state.isAiSearching,
                         onAiSearchClick = { viewModel.searchWithAi(settingsState.aiProvider, settingsState.activeAiApiKey) },
+                        hasActiveSearch = state.hasActiveSearch,
                     )
                     // AI search hint / error
                     state.aiSearchError?.let { hint ->
@@ -499,6 +506,46 @@ fun CatalogScreen(
                             color = Amber.copy(alpha = 0.7f),
                             modifier = Modifier.padding(top = 4.dp),
                         )
+                    }
+                    // Active search banner
+                    if (state.hasActiveSearch && state.searchResults.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Gunmetal)
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                if (state.aiSearchLabel != null) Icons.Rounded.AutoAwesome else Icons.Rounded.Search,
+                                contentDescription = null,
+                                tint = Amber,
+                                modifier = Modifier.size(14.dp),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = state.aiSearchLabel ?: "\"${state.searchQuery}\"",
+                                color = Snow,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                text = "${state.searchResults.size} results",
+                                color = StreamVault.colors.textTertiary,
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            TextButton(
+                                onClick = { viewModel.clearSearch() },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            ) {
+                                Text("Clear", color = Amber, style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
                     }
                 }
             }
@@ -683,6 +730,7 @@ private fun CatalogSearchRow(
     onFilterClick: () -> Unit,
     isAiSearching: Boolean = false,
     onAiSearchClick: () -> Unit = {},
+    hasActiveSearch: Boolean = false,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -715,7 +763,7 @@ private fun CatalogSearchRow(
                     }
                 },
             )
-            if (searchQuery.isNotEmpty()) {
+            if (searchQuery.isNotEmpty() || hasActiveSearch) {
                 IconButton(
                     onClick = onClearSearch,
                     modifier = Modifier
@@ -742,7 +790,7 @@ private fun CatalogSearchRow(
         }
 
         // AI sparkle button — visible when query has text
-        if (searchQuery.length >= 2) {
+        if (searchQuery.length >= 2 || hasActiveSearch) {
             IconButton(
                 onClick = onAiSearchClick,
                 enabled = !isAiSearching,

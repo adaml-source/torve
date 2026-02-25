@@ -22,6 +22,13 @@ interface PlayerEngine {
     fun selectAudioTrack(id: Int)
     fun disableSubtitles()
 
+    // Audio delay (ms): positive = delay audio, negative = advance audio
+    fun setAudioDelay(delayMs: Int) {}
+    fun getAudioDelay(): Int = 0
+
+    // Audio session (Android) — used for equalizer/audio effects
+    fun getAudioSessionId(): Int = 0
+
     // Lifecycle
     fun release()
 

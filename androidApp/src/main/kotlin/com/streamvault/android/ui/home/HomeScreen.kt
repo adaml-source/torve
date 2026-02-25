@@ -112,8 +112,10 @@ fun HomeScreen(
     mediaType: String = "all",
     viewModel: HomeViewModel = koinInject(),
     watchlistViewModel: WatchlistViewModel = koinInject(),
+    settingsViewModel: com.streamvault.presentation.settings.SettingsViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
+    val settingsState by settingsViewModel.state.collectAsState()
     val watchlistState by watchlistViewModel.state.collectAsState()
     val sectionConfigs by viewModel.sectionConfigs.collectAsState()
     val enabledServiceIds by viewModel.enabledServiceIds.collectAsState()
@@ -158,6 +160,10 @@ fun HomeScreen(
         }
     }
 
+    androidx.compose.runtime.CompositionLocalProvider(
+        com.streamvault.android.ui.components.LocalRatingPrefs provides settingsState.ratingPrefs,
+        com.streamvault.android.ui.components.LocalCardPrefs provides settingsState.cardPrefs,
+    ) {
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         when {
             state.isLoading -> {
@@ -472,6 +478,25 @@ fun HomeScreen(
                                     }
                                 }
                             }
+
+                            HomeSection.MDBLIST_SHELVES -> {
+                                if (state.mdbListShelves.isNotEmpty()) {
+                                    item(key = "mdblist_shelves") {
+                                        Spacer(Modifier.height(8.dp))
+                                        Column {
+                                            state.mdbListShelves.forEach { shelf ->
+                                                CatalogShelf(
+                                                    title = shelf.title,
+                                                    items = shelf.items,
+                                                    onItemClick = onMediaClick,
+                                                    onSeeAll = {},
+                                                )
+                                                Spacer(Modifier.height(8.dp))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     is CustomItem -> {
@@ -506,6 +531,7 @@ fun HomeScreen(
         }
 
     }
+} // end CompositionLocalProvider
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

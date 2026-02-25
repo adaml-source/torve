@@ -70,7 +70,7 @@ class SearchViewModel(
             }
 
             val finalResults = if (shouldDedupe()) filtered.dedupeByStableKey() else filtered
-            _state.update { it.copy(results = finalResults, isSearching = false) }
+            _state.update { it.copy(results = finalResults, isSearching = false, hasActiveSearch = true) }
         } catch (e: Exception) {
             _state.update { it.copy(isSearching = false, error = e.message) }
         }
@@ -109,6 +109,7 @@ class SearchViewModel(
                     it.copy(
                         discoverResults = finalResults,
                         isDiscovering = false,
+                        hasActiveSearch = true,
                     )
                 }
             } catch (e: Exception) {

@@ -66,7 +66,9 @@ import com.streamvault.android.ui.detail.DetailScreen
 import com.streamvault.android.ui.discover.DiscoverScreen
 import com.streamvault.android.ui.home.HomeScreen
 import com.streamvault.android.ui.detail.PersonScreen
+import com.streamvault.android.ui.download.DownloadCatalogueScreen
 import com.streamvault.android.ui.download.DownloadScreen
+import com.streamvault.android.ui.download.DownloadedShowDetailScreen
 import com.streamvault.android.ui.iptv.IptvScreen
 import com.streamvault.android.ui.legal.LegalScreen
 import com.streamvault.android.ui.mood.MoodMatcherScreen
@@ -81,6 +83,9 @@ import com.streamvault.android.ui.settings.SettingsScreen
 import com.streamvault.android.ui.settings.StreamGroupsScreen
 import com.streamvault.android.ui.settings.CustomSectionEditorScreen
 import com.streamvault.android.ui.settings.HomeLayoutScreen
+import com.streamvault.android.ui.settings.MdbListSettingsScreen
+import com.streamvault.android.ui.settings.CardStyleSettingsScreen
+import com.streamvault.android.ui.settings.RatingSettingsScreen
 import com.streamvault.android.ui.settings.StreamingServicesSettingsScreen
 import com.streamvault.android.ui.stats.StatsScreen
 import com.streamvault.android.ui.watchlist.WatchlistScreen
@@ -139,6 +144,17 @@ fun StreamVaultNavGraph(
     val watchlistState by watchlistViewModel.state.collectAsState()
     var didInitialWatchlistSync by remember { mutableStateOf(false) }
     val dest = if (isTvMode) "tv_home" else "home"
+
+    // Hoist CatalogViewModels to NavGraph level so they survive detail navigation
+    val metadataRepo: MetadataRepository = koinInject()
+    val keywordSearchService: KeywordSearchService = koinInject()
+    val prefsRepo: com.streamvault.domain.repository.PreferencesRepository = koinInject()
+    val moviesCatalogViewModel = remember {
+        CatalogViewModel(metadataRepo, "movie", keywordSearchService = keywordSearchService, prefsRepo = prefsRepo)
+    }
+    val tvCatalogViewModel = remember {
+        CatalogViewModel(metadataRepo, "tv", keywordSearchService = keywordSearchService, prefsRepo = prefsRepo)
+    }
 
     LaunchedEffect(Unit) {
         watchlistViewModel.loadWatchlist()
@@ -210,12 +226,8 @@ fun StreamVaultNavGraph(
 
             // Movies tab — CatalogScreen for movies
             composable("movies") {
-                val metadataRepo: MetadataRepository = koinInject()
-                val keywordSearchService: KeywordSearchService = koinInject()
-                val prefsRepo: com.streamvault.domain.repository.PreferencesRepository = koinInject()
-                val catalogViewModel = remember { CatalogViewModel(metadataRepo, "movie", keywordSearchService = keywordSearchService, prefsRepo = prefsRepo) }
                 CatalogScreen(
-                    viewModel = catalogViewModel,
+                    viewModel = moviesCatalogViewModel,
                     mediaType = "movie",
                     onMediaClick = { item ->
                         val type = if (item.type == MediaType.SERIES) "tv" else "movie"
@@ -226,12 +238,8 @@ fun StreamVaultNavGraph(
 
             // TV Shows tab — CatalogScreen for TV
             composable("tv_shows") {
-                val metadataRepo: MetadataRepository = koinInject()
-                val keywordSearchService: KeywordSearchService = koinInject()
-                val prefsRepo: com.streamvault.domain.repository.PreferencesRepository = koinInject()
-                val catalogViewModel = remember { CatalogViewModel(metadataRepo, "tv", keywordSearchService = keywordSearchService, prefsRepo = prefsRepo) }
                 CatalogScreen(
-                    viewModel = catalogViewModel,
+                    viewModel = tvCatalogViewModel,
                     mediaType = "tv",
                     onMediaClick = { item ->
                         val type = if (item.type == MediaType.SERIES) "tv" else "movie"
@@ -304,10 +312,12 @@ fun StreamVaultNavGraph(
                 val mediaType = backStackEntry.arguments?.getString("mediaType") ?: "movie"
                 val genreId = backStackEntry.arguments?.getInt("genreId") ?: 0
                 val genreName = backStackEntry.arguments?.getString("genreName") ?: ""
-                val metadataRepo: MetadataRepository = koinInject()
-                val keywordSearchService: KeywordSearchService = koinInject()
                 val catalogViewModel = remember {
-                    CatalogViewModel(metadataRepo, mediaType, keywordSearchService = keywordSearchService).also {
+                    CatalogViewModel(
+                        metadataRepo, mediaType,
+                        keywordSearchService = keywordSearchService,
+                        prefsRepo = prefsRepo,
+                    ).also {
                         if (genreId > 0) it.selectGenre(genreId)
                     }
                 }
@@ -333,13 +343,14 @@ fun StreamVaultNavGraph(
             ) { backStackEntry ->
                 val providerId = backStackEntry.arguments?.getInt("providerId") ?: 0
                 val providerName = backStackEntry.arguments?.getString("providerName") ?: ""
-                val metadataRepo: MetadataRepository = koinInject()
-                val keywordSearchService: KeywordSearchService = koinInject()
                 var selectedMediaType by remember { mutableStateOf("movie") }
                 val catalogViewModel = remember(selectedMediaType) {
-                    CatalogViewModel(metadataRepo, selectedMediaType, keywordSearchService = keywordSearchService).also {
-                        it.setProvider(providerId)
-                    }
+                    CatalogViewModel(
+                        metadataRepo, selectedMediaType,
+                        keywordSearchService = keywordSearchService,
+                        prefsRepo = prefsRepo,
+                        initialProviderId = providerId,
+                    )
                 }
                 CatalogScreen(
                     viewModel = catalogViewModel,
@@ -414,6 +425,9 @@ fun StreamVaultNavGraph(
                     onRegexPatternsClick = { navController.navigate("regex_patterns") },
                     onStreamGroupsClick = { navController.navigate("stream_groups") },
                     onHomeLayoutClick = { navController.navigate("home_layout") },
+                    onMdbListClick = { navController.navigate("mdblist_settings") },
+                    onRatingSettingsClick = { navController.navigate("rating_settings") },
+                    onCardStyleClick = { navController.navigate("card_style_settings") },
                 )
             }
 
@@ -432,6 +446,9 @@ fun StreamVaultNavGraph(
                     onRegexPatternsClick = { navController.navigate("regex_patterns") },
                     onStreamGroupsClick = { navController.navigate("stream_groups") },
                     onHomeLayoutClick = { navController.navigate("home_layout") },
+                    onMdbListClick = { navController.navigate("mdblist_settings") },
+                    onRatingSettingsClick = { navController.navigate("rating_settings") },
+                    onCardStyleClick = { navController.navigate("card_style_settings") },
                 )
             }
 
@@ -528,20 +545,49 @@ fun StreamVaultNavGraph(
                 )
             }
 
-            // Downloads
+            // Downloads — Catalogue
             composable("downloads") {
-                DownloadScreen(
+                DownloadCatalogueScreen(
                     onBack = { navController.popBackStack() },
-                    onPlayOffline = { download ->
+                    onPlayOffline = { item ->
                         navController.navigate(
-                            "player?url=${Uri.encode("file://${download.filePath}")}" +
-                                "&title=${Uri.encode(download.title)}" +
-                                "&mediaId=${download.mediaId}" +
-                                "&mediaType=${download.mediaType.name.lowercase()}" +
-                                "&posterUrl=${Uri.encode(download.posterUrl ?: "")}" +
+                            "player?url=${Uri.encode("file://${item.filePath}")}" +
+                                "&title=${Uri.encode(item.title)}" +
+                                "&mediaId=${item.mediaId}" +
+                                "&mediaType=${if (item.type == com.streamvault.domain.model.DownloadMediaType.MOVIE) "movie" else "series"}" +
+                                "&posterUrl=${Uri.encode(item.posterUrl ?: "")}" +
                                 "&backdropUrl=" +
-                                "&seasonNumber=${download.seasonNumber ?: -1}" +
-                                "&episodeNumber=${download.episodeNumber ?: -1}" +
+                                "&seasonNumber=${item.seasonNumber ?: -1}" +
+                                "&episodeNumber=${item.episodeNumber ?: -1}" +
+                                "&showTmdbId=-1" +
+                                "&showImdbId=",
+                        )
+                    },
+                    onShowDetail = { mediaId ->
+                        navController.navigate("download_show/$mediaId")
+                    },
+                )
+            }
+
+            // Downloaded Show Detail
+            composable(
+                route = "download_show/{mediaId}",
+                arguments = listOf(androidx.navigation.navArgument("mediaId") { type = androidx.navigation.NavType.StringType }),
+            ) { backStackEntry ->
+                val mediaId = backStackEntry.arguments?.getString("mediaId") ?: return@composable
+                DownloadedShowDetailScreen(
+                    mediaId = mediaId,
+                    onBack = { navController.popBackStack() },
+                    onPlayEpisode = { item ->
+                        navController.navigate(
+                            "player?url=${Uri.encode("file://${item.filePath}")}" +
+                                "&title=${Uri.encode(item.title)}" +
+                                "&mediaId=${item.mediaId}" +
+                                "&mediaType=series" +
+                                "&posterUrl=${Uri.encode(item.posterUrl ?: "")}" +
+                                "&backdropUrl=" +
+                                "&seasonNumber=${item.seasonNumber ?: -1}" +
+                                "&episodeNumber=${item.episodeNumber ?: -1}" +
                                 "&showTmdbId=-1" +
                                 "&showImdbId=",
                         )
@@ -607,6 +653,27 @@ fun StreamVaultNavGraph(
             // Stream Groups
             composable("stream_groups") {
                 StreamGroupsScreen(
+                    onBack = { navController.popBackStack() },
+                )
+            }
+
+            // MDBList Settings
+            composable("mdblist_settings") {
+                MdbListSettingsScreen(
+                    onBack = { navController.popBackStack() },
+                )
+            }
+
+            // Rating Settings
+            composable("rating_settings") {
+                RatingSettingsScreen(
+                    onBack = { navController.popBackStack() },
+                )
+            }
+
+            // Card Style Settings
+            composable("card_style_settings") {
+                CardStyleSettingsScreen(
                     onBack = { navController.popBackStack() },
                 )
             }

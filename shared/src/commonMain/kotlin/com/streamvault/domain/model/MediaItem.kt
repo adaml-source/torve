@@ -41,6 +41,7 @@ data class MediaItem(
     val seasons: List<Season> = emptyList(),
     val tagline: String? = null,
     val popularity: Double? = null,
+    val ratings: MediaRatings? = null,
 )
 
 @Serializable
@@ -94,7 +95,7 @@ data class PagedResult(
     val totalResults: Int,
 )
 
-private fun MediaItem.stableKey(): String {
+internal fun MediaItem.stableKey(): String {
     val idPart = tmdbId?.toString() ?: id
     return "${type.name}:$idPart"
 }
@@ -127,6 +128,7 @@ private fun mergeMediaItems(primary: MediaItem, other: MediaItem): MediaItem {
         seasons = if (primary.seasons.isNotEmpty()) primary.seasons else other.seasons,
         tagline = preferString(primary.tagline, other.tagline),
         popularity = preferDouble(primary.popularity, other.popularity),
+        ratings = primary.ratings ?: other.ratings,
     )
 }
 
@@ -144,4 +146,39 @@ fun List<MediaItem>.dedupeByStableKey(): List<MediaItem> {
         }
     }
     return map.values.toList()
+}
+
+/**
+ * Cross-shelf deduplication: each movie/show appears in only the FIRST shelf
+ * that contains it (by list order). Empty shelves are removed after filtering.
+ * [globalSeen] is a mutable set pre-populated with keys from protected sources
+ * (continue watching, watchlist, recently watched) so those items are excluded
+ * from later shelves but the protected sources themselves are untouched.
+ */
+fun List<CatalogShelf>.dedupeAcrossShelves(
+    globalSeen: MutableSet<String> = mutableSetOf(),
+): List<CatalogShelf> {
+    return mapNotNull { shelf ->
+        val filtered = shelf.items.filter { item ->
+            val key = item.stableKey()
+            if (key in globalSeen) {
+                false
+            } else {
+                globalSeen.add(key)
+                true
+            }
+        }
+        if (filtered.isEmpty()) null
+        else shelf.copy(items = filtered)
+    }
+}
+
+/**
+ * Collect stable keys from a list of media items into the given mutable set.
+ * Used to seed the global seen set from protected sources.
+ */
+fun List<MediaItem>.collectStableKeys(into: MutableSet<String>) {
+    for (item in this) {
+        into.add(item.stableKey())
+    }
 }

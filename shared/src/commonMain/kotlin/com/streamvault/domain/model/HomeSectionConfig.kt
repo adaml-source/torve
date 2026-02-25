@@ -27,7 +27,8 @@ enum class HomeSection(
     DIRECTORS("Popular Directors", false, 13),
     HIDDEN_GEMS("Hidden Gems", true, 14),
     ADDON_SHELVES("Addon Catalogs", false, 15),
-    BECAUSE_YOU_WATCHED("Because You Watched", false, 16);
+    BECAUSE_YOU_WATCHED("Because You Watched", false, 16),
+    MDBLIST_SHELVES("MDBList Lists", false, 17);
 
     /** Maps this section to its corresponding CatalogShelf id, if any. */
     val shelfId: String?

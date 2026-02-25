@@ -7,12 +7,14 @@ import com.streamvault.data.kodi.KodiHost
 import com.streamvault.data.simkl.SimklClient
 import com.streamvault.data.trakt.TraktClient
 import com.streamvault.db.StreamVaultDatabase
+import com.streamvault.domain.model.CardPrefs
 import com.streamvault.domain.model.CodecPreference
 import com.streamvault.domain.model.DEFAULT_STREAM_GROUPS
 import com.streamvault.domain.model.DebridServiceType
 import com.streamvault.domain.model.HdrMode
 import com.streamvault.domain.model.RegexPattern
 import com.streamvault.domain.model.StreamGroup
+import com.streamvault.domain.model.RatingDisplayPrefs
 import com.streamvault.domain.model.StreamPreferences
 import com.streamvault.domain.model.StreamQuality
 import com.streamvault.domain.repository.PreferencesRepository
@@ -85,6 +87,9 @@ class SettingsViewModel(
         const val KEY_GEMINI_API_KEY = "gemini_api_key"
         const val KEY_PERPLEXITY_API_KEY = "perplexity_api_key"
         const val KEY_DEEPSEEK_API_KEY = "deepseek_api_key"
+        const val KEY_MDBLIST_API_KEY = "mdblist_api_key"
+        const val KEY_RATING_PREFS = "rating_display_prefs"
+        const val KEY_CARD_PREFS = "card_prefs"
     }
 
     private val jsonParser = Json { ignoreUnknownKeys = true }
@@ -158,6 +163,13 @@ class SettingsViewModel(
             val geminiApiKey = prefsRepo.getString(KEY_GEMINI_API_KEY) ?: ""
             val perplexityApiKey = prefsRepo.getString(KEY_PERPLEXITY_API_KEY) ?: ""
             val deepSeekApiKey = prefsRepo.getString(KEY_DEEPSEEK_API_KEY) ?: ""
+            val mdblistApiKey = prefsRepo.getString(KEY_MDBLIST_API_KEY) ?: ""
+            val ratingPrefs = prefsRepo.getString(KEY_RATING_PREFS)?.let {
+                try { jsonParser.decodeFromString<RatingDisplayPrefs>(it) } catch (_: Exception) { null }
+            } ?: RatingDisplayPrefs()
+            val cardPrefs = prefsRepo.getString(KEY_CARD_PREFS)?.let {
+                try { jsonParser.decodeFromString<CardPrefs>(it) } catch (_: Exception) { null }
+            } ?: CardPrefs()
 
             _state.update {
                 it.copy(
@@ -193,6 +205,9 @@ class SettingsViewModel(
                     geminiApiKey = geminiApiKey,
                     perplexityApiKey = perplexityApiKey,
                     deepSeekApiKey = deepSeekApiKey,
+                    mdblistApiKey = mdblistApiKey,
+                    ratingPrefs = ratingPrefs,
+                    cardPrefs = cardPrefs,
                 )
             }
 
@@ -513,6 +528,33 @@ class SettingsViewModel(
             AiProvider.PERPLEXITY -> setPerplexityApiKey(key)
             AiProvider.DEEPSEEK -> setDeepSeekApiKey(key)
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // MDBList
+    // -------------------------------------------------------------------------
+
+    fun setMdblistApiKey(key: String) {
+        _state.update { it.copy(mdblistApiKey = key) }
+        scope.launch { prefsRepo.setString(KEY_MDBLIST_API_KEY, key) }
+    }
+
+    // -------------------------------------------------------------------------
+    // Ratings
+    // -------------------------------------------------------------------------
+
+    fun updateRatingPrefs(prefs: RatingDisplayPrefs) {
+        _state.update { it.copy(ratingPrefs = prefs) }
+        scope.launch { prefsRepo.setString(KEY_RATING_PREFS, jsonParser.encodeToString(prefs)) }
+    }
+
+    // -------------------------------------------------------------------------
+    // Card Style
+    // -------------------------------------------------------------------------
+
+    fun updateCardPrefs(prefs: CardPrefs) {
+        _state.update { it.copy(cardPrefs = prefs) }
+        scope.launch { prefsRepo.setString(KEY_CARD_PREFS, jsonParser.encodeToString(prefs)) }
     }
 
     // -------------------------------------------------------------------------

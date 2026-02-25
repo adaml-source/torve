@@ -64,8 +64,10 @@ import com.streamvault.android.ui.components.CardSize
 import com.streamvault.android.ui.components.PosterCard
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.AmberSubtle
+import com.streamvault.android.ui.theme.Charcoal
 import com.streamvault.android.ui.theme.Gunmetal
 import com.streamvault.android.ui.theme.Obsidian
+import com.streamvault.android.ui.theme.Silver
 import com.streamvault.android.ui.theme.Snow
 import com.streamvault.android.ui.theme.StreamVault
 import com.streamvault.domain.model.MediaItem
@@ -131,7 +133,7 @@ fun SearchScreen(
                         }
                     },
                 )
-                if (state.query.isNotEmpty()) {
+                if (state.query.isNotEmpty() || state.hasActiveSearch) {
                     IconButton(
                         onClick = { viewModel.clearSearch() },
                         modifier = Modifier
@@ -140,7 +142,7 @@ fun SearchScreen(
                     ) {
                         Icon(
                             Icons.Rounded.Close,
-                            contentDescription = "Clear",
+                            contentDescription = "Clear search",
                             tint = StreamVault.colors.textTertiary,
                             modifier = Modifier.size(18.dp),
                         )
@@ -276,10 +278,49 @@ fun SearchScreen(
             }
         }
 
-        // ── Results ──
-        val displayItems = if (state.query.length >= 2) state.results else state.discoverResults
+        // ── Active Search Banner ──
+        val displayItems = if (state.query.length >= 2 || state.hasActiveSearch) state.results else state.discoverResults
         val isLoading = state.isSearching || state.isDiscovering
 
+        if (state.hasActiveSearch && displayItems.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Charcoal)
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Rounded.Search,
+                    contentDescription = null,
+                    tint = Amber,
+                    modifier = Modifier.size(14.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "\"${state.query}\"",
+                    color = Snow,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = "${displayItems.size} results",
+                    color = Silver,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+                Spacer(Modifier.width(8.dp))
+                TextButton(
+                    onClick = { viewModel.clearSearch() },
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                ) {
+                    Text("Clear", color = Amber, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+
+        // ── Results ──
         Box(modifier = Modifier.fillMaxSize()) {
             when {
                 isLoading && displayItems.isEmpty() -> {

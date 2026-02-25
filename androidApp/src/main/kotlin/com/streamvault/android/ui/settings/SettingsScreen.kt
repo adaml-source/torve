@@ -105,6 +105,9 @@ fun SettingsScreen(
     onRegexPatternsClick: () -> Unit = {},
     onStreamGroupsClick: () -> Unit = {},
     onHomeLayoutClick: () -> Unit = {},
+    onMdbListClick: () -> Unit = {},
+    onRatingSettingsClick: () -> Unit = {},
+    onCardStyleClick: () -> Unit = {},
     viewModel: SettingsViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
@@ -937,6 +940,12 @@ fun SettingsScreen(
                 )
                 HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
                 SettingsNavRow(
+                    title = "Card Style",
+                    subtitle = "Size, hover zoom, watched indicators, appearance",
+                    onClick = onCardStyleClick,
+                )
+                HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
+                SettingsNavRow(
                     title = "Addons & Content Sources",
                     subtitle = "${addonState.addons.size} installed · Browse & manage",
                     onClick = onAddonCatalogClick,
@@ -958,6 +967,18 @@ fun SettingsScreen(
                     title = "Regex Patterns",
                     subtitle = "${state.regexPatterns.size} patterns",
                     onClick = onRegexPatternsClick,
+                )
+                HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
+                SettingsNavRow(
+                    title = "MDBList",
+                    subtitle = if (state.mdblistApiKey.isNotBlank()) "Connected" else "Curated community lists",
+                    onClick = onMdbListClick,
+                )
+                HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
+                SettingsNavRow(
+                    title = "Ratings",
+                    subtitle = "Multi-source rating pills",
+                    onClick = onRatingSettingsClick,
                 )
             }
         }

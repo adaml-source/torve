@@ -12,6 +12,8 @@ import com.streamvault.domain.model.CodecPreference
 import com.streamvault.domain.model.DebridServiceType
 import com.streamvault.domain.model.HdrMode
 import com.streamvault.data.ai.AiProvider
+import com.streamvault.domain.model.CardPrefs
+import com.streamvault.domain.model.RatingDisplayPrefs
 import com.streamvault.domain.model.RegexPattern
 import com.streamvault.domain.model.StreamGroup
 import com.streamvault.domain.model.StreamQuality
@@ -101,6 +103,12 @@ data class SettingsUiState(
     val streamGroups: List<StreamGroup> = emptyList(),
     // Browse
     val dedupeResults: Boolean = true,
+    // MDBList
+    val mdblistApiKey: String = "",
+    // Ratings
+    val ratingPrefs: RatingDisplayPrefs = RatingDisplayPrefs(),
+    // Card Style
+    val cardPrefs: CardPrefs = CardPrefs(),
 ) {
     val activeAiApiKey: String get() = when (aiProvider) {
         AiProvider.CLAUDE -> claudeApiKey

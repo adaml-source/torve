@@ -178,6 +178,25 @@ fun CustomSectionEditorScreen(
                     yearTo = ""
                     minRating = ""
                     sortBy = "popularity.desc"
+                } else if (result.mode == "person_credits" && result.personId != null) {
+                    // Person credits mode: auto-add as cast or crew filter
+                    specificItems = emptyList()
+                    if (result.title.isNotBlank()) title = result.title
+                    inferredKeywordTerms = emptyList()
+                    val pId = result.personId!!
+                    val saved = SavedPerson(pId, result.personName ?: "")
+                    if (result.isDirector) {
+                        crewPersons = (crewPersons + saved).distinctBy { it.id }
+                    } else {
+                        castPersons = (castPersons + saved).distinctBy { it.id }
+                    }
+                    // Apply any additional filters the AI extracted
+                    if (result.genreIds.isNotEmpty()) selectedGenres = result.genreIds
+                    result.yearFrom?.let { yearFrom = it.toString() }
+                    result.yearTo?.let { yearTo = it.toString() }
+                    if (result.sortBy.isNotBlank()) sortBy = result.sortBy
+                    result.minRating?.let { minRating = it.toString() }
+                    result.mediaType?.let { mediaType = it }
                 } else {
                     // Discover mode: auto-fill filter fields, clear specific items
                     specificItems = emptyList()
@@ -296,7 +315,7 @@ fun CustomSectionEditorScreen(
                         certificationCountry = "US"
                     }
 
-                    // Director parsing
+                    // Director parsing (supplement — only if AI didn't use person_credits)
                     val directorMatch = Regex("""(?:directed by|by)\s+([a-zA-Z .'\-]+)""")
                         .find(normalizedQuery)
                         ?.groupValues

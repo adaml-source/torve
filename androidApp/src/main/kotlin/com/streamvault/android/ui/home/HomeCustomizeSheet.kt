@@ -294,6 +294,7 @@ fun HomeSection.icon(): ImageVector = when (this) {
     HomeSection.HIDDEN_GEMS -> Icons.Rounded.AutoAwesome
     HomeSection.ADDON_SHELVES -> Icons.Rounded.Subscriptions
     HomeSection.BECAUSE_YOU_WATCHED -> Icons.Rounded.History
+    HomeSection.MDBLIST_SHELVES -> Icons.Rounded.Star
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

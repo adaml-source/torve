@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -77,6 +78,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaSession
 import androidx.media3.ui.PlayerView
+import com.streamvault.android.player.AudioEqualizer
 import com.streamvault.android.player.CastManager
 import com.streamvault.android.player.ExoPlayerEngine
 import com.streamvault.android.player.MPVPlayerEngine
@@ -100,6 +102,7 @@ import com.streamvault.domain.player.TrackDescription
 import com.streamvault.domain.repository.AddonRepository
 import com.streamvault.domain.repository.MetadataRepository
 import com.streamvault.domain.repository.StreamRepository
+import com.streamvault.domain.repository.PreferencesRepository
 import com.streamvault.domain.repository.WatchProgressRepository
 import com.streamvault.presentation.player.TraktScrobbler
 import com.streamvault.presentation.settings.SettingsViewModel
@@ -128,6 +131,7 @@ fun PlayerScreen(
     settingsViewModel: SettingsViewModel = koinInject(),
     traktScrobbler: TraktScrobbler = koinInject(),
     traktClient: TraktClient = koinInject(),
+    prefsRepo: PreferencesRepository = koinInject(),
 ) {
     val context = LocalContext.current
 
@@ -180,6 +184,8 @@ fun PlayerScreen(
     var useMpv by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var audioDelayMs by remember { mutableIntStateOf(0) }
+    var showEqualizerSheet by remember { mutableStateOf(false) }
+    var audioEqualizer by remember { mutableStateOf<AudioEqualizer?>(null) }
 
     // Mutable episode state — updated when swapping to next episode
     var currentSeasonNumber by remember { mutableStateOf(seasonNumber) }
@@ -228,7 +234,16 @@ fun PlayerScreen(
     }
 
     LaunchedEffect(engine) {
-        audioDelayMs = (engine as? MPVPlayerEngine)?.getAudioDelayMs() ?: 0
+        audioDelayMs = engine.getAudioDelay()
+        // Initialize equalizer from audio session
+        val sessionId = engine.getAudioSessionId()
+        if (sessionId > 0) {
+            val eq = AudioEqualizer(sessionId)
+            // Restore saved EQ state
+            val savedState = prefsRepo.getString("eq_state")
+            if (savedState != null) eq.restoreFromState(savedState)
+            audioEqualizer = eq
+        }
     }
 
     // Load season data for next-episode calculation (TV shows only)
@@ -475,6 +490,7 @@ fun PlayerScreen(
                 }
             }
             engine.removeListener(listener)
+            audioEqualizer?.release()
             engine.release()
         }
     }
@@ -723,17 +739,34 @@ fun PlayerScreen(
         if (showAudioDelayDialog) {
             AudioDelayDialog(
                 currentDelayMs = audioDelayMs,
-                supportsDelay = engine is MPVPlayerEngine,
                 onDelayChange = { newDelay ->
                     audioDelayMs = newDelay
-                    (engine as? MPVPlayerEngine)?.setAudioDelayMs(newDelay)
+                    engine.setAudioDelay(newDelay)
                 },
                 onReset = {
                     audioDelayMs = 0
-                    (engine as? MPVPlayerEngine)?.setAudioDelayMs(0)
+                    engine.setAudioDelay(0)
                 },
                 onDismiss = { showAudioDelayDialog = false },
             )
+        }
+
+        // Equalizer sheet
+        if (showEqualizerSheet) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.BottomCenter,
+            ) {
+                audioEqualizer?.let { eq ->
+                    EqualizerSheet(
+                        equalizer = eq,
+                        onDismiss = { showEqualizerSheet = false },
+                        onStateChanged = { state ->
+                            scope.launch { prefsRepo.setString("eq_state", state) }
+                        },
+                    )
+                }
+            }
         }
 
         // Skip Intro/Credits button
@@ -893,9 +926,23 @@ fun PlayerScreen(
                         Icon(
                             Icons.Default.Tune,
                             contentDescription = "Audio delay",
-                            tint = Color.White,
+                            tint = if (audioDelayMs != 0) com.streamvault.android.ui.theme.Amber else Color.White,
                             modifier = Modifier.size(24.dp),
                         )
+                    }
+
+                    if (audioEqualizer != null) {
+                        IconButton(onClick = {
+                            showEqualizerSheet = !showEqualizerSheet
+                            showControls = true
+                        }) {
+                            Icon(
+                                Icons.Default.Equalizer,
+                                contentDescription = "Equalizer",
+                                tint = if (audioEqualizer?.enabled == true) com.streamvault.android.ui.theme.Amber else Color.White,
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
                     }
                 }
 
@@ -1242,7 +1289,6 @@ private fun TrackRow(
 @Composable
 private fun AudioDelayDialog(
     currentDelayMs: Int,
-    supportsDelay: Boolean,
     onDelayChange: (Int) -> Unit,
     onReset: () -> Unit,
     onDismiss: () -> Unit,
@@ -1255,16 +1301,15 @@ private fun AudioDelayDialog(
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_close)) }
         },
         dismissButton = {
-            TextButton(onClick = onReset) { Text("Reset") }
+            TextButton(onClick = {
+                localDelay = 0
+                onReset()
+            }) { Text("Reset") }
         },
         title = { Text("Audio Delay") },
         text = {
             Column {
-                if (!supportsDelay) {
-                    Text("Audio delay adjustment requires the MPV engine.")
-                    return@Column
-                }
-                Text("Delay: ${localDelay} ms")
+                Text("Delay: $localDelay ms")
                 Slider(
                     value = localDelay.toFloat(),
                     onValueChange = {

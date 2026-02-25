@@ -3,11 +3,14 @@ package com.streamvault.android.ui.components
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,18 +36,26 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
 import coil3.compose.SubcomposeAsyncImage
 import com.streamvault.android.ui.theme.Amber
@@ -61,8 +72,16 @@ import com.streamvault.android.ui.theme.Graphite
 import com.streamvault.android.ui.theme.Gunmetal
 import com.streamvault.android.ui.theme.Obsidian
 import com.streamvault.android.ui.theme.Snow
+import com.streamvault.android.ui.theme.Steel
 import com.streamvault.android.ui.theme.StreamVault
+import com.streamvault.domain.model.CardPrefs
+import com.streamvault.domain.model.CardTitlePosition
 import com.streamvault.domain.model.MediaItem
+import com.streamvault.domain.model.MediaType
+import com.streamvault.domain.model.RatingPillPlacement
+import com.streamvault.domain.model.WatchState
+
+val LocalCardPrefs = staticCompositionLocalOf { CardPrefs() }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Poster Card — The primary content card used everywhere.
@@ -87,17 +106,57 @@ fun PosterCard(
     showTitle: Boolean = true,
     showRating: Boolean = true,
     isDownloaded: Boolean = false,
+    watchState: WatchState = WatchState(),
 ) {
+    val cardPrefs = LocalCardPrefs.current
+    val hoverPrefs = cardPrefs.hover
+    val appearance = cardPrefs.appearance
+    val cornerRadius = appearance.cornerRadiusDp.dp
+
+    // Hover / Focus zoom
+    var isFocused by remember { mutableStateOf(false) }
+    var isPressed by remember { mutableStateOf(false) }
+    val isActive = (isFocused || isPressed) && hoverPrefs.enabled
+
+    val scale by animateFloatAsState(
+        targetValue = if (isActive) hoverPrefs.scalePercent / 100f else 1f,
+        animationSpec = tween(hoverPrefs.animationDurationMs),
+        label = "card_scale",
+    )
+
     Column(
-        modifier = modifier.width(size.width),
+        modifier = modifier
+            .width(size.width)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .zIndex(if (isActive) 10f else 0f)
+            .onFocusChanged { isFocused = it.isFocused },
     ) {
         // Poster image
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(size.aspectRatio)
-                .clip(RoundedCornerShape(8.dp))
-                .clickable(onClick = onClick),
+                .clip(RoundedCornerShape(cornerRadius))
+                .then(
+                    if (isActive && hoverPrefs.borderOnHover) {
+                        Modifier.border(2.dp, Amber, RoundedCornerShape(cornerRadius))
+                    } else if (appearance.showBorder) {
+                        Modifier.border(1.dp, Steel, RoundedCornerShape(cornerRadius))
+                    } else Modifier,
+                )
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onPress = {
+                            isPressed = true
+                            tryAwaitRelease()
+                            isPressed = false
+                        },
+                        onTap = { onClick() },
+                    )
+                },
         ) {
             SubcomposeAsyncImage(
                 model = when (size) {
@@ -124,16 +183,46 @@ fun PosterCard(
                 },
             )
 
-            // Rating badge — top right, only on poster cards
+            // Watched overlay
+            val watchedPrefs = cardPrefs.watched
+            if (watchedPrefs.enabled && watchState.isStarted) {
+                WatchedOverlay(
+                    watchState = watchState,
+                    prefs = watchedPrefs,
+                    cornerRadiusDp = appearance.cornerRadiusDp,
+                    modifier = Modifier.matchParentSize(),
+                )
+            }
+
+            // Rating badge — configurable placement, only on poster cards
             if (showRating && size != CardSize.LANDSCAPE && size != CardSize.WIDE) {
-                item.rating?.let { rating ->
-                    if (rating > 0) {
-                        RatingPill(
-                            rating = rating,
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(6.dp),
-                        )
+                val ratingPrefs = LocalRatingPrefs.current
+                val insideAlignment = when (ratingPrefs.pillPlacement) {
+                    RatingPillPlacement.INSIDE_TOP_END -> Alignment.TopEnd
+                    RatingPillPlacement.INSIDE_TOP_START -> Alignment.TopStart
+                    RatingPillPlacement.INSIDE_BOTTOM_END -> Alignment.BottomEnd
+                    RatingPillPlacement.INSIDE_BOTTOM_START -> Alignment.BottomStart
+                    RatingPillPlacement.OUTSIDE_TOP -> Alignment.TopEnd
+                    RatingPillPlacement.OUTSIDE_BOTTOM -> Alignment.BottomEnd
+                }
+                if (item.ratings != null && ratingPrefs.showRatingsOnCards) {
+                    MultiRatingPills(
+                        ratings = item.ratings!!,
+                        prefs = ratingPrefs,
+                        modifier = Modifier
+                            .align(insideAlignment)
+                            .padding(6.dp),
+                    )
+                } else {
+                    item.rating?.let { rating ->
+                        if (rating > 0) {
+                            RatingPill(
+                                rating = rating,
+                                modifier = Modifier
+                                    .align(insideAlignment)
+                                    .padding(6.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -154,6 +243,81 @@ fun PosterCard(
                         contentDescription = "Downloaded",
                         tint = Obsidian,
                         modifier = Modifier.size(14.dp),
+                    )
+                }
+            }
+
+            // Type badge (Movie / TV)
+            if (appearance.showTypeBadge) {
+                val typeLabel = when (item.type) {
+                    MediaType.MOVIE -> "MOVIE"
+                    MediaType.SERIES -> "TV"
+                }
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(start = if (isDownloaded) 32.dp else 6.dp, top = 6.dp)
+                        .background(Obsidian.copy(alpha = 0.75f), RoundedCornerShape(3.dp))
+                        .padding(horizontal = 4.dp, vertical = 1.dp),
+                ) {
+                    Text(typeLabel, color = Snow, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            // Runtime badge
+            if (appearance.showRuntime && item.runtime != null && item.runtime!! > 0) {
+                val runtime = item.runtime!!
+                val text = if (runtime >= 60) "${runtime / 60}h${runtime % 60}m" else "${runtime}m"
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(6.dp)
+                        .background(Obsidian.copy(alpha = 0.75f), RoundedCornerShape(3.dp))
+                        .padding(horizontal = 4.dp, vertical = 1.dp),
+                ) {
+                    Text(text, color = Snow, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            // Genre tags
+            if (appearance.showGenreTags && item.genres.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(start = 6.dp, bottom = if (appearance.showRuntime && item.runtime != null) 22.dp else 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    item.genres.take(2).forEach { genre ->
+                        Text(
+                            text = genre.name,
+                            modifier = Modifier
+                                .background(Color.White.copy(alpha = 0.15f), RoundedCornerShape(3.dp))
+                                .padding(horizontal = 5.dp, vertical = 1.dp),
+                            color = Color.White.copy(alpha = 0.9f),
+                            fontSize = 8.sp,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+
+            // Overlay title (when title position is OVERLAY_BOTTOM)
+            if (appearance.titlePosition == CardTitlePosition.OVERLAY_BOTTOM &&
+                size != CardSize.LANDSCAPE && size != CardSize.WIDE
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.BottomCenter)
+                        .background(Brush.verticalGradient(CardGradient))
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                ) {
+                    Text(
+                        text = item.title,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Snow,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
@@ -180,8 +344,11 @@ fun PosterCard(
             }
         }
 
-        // Title below poster (not inside card)
-        if (showTitle && size != CardSize.LANDSCAPE && size != CardSize.WIDE) {
+        // Title below poster (not inside card) — only when BELOW
+        val showBelowTitle = showTitle &&
+            size != CardSize.LANDSCAPE && size != CardSize.WIDE &&
+            appearance.titlePosition == CardTitlePosition.BELOW
+        if (showBelowTitle) {
             Spacer(Modifier.height(6.dp))
             Text(
                 text = item.title,
@@ -191,14 +358,16 @@ fun PosterCard(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(horizontal = 2.dp),
             )
-            val year = item.year?.toString() ?: ""
-            if (year.isNotBlank()) {
-                Text(
-                    text = year,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = StreamVault.colors.textTertiary,
-                    modifier = Modifier.padding(horizontal = 2.dp),
-                )
+            if (appearance.showYear) {
+                val year = item.year?.toString() ?: ""
+                if (year.isNotBlank()) {
+                    Text(
+                        text = year,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = StreamVault.colors.textTertiary,
+                        modifier = Modifier.padding(horizontal = 2.dp),
+                    )
+                }
             }
         }
     }

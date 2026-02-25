@@ -10,7 +10,10 @@ import com.streamvault.domain.model.MediaItem
 import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.model.ParentalFilter
 import com.streamvault.domain.model.ShelfConfig
+import com.streamvault.domain.model.collectStableKeys
+import com.streamvault.domain.model.dedupeAcrossShelves
 import com.streamvault.domain.model.dedupeByStableKey
+import com.streamvault.domain.model.stableKey
 import com.streamvault.domain.recommendation.ScoredMediaItem
 import com.streamvault.domain.recommendation.GetRecommendationsUseCase
 import com.streamvault.domain.repository.MetadataRepository
@@ -22,6 +25,8 @@ import com.streamvault.domain.repository.WatchHistoryRepository
 import com.streamvault.domain.repository.WatchProgressRepository
 import com.streamvault.domain.repository.WatchlistRepository
 import com.streamvault.data.addon.CatalogAggregator
+import com.streamvault.data.mdblist.MdbListRepository
+import com.streamvault.data.mdblist.RatingsEnricher
 import com.streamvault.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -48,6 +53,8 @@ class HomeViewModel(
     private val prefsRepo: PreferencesRepository,
     private val addonRepo: AddonRepository,
     private val catalogAggregator: CatalogAggregator,
+    private val mdbListRepo: MdbListRepository,
+    private val ratingsEnricher: RatingsEnricher,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(HomeUiState())
@@ -328,6 +335,29 @@ class HomeViewModel(
                         emptyList()
                     }
                 }
+                val mdbListShelvesDeferred = async {
+                    try {
+                        val apiKey = prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY) ?: ""
+                        if (apiKey.isBlank()) emptyList()
+                        else {
+                            val savedLists = mdbListRepo.getSavedLists().filter { it.enabled }
+                            savedLists.mapNotNull { listConfig ->
+                                try {
+                                    val items = mdbListRepo.fetchListContent(listConfig.listId, apiKey, listConfig.itemCount)
+                                    if (items.isNotEmpty()) {
+                                        CatalogShelf(
+                                            id = "mdblist_${listConfig.listId}",
+                                            title = listConfig.name,
+                                            items = items,
+                                        )
+                                    } else null
+                                } catch (_: Exception) { null }
+                            }
+                        }
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                }
 
                 val shelves = shelvesDeferred.await()
                 val continueWatching = continueWatchingDeferred.await()
@@ -347,6 +377,7 @@ class HomeViewModel(
                     .ifEmpty { popularPeople }
                     .take(20)
                 val addonShelves = addonShelvesDeferred.await()
+                val mdbListShelves = mdbListShelvesDeferred.await()
 
                 // Load custom section content (parallel)
                 val allCustomSections = _customSections.value
@@ -489,7 +520,7 @@ class HomeViewModel(
                 // Apply parental content filtering
                 val activeProfile = try { profileRepo.getActiveProfile() } catch (_: Exception) { null }
                 val maxRating = activeProfile?.maxContentRating
-                val filteredShelves = orderedShelves.map { shelf ->
+                val parentalFilteredShelves = orderedShelves.map { shelf ->
                     val items = ParentalFilter.filter(shelf.items, maxRating)
                     shelf.copy(items = if (dedupe) items.dedupeByStableKey() else items)
                 }
@@ -498,52 +529,127 @@ class HomeViewModel(
                         ParentalFilter.filter(listOf(scored.item), maxRating).isNotEmpty()
                     }
                 } else recommendations
-                val dedupedRecommendations = if (dedupe) {
-                    val map = LinkedHashMap<String, ScoredMediaItem>()
-                    for (scored in filteredRecommendations) {
-                        val key = "${scored.item.type.name}:${scored.item.tmdbId ?: scored.item.id}"
-                        if (!map.containsKey(key)) {
-                            map[key] = scored
-                        }
-                    }
-                    map.values.toList()
-                } else filteredRecommendations
 
-                val finalWatchlistItems = if (dedupe) watchlistMediaItems.dedupeByStableKey() else watchlistMediaItems
-                val finalHiddenGemsShelf = hiddenGemsShelf?.let { shelf ->
+                // Within-shelf dedup first
+                val withinDedupedWatchlist = if (dedupe) watchlistMediaItems.dedupeByStableKey() else watchlistMediaItems
+                val withinDedupedRecents = if (dedupe) recentlyWatched.dedupeByStableKey() else recentlyWatched
+                val withinDedupedHiddenGems = hiddenGemsShelf?.let { shelf ->
                     shelf.copy(items = if (dedupe) shelf.items.dedupeByStableKey() else shelf.items)
                 }
-                val finalRecentlyWatched = if (dedupe) recentlyWatched.dedupeByStableKey() else recentlyWatched
-                val finalBecauseYouWatched = if (dedupe) {
-                    becauseYouWatched.map { shelf ->
-                        shelf.copy(items = shelf.items.dedupeByStableKey())
-                    }
+                val withinDedupedByw = if (dedupe) {
+                    becauseYouWatched.map { shelf -> shelf.copy(items = shelf.items.dedupeByStableKey()) }
                 } else becauseYouWatched
-                val finalAddonShelves = if (dedupe) {
+                val withinDedupedAddons = if (dedupe) {
                     addonShelves.map { shelf -> shelf.copy(items = shelf.items.dedupeByStableKey()) }
                 } else addonShelves
-                val finalCustomShelves = if (dedupe) {
+                val withinDedupedMdbList = if (dedupe) {
+                    mdbListShelves.map { shelf -> shelf.copy(items = shelf.items.dedupeByStableKey()) }
+                } else mdbListShelves
+                val withinDedupedCustom = if (dedupe) {
                     customShelves.mapValues { (_, items) -> items.dedupeByStableKey() }.toMutableMap()
                 } else customShelves
 
-                _state.update {
-                    it.copy(
-                        shelves = filteredShelves,
-                        heroItem = filteredShelves.firstOrNull()?.items?.firstOrNull(),
-                        continueWatching = continueWatching,
-                        recommendedItems = dedupedRecommendations,
-                        watchlistShelf = watchlistShelf,
-                        watchlistItems = finalWatchlistItems,
-                        becauseYouWatched = finalBecauseYouWatched,
-                        hiddenGemsShelf = finalHiddenGemsShelf,
-                        recentlyWatched = finalRecentlyWatched,
-                        popularActors = popularActors,
-                        popularDirectors = popularDirectors,
-                        customShelves = finalCustomShelves,
-                        addonShelves = finalAddonShelves,
-                        isLoading = false,
-                    )
+                // ── Cross-shelf dedup: each item appears in ONLY the first shelf ──
+                if (dedupe) {
+                    // 1. Seed global seen set from protected sources (keep their items intact)
+                    val globalSeen = mutableSetOf<String>()
+                    continueWatching.forEach { wp ->
+                        // WatchProgress items: track by mediaId
+                        val key = wp.mediaId
+                        if (key.isNotBlank()) globalSeen.add("id:$key")
+                        // Also try to extract tmdbId from mediaId (format: "type_tmdbId")
+                        val tmdb = key.substringAfterLast("_", "").toIntOrNull()
+                        if (tmdb != null && tmdb > 0) {
+                            globalSeen.add("${wp.mediaType.name}:$tmdb")
+                        }
+                    }
+                    withinDedupedWatchlist.collectStableKeys(globalSeen)
+                    withinDedupedRecents.collectStableKeys(globalSeen)
+
+                    // 2. Cross-dedup main TMDB shelves (Popular, Now Playing, Trending, etc.)
+                    val finalShelves = parentalFilteredShelves.dedupeAcrossShelves(globalSeen)
+
+                    // 3. Cross-dedup recommendations against seen items
+                    val finalRecommendations = run {
+                        val map = LinkedHashMap<String, ScoredMediaItem>()
+                        for (scored in filteredRecommendations) {
+                            val key = scored.item.stableKey()
+                            if (key !in globalSeen && !map.containsKey(key)) {
+                                map[key] = scored
+                                globalSeen.add(key)
+                            }
+                        }
+                        map.values.toList()
+                    }
+
+                    // 4. Cross-dedup hidden gems
+                    val finalHiddenGems = withinDedupedHiddenGems?.let { shelf ->
+                        val filtered = shelf.items.filter { item ->
+                            val key = item.stableKey()
+                            if (key in globalSeen) false
+                            else { globalSeen.add(key); true }
+                        }
+                        if (filtered.isEmpty()) null else shelf.copy(items = filtered)
+                    }
+
+                    // 5. Cross-dedup Because You Watched, Addon, MDBList shelves
+                    val finalByw = withinDedupedByw.dedupeAcrossShelves(globalSeen)
+                    val finalAddons = withinDedupedAddons.dedupeAcrossShelves(globalSeen)
+                    val finalMdbList = withinDedupedMdbList.dedupeAcrossShelves(globalSeen)
+
+                    // 6. Cross-dedup custom shelves
+                    val finalCustom = withinDedupedCustom.mapValues { (_, items) ->
+                        items.filter { item ->
+                            val key = item.stableKey()
+                            if (key in globalSeen) false
+                            else { globalSeen.add(key); true }
+                        }
+                    }.filter { it.value.isNotEmpty() }.toMutableMap()
+
+                    _state.update {
+                        it.copy(
+                            shelves = finalShelves,
+                            heroItem = finalShelves.firstOrNull()?.items?.firstOrNull(),
+                            continueWatching = continueWatching,
+                            recommendedItems = finalRecommendations,
+                            watchlistShelf = watchlistShelf,
+                            watchlistItems = withinDedupedWatchlist,
+                            becauseYouWatched = finalByw,
+                            hiddenGemsShelf = finalHiddenGems,
+                            recentlyWatched = withinDedupedRecents,
+                            popularActors = popularActors,
+                            popularDirectors = popularDirectors,
+                            customShelves = finalCustom,
+                            addonShelves = finalAddons,
+                            mdbListShelves = finalMdbList,
+                            isLoading = false,
+                        )
+                    }
+                } else {
+                    // No dedup — pass through as-is
+                    _state.update {
+                        it.copy(
+                            shelves = parentalFilteredShelves,
+                            heroItem = parentalFilteredShelves.firstOrNull()?.items?.firstOrNull(),
+                            continueWatching = continueWatching,
+                            recommendedItems = filteredRecommendations,
+                            watchlistShelf = watchlistShelf,
+                            watchlistItems = watchlistMediaItems,
+                            becauseYouWatched = becauseYouWatched,
+                            hiddenGemsShelf = hiddenGemsShelf,
+                            recentlyWatched = recentlyWatched,
+                            popularActors = popularActors,
+                            popularDirectors = popularDirectors,
+                            customShelves = customShelves,
+                            addonShelves = addonShelves,
+                            mdbListShelves = mdbListShelves,
+                            isLoading = false,
+                        )
+                    }
                 }
+
+                // Background enrichment: add MDBList multi-source ratings
+                launchRatingsEnrichment()
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = e.message ?: "Failed to load") }
             }
@@ -556,6 +662,21 @@ class HomeViewModel(
 
     private suspend fun shouldDedupe(): Boolean {
         return prefsRepo.getString(SettingsViewModel.KEY_DEDUPE_RESULTS)?.toBooleanStrictOrNull() ?: true
+    }
+
+    private fun launchRatingsEnrichment() {
+        scope.launch {
+            val apiKey = try {
+                prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY) ?: ""
+            } catch (_: Exception) { "" }
+            if (apiKey.isBlank()) return@launch
+
+            val current = _state.value
+            val enrichedShelves = current.shelves.map { shelf ->
+                shelf.copy(items = ratingsEnricher.enrichList(shelf.items, apiKey))
+            }
+            _state.update { it.copy(shelves = enrichedShelves) }
+        }
     }
 
     fun toggleShelfVisibility(shelfId: String) {

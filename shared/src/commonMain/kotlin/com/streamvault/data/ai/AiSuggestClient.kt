@@ -17,7 +17,7 @@ import kotlinx.serialization.json.jsonPrimitive
 
 @Serializable
 data class AiSuggestResult(
-    val mode: String = "discover", // "discover" or "specific"
+    val mode: String = "discover", // "discover", "specific", or "person_credits"
     val title: String = "",
     val genreIds: List<Int> = emptyList(),
     val keywordTerms: List<String> = emptyList(),
@@ -27,6 +27,8 @@ data class AiSuggestResult(
     val minRating: Float? = null,
     val mediaType: String? = null,
     val specificTitles: List<AiSpecificTitle> = emptyList(),
+    val personName: String? = null,
+    val personRole: String? = null, // "acting" or "directing"
 )
 
 @Serializable
@@ -217,13 +219,13 @@ class AiSuggestClient(private val httpClient: HttpClient) {
         val tvGenres = TmdbGenres.TV_GENRES.entries
             .joinToString(", ") { "${it.key}=${it.value}" }
 
-        return """You are a movie/TV show discovery assistant. You operate in TWO modes.
+        return """You are a TMDB query parser. Convert the user's natural language into a structured JSON query. Extract ONLY what is explicitly stated or directly implied. Do NOT add creative associations or hallucinate related topics.
+
+You operate in THREE modes:
 
 MODE 1 — "discover": The user describes a CATEGORY, GENRE, MOOD, ERA, or THEME.
-Use TMDB discover parameters to find matching content.
-
-MODE 2 — "specific": The user describes a SPECIFIC movie/show by its PLOT, SCENE, SETTING, CHARACTERS, or MEMORABLE MOMENTS.
-Identify the exact title(s) they're looking for.
+MODE 2 — "specific": The user describes a SPECIFIC movie/show by PLOT, SCENE, CHARACTERS, or MEMORABLE MOMENTS.
+MODE 3 — "person_credits": The user asks for movies/shows by a specific ACTOR or DIRECTOR.
 
 Available MOVIE genre IDs: $movieGenres
 Available TV genre IDs: $tvGenres
@@ -231,33 +233,36 @@ Available TV genre IDs: $tvGenres
 Respond ONLY with a JSON object (no markdown, no explanation).
 
 For DISCOVER mode:
-{"mode":"discover","title":"Section Title","genreIds":[28,53],"keywordTerms":["keyword"],"yearFrom":null,"yearTo":null,"sortBy":"popularity.desc","minRating":null,"mediaType":null,"specificTitles":[]}
+{"mode":"discover","title":"Section Title","genreIds":[28],"keywordTerms":["christmas"],"yearFrom":2015,"yearTo":null,"sortBy":"popularity.desc","minRating":null,"mediaType":"movie","specificTitles":[],"personName":null,"personRole":null}
 
 For SPECIFIC mode:
-{"mode":"specific","title":"Section Title","genreIds":[],"keywordTerms":[],"yearFrom":null,"yearTo":null,"sortBy":"popularity.desc","minRating":null,"mediaType":null,"specificTitles":[{"title":"Movie Name","year":1998,"mediaType":"movie"}]}
+{"mode":"specific","title":"Section Title","genreIds":[],"keywordTerms":[],"yearFrom":null,"yearTo":null,"sortBy":"popularity.desc","minRating":null,"mediaType":null,"specificTitles":[{"title":"Movie Name","year":1998,"mediaType":"movie"}],"personName":null,"personRole":null}
 
-DISCOVER mode rules:
-- Use genreIds as PRIMARY filter — more reliable than keywords
-- keywordTerms: use 1-8 SPECIFIC terms (single words or short phrases) for themes not covered by genres
-- Do NOT add redundant keywords that overlap with genres
-- For decade references like "90s", use yearFrom=1990, yearTo=1999
-- If the user mentions a SETTING (beach, island, jungle, forest, desert, ocean/sea, underwater, space, spaceship/rocketship, mountain, snow/ice),
-  include those as keywordTerms (single words)
+For PERSON_CREDITS mode:
+{"mode":"person_credits","title":"Movies with Denzel Washington","genreIds":[],"keywordTerms":[],"yearFrom":null,"yearTo":null,"sortBy":"popularity.desc","minRating":null,"mediaType":"movie","specificTitles":[],"personName":"Denzel Washington","personRole":"acting"}
 
-SPECIFIC mode rules:
-- Return 1-10 titles that match the description
-- Include the release year for each title to help disambiguation
-- Set mediaType to "movie" or "tv" for each title
-- If the description could match multiple movies/shows, include all likely matches
+CRITICAL RULES — STRICT EXTRACTION ONLY:
+- NEVER infer topics, themes, or keywords the user did not mention
+- "Christmas movies since 2015" → keywordTerms:["christmas"], yearFrom:2015. NOTHING ELSE. Not "space", not "winter", not "holiday", just "christmas"
+- "movies with Denzel Washington" → person_credits mode, personName:"Denzel Washington", personRole:"acting". NOT keyword search. NOT "faith". NOT "drama". Just his filmography.
+- "best horror movies" → discover mode, genreIds:[27], sortBy:"vote_average.desc", minRating:7.0. No keywords needed — genre covers it.
+- "dark sci-fi thriller from the 90s" → discover mode, genreIds:[878,53], yearFrom:1990, yearTo:1999. No keywords unless the user mentioned a specific theme.
+- "romantic comedies on Netflix" → discover mode, genreIds:[35,10749]. No extra keywords.
+- keywordTerms should ONLY contain specific themes NOT covered by genres (e.g. "christmas", "zombie", "heist", "vampire", "alien", "robot", "time travel", "beach", "island", "space")
+- If a genre ID covers the concept, do NOT also add it as a keyword
+- If the user mentions an actor or director by name, ALWAYS use person_credits mode
+- personRole: "acting" for actors, "directing" for directors/filmmakers
+- For decade references: "90s" → yearFrom:1990, yearTo:1999
+- "new" or "recent" → yearFrom:current_year-2, sortBy:"primary_release_date.desc"
+- "best" or "top" → sortBy:"vote_average.desc", minRating:7.0
 
 How to choose the mode:
-- "romantic comedy on the beach" → DISCOVER (category/theme)
+- "movies with [person name]" or "starring [person]" or "directed by [person]" → PERSON_CREDITS
+- "romantic comedy on the beach" → DISCOVER (genre + keyword "beach")
 - "the one where they search for a missing soldier in WW2" → SPECIFIC (plot description)
-- "movies set on an island" → DISCOVER (setting as theme)
+- "dark sci-fi thriller" → DISCOVER (genres only, no keywords needed)
 - "that movie where a guy wakes up reliving the same day" → SPECIFIC (Groundhog Day)
-- "dark sci-fi thriller" → DISCOVER (genre/mood)
-- "the show about a chemistry teacher who becomes a drug lord" → SPECIFIC (Breaking Bad)
-- "christmas movies" → DISCOVER (theme)
+- "christmas movies" → DISCOVER (keyword "christmas")
 - "movies like Inception" → SPECIFIC (identify similar specific titles)"""
     }
 

@@ -43,4 +43,5 @@ data class SearchUiState(
     val showFilterSheet: Boolean = false,
     val discoverResults: List<MediaItem> = emptyList(),
     val isDiscovering: Boolean = false,
+    val hasActiveSearch: Boolean = false,
 )

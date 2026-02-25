@@ -5,7 +5,7 @@ import com.streamvault.domain.repository.MetadataRepository
 
 data class KeywordSearchResult(
     val title: String,
-    val mode: String = "discover", // "discover" or "specific"
+    val mode: String = "discover", // "discover", "specific", or "person_credits"
     val genreIds: List<Int> = emptyList(),
     val keywordIds: List<Int> = emptyList(),
     val inferredKeywordTerms: List<String> = emptyList(),
@@ -15,6 +15,9 @@ data class KeywordSearchResult(
     val minRating: Float? = null,
     val mediaType: String? = null,
     val specificItems: List<SpecificItem> = emptyList(),
+    val personId: Int? = null,
+    val personName: String? = null,
+    val isDirector: Boolean = false,
 )
 
 data class SpecificItem(
@@ -28,12 +31,17 @@ class KeywordSearchService(
     private val metadataRepo: MetadataRepository,
 ) {
     /**
-     * Primary path: AI interprets the phrase, choosing discover or specific mode.
+     * Primary path: AI interprets the phrase, choosing discover, specific, or person_credits mode.
      */
     suspend fun searchWithAi(provider: AiProvider, apiKey: String, phrase: String): KeywordSearchResult {
         val normalizedPhrase = normalizePhrase(phrase)
         val suggestion = aiSuggestClient.suggest(provider, apiKey, phrase)
         val title = suggestion.title.ifBlank { phrase.replaceFirstChar { it.uppercase() } }
+
+        // Person credits mode: AI identified an actor/director query
+        if (suggestion.mode == "person_credits" && !suggestion.personName.isNullOrBlank()) {
+            return resolvePersonCredits(suggestion, title)
+        }
 
         // Specific mode: AI identified exact titles → resolve via TMDB search
         if (suggestion.mode == "specific" && suggestion.specificTitles.isNotEmpty()) {
@@ -68,14 +76,12 @@ class KeywordSearchService(
             )
         }
 
-        // Discover mode: resolve keyword terms to TMDB keyword IDs
-        val extraKeywordTerms = extractSettingKeywords(normalizedPhrase)
-        val fallbackTerms = extractSearchTerms(normalizedPhrase)
-        val keywordTerms = (suggestion.keywordTerms + extraKeywordTerms + fallbackTerms)
+        // Discover mode: resolve ONLY the AI-provided keyword terms to TMDB keyword IDs
+        // Do NOT add extracted/expanded terms — trust the AI's structured output
+        val keywordTerms = suggestion.keywordTerms
             .map { normalizeTerm(it) }
-            .flatMap { expandThemeSynonyms(it) }
             .distinct()
-            .take(10)
+            .take(5)
         val keywordIds = keywordTerms.mapNotNull { term ->
             try {
                 val results = metadataRepo.searchKeywords(term)
@@ -92,6 +98,44 @@ class KeywordSearchService(
             genreIds = suggestion.genreIds,
             keywordIds = keywordIds,
             inferredKeywordTerms = keywordTerms,
+            yearFrom = suggestion.yearFrom,
+            yearTo = suggestion.yearTo,
+            sortBy = suggestion.sortBy,
+            minRating = suggestion.minRating,
+            mediaType = suggestion.mediaType,
+        )
+    }
+
+    /**
+     * Resolve person_credits mode: search for the person, get their credits,
+     * and return as a discover result with cast/crew filter.
+     */
+    private suspend fun resolvePersonCredits(
+        suggestion: AiSuggestResult,
+        title: String,
+    ): KeywordSearchResult {
+        val personName = suggestion.personName!!
+        val isDirector = suggestion.personRole == "directing"
+
+        // Search for the person to get their TMDB ID
+        val personResults = try { metadataRepo.searchPerson(personName) } catch (_: Exception) { emptyList() }
+        val person = personResults.firstOrNull()
+
+        if (person == null) {
+            // Fallback: if person not found, return empty discover
+            return KeywordSearchResult(
+                title = title,
+                mode = "discover",
+            )
+        }
+
+        return KeywordSearchResult(
+            title = title,
+            mode = "person_credits",
+            personId = person.id,
+            personName = person.name,
+            isDirector = isDirector,
+            genreIds = suggestion.genreIds,
             yearFrom = suggestion.yearFrom,
             yearTo = suggestion.yearTo,
             sortBy = suggestion.sortBy,

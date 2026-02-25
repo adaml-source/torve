@@ -11,6 +11,7 @@ import com.streamvault.data.addon.SubtitleAggregator
 import com.streamvault.data.addon.StreamRepositoryImpl
 import com.streamvault.data.auth.AuthClient
 import com.streamvault.data.debrid.DebridClient
+import com.streamvault.data.download.DownloadCatalogueBuilder
 import com.streamvault.data.download.DownloadRepositoryImpl
 import com.streamvault.data.profile.ProfileRepositoryImpl
 import com.streamvault.data.shelf.ShelfConfigRepositoryImpl
@@ -20,6 +21,9 @@ import com.streamvault.data.iptv.EpgParser
 import com.streamvault.data.iptv.IptvRepositoryImpl
 import com.streamvault.data.iptv.M3uParser
 import com.streamvault.data.iptv.XtreamClient
+import com.streamvault.data.mdblist.MdbListApi
+import com.streamvault.data.mdblist.MdbListRepository
+import com.streamvault.data.mdblist.RatingsEnricher
 import com.streamvault.data.simkl.SimklClient
 import com.streamvault.data.metadata.MetadataRepositoryImpl
 import com.streamvault.data.metadata.TmdbApiClient
@@ -53,6 +57,7 @@ import com.streamvault.presentation.addon.AddonViewModel
 import com.streamvault.presentation.calendar.CalendarViewModel
 import com.streamvault.presentation.detail.DetailViewModel
 import com.streamvault.presentation.detail.PersonViewModel
+import com.streamvault.presentation.download.DownloadCatalogueViewModel
 import com.streamvault.presentation.download.DownloadViewModel
 import com.streamvault.presentation.home.HomeViewModel
 import com.streamvault.presentation.profile.ProfileViewModel
@@ -61,6 +66,7 @@ import com.streamvault.presentation.search.SearchViewModel
 import com.streamvault.presentation.settings.SettingsViewModel
 import com.streamvault.presentation.setup.SetupWizardViewModel
 import com.streamvault.presentation.discover.DiscoverViewModel
+import com.streamvault.presentation.mdblist.MdbListViewModel
 import com.streamvault.presentation.mood.MoodMatcherViewModel
 import com.streamvault.presentation.seeall.SeeAllViewModel
 import com.streamvault.presentation.stats.StatsViewModel
@@ -100,6 +106,11 @@ val sharedModule = module {
     // SIMKL
     single { SimklClient(get()) }
 
+    // MDBList
+    single { MdbListApi(get()) }
+    single { MdbListRepository(get(), get()) }
+    single { RatingsEnricher(get()) }
+
     // Kodi
     single { KodiClient(get()) }
 
@@ -138,6 +149,9 @@ val sharedModule = module {
     // Download Repository
     single<DownloadRepository> { DownloadRepositoryImpl(get()) }
 
+    // Download Catalogue
+    single { DownloadCatalogueBuilder() }
+
     // Profile Repository
     single<ProfileRepository> { ProfileRepositoryImpl(get()) }
 
@@ -161,8 +175,8 @@ val sharedModule = module {
     factory { MoodMatcher(get()) }
 
     // ViewModels
-    single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
-    factory { SearchViewModel(get(), get()) }
+    single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { SearchViewModel(get(), get()) }
     factory { DetailViewModel(get(), get(), get(), get(), get(), get(), get()) }
     factoryOf(::PersonViewModel)
     single { SettingsViewModel(get(), get(), get(), get(), get(), get(), get(), get()) }
@@ -170,12 +184,14 @@ val sharedModule = module {
     single { IptvViewModel(get(), get(), get()) }
     factory { CalendarViewModel(get(), get()) }
     factoryOf(::DownloadViewModel)
+    factory { DownloadCatalogueViewModel(get(), get(), get(), get()) }
     factoryOf(::ProfileViewModel)
     factoryOf(::SubscriptionViewModel)
     factory { SetupWizardViewModel(get(), get(), get()) }
     single { WatchlistViewModel(get(), get()) }
     factory { DiscoverViewModel() }
     factoryOf(::MoodMatcherViewModel)
+    factoryOf(::MdbListViewModel)
     factoryOf(::StatsViewModel)
     factory { SeeAllViewModel(get(), get(), get(), get()) }
 }

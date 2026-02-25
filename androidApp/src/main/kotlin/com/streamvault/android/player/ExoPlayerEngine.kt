@@ -11,6 +11,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.DefaultAudioSink
 import com.streamvault.domain.player.PlayerEngine
 import com.streamvault.domain.player.PlayerListener
 import com.streamvault.domain.player.PlayerState
@@ -35,6 +36,7 @@ class ExoPlayerEngine(
     private var currentSubtitleTracks = listOf<TrackDescription>()
     private var currentAudioTracks = listOf<TrackDescription>()
     private var trackGroups = listOf<Tracks.Group>()
+    private val delayProcessor = DelayAudioProcessor()
 
     private val exoListener = object : Player.Listener {
         override fun onIsPlayingChanged(playing: Boolean) {
@@ -111,8 +113,20 @@ class ExoPlayerEngine(
     }
 
     fun initialize() {
-        val renderersFactory = DefaultRenderersFactory(context)
-            .setEnableDecoderFallback(true)
+        val processor = delayProcessor
+        val renderersFactory = object : DefaultRenderersFactory(context) {
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioTrackPlaybackParams: Boolean,
+            ): DefaultAudioSink {
+                return DefaultAudioSink.Builder(context)
+                    .setAudioProcessors(arrayOf(processor))
+                    .setEnableFloatOutput(enableFloatOutput)
+                    .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                    .build()
+            }
+        }.setEnableDecoderFallback(true)
 
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(30_000, 120_000, 2_500, 5_000)
@@ -216,6 +230,14 @@ class ExoPlayerEngine(
     override fun removeListener(listener: PlayerListener) {
         listeners.remove(listener)
     }
+
+    override fun setAudioDelay(delayMs: Int) {
+        delayProcessor.setDelayMs(delayMs)
+    }
+
+    override fun getAudioDelay(): Int = delayProcessor.getDelayMs()
+
+    override fun getAudioSessionId(): Int = exoPlayer?.audioSessionId ?: 0
 
     fun getExoPlayer(): ExoPlayer? = exoPlayer
 

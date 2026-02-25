@@ -3,6 +3,7 @@ package com.streamvault.data.metadata
 import com.streamvault.domain.model.CastMember
 import com.streamvault.domain.model.Genre
 import com.streamvault.domain.model.MediaItem
+import com.streamvault.domain.model.MediaRatings
 import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.model.PersonSummary
 import com.streamvault.domain.model.Season
@@ -53,6 +54,7 @@ object TmdbMappers {
             trailerKey = trailer?.key,
             tagline = m.tagline,
             popularity = m.popularity,
+            ratings = m.voteAverage?.let { MediaRatings(tmdbScore = it.toFloat()) },
         )
     }
 
@@ -100,6 +102,7 @@ object TmdbMappers {
                     airDate = s.airDate,
                 )
             } ?: emptyList(),
+            ratings = t.voteAverage?.let { MediaRatings(tmdbScore = it.toFloat()) },
         )
     }
 
@@ -116,6 +119,7 @@ object TmdbMappers {
             rating = c.voteAverage,
             releaseDate = date,
             popularity = c.popularity,
+            ratings = c.voteAverage?.let { MediaRatings(tmdbScore = it.toFloat()) },
         )
     }
 
@@ -139,6 +143,7 @@ object TmdbMappers {
             rating = c.voteAverage,
             releaseDate = date,
             popularity = c.popularity,
+            ratings = c.voteAverage?.let { MediaRatings(tmdbScore = it.toFloat()) },
         )
     }
 
@@ -158,6 +163,7 @@ object TmdbMappers {
             genreIds = r.genreIds,
             releaseDate = date,
             popularity = r.popularity,
+            ratings = r.voteAverage?.let { MediaRatings(tmdbScore = it.toFloat()) },
         )
     }
 }

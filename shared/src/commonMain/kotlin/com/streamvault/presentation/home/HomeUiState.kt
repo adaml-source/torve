@@ -21,5 +21,6 @@ data class HomeUiState(
     val popularDirectors: List<PersonSummary> = emptyList(),
     val customShelves: Map<String, List<MediaItem>> = emptyMap(),
     val addonShelves: List<CatalogShelf> = emptyList(),
+    val mdbListShelves: List<CatalogShelf> = emptyList(),
     val error: String? = null,
 )

@@ -34,9 +34,10 @@ class CatalogViewModel(
     private val watchProgressRepo: WatchProgressRepository? = null,
     private val keywordSearchService: KeywordSearchService? = null,
     private val prefsRepo: PreferencesRepository? = null,
+    initialProviderId: Int? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private val _state = MutableStateFlow(CatalogUiState())
+    private val _state = MutableStateFlow(CatalogUiState(providerId = initialProviderId))
     val state: StateFlow<CatalogUiState> = _state.asStateFlow()
 
     private val searchQueryFlow = MutableStateFlow("")
@@ -265,6 +266,7 @@ class CatalogViewModel(
                                 isSearching = false,
                                 searchPage = result.page,
                                 searchHasMore = result.page < result.totalPages,
+                                hasActiveSearch = true,
                             )
                         }
                     } catch (_: Exception) {
@@ -327,6 +329,7 @@ class CatalogViewModel(
                         aiSearchError = null,
                         isSearching = false,
                         searchHasMore = false,
+                        hasActiveSearch = true,
                     )
                 }
             } catch (e: Exception) {
@@ -343,6 +346,7 @@ class CatalogViewModel(
                 searchQuery = "", searchResults = emptyList(),
                 searchPage = 1, searchHasMore = false,
                 aiSearchLabel = null, aiSearchError = null,
+                hasActiveSearch = false,
             )
         }
         searchQueryFlow.value = ""

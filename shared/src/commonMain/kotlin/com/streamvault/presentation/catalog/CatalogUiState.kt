@@ -37,6 +37,8 @@ data class CatalogUiState(
     val isAiSearching: Boolean = false,
     val aiSearchLabel: String? = null,
     val aiSearchError: String? = null,
+    // Active search indicator — true = results showing from a previous search
+    val hasActiveSearch: Boolean = false,
 )
 
 enum class CatalogCategory(val label: String) {
