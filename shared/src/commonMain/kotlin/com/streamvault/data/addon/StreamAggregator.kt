@@ -9,6 +9,7 @@ import com.streamvault.domain.model.StreamQuality
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 
 /**
@@ -44,15 +45,24 @@ class StreamAggregator(
             .map { it.manifestUrl.removeSuffix("/manifest.json").removeSuffix("/") }
             .ifEmpty { listOf(StremioAddonClient.TORRENTIO_BASE) }
 
-        // 1. Fan out to all addons in parallel
+        // 1. Fan out to all addons in parallel (single retry on failure)
         val rawStreams = addonUrls.map { url ->
             async {
                 try {
                     withTimeout(10_000) {
                         addonClient.getStreams(url, type, imdbId, season, episode)
                     }
-                } catch (_: Exception) {
-                    emptyList()
+                } catch (e: Exception) {
+                    // Single retry after 3s for transient failures
+                    try {
+                        delay(3_000)
+                        withTimeout(10_000) {
+                            addonClient.getStreams(url, type, imdbId, season, episode)
+                        }
+                    } catch (_: Exception) {
+                        println("StreamAggregator: addon $url failed after retry: ${e.message}")
+                        emptyList()
+                    }
                 }
             }
         }.awaitAll().flatten()
@@ -70,8 +80,8 @@ class StreamAggregator(
                     cached.forEach { (hash, isCached) ->
                         if (isCached) cacheStatus[hash] = true
                     }
-                } catch (_: Exception) {
-                    // Silently skip failed cache checks
+                } catch (e: Exception) {
+                    println("StreamAggregator: debrid cache check failed for $provider: ${e.message}")
                 }
             }
         }

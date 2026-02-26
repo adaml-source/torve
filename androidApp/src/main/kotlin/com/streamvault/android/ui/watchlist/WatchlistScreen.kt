@@ -34,6 +34,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,18 +46,22 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.streamvault.android.R
 import com.streamvault.android.ui.components.CardSize
+import com.streamvault.android.ui.components.LocalCardStyle
 import com.streamvault.android.ui.components.PosterCard
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Gunmetal
 import com.streamvault.android.ui.theme.Obsidian
 import com.streamvault.android.ui.theme.Snow
 import com.streamvault.android.ui.theme.StreamVault
+import com.streamvault.domain.model.resolveCardStyle
 import com.streamvault.domain.model.MediaItem
 import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.model.WatchHistoryEntry
 import com.streamvault.domain.model.WatchProgress
 import com.streamvault.domain.repository.WatchHistoryRepository
 import com.streamvault.domain.repository.WatchProgressRepository
+import com.streamvault.data.mdblist.RatingsEnricher
+import com.streamvault.presentation.settings.SettingsViewModel
 import com.streamvault.presentation.watchlist.WatchlistViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -70,8 +75,11 @@ fun WatchlistScreen(
     watchlistViewModel: WatchlistViewModel = koinInject(),
     watchProgressRepo: WatchProgressRepository = koinInject(),
     watchHistoryRepo: WatchHistoryRepository = koinInject(),
+    settingsViewModel: SettingsViewModel = koinInject(),
+    ratingsEnricher: RatingsEnricher = koinInject(),
 ) {
     val watchlistState by watchlistViewModel.state.collectAsState()
+    val settingsState by settingsViewModel.state.collectAsState()
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = listOf(
         stringResource(R.string.watchlist_title),
@@ -111,6 +119,35 @@ fun WatchlistScreen(
         }
     }
 
+    var enrichedWatchlist by remember { androidx.compose.runtime.mutableStateOf<List<MediaItem>>(emptyList()) }
+    LaunchedEffect(watchlistState.items, settingsState.mdblistApiKey) {
+        val baseItems = watchlistState.items.map { wlItem ->
+            MediaItem(
+                id = wlItem.mediaId,
+                tmdbId = wlItem.tmdbId.toInt(),
+                imdbId = wlItem.imdbId,
+                title = wlItem.title,
+                posterUrl = wlItem.posterUrl,
+                backdropUrl = wlItem.backdropUrl,
+                rating = wlItem.rating,
+                year = wlItem.year,
+                type = wlItem.mediaType,
+            )
+        }
+        val apiKey = settingsState.mdblistApiKey
+        enrichedWatchlist = if (apiKey.isNotBlank()) {
+            withContext(Dispatchers.Default) { ratingsEnricher.enrichList(baseItems, apiKey) }
+        } else baseItems
+    }
+
+    val defaultCardStyle = resolveCardStyle(
+        presets = settingsState.cardStylePresets,
+        presetId = null,
+        globalDefaultPresetId = settingsState.globalDefaultPresetId,
+    )
+    CompositionLocalProvider(
+        LocalCardStyle provides defaultCardStyle,
+    ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -155,7 +192,7 @@ fun WatchlistScreen(
 
         when (selectedTab) {
             0 -> WatchlistTab(
-                items = watchlistState.items,
+                items = enrichedWatchlist,
                 isLoading = watchlistState.isLoading,
                 onMediaClick = onMediaClick,
             )
@@ -171,11 +208,12 @@ fun WatchlistScreen(
             )
         }
     }
+    }
 }
 
 @Composable
 private fun WatchlistTab(
-    items: List<com.streamvault.domain.model.WatchlistItem>,
+    items: List<MediaItem>,
     isLoading: Boolean,
     onMediaClick: (MediaItem) -> Unit,
 ) {
@@ -205,8 +243,8 @@ private fun WatchlistTab(
         return
     }
 
-    val movies = items.filter { it.mediaType == MediaType.MOVIE }
-    val shows = items.filter { it.mediaType == MediaType.SERIES }
+    val movies = items.filter { it.type == MediaType.MOVIE }
+    val shows = items.filter { it.type == MediaType.SERIES }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -227,21 +265,11 @@ private fun WatchlistTab(
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    items(movies, key = { it.mediaId }) { wlItem ->
-                        val mediaItem = MediaItem(
-                            id = wlItem.mediaId,
-                            tmdbId = wlItem.tmdbId.toInt(),
-                            title = wlItem.title,
-                            posterUrl = wlItem.posterUrl,
-                            backdropUrl = wlItem.backdropUrl,
-                            rating = wlItem.rating,
-                            year = wlItem.year,
-                            type = MediaType.MOVIE,
-                        )
+                    items(movies, key = { it.id }) { wlItem ->
                         PosterCard(
-                            item = mediaItem,
-                            onClick = { onMediaClick(mediaItem) },
-                            size = CardSize.MEDIUM,
+                            item = wlItem,
+                            onClick = { onMediaClick(wlItem) },
+                            sizeOverride = CardSize.MEDIUM,
                         )
                     }
                 }
@@ -264,21 +292,11 @@ private fun WatchlistTab(
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    items(shows, key = { it.mediaId }) { wlItem ->
-                        val mediaItem = MediaItem(
-                            id = wlItem.mediaId,
-                            tmdbId = wlItem.tmdbId.toInt(),
-                            title = wlItem.title,
-                            posterUrl = wlItem.posterUrl,
-                            backdropUrl = wlItem.backdropUrl,
-                            rating = wlItem.rating,
-                            year = wlItem.year,
-                            type = MediaType.SERIES,
-                        )
+                    items(shows, key = { it.id }) { wlItem ->
                         PosterCard(
-                            item = mediaItem,
-                            onClick = { onMediaClick(mediaItem) },
-                            size = CardSize.MEDIUM,
+                            item = wlItem,
+                            onClick = { onMediaClick(wlItem) },
+                            sizeOverride = CardSize.MEDIUM,
                         )
                     }
                 }

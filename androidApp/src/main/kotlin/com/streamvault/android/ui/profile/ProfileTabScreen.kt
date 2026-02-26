@@ -55,7 +55,7 @@ fun ProfileTabScreen(
     onDownloadsClick: () -> Unit = {},
     onSubscriptionClick: () -> Unit = {},
     onProfilesClick: () -> Unit = {},
-    onIptvClick: () -> Unit = {},
+    onChannelsClick: () -> Unit = {},
     onStatsClick: () -> Unit = {},
     settingsViewModel: SettingsViewModel = koinInject(),
 ) {
@@ -170,9 +170,9 @@ fun ProfileTabScreen(
                 )
                 ProfileNavItem(
                     icon = Icons.Filled.LiveTv,
-                    label = "Live TV",
-                    subtitle = "IPTV channels & playlists",
-                    onClick = onIptvClick,
+                    label = "Live Channels",
+                    subtitle = "Live channels & playlists",
+                    onClick = onChannelsClick,
                 )
                 ProfileNavItem(
                     icon = Icons.Filled.Star,

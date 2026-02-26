@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -42,11 +43,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.streamvault.android.ui.components.CardSize
+import com.streamvault.android.ui.components.LocalCardStyle
 import com.streamvault.android.ui.components.PosterCard
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.StreamVault
 import com.streamvault.domain.model.MediaItem
+import com.streamvault.domain.model.resolveCardStyle
 import com.streamvault.presentation.detail.PersonViewModel
+import com.streamvault.presentation.settings.SettingsViewModel
 import org.koin.compose.koinInject
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -56,12 +60,20 @@ fun PersonScreen(
     onBack: () -> Unit,
     onMediaClick: (MediaItem) -> Unit,
     viewModel: PersonViewModel = koinInject(),
+    settingsViewModel: SettingsViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
+    val settingsState by settingsViewModel.state.collectAsState()
+    val defaultCardStyle = resolveCardStyle(
+        presets = settingsState.cardStylePresets,
+        presetId = null,
+        globalDefaultPresetId = settingsState.globalDefaultPresetId,
+    )
 
     LaunchedEffect(personId) { viewModel.loadPerson(personId) }
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    CompositionLocalProvider(LocalCardStyle provides defaultCardStyle) {
+        Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -163,12 +175,13 @@ fun PersonScreen(
                     items(state.credits, key = { "${it.tmdbId}_${it.type}" }) { item ->
                         PosterCard(
                             item = item,
-                            size = CardSize.SMALL,
+                            sizeOverride = CardSize.SMALL,
                             onClick = { onMediaClick(item) },
                         )
                     }
                 }
             }
         }
+    }
     }
 }

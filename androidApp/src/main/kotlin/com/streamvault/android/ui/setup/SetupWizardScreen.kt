@@ -21,7 +21,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -104,10 +106,11 @@ fun SetupWizardScreen(
             ) {
                 when (step) {
                     SetupStep.WELCOME -> WelcomeStep()
+                    SetupStep.TERMS -> TermsStep(state, viewModel)
                     SetupStep.DEBRID -> DebridStep(state, viewModel)
                     SetupStep.TRAKT -> TraktStep(state, viewModel)
                     SetupStep.QUALITY -> QualityStep(state, viewModel)
-                    SetupStep.IPTV -> IptvStep(state, viewModel)
+                    SetupStep.CHANNELS -> ChannelsStep(state, viewModel)
                     SetupStep.DONE -> DoneStep()
                 }
             }
@@ -149,7 +152,17 @@ fun SetupWizardScreen(
                         Text("Start Streaming")
                     }
                 }
-                SetupStep.DEBRID, SetupStep.TRAKT, SetupStep.IPTV -> {
+                SetupStep.TERMS -> {
+                    Button(
+                        onClick = { viewModel.nextStep() },
+                        enabled = state.termsAccepted,
+                    ) {
+                        Text("I Agree")
+                        Spacer(Modifier.width(4.dp))
+                        Icon(Icons.AutoMirrored.Filled.ArrowForward, null, Modifier.size(18.dp))
+                    }
+                }
+                SetupStep.DEBRID, SetupStep.TRAKT, SetupStep.CHANNELS -> {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         TextButton(onClick = { viewModel.skipStep() }) {
                             Text("Skip")
@@ -196,7 +209,7 @@ private fun WelcomeStep() {
         val features = listOf(
             "Stream movies & TV shows from multiple sources",
             "Cloud service integration for optimized playback",
-            "Live TV with IPTV/M3U playlist support",
+            "Live channels with M3U playlist support",
             "Download content for offline viewing",
             "Track your watchlist with Trakt.tv",
         )
@@ -225,6 +238,67 @@ private fun WelcomeStep() {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
+    }
+}
+
+@Composable
+private fun TermsStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
+    Column {
+        Text(
+            "Terms of Use",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(Modifier.height(16.dp))
+
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+            ),
+        ) {
+            Text(
+                text = "Torve is a media organizer and player. You are responsible for ensuring " +
+                    "you have the right to access any content through third-party sources you " +
+                    "configure. Torve does not host, provide, or control any media content.",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(16.dp),
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+            ),
+        ) {
+            Text(
+                text = "This product uses the TMDB API but is not endorsed or certified by TMDB.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(16.dp),
+            )
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { viewModel.setTermsAccepted(!state.termsAccepted) }
+                .padding(vertical = 8.dp),
+        ) {
+            Checkbox(
+                checked = state.termsAccepted,
+                onCheckedChange = { viewModel.setTermsAccepted(it) },
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "I understand and accept these terms",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
     }
 }
 
@@ -506,14 +580,14 @@ private fun QualityStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun IptvStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
-    val isXtream = state.iptvPlaylistType == "xtream"
+private fun ChannelsStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
+    val isXtream = state.channelPlaylistType == "xtream"
 
     Column {
-        Text("IPTV / Live TV", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text("Channels", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         Text(
-            "Add an M3U playlist or Xtream Codes account to watch live TV channels. You can add more later in the IPTV tab.",
+            "Add an M3U playlist or Xtream Codes account to watch live TV channels. You can add more later in the Channels tab.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -523,12 +597,12 @@ private fun IptvStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
             SegmentedButton(
                 selected = !isXtream,
-                onClick = { viewModel.setIptvPlaylistType("m3u") },
+                onClick = { viewModel.setChannelPlaylistType("m3u") },
                 shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
             ) { Text("M3U") }
             SegmentedButton(
                 selected = isXtream,
-                onClick = { viewModel.setIptvPlaylistType("xtream") },
+                onClick = { viewModel.setChannelPlaylistType("xtream") },
                 shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
             ) { Text("Xtream Codes") }
         }
@@ -536,10 +610,10 @@ private fun IptvStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
         Spacer(Modifier.height(16.dp))
 
         OutlinedTextField(
-            value = state.iptvPlaylistName,
-            onValueChange = { viewModel.setIptvPlaylistName(it) },
+            value = state.channelPlaylistName,
+            onValueChange = { viewModel.setChannelPlaylistName(it) },
             label = { Text("Playlist Name") },
-            placeholder = { Text("e.g. My IPTV") },
+            placeholder = { Text("e.g. My Channels") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
         )
@@ -547,8 +621,8 @@ private fun IptvStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
 
         if (isXtream) {
             OutlinedTextField(
-                value = state.iptvXtreamServer,
-                onValueChange = { viewModel.setIptvXtreamServer(it) },
+                value = state.channelXtreamServer,
+                onValueChange = { viewModel.setChannelXtreamServer(it) },
                 label = { Text("Server URL") },
                 placeholder = { Text("http://example.com:8080") },
                 modifier = Modifier.fillMaxWidth(),
@@ -556,24 +630,24 @@ private fun IptvStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
             )
             Spacer(Modifier.height(12.dp))
             OutlinedTextField(
-                value = state.iptvXtreamUsername,
-                onValueChange = { viewModel.setIptvXtreamUsername(it) },
+                value = state.channelXtreamUsername,
+                onValueChange = { viewModel.setChannelXtreamUsername(it) },
                 label = { Text("Username") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )
             Spacer(Modifier.height(12.dp))
             OutlinedTextField(
-                value = state.iptvXtreamPassword,
-                onValueChange = { viewModel.setIptvXtreamPassword(it) },
+                value = state.channelXtreamPassword,
+                onValueChange = { viewModel.setChannelXtreamPassword(it) },
                 label = { Text("Password") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )
         } else {
             OutlinedTextField(
-                value = state.iptvPlaylistUrl,
-                onValueChange = { viewModel.setIptvPlaylistUrl(it) },
+                value = state.channelPlaylistUrl,
+                onValueChange = { viewModel.setChannelPlaylistUrl(it) },
                 label = { Text("M3U Playlist URL") },
                 placeholder = { Text("https://example.com/playlist.m3u") },
                 modifier = Modifier.fillMaxWidth(),

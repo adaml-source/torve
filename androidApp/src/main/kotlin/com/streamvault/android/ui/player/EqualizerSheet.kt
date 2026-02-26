@@ -8,11 +8,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
@@ -32,11 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Constraints as UiConstraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.streamvault.android.player.AudioEqualizer
@@ -69,27 +68,38 @@ fun EqualizerSheet(
         }
     }
 
+    // Landscape-friendly: side panel on the right, scrollable content
     Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .fillMaxHeight(0.55f)
-            .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
-            .background(Charcoal),
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.4f))
+            .clickable(indication = null, interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }) { onDismiss() },
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
+        Row(
+            modifier = Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(0.85f)
+                .align(Alignment.CenterEnd)
+                .clip(RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp))
+                .background(Charcoal)
+                .clickable(indication = null, interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }) { /* consume click */ }
+                .padding(12.dp),
         ) {
-            // Header: title + enable toggle
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
+            // Left column: controls (header, preset, bass/surround, reset)
+            Column(
+                modifier = Modifier
+                    .width(160.dp)
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState()),
             ) {
+                // Header
                 Text("Equalizer", color = Snow, style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(8.dp))
+
+                // Enable toggle
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = onDismiss) {
-                        Text("Close", color = Amber)
-                    }
+                    Text("Enabled", color = Silver, style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.weight(1f))
                     Switch(
                         checked = enabled,
                         onCheckedChange = {
@@ -100,77 +110,32 @@ fun EqualizerSheet(
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Amber,
                             checkedTrackColor = AmberDark.copy(alpha = 0.5f),
+                            uncheckedThumbColor = Silver,
+                            uncheckedTrackColor = Gunmetal,
+                            uncheckedBorderColor = Silver,
                         ),
                     )
                 }
-            }
 
-            Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(8.dp))
 
-            // Preset selector
-            PresetSelector(
-                selected = selectedPreset,
-                onSelect = { preset ->
-                    selectedPreset = preset
-                    equalizer.applyPreset(preset)
-                    bandLevels = equalizer.bandLevels
-                    bassBoost = equalizer.bassBoostStrength
-                    virtualizer = equalizer.virtualizerStrength
-                    refreshKey++
-                    onStateChanged(equalizer.toStateString())
-                },
-            )
+                // Preset
+                PresetSelector(
+                    selected = selectedPreset,
+                    onSelect = { preset ->
+                        selectedPreset = preset
+                        equalizer.applyPreset(preset)
+                        bandLevels = equalizer.bandLevels
+                        bassBoost = equalizer.bassBoostStrength
+                        virtualizer = equalizer.virtualizerStrength
+                        refreshKey++
+                        onStateChanged(equalizer.toStateString())
+                    },
+                )
 
-            Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(12.dp))
 
-            // Band sliders — vertical columns
-            if (equalizer.bandCount > 0) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                ) {
-                    for (i in 0 until equalizer.bandCount) {
-                        val label = freqLabels.getOrElse(i) { "$i" }
-                        BandSlider(
-                            label = label,
-                            level = bandLevels.getOrElse(i) { 0 },
-                            minLevel = equalizer.minLevel,
-                            maxLevel = equalizer.maxLevel,
-                            enabled = enabled,
-                            onLevelChange = { newLevel ->
-                                equalizer.setBandLevel(i, newLevel)
-                                bandLevels = equalizer.bandLevels
-                                selectedPreset = null // custom
-                                onStateChanged(equalizer.toStateString())
-                            },
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                }
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        "Equalizer not available for this audio session",
-                        color = Silver,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            // Bass boost + Virtualizer
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
+                // Bass boost
                 EffectSlider(
                     label = "Bass",
                     value = bassBoost,
@@ -180,8 +145,11 @@ fun EqualizerSheet(
                         equalizer.setBassBoostStrength(it)
                         onStateChanged(equalizer.toStateString())
                     },
-                    modifier = Modifier.weight(1f),
                 )
+
+                Spacer(Modifier.height(4.dp))
+
+                // Virtualizer
                 EffectSlider(
                     label = "Surround",
                     value = virtualizer,
@@ -191,26 +159,73 @@ fun EqualizerSheet(
                         equalizer.setVirtualizerStrength(it)
                         onStateChanged(equalizer.toStateString())
                     },
-                    modifier = Modifier.weight(1f),
                 )
+
+                Spacer(Modifier.height(12.dp))
+
+                // Close + Reset
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    TextButton(onClick = {
+                        equalizer.applyPreset(EqPreset.FLAT)
+                        bandLevels = equalizer.bandLevels
+                        bassBoost = 0
+                        virtualizer = 0
+                        selectedPreset = EqPreset.FLAT
+                        refreshKey++
+                        onStateChanged(equalizer.toStateString())
+                    }) {
+                        Text("Reset", color = Silver, style = MaterialTheme.typography.labelMedium)
+                    }
+                    TextButton(onClick = onDismiss) {
+                        Text("Close", color = Amber, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
             }
 
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.width(12.dp))
 
-            // Reset button
-            TextButton(
-                onClick = {
-                    equalizer.applyPreset(EqPreset.FLAT)
-                    bandLevels = equalizer.bandLevels
-                    bassBoost = 0
-                    virtualizer = 0
-                    selectedPreset = EqPreset.FLAT
-                    refreshKey++
-                    onStateChanged(equalizer.toStateString())
-                },
-                modifier = Modifier.align(Alignment.CenterHorizontally),
-            ) {
-                Text("Reset to Flat", color = Amber, style = MaterialTheme.typography.labelMedium)
+            // Right area: band sliders (horizontal layout, each band is a horizontal row)
+            if (equalizer.bandCount > 0) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.SpaceEvenly,
+                ) {
+                    for (i in 0 until equalizer.bandCount) {
+                        val label = freqLabels.getOrElse(i) { "$i" }
+                        HorizontalBandSlider(
+                            label = label,
+                            level = bandLevels.getOrElse(i) { 0 },
+                            minLevel = equalizer.minLevel,
+                            maxLevel = equalizer.maxLevel,
+                            enabled = enabled,
+                            onLevelChange = { newLevel ->
+                                equalizer.setBandLevel(i, newLevel)
+                                bandLevels = equalizer.bandLevels
+                                selectedPreset = null
+                                onStateChanged(equalizer.toStateString())
+                            },
+                        )
+                    }
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "Equalizer not available for this audio session",
+                        color = Silver,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
         }
     }
@@ -263,73 +278,58 @@ private fun PresetSelector(
     }
 }
 
+/** Horizontal band slider — one row per frequency band. Landscape-friendly. */
 @Composable
-private fun BandSlider(
+private fun HorizontalBandSlider(
     label: String,
     level: Int,
     minLevel: Int,
     maxLevel: Int,
     enabled: Boolean,
     onLevelChange: (Int) -> Unit,
-    modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally,
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        // dB label
-        Text(
-            text = "${level / 100}",
-            color = if (enabled) Amber else Silver,
-            style = MaterialTheme.typography.labelSmall,
-            textAlign = TextAlign.Center,
-        )
-
-        // Vertical slider (horizontal slider rotated -90 degrees)
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .width(40.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Slider(
-                value = level.toFloat(),
-                onValueChange = { onLevelChange(it.toInt()) },
-                valueRange = minLevel.toFloat()..maxLevel.toFloat(),
-                enabled = enabled,
-                modifier = Modifier
-                    .graphicsLayer {
-                        rotationZ = 270f
-                        transformOrigin = TransformOrigin(0f, 0f)
-                    }
-                    .layout { measurable, constraints ->
-                        val placeable = measurable.measure(
-                            UiConstraints(
-                                minWidth = constraints.minHeight,
-                                maxWidth = constraints.maxHeight,
-                                minHeight = constraints.minWidth,
-                                maxHeight = constraints.maxWidth,
-                            ),
-                        )
-                        layout(placeable.height, placeable.width) {
-                            placeable.place(-placeable.width, 0)
-                        }
-                    },
-                colors = SliderDefaults.colors(
-                    thumbColor = if (enabled) Amber else Silver,
-                    activeTrackColor = if (enabled) Amber else Silver.copy(alpha = 0.5f),
-                    inactiveTrackColor = Graphite,
-                ),
-            )
-        }
-
         // Frequency label
         Text(
             text = label,
             color = Silver,
             style = MaterialTheme.typography.labelSmall,
-            fontSize = 9.sp,
-            textAlign = TextAlign.Center,
+            fontSize = 10.sp,
+            modifier = Modifier.width(28.dp),
+            textAlign = TextAlign.End,
+        )
+
+        Spacer(Modifier.width(8.dp))
+
+        // Horizontal slider
+        Slider(
+            value = level.toFloat(),
+            onValueChange = { onLevelChange(it.toInt()) },
+            valueRange = minLevel.toFloat()..maxLevel.toFloat(),
+            enabled = enabled,
+            modifier = Modifier.weight(1f),
+            colors = SliderDefaults.colors(
+                thumbColor = if (enabled) Amber else Silver,
+                activeTrackColor = if (enabled) Amber else Silver.copy(alpha = 0.5f),
+                inactiveTrackColor = Graphite,
+            ),
+        )
+
+        Spacer(Modifier.width(4.dp))
+
+        // dB value
+        Text(
+            text = "${level / 100}dB",
+            color = if (enabled) Amber else Silver,
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = 10.sp,
+            modifier = Modifier.width(32.dp),
+            textAlign = TextAlign.Start,
         )
     }
 }

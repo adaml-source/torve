@@ -69,6 +69,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -84,6 +85,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.streamvault.android.R
 import com.streamvault.android.ui.components.CardSize
+import com.streamvault.android.ui.components.LocalCardStyle
 import com.streamvault.android.ui.components.PosterCard
 import com.streamvault.android.ui.components.ShimmerBox
 import com.streamvault.android.ui.components.ShimmerPosterCard
@@ -95,6 +97,7 @@ import com.streamvault.android.ui.theme.Silver
 import com.streamvault.android.ui.theme.Snow
 import com.streamvault.android.ui.theme.StreamVault
 import com.streamvault.domain.model.MediaItem
+import com.streamvault.domain.model.resolveCardStyle
 import com.streamvault.presentation.catalog.CatalogCategory
 import com.streamvault.presentation.catalog.CatalogFilter
 import com.streamvault.presentation.catalog.CatalogViewModel
@@ -134,6 +137,7 @@ fun CatalogScreen(
     val settingsState by settingsViewModel.state.collectAsState()
     val genres = if (mediaType == "movie") MOVIE_GENRES else TV_GENRES
     val gridState = rememberLazyGridState()
+    val mdblistApiKey = settingsState.mdblistApiKey
 
     if (onBack != null) {
         BackHandler(onBack = onBack)
@@ -142,6 +146,10 @@ fun CatalogScreen(
     // Reset grid scroll position when viewModel changes (e.g. provider type switch)
     LaunchedEffect(viewModel) {
         gridState.scrollToItem(0)
+    }
+
+    LaunchedEffect(mdblistApiKey) {
+        if (mdblistApiKey.isNotBlank()) viewModel.refresh()
     }
 
     // Infinite scroll: trigger loadMore when near the bottom
@@ -179,6 +187,14 @@ fun CatalogScreen(
         !isScrollingDown || firstVisible <= 1
     } }
 
+    val defaultCardStyle = resolveCardStyle(
+        presets = settingsState.cardStylePresets,
+        presetId = null,
+        globalDefaultPresetId = settingsState.globalDefaultPresetId,
+    )
+    CompositionLocalProvider(
+        LocalCardStyle provides defaultCardStyle,
+    ) {
     Box(modifier = Modifier.fillMaxSize()) {
         when {
             state.isLoading && displayItems.isEmpty() -> {
@@ -346,7 +362,7 @@ fun CatalogScreen(
                         val item = displayItems[index]
                         PosterCard(
                             item = item,
-                            size = CardSize.MEDIUM,
+                            sizeOverride = CardSize.MEDIUM,
                             onClick = { onMediaClick(item) },
                         )
                     }
@@ -550,6 +566,7 @@ fun CatalogScreen(
                 }
             }
         }
+    }
     }
 
     // ── Filter Bottom Sheet ──

@@ -52,6 +52,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -68,6 +69,7 @@ import com.streamvault.android.ui.components.CastAvatar
 import com.streamvault.android.ui.components.PosterCard
 import com.streamvault.android.ui.components.CardSize
 import com.streamvault.android.ui.components.SectionHeader
+import com.streamvault.android.ui.components.LocalCardStyle
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Graphite
 import com.streamvault.android.ui.theme.HeroGradient
@@ -82,6 +84,11 @@ import com.streamvault.domain.model.Download
 import com.streamvault.domain.model.DownloadStatus
 import com.streamvault.domain.model.MediaItem
 import com.streamvault.domain.model.MediaType
+import com.streamvault.domain.model.AvailabilityOffer
+import com.streamvault.domain.model.AvailabilityOfferType
+import com.streamvault.domain.model.resolveCardStyle
+import com.streamvault.domain.model.calculateTorveScore
+import com.streamvault.android.player.DeviceCodecProbe
 import com.streamvault.presentation.detail.DetailViewModel
 import com.streamvault.presentation.download.DownloadViewModel
 import com.streamvault.presentation.settings.SettingsViewModel
@@ -94,7 +101,7 @@ import org.koin.compose.koinInject
 fun DetailScreen(
     type: String,
     id: Int,
-    onPlayClick: (url: String, season: Int?, episode: Int?, imdbId: String?) -> Unit,
+    onPlayClick: (url: String, fallbackUrl: String, season: Int?, episode: Int?, imdbId: String?) -> Unit,
     onBack: () -> Unit,
     onMediaClick: (MediaItem) -> Unit,
     onPersonClick: ((Int) -> Unit)? = null,
@@ -119,21 +126,47 @@ fun DetailScreen(
         }
     }
 
-    LaunchedEffect(Unit) { viewModel.setSettingsProvider { settingsViewModel } }
-    LaunchedEffect(type, id) { viewModel.loadDetail(type, id) }
+    LaunchedEffect(Unit) {
+        viewModel.setSettingsProvider { settingsViewModel }
+        viewModel.setDeviceCodecCaps(DeviceCodecProbe.probe())
+    }
+    LaunchedEffect(type, id) {
+        if (id <= 0) {
+            onBack()
+            return@LaunchedEffect
+        }
+        viewModel.loadDetail(type, id)
+    }
 
+    var resolvedFallbackUrl by remember { mutableStateOf("") }
     LaunchedEffect(state.resolvedStream) {
         state.resolvedStream?.let { resolved ->
             val url = resolved.transcodeUrls?.mp4
                 ?: resolved.transcodeUrls?.hls
                 ?: resolved.url
+            // Build a fallback chain: if primary is the direct URL, fallback to HLS transcode
+            val fallback = if (url == resolved.url) {
+                resolved.transcodeUrls?.hls ?: resolved.transcodeUrls?.mp4 ?: ""
+            } else if (url == resolved.transcodeUrls?.mp4) {
+                resolved.transcodeUrls?.hls ?: resolved.url
+            } else {
+                resolved.url
+            }
             resolvedUrl = url
+            resolvedFallbackUrl = fallback
             showActionSheet = true
             viewModel.clearResolvedStream()
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    val defaultCardStyle = resolveCardStyle(
+        presets = settingsState.cardStylePresets,
+        presetId = null,
+        globalDefaultPresetId = settingsState.globalDefaultPresetId,
+    )
+
+    CompositionLocalProvider(LocalCardStyle provides defaultCardStyle) {
+        Box(modifier = Modifier.fillMaxSize()) {
         when {
             state.isLoading -> {
                 CircularProgressIndicator(
@@ -195,6 +228,23 @@ fun DetailScreen(
                             color = Snow,
                         )
 
+                        if (state.isInLibrary) {
+                            Spacer(Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier
+                                    .background(Graphite, RoundedCornerShape(12.dp))
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "In Library",
+                                    color = Amber,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
+
                         Spacer(Modifier.height(8.dp))
 
                         // Metadata row — year • runtime • rating
@@ -211,20 +261,36 @@ fun DetailScreen(
                                     MetadataText(FormatUtil.formatRuntime(runtime))
                                 }
                             }
-                            item.rating?.let { rating ->
-                                if (rating > 0) {
-                                    Spacer(Modifier.width(6.dp))
-                                    Icon(
-                                        Icons.Rounded.Star,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(14.dp),
-                                        tint = Amber,
-                                    )
+                            if (settingsState.ratingPrefs.showRatingsOnDetailPage) {
+                                item.rating?.let { rating ->
+                                    if (rating > 0) {
+                                        Spacer(Modifier.width(6.dp))
+                                        Icon(
+                                            Icons.Rounded.Star,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(14.dp),
+                                            tint = Amber,
+                                        )
+                                        Text(
+                                            text = "%.1f".format(rating),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = Amber,
+                                            fontWeight = FontWeight.Medium,
+                                        )
+                                    }
+                                }
+                            }
+                            if (settingsState.ratingPrefs.showTorveScoreOnDetailPage) {
+                                val torve = item.ratings?.let {
+                                    calculateTorveScore(it, settingsState.ratingPrefs.torveWeights)
+                                }
+                                torve?.let {
+                                    MetadataText("•")
                                     Text(
-                                        text = "%.1f".format(rating),
+                                        text = "Torve ${"%.0f".format(it)}",
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = Amber,
-                                        fontWeight = FontWeight.Medium,
+                                        fontWeight = FontWeight.SemiBold,
                                     )
                                 }
                             }
@@ -251,7 +317,11 @@ fun DetailScreen(
                             Button(
                                 onClick = {
                                     if (settingsState.debridConnected) {
-                                        viewModel.fetchStreams()
+                                        if (item.type == MediaType.SERIES) {
+                                            viewModel.playNextEpisode()
+                                        } else {
+                                            viewModel.fetchStreams()
+                                        }
                                     } else {
                                         onSettingsClick?.invoke()
                                     }
@@ -351,6 +421,34 @@ fun DetailScreen(
                                             style = MaterialTheme.typography.labelLarge,
                                         )
                                     }
+
+                                    FilledTonalButton(
+                                        onClick = {
+                                            val next = when (val current = state.userRating) {
+                                                null -> 7
+                                                10 -> null
+                                                else -> current + 1
+                                            }
+                                            viewModel.setUserRating(next)
+                                        },
+                                        modifier = Modifier.weight(1f).height(44.dp),
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = ButtonDefaults.filledTonalButtonColors(
+                                            containerColor = if (state.userRating != null) Amber.copy(alpha = 0.2f) else Graphite,
+                                            contentColor = if (state.userRating != null) Amber else Snow,
+                                        ),
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.Star,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            text = state.userRating?.let { "Rated $it/10" } ?: "Rate",
+                                            style = MaterialTheme.typography.labelLarge,
+                                        )
+                                    }
                                 }
                             }
 
@@ -383,6 +481,22 @@ fun DetailScreen(
                                 ErrorMessage(error, Modifier.padding(top = 8.dp))
                             }
                         }
+
+                        Spacer(Modifier.height(20.dp))
+                        WhereToWatchSection(
+                            offers = state.availability?.offers.orEmpty(),
+                            isLoading = state.isLoadingAvailability,
+                            error = state.availabilityError,
+                            onOpenOffer = { offer ->
+                                val targetUrl = offer.deeplinkUrl ?: offer.webUrl
+                                if (!targetUrl.isNullOrBlank()) {
+                                    runCatching {
+                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl))
+                                        context.startActivity(intent)
+                                    }
+                                }
+                            },
+                        )
 
                         // Tagline
                         item.tagline?.let { tagline ->
@@ -512,7 +626,7 @@ fun DetailScreen(
                                 items(state.similar, key = { it.id }) { similar ->
                                     PosterCard(
                                         item = similar,
-                                        size = CardSize.SMALL,
+                                        sizeOverride = CardSize.SMALL,
                                         onClick = { onMediaClick(similar) },
                                     )
                                 }
@@ -598,7 +712,7 @@ fun DetailScreen(
                         url = resolvedUrl,
                         title = dlTitle,
                         posterUrl = item?.posterUrl ?: "",
-                        onPlayInApp = { onPlayClick(resolvedUrl, ctxSeason, ctxEpisode, item?.imdbId) },
+                        onPlayInApp = { onPlayClick(resolvedUrl, resolvedFallbackUrl, ctxSeason, ctxEpisode, item?.imdbId) },
                         onDownload = {
                             if (item != null) {
                                 downloadViewModel.enqueueDownload(
@@ -635,6 +749,78 @@ fun DetailScreen(
                             onDismiss = { showTrailer = false },
                             onOpenExternal = { launchTrailer(context, key) },
                         )
+                    }
+                }
+            }
+        }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun WhereToWatchSection(
+    offers: List<AvailabilityOffer>,
+    isLoading: Boolean,
+    error: String?,
+    onOpenOffer: (AvailabilityOffer) -> Unit,
+) {
+    SectionHeader(title = "Where to Watch")
+    Spacer(Modifier.height(8.dp))
+    when {
+        isLoading -> {
+            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Amber)
+        }
+        error != null -> {
+            Text(error, color = StreamVault.colors.textTertiary, style = MaterialTheme.typography.bodySmall)
+        }
+        offers.isEmpty() -> {
+            Text("No provider offers available in selected region.", color = StreamVault.colors.textTertiary, style = MaterialTheme.typography.bodySmall)
+        }
+        else -> {
+            val grouped = offers.groupBy { it.offerType }
+            val order = listOf(
+                AvailabilityOfferType.SUBSCRIPTION,
+                AvailabilityOfferType.FREE,
+                AvailabilityOfferType.ADS,
+                AvailabilityOfferType.RENT,
+                AvailabilityOfferType.BUY,
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                order.forEach { type ->
+                    val rows = grouped[type].orEmpty()
+                    if (rows.isNotEmpty()) {
+                        Text(
+                            text = when (type) {
+                                AvailabilityOfferType.SUBSCRIPTION -> "Subscription"
+                                AvailabilityOfferType.RENT -> "Rent"
+                                AvailabilityOfferType.BUY -> "Buy"
+                                AvailabilityOfferType.FREE -> "Free"
+                                AvailabilityOfferType.ADS -> "With Ads"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = StreamVault.colors.textSecondary,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            rows.forEach { offer ->
+                                Row(
+                                    modifier = Modifier
+                                        .background(Graphite, RoundedCornerShape(16.dp))
+                                        .clickable { onOpenOffer(offer) }
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        offer.providerName,
+                                        color = Snow,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }

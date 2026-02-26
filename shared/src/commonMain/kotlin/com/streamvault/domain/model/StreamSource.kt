@@ -32,6 +32,17 @@ enum class StreamQuality {
             UNKNOWN -> 5
         }
 
+    /** Pixel height for this quality tier. UNKNOWN returns null. */
+    val heightPx: Int?
+        get() = when (this) {
+            REMUX_4K -> 2160
+            UHD_4K -> 2160
+            FHD_1080P -> 1080
+            HD_720P -> 720
+            SD_480P -> 480
+            UNKNOWN -> null
+        }
+
     companion object {
         fun fromString(text: String): StreamQuality {
             val t = text.uppercase()

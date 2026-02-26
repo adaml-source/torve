@@ -93,7 +93,7 @@ class SubscriptionViewModel(
             val featureName = when (feature) {
                 PremiumFeature.STREAM_PLAYBACK -> "Stream Playback"
                 PremiumFeature.DOWNLOAD -> "Downloads"
-                PremiumFeature.IPTV -> "IPTV"
+                PremiumFeature.CHANNELS -> "Channels"
                 PremiumFeature.MULTI_DEBRID -> "Multi-Debrid"
                 PremiumFeature.ADVANCED_FILTERS -> "Advanced Filters"
             }

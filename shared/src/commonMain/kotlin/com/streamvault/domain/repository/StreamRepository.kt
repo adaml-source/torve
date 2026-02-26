@@ -25,7 +25,7 @@ interface StreamRepository {
 
     /**
      * Resolve a stream via debrid service to get a playable URL.
-     * For torrent streams (infoHash), goes through the full debrid pipeline.
+     * For hash-based streams (infoHash), goes through the full debrid pipeline.
      * For direct URL streams, passes through or unrestricts.
      */
     suspend fun resolveStream(

@@ -6,8 +6,15 @@ import com.streamvault.data.kodi.KodiClient
 import com.streamvault.data.kodi.KodiHost
 import com.streamvault.data.simkl.SimklClient
 import com.streamvault.data.trakt.TraktClient
+import com.streamvault.data.trakt.auth.TraktTokenStore
+import com.streamvault.data.trakt.repo.TraktSyncRepository
 import com.streamvault.db.StreamVaultDatabase
+import com.streamvault.domain.integrations.IntegrationSecretKey
+import com.streamvault.domain.integrations.IntegrationSecretStore
+import com.streamvault.domain.integrations.LibraryOverlayService
 import com.streamvault.domain.model.CardPrefs
+import com.streamvault.domain.model.CardStyle
+import com.streamvault.domain.model.CardStylePreset
 import com.streamvault.domain.model.CodecPreference
 import com.streamvault.domain.model.DEFAULT_STREAM_GROUPS
 import com.streamvault.domain.model.DebridServiceType
@@ -15,9 +22,14 @@ import com.streamvault.domain.model.HdrMode
 import com.streamvault.domain.model.RegexPattern
 import com.streamvault.domain.model.StreamGroup
 import com.streamvault.domain.model.RatingDisplayPrefs
+import com.streamvault.domain.model.RatingSource
+import com.streamvault.domain.model.defaultTorveWeights
 import com.streamvault.domain.model.StreamPreferences
 import com.streamvault.domain.model.StreamQuality
 import com.streamvault.domain.repository.PreferencesRepository
+import com.streamvault.domain.repository.WatchHistoryRepository
+import com.streamvault.domain.repository.WatchProgressRepository
+import com.streamvault.domain.repository.WatchlistRepository
 import com.streamvault.domain.sync.SyncRepository
 import com.streamvault.platform.NetworkMonitor
 import com.streamvault.platform.recommendedMaxQuality
@@ -33,6 +45,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Clock
+import kotlin.random.Random
 
 class SettingsViewModel(
     private val debridClient: DebridClient,
@@ -43,6 +57,13 @@ class SettingsViewModel(
     private val prefsRepo: PreferencesRepository,
     private val syncRepo: SyncRepository,
     private val networkMonitor: NetworkMonitor,
+    private val traktTokenStore: TraktTokenStore,
+    private val traktSyncRepo: TraktSyncRepository,
+    private val watchlistRepo: WatchlistRepository,
+    private val watchHistoryRepo: WatchHistoryRepository,
+    private val watchProgressRepo: WatchProgressRepository,
+    private val integrationSecretStore: IntegrationSecretStore,
+    private val libraryOverlayService: LibraryOverlayService,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(SettingsUiState())
@@ -62,6 +83,9 @@ class SettingsViewModel(
         const val KEY_TRAKT_CLIENT_SECRET = "trakt_client_secret"
         const val KEY_TRAKT_ACCESS_TOKEN = "trakt_access_token"
         const val KEY_TRAKT_REFRESH_TOKEN = "trakt_refresh_token"
+        const val KEY_TRAKT_LAST_SYNC_TIME = "trakt_last_sync_time"
+        const val KEY_AVAILABILITY_LAST_SYNC_TIME = "availability_last_sync_time"
+        const val KEY_LIBRARY_OVERLAY_LAST_SYNC_TIME = "library_overlay_last_sync_time"
         const val KEY_MAX_QUALITY = "stream_max_quality"
         const val KEY_MIN_QUALITY = "stream_min_quality"
         const val KEY_MAX_FILE_SIZE_MB = "stream_max_file_size_mb"
@@ -88,11 +112,23 @@ class SettingsViewModel(
         const val KEY_PERPLEXITY_API_KEY = "perplexity_api_key"
         const val KEY_DEEPSEEK_API_KEY = "deepseek_api_key"
         const val KEY_MDBLIST_API_KEY = "mdblist_api_key"
+        const val KEY_JELLYFIN_SERVER_URL = "jellyfin_server_url"
+        const val KEY_PLEX_SERVER_URL = "plex_server_url"
+        const val KEY_REGION_CODE = "content_region_code"
         const val KEY_RATING_PREFS = "rating_display_prefs"
         const val KEY_CARD_PREFS = "card_prefs"
+        const val KEY_CARD_STYLE_PRESETS = "card_style_presets"
+        const val KEY_CARD_DEFAULT_PRESET_ID = "card_style_default_preset_id"
     }
 
     private val jsonParser = Json { ignoreUnknownKeys = true }
+
+    private fun debridSecretKey(provider: DebridServiceType): IntegrationSecretKey = when (provider) {
+        DebridServiceType.REAL_DEBRID -> IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID
+        DebridServiceType.ALL_DEBRID -> IntegrationSecretKey.DEBRID_API_KEY_ALL_DEBRID
+        DebridServiceType.PREMIUMIZE -> IntegrationSecretKey.DEBRID_API_KEY_PREMIUMIZE
+        DebridServiceType.TORBOX -> IntegrationSecretKey.DEBRID_API_KEY_TORBOX
+    }
 
     init {
         loadSavedSettings()
@@ -104,9 +140,29 @@ class SettingsViewModel(
                 try { DebridServiceType.valueOf(it) } catch (_: Exception) { null }
             } ?: DebridServiceType.REAL_DEBRID
 
-            val apiKey = prefsRepo.getString(KEY_DEBRID_API_KEY) ?: ""
-            val traktAccessToken = prefsRepo.getString(KEY_TRAKT_ACCESS_TOKEN) ?: ""
-            val traktRefreshToken = prefsRepo.getString(KEY_TRAKT_REFRESH_TOKEN) ?: ""
+            val legacyDebridApiKey = prefsRepo.getString(KEY_DEBRID_API_KEY) ?: ""
+            val legacySingleKey = integrationSecretStore.get(IntegrationSecretKey.DEBRID_API_KEY)
+                ?: legacyDebridApiKey
+
+            // Load per-provider API keys
+            val allDebridKeys = mutableMapOf<DebridServiceType, String>()
+            for (p in DebridServiceType.entries) {
+                val key = integrationSecretStore.get(debridSecretKey(p))
+                if (!key.isNullOrBlank()) allDebridKeys[p] = key
+            }
+            // Migrate legacy single key → per-provider slot
+            if (allDebridKeys.isEmpty() && legacySingleKey.isNotBlank()) {
+                allDebridKeys[provider] = legacySingleKey
+                integrationSecretStore.put(debridSecretKey(provider), legacySingleKey)
+                integrationSecretStore.remove(IntegrationSecretKey.DEBRID_API_KEY)
+                prefsRepo.remove(KEY_DEBRID_API_KEY)
+            }
+            val apiKey = allDebridKeys[provider] ?: ""
+            val legacyTraktAccessToken = prefsRepo.getString(KEY_TRAKT_ACCESS_TOKEN) ?: ""
+            val legacyTraktRefreshToken = prefsRepo.getString(KEY_TRAKT_REFRESH_TOKEN) ?: ""
+            val traktTokens = traktTokenStore.read()
+            val traktAccessToken = traktTokens?.accessToken ?: legacyTraktAccessToken
+            val traktRefreshToken = traktTokens?.refreshToken ?: legacyTraktRefreshToken
 
             val maxQuality = prefsRepo.getString(KEY_MAX_QUALITY)?.let {
                 try { StreamQuality.valueOf(it) } catch (_: Exception) { null }
@@ -119,7 +175,9 @@ class SettingsViewModel(
             val hdrEnabled = prefsRepo.getString(KEY_HDR_ENABLED)?.toBooleanStrictOrNull() ?: false
             val scrobbleEnabled = prefsRepo.getString(KEY_TRAKT_SCROBBLE)?.toBooleanStrictOrNull() ?: true
             val simklClientId = prefsRepo.getString(KEY_SIMKL_CLIENT_ID) ?: ""
-            val simklAccessToken = prefsRepo.getString(KEY_SIMKL_ACCESS_TOKEN) ?: ""
+            val legacySimklAccessToken = prefsRepo.getString(KEY_SIMKL_ACCESS_TOKEN) ?: ""
+            val simklAccessToken = integrationSecretStore.get(IntegrationSecretKey.SIMKL_ACCESS_TOKEN)
+                ?: legacySimklAccessToken
             if (simklClientId.isNotBlank()) simklClient.setClientId(simklClientId)
 
             val kodiHosts = prefsRepo.getString(KEY_KODI_HOSTS)?.let { json ->
@@ -140,6 +198,9 @@ class SettingsViewModel(
             val autoPlayEnabled = prefsRepo.getString(KEY_AUTO_PLAY_ENABLED)?.toBooleanStrictOrNull() ?: true
             val autoPlayNextEpisodeEnabled = prefsRepo.getString(KEY_AUTO_PLAY_NEXT_EPISODE)?.toBooleanStrictOrNull() ?: true
             val lastSyncTime = prefsRepo.getString(KEY_LAST_SYNC_TIME)?.toLongOrNull()
+            val traktLastSyncTime = prefsRepo.getString(KEY_TRAKT_LAST_SYNC_TIME)?.toLongOrNull()
+            val availabilityLastSyncTime = prefsRepo.getString(KEY_AVAILABILITY_LAST_SYNC_TIME)?.toLongOrNull()
+            val libraryOverlayLastSyncTime = prefsRepo.getString(KEY_LIBRARY_OVERLAY_LAST_SYNC_TIME)?.toLongOrNull()
             val codecPreference = prefsRepo.getString(KEY_CODEC_PREFERENCE)?.let {
                 try { CodecPreference.valueOf(it) } catch (_: Exception) { null }
             } ?: CodecPreference.HEVC_PREFERRED
@@ -155,31 +216,57 @@ class SettingsViewModel(
             } ?: DEFAULT_STREAM_GROUPS
             val dedupeResults = prefsRepo.getString(KEY_DEDUPE_RESULTS)?.toBooleanStrictOrNull() ?: true
 
-            val claudeApiKey = prefsRepo.getString(KEY_CLAUDE_API_KEY) ?: ""
+            val legacyClaudeApiKey = prefsRepo.getString(KEY_CLAUDE_API_KEY) ?: ""
+            val claudeApiKey = integrationSecretStore.get(IntegrationSecretKey.CLAUDE_API_KEY)
+                ?: legacyClaudeApiKey
             val aiProvider = prefsRepo.getString(KEY_AI_PROVIDER)?.let {
                 try { AiProvider.valueOf(it) } catch (_: Exception) { null }
             } ?: AiProvider.CLAUDE
-            val chatGptApiKey = prefsRepo.getString(KEY_CHATGPT_API_KEY) ?: ""
-            val geminiApiKey = prefsRepo.getString(KEY_GEMINI_API_KEY) ?: ""
-            val perplexityApiKey = prefsRepo.getString(KEY_PERPLEXITY_API_KEY) ?: ""
-            val deepSeekApiKey = prefsRepo.getString(KEY_DEEPSEEK_API_KEY) ?: ""
-            val mdblistApiKey = prefsRepo.getString(KEY_MDBLIST_API_KEY) ?: ""
+            val legacyChatGptApiKey = prefsRepo.getString(KEY_CHATGPT_API_KEY) ?: ""
+            val chatGptApiKey = integrationSecretStore.get(IntegrationSecretKey.CHATGPT_API_KEY)
+                ?: legacyChatGptApiKey
+            val legacyGeminiApiKey = prefsRepo.getString(KEY_GEMINI_API_KEY) ?: ""
+            val geminiApiKey = integrationSecretStore.get(IntegrationSecretKey.GEMINI_API_KEY)
+                ?: legacyGeminiApiKey
+            val legacyPerplexityApiKey = prefsRepo.getString(KEY_PERPLEXITY_API_KEY) ?: ""
+            val perplexityApiKey = integrationSecretStore.get(IntegrationSecretKey.PERPLEXITY_API_KEY)
+                ?: legacyPerplexityApiKey
+            val legacyDeepSeekApiKey = prefsRepo.getString(KEY_DEEPSEEK_API_KEY) ?: ""
+            val deepSeekApiKey = integrationSecretStore.get(IntegrationSecretKey.DEEPSEEK_API_KEY)
+                ?: legacyDeepSeekApiKey
+            val legacyMdblistApiKey = prefsRepo.getString(KEY_MDBLIST_API_KEY) ?: ""
+            val mdblistApiKey = integrationSecretStore.get(IntegrationSecretKey.MDBLIST_API_KEY)
+                ?: legacyMdblistApiKey
+            val jellyfinServerUrl = prefsRepo.getString(KEY_JELLYFIN_SERVER_URL) ?: ""
+            val legacyJellyfinApiKey = prefsRepo.getString("jellyfin_api_key") ?: ""
+            val plexServerUrl = prefsRepo.getString(KEY_PLEX_SERVER_URL) ?: ""
+            val plexAccessToken = integrationSecretStore.get(IntegrationSecretKey.PLEX_ACCESS_TOKEN) ?: ""
+            val regionCode = prefsRepo.getString(KEY_REGION_CODE)?.uppercase()?.takeIf { it.length == 2 } ?: "US"
             val ratingPrefs = prefsRepo.getString(KEY_RATING_PREFS)?.let {
                 try { jsonParser.decodeFromString<RatingDisplayPrefs>(it) } catch (_: Exception) { null }
-            } ?: RatingDisplayPrefs()
-            val cardPrefs = prefsRepo.getString(KEY_CARD_PREFS)?.let {
+            }?.let(::sanitizeRatingPrefs) ?: RatingDisplayPrefs()
+            val legacyCardPrefs = prefsRepo.getString(KEY_CARD_PREFS)?.let {
                 try { jsonParser.decodeFromString<CardPrefs>(it) } catch (_: Exception) { null }
             } ?: CardPrefs()
+
+            val (cardStylePresets, globalDefaultPresetId) = loadCardStylePresets(
+                legacyCardPrefs = legacyCardPrefs,
+                ratingPrefs = ratingPrefs,
+            )
 
             _state.update {
                 it.copy(
                     debridProvider = provider,
                     debridApiKey = apiKey,
                     debridConnected = apiKey.isNotBlank(),
+                    connectedDebridProviders = allDebridKeys,
                     traktAccessToken = traktAccessToken,
                     traktRefreshToken = traktRefreshToken,
                     traktConnected = traktAccessToken.isNotBlank(),
                     traktScrobbleEnabled = scrobbleEnabled,
+                    traktLastSyncTime = traktLastSyncTime,
+                    availabilityLastSyncTime = availabilityLastSyncTime,
+                    libraryOverlayLastSyncTime = libraryOverlayLastSyncTime,
                     simklClientId = simklClientId,
                     simklAccessToken = simklAccessToken,
                     simklConnected = simklAccessToken.isNotBlank(),
@@ -206,12 +293,63 @@ class SettingsViewModel(
                     perplexityApiKey = perplexityApiKey,
                     deepSeekApiKey = deepSeekApiKey,
                     mdblistApiKey = mdblistApiKey,
+                    jellyfinServerUrl = jellyfinServerUrl,
+                    jellyfinApiKey = "",
+                    plexServerUrl = plexServerUrl,
+                    plexAccessToken = plexAccessToken,
+                    plexConnected = plexAccessToken.isNotBlank(),
+                    regionCode = regionCode,
                     ratingPrefs = ratingPrefs,
-                    cardPrefs = cardPrefs,
+                    cardStylePresets = cardStylePresets,
+                    globalDefaultPresetId = globalDefaultPresetId,
                 )
             }
 
             // Verify stored credentials
+            if (legacyJellyfinApiKey.isNotBlank()) {
+                prefsRepo.remove("jellyfin_api_key")
+            }
+            // legacy debrid key migration handled above
+            if (legacyTraktAccessToken.isNotBlank() && traktTokens == null) {
+                traktTokenStore.write(
+                    com.streamvault.data.trakt.TraktTokens(
+                        accessToken = legacyTraktAccessToken,
+                        refreshToken = legacyTraktRefreshToken,
+                        expiresIn = 0,
+                        createdAt = 0L,
+                    ),
+                )
+                prefsRepo.remove(KEY_TRAKT_ACCESS_TOKEN)
+                prefsRepo.remove(KEY_TRAKT_REFRESH_TOKEN)
+            }
+            if (legacySimklAccessToken.isNotBlank()) {
+                integrationSecretStore.put(IntegrationSecretKey.SIMKL_ACCESS_TOKEN, legacySimklAccessToken)
+                prefsRepo.remove(KEY_SIMKL_ACCESS_TOKEN)
+            }
+            if (legacyClaudeApiKey.isNotBlank()) {
+                integrationSecretStore.put(IntegrationSecretKey.CLAUDE_API_KEY, legacyClaudeApiKey)
+                prefsRepo.remove(KEY_CLAUDE_API_KEY)
+            }
+            if (legacyChatGptApiKey.isNotBlank()) {
+                integrationSecretStore.put(IntegrationSecretKey.CHATGPT_API_KEY, legacyChatGptApiKey)
+                prefsRepo.remove(KEY_CHATGPT_API_KEY)
+            }
+            if (legacyGeminiApiKey.isNotBlank()) {
+                integrationSecretStore.put(IntegrationSecretKey.GEMINI_API_KEY, legacyGeminiApiKey)
+                prefsRepo.remove(KEY_GEMINI_API_KEY)
+            }
+            if (legacyPerplexityApiKey.isNotBlank()) {
+                integrationSecretStore.put(IntegrationSecretKey.PERPLEXITY_API_KEY, legacyPerplexityApiKey)
+                prefsRepo.remove(KEY_PERPLEXITY_API_KEY)
+            }
+            if (legacyDeepSeekApiKey.isNotBlank()) {
+                integrationSecretStore.put(IntegrationSecretKey.DEEPSEEK_API_KEY, legacyDeepSeekApiKey)
+                prefsRepo.remove(KEY_DEEPSEEK_API_KEY)
+            }
+            if (legacyMdblistApiKey.isNotBlank()) {
+                integrationSecretStore.put(IntegrationSecretKey.MDBLIST_API_KEY, legacyMdblistApiKey)
+                prefsRepo.remove(KEY_MDBLIST_API_KEY)
+            }
             if (apiKey.isNotBlank()) {
                 verifyDebridConnection()
             }
@@ -226,8 +364,24 @@ class SettingsViewModel(
     // -------------------------------------------------------------------------
 
     fun setDebridProvider(provider: DebridServiceType) {
-        _state.update { it.copy(debridProvider = provider) }
-        scope.launch { prefsRepo.setString(KEY_DEBRID_PROVIDER, provider.name) }
+        debridPollJob?.cancel()
+        scope.launch {
+            prefsRepo.setString(KEY_DEBRID_PROVIDER, provider.name)
+            // Load the target provider's stored key
+            val storedKey = integrationSecretStore.get(debridSecretKey(provider)) ?: ""
+            _state.update {
+                it.copy(
+                    debridProvider = provider,
+                    debridApiKey = storedKey,
+                    debridConnected = storedKey.isNotBlank(),
+                    debridUser = null,
+                    debridDeviceCode = null,
+                    isPollingDebrid = false,
+                    debridError = null,
+                )
+            }
+            if (storedKey.isNotBlank()) verifyDebridConnection()
+        }
     }
 
     fun setDebridApiKey(apiKey: String) {
@@ -237,17 +391,21 @@ class SettingsViewModel(
     fun connectDebridWithApiKey() {
         val apiKey = _state.value.debridApiKey
         if (apiKey.isBlank()) return
+        val provider = _state.value.debridProvider
 
         scope.launch {
             _state.update { it.copy(debridLoading = true, debridError = null) }
-            val result = debridClient.verifyApiKey(_state.value.debridProvider, apiKey)
+            val result = debridClient.verifyApiKey(provider, apiKey)
             if (result.success) {
-                prefsRepo.setString(KEY_DEBRID_API_KEY, apiKey)
+                integrationSecretStore.put(debridSecretKey(provider), apiKey)
+                val updated = _state.value.connectedDebridProviders.toMutableMap()
+                updated[provider] = apiKey
                 _state.update {
                     it.copy(
                         debridConnected = true,
                         debridUser = result.user,
                         debridLoading = false,
+                        connectedDebridProviders = updated,
                     )
                 }
             } else {
@@ -278,30 +436,34 @@ class SettingsViewModel(
 
     private fun pollDebridDevice(code: com.streamvault.data.debrid.DeviceCodeInfo) {
         debridPollJob?.cancel()
+        val provider = _state.value.debridProvider
         debridPollJob = scope.launch {
             _state.update { it.copy(isPollingDebrid = true) }
             val maxAttempts = code.expiresIn / code.interval
             for (i in 0 until maxAttempts) {
                 delay(code.interval * 1000L)
                 val result = debridClient.pollDeviceAuth(
-                    _state.value.debridProvider,
+                    provider,
                     code.deviceCode,
                     code.userCode,
                 )
                 if (result.done && result.apiKey != null) {
-                    prefsRepo.setString(KEY_DEBRID_API_KEY, result.apiKey)
+                    integrationSecretStore.put(debridSecretKey(provider), result.apiKey)
                     result.oauthTokens?.let { tokens ->
-                        prefsRepo.setString(KEY_DEBRID_RD_REFRESH, tokens.refreshToken)
-                        prefsRepo.setString(KEY_DEBRID_RD_CLIENT_ID, tokens.clientId)
-                        prefsRepo.setString(KEY_DEBRID_RD_CLIENT_SECRET, tokens.clientSecret)
+                        integrationSecretStore.put(IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN, tokens.refreshToken)
+                        integrationSecretStore.put(IntegrationSecretKey.DEBRID_RD_CLIENT_ID, tokens.clientId)
+                        integrationSecretStore.put(IntegrationSecretKey.DEBRID_RD_CLIENT_SECRET, tokens.clientSecret)
                         prefsRepo.setString(KEY_DEBRID_RD_EXPIRES_AT, tokens.expiresAt.toString())
                     }
+                    val updated = _state.value.connectedDebridProviders.toMutableMap()
+                    updated[provider] = result.apiKey
                     _state.update {
                         it.copy(
                             debridApiKey = result.apiKey,
                             debridConnected = true,
                             debridDeviceCode = null,
                             isPollingDebrid = false,
+                            connectedDebridProviders = updated,
                         )
                     }
                     verifyDebridConnection()
@@ -330,13 +492,18 @@ class SettingsViewModel(
 
     fun disconnectDebrid() {
         debridPollJob?.cancel()
+        val provider = _state.value.debridProvider
         scope.launch {
-            prefsRepo.remove(KEY_DEBRID_API_KEY)
-            prefsRepo.remove(KEY_DEBRID_RD_REFRESH)
-            prefsRepo.remove(KEY_DEBRID_RD_CLIENT_ID)
-            prefsRepo.remove(KEY_DEBRID_RD_CLIENT_SECRET)
-            prefsRepo.remove(KEY_DEBRID_RD_EXPIRES_AT)
+            integrationSecretStore.remove(debridSecretKey(provider))
+            if (provider == DebridServiceType.REAL_DEBRID) {
+                integrationSecretStore.remove(IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN)
+                integrationSecretStore.remove(IntegrationSecretKey.DEBRID_RD_CLIENT_ID)
+                integrationSecretStore.remove(IntegrationSecretKey.DEBRID_RD_CLIENT_SECRET)
+                prefsRepo.remove(KEY_DEBRID_RD_EXPIRES_AT)
+            }
         }
+        val updated = _state.value.connectedDebridProviders.toMutableMap()
+        updated.remove(provider)
         _state.update {
             it.copy(
                 debridApiKey = "",
@@ -344,6 +511,7 @@ class SettingsViewModel(
                 debridUser = null,
                 debridDeviceCode = null,
                 isPollingDebrid = false,
+                connectedDebridProviders = updated,
             )
         }
     }
@@ -375,8 +543,9 @@ class SettingsViewModel(
                 delay(interval * 1000L)
                 when (val result = traktClient.pollDeviceToken(code.deviceCode)) {
                     is com.streamvault.data.trakt.TraktPollResult.Success -> {
-                        prefsRepo.setString(KEY_TRAKT_ACCESS_TOKEN, result.tokens.accessToken)
-                        prefsRepo.setString(KEY_TRAKT_REFRESH_TOKEN, result.tokens.refreshToken)
+                        traktTokenStore.write(result.tokens)
+                        prefsRepo.remove(KEY_TRAKT_ACCESS_TOKEN)
+                        prefsRepo.remove(KEY_TRAKT_REFRESH_TOKEN)
                         _state.update {
                             it.copy(
                                 traktAccessToken = result.tokens.accessToken,
@@ -387,6 +556,7 @@ class SettingsViewModel(
                             )
                         }
                         verifyTraktConnection()
+                        initialTraktImport()
                         return@launch
                     }
                     is com.streamvault.data.trakt.TraktPollResult.Pending -> { /* Keep polling */ }
@@ -467,8 +637,10 @@ class SettingsViewModel(
         val token = _state.value.traktAccessToken
         scope.launch {
             if (token.isNotBlank()) traktClient.revokeToken(token)
+            traktTokenStore.clear()
             prefsRepo.remove(KEY_TRAKT_ACCESS_TOKEN)
             prefsRepo.remove(KEY_TRAKT_REFRESH_TOKEN)
+            clearTraktCache()
         }
         _state.update {
             it.copy(
@@ -480,6 +652,33 @@ class SettingsViewModel(
                 isPollingTrakt = false,
             )
         }
+    }
+
+    fun syncTraktNow() {
+        scope.launch {
+            initialTraktImport()
+            checkTraktApiStatus()
+        }
+    }
+
+    private suspend fun initialTraktImport() {
+        runCatching { watchlistRepo.syncFromTrakt() }
+        runCatching { watchProgressRepo.syncFromTrakt() }
+        runCatching { watchHistoryRepo.syncFromTrakt() }
+        runCatching { traktSyncRepo.syncRatingsFromTrakt() }
+        runCatching { traktSyncRepo.flushPendingWrites() }
+        val now = Clock.System.now().toEpochMilliseconds()
+        prefsRepo.setString(KEY_TRAKT_LAST_SYNC_TIME, now.toString())
+        _state.update { it.copy(traktLastSyncTime = now) }
+    }
+
+    private suspend fun clearTraktCache() {
+        runCatching { watchlistRepo.clear() }
+        runCatching { watchProgressRepo.clearAllProgress() }
+        runCatching { watchHistoryRepo.clearAll() }
+        runCatching { traktSyncRepo.clearLocalData() }
+        prefsRepo.remove(KEY_TRAKT_LAST_SYNC_TIME)
+        _state.update { it.copy(traktLastSyncTime = null) }
     }
 
     // -------------------------------------------------------------------------
@@ -497,27 +696,42 @@ class SettingsViewModel(
 
     fun setClaudeApiKey(key: String) {
         _state.update { it.copy(claudeApiKey = key) }
-        scope.launch { prefsRepo.setString(KEY_CLAUDE_API_KEY, key) }
+        scope.launch {
+            integrationSecretStore.put(IntegrationSecretKey.CLAUDE_API_KEY, key)
+            prefsRepo.remove(KEY_CLAUDE_API_KEY)
+        }
     }
 
     fun setChatGptApiKey(key: String) {
         _state.update { it.copy(chatGptApiKey = key) }
-        scope.launch { prefsRepo.setString(KEY_CHATGPT_API_KEY, key) }
+        scope.launch {
+            integrationSecretStore.put(IntegrationSecretKey.CHATGPT_API_KEY, key)
+            prefsRepo.remove(KEY_CHATGPT_API_KEY)
+        }
     }
 
     fun setGeminiApiKey(key: String) {
         _state.update { it.copy(geminiApiKey = key) }
-        scope.launch { prefsRepo.setString(KEY_GEMINI_API_KEY, key) }
+        scope.launch {
+            integrationSecretStore.put(IntegrationSecretKey.GEMINI_API_KEY, key)
+            prefsRepo.remove(KEY_GEMINI_API_KEY)
+        }
     }
 
     fun setPerplexityApiKey(key: String) {
         _state.update { it.copy(perplexityApiKey = key) }
-        scope.launch { prefsRepo.setString(KEY_PERPLEXITY_API_KEY, key) }
+        scope.launch {
+            integrationSecretStore.put(IntegrationSecretKey.PERPLEXITY_API_KEY, key)
+            prefsRepo.remove(KEY_PERPLEXITY_API_KEY)
+        }
     }
 
     fun setDeepSeekApiKey(key: String) {
         _state.update { it.copy(deepSeekApiKey = key) }
-        scope.launch { prefsRepo.setString(KEY_DEEPSEEK_API_KEY, key) }
+        scope.launch {
+            integrationSecretStore.put(IntegrationSecretKey.DEEPSEEK_API_KEY, key)
+            prefsRepo.remove(KEY_DEEPSEEK_API_KEY)
+        }
     }
 
     fun setActiveAiApiKey(key: String) {
@@ -536,7 +750,127 @@ class SettingsViewModel(
 
     fun setMdblistApiKey(key: String) {
         _state.update { it.copy(mdblistApiKey = key) }
-        scope.launch { prefsRepo.setString(KEY_MDBLIST_API_KEY, key) }
+        scope.launch {
+            integrationSecretStore.put(IntegrationSecretKey.MDBLIST_API_KEY, key)
+            prefsRepo.remove(KEY_MDBLIST_API_KEY)
+        }
+    }
+
+    fun setJellyfinServerUrl(url: String) {
+        _state.update { it.copy(jellyfinServerUrl = url) }
+        scope.launch { prefsRepo.setString(KEY_JELLYFIN_SERVER_URL, url) }
+    }
+
+    fun setJellyfinApiKey(key: String) {
+        _state.update { it.copy(jellyfinApiKey = key) }
+    }
+
+    private val jellyfinService: com.streamvault.data.integrations.JellyfinLibraryOverlayService?
+        get() = (libraryOverlayService as? com.streamvault.data.integrations.CompositeLibraryOverlayService)?.jellyfin
+            ?: (libraryOverlayService as? com.streamvault.data.integrations.JellyfinLibraryOverlayService)
+
+    fun testJellyfinConnection() {
+        val server = _state.value.jellyfinServerUrl
+        val key = _state.value.jellyfinApiKey
+        val service = jellyfinService ?: return
+        scope.launch {
+            val ok = service.testConnection(serverUrl = server, apiKey = key)
+            _state.update {
+                it.copy(
+                    jellyfinStatusMessage = if (ok) "Connection successful" else "Connection failed",
+                )
+            }
+            if (ok) {
+                prefsRepo.setString(KEY_LIBRARY_OVERLAY_LAST_SYNC_TIME, Clock.System.now().toEpochMilliseconds().toString())
+                _state.update { s -> s.copy(libraryOverlayLastSyncTime = Clock.System.now().toEpochMilliseconds()) }
+                loadJellyfinProfiles()
+            }
+        }
+    }
+
+    fun loadJellyfinProfiles() {
+        val service = jellyfinService ?: return
+        scope.launch {
+            val profiles = service.getUserProfiles()
+            val selectedId = service.getSelectedUserId()
+            _state.update { it.copy(jellyfinProfiles = profiles, selectedJellyfinUserId = selectedId) }
+        }
+    }
+
+    fun selectJellyfinProfile(userId: String?) {
+        val service = jellyfinService ?: return
+        _state.update { it.copy(selectedJellyfinUserId = userId) }
+        scope.launch { service.setSelectedUserId(userId) }
+    }
+
+    // -------------------------------------------------------------------------
+    // Plex
+    // -------------------------------------------------------------------------
+
+    fun setPlexServerUrl(url: String) {
+        _state.update { it.copy(plexServerUrl = url) }
+        scope.launch { prefsRepo.setString(KEY_PLEX_SERVER_URL, url) }
+    }
+
+    fun setPlexAccessToken(token: String) {
+        _state.update { it.copy(plexAccessToken = token) }
+        scope.launch {
+            if (token.isBlank()) {
+                integrationSecretStore.remove(IntegrationSecretKey.PLEX_ACCESS_TOKEN)
+            } else {
+                integrationSecretStore.put(IntegrationSecretKey.PLEX_ACCESS_TOKEN, token)
+            }
+        }
+    }
+
+    private val plexService: com.streamvault.data.integrations.PlexLibraryOverlayService?
+        get() = (libraryOverlayService as? com.streamvault.data.integrations.CompositeLibraryOverlayService)?.plex
+
+    fun testPlexConnection() {
+        val url = _state.value.plexServerUrl
+        val token = _state.value.plexAccessToken
+        if (url.isBlank() || token.isBlank()) {
+            _state.update { it.copy(plexError = "Server URL and access token are required") }
+            return
+        }
+        val service = plexService ?: run {
+            _state.update { it.copy(plexError = "Plex service not available") }
+            return
+        }
+        _state.update { it.copy(plexLoading = true, plexError = null) }
+        scope.launch {
+            val success = service.testConnection(serverUrl = url, apiKey = token)
+            _state.update {
+                it.copy(
+                    plexLoading = false,
+                    plexConnected = success,
+                    plexError = if (success) null else "Could not connect. Check URL and token.",
+                )
+            }
+        }
+    }
+
+    fun disconnectPlex() {
+        scope.launch {
+            integrationSecretStore.remove(IntegrationSecretKey.PLEX_ACCESS_TOKEN)
+            prefsRepo.setString(KEY_PLEX_SERVER_URL, "")
+        }
+        _state.update {
+            it.copy(
+                plexServerUrl = "",
+                plexAccessToken = "",
+                plexConnected = false,
+                plexError = null,
+            )
+        }
+    }
+
+    fun setRegionCode(value: String) {
+        val normalized = value.trim().uppercase().take(2)
+        _state.update { it.copy(regionCode = normalized) }
+        if (normalized.length == 2) {
+            scope.launch { prefsRepo.setString(KEY_REGION_CODE, normalized) }
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -544,17 +878,104 @@ class SettingsViewModel(
     // -------------------------------------------------------------------------
 
     fun updateRatingPrefs(prefs: RatingDisplayPrefs) {
-        _state.update { it.copy(ratingPrefs = prefs) }
-        scope.launch { prefsRepo.setString(KEY_RATING_PREFS, jsonParser.encodeToString(prefs)) }
+        val sanitized = sanitizeRatingPrefs(prefs)
+        _state.update { it.copy(ratingPrefs = sanitized) }
+        scope.launch { prefsRepo.setString(KEY_RATING_PREFS, jsonParser.encodeToString(sanitized)) }
+        val defaultId = _state.value.globalDefaultPresetId
+        val defaultPreset = _state.value.cardStylePresets.firstOrNull { it.presetId == defaultId }
+        if (defaultPreset != null) {
+            updateCardStylePreset(defaultPreset.presetId, defaultPreset.cardStyle.copy(ratingPrefs = sanitized))
+        }
     }
 
     // -------------------------------------------------------------------------
     // Card Style
     // -------------------------------------------------------------------------
 
-    fun updateCardPrefs(prefs: CardPrefs) {
-        _state.update { it.copy(cardPrefs = prefs) }
-        scope.launch { prefsRepo.setString(KEY_CARD_PREFS, jsonParser.encodeToString(prefs)) }
+    fun setDefaultCardStylePreset(presetId: String) {
+        _state.update { it.copy(globalDefaultPresetId = presetId) }
+        scope.launch { prefsRepo.setString(KEY_CARD_DEFAULT_PRESET_ID, presetId) }
+    }
+
+    fun updateCardStylePreset(presetId: String, style: CardStyle) {
+        val updated = _state.value.cardStylePresets.map { preset ->
+            if (preset.presetId == presetId) {
+                preset.copy(cardStyle = style, updatedAt = nowMs())
+            } else preset
+        }
+        _state.update { it.copy(cardStylePresets = updated) }
+        saveCardStylePresets(updated)
+    }
+
+    fun createCardStylePreset(name: String, style: CardStyle, isBuiltIn: Boolean = false): String {
+        val id = generatePresetId()
+        val now = nowMs()
+        val preset = CardStylePreset(
+            presetId = id,
+            name = name,
+            cardStyle = style,
+            isBuiltIn = isBuiltIn,
+            createdAt = now,
+            updatedAt = now,
+        )
+        val updated = _state.value.cardStylePresets + preset
+        _state.update { it.copy(cardStylePresets = updated) }
+        saveCardStylePresets(updated)
+        return id
+    }
+
+    fun duplicateCardStylePreset(presetId: String): String? {
+        val preset = _state.value.cardStylePresets.firstOrNull { it.presetId == presetId } ?: return null
+        val name = "Copy of ${preset.name}"
+        return createCardStylePreset(name, preset.cardStyle.copy())
+    }
+
+    fun renameCardStylePreset(presetId: String, name: String) {
+        val updated = _state.value.cardStylePresets.map { preset ->
+            if (preset.presetId == presetId) preset.copy(name = name, updatedAt = nowMs()) else preset
+        }
+        _state.update { it.copy(cardStylePresets = updated) }
+        saveCardStylePresets(updated)
+    }
+
+    fun deleteCardStylePreset(presetId: String) {
+        val current = _state.value
+        val preset = current.cardStylePresets.firstOrNull { it.presetId == presetId } ?: return
+        if (preset.isBuiltIn) return
+        if (current.globalDefaultPresetId == presetId) return
+        val updated = current.cardStylePresets.filterNot { it.presetId == presetId }
+        _state.update { it.copy(cardStylePresets = updated) }
+        saveCardStylePresets(updated)
+    }
+
+    private fun saveCardStylePresets(presets: List<CardStylePreset>) {
+        scope.launch { prefsRepo.setString(KEY_CARD_STYLE_PRESETS, jsonParser.encodeToString(presets)) }
+    }
+
+    fun resetAppearanceSettings() {
+        val now = nowMs()
+        val ratingDefaults = RatingDisplayPrefs()
+        val defaultPreset = CardStylePreset(
+            presetId = "default",
+            name = "Default",
+            cardStyle = CardStyle(ratingPrefs = ratingDefaults),
+            isBuiltIn = true,
+            createdAt = now,
+            updatedAt = now,
+        )
+        val presets = listOf(defaultPreset)
+        _state.update {
+            it.copy(
+                ratingPrefs = ratingDefaults,
+                cardStylePresets = presets,
+                globalDefaultPresetId = defaultPreset.presetId,
+            )
+        }
+        scope.launch {
+            prefsRepo.setString(KEY_RATING_PREFS, jsonParser.encodeToString(ratingDefaults))
+            prefsRepo.setString(KEY_CARD_STYLE_PRESETS, jsonParser.encodeToString(presets))
+            prefsRepo.setString(KEY_CARD_DEFAULT_PRESET_ID, defaultPreset.presetId)
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -588,7 +1009,8 @@ class SettingsViewModel(
                 delay(code.interval * 1000L)
                 val tokens = simklClient.pollDeviceToken(code.userCode)
                 if (tokens != null) {
-                    prefsRepo.setString(KEY_SIMKL_ACCESS_TOKEN, tokens.accessToken)
+                    integrationSecretStore.put(IntegrationSecretKey.SIMKL_ACCESS_TOKEN, tokens.accessToken)
+                    prefsRepo.remove(KEY_SIMKL_ACCESS_TOKEN)
                     _state.update {
                         it.copy(
                             simklAccessToken = tokens.accessToken,
@@ -611,6 +1033,7 @@ class SettingsViewModel(
 
     fun disconnectSimkl() {
         scope.launch {
+            integrationSecretStore.remove(IntegrationSecretKey.SIMKL_ACCESS_TOKEN)
             prefsRepo.remove(KEY_SIMKL_ACCESS_TOKEN)
         }
         _state.update {
@@ -712,12 +1135,7 @@ class SettingsViewModel(
     fun isTraktConnected(): Boolean = _state.value.traktConnected
 
     fun getDebridAccounts(): Map<DebridServiceType, String> {
-        val s = _state.value
-        return if (s.debridConnected && s.debridApiKey.isNotBlank()) {
-            mapOf(s.debridProvider to s.debridApiKey)
-        } else {
-            emptyMap()
-        }
+        return _state.value.connectedDebridProviders
     }
 
     // -------------------------------------------------------------------------
@@ -917,6 +1335,71 @@ class SettingsViewModel(
         scope.launch {
             prefsRepo.setString(KEY_STREAM_GROUPS, jsonParser.encodeToString(groups))
         }
+    }
+
+    private suspend fun loadCardStylePresets(
+        legacyCardPrefs: CardPrefs,
+        ratingPrefs: RatingDisplayPrefs,
+    ): Pair<List<CardStylePreset>, String?> {
+        val storedPresets = prefsRepo.getString(KEY_CARD_STYLE_PRESETS)?.let { json ->
+            try { jsonParser.decodeFromString<List<CardStylePreset>>(json) } catch (_: Exception) { null }
+        }
+        val storedDefaultId = prefsRepo.getString(KEY_CARD_DEFAULT_PRESET_ID)
+
+        if (!storedPresets.isNullOrEmpty()) {
+            val defaultId = storedDefaultId?.takeIf { id -> storedPresets.any { it.presetId == id } }
+                ?: storedPresets.first().presetId
+            return storedPresets to defaultId
+        }
+
+        val now = nowMs()
+        val baseStyle = CardStyle(
+            size = legacyCardPrefs.size,
+            hover = legacyCardPrefs.hover,
+            watched = legacyCardPrefs.watched,
+            appearance = legacyCardPrefs.appearance,
+            ratingPrefs = ratingPrefs,
+        )
+        val defaultPreset = CardStylePreset(
+            presetId = "default",
+            name = "Default",
+            cardStyle = baseStyle,
+            isBuiltIn = true,
+            createdAt = now,
+            updatedAt = now,
+        )
+        val presets = listOf(defaultPreset)
+        scope.launch {
+            prefsRepo.setString(KEY_CARD_STYLE_PRESETS, jsonParser.encodeToString(presets))
+            prefsRepo.setString(KEY_CARD_DEFAULT_PRESET_ID, defaultPreset.presetId)
+        }
+        return presets to defaultPreset.presetId
+    }
+
+    private fun nowMs(): Long = Clock.System.now().toEpochMilliseconds()
+
+    private fun generatePresetId(): String {
+        val randomPart = Random.nextInt(1000, 9999)
+        return "preset_${nowMs()}_$randomPart"
+    }
+
+    private fun sanitizeRatingPrefs(prefs: RatingDisplayPrefs): RatingDisplayPrefs {
+        val allSources = RatingSource.entries
+        val enabled = prefs.enabledProviders
+            .filter { it in allSources }
+            .distinct()
+        val ordered = (prefs.providerOrder.filter { it in allSources } + allSources)
+            .distinct()
+        val weights = (defaultTorveWeights() + prefs.torveWeights)
+            .filterKeys { it in allSources && it != RatingSource.TORVE }
+            .mapValues { (_, weight) -> weight.coerceIn(0, 100) }
+
+        return prefs.copy(
+            enabledProviders = enabled,
+            providerOrder = ordered,
+            maxRatingsOnCard = prefs.maxRatingsOnCard.coerceIn(1, 9),
+            torveWeights = weights,
+        )
     }
 }
 

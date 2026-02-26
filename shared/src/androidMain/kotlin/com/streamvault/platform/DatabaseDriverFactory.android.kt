@@ -201,5 +201,49 @@ actual class DatabaseDriverFactory(private val context: Context) {
                 show_title TEXT
             )""",
         )
+
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS trakt_rating (
+                media_key TEXT NOT NULL PRIMARY KEY,
+                tmdb_id INTEGER NOT NULL,
+                media_type TEXT NOT NULL,
+                rating INTEGER NOT NULL,
+                rated_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )""",
+        )
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS trakt_sync_state (
+                domain TEXT NOT NULL PRIMARY KEY,
+                last_sync_at INTEGER NOT NULL,
+                cursor TEXT
+            )""",
+        )
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS trakt_sync_queue (
+                id TEXT NOT NULL PRIMARY KEY,
+                action_type TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT,
+                next_retry_at INTEGER
+            )""",
+        )
+
+        // Migration: add next_retry_at column to trakt_sync_queue (for DBs created before this column existed)
+        // Skip if column already present (table created with it, or previous migration ran)
+        val cursor = db.query("PRAGMA table_info(trakt_sync_queue)")
+        var hasNextRetryAt = false
+        while (cursor.moveToNext()) {
+            if (cursor.getString(cursor.getColumnIndexOrThrow("name")) == "next_retry_at") {
+                hasNextRetryAt = true
+                break
+            }
+        }
+        cursor.close()
+        if (!hasNextRetryAt) {
+            db.execSQL("ALTER TABLE trakt_sync_queue ADD COLUMN next_retry_at INTEGER")
+        }
     }
 }

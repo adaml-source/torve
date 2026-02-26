@@ -228,3 +228,19 @@ data class TmdbWatchProvider(
     @SerialName("provider_name") val providerName: String = "",
     @SerialName("logo_path") val logoPath: String? = null,
 )
+
+@Serializable
+data class TmdbTitleWatchProvidersResponse(
+    val id: Int,
+    val results: Map<String, TmdbTitleRegionProviders> = emptyMap(),
+)
+
+@Serializable
+data class TmdbTitleRegionProviders(
+    val link: String? = null,
+    val flatrate: List<TmdbWatchProvider> = emptyList(),
+    val rent: List<TmdbWatchProvider> = emptyList(),
+    val buy: List<TmdbWatchProvider> = emptyList(),
+    val free: List<TmdbWatchProvider> = emptyList(),
+    val ads: List<TmdbWatchProvider> = emptyList(),
+)

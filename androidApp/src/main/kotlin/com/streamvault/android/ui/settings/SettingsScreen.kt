@@ -1,7 +1,12 @@
 package com.streamvault.android.ui.settings
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -27,7 +32,9 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -61,10 +68,10 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
-import android.app.LocaleManager
-import android.os.Build
-import android.os.LocaleList
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.os.LocaleListCompat
 import com.streamvault.android.R
 import com.streamvault.domain.model.DebridServiceType
 import com.streamvault.domain.model.StreamQuality
@@ -83,12 +90,13 @@ import com.streamvault.android.ui.theme.Snow
 import com.streamvault.android.ui.theme.Steel
 import com.streamvault.android.ui.theme.StreamVault
 import com.streamvault.presentation.addon.AddonViewModel
-import com.streamvault.presentation.iptv.IptvViewModel
+import com.streamvault.presentation.channels.ChannelsViewModel
 import com.streamvault.presentation.settings.AppLanguage
 import com.streamvault.presentation.settings.SettingsViewModel
 import com.streamvault.presentation.settings.ThemeMode
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -108,9 +116,19 @@ fun SettingsScreen(
     onMdbListClick: () -> Unit = {},
     onRatingSettingsClick: () -> Unit = {},
     onCardStyleClick: () -> Unit = {},
+    onIntegrationsClick: () -> Unit = {},
+    onDiagnosticsClick: () -> Unit = {},
     viewModel: SettingsViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
+    LaunchedEffect(Unit) {
+        if (state.regionCode.isBlank() || state.regionCode == "US") {
+            val country = Locale.getDefault().country.uppercase()
+            if (country.length == 2 && country != state.regionCode) {
+                viewModel.setRegionCode(country)
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -224,6 +242,26 @@ fun SettingsScreen(
                     }
                 }
 
+                // Show connected provider badges
+                if (state.connectedDebridProviders.size > 1) {
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        state.connectedDebridProviders.keys.forEach { p ->
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (p == state.debridProvider) Amber.copy(alpha = 0.2f) else Gunmetal,
+                            ) {
+                                Text(
+                                    p.label,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (p == state.debridProvider) Amber else Silver,
+                                )
+                            }
+                        }
+                    }
+                }
+
                 Spacer(Modifier.height(12.dp))
 
                 if (state.debridConnected) {
@@ -241,32 +279,11 @@ fun SettingsScreen(
                         Text(stringResource(R.string.common_disconnect))
                     }
                 } else if (state.debridDeviceCode != null) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Text(stringResource(R.string.settings_go_to), style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            text = state.debridDeviceCode!!.verificationUrl,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Amber,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = "${stringResource(R.string.settings_enter_code)} ${state.debridDeviceCode!!.userCode}",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        if (state.isPollingDebrid) {
-                            Spacer(Modifier.height(8.dp))
-                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                            Text(
-                                stringResource(R.string.settings_waiting_auth),
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                    }
+                    DebridDeviceCodeSection(
+                        userCode = state.debridDeviceCode!!.userCode,
+                        verificationUrl = state.debridDeviceCode!!.verificationUrl,
+                        isPolling = state.isPollingDebrid,
+                    )
                 } else {
                     SettingsTextField(
                         value = state.debridApiKey,
@@ -322,248 +339,11 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(Modifier.height(24.dp))
-
-        // ── Trakt Section ──
-        SectionHeader(title = stringResource(R.string.settings_trakt))
-        Spacer(Modifier.height(8.dp))
-
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Charcoal),
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                if (state.traktConnected) {
-                    ConnectionStatus(
-                        connected = true,
-                        label = state.traktUser?.username ?: stringResource(R.string.settings_connected),
-                        sublabel = if (state.traktUser?.vip == true) "VIP" else null,
-                    )
-
-                    // Trakt Stats
-                    state.traktStats?.let { stats ->
-                        Spacer(Modifier.height(12.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(
-                                    "${stats.moviesWatched}",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                                Text(stringResource(R.string.settings_movies), style = MaterialTheme.typography.bodySmall)
-                            }
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(
-                                    "${stats.episodesWatched}",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                                Text(stringResource(R.string.settings_episodes), style = MaterialTheme.typography.bodySmall)
-                            }
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(
-                                    "${stats.minutesWatched / 60}h",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                                Text(stringResource(R.string.settings_watch_time), style = MaterialTheme.typography.bodySmall)
-                            }
-                        }
-                    }
-
-                    Spacer(Modifier.height(12.dp))
-
-                    // Scrobble toggle
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(stringResource(R.string.settings_scrobble), style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                stringResource(R.string.settings_scrobble_desc),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = StreamVault.colors.textSecondary,
-                            )
-                        }
-                        Switch(
-                            checked = state.traktScrobbleEnabled,
-                            onCheckedChange = { viewModel.setTraktScrobbleEnabled(it) },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Amber,
-                                checkedTrackColor = Amber.copy(alpha = 0.3f),
-                                uncheckedThumbColor = Silver,
-                                uncheckedTrackColor = Gunmetal,
-                            ),
-                        )
-                    }
-
-                    // API Status
-                    state.traktApiStatus?.let { status ->
-                        Spacer(Modifier.height(8.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                if (status == "Online") Icons.Default.Check else Icons.Default.Close,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                                tint = if (status == "Online") Emerald else Ruby,
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Text(
-                                stringResource(R.string.settings_api_status, status),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = StreamVault.colors.textSecondary,
-                            )
-                        }
-                    }
-
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = { viewModel.disconnectTrakt() },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Ruby),
-                    ) {
-                        Text(stringResource(R.string.common_disconnect))
-                    }
-                } else if (state.traktDeviceCode != null) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Text(stringResource(R.string.settings_go_to), style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            text = state.traktDeviceCode!!.verificationUrl,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Amber,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = "${stringResource(R.string.settings_enter_code)} ${state.traktDeviceCode!!.userCode}",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        if (state.isPollingTrakt) {
-                            Spacer(Modifier.height(8.dp))
-                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                            Text(
-                                stringResource(R.string.settings_waiting_auth),
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                    }
-                } else {
-                    Button(
-                        onClick = { viewModel.startTraktDeviceAuth() },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !state.traktLoading,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Amber,
-                            contentColor = Obsidian,
-                        ),
-                    ) {
-                        if (state.traktLoading) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp,
-                                color = Obsidian,
-                            )
-                        } else {
-                            Text(stringResource(R.string.settings_connect_trakt))
-                        }
-                    }
-                }
-
-                state.traktError?.let { error ->
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = error,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Ruby,
-                    )
-                }
-            }
-        }
+        // Trakt & SIMKL management moved to Integrations screen
 
         Spacer(Modifier.height(24.dp))
 
-        // ── SIMKL Section ──
-        SectionHeader(title = stringResource(R.string.settings_simkl))
-        Spacer(Modifier.height(8.dp))
-
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Charcoal),
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                if (state.simklConnected) {
-                    ConnectionStatus(
-                        connected = true,
-                        label = state.simklUser?.username ?: stringResource(R.string.settings_connected),
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = { viewModel.disconnectSimkl() },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Ruby),
-                    ) {
-                        Text(stringResource(R.string.common_disconnect))
-                    }
-                } else if (state.simklDeviceCode != null) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Text(stringResource(R.string.settings_go_to), style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            text = state.simklDeviceCode!!.verificationUrl,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Amber,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = "${stringResource(R.string.settings_enter_code)} ${state.simklDeviceCode!!.userCode}",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        if (state.isPollingSimkl) {
-                            Spacer(Modifier.height(8.dp))
-                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                            Text(stringResource(R.string.settings_waiting_auth), style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                } else {
-                    Button(
-                        onClick = { viewModel.startSimklDeviceAuth() },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !state.simklLoading,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Amber,
-                            contentColor = Obsidian,
-                        ),
-                    ) {
-                        if (state.simklLoading) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Obsidian)
-                        } else {
-                            Text(stringResource(R.string.settings_connect_simkl))
-                        }
-                    }
-                }
-
-                state.simklError?.let { error ->
-                    Spacer(Modifier.height(8.dp))
-                    Text(error, style = MaterialTheme.typography.bodySmall, color = Ruby)
-                }
-            }
-        }
-
-        Spacer(Modifier.height(24.dp))
-
-        // ── Live TV / IPTV Section ──
+        // ── Channels Section ──
         LiveTvSettingsSection()
 
         Spacer(Modifier.height(24.dp))
@@ -762,6 +542,30 @@ fun SettingsScreen(
                         ),
                     )
                 }
+
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Streaming Availability Region",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    "2-letter country code (e.g. US, GB, DE). Determines which streaming services are shown on detail pages.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = StreamVault.colors.textSecondary,
+                )
+                Spacer(Modifier.height(6.dp))
+                SettingsTextField(
+                    value = state.regionCode,
+                    onValueChange = { input ->
+                        val normalized = input.trim().uppercase()
+                        if (normalized.length <= 2) {
+                            viewModel.setRegionCode(normalized)
+                        }
+                    },
+                    label = "Region",
+                    placeholder = "US",
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
 
@@ -979,6 +783,12 @@ fun SettingsScreen(
                     title = "Ratings",
                     subtitle = "Multi-source rating pills",
                     onClick = onRatingSettingsClick,
+                )
+                HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
+                SettingsNavRow(
+                    title = "Integrations",
+                    subtitle = "Trakt, SIMKL, Jellyfin, Plex",
+                    onClick = onIntegrationsClick,
                 )
             }
         }
@@ -1243,7 +1053,7 @@ fun SettingsScreen(
                 Spacer(Modifier.height(12.dp))
 
                 // Language selector
-                val languageContext = LocalContext.current
+
                 var languageExpanded by remember { mutableStateOf(false) }
                 ExposedDropdownMenuBox(
                     expanded = languageExpanded,
@@ -1281,10 +1091,9 @@ fun SettingsScreen(
                                 onClick = {
                                     viewModel.setAppLanguage(lang)
                                     languageExpanded = false
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                        val lm = languageContext.getSystemService(LocaleManager::class.java)
-                                        lm.applicationLocales = LocaleList.forLanguageTags(lang.code)
-                                    }
+                                    AppCompatDelegate.setApplicationLocales(
+                                        LocaleListCompat.forLanguageTags(lang.code),
+                                    )
                                 },
                             )
                         }
@@ -1546,7 +1355,86 @@ fun SettingsScreen(
                         context.startActivity(Intent.createChooser(shareIntent, shareTitle))
                     },
                 )
+                HorizontalDivider(color = Steel.copy(alpha = 0.3f))
+                SettingsLinkItem(
+                    title = "Diagnostics",
+                    onClick = onDiagnosticsClick,
+                )
+                HorizontalDivider(color = Steel.copy(alpha = 0.3f))
+                SettingsLinkItem(
+                    title = "Report Issue",
+                    onClick = {
+                        val versionName = try {
+                            context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
+                        } catch (_: Exception) { "unknown" }
+                        val payload = buildIssuePayload(
+                            appVersion = versionName,
+                            deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}",
+                            sdkInt = Build.VERSION.SDK_INT,
+                            settingsState = state,
+                        )
+                        val intent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_SUBJECT, "Torve issue report")
+                            putExtra(Intent.EXTRA_TEXT, payload)
+                        }
+                        context.startActivity(Intent.createChooser(intent, "Report issue"))
+                    },
+                )
             }
+        }
+
+        // ── Reset Appearance ──
+        Spacer(Modifier.height(24.dp))
+        HorizontalDivider(color = Steel.copy(alpha = 0.3f))
+        Spacer(Modifier.height(16.dp))
+
+        var showResetAppearanceConfirm by remember { mutableStateOf(false) }
+
+        Text(
+            text = "Danger Zone",
+            style = MaterialTheme.typography.titleSmall,
+            color = Ruby,
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = { showResetAppearanceConfirm = true },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = Ruby),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Ruby.copy(alpha = 0.5f)),
+        ) {
+            Text("Reset all appearance settings")
+        }
+        Text(
+            text = "This will delete all custom card style presets and reset rating display settings to defaults.",
+            style = MaterialTheme.typography.bodySmall,
+            color = StreamVault.colors.textTertiary,
+        )
+
+        if (showResetAppearanceConfirm) {
+            AlertDialog(
+                onDismissRequest = { showResetAppearanceConfirm = false },
+                title = { Text("Reset Appearance?") },
+                text = {
+                    Text("This will permanently delete all custom card style presets and reset all appearance settings to defaults. This cannot be undone.")
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.resetAppearanceSettings()
+                            showResetAppearanceConfirm = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Ruby),
+                    ) {
+                        Text("Reset")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showResetAppearanceConfirm = false }) {
+                        Text("Cancel")
+                    }
+                },
+            )
         }
 
         Spacer(Modifier.height(24.dp))
@@ -1663,6 +1551,43 @@ private fun SettingsTextField(
     }
 }
 
+private fun buildIssuePayload(
+    appVersion: String,
+    deviceModel: String,
+    sdkInt: Int,
+    settingsState: com.streamvault.presentation.settings.SettingsUiState,
+): String {
+    val redactedSettings = mapOf(
+        "themeMode" to settingsState.themeMode.name,
+        "appLanguage" to settingsState.appLanguage.code,
+        "debridProvider" to settingsState.debridProvider.name,
+        "debridConnected" to settingsState.debridConnected.toString(),
+        "traktConnected" to settingsState.traktConnected.toString(),
+        "traktLastSyncTime" to (settingsState.traktLastSyncTime?.toString() ?: ""),
+        "availabilityLastSyncTime" to (settingsState.availabilityLastSyncTime?.toString() ?: ""),
+        "libraryOverlayLastSyncTime" to (settingsState.libraryOverlayLastSyncTime?.toString() ?: ""),
+        "simklConnected" to settingsState.simklConnected.toString(),
+        "mdblistConfigured" to settingsState.mdblistApiKey.isNotBlank().toString(),
+        "jellyfinConfigured" to settingsState.jellyfinApiKey.isNotBlank().toString(),
+        "jellyfinServerUrl" to settingsState.jellyfinServerUrl,
+        "regionCode" to settingsState.regionCode,
+        "ratingProviders" to settingsState.ratingPrefs.enabledProviders.joinToString(",") { it.name },
+        "maxRatingsOnCard" to settingsState.ratingPrefs.maxRatingsOnCard.toString(),
+        "allowRatingsOnLandscapeCards" to settingsState.ratingPrefs.allowRatingsOnLandscapeCards.toString(),
+        "pillPosition" to settingsState.ratingPrefs.pillPosition.name,
+        "torveWeights" to settingsState.ratingPrefs.torveWeights.entries.joinToString(",") { "${it.key.name}:${it.value}" },
+        "globalDefaultPresetId" to (settingsState.globalDefaultPresetId ?: ""),
+        "presetCount" to settingsState.cardStylePresets.size.toString(),
+    )
+    return buildString {
+        appendLine("Torve issue report")
+        appendLine("appVersion=$appVersion")
+        appendLine("device=$deviceModel")
+        appendLine("sdkInt=$sdkInt")
+        appendLine("settings=${redactedSettings.entries.joinToString(";") { "${it.key}=${it.value}" }}")
+    }
+}
+
 @Composable
 private fun SettingsNavRow(
     title: String,
@@ -1695,8 +1620,8 @@ private fun SettingsNavRow(
 
 @Composable
 private fun LiveTvSettingsSection() {
-    val iptvViewModel: IptvViewModel = koinInject()
-    val iptvState by iptvViewModel.state.collectAsState()
+    val channelsViewModel: ChannelsViewModel = koinInject()
+    val channelsState by channelsViewModel.state.collectAsState()
 
     SectionHeader(title = stringResource(R.string.settings_live_tv))
     Spacer(Modifier.height(8.dp))
@@ -1706,14 +1631,14 @@ private fun LiveTvSettingsSection() {
         colors = CardDefaults.cardColors(containerColor = Charcoal),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            if (iptvState.playlists.isEmpty()) {
+            if (channelsState.playlists.isEmpty()) {
                 Text(
                     text = stringResource(R.string.settings_no_playlists),
                     style = MaterialTheme.typography.bodyMedium,
                     color = StreamVault.colors.textTertiary,
                 )
             } else {
-                iptvState.playlists.forEach { playlist ->
+                channelsState.playlists.forEach { playlist ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1733,7 +1658,7 @@ private fun LiveTvSettingsSection() {
                             )
                         }
                         IconButton(
-                            onClick = { iptvViewModel.deletePlaylist(playlist.id) },
+                            onClick = { channelsViewModel.deletePlaylist(playlist.id) },
                         ) {
                             Icon(
                                 Icons.Default.Delete,
@@ -1749,7 +1674,7 @@ private fun LiveTvSettingsSection() {
             Spacer(Modifier.height(8.dp))
 
             Button(
-                onClick = { iptvViewModel.showAddPlaylistDialog() },
+                onClick = { channelsViewModel.showAddPlaylistDialog() },
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Amber,
@@ -1764,26 +1689,114 @@ private fun LiveTvSettingsSection() {
         }
     }
 
-    // Add Playlist Dialog (shared with IptvScreen)
-    if (iptvState.showAddPlaylist) {
-        com.streamvault.android.ui.iptv.AddPlaylistDialog(
-            name = iptvState.newPlaylistName,
-            url = iptvState.newPlaylistUrl,
-            epgUrl = iptvState.newPlaylistEpgUrl,
-            playlistType = iptvState.newPlaylistType,
-            xtreamServer = iptvState.newXtreamServer,
-            xtreamUsername = iptvState.newXtreamUsername,
-            xtreamPassword = iptvState.newXtreamPassword,
-            isLoading = iptvState.isAddingPlaylist,
-            onNameChange = { iptvViewModel.setNewPlaylistName(it) },
-            onUrlChange = { iptvViewModel.setNewPlaylistUrl(it) },
-            onEpgUrlChange = { iptvViewModel.setNewPlaylistEpgUrl(it) },
-            onTypeChange = { iptvViewModel.setNewPlaylistType(it) },
-            onXtreamServerChange = { iptvViewModel.setNewXtreamServer(it) },
-            onXtreamUsernameChange = { iptvViewModel.setNewXtreamUsername(it) },
-            onXtreamPasswordChange = { iptvViewModel.setNewXtreamPassword(it) },
-            onConfirm = { iptvViewModel.addPlaylist() },
-            onDismiss = { iptvViewModel.dismissAddPlaylistDialog() },
+    // Add Playlist Dialog (shared with ChannelsScreen)
+    if (channelsState.showAddPlaylist) {
+        com.streamvault.android.ui.channels.AddPlaylistDialog(
+            name = channelsState.newPlaylistName,
+            url = channelsState.newPlaylistUrl,
+            epgUrl = channelsState.newPlaylistEpgUrl,
+            playlistType = channelsState.newPlaylistType,
+            xtreamServer = channelsState.newXtreamServer,
+            xtreamUsername = channelsState.newXtreamUsername,
+            xtreamPassword = channelsState.newXtreamPassword,
+            isLoading = channelsState.isAddingPlaylist,
+            onNameChange = { channelsViewModel.setNewPlaylistName(it) },
+            onUrlChange = { channelsViewModel.setNewPlaylistUrl(it) },
+            onEpgUrlChange = { channelsViewModel.setNewPlaylistEpgUrl(it) },
+            onTypeChange = { channelsViewModel.setNewPlaylistType(it) },
+            onXtreamServerChange = { channelsViewModel.setNewXtreamServer(it) },
+            onXtreamUsernameChange = { channelsViewModel.setNewXtreamUsername(it) },
+            onXtreamPasswordChange = { channelsViewModel.setNewXtreamPassword(it) },
+            onConfirm = { channelsViewModel.addPlaylist() },
+            onDismiss = { channelsViewModel.dismissAddPlaylistDialog() },
         )
+    }
+}
+
+/** Device-code auth section with clickable URL, copyable code, and open-in-browser button. */
+@Composable
+private fun DebridDeviceCodeSection(
+    userCode: String,
+    verificationUrl: String,
+    isPolling: Boolean,
+) {
+    val context = LocalContext.current
+
+    // Clickable verification URL
+    Text(
+        text = verificationUrl,
+        color = Amber,
+        style = MaterialTheme.typography.bodyMedium,
+        fontWeight = FontWeight.SemiBold,
+        textDecoration = TextDecoration.Underline,
+        modifier = Modifier.clickable {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(verificationUrl)))
+        },
+    )
+
+    Spacer(Modifier.height(8.dp))
+
+    // Code with copy button
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Gunmetal, RoundedCornerShape(8.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Column {
+            Text("Your code", style = MaterialTheme.typography.bodySmall, color = Silver)
+            Text(
+                text = userCode,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = Snow,
+            )
+        }
+        IconButton(
+            onClick = {
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("Device Code", userCode))
+                Toast.makeText(context, "Code copied", Toast.LENGTH_SHORT).show()
+            },
+        ) {
+            Icon(
+                Icons.Default.ContentCopy,
+                contentDescription = "Copy code",
+                tint = Amber,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+
+    Spacer(Modifier.height(8.dp))
+
+    // Open in browser button
+    Button(
+        onClick = {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(verificationUrl)))
+        },
+        modifier = Modifier.fillMaxWidth(),
+        colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
+    ) {
+        Icon(
+            Icons.Default.OpenInBrowser,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text("Open in Browser")
+    }
+
+    if (isPolling) {
+        Spacer(Modifier.height(8.dp))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Amber)
+            Text("Waiting for authorization...", style = MaterialTheme.typography.bodySmall, color = Silver)
+        }
     }
 }

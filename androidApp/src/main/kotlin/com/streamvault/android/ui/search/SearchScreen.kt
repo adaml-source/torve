@@ -47,6 +47,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -61,6 +62,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.streamvault.android.ui.components.CardSize
+import com.streamvault.android.ui.components.LocalCardStyle
 import com.streamvault.android.ui.components.PosterCard
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.AmberSubtle
@@ -71,8 +73,10 @@ import com.streamvault.android.ui.theme.Silver
 import com.streamvault.android.ui.theme.Snow
 import com.streamvault.android.ui.theme.StreamVault
 import com.streamvault.domain.model.MediaItem
+import com.streamvault.domain.model.resolveCardStyle
 import com.streamvault.presentation.catalog.RuntimeFilter
 import com.streamvault.presentation.catalog.SortOption
+import com.streamvault.presentation.settings.SettingsViewModel
 import com.streamvault.presentation.search.SearchFilter
 import com.streamvault.presentation.search.SearchViewModel
 import org.koin.compose.koinInject
@@ -91,14 +95,22 @@ private val genreOptions = listOf(
 fun SearchScreen(
     onMediaClick: (MediaItem) -> Unit,
     viewModel: SearchViewModel = koinInject(),
+    settingsViewModel: SettingsViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
+    val settingsState by settingsViewModel.state.collectAsState()
+    val defaultCardStyle = resolveCardStyle(
+        presets = settingsState.cardStylePresets,
+        presetId = null,
+        globalDefaultPresetId = settingsState.globalDefaultPresetId,
+    )
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
-    ) {
+    CompositionLocalProvider(LocalCardStyle provides defaultCardStyle) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background),
+        ) {
         // ── Search Input Row ──
         Row(
             modifier = Modifier
@@ -233,6 +245,42 @@ fun SearchScreen(
                         shape = RoundedCornerShape(20.dp),
                     )
                 }
+                state.filter.minImdbScore?.let { imdb ->
+                    FilterChip(
+                        selected = true,
+                        onClick = { viewModel.applyFilter(state.filter.copy(minImdbScore = null)) },
+                        label = { Text("IMDb %.1f+".format(imdb)) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = AmberSubtle,
+                            selectedLabelColor = Amber,
+                        ),
+                        shape = RoundedCornerShape(20.dp),
+                    )
+                }
+                state.filter.minTmdbScore?.let { tmdb ->
+                    FilterChip(
+                        selected = true,
+                        onClick = { viewModel.applyFilter(state.filter.copy(minTmdbScore = null)) },
+                        label = { Text("TMDB %.1f+".format(tmdb)) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = AmberSubtle,
+                            selectedLabelColor = Amber,
+                        ),
+                        shape = RoundedCornerShape(20.dp),
+                    )
+                }
+                state.filter.minTorveScore?.let { torve ->
+                    FilterChip(
+                        selected = true,
+                        onClick = { viewModel.applyFilter(state.filter.copy(minTorveScore = null)) },
+                        label = { Text("Torve %.0f+".format(torve)) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = AmberSubtle,
+                            selectedLabelColor = Amber,
+                        ),
+                        shape = RoundedCornerShape(20.dp),
+                    )
+                }
                 if (state.filter.yearFrom != null || state.filter.yearTo != null) {
                     val yearLabel = when {
                         state.filter.yearFrom != null && state.filter.yearTo != null ->
@@ -268,6 +316,18 @@ fun SearchScreen(
                         selected = true,
                         onClick = { viewModel.applyFilter(state.filter.copy(sortBy = SortOption.POPULARITY_DESC)) },
                         label = { Text(state.filter.sortBy.label) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = AmberSubtle,
+                            selectedLabelColor = Amber,
+                        ),
+                        shape = RoundedCornerShape(20.dp),
+                    )
+                }
+                if (state.filter.providersAvailabilityOnly) {
+                    FilterChip(
+                        selected = true,
+                        onClick = { viewModel.applyFilter(state.filter.copy(providersAvailabilityOnly = false)) },
+                        label = { Text("Provider Ready") },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = AmberSubtle,
                             selectedLabelColor = Amber,
@@ -321,6 +381,28 @@ fun SearchScreen(
         }
 
         // ── Results ──
+        if (state.hasActiveSearch && (state.peopleResults.isNotEmpty() || state.userLists.isNotEmpty())) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+            ) {
+                if (state.peopleResults.isNotEmpty()) {
+                    Text(
+                        text = "People: " + state.peopleResults.take(3).joinToString(", ") { it.name },
+                        color = Silver,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (state.userLists.isNotEmpty()) {
+                    Text(
+                        text = "Lists: " + state.userLists.joinToString(" • "),
+                        color = StreamVault.colors.textTertiary,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        }
         Box(modifier = Modifier.fillMaxSize()) {
             when {
                 isLoading && displayItems.isEmpty() -> {
@@ -369,7 +451,7 @@ fun SearchScreen(
                         items(displayItems, key = { it.id }) { item ->
                             PosterCard(
                                 item = item,
-                                size = CardSize.MEDIUM,
+                                sizeOverride = CardSize.MEDIUM,
                                 onClick = { onMediaClick(item) },
                             )
                         }
@@ -408,6 +490,7 @@ fun SearchScreen(
         )
     }
 }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -422,6 +505,10 @@ private fun SearchFilterSheet(
     var hasRatingFilter by remember { mutableStateOf(currentFilter.minRating != null) }
     var yearFromText by remember { mutableStateOf(currentFilter.yearFrom?.toString() ?: "") }
     var yearToText by remember { mutableStateOf(currentFilter.yearTo?.toString() ?: "") }
+    var providersAvailabilityOnly by remember { mutableStateOf(currentFilter.providersAvailabilityOnly) }
+    var minImdbScore by remember { mutableStateOf(currentFilter.minImdbScore) }
+    var minTmdbScore by remember { mutableStateOf(currentFilter.minTmdbScore) }
+    var minTorveScore by remember { mutableStateOf(currentFilter.minTorveScore) }
     var selectedRuntime by remember { mutableStateOf(currentFilter.runtimeFilter) }
     var selectedSort by remember { mutableStateOf(currentFilter.sortBy) }
 
@@ -457,6 +544,10 @@ private fun SearchFilterSheet(
                     hasRatingFilter = false
                     yearFromText = ""
                     yearToText = ""
+                    providersAvailabilityOnly = false
+                    minImdbScore = null
+                    minTmdbScore = null
+                    minTorveScore = null
                     selectedRuntime = null
                     selectedSort = SortOption.POPULARITY_DESC
                 }) {
@@ -608,6 +699,40 @@ private fun SearchFilterSheet(
 
             // ── Year Range ──
             Text(
+                "Power Filters",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = providersAvailabilityOnly,
+                    onClick = { providersAvailabilityOnly = !providersAvailabilityOnly },
+                    label = { Text("Provider Ready") },
+                    shape = RoundedCornerShape(16.dp),
+                )
+                FilterChip(
+                    selected = minImdbScore != null,
+                    onClick = { minImdbScore = if (minImdbScore == null) 7f else null },
+                    label = { Text("IMDb 7.0+") },
+                    shape = RoundedCornerShape(16.dp),
+                )
+                FilterChip(
+                    selected = minTmdbScore != null,
+                    onClick = { minTmdbScore = if (minTmdbScore == null) 7f else null },
+                    label = { Text("TMDB 7.0+") },
+                    shape = RoundedCornerShape(16.dp),
+                )
+                FilterChip(
+                    selected = minTorveScore != null,
+                    onClick = { minTorveScore = if (minTorveScore == null) 75f else null },
+                    label = { Text("Torve 75+") },
+                    shape = RoundedCornerShape(16.dp),
+                )
+            }
+            Spacer(Modifier.height(20.dp))
+            Text(
                 "Release Year",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
@@ -743,6 +868,10 @@ private fun SearchFilterSheet(
                             mediaType = mediaType,
                             genreIds = selectedGenreIds,
                             minRating = if (hasRatingFilter && minRating > 0f) minRating else null,
+                            minImdbScore = minImdbScore,
+                            minTmdbScore = minTmdbScore,
+                            minTorveScore = minTorveScore,
+                            providersAvailabilityOnly = providersAvailabilityOnly,
                             yearFrom = yearFrom,
                             yearTo = yearTo,
                             runtimeFilter = selectedRuntime,

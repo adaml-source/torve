@@ -10,8 +10,6 @@ data class CustomSection(
     val filters: CustomSectionFilters = CustomSectionFilters(),
     val order: Int = 0,
     val enabled: Boolean = true,
-    val orientation: PosterOrientation = PosterOrientation.PORTRAIT,
-    val size: PosterSize = PosterSize.MEDIUM,
 )
 
 @Serializable

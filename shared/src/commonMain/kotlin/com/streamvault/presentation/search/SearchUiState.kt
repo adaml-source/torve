@@ -1,13 +1,18 @@
 package com.streamvault.presentation.search
 
 import com.streamvault.domain.model.MediaItem
+import com.streamvault.domain.model.PersonSummary
 import com.streamvault.presentation.catalog.RuntimeFilter
 import com.streamvault.presentation.catalog.SortOption
 
 data class SearchFilter(
     val mediaType: String? = null, // "movie", "tv", or null for both
+    val providersAvailabilityOnly: Boolean = false, // placeholder; provider wiring lands later
     val genreIds: List<Int> = emptyList(),
     val minRating: Float? = null,
+    val minImdbScore: Float? = null,
+    val minTmdbScore: Float? = null,
+    val minTorveScore: Float? = null,
     val yearFrom: Int? = null,
     val yearTo: Int? = null,
     val runtimeFilter: RuntimeFilter? = null,
@@ -17,7 +22,8 @@ data class SearchFilter(
     val genreId: Int? get() = genreIds.firstOrNull()
 
     val isActive: Boolean
-        get() = mediaType != null || genreIds.isNotEmpty() || minRating != null ||
+        get() = mediaType != null || providersAvailabilityOnly || genreIds.isNotEmpty() || minRating != null ||
+            minImdbScore != null || minTmdbScore != null || minTorveScore != null ||
             yearFrom != null || yearTo != null || runtimeFilter != null ||
             sortBy != SortOption.POPULARITY_DESC
 
@@ -25,8 +31,12 @@ data class SearchFilter(
         get() {
             var count = 0
             if (mediaType != null) count++
+            if (providersAvailabilityOnly) count++
             if (genreIds.isNotEmpty()) count++
             if (minRating != null) count++
+            if (minImdbScore != null) count++
+            if (minTmdbScore != null) count++
+            if (minTorveScore != null) count++
             if (yearFrom != null || yearTo != null) count++
             if (runtimeFilter != null) count++
             if (sortBy != SortOption.POPULARITY_DESC) count++
@@ -42,6 +52,8 @@ data class SearchUiState(
     val filter: SearchFilter = SearchFilter(),
     val showFilterSheet: Boolean = false,
     val discoverResults: List<MediaItem> = emptyList(),
+    val peopleResults: List<PersonSummary> = emptyList(),
+    val userLists: List<String> = emptyList(),
     val isDiscovering: Boolean = false,
     val hasActiveSearch: Boolean = false,
 )

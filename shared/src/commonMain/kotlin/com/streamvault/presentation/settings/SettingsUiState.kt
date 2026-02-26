@@ -12,7 +12,7 @@ import com.streamvault.domain.model.CodecPreference
 import com.streamvault.domain.model.DebridServiceType
 import com.streamvault.domain.model.HdrMode
 import com.streamvault.data.ai.AiProvider
-import com.streamvault.domain.model.CardPrefs
+import com.streamvault.domain.model.CardStylePreset
 import com.streamvault.domain.model.RatingDisplayPrefs
 import com.streamvault.domain.model.RegexPattern
 import com.streamvault.domain.model.StreamGroup
@@ -41,6 +41,8 @@ data class SettingsUiState(
     // Debrid device auth
     val debridDeviceCode: DeviceCodeInfo? = null,
     val isPollingDebrid: Boolean = false,
+    // All connected debrid providers (provider → apiKey)
+    val connectedDebridProviders: Map<DebridServiceType, String> = emptyMap(),
     // Trakt
     val traktClientId: String = "",
     val traktClientSecret: String = "",
@@ -57,6 +59,9 @@ data class SettingsUiState(
     val traktStats: TraktStats? = null,
     val traktScrobbleEnabled: Boolean = true,
     val traktApiStatus: String? = null,
+    val traktLastSyncTime: Long? = null,
+    val availabilityLastSyncTime: Long? = null,
+    val libraryOverlayLastSyncTime: Long? = null,
     // SIMKL
     val simklClientId: String = "",
     val simklAccessToken: String = "",
@@ -105,10 +110,25 @@ data class SettingsUiState(
     val dedupeResults: Boolean = true,
     // MDBList
     val mdblistApiKey: String = "",
+    // Integrations — Jellyfin
+    val jellyfinServerUrl: String = "",
+    val jellyfinApiKey: String = "",
+    val jellyfinStatusMessage: String? = null,
+    val jellyfinProfiles: List<com.streamvault.data.integrations.JellyfinProfile> = emptyList(),
+    val selectedJellyfinUserId: String? = null,
+    // Integrations — Plex
+    val plexServerUrl: String = "",
+    val plexAccessToken: String = "",
+    val plexConnected: Boolean = false,
+    val plexLoading: Boolean = false,
+    val plexError: String? = null,
+    // Region / availability
+    val regionCode: String = "US",
     // Ratings
     val ratingPrefs: RatingDisplayPrefs = RatingDisplayPrefs(),
-    // Card Style
-    val cardPrefs: CardPrefs = CardPrefs(),
+    // Card Style Presets
+    val cardStylePresets: List<CardStylePreset> = emptyList(),
+    val globalDefaultPresetId: String? = null,
 ) {
     val activeAiApiKey: String get() = when (aiProvider) {
         AiProvider.CLAUDE -> claudeApiKey

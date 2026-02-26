@@ -78,6 +78,18 @@ class TmdbApiClient(private val httpClient: HttpClient) {
         }.body()
     }
 
+    suspend fun getMovieExternalIds(id: Int): TmdbExternalIds {
+        return httpClient.get("$BASE_URL/movie/$id/external_ids") {
+            parameter("api_key", API_KEY)
+        }.body()
+    }
+
+    suspend fun getTvExternalIds(id: Int): TmdbExternalIds {
+        return httpClient.get("$BASE_URL/tv/$id/external_ids") {
+            parameter("api_key", API_KEY)
+        }.body()
+    }
+
     suspend fun getSimilar(type: String, id: Int, page: Int = 1): TmdbResponse<TmdbMovie> {
         return httpClient.get("$BASE_URL/$type/$id/similar") {
             parameter("api_key", API_KEY)
@@ -264,6 +276,12 @@ class TmdbApiClient(private val httpClient: HttpClient) {
         return httpClient.get("$BASE_URL/watch/providers/$type") {
             parameter("api_key", API_KEY)
             parameter("watch_region", region)
+        }.body()
+    }
+
+    suspend fun getTitleWatchProviders(type: String, id: Int): TmdbTitleWatchProvidersResponse {
+        return httpClient.get("$BASE_URL/$type/$id/watch/providers") {
+            parameter("api_key", API_KEY)
         }.body()
     }
 

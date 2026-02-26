@@ -47,39 +47,51 @@ class AiSuggestClient(private val httpClient: HttpClient) {
     }
 
     suspend fun suggest(provider: AiProvider, apiKey: String, phrase: String): AiSuggestResult {
-        val systemPrompt = buildSystemPrompt()
+        return try {
+            val systemPrompt = buildSystemPrompt()
 
-        val text = when (provider) {
-            AiProvider.CLAUDE -> callClaude(apiKey, systemPrompt, phrase)
-            AiProvider.CHATGPT -> callOpenAiCompatible(
-                url = "https://api.openai.com/v1/chat/completions",
-                model = "gpt-4o-mini",
-                apiKey = apiKey,
-                systemPrompt = systemPrompt,
-                userMessage = phrase,
-            )
-            AiProvider.GEMINI -> callGemini(apiKey, systemPrompt, phrase)
-            AiProvider.PERPLEXITY -> callOpenAiCompatible(
-                url = "https://api.perplexity.ai/chat/completions",
-                model = "sonar",
-                apiKey = apiKey,
-                systemPrompt = systemPrompt,
-                userMessage = phrase,
-            )
-            AiProvider.DEEPSEEK -> callOpenAiCompatible(
-                url = "https://api.deepseek.com/chat/completions",
-                model = "deepseek-chat",
-                apiKey = apiKey,
-                systemPrompt = systemPrompt,
-                userMessage = phrase,
-            )
+            val text = when (provider) {
+                AiProvider.CLAUDE -> callClaude(apiKey, systemPrompt, phrase)
+                AiProvider.CHATGPT -> callOpenAiCompatible(
+                    url = "https://api.openai.com/v1/chat/completions",
+                    model = "gpt-4o-mini",
+                    apiKey = apiKey,
+                    systemPrompt = systemPrompt,
+                    userMessage = phrase,
+                )
+                AiProvider.GEMINI -> callGemini(apiKey, systemPrompt, phrase)
+                AiProvider.PERPLEXITY -> callOpenAiCompatible(
+                    url = "https://api.perplexity.ai/chat/completions",
+                    model = "sonar",
+                    apiKey = apiKey,
+                    systemPrompt = systemPrompt,
+                    userMessage = phrase,
+                )
+                AiProvider.DEEPSEEK -> callOpenAiCompatible(
+                    url = "https://api.deepseek.com/chat/completions",
+                    model = "deepseek-chat",
+                    apiKey = apiKey,
+                    systemPrompt = systemPrompt,
+                    userMessage = phrase,
+                )
+            }
+
+            val jsonStr = extractJson(text)
+            jsonParser.decodeFromString<AiSuggestResult>(jsonStr)
+        } catch (e: Exception) {
+            val message = when {
+                e.message?.contains("401") == true || e.message?.contains("403") == true ->
+                    "Invalid API key. Please check your ${provider.name} key in Settings."
+                e.message?.contains("429") == true ->
+                    "Rate limit reached. Please wait a moment and try again."
+                e.message?.contains("timeout") == true || e.message?.contains("timed out") == true ->
+                    "The AI service is not responding. Try again or switch providers in Settings."
+                e.message?.contains("quota") == true ->
+                    "API quota exceeded. Check your ${provider.name} account billing."
+                else -> "AI search failed: ${e.message?.take(100) ?: "Unknown error"}"
+            }
+            throw Exception(message)
         }
-
-        println("AI_DEBUG: raw response text=$text")
-        val jsonStr = extractJson(text)
-        val result = jsonParser.decodeFromString<AiSuggestResult>(jsonStr)
-        println("AI_DEBUG: parsed mode=${result.mode}, specificTitles=${result.specificTitles.map { it.title }}")
-        return result
     }
 
     // ── Claude Messages API ──

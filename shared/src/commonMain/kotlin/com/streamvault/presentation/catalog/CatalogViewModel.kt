@@ -2,6 +2,7 @@ package com.streamvault.presentation.catalog
 
 import com.streamvault.data.ai.AiProvider
 import com.streamvault.data.ai.KeywordSearchService
+import com.streamvault.data.mdblist.RatingsEnricher
 import com.streamvault.domain.model.MediaItem
 import com.streamvault.domain.model.dedupeByStableKey
 import com.streamvault.domain.model.MediaType
@@ -34,6 +35,7 @@ class CatalogViewModel(
     private val watchProgressRepo: WatchProgressRepository? = null,
     private val keywordSearchService: KeywordSearchService? = null,
     private val prefsRepo: PreferencesRepository? = null,
+    private val ratingsEnricher: RatingsEnricher? = null,
     initialProviderId: Int? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -128,6 +130,9 @@ class CatalogViewModel(
                         activeFilterCount = filter.activeCount + (if (genreId != null) 1 else 0),
                     )
                 }
+                enrichAndUpdateItems(finalItems) { items ->
+                    _state.update { it.copy(items = items) }
+                }
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = e.message) }
             }
@@ -184,6 +189,9 @@ class CatalogViewModel(
                         hasMore = result.page < result.totalPages,
                     )
                 }
+                enrichAndUpdateItems(newItems) { items ->
+                    _state.update { it.copy(items = items) }
+                }
             } catch (_: Exception) {
                 _state.update { it.copy(isLoadingMore = false) }
             }
@@ -208,6 +216,9 @@ class CatalogViewModel(
                         searchPage = result.page,
                         searchHasMore = result.page < result.totalPages,
                     )
+                }
+                enrichAndUpdateItems(newItems) { items ->
+                    _state.update { it.copy(searchResults = items) }
                 }
             } catch (_: Exception) {
                 _state.update { it.copy(isSearchingMore = false) }
@@ -269,6 +280,9 @@ class CatalogViewModel(
                                 hasActiveSearch = true,
                             )
                         }
+                        enrichAndUpdateItems(finalResults) { items ->
+                            _state.update { it.copy(searchResults = items) }
+                        }
                     } catch (_: Exception) {
                         _state.update { it.copy(isSearching = false) }
                     }
@@ -290,19 +304,13 @@ class CatalogViewModel(
         scope.launch {
             _state.update { it.copy(isAiSearching = true, aiSearchError = null) }
             try {
-                println("AI_DEBUG: provider=$provider, keyLen=${apiKey.length}, query='$query'")
                 val result = keywordSearchService.searchWithAi(provider, apiKey, query)
-                println("AI_DEBUG: mode=${result.mode}, specificItems=${result.specificItems.size}, genreIds=${result.genreIds}, keywordIds=${result.keywordIds}, title=${result.title}")
 
                 val items: List<MediaItem> = if (result.mode == "specific" && result.specificItems.isNotEmpty()) {
-                    println("AI_DEBUG: fetching ${result.specificItems.size} specific items: ${result.specificItems.map { "${it.title}(${it.tmdbId})" }}")
                     result.specificItems.mapNotNull { specific ->
                         try {
-                            val detail = metadataRepo.getDetail(specific.mediaType, specific.tmdbId)
-                            println("AI_DEBUG: got detail: ${detail.title}")
-                            detail
-                        } catch (e: Exception) {
-                            println("AI_DEBUG: getDetail FAILED for ${specific.title}: ${e.message}")
+                            metadataRepo.getDetail(specific.mediaType, specific.tmdbId)
+                        } catch (_: Exception) {
                             null
                         }
                     }
@@ -358,5 +366,21 @@ class CatalogViewModel(
 
     private suspend fun shouldDedupe(): Boolean {
         return prefsRepo?.getString(SettingsViewModel.KEY_DEDUPE_RESULTS)?.toBooleanStrictOrNull() ?: true
+    }
+
+    private fun enrichAndUpdateItems(
+        items: List<MediaItem>,
+        update: (List<MediaItem>) -> Unit,
+    ) {
+        val enricher = ratingsEnricher ?: return
+        val repo = prefsRepo ?: return
+        scope.launch {
+            val apiKey = try {
+                repo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY) ?: ""
+            } catch (_: Exception) { "" }
+            if (apiKey.isBlank()) return@launch
+            val enriched = enricher.enrichList(items, apiKey)
+            update(enriched)
+        }
     }
 }

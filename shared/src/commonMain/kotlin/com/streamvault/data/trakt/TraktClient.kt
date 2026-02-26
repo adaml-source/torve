@@ -256,19 +256,43 @@ class TraktClient(
     }
 
     // -------------------------------------------------------------------------
+    // Ratings
+    // -------------------------------------------------------------------------
+
+    suspend fun getRatings(accessToken: String, limit: Int = 100): List<TraktRatingResponse> {
+        return httpClient.get("$TRAKT_BASE/sync/ratings") {
+            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
+            parameter("page", 1)
+            parameter("limit", limit)
+        }.body()
+    }
+
+    suspend fun addRatings(accessToken: String, body: TraktRatingsBody) {
+        httpClient.post("$TRAKT_BASE/sync/ratings") {
+            contentType(ContentType.Application.Json)
+            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
+            setBody(body)
+        }
+    }
+
+    suspend fun removeRatings(accessToken: String, body: TraktRatingsBody) {
+        httpClient.post("$TRAKT_BASE/sync/ratings/remove") {
+            contentType(ContentType.Application.Json)
+            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
+            setBody(body)
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Watch History
     // -------------------------------------------------------------------------
 
     suspend fun getHistory(accessToken: String, limit: Int = 50): List<TraktHistoryResponse> {
-        return try {
-            httpClient.get("$TRAKT_BASE/sync/history") {
-                traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
-                parameter("page", 1)
-                parameter("limit", limit)
-            }.body()
-        } catch (_: Exception) {
-            emptyList()
-        }
+        return httpClient.get("$TRAKT_BASE/sync/history") {
+            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
+            parameter("page", 1)
+            parameter("limit", limit)
+        }.body()
     }
 
     // -------------------------------------------------------------------------
@@ -276,13 +300,9 @@ class TraktClient(
     // -------------------------------------------------------------------------
 
     suspend fun getPlaybackProgress(accessToken: String): List<TraktPlaybackResponse> {
-        return try {
-            httpClient.get("$TRAKT_BASE/sync/playback") {
-                traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
-            }.body()
-        } catch (_: Exception) {
-            emptyList()
-        }
+        return httpClient.get("$TRAKT_BASE/sync/playback") {
+            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
+        }.body()
     }
 
     // -------------------------------------------------------------------------

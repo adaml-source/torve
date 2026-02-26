@@ -24,6 +24,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -34,16 +35,20 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.streamvault.android.ui.components.BackButton
 import com.streamvault.android.ui.components.CardSize
+import com.streamvault.android.ui.components.LocalCardStyle
 import com.streamvault.android.ui.components.PosterCard
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Charcoal
 import com.streamvault.android.ui.theme.Gunmetal
 import com.streamvault.android.ui.theme.Obsidian
+import com.streamvault.android.ui.theme.Silver
 import com.streamvault.android.ui.theme.Snow
 import com.streamvault.android.ui.theme.StreamVault
 import com.streamvault.domain.model.MediaItem
+import com.streamvault.domain.model.resolveCardStyle
 import com.streamvault.domain.recommendation.Mood
 import com.streamvault.presentation.mood.MoodMatcherViewModel
+import com.streamvault.presentation.settings.SettingsViewModel
 import org.koin.compose.koinInject
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -52,15 +57,23 @@ fun MoodMatcherScreen(
     onMediaClick: (MediaItem) -> Unit,
     onBack: () -> Unit,
     viewModel: MoodMatcherViewModel = koinInject(),
+    settingsViewModel: SettingsViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
+    val settingsState by settingsViewModel.state.collectAsState()
+    val defaultCardStyle = resolveCardStyle(
+        presets = settingsState.cardStylePresets,
+        presetId = null,
+        globalDefaultPresetId = settingsState.globalDefaultPresetId,
+    )
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Obsidian)
-            .statusBarsPadding(),
-    ) {
+    CompositionLocalProvider(LocalCardStyle provides defaultCardStyle) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Obsidian)
+                .statusBarsPadding(),
+        ) {
         // Top bar
         Box(
             modifier = Modifier
@@ -130,7 +143,13 @@ fun MoodMatcherScreen(
                         }
                     }
                 }
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "Powered by ${settingsState.aiProvider.name} — each suggestion uses one API call",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Silver,
+                )
+                Spacer(Modifier.height(16.dp))
             }
 
             // Results
@@ -169,7 +188,7 @@ fun MoodMatcherScreen(
                             ) {
                                 PosterCard(
                                     item = result.item,
-                                    size = CardSize.MEDIUM,
+                                    sizeOverride = CardSize.MEDIUM,
                                     onClick = { onMediaClick(result.item) },
                                 )
                                 Spacer(Modifier.height(4.dp))
@@ -197,6 +216,7 @@ fun MoodMatcherScreen(
                 }
             }
         }
+    }
     }
 }
 

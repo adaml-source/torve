@@ -6,17 +6,20 @@ import com.streamvault.data.simkl.SimklClient
 import com.streamvault.data.simkl.SimklIds
 import com.streamvault.data.simkl.SimklSyncBody
 import com.streamvault.data.simkl.SimklSyncItem
-import com.streamvault.data.trakt.TraktClient
+import com.streamvault.data.trakt.api.TraktAuthorizedApi
+import com.streamvault.data.trakt.repo.TraktSyncRepository
+import com.streamvault.data.trakt.repo.deriveWatchlistMerge
 import com.streamvault.data.trakt.TraktHistoryMovie
 import com.streamvault.data.trakt.TraktHistoryShow
 import com.streamvault.data.trakt.TraktIds
 import com.streamvault.data.trakt.TraktWatchlistBody
 import com.streamvault.db.StreamVaultDatabase
+import com.streamvault.domain.integrations.IntegrationSecretKey
+import com.streamvault.domain.integrations.IntegrationSecretStore
 import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.model.WatchlistItem
 import com.streamvault.domain.repository.PreferencesRepository
 import com.streamvault.domain.repository.WatchlistRepository
-import com.streamvault.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -26,10 +29,12 @@ import kotlinx.datetime.Instant
 
 class WatchlistRepositoryImpl(
     private val database: StreamVaultDatabase,
-    private val traktClient: TraktClient,
+    private val traktApi: TraktAuthorizedApi,
+    private val traktSyncRepo: TraktSyncRepository,
     private val prefsRepo: PreferencesRepository,
     private val tmdbClient: TmdbApiClient,
     private val simklClient: SimklClient,
+    private val integrationSecretStore: IntegrationSecretStore,
 ) : WatchlistRepository {
 
     private val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -122,13 +127,8 @@ class WatchlistRepositoryImpl(
     }
 
     override suspend fun syncFromTrakt() {
-        val token = try {
-            prefsRepo.getString(SettingsViewModel.KEY_TRAKT_ACCESS_TOKEN)
-        } catch (_: Exception) { null }
-        if (token.isNullOrBlank()) return
-
         try {
-            val traktItems = traktClient.getWatchlist(token)
+            val traktItems = traktApi.getWatchlist()
             val traktIds = traktItems.mapNotNull { item ->
                 val media = if (item.type == "movie") item.movie else item.show
                 media?.ids?.tmdb?.toString()
@@ -138,6 +138,7 @@ class WatchlistRepositoryImpl(
             val localIds = database.streamVaultQueries.getAllWatchlist().executeAsList()
                 .map { it.media_id }
                 .toSet()
+            val mergePlan = deriveWatchlistMerge(localIds, traktIds)
 
             for (item in traktItems) {
                 val media = if (item.type == "movie") item.movie else item.show
@@ -147,7 +148,7 @@ class WatchlistRepositoryImpl(
                 val mediaType = if (item.type == "movie") "movie" else "series"
                 val mediaId = tmdbId.toString()
 
-                if (mediaId in localIds) continue
+                if (mediaId !in mergePlan.toAdd) continue
 
                 val addedAt = try {
                     Instant.parse(item.listedAt).toEpochMilliseconds()
@@ -172,8 +173,7 @@ class WatchlistRepositoryImpl(
             }
 
             // Remove local items that no longer exist in Trakt
-            val toRemove = localIds - traktIds
-            toRemove.forEach { mediaId ->
+            mergePlan.toRemove.forEach { mediaId ->
                 database.streamVaultQueries.removeFromWatchlist(mediaId)
             }
         } catch (_: Exception) {
@@ -225,17 +225,19 @@ class WatchlistRepositoryImpl(
     private fun syncTraktAdd(item: WatchlistItem) {
         syncScope.launch {
             try {
-                val token = prefsRepo.getString("trakt_access_token") ?: return@launch
-                if (token.isBlank()) return@launch
                 val ids = TraktIds(tmdb = item.tmdbId, imdb = item.imdbId)
                 val body = if (item.mediaType == MediaType.MOVIE) {
                     TraktWatchlistBody(movies = listOf(TraktHistoryMovie(ids)))
                 } else {
                     TraktWatchlistBody(shows = listOf(TraktHistoryShow(ids)))
                 }
-                traktClient.addToWatchlist(token, body)
+                traktApi.addToWatchlist(body)
             } catch (_: Exception) {
-                // Fire-and-forget — don't block local operation
+                traktSyncRepo.enqueueWatchlistAdd(
+                    tmdbId = item.tmdbId,
+                    mediaType = item.mediaType,
+                    imdbId = item.imdbId,
+                )
             }
         }
     }
@@ -243,17 +245,19 @@ class WatchlistRepositoryImpl(
     private fun syncTraktRemove(tmdbId: Int, imdbId: String?, isMovie: Boolean) {
         syncScope.launch {
             try {
-                val token = prefsRepo.getString("trakt_access_token") ?: return@launch
-                if (token.isBlank()) return@launch
                 val ids = TraktIds(tmdb = tmdbId, imdb = imdbId)
                 val body = if (isMovie) {
                     TraktWatchlistBody(movies = listOf(TraktHistoryMovie(ids)))
                 } else {
                     TraktWatchlistBody(shows = listOf(TraktHistoryShow(ids)))
                 }
-                traktClient.removeFromWatchlist(token, body)
+                traktApi.removeFromWatchlist(body)
             } catch (_: Exception) {
-                // Fire-and-forget — don't block local operation
+                traktSyncRepo.enqueueWatchlistRemove(
+                    tmdbId = tmdbId,
+                    mediaType = if (isMovie) MediaType.MOVIE else MediaType.SERIES,
+                    imdbId = imdbId,
+                )
             }
         }
     }
@@ -261,7 +265,9 @@ class WatchlistRepositoryImpl(
     private fun syncSimklAdd(item: WatchlistItem) {
         syncScope.launch {
             try {
-                val token = prefsRepo.getString("simkl_access_token") ?: return@launch
+                val token = integrationSecretStore.get(IntegrationSecretKey.SIMKL_ACCESS_TOKEN)
+                    ?: prefsRepo.getString("simkl_access_token")
+                    ?: return@launch
                 if (token.isBlank()) return@launch
                 val ids = SimklIds(tmdb = item.tmdbId, imdb = item.imdbId)
                 val body = if (item.mediaType == MediaType.MOVIE) {
@@ -279,7 +285,9 @@ class WatchlistRepositoryImpl(
     private fun syncSimklRemove(tmdbId: Int, imdbId: String?, isMovie: Boolean) {
         syncScope.launch {
             try {
-                val token = prefsRepo.getString("simkl_access_token") ?: return@launch
+                val token = integrationSecretStore.get(IntegrationSecretKey.SIMKL_ACCESS_TOKEN)
+                    ?: prefsRepo.getString("simkl_access_token")
+                    ?: return@launch
                 if (token.isBlank()) return@launch
                 val ids = SimklIds(tmdb = tmdbId, imdb = imdbId)
                 val body = if (isMovie) {
@@ -294,3 +302,4 @@ class WatchlistRepositoryImpl(
         }
     }
 }
+

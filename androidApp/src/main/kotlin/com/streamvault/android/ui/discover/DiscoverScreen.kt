@@ -53,7 +53,7 @@ import org.koin.compose.koinInject
 @Composable
 fun DiscoverScreen(
     onGenreClick: (genreId: Int, genreName: String, mediaType: String) -> Unit,
-    onIptvClick: () -> Unit = {},
+    onChannelsClick: () -> Unit = {},
     onMoodClick: () -> Unit = {},
     viewModel: DiscoverViewModel = koinInject(),
 ) {
@@ -105,7 +105,7 @@ fun DiscoverScreen(
         Spacer(Modifier.height(16.dp))
 
         if (state.selectedTab == DiscoverTab.LIVE_TV) {
-            // Placeholder for Live TV — will be wired to IptvScreen content later
+            // Placeholder for Live TV — will be wired to ChannelsScreen content later
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center,

@@ -9,7 +9,7 @@
     <string name="nav_home">Home</string>
     <string name="nav_movies">Movies</string>
     <string name="nav_tv_shows">TV Shows</string>
-    <string name="nav_live_tv">Live TV</string>
+    <string name="nav_channels">Channels</string>
     <string name="nav_watchlist">Watchlist</string>
     <string name="nav_settings">Settings</string>
 
@@ -97,7 +97,7 @@
     <string name="settings_simkl">SIMKL</string>
     <string name="settings_connect_simkl">Connect SIMKL</string>
 
-    <string name="settings_live_tv">Live TV</string>
+    <string name="settings_live_tv">Channels</string>
     <string name="settings_no_playlists">No playlists configured</string>
     <string name="settings_channels_count">%1$d channels</string>
     <string name="settings_add_playlist">Add Playlist</string>
@@ -144,7 +144,7 @@
     <string name="settings_last_backup">Last backup: %1$s</string>
     <string name="settings_export_backup">Export Backup</string>
     <string name="settings_import_backup">Import Backup</string>
-    <string name="settings_backup_desc">Export your addons, preferences, watch progress, and IPTV favorites to a file. API keys and tokens are never included.</string>
+    <string name="settings_backup_desc">Export your addons, preferences, watch progress, and channel favorites to a file. API keys and tokens are never included.</string>
 
     <string name="settings_account">Account</string>
     <string name="settings_account_coming_soon">Account sync coming soon</string>
@@ -165,13 +165,13 @@
     <string name="paywall_tier">Tier: %1$s</string>
     <string name="paywall_cancel">Cancel Subscription</string>
     <string name="paywall_unlock">Unlock Torve Pro</string>
-    <string name="paywall_subtitle">Stream, download, and watch IPTV with a Pro subscription</string>
+    <string name="paywall_subtitle">Stream, download, and watch live channels with a Pro subscription</string>
     <string name="paywall_free">Free</string>
     <string name="paywall_pro">Pro</string>
     <string name="paywall_search_browse">Search &amp; Browse</string>
     <string name="paywall_stream_playback">Stream Playback</string>
     <string name="paywall_downloads">Downloads</string>
-    <string name="paywall_iptv">IPTV / Live TV</string>
+    <string name="paywall_iptv">Channels</string>
     <string name="paywall_multi_cloud">Multi-Cloud</string>
     <string name="paywall_advanced_filters">Advanced Filters</string>
     <string name="paywall_lifetime">Lifetime</string>
@@ -201,10 +201,10 @@
     <string name="catalog_classic">Classic</string>
 
     <!-- IPTV Screen -->
-    <string name="iptv_no_playlists">No IPTV Playlists</string>
+    <string name="iptv_no_playlists">No Playlists</string>
     <string name="iptv_add_playlist_prompt">Add an M3U or Xtream Codes playlist to get started</string>
     <string name="iptv_add_playlist">Add Playlist</string>
-    <string name="iptv_add_title">Add IPTV Playlist</string>
+    <string name="iptv_add_title">Add Playlist</string>
     <string name="iptv_playlist_name">Playlist Name</string>
     <string name="iptv_m3u_url">M3U URL</string>
     <string name="iptv_epg_optional">EPG URL (optional)</string>

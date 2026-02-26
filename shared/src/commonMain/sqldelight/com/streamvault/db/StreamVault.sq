@@ -45,6 +45,9 @@ SELECT * FROM watch_progress WHERE media_id = ?;
 upsertProgress:
 INSERT OR REPLACE INTO watch_progress (media_id, media_type, title, poster_url, backdrop_url, position_ms, duration_ms, season_number, episode_number, show_title, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
+clearAllProgress:
+DELETE FROM watch_progress;
+
 -- User preferences key-value store
 CREATE TABLE preference (
     key TEXT NOT NULL PRIMARY KEY,
@@ -401,3 +404,71 @@ DELETE FROM watch_history;
 
 getHistoryCount:
 SELECT COUNT(*) FROM watch_history;
+
+-- Trakt ratings cache
+CREATE TABLE IF NOT EXISTS trakt_rating (
+    media_key TEXT NOT NULL PRIMARY KEY,
+    tmdb_id INTEGER NOT NULL,
+    media_type TEXT NOT NULL,
+    rating INTEGER NOT NULL,
+    rated_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+getTraktRatingByTmdb:
+SELECT * FROM trakt_rating WHERE tmdb_id = ? AND media_type = ? LIMIT 1;
+
+upsertTraktRating:
+INSERT OR REPLACE INTO trakt_rating (media_key, tmdb_id, media_type, rating, rated_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?);
+
+removeTraktRating:
+DELETE FROM trakt_rating WHERE media_key = ?;
+
+clearTraktRatings:
+DELETE FROM trakt_rating;
+
+-- Trakt sync state
+CREATE TABLE IF NOT EXISTS trakt_sync_state (
+    domain TEXT NOT NULL PRIMARY KEY,
+    last_sync_at INTEGER NOT NULL,
+    cursor TEXT
+);
+
+getTraktSyncState:
+SELECT * FROM trakt_sync_state WHERE domain = ?;
+
+upsertTraktSyncState:
+INSERT OR REPLACE INTO trakt_sync_state (domain, last_sync_at, cursor) VALUES (?, ?, ?);
+
+clearTraktSyncState:
+DELETE FROM trakt_sync_state;
+
+-- Trakt pending write queue (offline-friendly)
+CREATE TABLE IF NOT EXISTS trakt_sync_queue (
+    id TEXT NOT NULL PRIMARY KEY,
+    action_type TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    next_retry_at INTEGER
+);
+
+getPendingTraktQueue:
+SELECT * FROM trakt_sync_queue
+WHERE next_retry_at IS NULL OR next_retry_at <= ?
+ORDER BY created_at ASC LIMIT ?;
+
+insertTraktQueueItem:
+INSERT OR REPLACE INTO trakt_sync_queue (id, action_type, payload_json, created_at, attempts, last_error)
+VALUES (?, ?, ?, ?, ?, ?);
+
+updateTraktQueueAttempt:
+UPDATE trakt_sync_queue SET attempts = ?, last_error = ?, next_retry_at = ? WHERE id = ?;
+
+deleteTraktQueueItem:
+DELETE FROM trakt_sync_queue WHERE id = ?;
+
+clearTraktQueue:
+DELETE FROM trakt_sync_queue;

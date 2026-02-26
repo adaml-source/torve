@@ -171,6 +171,24 @@ data class TraktWatchlistBody(
     val shows: List<TraktHistoryShow>? = null,
 )
 
+@Serializable
+data class TraktRatingMovie(
+    val rating: Int,
+    val ids: TraktIds,
+)
+
+@Serializable
+data class TraktRatingShow(
+    val rating: Int,
+    val ids: TraktIds,
+)
+
+@Serializable
+data class TraktRatingsBody(
+    val movies: List<TraktRatingMovie>? = null,
+    val shows: List<TraktRatingShow>? = null,
+)
+
 // Watchlist GET response
 @Serializable
 data class TraktWatchlistItemResponse(
@@ -199,6 +217,15 @@ data class TraktHistoryResponse(
     val movie: TraktWatchlistMediaResponse? = null,
     val show: TraktWatchlistMediaResponse? = null,
     val episode: TraktPlaybackEpisode? = null,
+)
+
+@Serializable
+data class TraktRatingResponse(
+    @SerialName("rated_at") val ratedAt: String = "",
+    val rating: Int = 0,
+    val type: String = "",
+    val movie: TraktWatchlistMediaResponse? = null,
+    val show: TraktWatchlistMediaResponse? = null,
 )
 
 // Playback progress (in-progress items)

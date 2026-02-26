@@ -21,6 +21,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -33,11 +34,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.streamvault.android.ui.components.BackButton
 import com.streamvault.android.ui.components.CardSize
+import com.streamvault.android.ui.components.LocalCardStyle
 import com.streamvault.android.ui.components.PosterCard
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Snow
 import com.streamvault.domain.model.MediaItem
+import com.streamvault.domain.model.resolveCardStyle
 import com.streamvault.presentation.seeall.SeeAllViewModel
+import com.streamvault.presentation.settings.SettingsViewModel
 import org.koin.compose.koinInject
 
 @Composable
@@ -46,8 +50,15 @@ fun SeeAllScreen(
     onBack: () -> Unit,
     onMediaClick: (MediaItem) -> Unit,
     viewModel: SeeAllViewModel = koinInject(),
+    settingsViewModel: SettingsViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
+    val settingsState by settingsViewModel.state.collectAsState()
+    val defaultCardStyle = resolveCardStyle(
+        presets = settingsState.cardStylePresets,
+        presetId = null,
+        globalDefaultPresetId = settingsState.globalDefaultPresetId,
+    )
     val gridState = rememberLazyGridState()
 
     LaunchedEffect(sectionId) { viewModel.loadSection(sectionId) }
@@ -63,12 +74,13 @@ fun SeeAllScreen(
         if (shouldLoadMore) viewModel.loadMore()
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .statusBarsPadding(),
-    ) {
+    CompositionLocalProvider(LocalCardStyle provides defaultCardStyle) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .statusBarsPadding(),
+        ) {
         Row(
             Modifier
                 .fillMaxWidth()
@@ -103,7 +115,7 @@ fun SeeAllScreen(
                 items(state.items, key = { "${it.id}_${it.type}" }) { item ->
                     PosterCard(
                         item = item,
-                        size = CardSize.SMALL,
+                        sizeOverride = CardSize.SMALL,
                         onClick = { onMediaClick(item) },
                     )
                 }
@@ -120,5 +132,6 @@ fun SeeAllScreen(
                 }
             }
         }
+    }
     }
 }

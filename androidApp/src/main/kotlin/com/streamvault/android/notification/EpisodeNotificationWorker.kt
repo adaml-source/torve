@@ -14,9 +14,8 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import com.streamvault.data.trakt.TraktClient
-import com.streamvault.domain.repository.PreferencesRepository
-import com.streamvault.presentation.settings.SettingsViewModel
+import com.streamvault.data.trakt.api.TraktAuthorizedApi
+import com.streamvault.data.trakt.auth.TraktTokenStore
 import org.koin.java.KoinJavaComponent.getKoin
 import java.util.concurrent.TimeUnit
 
@@ -27,19 +26,13 @@ class EpisodeNotificationWorker(
 
     override suspend fun doWork(): Result {
         return try {
-            val prefsRepo: PreferencesRepository = getKoin().get()
-            val traktClient: TraktClient = getKoin().get()
+            val tokenStore: TraktTokenStore = getKoin().get()
+            val traktApi: TraktAuthorizedApi = getKoin().get()
 
-            val accessToken = prefsRepo.getString(SettingsViewModel.KEY_TRAKT_ACCESS_TOKEN)
+            val accessToken = tokenStore.accessToken()
             if (accessToken.isNullOrBlank()) return Result.success()
 
-            val clientId = prefsRepo.getString(SettingsViewModel.KEY_TRAKT_CLIENT_ID) ?: ""
-            val clientSecret = prefsRepo.getString(SettingsViewModel.KEY_TRAKT_CLIENT_SECRET) ?: ""
-            if (clientId.isNotBlank()) {
-                traktClient.setCredentials(clientId, clientSecret)
-            }
-
-            val calendar = traktClient.getCalendar(accessToken)
+            val calendar = traktApi.getCalendar()
             if (calendar.isNotEmpty()) {
                 ensureNotificationChannel()
                 val titles = calendar.take(3).joinToString(", ") { it.showTitle }

@@ -50,6 +50,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -74,14 +75,17 @@ import com.streamvault.android.ui.theme.Obsidian
 import com.streamvault.android.ui.theme.Snow
 import com.streamvault.android.ui.theme.Steel
 import com.streamvault.android.ui.theme.StreamVault
-import com.streamvault.domain.model.CardPrefs
+import com.streamvault.domain.model.CardOrientation
+import com.streamvault.domain.model.CardStyle
 import com.streamvault.domain.model.CardTitlePosition
 import com.streamvault.domain.model.MediaItem
 import com.streamvault.domain.model.MediaType
-import com.streamvault.domain.model.RatingPillPlacement
+import com.streamvault.domain.model.isOutside
+import com.streamvault.domain.model.resolvedAspectRatio
+import com.streamvault.domain.model.resolvedWidthDp
 import com.streamvault.domain.model.WatchState
 
-val LocalCardPrefs = staticCompositionLocalOf { CardPrefs() }
+val LocalCardStyle = staticCompositionLocalOf { CardStyle() }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Poster Card — The primary content card used everywhere.
@@ -97,21 +101,47 @@ enum class CardSize(val width: Dp, val aspectRatio: Float) {
     WIDE(280.dp, 16f / 9f),
 }
 
+private data class CardLayoutSpec(
+    val width: Dp,
+    val aspectRatio: Float,
+    val useBackdrop: Boolean,
+)
+
+private fun CardSize.toLayoutSpec(): CardLayoutSpec = CardLayoutSpec(
+    width = width,
+    aspectRatio = aspectRatio,
+    useBackdrop = this == CardSize.LANDSCAPE || this == CardSize.WIDE,
+)
+
+private fun resolveCardLayoutSpec(sizeOverride: CardSize?, cardStyle: CardStyle): CardLayoutSpec {
+    return if (sizeOverride != null) {
+        sizeOverride.toLayoutSpec()
+    } else {
+        val width = cardStyle.size.resolvedWidthDp().dp
+        val ratio = cardStyle.size.resolvedAspectRatio()
+        val useBackdrop = cardStyle.size.orientation == CardOrientation.LANDSCAPE
+        CardLayoutSpec(width = width, aspectRatio = ratio, useBackdrop = useBackdrop)
+    }
+}
+
 @Composable
 fun PosterCard(
     item: MediaItem,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    size: CardSize = CardSize.MEDIUM,
+    sizeOverride: CardSize? = null,
     showTitle: Boolean = true,
     showRating: Boolean = true,
     isDownloaded: Boolean = false,
     watchState: WatchState = WatchState(),
+    cardStyle: CardStyle = LocalCardStyle.current,
 ) {
-    val cardPrefs = LocalCardPrefs.current
-    val hoverPrefs = cardPrefs.hover
-    val appearance = cardPrefs.appearance
+    val hoverPrefs = cardStyle.hover
+    val appearance = cardStyle.appearance
     val cornerRadius = appearance.cornerRadiusDp.dp
+    val ratingPrefs = cardStyle.ratingPrefs
+    val layoutSpec = resolveCardLayoutSpec(sizeOverride, cardStyle)
+    val isLandscapeCard = layoutSpec.useBackdrop
 
     // Hover / Focus zoom
     var isFocused by remember { mutableStateOf(false) }
@@ -125,8 +155,9 @@ fun PosterCard(
     )
 
     Column(
-        modifier = modifier
-            .width(size.width)
+        modifier = Modifier
+            .width(layoutSpec.width)
+            .then(modifier)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
@@ -134,11 +165,18 @@ fun PosterCard(
             .zIndex(if (isActive) 10f else 0f)
             .onFocusChanged { isFocused = it.isFocused },
     ) {
+        val showCardRatings = showRating &&
+            (!isLandscapeCard || ratingPrefs.allowRatingsOnLandscapeCards) &&
+            ratingPrefs.enabledProviders.isNotEmpty() &&
+            ratingPrefs.maxRatingsOnCard > 0
+        val showFallbackRating = showCardRatings
+        val showInsideRatings = showCardRatings && !ratingPrefs.pillPosition.isOutside()
+        val showOutsideRatings = showCardRatings && ratingPrefs.pillPosition.isOutside()
         // Poster image
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(size.aspectRatio)
+                .aspectRatio(layoutSpec.aspectRatio)
                 .clip(RoundedCornerShape(cornerRadius))
                 .then(
                     if (isActive && hoverPrefs.borderOnHover) {
@@ -159,10 +197,7 @@ fun PosterCard(
                 },
         ) {
             SubcomposeAsyncImage(
-                model = when (size) {
-                    CardSize.LANDSCAPE, CardSize.WIDE -> item.backdropUrl ?: item.posterUrl
-                    else -> item.posterUrl
-                },
+                model = if (isLandscapeCard) item.backdropUrl ?: item.posterUrl else item.posterUrl,
                 contentDescription = item.title,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
@@ -184,7 +219,7 @@ fun PosterCard(
             )
 
             // Watched overlay
-            val watchedPrefs = cardPrefs.watched
+            val watchedPrefs = cardStyle.watched
             if (watchedPrefs.enabled && watchState.isStarted) {
                 WatchedOverlay(
                     watchState = watchState,
@@ -194,35 +229,25 @@ fun PosterCard(
                 )
             }
 
-            // Rating badge — configurable placement, only on poster cards
-            if (showRating && size != CardSize.LANDSCAPE && size != CardSize.WIDE) {
-                val ratingPrefs = LocalRatingPrefs.current
-                val insideAlignment = when (ratingPrefs.pillPlacement) {
-                    RatingPillPlacement.INSIDE_TOP_END -> Alignment.TopEnd
-                    RatingPillPlacement.INSIDE_TOP_START -> Alignment.TopStart
-                    RatingPillPlacement.INSIDE_BOTTOM_END -> Alignment.BottomEnd
-                    RatingPillPlacement.INSIDE_BOTTOM_START -> Alignment.BottomStart
-                    RatingPillPlacement.OUTSIDE_TOP -> Alignment.TopEnd
-                    RatingPillPlacement.OUTSIDE_BOTTOM -> Alignment.BottomEnd
-                }
-                if (item.ratings != null && ratingPrefs.showRatingsOnCards) {
-                    MultiRatingPills(
-                        ratings = item.ratings!!,
-                        prefs = ratingPrefs,
-                        modifier = Modifier
-                            .align(insideAlignment)
-                            .padding(6.dp),
-                    )
-                } else {
-                    item.rating?.let { rating ->
-                        if (rating > 0) {
-                            RatingPill(
-                                rating = rating,
-                                modifier = Modifier
-                                    .align(insideAlignment)
-                                    .padding(6.dp),
-                            )
-                        }
+            // Rating badge — inside overlay
+            if (showInsideRatings && item.ratings != null) {
+                MultiRatingPills(
+                    ratings = item.ratings!!,
+                    prefs = ratingPrefs,
+                    modifier = Modifier
+                        .testTag("poster_ratings_inside")
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp),
+                )
+            } else if (!showOutsideRatings && showFallbackRating) {
+                item.rating?.let { rating ->
+                    if (rating > 0) {
+                        RatingPill(
+                            rating = rating,
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(6.dp),
+                        )
                     }
                 }
             }
@@ -303,7 +328,7 @@ fun PosterCard(
 
             // Overlay title (when title position is OVERLAY_BOTTOM)
             if (appearance.titlePosition == CardTitlePosition.OVERLAY_BOTTOM &&
-                size != CardSize.LANDSCAPE && size != CardSize.WIDE
+                !isLandscapeCard
             ) {
                 Box(
                     modifier = Modifier
@@ -323,7 +348,7 @@ fun PosterCard(
             }
 
             // For landscape cards, show title overlaid at bottom
-            if (size == CardSize.LANDSCAPE || size == CardSize.WIDE) {
+            if (isLandscapeCard) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -344,9 +369,28 @@ fun PosterCard(
             }
         }
 
+        // Ratings outside poster image
+        if (showOutsideRatings && item.ratings != null) {
+            Spacer(Modifier.height(6.dp))
+            MultiRatingPills(
+                ratings = item.ratings!!,
+                prefs = ratingPrefs,
+                modifier = Modifier
+                    .testTag("poster_ratings_outside")
+                    .fillMaxWidth(),
+            )
+        } else if (showFallbackRating && ratingPrefs.pillPosition.isOutside()) {
+            item.rating?.let { rating ->
+                if (rating > 0) {
+                    Spacer(Modifier.height(6.dp))
+                    RatingPill(rating = rating)
+                }
+            }
+        }
+
         // Title below poster (not inside card) — only when BELOW
         val showBelowTitle = showTitle &&
-            size != CardSize.LANDSCAPE && size != CardSize.WIDE &&
+            !isLandscapeCard &&
             appearance.titlePosition == CardTitlePosition.BELOW
         if (showBelowTitle) {
             Spacer(Modifier.height(6.dp))
@@ -473,13 +517,15 @@ fun ShimmerBox(modifier: Modifier = Modifier) {
 @Composable
 fun ShimmerPosterCard(
     modifier: Modifier = Modifier,
-    size: CardSize = CardSize.MEDIUM,
+    sizeOverride: CardSize? = null,
+    cardStyle: CardStyle = LocalCardStyle.current,
 ) {
-    Column(modifier = modifier.width(size.width)) {
+    val layoutSpec = resolveCardLayoutSpec(sizeOverride, cardStyle)
+    Column(modifier = modifier.width(layoutSpec.width)) {
         ShimmerBox(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(size.aspectRatio)
+                .aspectRatio(layoutSpec.aspectRatio)
                 .clip(RoundedCornerShape(8.dp)),
         )
         Spacer(Modifier.height(6.dp))
@@ -636,7 +682,7 @@ fun BackButton(
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Live Indicator Dot — Pulsing red dot for IPTV/live
+// Live Indicator Dot — Pulsing red dot for live channels
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @Composable

@@ -72,6 +72,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -105,11 +106,18 @@ import com.streamvault.android.ui.theme.Sapphire
 import com.streamvault.android.ui.theme.Silver
 import com.streamvault.android.ui.theme.Smoke
 import com.streamvault.android.ui.theme.Snow
+import com.streamvault.android.ui.components.LocalCardStyle
+import com.streamvault.android.ui.components.MultiRatingPills
+import com.streamvault.data.mdblist.RatingsEnricher
 import com.streamvault.data.download.DownloadCatalogueBuilder
+import com.streamvault.domain.model.MediaItem
+import com.streamvault.domain.model.MediaRatings
+import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.model.CatalogueFilterType
 import com.streamvault.domain.model.CatalogueGrouping
 import com.streamvault.domain.model.CatalogueSection
 import com.streamvault.domain.model.CatalogueSortBy
+import com.streamvault.domain.model.resolveCardStyle
 import com.streamvault.domain.model.CatalogueState
 import com.streamvault.domain.model.CatalogueViewMode
 import com.streamvault.domain.model.CatalogueWatchFilter
@@ -121,7 +129,10 @@ import com.streamvault.domain.model.DownloadStatus
 import com.streamvault.domain.model.DownloadedItem
 import com.streamvault.presentation.download.DownloadCatalogueViewModel
 import com.streamvault.presentation.download.DownloadViewModel
+import com.streamvault.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.koin.compose.koinInject
 import java.io.File
 
@@ -137,12 +148,43 @@ fun DownloadCatalogueScreen(
     onShowDetail: (String) -> Unit,
     catalogueVM: DownloadCatalogueViewModel = koinInject(),
     downloadVM: DownloadViewModel = koinInject(),
+    settingsViewModel: SettingsViewModel = koinInject(),
+    ratingsEnricher: RatingsEnricher = koinInject(),
 ) {
     val catalogueState by catalogueVM.state.collectAsState()
     val downloadState by downloadVM.state.collectAsState()
+    val settingsState by settingsViewModel.state.collectAsState()
     val context = LocalContext.current
     val state = catalogueState.catalogue
     val prefs = catalogueState.prefs
+    var ratingsByMediaId by remember { mutableStateOf<Map<String, MediaRatings>>(emptyMap()) }
+
+    LaunchedEffect(state.sections, state.specialSections, settingsState.mdblistApiKey) {
+        val apiKey = settingsState.mdblistApiKey
+        if (apiKey.isBlank()) {
+            ratingsByMediaId = emptyMap()
+            return@LaunchedEffect
+        }
+        val groups = buildList {
+            state.specialSections.forEach { addAll(it.items) }
+            state.sections.forEach { addAll(it.items) }
+        }.distinctBy { it.mediaId }
+
+        val mediaItems = groups.mapNotNull { group ->
+            val tmdbId = group.mediaId.toIntOrNull() ?: return@mapNotNull null
+            val type = if (group.type == DownloadGroupType.MOVIE) MediaType.MOVIE else MediaType.SERIES
+            MediaItem(
+                id = group.mediaId,
+                tmdbId = tmdbId,
+                type = type,
+                title = group.title,
+                posterUrl = group.posterUrl,
+                backdropUrl = group.backdropUrl,
+            )
+        }
+        val enriched = withContext(Dispatchers.Default) { ratingsEnricher.enrichList(mediaItems, apiKey) }
+        ratingsByMediaId = enriched.associate { it.id to (it.ratings ?: MediaRatings()) }
+    }
 
     // Wire platform callbacks
     LaunchedEffect(catalogueVM, downloadVM) {
@@ -170,6 +212,14 @@ fun DownloadCatalogueScreen(
     var showSettingsSheet by remember { mutableStateOf(false) }
     var contextMenuGroup by remember { mutableStateOf<DownloadGroup?>(null) }
 
+    val defaultCardStyle = resolveCardStyle(
+        presets = settingsState.cardStylePresets,
+        presetId = null,
+        globalDefaultPresetId = settingsState.globalDefaultPresetId,
+    )
+    CompositionLocalProvider(
+        LocalCardStyle provides defaultCardStyle,
+    ) {
     Column(
         Modifier
             .fillMaxSize()
@@ -214,12 +264,13 @@ fun DownloadCatalogueScreen(
 
             // Main content by view mode
             when (prefs.viewMode) {
-                CatalogueViewMode.GRID -> GridCatalogue(state, prefs, onPlayOffline, onShowDetail) { contextMenuGroup = it }
+                CatalogueViewMode.GRID -> GridCatalogue(state, prefs, ratingsByMediaId, onPlayOffline, onShowDetail) { contextMenuGroup = it }
                 CatalogueViewMode.LIST -> ListCatalogue(state, prefs, onPlayOffline, onShowDetail) { contextMenuGroup = it }
-                CatalogueViewMode.SHELF -> ShelfCatalogue(state, prefs, onPlayOffline, onShowDetail) { contextMenuGroup = it }
-                CatalogueViewMode.COVER -> CoverCatalogue(state, prefs, onPlayOffline, onShowDetail) { contextMenuGroup = it }
+                CatalogueViewMode.SHELF -> ShelfCatalogue(state, prefs, ratingsByMediaId, onPlayOffline, onShowDetail) { contextMenuGroup = it }
+                CatalogueViewMode.COVER -> CoverCatalogue(state, prefs, ratingsByMediaId, onPlayOffline, onShowDetail) { contextMenuGroup = it }
             }
         }
+    }
     }
 
     // Bottom sheets
@@ -607,6 +658,7 @@ private fun FilterChipsRow(
 private fun GridCatalogue(
     state: CatalogueState,
     prefs: DownloadCataloguePrefs,
+    ratingsByMediaId: Map<String, MediaRatings>,
     onPlay: (DownloadedItem) -> Unit,
     onDetail: (String) -> Unit,
     onLongPress: (DownloadGroup) -> Unit,
@@ -630,7 +682,7 @@ private fun GridCatalogue(
                 )
             }
             items(section.items, key = { "sp_${section.title}_${it.mediaId}" }) { group ->
-                DownloadGroupCard(group, prefs, onPlay, onDetail, onLongPress)
+                DownloadGroupCard(group, prefs, ratingsByMediaId, onPlay, onDetail, onLongPress)
             }
         }
 
@@ -644,7 +696,7 @@ private fun GridCatalogue(
                 )
             }
             items(section.items, key = { "${section.title}_${it.mediaId}" }) { group ->
-                DownloadGroupCard(group, prefs, onPlay, onDetail, onLongPress)
+                DownloadGroupCard(group, prefs, ratingsByMediaId, onPlay, onDetail, onLongPress)
             }
         }
     }
@@ -761,16 +813,17 @@ private fun DownloadGroupListRow(
 private fun ShelfCatalogue(
     state: CatalogueState,
     prefs: DownloadCataloguePrefs,
+    ratingsByMediaId: Map<String, MediaRatings>,
     onPlay: (DownloadedItem) -> Unit,
     onDetail: (String) -> Unit,
     onLongPress: (DownloadGroup) -> Unit,
 ) {
     LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
         state.specialSections.forEach { section ->
-            item { ShelfSection(section, prefs, onPlay, onDetail, onLongPress) }
+            item { ShelfSection(section, prefs, ratingsByMediaId, onPlay, onDetail, onLongPress) }
         }
         state.sections.forEach { section ->
-            item { ShelfSection(section, prefs, onPlay, onDetail, onLongPress) }
+            item { ShelfSection(section, prefs, ratingsByMediaId, onPlay, onDetail, onLongPress) }
         }
     }
 }
@@ -779,6 +832,7 @@ private fun ShelfCatalogue(
 private fun ShelfSection(
     section: CatalogueSection,
     prefs: DownloadCataloguePrefs,
+    ratingsByMediaId: Map<String, MediaRatings>,
     onPlay: (DownloadedItem) -> Unit,
     onDetail: (String) -> Unit,
     onLongPress: (DownloadGroup) -> Unit,
@@ -798,7 +852,7 @@ private fun ShelfSection(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             items(section.items, key = { "shelf_${section.title}_${it.mediaId}" }) { group ->
-                DownloadGroupCard(group, prefs, onPlay, onDetail, onLongPress)
+                DownloadGroupCard(group, prefs, ratingsByMediaId, onPlay, onDetail, onLongPress)
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -813,6 +867,7 @@ private fun ShelfSection(
 private fun CoverCatalogue(
     state: CatalogueState,
     prefs: DownloadCataloguePrefs,
+    ratingsByMediaId: Map<String, MediaRatings>,
     onPlay: (DownloadedItem) -> Unit,
     onDetail: (String) -> Unit,
     onLongPress: (DownloadGroup) -> Unit,
@@ -829,7 +884,7 @@ private fun CoverCatalogue(
                 )
             }
             items(section.items, key = { "cover_${section.title}_${it.mediaId}" }) { group ->
-                CoverCard(group, prefs, onPlay, onDetail, onLongPress)
+                CoverCard(group, prefs, ratingsByMediaId, onPlay, onDetail, onLongPress)
             }
         }
     }
@@ -840,6 +895,7 @@ private fun CoverCatalogue(
 private fun CoverCard(
     group: DownloadGroup,
     prefs: DownloadCataloguePrefs,
+    ratingsByMediaId: Map<String, MediaRatings>,
     onPlay: (DownloadedItem) -> Unit,
     onDetail: (String) -> Unit,
     onLongPress: (DownloadGroup) -> Unit,
@@ -923,6 +979,16 @@ private fun CoverCard(
                     }
                 }
             }
+
+            ratingsByMediaId[group.mediaId]?.let { ratings ->
+                MultiRatingPills(
+                    ratings = ratings,
+                    prefs = LocalCardStyle.current.ratingPrefs,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp),
+                )
+            }
         }
     }
 }
@@ -936,6 +1002,7 @@ private fun CoverCard(
 private fun DownloadGroupCard(
     group: DownloadGroup,
     prefs: DownloadCataloguePrefs,
+    ratingsByMediaId: Map<String, MediaRatings>,
     onPlay: (DownloadedItem) -> Unit,
     onDetail: (String) -> Unit,
     onLongPress: (DownloadGroup) -> Unit,
@@ -1006,6 +1073,16 @@ private fun DownloadGroupCard(
                         Text(res, color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
                     }
                 }
+            }
+
+            ratingsByMediaId[group.mediaId]?.let { ratings ->
+                MultiRatingPills(
+                    ratings = ratings,
+                    prefs = LocalCardStyle.current.ratingPrefs,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp),
+                )
             }
 
             // Watch progress bar

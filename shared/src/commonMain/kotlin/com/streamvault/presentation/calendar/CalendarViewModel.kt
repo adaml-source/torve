@@ -1,9 +1,8 @@
 package com.streamvault.presentation.calendar
 
 import com.streamvault.data.trakt.TraktCalendarEpisode
-import com.streamvault.data.trakt.TraktClient
-import com.streamvault.domain.repository.PreferencesRepository
-import com.streamvault.presentation.settings.SettingsViewModel
+import com.streamvault.data.trakt.api.TraktAuthorizedApi
+import com.streamvault.data.trakt.auth.TraktTokenStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -20,8 +19,8 @@ import kotlinx.datetime.plus
 import kotlinx.datetime.toLocalDateTime
 
 class CalendarViewModel(
-    private val traktClient: TraktClient,
-    private val prefsRepo: PreferencesRepository,
+    private val traktApi: TraktAuthorizedApi,
+    private val tokenStore: TraktTokenStore,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(CalendarUiState())
@@ -37,19 +36,18 @@ class CalendarViewModel(
 
     private fun checkConnectionAndLoad() {
         scope.launch {
-            val token = prefsRepo.getString(SettingsViewModel.KEY_TRAKT_ACCESS_TOKEN) ?: ""
-            val connected = token.isNotBlank()
+            val connected = tokenStore.accessToken().isNullOrBlank().not()
             _state.update { it.copy(traktConnected = connected) }
             if (connected) {
-                loadCalendar(token)
+                loadCalendar()
             }
         }
     }
 
-    private suspend fun loadCalendar(token: String) {
+    private suspend fun loadCalendar() {
         _state.update { it.copy(isLoading = true, error = null) }
         try {
-            val episodes = traktClient.getCalendar(token, days = 33)
+            val episodes = traktApi.getCalendar(days = 33)
             val grouped = groupEpisodesByDate(episodes)
             _state.update {
                 it.copy(

@@ -13,7 +13,7 @@ import io.ktor.http.isSuccess
 class MdbListApi(private val httpClient: HttpClient) {
 
     companion object {
-        private const val BASE_URL = "https://mdblist.com/api"
+        private const val BASE_URL = "https://api.mdblist.com"
     }
 
     suspend fun getListItems(
@@ -84,6 +84,22 @@ class MdbListApi(private val httpClient: HttpClient) {
         val response = httpClient.get("$BASE_URL/") {
             parameter("apikey", apiKey)
             parameter("i", imdbId)
+        }
+        if (!response.status.isSuccess()) return null
+        return try { response.body() } catch (_: Exception) { null }
+    }
+
+    suspend fun getRatingsByTmdbMovie(tmdbId: Int, apiKey: String): MdbListRatings? {
+        val response = httpClient.get("$BASE_URL/tmdb/movie/$tmdbId") {
+            parameter("apikey", apiKey)
+        }
+        if (!response.status.isSuccess()) return null
+        return try { response.body() } catch (_: Exception) { null }
+    }
+
+    suspend fun getRatingsByTmdbShow(tmdbId: Int, apiKey: String): MdbListRatings? {
+        val response = httpClient.get("$BASE_URL/tmdb/show/$tmdbId") {
+            parameter("apikey", apiKey)
         }
         if (!response.status.isSuccess()) return null
         return try { response.body() } catch (_: Exception) { null }

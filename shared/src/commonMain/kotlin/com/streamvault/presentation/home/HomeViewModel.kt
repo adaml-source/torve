@@ -4,8 +4,7 @@ import com.streamvault.domain.model.CatalogShelf
 import com.streamvault.domain.model.CustomSection
 import com.streamvault.domain.model.HomeSectionConfig
 import com.streamvault.domain.model.HomeSection
-import com.streamvault.domain.model.PosterOrientation
-import com.streamvault.domain.model.PosterSize
+import com.streamvault.domain.model.CardStylePreset
 import com.streamvault.domain.model.MediaItem
 import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.model.ParentalFilter
@@ -14,6 +13,8 @@ import com.streamvault.domain.model.collectStableKeys
 import com.streamvault.domain.model.dedupeAcrossShelves
 import com.streamvault.domain.model.dedupeByStableKey
 import com.streamvault.domain.model.stableKey
+import com.streamvault.domain.model.updateSectionPresetId
+import com.streamvault.domain.integrations.LibraryOverlayService
 import com.streamvault.domain.recommendation.ScoredMediaItem
 import com.streamvault.domain.recommendation.GetRecommendationsUseCase
 import com.streamvault.domain.repository.MetadataRepository
@@ -55,6 +56,7 @@ class HomeViewModel(
     private val catalogAggregator: CatalogAggregator,
     private val mdbListRepo: MdbListRepository,
     private val ratingsEnricher: RatingsEnricher,
+    private val libraryOverlayService: LibraryOverlayService,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(HomeUiState())
@@ -112,7 +114,14 @@ class HomeViewModel(
                 val decoded = json.decodeFromString<List<HomeSectionConfig>>(saved)
                 val defaults = defaultSectionConfigs()
                 val bySection = decoded.associateBy { it.section }
-                defaults.map { def -> bySection[def.section] ?: def }
+                val presetIds = loadCardStylePresetIds()
+                val sanitized = defaults.map { def ->
+                    val resolved = bySection[def.section] ?: def
+                    if (resolved.presetId != null && resolved.presetId !in presetIds) {
+                        resolved.copy(presetId = null)
+                    } else resolved
+                }
+                sanitized
             } catch (_: Exception) {
                 defaultSectionConfigs()
             }
@@ -141,6 +150,22 @@ class HomeViewModel(
         val defaults = defaultSectionConfigs()
         _sectionConfigs.value = defaults
         saveSectionConfigs(defaults)
+    }
+
+    fun resetSectionToDefault(section: HomeSection) {
+        val defaults = defaultSectionConfigs().associateBy { it.section }
+        val defaultConfig = defaults[section] ?: return
+        val updated = _sectionConfigs.value.map {
+            if (it.section == section) {
+                it.copy(
+                    enabled = defaultConfig.enabled,
+                    presetId = null,
+                    customTitle = null,
+                )
+            } else it
+        }
+        _sectionConfigs.value = updated
+        saveSectionConfigs(updated)
     }
 
     private fun saveSectionConfigs(configs: List<HomeSectionConfig>) {
@@ -175,18 +200,13 @@ class HomeViewModel(
     // Custom sections
     private suspend fun loadCustomSections(): List<CustomSection> {
         val saved = try { prefsRepo.getString("custom_sections") } catch (_: Exception) { null }
-        println("StreamVault: loadCustomSections raw = ${saved?.take(200)}")
         return if (saved != null) {
             try {
-                val result = json.decodeFromString<List<CustomSection>>(saved)
-                println("StreamVault: loadCustomSections parsed ${result.size} sections")
-                result
-            } catch (e: Exception) {
-                println("StreamVault: loadCustomSections parse failed: ${e.message}")
+                json.decodeFromString<List<CustomSection>>(saved)
+            } catch (_: Exception) {
                 emptyList()
             }
         } else {
-            println("StreamVault: loadCustomSections — no saved data")
             emptyList()
         }
     }
@@ -252,12 +272,20 @@ class HomeViewModel(
         loadHomeScreen()
     }
 
-    fun updateSectionLayout(section: HomeSection, orientation: PosterOrientation, size: PosterSize) {
-        val updated = _sectionConfigs.value.map {
-            if (it.section == section) it.copy(orientation = orientation, size = size) else it
-        }
+    fun updateSectionPreset(section: HomeSection, presetId: String?) {
+        val updated = updateSectionPresetId(_sectionConfigs.value, section, presetId)
         _sectionConfigs.value = updated
         saveSectionConfigs(updated)
+    }
+
+    private suspend fun loadCardStylePresetIds(): Set<String> {
+        val saved = try { prefsRepo.getString(SettingsViewModel.KEY_CARD_STYLE_PRESETS) } catch (_: Exception) { null }
+        if (saved.isNullOrBlank()) return emptySet()
+        return try {
+            json.decodeFromString<List<CardStylePreset>>(saved).map { it.presetId }.toSet()
+        } catch (_: Exception) {
+            emptySet()
+        }
     }
 
     fun loadHomeScreen() {
@@ -267,6 +295,9 @@ class HomeViewModel(
                 val dedupe = shouldDedupe()
                 val shelvesDeferred = async { metadataRepo.getHomeShelves() }
                 val continueWatchingDeferred = async { watchProgressRepo.getInProgress(20) }
+                val overlayContinueDeferred = async {
+                    try { libraryOverlayService.getContinueWatching(20) } catch (_: Exception) { emptyList() }
+                }
                 val recommendationsDeferred = async {
                     try {
                         recommendationsUseCase.execute()
@@ -361,6 +392,12 @@ class HomeViewModel(
 
                 val shelves = shelvesDeferred.await()
                 val continueWatching = continueWatchingDeferred.await()
+                val overlayContinue = overlayContinueDeferred.await()
+                val mergedContinueWatching = (continueWatching + overlayContinue)
+                    .groupBy { "${it.mediaType.name}:${it.mediaId}" }
+                    .mapNotNull { (_, entries) -> entries.maxByOrNull { it.updatedAt } }
+                    .sortedByDescending { it.updatedAt }
+                    .take(20)
                 val recommendations = recommendationsDeferred.await()
                 val watchlistItems = watchlistDeferred.await()
                 val recentHistory = historyDeferred.await()
@@ -610,7 +647,7 @@ class HomeViewModel(
                         it.copy(
                             shelves = finalShelves,
                             heroItem = finalShelves.firstOrNull()?.items?.firstOrNull(),
-                            continueWatching = continueWatching,
+                    continueWatching = mergedContinueWatching,
                             recommendedItems = finalRecommendations,
                             watchlistShelf = watchlistShelf,
                             watchlistItems = withinDedupedWatchlist,
@@ -631,7 +668,7 @@ class HomeViewModel(
                         it.copy(
                             shelves = parentalFilteredShelves,
                             heroItem = parentalFilteredShelves.firstOrNull()?.items?.firstOrNull(),
-                            continueWatching = continueWatching,
+                            continueWatching = mergedContinueWatching,
                             recommendedItems = filteredRecommendations,
                             watchlistShelf = watchlistShelf,
                             watchlistItems = watchlistMediaItems,
@@ -669,13 +706,38 @@ class HomeViewModel(
             val apiKey = try {
                 prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY) ?: ""
             } catch (_: Exception) { "" }
-            if (apiKey.isBlank()) return@launch
+            refreshRatings(apiKey)
+        }
+    }
 
+    fun refreshRatings(apiKey: String) {
+        if (apiKey.isBlank()) return
+        scope.launch {
             val current = _state.value
             val enrichedShelves = current.shelves.map { shelf ->
                 shelf.copy(items = ratingsEnricher.enrichList(shelf.items, apiKey))
             }
-            _state.update { it.copy(shelves = enrichedShelves) }
+            val enrichedAddonShelves = current.addonShelves.map { shelf ->
+                shelf.copy(items = ratingsEnricher.enrichList(shelf.items, apiKey))
+            }
+            val enrichedMdbListShelves = current.mdbListShelves.map { shelf ->
+                shelf.copy(items = ratingsEnricher.enrichList(shelf.items, apiKey))
+            }
+            val enrichedCustomShelves = current.customShelves.mapValues { (_, items) ->
+                ratingsEnricher.enrichList(items, apiKey)
+            }.toMutableMap()
+            val enrichedHiddenGems = current.hiddenGemsShelf?.let { shelf ->
+                shelf.copy(items = ratingsEnricher.enrichList(shelf.items, apiKey))
+            }
+            _state.update {
+                it.copy(
+                    shelves = enrichedShelves,
+                    addonShelves = enrichedAddonShelves,
+                    mdbListShelves = enrichedMdbListShelves,
+                    customShelves = enrichedCustomShelves,
+                    hiddenGemsShelf = enrichedHiddenGems,
+                )
+            }
         }
     }
 

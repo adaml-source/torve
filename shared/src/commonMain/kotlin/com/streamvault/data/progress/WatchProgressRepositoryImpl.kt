@@ -2,21 +2,20 @@ package com.streamvault.data.progress
 
 import com.streamvault.data.metadata.TmdbApiClient
 import com.streamvault.data.metadata.TmdbMappers
-import com.streamvault.data.trakt.TraktClient
+import com.streamvault.data.trakt.api.TraktAuthorizedApi
+import com.streamvault.data.trakt.repo.TraktSyncRepository
 import com.streamvault.db.StreamVaultDatabase
 import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.model.WatchProgress
-import com.streamvault.domain.repository.PreferencesRepository
 import com.streamvault.domain.repository.WatchProgressRepository
-import com.streamvault.presentation.settings.SettingsViewModel
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 
 class WatchProgressRepositoryImpl(
     private val database: StreamVaultDatabase,
-    private val traktClient: TraktClient,
-    private val prefsRepo: PreferencesRepository,
+    private val traktApi: TraktAuthorizedApi,
     private val tmdbClient: TmdbApiClient,
+    private val traktSyncRepo: TraktSyncRepository,
 ) : WatchProgressRepository {
 
     override suspend fun getInProgress(limit: Long): List<WatchProgress> {
@@ -72,6 +71,23 @@ class WatchProgressRepositoryImpl(
             show_title = progress.showTitle,
             updated_at = Clock.System.now().toEpochMilliseconds(),
         )
+
+        // Treat near-complete playback as watched; enqueue for eventual Trakt sync.
+        val ratio = if (progress.durationMs > 0) {
+            progress.positionMs.toDouble() / progress.durationMs.toDouble()
+        } else {
+            0.0
+        }
+        if (ratio >= 0.9) {
+            val tmdbId = progress.mediaId.toIntOrNull() ?: return
+            runCatching {
+                traktSyncRepo.enqueueHistoryAdd(
+                    tmdbId = tmdbId,
+                    mediaType = progress.mediaType,
+                    imdbId = null,
+                )
+            }
+        }
     }
 
     override suspend fun getAllProgress(): List<WatchProgress> {
@@ -92,12 +108,13 @@ class WatchProgressRepositoryImpl(
         }
     }
 
+    override suspend fun clearAllProgress() {
+        database.streamVaultQueries.clearAllProgress()
+    }
+
     override suspend fun syncFromTrakt() {
         try {
-            val token = prefsRepo.getString(SettingsViewModel.KEY_TRAKT_ACCESS_TOKEN) ?: return
-            if (token.isBlank()) return
-
-            val playbackItems = traktClient.getPlaybackProgress(token)
+            val playbackItems = traktApi.getPlaybackProgress()
             if (playbackItems.isEmpty()) return
 
             val localIds = database.streamVaultQueries.getAllProgress().executeAsList()

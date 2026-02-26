@@ -9,7 +9,7 @@
     <string name="nav_home">Accueil</string>
     <string name="nav_movies">Films</string>
     <string name="nav_tv_shows">Séries TV</string>
-    <string name="nav_live_tv">TV en direct</string>
+    <string name="nav_channels">TV en direct</string>
     <string name="nav_watchlist">Liste de suivi</string>
     <string name="nav_settings">Paramètres</string>
 

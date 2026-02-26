@@ -114,6 +114,7 @@ import org.koin.compose.koinInject
 @Composable
 fun PlayerScreen(
     url: String,
+    fallbackUrl: String = "",
     title: String = "",
     mediaId: String = "",
     mediaType: String = "movie",
@@ -183,6 +184,8 @@ fun PlayerScreen(
     var audioTracks by remember { mutableStateOf<List<TrackDescription>>(emptyList()) }
     var useMpv by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var codecFallbackUsed by remember { mutableStateOf(false) }
+    var codecFallbackInProgress by remember { mutableStateOf(false) }
     var audioDelayMs by remember { mutableIntStateOf(0) }
     var showEqualizerSheet by remember { mutableStateOf(false) }
     var audioEqualizer by remember { mutableStateOf<AudioEqualizer?>(null) }
@@ -440,10 +443,39 @@ fun PlayerScreen(
 
             override fun onError(message: String) {
                 android.util.Log.e("Player", "Playback error for URL: $currentUrl — $message")
-                errorMessage = message
+                // Suppress error overlay while codec fallback is in progress
+                if (!codecFallbackInProgress) {
+                    errorMessage = message
+                }
             }
         }
         engine.addListener(listener)
+
+        // Wire codec-error recovery for ExoPlayer
+        if (engine is ExoPlayerEngine) {
+            // On video decoder failure, silently switch to
+            // fallback URL (HLS transcode) or go back. Never show error to user.
+            engine.onCodecError = { errorCode ->
+                android.util.Log.w("Player", "Codec error ($errorCode) — attempting silent fallback")
+                codecFallbackInProgress = true
+                scope.launch(kotlinx.coroutines.Dispatchers.Main) {
+                    errorMessage = null // clear any error that snuck in
+                    if (fallbackUrl.isNotBlank() && !codecFallbackUsed) {
+                        codecFallbackUsed = true
+                        currentUrl = fallbackUrl
+                        engine.stop()
+                        engine.play(fallbackUrl)
+                    } else {
+                        // No fallback available — silently go back
+                        onBack()
+                    }
+                    // Allow errors again after a short delay for the new stream to start
+                    kotlinx.coroutines.delay(3000)
+                    codecFallbackInProgress = false
+                }
+            }
+        }
+
         engine.play(currentUrl)
 
         // Scrobble start on initial playback

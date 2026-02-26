@@ -4,6 +4,7 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class SyncPayload(
+    val schemaVersion: Int = 1,
     val version: Int = 1,
     val exportedAt: Long,
     val deviceName: String = "",

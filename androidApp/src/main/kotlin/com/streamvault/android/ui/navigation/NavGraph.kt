@@ -69,8 +69,9 @@ import com.streamvault.android.ui.detail.PersonScreen
 import com.streamvault.android.ui.download.DownloadCatalogueScreen
 import com.streamvault.android.ui.download.DownloadScreen
 import com.streamvault.android.ui.download.DownloadedShowDetailScreen
-import com.streamvault.android.ui.iptv.IptvScreen
+import com.streamvault.android.ui.channels.ChannelsScreen
 import com.streamvault.android.ui.legal.LegalScreen
+import com.streamvault.android.ui.legal.PrivacyPolicyScreen
 import com.streamvault.android.ui.mood.MoodMatcherScreen
 import com.streamvault.android.ui.player.PlayerScreen
 import com.streamvault.android.ui.profile.ProfileScreen
@@ -82,6 +83,8 @@ import com.streamvault.android.ui.settings.RegexPatternsScreen
 import com.streamvault.android.ui.settings.SettingsScreen
 import com.streamvault.android.ui.settings.StreamGroupsScreen
 import com.streamvault.android.ui.settings.CustomSectionEditorScreen
+import com.streamvault.android.ui.settings.DiagnosticsScreen
+import com.streamvault.android.ui.settings.IntegrationsScreen
 import com.streamvault.android.ui.settings.HomeLayoutScreen
 import com.streamvault.android.ui.settings.MdbListSettingsScreen
 import com.streamvault.android.ui.settings.CardStyleSettingsScreen
@@ -97,12 +100,23 @@ import com.streamvault.android.ui.theme.Obsidian
 import com.streamvault.android.ui.theme.StreamVault
 import com.streamvault.domain.model.MediaType
 import com.streamvault.data.ai.KeywordSearchService
+import com.streamvault.data.mdblist.RatingsEnricher
 import com.streamvault.domain.repository.MetadataRepository
 import com.streamvault.presentation.catalog.CatalogViewModel
 import com.streamvault.presentation.setup.SetupWizardViewModel
 import com.streamvault.presentation.watchlist.WatchlistViewModel
 import com.streamvault.presentation.home.HomeViewModel
 import org.koin.compose.koinInject
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Safe detail navigation — guards against null tmdbId
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+private fun NavHostController.navigateToDetail(item: com.streamvault.domain.model.MediaItem) {
+    val id = item.tmdbId ?: item.id.toIntOrNull() ?: return
+    val type = if (item.type == MediaType.SERIES) "tv" else "movie"
+    navigate("detail/$type/$id")
+}
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Navigation Tabs
@@ -119,7 +133,7 @@ private val navTabDefs = listOf(
     NavTab("home", R.string.nav_home, Icons.Filled.Home, Icons.Outlined.Home),
     NavTab("movies", R.string.nav_movies, Icons.Filled.Movie, Icons.Outlined.Movie),
     NavTab("tv_shows", R.string.nav_tv_shows, Icons.Filled.Tv, Icons.Outlined.Tv),
-    NavTab("live_tv", R.string.nav_live_tv, Icons.Filled.LiveTv, Icons.Outlined.LiveTv),
+    NavTab("live_tv", R.string.nav_channels, Icons.Filled.LiveTv, Icons.Outlined.LiveTv),
     NavTab("watchlist_tab", R.string.nav_watchlist, Icons.Filled.Bookmark, Icons.Outlined.BookmarkBorder),
     NavTab("profile_tab", R.string.nav_settings, Icons.Filled.Settings, Icons.Outlined.Settings),
 )
@@ -149,11 +163,24 @@ fun StreamVaultNavGraph(
     val metadataRepo: MetadataRepository = koinInject()
     val keywordSearchService: KeywordSearchService = koinInject()
     val prefsRepo: com.streamvault.domain.repository.PreferencesRepository = koinInject()
+    val ratingsEnricher: RatingsEnricher = koinInject()
     val moviesCatalogViewModel = remember {
-        CatalogViewModel(metadataRepo, "movie", keywordSearchService = keywordSearchService, prefsRepo = prefsRepo)
+        CatalogViewModel(
+            metadataRepo,
+            "movie",
+            keywordSearchService = keywordSearchService,
+            prefsRepo = prefsRepo,
+            ratingsEnricher = ratingsEnricher,
+        )
     }
     val tvCatalogViewModel = remember {
-        CatalogViewModel(metadataRepo, "tv", keywordSearchService = keywordSearchService, prefsRepo = prefsRepo)
+        CatalogViewModel(
+            metadataRepo,
+            "tv",
+            keywordSearchService = keywordSearchService,
+            prefsRepo = prefsRepo,
+            ratingsEnricher = ratingsEnricher,
+        )
     }
 
     LaunchedEffect(Unit) {
@@ -194,23 +221,18 @@ fun StreamVaultNavGraph(
             // Android TV home
             composable("tv_home") {
                 TvHomeScreen(
-                    onMediaClick = { item ->
-                        val type = if (item.type == MediaType.SERIES) "tv" else "movie"
-                        navController.navigate("detail/$type/${item.tmdbId}")
-                    },
+                    onMediaClick = { item -> navController.navigateToDetail(item) },
                 )
             }
 
             // Home tab — Unified HomeScreen with all content (movies + TV)
             composable("home") {
                 HomeScreen(
-                    onMediaClick = { item ->
-                        val type = if (item.type == MediaType.SERIES) "tv" else "movie"
-                        navController.navigate("detail/$type/${item.tmdbId}")
-                    },
+                    onMediaClick = { item -> navController.navigateToDetail(item) },
                     onContinueWatchingClick = { progress ->
+                        val id = progress.mediaId.toIntOrNull() ?: return@HomeScreen
                         val type = if (progress.mediaType == MediaType.SERIES) "tv" else "movie"
-                        navController.navigate("detail/$type/${progress.mediaId}")
+                        navController.navigate("detail/$type/$id")
                     },
                     onSeeAllClick = { sectionId ->
                         navController.navigate("seeall/${Uri.encode(sectionId)}")
@@ -229,10 +251,7 @@ fun StreamVaultNavGraph(
                 CatalogScreen(
                     viewModel = moviesCatalogViewModel,
                     mediaType = "movie",
-                    onMediaClick = { item ->
-                        val type = if (item.type == MediaType.SERIES) "tv" else "movie"
-                        navController.navigate("detail/$type/${item.tmdbId}")
-                    },
+                    onMediaClick = { item -> navController.navigateToDetail(item) },
                 )
             }
 
@@ -241,16 +260,13 @@ fun StreamVaultNavGraph(
                 CatalogScreen(
                     viewModel = tvCatalogViewModel,
                     mediaType = "tv",
-                    onMediaClick = { item ->
-                        val type = if (item.type == MediaType.SERIES) "tv" else "movie"
-                        navController.navigate("detail/$type/${item.tmdbId}")
-                    },
+                    onMediaClick = { item -> navController.navigateToDetail(item) },
                 )
             }
 
             // Live TV tab
             composable("live_tv") {
-                IptvScreen(
+                ChannelsScreen(
                     onChannelPlay = { channel ->
                         navController.navigate(
                             "player?url=${Uri.encode(channel.url)}" +
@@ -264,9 +280,9 @@ fun StreamVaultNavGraph(
                 )
             }
 
-            // IPTV (also accessible via non-tab navigation)
-            composable("iptv") {
-                IptvScreen(
+            // Channels (also accessible via non-tab navigation)
+            composable("channels") {
+                ChannelsScreen(
                     onChannelPlay = { channel ->
                         navController.navigate(
                             "player?url=${Uri.encode(channel.url)}" +
@@ -293,10 +309,7 @@ fun StreamVaultNavGraph(
             // Search tab — Global search
             composable("search") {
                 SearchScreen(
-                    onMediaClick = { item ->
-                        val type = if (item.type == MediaType.SERIES) "tv" else "movie"
-                        navController.navigate("detail/$type/${item.tmdbId}")
-                    },
+                    onMediaClick = { item -> navController.navigateToDetail(item) },
                 )
             }
 
@@ -317,6 +330,7 @@ fun StreamVaultNavGraph(
                         metadataRepo, mediaType,
                         keywordSearchService = keywordSearchService,
                         prefsRepo = prefsRepo,
+                        ratingsEnricher = ratingsEnricher,
                     ).also {
                         if (genreId > 0) it.selectGenre(genreId)
                     }
@@ -324,10 +338,7 @@ fun StreamVaultNavGraph(
                 CatalogScreen(
                     viewModel = catalogViewModel,
                     mediaType = mediaType,
-                    onMediaClick = { item ->
-                        val t = if (item.type == MediaType.SERIES) "tv" else "movie"
-                        navController.navigate("detail/$t/${item.tmdbId}")
-                    },
+                    onMediaClick = { item -> navController.navigateToDetail(item) },
                     onBack = { navController.popBackStack() },
                     title = genreName.ifBlank { null },
                 )
@@ -349,16 +360,14 @@ fun StreamVaultNavGraph(
                         metadataRepo, selectedMediaType,
                         keywordSearchService = keywordSearchService,
                         prefsRepo = prefsRepo,
+                        ratingsEnricher = ratingsEnricher,
                         initialProviderId = providerId,
                     )
                 }
                 CatalogScreen(
                     viewModel = catalogViewModel,
                     mediaType = selectedMediaType,
-                    onMediaClick = { item ->
-                        val t = if (item.type == MediaType.SERIES) "tv" else "movie"
-                        navController.navigate("detail/$t/${item.tmdbId}")
-                    },
+                    onMediaClick = { item -> navController.navigateToDetail(item) },
                     onBack = { navController.popBackStack() },
                     title = providerName,
                     onMediaTypeChange = { selectedMediaType = it },
@@ -378,10 +387,7 @@ fun StreamVaultNavGraph(
             // Mood Matcher — "What should I watch?"
             composable("mood") {
                 MoodMatcherScreen(
-                    onMediaClick = { item ->
-                        val type = if (item.type == MediaType.SERIES) "tv" else "movie"
-                        navController.navigate("detail/$type/${item.tmdbId}")
-                    },
+                    onMediaClick = { item -> navController.navigateToDetail(item) },
                     onBack = { navController.popBackStack() },
                 )
             }
@@ -396,16 +402,15 @@ fun StreamVaultNavGraph(
             // Watchlist tab — 3 sub-tabs: Watchlist, In Progress, History
             composable("watchlist_tab") {
                 WatchlistScreen(
-                    onMediaClick = { item ->
-                        val type = if (item.type == MediaType.SERIES) "tv" else "movie"
-                        navController.navigate("detail/$type/${item.tmdbId}")
-                    },
+                    onMediaClick = { item -> navController.navigateToDetail(item) },
                     onContinueWatchingClick = { progress ->
+                        val id = progress.mediaId.toIntOrNull() ?: return@WatchlistScreen
                         val type = if (progress.mediaType == MediaType.SERIES) "tv" else "movie"
-                        navController.navigate("detail/$type/${progress.mediaId}")
+                        navController.navigate("detail/$type/$id")
                     },
                     onHistoryItemClick = { entry ->
-                        navController.navigate("detail/${entry.mediaType}/${entry.mediaId}")
+                        val id = entry.mediaId.toIntOrNull() ?: return@WatchlistScreen
+                        navController.navigate("detail/${entry.mediaType}/$id")
                     },
                 )
             }
@@ -428,6 +433,8 @@ fun StreamVaultNavGraph(
                     onMdbListClick = { navController.navigate("mdblist_settings") },
                     onRatingSettingsClick = { navController.navigate("rating_settings") },
                     onCardStyleClick = { navController.navigate("card_style_settings") },
+                    onIntegrationsClick = { navController.navigate("integrations") },
+                    onDiagnosticsClick = { navController.navigate("diagnostics") },
                 )
             }
 
@@ -449,6 +456,8 @@ fun StreamVaultNavGraph(
                     onMdbListClick = { navController.navigate("mdblist_settings") },
                     onRatingSettingsClick = { navController.navigate("rating_settings") },
                     onCardStyleClick = { navController.navigate("card_style_settings") },
+                    onIntegrationsClick = { navController.navigate("integrations") },
+                    onDiagnosticsClick = { navController.navigate("diagnostics") },
                 )
             }
 
@@ -465,7 +474,7 @@ fun StreamVaultNavGraph(
                 DetailScreen(
                     type = detailType,
                     id = detailId,
-                    onPlayClick = { url, season, episode, imdbId ->
+                    onPlayClick = { url, fallbackUrl, season, episode, imdbId ->
                         navController.navigate(
                             "player?url=${Uri.encode(url)}" +
                                 "&title=${Uri.encode("")}" +
@@ -476,14 +485,12 @@ fun StreamVaultNavGraph(
                                 "&seasonNumber=${season ?: -1}" +
                                 "&episodeNumber=${episode ?: -1}" +
                                 "&showTmdbId=${if (detailType == "tv") detailId else -1}" +
-                                "&showImdbId=${Uri.encode(imdbId ?: "")}",
+                                "&showImdbId=${Uri.encode(imdbId ?: "")}" +
+                                "&fallbackUrl=${Uri.encode(fallbackUrl)}",
                         )
                     },
                     onBack = { navController.popBackStack() },
-                    onMediaClick = { item ->
-                        val t = if (item.type == MediaType.SERIES) "tv" else "movie"
-                        navController.navigate("detail/$t/${item.tmdbId}")
-                    },
+                    onMediaClick = { item -> navController.navigateToDetail(item) },
                     onPersonClick = { personId ->
                         navController.navigate("person/$personId")
                     },
@@ -504,10 +511,7 @@ fun StreamVaultNavGraph(
                 PersonScreen(
                     personId = personId,
                     onBack = { navController.popBackStack() },
-                    onMediaClick = { item ->
-                        val t = if (item.type == MediaType.SERIES) "tv" else "movie"
-                        navController.navigate("detail/$t/${item.tmdbId}")
-                    },
+                    onMediaClick = { item -> navController.navigateToDetail(item) },
                 )
             }
 
@@ -516,7 +520,8 @@ fun StreamVaultNavGraph(
                 route = "player?url={url}&title={title}&mediaId={mediaId}&mediaType={mediaType}" +
                     "&posterUrl={posterUrl}&backdropUrl={backdropUrl}" +
                     "&seasonNumber={seasonNumber}&episodeNumber={episodeNumber}" +
-                    "&showTmdbId={showTmdbId}&showImdbId={showImdbId}",
+                    "&showTmdbId={showTmdbId}&showImdbId={showImdbId}" +
+                    "&fallbackUrl={fallbackUrl}",
                 arguments = listOf(
                     navArgument("url") { type = NavType.StringType; defaultValue = "" },
                     navArgument("title") { type = NavType.StringType; defaultValue = "" },
@@ -528,10 +533,12 @@ fun StreamVaultNavGraph(
                     navArgument("episodeNumber") { type = NavType.IntType; defaultValue = -1 },
                     navArgument("showTmdbId") { type = NavType.IntType; defaultValue = -1 },
                     navArgument("showImdbId") { type = NavType.StringType; defaultValue = "" },
+                    navArgument("fallbackUrl") { type = NavType.StringType; defaultValue = "" },
                 ),
             ) { backStackEntry ->
                 PlayerScreen(
                     url = backStackEntry.arguments?.getString("url") ?: "",
+                    fallbackUrl = backStackEntry.arguments?.getString("fallbackUrl") ?: "",
                     title = backStackEntry.arguments?.getString("title") ?: "",
                     mediaId = backStackEntry.arguments?.getString("mediaId") ?: "",
                     mediaType = backStackEntry.arguments?.getString("mediaType") ?: "movie",
@@ -622,10 +629,7 @@ fun StreamVaultNavGraph(
                 SeeAllScreen(
                     sectionId = sectionId,
                     onBack = { navController.popBackStack() },
-                    onMediaClick = { item ->
-                        val type = if (item.type == MediaType.SERIES) "tv" else "movie"
-                        navController.navigate("detail/$type/${item.tmdbId}")
-                    },
+                    onMediaClick = { item -> navController.navigateToDetail(item) },
                 )
             }
 
@@ -689,6 +693,17 @@ fun StreamVaultNavGraph(
                 )
             }
 
+            // Integrations
+            composable("integrations") {
+                IntegrationsScreen(
+                    onBack = { navController.popBackStack() },
+                )
+            }
+
+            composable("diagnostics") {
+                DiagnosticsScreen(onBack = { navController.popBackStack() })
+            }
+
             // Custom Section Editor
             composable(
                 route = "custom_section_editor?sectionId={sectionId}",
@@ -709,11 +724,7 @@ fun StreamVaultNavGraph(
 
             // Legal screens
             composable("legal/privacy") {
-                LegalScreen(
-                    title = "Privacy Policy",
-                    assetFileName = "privacy_policy.html",
-                    onBack = { navController.popBackStack() },
-                )
+                PrivacyPolicyScreen(onBack = { navController.popBackStack() })
             }
             composable("legal/terms") {
                 LegalScreen(

@@ -7,5 +7,6 @@ interface WatchProgressRepository {
     suspend fun getProgress(mediaId: String): WatchProgress?
     suspend fun saveProgress(progress: WatchProgress)
     suspend fun getAllProgress(): List<WatchProgress>
+    suspend fun clearAllProgress()
     suspend fun syncFromTrakt()
 }

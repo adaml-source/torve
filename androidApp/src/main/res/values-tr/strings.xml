@@ -9,7 +9,7 @@
     <string name="nav_home">Ana Sayfa</string>
     <string name="nav_movies">Filmler</string>
     <string name="nav_tv_shows">Diziler</string>
-    <string name="nav_live_tv">Canlı TV</string>
+    <string name="nav_channels">Canlı TV</string>
     <string name="nav_watchlist">İzleme Listesi</string>
     <string name="nav_settings">Ayarlar</string>
 

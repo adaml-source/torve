@@ -1,6 +1,7 @@
 package com.streamvault.presentation.detail
 
 import com.streamvault.data.addon.ParsedStream
+import com.streamvault.domain.model.AvailabilityResult
 import com.streamvault.domain.model.Episode
 import com.streamvault.domain.model.MediaItem
 import com.streamvault.domain.model.ResolvedStream
@@ -11,6 +12,9 @@ data class DetailUiState(
     val isLoading: Boolean = true,
     val mediaItem: MediaItem? = null,
     val similar: List<MediaItem> = emptyList(),
+    val availability: AvailabilityResult? = null,
+    val isLoadingAvailability: Boolean = false,
+    val availabilityError: String? = null,
     val error: String? = null,
     // Streams
     val streams: List<ParsedStream> = emptyList(),
@@ -26,12 +30,15 @@ data class DetailUiState(
     val showStreamPicker: Boolean = false,
     // Watched status
     val isMarkedWatched: Boolean = false,
+    // Trakt user rating (1..10)
+    val userRating: Int? = null,
     // Season/Episode details
     val selectedSeason: Int = 1,
     val seasonDetail: Season? = null,
     val isLoadingSeasonDetail: Boolean = false,
     // Episode tracking: keys like "s1e1", "s1e2", etc.
     val watchedEpisodes: Set<String> = emptySet(),
+    val isInLibrary: Boolean = false,
     // Track what we're fetching streams for (for download labeling)
     val streamContextSeason: Int? = null,
     val streamContextEpisode: Int? = null,

@@ -3,6 +3,9 @@ package com.streamvault.presentation.setup
 import com.streamvault.data.debrid.DebridClient
 import com.streamvault.data.trakt.TraktClient
 import com.streamvault.data.trakt.TraktDeviceCode
+import com.streamvault.data.trakt.auth.TraktTokenStore
+import com.streamvault.domain.integrations.IntegrationSecretKey
+import com.streamvault.domain.integrations.IntegrationSecretStore
 import com.streamvault.domain.model.DebridServiceType
 import com.streamvault.domain.model.StreamQuality
 import com.streamvault.domain.repository.PreferencesRepository
@@ -16,7 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-enum class SetupStep { WELCOME, DEBRID, TRAKT, QUALITY, IPTV, DONE }
+enum class SetupStep { WELCOME, TERMS, DEBRID, TRAKT, QUALITY, CHANNELS, DONE }
 
 data class SetupUiState(
     val currentStep: SetupStep = SetupStep.WELCOME,
@@ -37,19 +40,23 @@ data class SetupUiState(
     // Quality
     val maxQuality: StreamQuality = StreamQuality.FHD_1080P,
     val cachedOnly: Boolean = true,
-    // IPTV
-    val iptvPlaylistUrl: String = "",
-    val iptvPlaylistName: String = "",
-    val iptvPlaylistType: String = "m3u",
-    val iptvXtreamServer: String = "",
-    val iptvXtreamUsername: String = "",
-    val iptvXtreamPassword: String = "",
+    // Channels
+    val channelPlaylistUrl: String = "",
+    val channelPlaylistName: String = "",
+    val channelPlaylistType: String = "m3u",
+    val channelXtreamServer: String = "",
+    val channelXtreamUsername: String = "",
+    val channelXtreamPassword: String = "",
+    // Terms acceptance
+    val termsAccepted: Boolean = false,
 )
 
 class SetupWizardViewModel(
     private val debridClient: DebridClient,
     private val prefsRepo: PreferencesRepository,
     private val traktClient: TraktClient,
+    private val tokenStore: TraktTokenStore,
+    private val integrationSecretStore: IntegrationSecretStore,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(SetupUiState())
@@ -62,11 +69,12 @@ class SetupWizardViewModel(
     fun nextStep() {
         _state.update { s ->
             val next = when (s.currentStep) {
-                SetupStep.WELCOME -> SetupStep.DEBRID
+                SetupStep.WELCOME -> SetupStep.TERMS
+                SetupStep.TERMS -> SetupStep.DEBRID
                 SetupStep.DEBRID -> SetupStep.TRAKT
                 SetupStep.TRAKT -> SetupStep.QUALITY
-                SetupStep.QUALITY -> SetupStep.IPTV
-                SetupStep.IPTV -> SetupStep.DONE
+                SetupStep.QUALITY -> SetupStep.CHANNELS
+                SetupStep.CHANNELS -> SetupStep.DONE
                 SetupStep.DONE -> SetupStep.DONE
             }
             s.copy(currentStep = next)
@@ -77,11 +85,12 @@ class SetupWizardViewModel(
         _state.update { s ->
             val prev = when (s.currentStep) {
                 SetupStep.WELCOME -> SetupStep.WELCOME
-                SetupStep.DEBRID -> SetupStep.WELCOME
+                SetupStep.TERMS -> SetupStep.WELCOME
+                SetupStep.DEBRID -> SetupStep.TERMS
                 SetupStep.TRAKT -> SetupStep.DEBRID
                 SetupStep.QUALITY -> SetupStep.TRAKT
-                SetupStep.IPTV -> SetupStep.QUALITY
-                SetupStep.DONE -> SetupStep.IPTV
+                SetupStep.CHANNELS -> SetupStep.QUALITY
+                SetupStep.DONE -> SetupStep.CHANNELS
             }
             s.copy(currentStep = prev)
         }
@@ -109,7 +118,8 @@ class SetupWizardViewModel(
             val result = debridClient.verifyApiKey(_state.value.debridProvider, apiKey)
             if (result.success) {
                 prefsRepo.setString("debrid_provider", _state.value.debridProvider.name)
-                prefsRepo.setString("debrid_api_key", apiKey)
+                integrationSecretStore.put(IntegrationSecretKey.DEBRID_API_KEY, apiKey)
+                prefsRepo.remove("debrid_api_key")
                 _state.update { it.copy(debridConnected = true, debridLoading = false) }
             } else {
                 _state.update {
@@ -141,8 +151,7 @@ class SetupWizardViewModel(
                 delay(interval * 1000L)
                 when (val result = traktClient.pollDeviceToken(code.deviceCode)) {
                     is com.streamvault.data.trakt.TraktPollResult.Success -> {
-                        prefsRepo.setString("trakt_access_token", result.tokens.accessToken)
-                        prefsRepo.setString("trakt_refresh_token", result.tokens.refreshToken)
+                        tokenStore.write(result.tokens)
                         val username = try {
                             traktClient.getUser(result.tokens.accessToken).username
                         } catch (_: Exception) { null }
@@ -192,29 +201,34 @@ class SetupWizardViewModel(
         _state.update { it.copy(cachedOnly = enabled) }
     }
 
-    // IPTV
-    fun setIptvPlaylistUrl(url: String) {
-        _state.update { it.copy(iptvPlaylistUrl = url) }
+    // Terms
+    fun setTermsAccepted(accepted: Boolean) {
+        _state.update { it.copy(termsAccepted = accepted) }
     }
 
-    fun setIptvPlaylistName(name: String) {
-        _state.update { it.copy(iptvPlaylistName = name) }
+    // Channels
+    fun setChannelPlaylistUrl(url: String) {
+        _state.update { it.copy(channelPlaylistUrl = url) }
     }
 
-    fun setIptvPlaylistType(type: String) {
-        _state.update { it.copy(iptvPlaylistType = type) }
+    fun setChannelPlaylistName(name: String) {
+        _state.update { it.copy(channelPlaylistName = name) }
     }
 
-    fun setIptvXtreamServer(server: String) {
-        _state.update { it.copy(iptvXtreamServer = server) }
+    fun setChannelPlaylistType(type: String) {
+        _state.update { it.copy(channelPlaylistType = type) }
     }
 
-    fun setIptvXtreamUsername(username: String) {
-        _state.update { it.copy(iptvXtreamUsername = username) }
+    fun setChannelXtreamServer(server: String) {
+        _state.update { it.copy(channelXtreamServer = server) }
     }
 
-    fun setIptvXtreamPassword(password: String) {
-        _state.update { it.copy(iptvXtreamPassword = password) }
+    fun setChannelXtreamUsername(username: String) {
+        _state.update { it.copy(channelXtreamUsername = username) }
+    }
+
+    fun setChannelXtreamPassword(password: String) {
+        _state.update { it.copy(channelXtreamPassword = password) }
     }
 
     fun completeSetup() {
@@ -227,7 +241,10 @@ class SetupWizardViewModel(
             // Save Trakt credentials if provided
             if (s.traktClientId.isNotBlank()) {
                 prefsRepo.setString("trakt_client_id", s.traktClientId)
-                prefsRepo.setString("trakt_client_secret", s.traktClientSecret)
+                if (s.traktClientSecret.isNotBlank()) {
+                    integrationSecretStore.put(IntegrationSecretKey.TRAKT_CLIENT_SECRET, s.traktClientSecret)
+                    prefsRepo.remove("trakt_client_secret")
+                }
             }
 
             // Mark setup as complete

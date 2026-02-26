@@ -1,10 +1,10 @@
 package com.streamvault.android.ui.settings
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
@@ -27,7 +26,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -43,12 +41,13 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.streamvault.android.ui.components.BackButton
+import com.streamvault.android.ui.components.CardSize
+import com.streamvault.android.ui.components.PosterCard
 import com.streamvault.android.ui.components.getRatingSourceColor
 import com.streamvault.android.ui.components.getRatingSourceExample
 import com.streamvault.android.ui.theme.Amber
@@ -62,9 +61,15 @@ import com.streamvault.android.ui.theme.Silver
 import com.streamvault.android.ui.theme.Snow
 import com.streamvault.android.ui.theme.Steel
 import com.streamvault.domain.model.RatingDisplayPrefs
-import com.streamvault.domain.model.RatingPillPlacement
+import com.streamvault.domain.model.MediaItem
+import com.streamvault.domain.model.MediaRatings
+import com.streamvault.domain.model.MediaType
+import com.streamvault.domain.model.RatingPillPosition
 import com.streamvault.domain.model.RatingPillStyle
 import com.streamvault.domain.model.RatingSource
+import com.streamvault.domain.model.resolveCardStyle
+import com.streamvault.domain.model.CardStyle
+import com.streamvault.domain.model.defaultTorveWeights
 import com.streamvault.presentation.settings.SettingsViewModel
 import org.koin.compose.koinInject
 import kotlin.math.roundToInt
@@ -76,6 +81,11 @@ fun RatingSettingsScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val prefs = state.ratingPrefs
+    val defaultCardStyle = resolveCardStyle(
+        presets = state.cardStylePresets,
+        presetId = null,
+        globalDefaultPresetId = state.globalDefaultPresetId,
+    )
 
     Column(
         Modifier
@@ -116,26 +126,6 @@ fun RatingSettingsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(Modifier.weight(1f)) {
-                                Text("Show on Cards", color = Snow, fontWeight = FontWeight.SemiBold)
-                                Text("Display rating pills on poster cards", color = Silver, fontSize = 12.sp)
-                            }
-                            Switch(
-                                checked = prefs.showRatingsOnCards,
-                                onCheckedChange = { viewModel.updateRatingPrefs(prefs.copy(showRatingsOnCards = it)) },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Amber, checkedTrackColor = AmberSubtle,
-                                    uncheckedThumbColor = Steel, uncheckedTrackColor = Gunmetal,
-                                ),
-                            )
-                        }
-
-                        HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(vertical = 8.dp))
-
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
                                 Text("Show on Detail Page", color = Snow, fontWeight = FontWeight.SemiBold)
                                 Text("Display ratings on movie/show detail screen", color = Silver, fontSize = 12.sp)
                             }
@@ -148,11 +138,119 @@ fun RatingSettingsScreen(
                                 ),
                             )
                         }
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Show Torve Score on Detail", color = Snow, fontWeight = FontWeight.SemiBold)
+                                Text("Displays weighted Torve Score in metadata row", color = Silver, fontSize = 12.sp)
+                            }
+                            Switch(
+                                checked = prefs.showTorveScoreOnDetailPage,
+                                onCheckedChange = { viewModel.updateRatingPrefs(prefs.copy(showTorveScoreOnDetailPage = it)) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Amber, checkedTrackColor = AmberSubtle,
+                                    uncheckedThumbColor = Steel, uncheckedTrackColor = Gunmetal,
+                                ),
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Allow Torve Score Pill on Cards", color = Snow, fontWeight = FontWeight.SemiBold)
+                                Text("Enable Torve Score in provider pills", color = Silver, fontSize = 12.sp)
+                            }
+                            Switch(
+                                checked = prefs.showTorveScoreOnCards,
+                                onCheckedChange = { viewModel.updateRatingPrefs(prefs.copy(showTorveScoreOnCards = it)) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Amber, checkedTrackColor = AmberSubtle,
+                                    uncheckedThumbColor = Steel, uncheckedTrackColor = Gunmetal,
+                                ),
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Allow Ratings on Landscape Cards", color = Snow, fontWeight = FontWeight.SemiBold)
+                                Text("Show compact rating pills on backdrop-style cards", color = Silver, fontSize = 12.sp)
+                            }
+                            Switch(
+                                checked = prefs.allowRatingsOnLandscapeCards,
+                                onCheckedChange = {
+                                    viewModel.updateRatingPrefs(
+                                        prefs.copy(allowRatingsOnLandscapeCards = it),
+                                    )
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Amber, checkedTrackColor = AmberSubtle,
+                                    uncheckedThumbColor = Steel, uncheckedTrackColor = Gunmetal,
+                                ),
+                            )
+                        }
                     }
                 }
             }
 
-            // Pill placement picker
+            // Torve score weights
+            item {
+                Card(
+                    Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Charcoal),
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Torve Score Weights", color = Snow, fontWeight = FontWeight.SemiBold)
+                        Text("Weights are normalized using available sources", color = Silver, fontSize = 12.sp)
+                        Spacer(Modifier.height(10.dp))
+                        listOf(
+                            RatingSource.IMDB to "IMDb",
+                            RatingSource.TMDB to "TMDB",
+                            RatingSource.ROTTEN_TOMATOES to "Rotten Tomatoes",
+                            RatingSource.METACRITIC to "Metacritic",
+                        ).forEach { (source, label) ->
+                            val current = prefs.torveWeights[source] ?: 0
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(label, color = Snow, fontSize = 13.sp)
+                                Text("$current", color = Amber, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
+                            Slider(
+                                value = current.toFloat(),
+                                onValueChange = { value ->
+                                    viewModel.updateRatingPrefs(
+                                        prefs.copy(torveWeights = prefs.torveWeights + (source to value.roundToInt())),
+                                    )
+                                },
+                                valueRange = 0f..100f,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = Amber,
+                                    activeTrackColor = Amber,
+                                    inactiveTrackColor = Graphite,
+                                ),
+                            )
+                        }
+                        TextButton(
+                            onClick = { viewModel.updateRatingPrefs(prefs.copy(torveWeights = defaultTorveWeights())) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Reset Torve Weights", color = Amber)
+                        }
+                    }
+                }
+            }
+
+            // Pill position picker
             item {
                 Card(
                     Modifier.fillMaxWidth(),
@@ -162,9 +260,9 @@ fun RatingSettingsScreen(
                         Text("Pill Position", color = Snow, fontWeight = FontWeight.SemiBold)
                         Text("Where to show rating pills on poster cards", color = Silver, fontSize = 12.sp)
                         Spacer(Modifier.height(12.dp))
-                        PlacementPicker(
-                            selected = prefs.pillPlacement,
-                            onSelect = { viewModel.updateRatingPrefs(prefs.copy(pillPlacement = it)) },
+                        PillPositionPicker(
+                            selected = prefs.pillPosition,
+                            onSelect = { viewModel.updateRatingPrefs(prefs.copy(pillPosition = it)) },
                         )
                     }
                 }
@@ -184,7 +282,7 @@ fun RatingSettingsScreen(
                         ) {
                             Text("Max Ratings on Card", color = Snow, fontWeight = FontWeight.SemiBold)
                             Text(
-                                "${prefs.maxPillsOnCard}",
+                                "${prefs.maxRatingsOnCard}",
                                 color = Amber,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 16.sp,
@@ -193,9 +291,9 @@ fun RatingSettingsScreen(
                         Text("How many rating pills to show on poster cards", color = Silver, fontSize = 12.sp)
                         Spacer(Modifier.height(4.dp))
                         Slider(
-                            value = prefs.maxPillsOnCard.toFloat(),
+                            value = prefs.maxRatingsOnCard.toFloat(),
                             onValueChange = {
-                                viewModel.updateRatingPrefs(prefs.copy(maxPillsOnCard = it.roundToInt()))
+                                viewModel.updateRatingPrefs(prefs.copy(maxRatingsOnCard = it.roundToInt()))
                             },
                             valueRange = 1f..9f,
                             steps = 7,
@@ -250,6 +348,21 @@ fun RatingSettingsScreen(
                 }
             }
 
+            // Preview
+            item {
+                Card(
+                    Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Charcoal),
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Preview", color = Snow, fontWeight = FontWeight.SemiBold)
+                        Text("Compact preview of inside vs outside placement", color = Silver, fontSize = 12.sp)
+                        Spacer(Modifier.height(12.dp))
+                        RatingsPreviewRow(prefs = prefs, baseStyle = defaultCardStyle)
+                    }
+                }
+            }
+
             // Per-source section header
             item {
                 Spacer(Modifier.height(4.dp))
@@ -264,13 +377,14 @@ fun RatingSettingsScreen(
             }
 
             // Per-source toggles with reorder arrows
-            val sortedSources = prefs.sources.sortedBy { it.order }
-            itemsIndexed(sortedSources, key = { _, cfg -> cfg.source.name }) { index, cfg ->
-                val sourceColor = getRatingSourceColor(cfg.source)
+            val sortedSources = prefs.providerOrder
+            itemsIndexed(sortedSources, key = { _, source -> source.name }) { index, source ->
+                val enabled = prefs.enabledProviders.contains(source)
+                val sourceColor = getRatingSourceColor(source)
                 Card(
                     Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(
-                        containerColor = if (cfg.enabled) Charcoal else Charcoal.copy(alpha = 0.5f),
+                        containerColor = if (enabled) Charcoal else Charcoal.copy(alpha = 0.5f),
                     ),
                 ) {
                     Row(
@@ -289,8 +403,7 @@ fun RatingSettingsScreen(
                                         val reordered = sortedSources.toMutableList()
                                         val item = reordered.removeAt(index)
                                         reordered.add(index - 1, item)
-                                        val updated = reordered.mapIndexed { i, c -> c.copy(order = i) }
-                                        viewModel.updateRatingPrefs(prefs.copy(sources = updated))
+                                        viewModel.updateRatingPrefs(prefs.copy(providerOrder = reordered))
                                     }
                                 },
                                 enabled = index > 0,
@@ -309,8 +422,7 @@ fun RatingSettingsScreen(
                                         val reordered = sortedSources.toMutableList()
                                         val item = reordered.removeAt(index)
                                         reordered.add(index + 1, item)
-                                        val updated = reordered.mapIndexed { i, c -> c.copy(order = i) }
-                                        viewModel.updateRatingPrefs(prefs.copy(sources = updated))
+                                        viewModel.updateRatingPrefs(prefs.copy(providerOrder = reordered))
                                     }
                                 },
                                 enabled = index < sortedSources.size - 1,
@@ -335,7 +447,7 @@ fun RatingSettingsScreen(
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Text(
-                                    cfg.source.iconChar,
+                                    source.iconChar,
                                     fontSize = 14.sp,
                                     color = sourceColor,
                                     fontWeight = FontWeight.Bold,
@@ -348,25 +460,28 @@ fun RatingSettingsScreen(
                         // Name + example
                         Column(Modifier.weight(1f)) {
                             Text(
-                                cfg.source.displayName,
-                                color = if (cfg.enabled) Snow else Ash,
+                                source.displayName,
+                                color = if (enabled) Snow else Ash,
                                 fontWeight = FontWeight.SemiBold,
                             )
                             Text(
-                                getRatingSourceExample(cfg.source),
-                                color = if (cfg.enabled) Silver else Steel,
+                                getRatingSourceExample(source),
+                                color = if (enabled) Silver else Steel,
                                 fontSize = 11.sp,
                             )
                         }
 
                         // Toggle
                         Switch(
-                            checked = cfg.enabled,
+                            checked = enabled,
                             onCheckedChange = { enabled ->
-                                val updated = prefs.sources.map {
-                                    if (it.source == cfg.source) it.copy(enabled = enabled) else it
+                                val updated = if (enabled) {
+                                    if (prefs.enabledProviders.contains(source)) prefs.enabledProviders
+                                    else prefs.enabledProviders + source
+                                } else {
+                                    prefs.enabledProviders.filterNot { it == source }
                                 }
-                                viewModel.updateRatingPrefs(prefs.copy(sources = updated))
+                                viewModel.updateRatingPrefs(prefs.copy(enabledProviders = updated))
                             },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = Amber, checkedTrackColor = AmberSubtle,
@@ -393,137 +508,120 @@ fun RatingSettingsScreen(
 }
 
 @Composable
-private fun PlacementPicker(
-    selected: RatingPillPlacement,
-    onSelect: (RatingPillPlacement) -> Unit,
+private fun PillPositionPicker(
+    selected: RatingPillPosition,
+    onSelect: (RatingPillPosition) -> Unit,
 ) {
-    // Visual poster card representation with clickable placement zones
-    Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        // Inside placements — mini poster card mock
-        Card(
-            Modifier.weight(1f),
-            colors = CardDefaults.cardColors(containerColor = Gunmetal),
-        ) {
-            Column(Modifier.padding(8.dp)) {
-                Text("Inside Card", color = Silver, fontSize = 10.sp, textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth())
-                Spacer(Modifier.height(6.dp))
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(2f / 3f)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Graphite),
-                ) {
-                    // Top-left
-                    PlacementDot(
-                        label = "TL",
-                        isSelected = selected == RatingPillPlacement.INSIDE_TOP_START,
-                        onClick = { onSelect(RatingPillPlacement.INSIDE_TOP_START) },
-                        modifier = Modifier.align(Alignment.TopStart).padding(4.dp),
-                    )
-                    // Top-right
-                    PlacementDot(
-                        label = "TR",
-                        isSelected = selected == RatingPillPlacement.INSIDE_TOP_END,
-                        onClick = { onSelect(RatingPillPlacement.INSIDE_TOP_END) },
-                        modifier = Modifier.align(Alignment.TopEnd).padding(4.dp),
-                    )
-                    // Bottom-left
-                    PlacementDot(
-                        label = "BL",
-                        isSelected = selected == RatingPillPlacement.INSIDE_BOTTOM_START,
-                        onClick = { onSelect(RatingPillPlacement.INSIDE_BOTTOM_START) },
-                        modifier = Modifier.align(Alignment.BottomStart).padding(4.dp),
-                    )
-                    // Bottom-right
-                    PlacementDot(
-                        label = "BR",
-                        isSelected = selected == RatingPillPlacement.INSIDE_BOTTOM_END,
-                        onClick = { onSelect(RatingPillPlacement.INSIDE_BOTTOM_END) },
-                        modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp),
-                    )
-                }
-            }
-        }
-
-        // Outside placements
-        Card(
-            Modifier.weight(1f),
-            colors = CardDefaults.cardColors(containerColor = Gunmetal),
-        ) {
-            Column(Modifier.padding(8.dp)) {
-                Text("Outside Card", color = Silver, fontSize = 10.sp, textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth())
-                Spacer(Modifier.height(6.dp))
-                Column(
-                    Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    // Outside top
-                    PlacementDot(
-                        label = "Top",
-                        isSelected = selected == RatingPillPlacement.OUTSIDE_TOP,
-                        onClick = { onSelect(RatingPillPlacement.OUTSIDE_TOP) },
-                        modifier = Modifier,
-                        wide = true,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(2f / 3f)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Graphite),
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    // Outside bottom
-                    PlacementDot(
-                        label = "Bottom",
-                        isSelected = selected == RatingPillPlacement.OUTSIDE_BOTTOM,
-                        onClick = { onSelect(RatingPillPlacement.OUTSIDE_BOTTOM) },
-                        modifier = Modifier,
-                        wide = true,
-                    )
-                }
-            }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(
+            RatingPillPosition.INSIDE to "Inside Card",
+            RatingPillPosition.OUTSIDE to "Outside Card",
+        ).forEach { (position, label) ->
+            FilterChip(
+                selected = selected == position,
+                onClick = { onSelect(position) },
+                label = { Text(label) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = Amber,
+                    selectedLabelColor = Obsidian,
+                    containerColor = Gunmetal,
+                    labelColor = Snow,
+                ),
+            )
         }
     }
 }
 
 @Composable
-private fun PlacementDot(
-    label: String,
-    isSelected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    wide: Boolean = false,
-) {
-    val bg = if (isSelected) Amber else Gunmetal
-    val textColor = if (isSelected) Obsidian else Silver
-    val borderMod = if (isSelected) {
-        Modifier.border(1.5.dp, Amber, if (wide) RoundedCornerShape(4.dp) else CircleShape)
-    } else {
-        Modifier.border(1.dp, Steel.copy(alpha = 0.5f), if (wide) RoundedCornerShape(4.dp) else CircleShape)
-    }
+private fun RatingsPreviewRow(prefs: RatingDisplayPrefs, baseStyle: CardStyle) {
+    val mockRatings = MediaRatings(
+        imdbScore = 7.8f,
+        rottenTomatoesScore = 82,
+        rtAudienceScore = 91,
+        tmdbScore = 7.5f,
+        metacriticScore = 74,
+        letterboxdScore = 3.9f,
+        traktScore = 86f,
+        mdblistScore = 78f,
+        malScore = 8.2f,
+    )
+    val mockItem = MediaItem(
+        id = "ratings_preview",
+        type = MediaType.MOVIE,
+        title = "Preview",
+        posterUrl = null,
+        ratings = mockRatings,
+        rating = 7.8,
+    )
 
-    Box(
-        modifier = modifier
-            .then(if (wide) Modifier.fillMaxWidth().height(22.dp) else Modifier.size(26.dp))
-            .clip(if (wide) RoundedCornerShape(4.dp) else CircleShape)
-            .background(bg)
-            .then(borderMod)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val gap = 12.dp
+        val maxCardWidth = 220.dp
+        val available = (maxWidth - gap) / 2f
+        val previewWidth = if (available < maxCardWidth) available else maxCardWidth
+
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(gap),
+        ) {
+            RatingPreviewCard(
+                title = "Inside",
+                position = RatingPillPosition.INSIDE,
+                selected = prefs.pillPosition == RatingPillPosition.INSIDE,
+                prefs = prefs,
+                item = mockItem,
+                width = previewWidth,
+                baseStyle = baseStyle,
+            )
+            RatingPreviewCard(
+                title = "Outside",
+                position = RatingPillPosition.OUTSIDE,
+                selected = prefs.pillPosition == RatingPillPosition.OUTSIDE,
+                prefs = prefs,
+                item = mockItem,
+                width = previewWidth,
+                baseStyle = baseStyle,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RatingPreviewCard(
+    title: String,
+    position: RatingPillPosition,
+    selected: Boolean,
+    prefs: RatingDisplayPrefs,
+    item: MediaItem,
+    width: androidx.compose.ui.unit.Dp,
+    baseStyle: CardStyle,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Gunmetal),
+        border = if (selected) androidx.compose.foundation.BorderStroke(1.dp, Amber) else null,
     ) {
-        Text(
-            label,
-            fontSize = 8.sp,
-            color = textColor,
-            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-        )
+        Column(
+            modifier = Modifier.padding(10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                title,
+                color = if (selected) Snow else Silver,
+                fontSize = 10.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(8.dp))
+            val cardStyle = baseStyle.copy(ratingPrefs = prefs.copy(pillPosition = position))
+            PosterCard(
+                item = item,
+                onClick = {},
+                showTitle = false,
+                sizeOverride = CardSize.MEDIUM,
+                modifier = Modifier.width(width),
+                cardStyle = cardStyle,
+            )
+        }
     }
 }

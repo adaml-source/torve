@@ -114,7 +114,7 @@ val POPULAR_ADDONS = listOf(
     // ── Streams ──
     PopularAddon(
         "Torrentio",
-        "Streams from various torrent providers — works great with debrid",
+        "Streams from various sources — works great with debrid",
         "https://torrentio.strem.fun/manifest.json",
         listOf(AddonCategory.STREAMS),
         "https://torrentio.strem.fun/images/torrentio-logo.png",

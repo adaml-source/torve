@@ -1,15 +1,48 @@
 package com.streamvault.data.sync
 
 import com.streamvault.db.StreamVaultDatabase
+import com.streamvault.domain.model.CardOrientation
+import com.streamvault.domain.model.CardSizePreset
+import com.streamvault.domain.model.CardStyle
+import com.streamvault.domain.model.CardStylePreset
+import com.streamvault.domain.model.HomeSectionConfig
+import com.streamvault.domain.model.RatingDisplayPrefs
+import com.streamvault.domain.model.RatingSource
+import com.streamvault.domain.model.defaultTorveWeights
 import com.streamvault.domain.sync.*
+import com.streamvault.presentation.settings.SettingsViewModel
 import kotlinx.datetime.Clock
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+
+internal val SENSITIVE_PREFERENCE_KEYS = setOf(
+    "debrid_api_key",
+    "debrid_provider",
+    "debrid_rd_refresh_token",
+    "debrid_rd_client_id",
+    "debrid_rd_client_secret",
+    "debrid_rd_expires_at",
+    "trakt_client_id",
+    "trakt_client_secret",
+    "trakt_access_token",
+    "trakt_refresh_token",
+    "simkl_client_id",
+    "simkl_access_token",
+    "kodi_hosts_json",
+)
+
+internal fun isSensitivePreferenceKey(key: String): Boolean {
+    if (key in SENSITIVE_PREFERENCE_KEYS) return true
+    val lower = key.lowercase()
+    return listOf("token", "secret", "password", "api_key", "credential")
+        .any { it in lower }
+}
 
 class SyncRepositoryImpl(
     private val database: StreamVaultDatabase,
     private val json: Json,
 ) : SyncRepository {
+    private val tolerantJson = Json { ignoreUnknownKeys = true }
 
     companion object {
         /** Keys that contain credentials/tokens — never exported. */
@@ -31,10 +64,7 @@ class SyncRepositoryImpl(
 
         /** Heuristic: skip any key that looks credential-like. */
         private fun isSensitive(key: String): Boolean {
-            if (key in SENSITIVE_KEYS) return true
-            val lower = key.lowercase()
-            return listOf("token", "secret", "password", "api_key", "credential")
-                .any { it in lower }
+            return isSensitivePreferenceKey(key)
         }
     }
 
@@ -149,7 +179,8 @@ class SyncRepositoryImpl(
         // Preferences: last-write-wins, skip sensitive keys
         for (pref in payload.preferences) {
             if (isSensitive(pref.key)) continue
-            queries.setPreference(pref.key, pref.value)
+            val safeValue = sanitizePreferenceValue(pref.key, pref.value)
+            queries.setPreference(pref.key, safeValue)
             prefsImported++
         }
 
@@ -177,7 +208,7 @@ class SyncRepositoryImpl(
             progressImported++
         }
 
-        // IPTV playlists: insert if URL not already present
+        // Channel playlists: insert if URL not already present
         val existingPlaylists = queries.getAllPlaylists().executeAsList()
         val existingUrls = existingPlaylists.map { it.url }.toSet()
         for (pl in payload.iptvPlaylists) {
@@ -200,7 +231,7 @@ class SyncRepositoryImpl(
             playlistsImported++
         }
 
-        // IPTV favorites: upsert by channelId
+        // Channel favorites: upsert by channelId
         for (fav in payload.iptvFavorites) {
             queries.insertFavorite(
                 channel_id = fav.channelId,
@@ -225,6 +256,131 @@ class SyncRepositoryImpl(
 
     override suspend fun importFromJson(jsonStr: String): SyncResult {
         val payload = json.decodeFromString<SyncPayload>(jsonStr)
+        val schema = if (payload.schemaVersion > 0) payload.schemaVersion else payload.version
+        require(schema == 1) { "Unsupported backup schema version: $schema" }
         return importSyncPayload(payload)
+    }
+
+    private fun sanitizePreferenceValue(key: String, raw: String): String {
+        return when (key) {
+            SettingsViewModel.KEY_RATING_PREFS -> {
+                val parsed = runCatching {
+                    tolerantJson.decodeFromString<RatingDisplayPrefs>(raw)
+                }.getOrNull()
+                json.encodeToString(parsed?.let(::sanitizeRatingPrefs) ?: RatingDisplayPrefs())
+            }
+            SettingsViewModel.KEY_CARD_STYLE_PRESETS -> {
+                val parsed = runCatching {
+                    tolerantJson.decodeFromString<List<CardStylePreset>>(raw)
+                }.getOrNull().orEmpty()
+                json.encodeToString(sanitizeCardStylePresets(parsed))
+            }
+            "home_section_configs" -> {
+                val parsed = runCatching {
+                    tolerantJson.decodeFromString<List<HomeSectionConfig>>(raw)
+                }.getOrNull() ?: emptyList()
+                json.encodeToString(sanitizeHomeSectionConfigs(parsed))
+            }
+            else -> raw
+        }
+    }
+
+    private fun sanitizeRatingPrefs(prefs: RatingDisplayPrefs): RatingDisplayPrefs {
+        val allSources = RatingSource.entries
+        val enabled = prefs.enabledProviders
+            .filter { it in allSources }
+            .distinct()
+        val ordered = (prefs.providerOrder.filter { it in allSources } + allSources)
+            .distinct()
+        val torveWeights = (defaultTorveWeights() + prefs.torveWeights)
+            .filterKeys { it in allSources && it != RatingSource.TORVE }
+            .mapValues { (_, weight) -> weight.coerceIn(0, 100) }
+
+        return prefs.copy(
+            enabledProviders = enabled,
+            providerOrder = ordered,
+            maxRatingsOnCard = prefs.maxRatingsOnCard.coerceIn(1, 9),
+            torveWeights = torveWeights,
+        )
+    }
+
+    private fun sanitizeCardStylePresets(presets: List<CardStylePreset>): List<CardStylePreset> {
+        val now = Clock.System.now().toEpochMilliseconds()
+        if (presets.isEmpty()) {
+            return listOf(
+                CardStylePreset(
+                    presetId = "default",
+                    name = "Default",
+                    cardStyle = CardStyle(),
+                    isBuiltIn = true,
+                    createdAt = now,
+                    updatedAt = now,
+                ),
+            )
+        }
+
+        val seen = mutableSetOf<String>()
+        return presets.mapIndexed { index, preset ->
+            val baseId = preset.presetId.trim().ifBlank { "preset_${index + 1}" }
+            var finalId = baseId
+            var suffix = 2
+            while (!seen.add(finalId)) {
+                finalId = "${baseId}_$suffix"
+                suffix++
+            }
+            val safeName = preset.name.trim().ifBlank { "Preset ${index + 1}" }
+            val safeStyle = sanitizeCardStyle(preset.cardStyle)
+            val createdAt = if (preset.createdAt <= 0L) now else preset.createdAt
+            val updatedAt = if (preset.updatedAt <= 0L) createdAt else preset.updatedAt
+            preset.copy(
+                presetId = finalId,
+                name = safeName,
+                cardStyle = safeStyle,
+                createdAt = createdAt,
+                updatedAt = updatedAt,
+            )
+        }
+    }
+
+    private fun sanitizeCardStyle(style: CardStyle): CardStyle {
+        val safeSize = style.size.copy(
+            preset = style.size.preset.takeIf { it in CardSizePreset.entries } ?: CardSizePreset.M,
+            orientation = style.size.orientation.takeIf { it in CardOrientation.entries } ?: CardOrientation.PORTRAIT,
+            customWidthDp = style.size.customWidthDp.coerceIn(80, 320),
+        )
+        val safeHover = style.hover.copy(
+            scalePercent = style.hover.scalePercent.coerceIn(100, 130),
+            animationDurationMs = style.hover.animationDurationMs.coerceIn(80, 600),
+        )
+        val safeWatched = style.watched.copy(
+            dimAmount = style.watched.dimAmount.coerceIn(0f, 1f),
+        )
+        val safeAppearance = style.appearance.copy(
+            cornerRadiusDp = style.appearance.cornerRadiusDp.coerceIn(0, 32),
+            cardSpacingDp = style.appearance.cardSpacingDp.coerceIn(0, 40),
+            cardElevationDp = style.appearance.cardElevationDp.coerceIn(0, 16),
+        )
+
+        return style.copy(
+            size = safeSize,
+            hover = safeHover,
+            watched = safeWatched,
+            appearance = safeAppearance,
+            ratingPrefs = sanitizeRatingPrefs(style.ratingPrefs),
+        )
+    }
+
+    private fun sanitizeHomeSectionConfigs(configs: List<HomeSectionConfig>): List<HomeSectionConfig> {
+        val seen = mutableSetOf<com.streamvault.domain.model.HomeSection>()
+        return configs.asSequence()
+            .filter { seen.add(it.section) }
+            .map { config ->
+                config.copy(
+                    order = config.order.coerceAtLeast(0),
+                    customTitle = config.customTitle?.trim()?.takeIf { it.isNotEmpty() },
+                    presetId = config.presetId?.trim()?.takeIf { it.isNotEmpty() },
+                )
+            }
+            .toList()
     }
 }

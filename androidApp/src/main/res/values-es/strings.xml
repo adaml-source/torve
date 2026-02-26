@@ -7,7 +7,7 @@
     <string name="nav_home">Inicio</string>
     <string name="nav_movies">Películas</string>
     <string name="nav_tv_shows">Series</string>
-    <string name="nav_live_tv">TV en Vivo</string>
+    <string name="nav_channels">TV en Vivo</string>
     <string name="nav_watchlist">Lista</string>
     <string name="nav_settings">Ajustes</string>
 

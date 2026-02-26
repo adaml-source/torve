@@ -77,6 +77,7 @@ enum class RuntimeFilter(val label: String, val minMinutes: Int?, val maxMinutes
 
 enum class SortOption(val apiValue: String, val label: String) {
     POPULARITY_DESC("popularity.desc", "Most Popular"),
+    TORVE_SCORE_DESC("popularity.desc", "Torve Score"),
     VOTE_AVERAGE_DESC("vote_average.desc", "Highest Rated"),
     VOTE_COUNT_DESC("vote_count.desc", "Most Votes"),
     RELEASE_DATE_DESC("primary_release_date.desc", "Newest First"),

@@ -1,17 +1,23 @@
 package com.streamvault.presentation.detail
 
 import com.streamvault.data.addon.ParsedStream
-import com.streamvault.data.trakt.TraktClient
+import com.streamvault.data.addon.StreamSelector
+import com.streamvault.data.trakt.api.TraktAuthorizedApi
 import com.streamvault.data.trakt.TraktHistoryBody
 import com.streamvault.data.trakt.TraktHistoryMovie
 import com.streamvault.data.trakt.TraktHistoryShow
 import com.streamvault.data.trakt.TraktIds
 import com.streamvault.data.trakt.TraktRemoveHistoryBody
+import com.streamvault.data.trakt.repo.TraktSyncRepository
 import com.streamvault.domain.model.DebridServiceType
+import com.streamvault.domain.model.DeviceCodecCaps
 import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.model.StreamPreferences
+import com.streamvault.domain.model.StreamQuality
 import com.streamvault.domain.model.WatchHistoryEntry
+import com.streamvault.domain.integrations.LibraryOverlayService
 import com.streamvault.domain.repository.AddonRepository
+import com.streamvault.domain.repository.AvailabilityRepository
 import com.streamvault.domain.repository.MetadataRepository
 import com.streamvault.domain.repository.PreferencesRepository
 import com.streamvault.domain.repository.StreamRepository
@@ -27,16 +33,21 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.min
 
 class DetailViewModel(
     private val metadataRepo: MetadataRepository,
     private val streamRepo: StreamRepository,
     private val watchProgressRepo: WatchProgressRepository,
-    private val traktClient: TraktClient,
-    private val prefsRepo: PreferencesRepository,
+    private val traktApi: TraktAuthorizedApi,
+    private val traktSyncRepo: TraktSyncRepository,
     private val addonRepo: AddonRepository,
     private val watchHistoryRepo: WatchHistoryRepository,
+    private val availabilityRepo: AvailabilityRepository,
+    private val prefsRepo: PreferencesRepository,
+    private val libraryOverlayService: LibraryOverlayService,
+    private val streamSelector: StreamSelector,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(DetailUiState())
@@ -45,8 +56,15 @@ class DetailViewModel(
     // Injected by the UI layer (Android Compose / iOS) since SettingsViewModel is a singleton
     private var settingsProvider: (() -> SettingsViewModel)? = null
 
+    /** Device codec capabilities — set by the platform layer at init time. */
+    private var deviceCodecCaps: DeviceCodecCaps = DeviceCodecCaps.SAFE_BASELINE
+
     fun setSettingsProvider(provider: () -> SettingsViewModel) {
         settingsProvider = provider
+    }
+
+    fun setDeviceCodecCaps(caps: DeviceCodecCaps) {
+        deviceCodecCaps = caps
     }
 
     fun loadDetail(type: String, id: Int) {
@@ -63,7 +81,10 @@ class DetailViewModel(
                 // Load watch progress
                 if (item != null) {
                     val progress = watchProgressRepo.getProgress(item.id)
-                    _state.update { it.copy(watchProgress = progress) }
+                    val rating = item.tmdbId?.let { tmdbId ->
+                        runCatching { traktSyncRepo.getUserRating(tmdbId, item.type) }.getOrNull()
+                    }
+                    _state.update { it.copy(watchProgress = progress, userRating = rating) }
                 }
 
                 // Auto-load first season for TV shows
@@ -74,9 +95,50 @@ class DetailViewModel(
                     }
                     loadWatchedEpisodes()
                 }
+                loadAvailability(item)
+                loadLibraryStatus(item)
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = e.message ?: "Failed to load") }
             }
+        }
+    }
+
+    private fun loadAvailability(item: com.streamvault.domain.model.MediaItem) {
+        val tmdbId = item.tmdbId ?: return
+        scope.launch {
+            _state.update { it.copy(isLoadingAvailability = true, availabilityError = null) }
+            try {
+                val region = (prefsRepo.getString("content_region_code") ?: "US").ifBlank { "US" }
+                val result = availabilityRepo.getAvailability(
+                    tmdbId = tmdbId,
+                    mediaType = item.type,
+                    region = region,
+                )
+                _state.update {
+                    it.copy(
+                        availability = result,
+                        isLoadingAvailability = false,
+                        availabilityError = null,
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(
+                        isLoadingAvailability = false,
+                        availabilityError = e.message ?: "Failed to load availability",
+                    )
+                }
+            }
+        }
+    }
+
+    private fun loadLibraryStatus(item: com.streamvault.domain.model.MediaItem) {
+        val tmdbId = item.tmdbId ?: return
+        scope.launch {
+            val inLibrary = runCatching {
+                libraryOverlayService.isInLibrary(tmdbId, item.type)
+            }.getOrDefault(false)
+            _state.update { it.copy(isInLibrary = inLibrary) }
         }
     }
 
@@ -88,6 +150,55 @@ class DetailViewModel(
                 _state.update { it.copy(seasonDetail = season, isLoadingSeasonDetail = false) }
             } catch (_: Exception) {
                 _state.update { it.copy(isLoadingSeasonDetail = false) }
+            }
+        }
+    }
+
+    /**
+     * For TV shows: auto-start the next unwatched or in-progress episode.
+     * Priority: 1) resume partially-watched episode, 2) first unwatched episode, 3) S01E01.
+     * For movies: delegates straight to fetchStreams().
+     */
+    fun playNextEpisode() {
+        val item = _state.value.mediaItem ?: return
+        if (item.type != MediaType.SERIES) {
+            fetchStreams()
+            return
+        }
+
+        scope.launch {
+            // 1. Check for a partially-watched episode (2%–90% progress)
+            val allProgress = try { watchProgressRepo.getAllProgress() } catch (_: Exception) { emptyList() }
+            val inProgress = allProgress
+                .filter { it.seasonNumber != null && it.episodeNumber != null }
+                .filter { it.showTitle == item.title || it.mediaId == item.id.toString() }
+                .filter { it.progressPercent > 0.02f && it.progressPercent < 0.9f }
+                .maxByOrNull { it.updatedAt }
+
+            if (inProgress != null) {
+                fetchStreams(season = inProgress.seasonNumber, episode = inProgress.episodeNumber)
+                return@launch
+            }
+
+            // 2. Find next unwatched episode across all seasons
+            val watched = _state.value.watchedEpisodes
+            val seasons = item.seasons
+                .filter { it.seasonNumber > 0 }
+                .sortedBy { it.seasonNumber }
+
+            for (season in seasons) {
+                for (ep in 1..season.episodeCount) {
+                    if ("s${season.seasonNumber}e$ep" !in watched) {
+                        fetchStreams(season = season.seasonNumber, episode = ep)
+                        return@launch
+                    }
+                }
+            }
+
+            // 3. All episodes watched — restart from S01E01
+            val firstSeason = seasons.firstOrNull()
+            if (firstSeason != null) {
+                fetchStreams(season = firstSeason.seasonNumber, episode = 1)
             }
         }
     }
@@ -139,7 +250,15 @@ class DetailViewModel(
                 }
 
                 if (preferences.autoPlayEnabled) {
-                    val best = streams.first()
+                    // Pre-filter streams by device codec caps to avoid codec errors.
+                    // On capable devices this is a no-op (HEVC/VP9/AV1 all pass).
+                    // On weak HEVC devices (emulators, low-end) this filters out
+                    // unsupported HEVC streams BEFORE they reach the player.
+                    val playable = streams.filter { s ->
+                        deviceCodecCaps.canDecode(s.codec, title = s.title)
+                    }.ifEmpty { streams } // fallback to unfiltered if all rejected
+
+                    val best = playable.first()
                     val info = buildAutoPlayMessage(best)
                     _state.update {
                         it.copy(
@@ -147,7 +266,7 @@ class DetailViewModel(
                             autoPlayMessage = info,
                         )
                     }
-                    autoResolveStream(streams, 0, preferences)
+                    autoResolveStream(playable, 0, preferences)
                 } else {
                     _state.update { it.copy(showStreamPicker = true) }
                 }
@@ -172,6 +291,7 @@ class DetailViewModel(
                     autoPlayMessage = null,
                     isResolving = false,
                     showStreamPicker = true,
+                    streamsError = if (_state.value.streams.isNotEmpty()) "Auto-play failed — pick a stream manually" else null,
                 )
             }
             return
@@ -204,16 +324,29 @@ class DetailViewModel(
         }
 
         try {
-            val resolved = streamRepo.resolveStream(stream, provider, apiKey)
-            _state.update {
-                it.copy(
-                    resolvedStream = resolved,
-                    isResolving = false,
-                    showStreamPicker = false,
-                    autoPlayMessage = buildAutoPlayMessage(stream),
-                )
+            // Cached streams resolve in seconds; 30s is generous.
+            val resolved = withTimeoutOrNull(30_000L) {
+                streamRepo.resolveStream(stream, provider, apiKey)
             }
-        } catch (_: Exception) {
+            if (resolved != null) {
+                _state.update {
+                    it.copy(
+                        resolvedStream = resolved,
+                        isResolving = false,
+                        showStreamPicker = false,
+                        autoPlayMessage = buildAutoPlayMessage(stream),
+                    )
+                }
+            } else {
+                _state.update {
+                    it.copy(
+                        autoPlayMessage = "Stream timed out, trying next...",
+                        fallbackAttempt = attemptIndex + 1,
+                    )
+                }
+                autoResolveStream(streams, attemptIndex + 1, preferences)
+            }
+        } catch (e: Exception) {
             _state.update {
                 it.copy(
                     autoPlayMessage = "Stream failed, trying next...",
@@ -237,13 +370,21 @@ class DetailViewModel(
         scope.launch {
             _state.update { it.copy(isResolving = true, resolveError = null) }
             try {
-                val resolved = streamRepo.resolveStream(stream, provider, apiKey)
-                _state.update {
-                    it.copy(
-                        resolvedStream = resolved,
-                        isResolving = false,
-                        showStreamPicker = false,
-                    )
+                val resolved = withTimeoutOrNull(30_000L) {
+                    streamRepo.resolveStream(stream, provider, apiKey)
+                }
+                if (resolved != null) {
+                    _state.update {
+                        it.copy(
+                            resolvedStream = resolved,
+                            isResolving = false,
+                            showStreamPicker = false,
+                        )
+                    }
+                } else {
+                    _state.update {
+                        it.copy(isResolving = false, resolveError = "Stream resolution timed out — try another stream")
+                    }
                 }
             } catch (e: Exception) {
                 _state.update {
@@ -251,6 +392,58 @@ class DetailViewModel(
                 }
             }
         }
+    }
+
+    /**
+     * Called by the player layer when a codec error occurs at runtime.
+     * Silently falls back to the next best stream — never shows errors to the user.
+     * Returns a non-null string if a fallback was found (player should switch).
+     */
+    fun onCodecError(failedStream: ParsedStream): String? {
+        val streams = _state.value.streams
+        if (streams.isEmpty()) return null
+
+        // Find the next stream after the failed one in score order
+        val fallback = streams.firstOrNull { it != failedStream }
+            ?: return null
+
+        val settings = settingsProvider?.invoke()
+        val provider = settings?.getDebridProvider() ?: DebridServiceType.REAL_DEBRID
+        val apiKey = settings?.getDebridApiKey() ?: ""
+
+        scope.launch {
+            _state.update {
+                it.copy(
+                    autoPlayStream = fallback,
+                    isResolving = true,
+                )
+            }
+            try {
+                val resolved = withTimeoutOrNull(30_000L) {
+                    streamRepo.resolveStream(fallback, provider, apiKey)
+                }
+                if (resolved != null) {
+                    _state.update {
+                        it.copy(
+                            resolvedStream = resolved,
+                            isResolving = false,
+                            autoPlayMessage = buildAutoPlayMessage(fallback),
+                        )
+                    }
+                } else {
+                    // Silently give up — show stream picker as last resort
+                    _state.update {
+                        it.copy(isResolving = false, showStreamPicker = true)
+                    }
+                }
+            } catch (_: Exception) {
+                _state.update {
+                    it.copy(isResolving = false, showStreamPicker = true)
+                }
+            }
+        }
+
+        return "switching"
     }
 
     fun toggleStreamPicker() {
@@ -278,34 +471,52 @@ class DetailViewModel(
     fun markWatched() {
         val item = _state.value.mediaItem ?: return
         scope.launch {
+            _state.update { it.copy(isMarkedWatched = true) }
             try {
-                val token = prefsRepo.getString("trakt_access_token") ?: return@launch
                 val tmdbId = item.tmdbId ?: return@launch
                 val ids = TraktIds(tmdb = tmdbId)
                 if (item.type == MediaType.MOVIE) {
-                    traktClient.addToHistory(token, TraktHistoryBody(movies = listOf(TraktHistoryMovie(ids))))
+                    traktApi.addToHistory(TraktHistoryBody(movies = listOf(TraktHistoryMovie(ids))))
                 } else {
-                    traktClient.addToHistory(token, TraktHistoryBody(shows = listOf(TraktHistoryShow(ids))))
+                    traktApi.addToHistory(TraktHistoryBody(shows = listOf(TraktHistoryShow(ids))))
                 }
-                _state.update { it.copy(isMarkedWatched = true) }
-            } catch (_: Exception) { }
+            } catch (_: Exception) {
+                val tmdbId = item.tmdbId ?: return@launch
+                traktSyncRepo.enqueueHistoryAdd(tmdbId, item.type, item.imdbId)
+            }
         }
     }
 
     fun markUnwatched() {
         val item = _state.value.mediaItem ?: return
         scope.launch {
+            _state.update { it.copy(isMarkedWatched = false) }
             try {
-                val token = prefsRepo.getString("trakt_access_token") ?: return@launch
                 val tmdbId = item.tmdbId ?: return@launch
                 val ids = TraktIds(tmdb = tmdbId)
                 if (item.type == MediaType.MOVIE) {
-                    traktClient.removeFromHistory(token, TraktRemoveHistoryBody(movies = listOf(TraktHistoryMovie(ids))))
+                    traktApi.removeFromHistory(TraktRemoveHistoryBody(movies = listOf(TraktHistoryMovie(ids))))
                 } else {
-                    traktClient.removeFromHistory(token, TraktRemoveHistoryBody(shows = listOf(TraktHistoryShow(ids))))
+                    traktApi.removeFromHistory(TraktRemoveHistoryBody(shows = listOf(TraktHistoryShow(ids))))
                 }
-                _state.update { it.copy(isMarkedWatched = false) }
-            } catch (_: Exception) { }
+            } catch (_: Exception) {
+                val tmdbId = item.tmdbId ?: return@launch
+                traktSyncRepo.enqueueHistoryRemove(tmdbId, item.type, item.imdbId)
+            }
+        }
+    }
+
+    fun setUserRating(rating: Int?) {
+        val item = _state.value.mediaItem ?: return
+        val tmdbId = item.tmdbId ?: return
+        scope.launch {
+            _state.update { it.copy(userRating = rating?.coerceIn(1, 10)) }
+            traktSyncRepo.setUserRating(
+                tmdbId = tmdbId,
+                mediaType = item.type,
+                imdbId = item.imdbId,
+                rating = rating,
+            )
         }
     }
 

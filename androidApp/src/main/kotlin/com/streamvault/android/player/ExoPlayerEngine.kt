@@ -1,6 +1,7 @@
 package com.streamvault.android.player
 
 import android.content.Context
+import android.util.Log
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -19,8 +20,14 @@ import com.streamvault.domain.player.TrackDescription
 import java.util.Locale
 
 /**
- * PlayerEngine backed by ExoPlayer (Media3).
+ * PlayerEngine backed by ExoPlayer (Media3 1.5.1).
  * Used as fallback when libmpv .so files are not available.
+ *
+ * Resilience:
+ * - On audio codec error, silently falls back to a compatible track or disables audio
+ * - On video codec error, notifies via onCodecError callback so the stream selection
+ *   layer can retry with a safer variant
+ * - Video quality filtering is handled upstream by StreamSelector (not at TrackSelector level)
  */
 @UnstableApi
 class ExoPlayerEngine(
@@ -37,6 +44,12 @@ class ExoPlayerEngine(
     private var currentAudioTracks = listOf<TrackDescription>()
     private var trackGroups = listOf<Tracks.Group>()
     private val delayProcessor = DelayAudioProcessor()
+
+    /** Set by the player screen to enable codec-error fallback at the stream level. */
+    var onCodecError: ((errorCode: Int) -> Unit)? = null
+
+    /** Prevents infinite loop if audio fallback also fails. */
+    private var audioFallbackAttempted = false
 
     private val exoListener = object : Player.Listener {
         override fun onIsPlayingChanged(playing: Boolean) {
@@ -56,7 +69,47 @@ class ExoPlayerEngine(
         }
 
         override fun onPlayerError(error: PlaybackException) {
-            val msg = when (error.errorCode) {
+            val isCodecError = error.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
+                error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED
+
+            if (isCodecError) {
+                val msg = error.message.orEmpty()
+                val isAudioCodecError = msg.contains("AudioRenderer", ignoreCase = true) ||
+                    msg.contains("audio/eac3", ignoreCase = true) ||
+                    msg.contains("audio/ac3", ignoreCase = true) ||
+                    msg.contains("audio/dts", ignoreCase = true) ||
+                    msg.contains("audio/truehd", ignoreCase = true) ||
+                    msg.contains("audio/mlp", ignoreCase = true)
+
+                if (isAudioCodecError) {
+                    if (!audioFallbackAttempted) {
+                        Log.w(TAG, "Audio codec error — attempting fallback")
+                        audioFallbackAttempted = true
+                        handleAudioCodecError()
+                    } else {
+                        // Already tried fallback — just disable audio silently and keep playing
+                        Log.w(TAG, "Audio codec error after fallback — disabling audio entirely")
+                        val player = exoPlayer ?: return
+                        player.trackSelectionParameters = player.trackSelectionParameters
+                            .buildUpon()
+                            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+                            .build()
+                        player.prepare()
+                        player.playWhenReady = true
+                        listeners.forEach { it.onError("Audio format not supported on this device — playing without sound") }
+                    }
+                    return
+                }
+
+                Log.w(TAG, "Video codec error (${error.errorCode}): $msg")
+                val callback = onCodecError
+                if (callback != null) {
+                    callback(error.errorCode)
+                    return
+                }
+            }
+
+            val errMsg = when (error.errorCode) {
                 PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
                 PlaybackException.ERROR_CODE_DECODING_FAILED ->
                     "Codec error: This format is not supported on this device"
@@ -67,7 +120,7 @@ class ExoPlayerEngine(
                     "Live stream error: Fell behind live window"
                 else -> error.message ?: "Playback error (${error.errorCode})"
             }
-            listeners.forEach { it.onError(msg) }
+            listeners.forEach { it.onError(errMsg) }
         }
 
         override fun onTracksChanged(tracks: Tracks) {
@@ -139,6 +192,7 @@ class ExoPlayerEngine(
     }
 
     override fun play(url: String) {
+        audioFallbackAttempted = false
         exoPlayer?.apply {
             setMediaItem(MediaItem.fromUri(url))
             prepare()
@@ -216,11 +270,62 @@ class ExoPlayerEngine(
             .build()
     }
 
+    /**
+     * Handles audio codec errors by trying to select a compatible audio track.
+     * Falls back to disabling audio entirely if no compatible track exists.
+     */
+    private fun handleAudioCodecError() {
+        val player = exoPlayer ?: return
+
+        // Safe audio MIME types that virtually all Android devices support
+        val safeMimes = setOf(
+            "audio/mp4a-latm", // AAC
+            "audio/mpeg",      // MP3
+            "audio/opus",
+            "audio/vorbis",
+            "audio/raw",
+            "audio/flac",
+        )
+
+        // Search through all audio track groups for a compatible track
+        val tracks = player.currentTracks
+        for (group in tracks.groups) {
+            if (group.type != C.TRACK_TYPE_AUDIO) continue
+            for (i in 0 until group.length) {
+                val format = group.getTrackFormat(i)
+                val mime = format.sampleMimeType ?: continue
+                if (mime in safeMimes) {
+                    Log.d(TAG, "Audio fallback: selecting $mime (${format.language ?: "?"}) instead of unsupported codec")
+                    player.trackSelectionParameters = player.trackSelectionParameters
+                        .buildUpon()
+                        .setOverrideForType(
+                            TrackSelectionOverride(group.mediaTrackGroup, i),
+                        )
+                        .build()
+                    player.prepare()
+                    player.playWhenReady = true
+                    return
+                }
+            }
+        }
+
+        // No compatible audio track — disable audio, keep video playing silently
+        Log.w(TAG, "No compatible audio track found — disabling audio")
+        player.trackSelectionParameters = player.trackSelectionParameters
+            .buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+            .build()
+        player.prepare()
+        player.playWhenReady = true
+        listeners.forEach { it.onError("Audio format not supported on this device — playing without sound") }
+    }
+
     override fun release() {
         exoPlayer?.removeListener(exoListener)
         exoPlayer?.stop()
         exoPlayer?.release()
         exoPlayer = null
+        onCodecError = null
     }
 
     override fun addListener(listener: PlayerListener) {
@@ -248,5 +353,9 @@ class ExoPlayerEngine(
 
     private fun notifyStateChanged() {
         listeners.forEach { it.onStateChanged(_state) }
+    }
+
+    companion object {
+        private const val TAG = "ExoPlayerEngine"
     }
 }

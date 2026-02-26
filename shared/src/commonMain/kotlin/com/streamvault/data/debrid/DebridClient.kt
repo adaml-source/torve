@@ -378,13 +378,13 @@ class DebridClient(
                 break
             }
             if (info.status in listOf("error", "dead", "magnet_error")) {
-                throw Exception("Real-Debrid torrent failed: ${info.status}")
+                throw Exception("Real-Debrid download failed: ${info.status}")
             }
             delay(2000)
         }
 
         if (links.isEmpty()) {
-            throw Exception("Torrent timed out — no download links available")
+            throw Exception("Download timed out — no links available")
         }
 
         // 4. Unrestrict the right link
@@ -498,7 +498,7 @@ class DebridClient(
             delay(2000)
         }
 
-        if (links.isEmpty()) throw Exception("AllDebrid torrent timed out")
+        if (links.isEmpty()) throw Exception("AllDebrid download timed out")
 
         // 3. Unlock the link
         val targetLink = if (fileIdx != null && fileIdx < links.size) links[fileIdx] else links[0]
@@ -623,7 +623,7 @@ class DebridClient(
             header("Authorization", "Bearer $apiKey")
         }.body()
 
-        val torrentId = createResp.data?.id ?: throw Exception("TorBox create torrent failed")
+        val torrentId = createResp.data?.id ?: throw Exception("TorBox create download failed")
 
         // 2. Poll until ready
         for (attempt in 0 until 30) {
@@ -662,7 +662,7 @@ class DebridClient(
             delay(2000)
         }
 
-        throw Exception("TorBox torrent timed out")
+        throw Exception("TorBox download timed out")
     }
 
     // -------------------------------------------------------------------------

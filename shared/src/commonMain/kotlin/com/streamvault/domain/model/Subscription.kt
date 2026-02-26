@@ -37,7 +37,7 @@ data class Subscription(
 enum class PremiumFeature {
     STREAM_PLAYBACK,
     DOWNLOAD,
-    IPTV,
+    CHANNELS,
     MULTI_DEBRID,
     ADVANCED_FILTERS,
 }

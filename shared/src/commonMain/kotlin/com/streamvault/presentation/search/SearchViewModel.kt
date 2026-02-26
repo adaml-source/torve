@@ -1,8 +1,11 @@
 package com.streamvault.presentation.search
 
 import com.streamvault.domain.model.dedupeByStableKey
+import com.streamvault.domain.model.calculateTorveScore
+import com.streamvault.domain.model.defaultTorveWeights
 import com.streamvault.domain.repository.MetadataRepository
 import com.streamvault.domain.repository.PreferencesRepository
+import com.streamvault.presentation.catalog.SortOption
 import com.streamvault.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -59,18 +62,42 @@ class SearchViewModel(
             } else {
                 metadataRepo.searchMulti(query)
             }
+            val people = try {
+                metadataRepo.searchPerson(query, page = 1)
+            } catch (_: Exception) {
+                emptyList()
+            }
 
             // Apply client-side filters
             val filtered = results.filter { item ->
                 val genreMatch = filter.genreIds.isEmpty() || filter.genreIds.any { it in item.genreIds }
                 val ratingMatch = filter.minRating == null || (item.rating ?: 0.0) >= filter.minRating
+                val imdbMatch = filter.minImdbScore == null || ((item.ratings?.imdbScore ?: 0f) >= filter.minImdbScore)
+                val tmdbMatch = filter.minTmdbScore == null || ((item.ratings?.tmdbScore ?: 0f) >= filter.minTmdbScore)
+                val torveMatch = filter.minTorveScore == null || (
+                    (item.ratings?.let { calculateTorveScore(it, defaultTorveWeights()) } ?: 0f) >= filter.minTorveScore
+                )
                 val yearFromMatch = filter.yearFrom == null || (item.year ?: 0) >= filter.yearFrom
                 val yearToMatch = filter.yearTo == null || (item.year ?: Int.MAX_VALUE) <= filter.yearTo
-                genreMatch && ratingMatch && yearFromMatch && yearToMatch
+                genreMatch && ratingMatch && imdbMatch && tmdbMatch && torveMatch && yearFromMatch && yearToMatch
             }
 
-            val finalResults = if (shouldDedupe()) filtered.dedupeByStableKey() else filtered
-            _state.update { it.copy(results = finalResults, isSearching = false, hasActiveSearch = true) }
+            val deduped = if (shouldDedupe()) filtered.dedupeByStableKey() else filtered
+            val finalResults = when (filter.sortBy) {
+                SortOption.TORVE_SCORE_DESC -> deduped.sortedByDescending { item ->
+                    item.ratings?.let { calculateTorveScore(it, defaultTorveWeights()) } ?: Float.MIN_VALUE
+                }
+                else -> deduped
+            }
+            _state.update {
+                it.copy(
+                    results = finalResults,
+                    peopleResults = people,
+                    userLists = buildUserListPlaceholders(query),
+                    isSearching = false,
+                    hasActiveSearch = true,
+                )
+            }
         } catch (e: Exception) {
             _state.update { it.copy(isSearching = false, error = e.message) }
         }
@@ -104,7 +131,21 @@ class SearchViewModel(
                     runtimeGte = filter.runtimeFilter?.minMinutes,
                     runtimeLte = filter.runtimeFilter?.maxMinutes,
                 )
-                val finalResults = if (shouldDedupe()) result.items.dedupeByStableKey() else result.items
+                val preFiltered = result.items.filter { item ->
+                    val imdbMatch = filter.minImdbScore == null || ((item.ratings?.imdbScore ?: 0f) >= filter.minImdbScore)
+                    val tmdbMatch = filter.minTmdbScore == null || ((item.ratings?.tmdbScore ?: 0f) >= filter.minTmdbScore)
+                    val torveMatch = filter.minTorveScore == null || (
+                        (item.ratings?.let { calculateTorveScore(it, defaultTorveWeights()) } ?: 0f) >= filter.minTorveScore
+                    )
+                    imdbMatch && tmdbMatch && torveMatch
+                }
+                val deduped = if (shouldDedupe()) preFiltered.dedupeByStableKey() else preFiltered
+                val finalResults = when (filter.sortBy) {
+                    SortOption.TORVE_SCORE_DESC -> deduped.sortedByDescending { item ->
+                        item.ratings?.let { calculateTorveScore(it, defaultTorveWeights()) } ?: Float.MIN_VALUE
+                    }
+                    else -> deduped
+                }
                 _state.update {
                     it.copy(
                         discoverResults = finalResults,
@@ -141,4 +182,9 @@ class SearchViewModel(
     private suspend fun shouldDedupe(): Boolean {
         return prefsRepo.getString(SettingsViewModel.KEY_DEDUPE_RESULTS)?.toBooleanStrictOrNull() ?: true
     }
+
+    private fun buildUserListPlaceholders(query: String): List<String> = listOf(
+        "My Watchlist matches for \"$query\" (coming soon)",
+        "Trakt lists for \"$query\" (coming soon)",
+    )
 }

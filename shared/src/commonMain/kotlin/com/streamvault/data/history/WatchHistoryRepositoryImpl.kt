@@ -2,19 +2,19 @@ package com.streamvault.data.history
 
 import com.streamvault.data.metadata.TmdbApiClient
 import com.streamvault.data.metadata.TmdbMappers
-import com.streamvault.data.trakt.TraktClient
+import com.streamvault.data.trakt.api.TraktAuthorizedApi
+import com.streamvault.data.trakt.repo.TraktSyncRepository
 import com.streamvault.db.StreamVaultDatabase
+import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.model.WatchHistoryEntry
-import com.streamvault.domain.repository.PreferencesRepository
 import com.streamvault.domain.repository.WatchHistoryRepository
-import com.streamvault.presentation.settings.SettingsViewModel
 import kotlinx.datetime.Instant
 
 class WatchHistoryRepositoryImpl(
     private val database: StreamVaultDatabase,
-    private val traktClient: TraktClient,
-    private val prefsRepo: PreferencesRepository,
+    private val traktApi: TraktAuthorizedApi,
     private val tmdbClient: TmdbApiClient,
+    private val traktSyncRepo: TraktSyncRepository,
 ) : WatchHistoryRepository {
     private val queries get() = database.streamVaultQueries
 
@@ -44,6 +44,14 @@ class WatchHistoryRepositoryImpl(
             episode_number = entry.episodeNumber?.toLong(),
             show_title = entry.showTitle,
         )
+        val tmdbId = entry.mediaId.toIntOrNull() ?: return
+        runCatching {
+            traktSyncRepo.enqueueHistoryAdd(
+                tmdbId = tmdbId,
+                mediaType = if (entry.mediaType.equals("movie", ignoreCase = true)) MediaType.MOVIE else MediaType.SERIES,
+                imdbId = null,
+            )
+        }
     }
 
     override suspend fun delete(id: String) {
@@ -60,10 +68,7 @@ class WatchHistoryRepositoryImpl(
 
     override suspend fun syncFromTrakt() {
         try {
-            val token = prefsRepo.getString(SettingsViewModel.KEY_TRAKT_ACCESS_TOKEN) ?: return
-            if (token.isBlank()) return
-
-            val historyItems = traktClient.getHistory(token, limit = 100)
+            val historyItems = traktApi.getHistory(limit = 100)
             if (historyItems.isEmpty()) return
 
             val localIds = queries.getAllHistory().executeAsList()

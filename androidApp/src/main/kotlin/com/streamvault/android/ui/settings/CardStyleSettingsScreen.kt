@@ -25,12 +25,15 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
@@ -38,6 +41,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,6 +57,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.streamvault.android.ui.components.BackButton
+import com.streamvault.android.ui.components.CardSize
+import com.streamvault.android.ui.components.LocalCardStyle
+import com.streamvault.android.ui.components.PosterCard
 import com.streamvault.android.ui.components.WatchedOverlay
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.AmberSubtle
@@ -67,11 +74,14 @@ import com.streamvault.android.ui.theme.Steel
 import com.streamvault.domain.model.CardAppearancePrefs
 import com.streamvault.domain.model.CardHoverPrefs
 import com.streamvault.domain.model.CardOrientation
-import com.streamvault.domain.model.CardPrefs
 import com.streamvault.domain.model.CardScrollAnimation
 import com.streamvault.domain.model.CardSizePrefs
 import com.streamvault.domain.model.CardSizePreset
+import com.streamvault.domain.model.CardStyle
 import com.streamvault.domain.model.CardTitlePosition
+import com.streamvault.domain.model.MediaItem
+import com.streamvault.domain.model.MediaRatings
+import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.model.WatchState
 import com.streamvault.domain.model.WatchedIndicatorPrefs
 import com.streamvault.domain.model.WatchedIndicatorStyle
@@ -87,7 +97,30 @@ fun CardStyleSettingsScreen(
     viewModel: SettingsViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
-    val prefs = state.cardPrefs
+    val presets = state.cardStylePresets
+    val defaultPresetId = state.globalDefaultPresetId
+    var selectedPresetId by remember(defaultPresetId, presets) {
+        mutableStateOf(defaultPresetId ?: presets.firstOrNull()?.presetId)
+    }
+    val currentPreset = presets.firstOrNull { it.presetId == selectedPresetId } ?: presets.firstOrNull()
+    val currentStyle = currentPreset?.cardStyle ?: CardStyle()
+
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var showCreateDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var nameDraft by remember { mutableStateOf("") }
+
+    fun updateStyle(update: (CardStyle) -> CardStyle) {
+        currentPreset?.let { preset ->
+            viewModel.updateCardStylePreset(preset.presetId, update(preset.cardStyle))
+        }
+    }
+
+    androidx.compose.runtime.LaunchedEffect(presets, defaultPresetId) {
+        if (selectedPresetId == null || presets.none { it.presetId == selectedPresetId }) {
+            selectedPresetId = defaultPresetId ?: presets.firstOrNull()?.presetId
+        }
+    }
 
     Column(
         Modifier
@@ -115,38 +148,187 @@ fun CardStyleSettingsScreen(
             modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // ─── Card Size ───
+            // Preset selection & actions
             item {
                 Spacer(Modifier.height(4.dp))
-                CardSizeSection(prefs.size) { viewModel.updateCardPrefs(prefs.copy(size = it)) }
+                Card(
+                    Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Charcoal),
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Preset", style = MaterialTheme.typography.titleMedium, color = Snow)
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        ) {
+                            presets.forEach { preset ->
+                                val label = if (preset.presetId == defaultPresetId) "${preset.name} (Default)" else preset.name
+                                FilterChip(
+                                    selected = preset.presetId == selectedPresetId,
+                                    onClick = { selectedPresetId = preset.presetId },
+                                    label = { Text(label, fontSize = 12.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = AmberSubtle,
+                                        selectedLabelColor = Amber,
+                                        containerColor = Gunmetal,
+                                        labelColor = Ash,
+                                    ),
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(
+                                onClick = {
+                                    currentPreset?.let { viewModel.setDefaultCardStylePreset(it.presetId) }
+                                },
+                                enabled = currentPreset?.presetId != null && currentPreset.presetId != defaultPresetId,
+                            ) {
+                                Text("Set Default", color = Amber)
+                            }
+                            TextButton(
+                                onClick = {
+                                    nameDraft = currentPreset?.name?.let { "$it Copy" } ?: "New Preset"
+                                    showCreateDialog = true
+                                },
+                                enabled = currentPreset != null,
+                            ) {
+                                Text("Save as Preset", color = Amber)
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(
+                                onClick = {
+                                    currentPreset?.let { viewModel.duplicateCardStylePreset(it.presetId) }
+                                },
+                                enabled = currentPreset != null,
+                            ) {
+                                Text("Duplicate", color = Amber)
+                            }
+                            TextButton(
+                                onClick = {
+                                    nameDraft = currentPreset?.name.orEmpty()
+                                    showRenameDialog = true
+                                },
+                                enabled = currentPreset != null,
+                            ) {
+                                Text("Rename", color = Amber)
+                            }
+                            TextButton(
+                                onClick = { showDeleteDialog = true },
+                                enabled = currentPreset != null &&
+                                    currentPreset.presetId != defaultPresetId &&
+                                    currentPreset.isBuiltIn.not(),
+                            ) {
+                                Text("Delete", color = if (currentPreset != null &&
+                                    currentPreset.presetId != defaultPresetId &&
+                                    currentPreset.isBuiltIn.not()
+                                ) Amber else Silver)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Quick Presets
+            item {
+                Card(
+                    Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Charcoal),
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Quick Presets", style = MaterialTheme.typography.titleMedium, color = Snow)
+                        Spacer(Modifier.height(4.dp))
+                        Text("Apply a predefined style to the current preset", style = MaterialTheme.typography.bodySmall, color = Silver)
+                        Spacer(Modifier.height(12.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            QuickPresetButton("Cinema") {
+                                updateStyle {
+                                    CardStyle(
+                                        size = CardSizePrefs(preset = CardSizePreset.L, orientation = CardOrientation.PORTRAIT),
+                                        hover = CardHoverPrefs(enabled = true, scalePercent = 110, elevationOnHover = true, borderOnHover = true),
+                                        watched = WatchedIndicatorPrefs(style = WatchedIndicatorStyle.CHECKMARK_OVERLAY, dimWatched = true, dimAmount = 0.4f),
+                                        appearance = CardAppearancePrefs(cornerRadiusDp = 12, showBottomGradient = true, titlePosition = CardTitlePosition.OVERLAY_BOTTOM, showYear = true),
+                                        ratingPrefs = it.ratingPrefs,
+                                    )
+                                }
+                            }
+                            QuickPresetButton("Compact") {
+                                updateStyle {
+                                    CardStyle(
+                                        size = CardSizePrefs(preset = CardSizePreset.S, orientation = CardOrientation.PORTRAIT),
+                                        hover = CardHoverPrefs(enabled = false),
+                                        watched = WatchedIndicatorPrefs(style = WatchedIndicatorStyle.DOT, dimWatched = false),
+                                        appearance = CardAppearancePrefs(cornerRadiusDp = 4, cardSpacingDp = 6, showBottomGradient = false, titlePosition = CardTitlePosition.BELOW, showYear = false),
+                                        ratingPrefs = it.ratingPrefs,
+                                    )
+                                }
+                            }
+                            QuickPresetButton("Classic") {
+                                updateStyle {
+                                    CardStyle(
+                                        size = CardSizePrefs(preset = CardSizePreset.M, orientation = CardOrientation.PORTRAIT),
+                                        hover = CardHoverPrefs(enabled = true, scalePercent = 115),
+                                        watched = WatchedIndicatorPrefs(style = WatchedIndicatorStyle.CHECKMARK_BADGE),
+                                        appearance = CardAppearancePrefs(cornerRadiusDp = 8, showBottomGradient = true, titlePosition = CardTitlePosition.BELOW, showYear = true),
+                                        ratingPrefs = it.ratingPrefs,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Card(
+                    Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Charcoal),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text("Live Preview", color = Snow, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(8.dp))
+                        CardStyleLivePreview(style = currentStyle)
+                    }
+                }
+            }
+
+
+            item {
+                Spacer(Modifier.height(4.dp))
+                CardSizeSection(currentStyle.size) { updateStyle { style -> style.copy(size = it) } }
             }
 
             item { HorizontalDivider(color = Steel.copy(alpha = 0.2f)) }
 
             // ─── Hover / Focus Zoom ───
             item {
-                CardHoverSection(prefs.hover) { viewModel.updateCardPrefs(prefs.copy(hover = it)) }
+                CardHoverSection(currentStyle.hover) { updateStyle { style -> style.copy(hover = it) } }
             }
 
             item { HorizontalDivider(color = Steel.copy(alpha = 0.2f)) }
 
             // ─── Watched Indicator ───
             item {
-                WatchedIndicatorSection(prefs.watched) { viewModel.updateCardPrefs(prefs.copy(watched = it)) }
+                WatchedIndicatorSection(currentStyle.watched) { updateStyle { style -> style.copy(watched = it) } }
             }
 
             item { HorizontalDivider(color = Steel.copy(alpha = 0.2f)) }
 
             // ─── Appearance ───
             item {
-                AppearanceSection(prefs.appearance) { viewModel.updateCardPrefs(prefs.copy(appearance = it)) }
+                AppearanceSection(currentStyle.appearance) { updateStyle { style -> style.copy(appearance = it) } }
             }
 
             // ─── Reset ───
             item {
                 Spacer(Modifier.height(8.dp))
                 TextButton(
-                    onClick = { viewModel.updateCardPrefs(CardPrefs()) },
+                    onClick = { updateStyle { CardStyle() } },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text("Reset All to Defaults", color = Amber)
@@ -155,8 +337,129 @@ fun CardStyleSettingsScreen(
             }
         }
     }
+
+    if (showRenameDialog && currentPreset != null) {
+        AlertDialog(
+            onDismissRequest = { showRenameDialog = false },
+            title = { Text("Rename Preset", color = Snow) },
+            text = {
+                OutlinedTextField(
+                    value = nameDraft,
+                    onValueChange = { nameDraft = it },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Amber,
+                        focusedLabelColor = Amber,
+                        unfocusedBorderColor = Steel,
+                        unfocusedLabelColor = Silver,
+                        cursorColor = Amber,
+                    ),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val trimmed = nameDraft.trim()
+                        if (trimmed.isNotEmpty()) {
+                            viewModel.renameCardStylePreset(currentPreset.presetId, trimmed)
+                        }
+                        showRenameDialog = false
+                    },
+                ) { Text("Save", color = Amber) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameDialog = false }) { Text("Cancel", color = Silver) }
+            },
+            containerColor = Charcoal,
+        )
+    }
+
+    if (showCreateDialog && currentPreset != null) {
+        AlertDialog(
+            onDismissRequest = { showCreateDialog = false },
+            title = { Text("Save Preset", color = Snow) },
+            text = {
+                OutlinedTextField(
+                    value = nameDraft,
+                    onValueChange = { nameDraft = it },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Amber,
+                        focusedLabelColor = Amber,
+                        unfocusedBorderColor = Steel,
+                        unfocusedLabelColor = Silver,
+                        cursorColor = Amber,
+                    ),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val trimmed = nameDraft.trim()
+                        if (trimmed.isNotEmpty()) {
+                            val newId = viewModel.createCardStylePreset(trimmed, currentPreset.cardStyle.copy())
+                            selectedPresetId = newId
+                        }
+                        showCreateDialog = false
+                    },
+                ) { Text("Save", color = Amber) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCreateDialog = false }) { Text("Cancel", color = Silver) }
+            },
+            containerColor = Charcoal,
+        )
+    }
+
+    if (showDeleteDialog && currentPreset != null) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Delete Preset?", color = Snow) },
+            text = {
+                Text(
+                    "This will remove \"${currentPreset.name}\". Sections using it will fall back to Default.",
+                    color = Silver,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteCardStylePreset(currentPreset.presetId)
+                        showDeleteDialog = false
+                    },
+                ) { Text("Delete", color = Amber) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel", color = Silver) }
+            },
+            containerColor = Charcoal,
+        )
+    }
 }
 
+@Composable
+private fun CardStyleLivePreview(style: CardStyle) {
+    val previewItem = MediaItem(
+        id = "settings_preview",
+        type = MediaType.MOVIE,
+        title = "Signal in the Dust",
+        year = 2026,
+        rating = 7.9,
+        ratings = MediaRatings(
+            imdbScore = 7.9f,
+            tmdbScore = 7.4f,
+            rottenTomatoesScore = 83,
+        ),
+    )
+    CompositionLocalProvider(LocalCardStyle provides style) {
+        PosterCard(
+            item = previewItem,
+            onClick = {},
+            sizeOverride = CardSize.MEDIUM,
+            cardStyle = style,
+        )
+    }
+}
 // ─── Card Size Section ───
 
 @Composable
@@ -733,6 +1036,17 @@ private fun AppearanceSection(
 // ─── Shared Components ───
 
 @Composable
+private fun QuickPresetButton(label: String, onClick: () -> Unit) {
+    TextButton(
+        onClick = onClick,
+        modifier = Modifier
+            .background(Gunmetal, RoundedCornerShape(8.dp)),
+    ) {
+        Text(label, color = Amber, fontSize = 12.sp)
+    }
+}
+
+@Composable
 private fun ToggleRow(
     label: String,
     checked: Boolean,
@@ -757,3 +1071,6 @@ private fun ToggleRow(
         )
     }
 }
+
+
+

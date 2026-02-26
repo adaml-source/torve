@@ -3,9 +3,12 @@ package com.streamvault.di
 import com.streamvault.data.ai.AiSuggestClient
 import com.streamvault.data.ai.KeywordSearchService
 import com.streamvault.data.addon.AddonRepositoryImpl
+import com.streamvault.data.availability.AvailabilityRepositoryImpl
+import com.streamvault.data.availability.TmdbAvailabilityProvider
 import com.streamvault.data.addon.CatalogAggregator
 import com.streamvault.data.addon.StreamAggregator
 import com.streamvault.data.addon.StreamScorer
+import com.streamvault.data.addon.StreamSelector
 import com.streamvault.data.addon.StremioAddonClient
 import com.streamvault.data.addon.SubtitleAggregator
 import com.streamvault.data.addon.StreamRepositoryImpl
@@ -13,14 +16,17 @@ import com.streamvault.data.auth.AuthClient
 import com.streamvault.data.debrid.DebridClient
 import com.streamvault.data.download.DownloadCatalogueBuilder
 import com.streamvault.data.download.DownloadRepositoryImpl
+import com.streamvault.data.integrations.CompositeLibraryOverlayService
+import com.streamvault.data.integrations.JellyfinLibraryOverlayService
+import com.streamvault.data.integrations.PlexLibraryOverlayService
 import com.streamvault.data.profile.ProfileRepositoryImpl
 import com.streamvault.data.shelf.ShelfConfigRepositoryImpl
 import com.streamvault.data.kodi.KodiClient
-import com.streamvault.data.iptv.CatchupResolver
-import com.streamvault.data.iptv.EpgParser
-import com.streamvault.data.iptv.IptvRepositoryImpl
-import com.streamvault.data.iptv.M3uParser
-import com.streamvault.data.iptv.XtreamClient
+import com.streamvault.data.channels.CatchupResolver
+import com.streamvault.data.channels.EpgParser
+import com.streamvault.data.channels.ChannelRepositoryImpl
+import com.streamvault.data.channels.M3uParser
+import com.streamvault.data.channels.XtreamClient
 import com.streamvault.data.mdblist.MdbListApi
 import com.streamvault.data.mdblist.MdbListRepository
 import com.streamvault.data.mdblist.RatingsEnricher
@@ -33,15 +39,22 @@ import com.streamvault.data.progress.WatchProgressRepositoryImpl
 import com.streamvault.data.subscription.SubscriptionRepositoryImpl
 import com.streamvault.data.history.WatchHistoryRepositoryImpl
 import com.streamvault.data.sync.SyncRepositoryImpl
+import com.streamvault.data.trakt.api.TraktAuthorizedApi
+import com.streamvault.data.trakt.auth.TraktTokenStore
+import com.streamvault.data.trakt.repo.TraktSyncRepository
+import com.streamvault.data.trakt.repo.TraktSyncRepositoryImpl
 import com.streamvault.data.watchlist.WatchlistRepositoryImpl
 import com.streamvault.domain.recommendation.GetRecommendationsUseCase
 import com.streamvault.domain.recommendation.MoodMatcher
 import com.streamvault.data.trakt.TraktClient
+import com.streamvault.domain.integrations.AvailabilityProvider
+import com.streamvault.domain.integrations.LibraryOverlayService
 import com.streamvault.presentation.player.TraktScrobbler
 import com.streamvault.db.StreamVaultDatabase
 import com.streamvault.domain.repository.AddonRepository
+import com.streamvault.domain.repository.AvailabilityRepository
 import com.streamvault.domain.repository.DownloadRepository
-import com.streamvault.domain.repository.IptvRepository
+import com.streamvault.domain.repository.ChannelRepository
 import com.streamvault.domain.repository.MetadataRepository
 import com.streamvault.domain.repository.ProfileRepository
 import com.streamvault.domain.repository.ShelfConfigRepository
@@ -61,7 +74,7 @@ import com.streamvault.presentation.download.DownloadCatalogueViewModel
 import com.streamvault.presentation.download.DownloadViewModel
 import com.streamvault.presentation.home.HomeViewModel
 import com.streamvault.presentation.profile.ProfileViewModel
-import com.streamvault.presentation.iptv.IptvViewModel
+import com.streamvault.presentation.channels.ChannelsViewModel
 import com.streamvault.presentation.search.SearchViewModel
 import com.streamvault.presentation.settings.SettingsViewModel
 import com.streamvault.presentation.setup.SetupWizardViewModel
@@ -88,6 +101,8 @@ val sharedModule = module {
     // TMDB
     singleOf(::TmdbApiClient)
     single<MetadataRepository> { MetadataRepositoryImpl(get()) }
+    single<AvailabilityProvider> { TmdbAvailabilityProvider(get()) }
+    single<AvailabilityRepository> { AvailabilityRepositoryImpl(get(), get(), get()) }
 
     // AI Suggest
     single { AiSuggestClient(get()) }
@@ -99,8 +114,16 @@ val sharedModule = module {
     // Debrid
     single { DebridClient(get(), get()) }
 
+    // Library Overlay (Jellyfin + Plex → composite router)
+    single { JellyfinLibraryOverlayService(get(), get(), get()) }
+    single { PlexLibraryOverlayService(get(), get(), get()) }
+    single<LibraryOverlayService> { CompositeLibraryOverlayService(get(), get(), get(), get()) }
+
     // Trakt
     single { TraktClient(get(), get()) }
+    single { TraktTokenStore(get(), get()) }
+    single { TraktAuthorizedApi(get(), get()) }
+    single<TraktSyncRepository> { TraktSyncRepositoryImpl(get(), get(), get(), get()) }
     factory { TraktScrobbler(get()) }
 
     // SIMKL
@@ -109,7 +132,7 @@ val sharedModule = module {
     // MDBList
     single { MdbListApi(get()) }
     single { MdbListRepository(get(), get()) }
-    single { RatingsEnricher(get()) }
+    single { RatingsEnricher(get(), get()) }
 
     // Kodi
     single { KodiClient(get()) }
@@ -127,6 +150,7 @@ val sharedModule = module {
 
     // Scoring & Aggregation
     single { StreamScorer() }
+    single { StreamSelector(get()) }
     single { CatalogAggregator(get()) }
     single { SubtitleAggregator(get()) }
     single { StreamAggregator(get(), get(), get()) }
@@ -143,8 +167,8 @@ val sharedModule = module {
     // Addon Repository
     single<AddonRepository> { AddonRepositoryImpl(get(), get(), get()) }
 
-    // IPTV Repository
-    single<IptvRepository> { IptvRepositoryImpl(get(), get(), get(), get(), get()) }
+    // Channel Repository
+    single<ChannelRepository> { ChannelRepositoryImpl(get(), get(), get(), get(), get()) }
 
     // Download Repository
     single<DownloadRepository> { DownloadRepositoryImpl(get()) }
@@ -162,7 +186,7 @@ val sharedModule = module {
     single<SubscriptionRepository> { SubscriptionRepositoryImpl(get()) }
 
     // Watchlist Repository
-    single<WatchlistRepository> { WatchlistRepositoryImpl(get(), get(), get(), get(), get()) }
+    single<WatchlistRepository> { WatchlistRepositoryImpl(get(), get(), get(), get(), get(), get(), get()) }
 
     // Watch History Repository
     single<WatchHistoryRepository> { WatchHistoryRepositoryImpl(get(), get(), get(), get()) }
@@ -175,19 +199,19 @@ val sharedModule = module {
     factory { MoodMatcher(get()) }
 
     // ViewModels
-    single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     single { SearchViewModel(get(), get()) }
-    factory { DetailViewModel(get(), get(), get(), get(), get(), get(), get()) }
+    factory { DetailViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     factoryOf(::PersonViewModel)
-    single { SettingsViewModel(get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { SettingsViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     factoryOf(::AddonViewModel)
-    single { IptvViewModel(get(), get(), get()) }
+    single { ChannelsViewModel(get(), get(), get()) }
     factory { CalendarViewModel(get(), get()) }
     factoryOf(::DownloadViewModel)
     factory { DownloadCatalogueViewModel(get(), get(), get(), get()) }
     factoryOf(::ProfileViewModel)
     factoryOf(::SubscriptionViewModel)
-    factory { SetupWizardViewModel(get(), get(), get()) }
+    factory { SetupWizardViewModel(get(), get(), get(), get(), get()) }
     single { WatchlistViewModel(get(), get()) }
     factory { DiscoverViewModel() }
     factoryOf(::MoodMatcherViewModel)

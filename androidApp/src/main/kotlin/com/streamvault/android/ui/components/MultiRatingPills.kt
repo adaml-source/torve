@@ -2,24 +2,29 @@ package com.streamvault.android.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.streamvault.android.ui.theme.Snow
 import com.streamvault.domain.model.MediaRatings
 import com.streamvault.domain.model.RatingDisplayPrefs
 import com.streamvault.domain.model.RatingPillStyle
 import com.streamvault.domain.model.RatingSource
+import com.streamvault.domain.model.calculateTorveScore
+import com.streamvault.domain.model.deriveProvidersToRender
 
 val LocalRatingPrefs = staticCompositionLocalOf { RatingDisplayPrefs() }
 
@@ -33,32 +38,45 @@ private val MalBlue = Color(0xFF2E51A2)
 private val ChipBg = Color(0xFF1A1A2E)
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 fun MultiRatingPills(
     ratings: MediaRatings,
     modifier: Modifier = Modifier,
     prefs: RatingDisplayPrefs = LocalRatingPrefs.current,
 ) {
-    if (!prefs.showRatingsOnCards) return
+    val enabledProviders = prefs.enabledProviders.filterNot {
+        it == RatingSource.TORVE && !prefs.showTorveScoreOnCards
+    }
+    val providersToRender = deriveProvidersToRender(
+        enabledProviders = enabledProviders,
+        providerOrder = prefs.providerOrder,
+        maxRatingsOnCard = prefs.maxRatingsOnCard,
+    )
 
-    val enabledSources = prefs.sources
-        .filter { it.enabled }
-        .sortedBy { it.order }
-        .map { it.source }
-
-    val pills = enabledSources.mapNotNull { source ->
-        val value = getRatingValue(source, ratings) ?: return@mapNotNull null
+    val pills = providersToRender.map { source ->
+        val value = getRatingValue(source, ratings, prefs)
         source to value
-    }.take(prefs.maxPillsOnCard)
+    }
 
     if (pills.isEmpty()) return
 
-    Row(
-        modifier = modifier.padding(horizontal = 2.dp, vertical = 2.dp),
+    FlowRow(
+        modifier = modifier
+            .testTag("rating_pills")
+            .padding(horizontal = 2.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(3.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         pills.forEach { (source, value) ->
-            RatingChip(source = source, displayValue = value, style = prefs.pillStyle, ratings = ratings)
+            key(source) {
+                RatingChip(
+                    source = source,
+                    displayValue = value ?: "--",
+                    isMissing = value == null,
+                    style = prefs.pillStyle,
+                    ratings = ratings,
+                )
+            }
         }
     }
 }
@@ -67,13 +85,20 @@ fun MultiRatingPills(
 private fun RatingChip(
     source: RatingSource,
     displayValue: String,
+    isMissing: Boolean,
     style: RatingPillStyle,
     ratings: MediaRatings,
 ) {
-    val (iconColor, textColor) = getSourceColors(source, displayValue, ratings)
+    val (iconColor, textColor) = if (isMissing) {
+        val muted = Color(0xFF777777)
+        muted to muted
+    } else {
+        getSourceColors(source, displayValue, ratings)
+    }
 
     Row(
         modifier = Modifier
+            .testTag("rating_chip_${source.name}")
             .background(ChipBg.copy(alpha = 0.85f), RoundedCornerShape(4.dp))
             .padding(horizontal = 5.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -127,6 +152,7 @@ private fun RatingChip(
 private fun getSourceColors(source: RatingSource, displayValue: String, ratings: MediaRatings): Pair<Color, Color> {
     val defaultText = Color(0xFFCCCCCC)
     return when (source) {
+        RatingSource.TORVE -> Color(0xFFFFC940) to Color(0xFFFFC940)
         RatingSource.IMDB -> ImdbYellow to defaultText
         RatingSource.ROTTEN_TOMATOES -> {
             val pct = ratings.rottenTomatoesScore ?: 0
@@ -155,8 +181,9 @@ private fun getSourceColors(source: RatingSource, displayValue: String, ratings:
     }
 }
 
-private fun getRatingValue(source: RatingSource, ratings: MediaRatings): String? {
+private fun getRatingValue(source: RatingSource, ratings: MediaRatings, prefs: RatingDisplayPrefs): String? {
     return when (source) {
+        RatingSource.TORVE -> calculateTorveScore(ratings, prefs.torveWeights)?.let { "%.0f".format(it) }
         RatingSource.IMDB -> ratings.imdbScore?.let { "%.1f".format(it) }
         RatingSource.ROTTEN_TOMATOES -> ratings.rottenTomatoesScore?.let { "${it}%" }
         RatingSource.RT_AUDIENCE -> ratings.rtAudienceScore?.let { "${it}%" }
@@ -173,6 +200,7 @@ private fun getRatingValue(source: RatingSource, ratings: MediaRatings): String?
  * Get the brand color for a rating source — used in settings screen.
  */
 fun getRatingSourceColor(source: RatingSource): Color = when (source) {
+    RatingSource.TORVE -> Color(0xFFFFC940)
     RatingSource.IMDB -> ImdbYellow
     RatingSource.ROTTEN_TOMATOES -> Color(0xFFFA320A)
     RatingSource.RT_AUDIENCE -> Color(0xFFFFA500)
@@ -188,6 +216,7 @@ fun getRatingSourceColor(source: RatingSource): Color = when (source) {
  * Example display values for the settings screen.
  */
 fun getRatingSourceExample(source: RatingSource): String = when (source) {
+    RatingSource.TORVE -> "e.g. 84/100 weighted score"
     RatingSource.IMDB -> "e.g. 7.5/10"
     RatingSource.ROTTEN_TOMATOES -> "e.g. 81% (critics)"
     RatingSource.RT_AUDIENCE -> "e.g. 92% (audience)"

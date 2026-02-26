@@ -29,8 +29,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -73,9 +73,8 @@ import com.streamvault.android.ui.theme.Steel
 import com.streamvault.domain.model.CustomSection
 import com.streamvault.domain.model.HomeSection
 import com.streamvault.domain.model.HomeSectionConfig
-import com.streamvault.domain.model.PosterOrientation
-import com.streamvault.domain.model.PosterSize
 import com.streamvault.presentation.home.HomeViewModel
+import com.streamvault.presentation.settings.SettingsViewModel
 import org.koin.compose.koinInject
 
 private sealed interface HomeLayoutItem {
@@ -96,9 +95,13 @@ fun HomeLayoutScreen(
     onAddCustomSection: () -> Unit = {},
     onEditCustomSection: (String) -> Unit = {},
     viewModel: HomeViewModel = koinInject(),
+    settingsViewModel: SettingsViewModel = koinInject(),
 ) {
     val sectionConfigs by viewModel.sectionConfigs.collectAsState()
     val customSections by viewModel.customSections.collectAsState()
+    val settingsState by settingsViewModel.state.collectAsState()
+    val cardStylePresets = settingsState.cardStylePresets
+    val defaultPresetId = settingsState.globalDefaultPresetId
     var orderedItems by remember(sectionConfigs, customSections) {
         mutableStateOf(
             buildList {
@@ -216,23 +219,31 @@ fun HomeLayoutScreen(
                             onExpandToggle = {
                                 expandedSection = if (expandedSection == config.section) null else config.section
                             },
-                            onOrientationChange = { orientation ->
+                            presets = cardStylePresets,
+                            defaultPresetId = defaultPresetId,
+                            onPresetChange = { presetId ->
                                 val updated = orderedItems.map {
                                     if (it is SectionItem && it.config.section == config.section) {
-                                        it.copy(config = it.config.copy(orientation = orientation))
+                                        it.copy(config = it.config.copy(presetId = presetId))
                                     } else it
                                 }
                                 orderedItems = updated
-                                viewModel.updateSectionLayout(config.section, orientation, config.size)
+                                viewModel.updateSectionPreset(config.section, presetId)
                             },
-                            onSizeChange = { size ->
+                            onResetSection = {
                                 val updated = orderedItems.map {
                                     if (it is SectionItem && it.config.section == config.section) {
-                                        it.copy(config = it.config.copy(size = size))
+                                        it.copy(
+                                            config = it.config.copy(
+                                                enabled = config.section.defaultEnabled,
+                                                presetId = null,
+                                                customTitle = null,
+                                            ),
+                                        )
                                     } else it
                                 }
                                 orderedItems = updated
-                                viewModel.updateSectionLayout(config.section, config.orientation, size)
+                                viewModel.resetSectionToDefault(config.section)
                             },
                             onDragStart = {
                                 if (!isHero) draggedIndex = index
@@ -465,8 +476,10 @@ private fun SectionRow(
     dragOffset: Float,
     onToggle: (Boolean) -> Unit,
     onExpandToggle: () -> Unit,
-    onOrientationChange: (PosterOrientation) -> Unit,
-    onSizeChange: (PosterSize) -> Unit,
+    presets: List<com.streamvault.domain.model.CardStylePreset>,
+    defaultPresetId: String?,
+    onPresetChange: (String?) -> Unit,
+    onResetSection: () -> Unit,
     onDragStart: () -> Unit,
     onDrag: (Float) -> Unit,
     onDragEnd: () -> Unit,
@@ -580,50 +593,64 @@ private fun SectionRow(
                 color = Gunmetal.copy(alpha = 0.5f),
             ) {
                 Column(Modifier.padding(16.dp)) {
-                    // Orientation
-                    Text("Orientation", color = Silver, style = MaterialTheme.typography.labelLarge)
+                    // Card style preset selector
+                    Text("Card Style", color = Silver, style = MaterialTheme.typography.labelLarge)
                     Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        PosterOrientation.entries.forEach { orientation ->
-                            FilterChip(
-                                selected = config.orientation == orientation,
-                                onClick = { onOrientationChange(orientation) },
-                                label = {
-                                    Text(orientation.name.lowercase().replaceFirstChar { it.uppercase() })
-                                },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = Amber,
-                                    selectedLabelColor = Obsidian,
-                                    containerColor = Gunmetal,
-                                    labelColor = Silver,
-                                ),
-                                shape = RoundedCornerShape(20.dp),
+                    var expanded by remember { mutableStateOf(false) }
+                    val defaultPreset = presets.firstOrNull { it.presetId == defaultPresetId }
+                    val selectedPreset = presets.firstOrNull { it.presetId == config.presetId }
+                    val label = when {
+                        config.presetId == null -> "Default" + (defaultPreset?.let { " (${it.name})" } ?: "")
+                        selectedPreset != null -> selectedPreset.name
+                        else -> "Default"
+                    }
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { expanded = true },
+                        shape = RoundedCornerShape(10.dp),
+                        color = Gunmetal,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Steel.copy(alpha = 0.5f)),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(label, color = Snow, modifier = Modifier.weight(1f))
+                            Icon(
+                                imageVector = if (expanded) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
+                                contentDescription = null,
+                                tint = Silver,
                             )
                         }
                     }
-
-                    Spacer(Modifier.height(16.dp))
-
-                    // Size
-                    Text("Card Size", color = Silver, style = MaterialTheme.typography.labelLarge)
-                    Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        PosterSize.entries.forEach { size ->
-                            FilterChip(
-                                selected = config.size == size,
-                                onClick = { onSizeChange(size) },
-                                label = {
-                                    Text(size.name.lowercase().replaceFirstChar { it.uppercase() })
+                    DropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Default") },
+                            onClick = {
+                                expanded = false
+                                onPresetChange(null)
+                            },
+                        )
+                        presets.forEach { preset ->
+                            DropdownMenuItem(
+                                text = { Text(preset.name) },
+                                onClick = {
+                                    expanded = false
+                                    onPresetChange(preset.presetId)
                                 },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = Amber,
-                                    selectedLabelColor = Obsidian,
-                                    containerColor = Gunmetal,
-                                    labelColor = Silver,
-                                ),
-                                shape = RoundedCornerShape(20.dp),
                             )
                         }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(
+                        onClick = onResetSection,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Reset section to default", color = Amber)
                     }
                 }
             }

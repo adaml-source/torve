@@ -53,17 +53,18 @@ data class HomeSectionConfig(
     val enabled: Boolean,
     val order: Int,
     val customTitle: String? = null,
-    val orientation: PosterOrientation = PosterOrientation.PORTRAIT,
-    val size: PosterSize = PosterSize.MEDIUM,
+    val presetId: String? = null,
 )
+
+fun updateSectionPresetId(
+    configs: List<HomeSectionConfig>,
+    section: HomeSection,
+    presetId: String?,
+): List<HomeSectionConfig> = configs.map { config ->
+    if (config.section == section) config.copy(presetId = presetId) else config
+}
 
 /** Returns true if this shelf matches the given HomeSection based on shelf id. */
 fun CatalogShelf.matchesSection(section: HomeSection): Boolean =
     section.shelfId != null && id == section.shelfId
-
-/** Poster card orientation preference. */
-enum class PosterOrientation { PORTRAIT, LANDSCAPE }
-
-/** Poster card size preference. */
-enum class PosterSize { SMALL, MEDIUM, LARGE }
 
