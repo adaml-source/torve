@@ -178,11 +178,21 @@ fun CustomSectionEditorScreen(
                     yearTo = ""
                     minRating = ""
                     sortBy = "popularity.desc"
-                } else if (result.mode == "person_credits" && result.personId != null) {
-                    // Person credits mode: auto-add as cast or crew filter
+                } else if (result.mode == "person_filtered" && result.specificItems.isNotEmpty()) {
+                    // Person filtered with AI-identified specific titles
+                    specificItems = result.specificItems
+                    if (result.title.isNotBlank()) title = result.title
+                    selectedGenres = emptyList()
+                    keywordIds = emptyList()
+                    inferredKeywordTerms = emptyList()
+                    yearFrom = ""
+                    yearTo = ""
+                    minRating = ""
+                    sortBy = "popularity.desc"
+                } else if ((result.mode == "person_credits" || result.mode == "person_filtered") && result.personId != null) {
+                    // Person credits or person_filtered fallback (no specific titles): add as cast/crew filter
                     specificItems = emptyList()
                     if (result.title.isNotBlank()) title = result.title
-                    inferredKeywordTerms = emptyList()
                     val pId = result.personId!!
                     val saved = SavedPerson(pId, result.personName ?: "")
                     if (result.isDirector) {
@@ -190,8 +200,9 @@ fun CustomSectionEditorScreen(
                     } else {
                         castPersons = (castPersons + saved).distinctBy { it.id }
                     }
-                    // Apply any additional filters the AI extracted
                     if (result.genreIds.isNotEmpty()) selectedGenres = result.genreIds
+                    if (result.keywordIds.isNotEmpty()) keywordIds = result.keywordIds
+                    inferredKeywordTerms = result.inferredKeywordTerms
                     result.yearFrom?.let { yearFrom = it.toString() }
                     result.yearTo?.let { yearTo = it.toString() }
                     if (result.sortBy.isNotBlank()) sortBy = result.sortBy

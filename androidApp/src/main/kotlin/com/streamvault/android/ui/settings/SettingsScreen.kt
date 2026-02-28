@@ -1083,41 +1083,6 @@ fun SettingsScreen(
                 // Language selector
 
                 var languageExpanded by remember { mutableStateOf(false) }
-                var pendingLanguage by remember { mutableStateOf<AppLanguage?>(null) }
-
-                // Confirmation dialog before applying locale change (restarts activity)
-                pendingLanguage?.let { lang ->
-                    AlertDialog(
-                        onDismissRequest = { pendingLanguage = null },
-                        title = { Text(stringResource(R.string.settings_language), color = Snow) },
-                        text = {
-                            Text(
-                                stringResource(R.string.language_change_confirm, lang.displayName),
-                                color = StreamVault.colors.textSecondary,
-                            )
-                        },
-                        confirmButton = {
-                            Button(
-                                onClick = {
-                                    val selected = lang
-                                    pendingLanguage = null
-                                    viewModel.setAppLanguage(selected)
-                                    AppCompatDelegate.setApplicationLocales(
-                                        LocaleListCompat.forLanguageTags(selected.code),
-                                    )
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Amber),
-                            ) { Text("OK", color = Obsidian) }
-                        },
-                        dismissButton = {
-                            TextButton(onClick = { pendingLanguage = null }) {
-                                Text(stringResource(R.string.common_cancel), color = StreamVault.colors.textSecondary)
-                            }
-                        },
-                        containerColor = Charcoal,
-                    )
-                }
-
                 ExposedDropdownMenuBox(
                     expanded = languageExpanded,
                     onExpandedChange = { languageExpanded = !languageExpanded },
@@ -1152,10 +1117,11 @@ fun SettingsScreen(
                             DropdownMenuItem(
                                 text = { Text(lang.displayName) },
                                 onClick = {
+                                    viewModel.setAppLanguage(lang)
                                     languageExpanded = false
-                                    if (lang != state.appLanguage) {
-                                        pendingLanguage = lang
-                                    }
+                                    AppCompatDelegate.setApplicationLocales(
+                                        LocaleListCompat.forLanguageTags(lang.code),
+                                    )
                                 },
                             )
                         }
@@ -1488,12 +1454,12 @@ fun SettingsScreen(
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Ruby),
                     ) {
-                        Text(stringResource(R.string.common_reset))
+                        Text("Reset")
                     }
                 },
                 dismissButton = {
                     TextButton(onClick = { showResetAppearanceConfirm = false }) {
-                        Text(stringResource(R.string.common_cancel))
+                        Text("Cancel")
                     }
                 },
             )

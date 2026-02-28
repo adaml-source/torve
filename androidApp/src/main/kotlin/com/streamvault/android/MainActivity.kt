@@ -50,8 +50,9 @@ class MainActivity : AppCompatActivity() {
             var showSplash by rememberSaveable { mutableStateOf(true) }
 
             StreamVaultTheme(themeMode = settingsState.themeMode) {
-                // Release native splash as soon as compose is ready
-                // (must be outside the if/else so it also fires on Activity recreation, e.g. locale change)
+                // Dismiss native splash — MUST be outside if/else so it also
+                // fires on recreation (e.g. locale change) when showSplash
+                // is restored as false by rememberSaveable.
                 LaunchedEffect(Unit) { keepSplash = false }
 
                 if (showSplash) {

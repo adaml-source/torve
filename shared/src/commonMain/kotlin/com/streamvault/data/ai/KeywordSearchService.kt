@@ -5,7 +5,7 @@ import com.streamvault.domain.repository.MetadataRepository
 
 data class KeywordSearchResult(
     val title: String,
-    val mode: String = "discover", // "discover", "specific", or "person_credits"
+    val mode: String = "discover", // "discover", "specific", "person_credits", or "person_filtered"
     val genreIds: List<Int> = emptyList(),
     val keywordIds: List<Int> = emptyList(),
     val inferredKeywordTerms: List<String> = emptyList(),
@@ -38,9 +38,14 @@ class KeywordSearchService(
         val suggestion = aiSuggestClient.suggest(provider, apiKey, phrase)
         val title = suggestion.title.ifBlank { phrase.replaceFirstChar { it.uppercase() } }
 
-        // Person credits mode: AI identified an actor/director query
+        // Person credits mode: AI identified an actor/director query (no extra filters)
         if (suggestion.mode == "person_credits" && !suggestion.personName.isNullOrBlank()) {
             return resolvePersonCredits(suggestion, title)
+        }
+
+        // Person filtered mode: person + genre/keyword/era constraints → discover with cast/crew
+        if (suggestion.mode == "person_filtered" && !suggestion.personName.isNullOrBlank()) {
+            return resolvePersonFiltered(suggestion, title)
         }
 
         // Specific mode: AI identified exact titles → resolve via TMDB search
@@ -134,6 +139,66 @@ class KeywordSearchService(
             mode = "person_credits",
             personId = person.id,
             personName = person.name,
+            isDirector = isDirector,
+            genreIds = suggestion.genreIds,
+            yearFrom = suggestion.yearFrom,
+            yearTo = suggestion.yearTo,
+            sortBy = suggestion.sortBy,
+            minRating = suggestion.minRating,
+            mediaType = suggestion.mediaType,
+        )
+    }
+
+    /**
+     * Resolve person_filtered mode: AI identifies specific titles matching
+     * person + constraints. We resolve those titles via TMDB search,
+     * and keep the person ID as fallback for discover if needed.
+     */
+    private suspend fun resolvePersonFiltered(
+        suggestion: AiSuggestResult,
+        title: String,
+    ): KeywordSearchResult {
+        val personName = suggestion.personName!!
+        val isDirector = suggestion.personRole == "directing"
+
+        // Resolve person name → TMDB person ID (for fallback / custom section editor)
+        val personResults = try { metadataRepo.searchPerson(personName) } catch (_: Exception) { emptyList() }
+        val person = personResults.firstOrNull()
+
+        // Resolve AI-identified specific titles via TMDB search
+        val specificItems = if (suggestion.specificTitles.isNotEmpty()) {
+            suggestion.specificTitles.mapNotNull { aiTitle ->
+                try {
+                    val results = metadataRepo.searchMulti(aiTitle.title)
+                    val match = results.firstOrNull { item ->
+                        val titleMatch = item.title.equals(aiTitle.title, ignoreCase = true)
+                        val yearMatch = aiTitle.year == null || item.year == aiTitle.year
+                        titleMatch && yearMatch
+                    } ?: results.firstOrNull { item ->
+                        item.title.contains(aiTitle.title, ignoreCase = true)
+                    } ?: results.firstOrNull()
+                    match?.let {
+                        val tmdbId = it.tmdbId ?: it.id.toIntOrNull() ?: return@let null
+                        val type = when (it.type) {
+                            com.streamvault.domain.model.MediaType.SERIES -> "tv"
+                            else -> "movie"
+                        }
+                        SpecificItem(tmdbId = tmdbId, title = it.title, mediaType = type)
+                    }
+                } catch (_: Exception) {
+                    null
+                }
+            }.distinctBy { it.tmdbId }
+        } else {
+            emptyList()
+        }
+
+        return KeywordSearchResult(
+            title = title,
+            mode = "person_filtered",
+            specificItems = specificItems,
+            personId = person?.id,
+            personName = person?.name ?: personName,
             isDirector = isDirector,
             genreIds = suggestion.genreIds,
             yearFrom = suggestion.yearFrom,

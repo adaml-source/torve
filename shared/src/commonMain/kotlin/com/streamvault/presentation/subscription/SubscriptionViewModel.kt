@@ -2,6 +2,7 @@ package com.streamvault.presentation.subscription
 
 import com.streamvault.data.subscription.RebateCodeApi
 import com.streamvault.data.subscription.RebateResult
+import com.streamvault.domain.device.DeviceIdProvider
 import com.streamvault.domain.model.PremiumFeature
 import com.streamvault.domain.model.SubscriptionTier
 import com.streamvault.domain.repository.SubscriptionRepository
@@ -17,6 +18,7 @@ import kotlinx.coroutines.launch
 class SubscriptionViewModel(
     private val subscriptionRepo: SubscriptionRepository,
     private val rebateCodeApi: RebateCodeApi,
+    private val deviceIdProvider: DeviceIdProvider,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(SubscriptionUiState())
@@ -83,7 +85,8 @@ class SubscriptionViewModel(
         scope.launch {
             _state.update { it.copy(isRedeeming = true, error = null, rebateSuccess = false) }
             try {
-                when (val result = rebateCodeApi.redeemCode(code)) {
+                val deviceId = deviceIdProvider.getDeviceId()
+                when (val result = rebateCodeApi.redeemCode(code, deviceId)) {
                     is RebateResult.Success -> {
                         subscriptionRepo.activateSubscription(
                             SubscriptionTier.LIFETIME,

@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -27,12 +28,16 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -79,6 +84,8 @@ fun PaywallScreen(
                 state = state,
                 onPurchase = { viewModel.purchase("mock_token_${System.currentTimeMillis()}") },
                 onRestore = { viewModel.restorePurchase("restore_token") },
+                onRebateCodeChange = viewModel::updateRebateCode,
+                onRedeemCode = viewModel::redeemCode,
             )
         }
     }
@@ -173,6 +180,8 @@ private fun FreeTierContent(
     state: com.streamvault.presentation.subscription.SubscriptionUiState,
     onPurchase: () -> Unit,
     onRestore: () -> Unit,
+    onRebateCodeChange: (String) -> Unit,
+    onRedeemCode: () -> Unit,
 ) {
     Column(
         modifier = Modifier.padding(16.dp),
@@ -285,7 +294,76 @@ private fun FreeTierContent(
             )
         }
 
+        // Rebate code section
+        if (state.rebateCodesEnabled && !state.rebateSuccess) {
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Spacer(Modifier.height(8.dp))
+            RebateCodeSection(
+                code = state.rebateCode,
+                isRedeeming = state.isRedeeming,
+                onCodeChange = onRebateCodeChange,
+                onRedeem = onRedeemCode,
+            )
+        }
+
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun RebateCodeSection(
+    code: String,
+    isRedeeming: Boolean,
+    onCodeChange: (String) -> Unit,
+    onRedeem: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        TextButton(onClick = { expanded = !expanded }) {
+            Text(
+                text = stringResource(R.string.paywall_have_code),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        AnimatedVisibility(visible = expanded) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedTextField(
+                    value = code,
+                    onValueChange = onCodeChange,
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text(stringResource(R.string.paywall_enter_code)) },
+                    singleLine = true,
+                    enabled = !isRedeeming,
+                    shape = RoundedCornerShape(12.dp),
+                )
+                Button(
+                    onClick = onRedeem,
+                    enabled = code.isNotBlank() && !isRedeeming,
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    if (isRedeeming) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                    } else {
+                        Text(stringResource(R.string.paywall_redeem))
+                    }
+                }
+            }
+        }
     }
 }
 

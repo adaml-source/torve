@@ -319,26 +319,59 @@ class CatalogViewModel(
             try {
                 val result = keywordSearchService.searchWithAi(provider, apiKey, query)
 
-                val items: List<MediaItem> = if (result.mode == "specific" && result.specificItems.isNotEmpty()) {
-                    result.specificItems.mapNotNull { specific ->
-                        try {
-                            metadataRepo.getDetail(specific.mediaType, specific.tmdbId)
-                        } catch (_: Exception) {
-                            null
+                val items: List<MediaItem> = when {
+                    result.mode == "specific" && result.specificItems.isNotEmpty() -> {
+                        result.specificItems.mapNotNull { specific ->
+                            try {
+                                metadataRepo.getDetail(specific.mediaType, specific.tmdbId)
+                            } catch (_: Exception) {
+                                null
+                            }
                         }
                     }
-                } else {
-                    val type = result.mediaType ?: mediaType
-                    metadataRepo.discover(
-                        type = type,
-                        page = 1,
-                        sortBy = result.sortBy,
-                        withGenres = result.genreIds.takeIf { it.isNotEmpty() }?.joinToString(","),
-                        minRating = result.minRating,
-                        year = result.yearFrom,
-                        yearTo = result.yearTo,
-                        withKeywords = result.keywordIds.takeIf { it.isNotEmpty() }?.joinToString("|"),
-                    ).items
+                    result.mode == "person_credits" && result.personId != null -> {
+                        metadataRepo.getPersonCredits(result.personId!!)
+                    }
+                    result.mode == "person_filtered" && result.specificItems.isNotEmpty() -> {
+                        // AI identified specific titles — resolve each via TMDB
+                        result.specificItems.mapNotNull { specific ->
+                            try {
+                                metadataRepo.getDetail(specific.mediaType, specific.tmdbId)
+                            } catch (_: Exception) {
+                                null
+                            }
+                        }
+                    }
+                    result.mode == "person_filtered" && result.personId != null -> {
+                        // Fallback: AI didn't return specific titles, use discover with cast filter
+                        val type = result.mediaType ?: mediaType
+                        val castParam = if (!result.isDirector) result.personId.toString() else null
+                        val crewParam = if (result.isDirector) result.personId.toString() else null
+                        metadataRepo.discover(
+                            type = type,
+                            page = 1,
+                            sortBy = result.sortBy,
+                            withGenres = result.genreIds.takeIf { it.isNotEmpty() }?.joinToString(","),
+                            minRating = result.minRating,
+                            year = result.yearFrom,
+                            yearTo = result.yearTo,
+                            withCast = castParam,
+                            withCrew = crewParam,
+                        ).items
+                    }
+                    else -> {
+                        val type = result.mediaType ?: mediaType
+                        metadataRepo.discover(
+                            type = type,
+                            page = 1,
+                            sortBy = result.sortBy,
+                            withGenres = result.genreIds.takeIf { it.isNotEmpty() }?.joinToString(","),
+                            minRating = result.minRating,
+                            year = result.yearFrom,
+                            yearTo = result.yearTo,
+                            withKeywords = result.keywordIds.takeIf { it.isNotEmpty() }?.joinToString("|"),
+                        ).items
+                    }
                 }
 
                 val finalItems = if (shouldDedupe()) items.dedupeByStableKey() else items

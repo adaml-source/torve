@@ -170,7 +170,8 @@ class AiSuggestClient(private val httpClient: HttpClient) {
             addAll(
                 listOf(
                     "gemini-3.0-flash",
-                    "gemini-3.0-pro",
+                    "gemini-3.1-pro-preview",
+                    "gemini-2.5-flash",
                     "gemini-3.0-flash-lite",
                 ),
             )
@@ -230,12 +231,13 @@ class AiSuggestClient(private val httpClient: HttpClient) {
         // flash is the quality floor; flash-lite is fallback only
         val preferred = listOf(
             "gemini-3.0-flash",
-            "gemini-3.0-pro",
+            "gemini-3.1-pro-preview",
+            "gemini-2.5-flash",
             "gemini-3.0-flash-lite",
         )
         return preferred.firstOrNull { pref ->
             models.any { it.startsWith(pref) }
-        } ?: models.firstOrNull { it.startsWith("gemini-3") }
+        } ?: models.firstOrNull { it.startsWith("gemini-") }
     }
 
     private fun isModelNotFound(errorBody: String): Boolean {
@@ -253,11 +255,12 @@ class AiSuggestClient(private val httpClient: HttpClient) {
 
         return """You are a TMDB query parser. Convert the user's natural language into a structured JSON query. Extract ONLY what is explicitly stated or directly implied. Do NOT add creative associations or hallucinate related topics.
 
-You operate in THREE modes:
+You operate in FOUR modes:
 
-MODE 1 — "discover": The user describes a CATEGORY, GENRE, MOOD, ERA, or THEME.
+MODE 1 — "discover": The user describes a CATEGORY, GENRE, MOOD, ERA, or THEME (no specific person mentioned).
 MODE 2 — "specific": The user describes a SPECIFIC movie/show by PLOT, SCENE, CHARACTERS, or MEMORABLE MOMENTS.
-MODE 3 — "person_credits": The user asks for movies/shows by a specific ACTOR or DIRECTOR.
+MODE 3 — "person_credits": The user asks for ALL movies/shows by a specific ACTOR or DIRECTOR with NO additional filters.
+MODE 4 — "person_filtered": The user asks for movies/shows by a specific ACTOR or DIRECTOR AND adds extra constraints (genre, theme, era, setting, rating).
 
 Available MOVIE genre IDs: $movieGenres
 Available TV genre IDs: $tvGenres
@@ -270,27 +273,42 @@ For DISCOVER mode:
 For SPECIFIC mode:
 {"mode":"specific","title":"Section Title","genreIds":[],"keywordTerms":[],"yearFrom":null,"yearTo":null,"sortBy":"popularity.desc","minRating":null,"mediaType":null,"specificTitles":[{"title":"Movie Name","year":1998,"mediaType":"movie"}],"personName":null,"personRole":null}
 
-For PERSON_CREDITS mode:
+For PERSON_CREDITS mode (unfiltered — show entire filmography):
 {"mode":"person_credits","title":"Movies with Denzel Washington","genreIds":[],"keywordTerms":[],"yearFrom":null,"yearTo":null,"sortBy":"popularity.desc","minRating":null,"mediaType":"movie","specificTitles":[],"personName":"Denzel Washington","personRole":"acting"}
+
+For PERSON_FILTERED mode (person + extra constraints — return the ACTUAL matching titles):
+{"mode":"person_filtered","title":"Adam Sandler Beach Movies","genreIds":[],"keywordTerms":[],"yearFrom":null,"yearTo":null,"sortBy":"popularity.desc","minRating":null,"mediaType":"movie","specificTitles":[{"title":"50 First Dates","year":2004,"mediaType":"movie"},{"title":"Just Go With It","year":2011,"mediaType":"movie"},{"title":"Blended","year":2014,"mediaType":"movie"},{"title":"Murder Mystery","year":2019,"mediaType":"movie"}],"personName":"Adam Sandler","personRole":"acting"}
 
 CRITICAL RULES — STRICT EXTRACTION ONLY:
 - NEVER infer topics, themes, or keywords the user did not mention
 - "Christmas movies since 2015" → keywordTerms:["christmas"], yearFrom:2015. NOTHING ELSE. Not "space", not "winter", not "holiday", just "christmas"
-- "movies with Denzel Washington" → person_credits mode, personName:"Denzel Washington", personRole:"acting". NOT keyword search. NOT "faith". NOT "drama". Just his filmography.
+- "movies with Denzel Washington" → person_credits mode (NO extra filters). Just his filmography.
+- "Adam Sandler movies on the beach" → person_filtered mode. Use your REAL KNOWLEDGE to list the actual Adam Sandler movies set on beaches as specificTitles.
+- "horror movies with Nicolas Cage" → person_filtered mode. List the actual Nicolas Cage horror movies you know as specificTitles.
+- "Nolan sci-fi movies" → person_filtered mode, personRole:"directing". List the actual Christopher Nolan sci-fi movies as specificTitles.
+- For person_filtered: you MUST populate specificTitles with the REAL movies/shows you know that match. Use your knowledge — do NOT leave specificTitles empty.
 - "best horror movies" → discover mode, genreIds:[27], sortBy:"vote_average.desc", minRating:7.0. No keywords needed — genre covers it.
 - "dark sci-fi thriller from the 90s" → discover mode, genreIds:[878,53], yearFrom:1990, yearTo:1999. No keywords unless the user mentioned a specific theme.
 - "romantic comedies on Netflix" → discover mode, genreIds:[35,10749]. No extra keywords.
 - keywordTerms should ONLY contain specific themes NOT covered by genres (e.g. "christmas", "zombie", "heist", "vampire", "alien", "robot", "time travel", "beach", "island", "space")
 - If a genre ID covers the concept, do NOT also add it as a keyword
-- If the user mentions an actor or director by name, ALWAYS use person_credits mode
 - personRole: "acting" for actors, "directing" for directors/filmmakers
 - For decade references: "90s" → yearFrom:1990, yearTo:1999
 - "new" or "recent" → yearFrom:current_year-2, sortBy:"primary_release_date.desc"
 - "best" or "top" → sortBy:"vote_average.desc", minRating:7.0
 
-How to choose the mode:
-- "movies with [person name]" or "starring [person]" or "directed by [person]" → PERSON_CREDITS
-- "romantic comedy on the beach" → DISCOVER (genre + keyword "beach")
+How to choose between PERSON_CREDITS vs PERSON_FILTERED:
+- "movies with Adam Sandler" → PERSON_CREDITS (no extra constraints, show full filmography)
+- "Adam Sandler comedies" → PERSON_FILTERED (person + genre constraint)
+- "Adam Sandler movies on the beach" → PERSON_FILTERED (person + keyword "beach")
+- "recent Tom Hanks dramas" → PERSON_FILTERED (person + genre + era)
+- "directed by Spielberg" → PERSON_CREDITS (no extra constraints)
+- "Spielberg war movies" → PERSON_FILTERED (person + genre)
+
+How to choose the mode (general):
+- Person name WITHOUT extra constraints → PERSON_CREDITS
+- Person name WITH genre/keyword/era/rating → PERSON_FILTERED
+- "romantic comedy on the beach" (no person) → DISCOVER (genre + keyword "beach")
 - "the one where they search for a missing soldier in WW2" → SPECIFIC (plot description)
 - "dark sci-fi thriller" → DISCOVER (genres only, no keywords needed)
 - "that movie where a guy wakes up reliving the same day" → SPECIFIC (Groundhog Day)
