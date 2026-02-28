@@ -16,7 +16,7 @@ class RebateCodeApi(private val httpClient: HttpClient) {
         private const val BASE_URL = "https://torve-rebate.torve-api.workers.dev"
 
         /** Rebate code redemption via Cloudflare Worker + KV. */
-        const val ENABLED = true
+        const val ENABLED = false
 
         private const val MAX_ATTEMPTS = 5
         private const val WINDOW_MS = 60 * 60 * 1000L // 1 hour
