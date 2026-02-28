@@ -1,0 +1,509 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App -->
+    <string name="app_name">Torve</string>
+    <string name="widget_description">Mostra la tua lista di contenuti in corso</string>
+    <string name="widget_name">Continua a guardare</string>
+
+    <!-- Navigation -->
+    <string name="nav_home">Home</string>
+    <string name="nav_movies">Film</string>
+    <string name="nav_tv_shows">Serie TV</string>
+    <string name="nav_channels">TV in diretta</string>
+    <string name="nav_watchlist">Lista</string>
+    <string name="nav_settings">Impostazioni</string>
+
+    <!-- Common Actions -->
+    <string name="common_connect">Connetti</string>
+    <string name="common_disconnect">Disconnetti</string>
+    <string name="common_cancel">Annulla</string>
+    <string name="common_add">Aggiungi</string>
+    <string name="common_clear">Cancella</string>
+    <string name="common_retry">Riprova</string>
+    <string name="common_close">Chiudi</string>
+    <string name="common_back">Indietro</string>
+    <string name="common_play">Riproduci</string>
+    <string name="common_pause">Pausa</string>
+    <string name="common_delete">Elimina</string>
+    <string name="common_remove">Rimuovi</string>
+    <string name="common_test">Testa</string>
+    <string name="common_share">Condividi</string>
+    <string name="common_search">Cerca</string>
+    <string name="common_off">Disattivato</string>
+    <string name="common_details">Dettagli</string>
+    <string name="common_apply">Applica</string>
+
+    <!-- Home Screen -->
+    <string name="home_something_went_wrong">Qualcosa è andato storto</string>
+    <string name="home_try_again">Riprova</string>
+    <string name="home_continue_watching">Continua a guardare</string>
+    <string name="home_continue_watching_empty">Inizia a guardare un film o una serie per monitorare i tuoi progressi qui.</string>
+    <string name="home_recommended">Consigliati per te</string>
+    <string name="home_see_all">VEDI TUTTO →</string>
+    <string name="home_in_watchlist">Nella lista</string>
+    <string name="home_watchlist">Lista</string>
+
+    <!-- Detail Screen -->
+    <string name="detail_connect_cloud">Connetti un servizio cloud nelle Impostazioni</string>
+    <string name="detail_finding_streams">Ricerca degli stream…</string>
+    <string name="detail_resolving">Risoluzione…</string>
+    <string name="detail_watchlist">Lista</string>
+    <string name="detail_in_watchlist">Nella lista</string>
+    <string name="detail_watched">Visto</string>
+    <string name="detail_unwatched">Non visto</string>
+    <string name="detail_watch_trailer">Guarda il trailer</string>
+    <string name="detail_select_manually">Seleziona manualmente</string>
+    <string name="detail_director">Regia: </string>
+    <string name="detail_cast">Cast</string>
+    <string name="detail_more_like_this">Titoli simili</string>
+
+    <!-- Player Screen -->
+    <string name="player_playback_error">Errore di riproduzione</string>
+    <string name="player_retry">Riprova</string>
+    <string name="player_go_back">Torna indietro</string>
+    <string name="player_rewind">Indietro 10s</string>
+    <string name="player_forward">Avanti 10s</string>
+    <string name="player_track_selection">Selezione traccia</string>
+    <string name="player_subtitles">Sottotitoli</string>
+    <string name="player_audio">Audio</string>
+    <string name="player_selected">Selezionato</string>
+
+    <!-- Settings Screen -->
+    <string name="settings_title">Impostazioni</string>
+    <string name="settings_profiles">Profili</string>
+    <string name="settings_subscription">Acquista</string>
+    <string name="settings_downloads">Download</string>
+    <string name="settings_calendar">Calendario</string>
+
+    <string name="settings_cloud_service">Servizio cloud</string>
+    <string name="settings_provider">Provider</string>
+    <string name="settings_connected">Connesso</string>
+    <string name="settings_premium_until">Premium fino al %1$s</string>
+    <string name="settings_go_to">Vai a:</string>
+    <string name="settings_enter_code">Inserisci il codice:</string>
+    <string name="settings_waiting_auth">In attesa di autorizzazione…</string>
+    <string name="settings_api_key">Chiave API</string>
+    <string name="settings_device_auth">Autenticazione dispositivo</string>
+
+    <string name="settings_trakt">Trakt.tv</string>
+    <string name="settings_connect_trakt">Connetti Trakt</string>
+    <string name="settings_movies">Film</string>
+    <string name="settings_episodes">Episodi</string>
+    <string name="settings_watch_time">Tempo di visione</string>
+    <string name="settings_scrobble">Scrobble</string>
+    <string name="settings_scrobble_desc">Traccia automaticamente quello che guardi</string>
+    <string name="settings_api_status">API: %1$s</string>
+
+    <string name="settings_simkl">SIMKL</string>
+    <string name="settings_connect_simkl">Connetti SIMKL</string>
+
+    <string name="settings_live_tv">TV in diretta</string>
+    <string name="settings_no_playlists">Nessuna playlist configurata</string>
+    <string name="settings_channels_count">%1$d canali</string>
+    <string name="settings_add_playlist">Aggiungi playlist</string>
+
+    <string name="settings_stream_quality">Qualità dello stream</string>
+    <string name="settings_max_quality">Qualità massima</string>
+    <string name="settings_min_quality">Qualità minima</string>
+    <string name="settings_max_file_size">Dimensione massima file (MB)</string>
+    <string name="settings_no_limit">Nessun limite</string>
+    <string name="settings_cached_only">Solo in cache</string>
+    <string name="settings_cached_only_desc">Mostra solo gli stream in cache per la riproduzione istantanea</string>
+    <string name="settings_dedupe_results">Rimuovi duplicati</string>
+    <string name="settings_dedupe_results_desc">Nascondi film o serie ripetuti nelle liste</string>
+    <string name="settings_hdr_content">Contenuti HDR</string>
+    <string name="settings_hdr_content_desc">Includi stream HDR / Dolby Vision</string>
+
+    <string name="settings_playback">Riproduzione</string>
+    <string name="settings_auto_play">Riproduzione automatica del miglior stream</string>
+    <string name="settings_auto_play_desc">Seleziona e riproduci automaticamente il miglior stream</string>
+    <string name="settings_auto_play_next">Riproduci automaticamente il prossimo episodio</string>
+    <string name="settings_auto_play_next_desc">Riproduci automaticamente l\'episodio successivo al termine di quello corrente</string>
+    <string name="settings_codec_preference">Preferenza codec</string>
+    <string name="settings_hdr_mode">Modalità HDR</string>
+
+    <string name="settings_kodi_remote">Telecomando Kodi</string>
+    <string name="settings_no_kodi_hosts">Nessun host Kodi configurato</string>
+    <string name="settings_add_kodi_host">Aggiungi host Kodi</string>
+    <string name="settings_kodi_name">Nome</string>
+    <string name="settings_kodi_name_hint">Soggiorno</string>
+    <string name="settings_kodi_ip">Indirizzo IP</string>
+    <string name="settings_kodi_port">Porta</string>
+
+    <string name="settings_appearance">Aspetto</string>
+    <string name="settings_theme">Tema</string>
+    <string name="settings_language">Lingua</string>
+    <string name="language_change_confirm">Cambiare la lingua in %1$s riavvierà l\'app. Continuare?</string>
+
+    <string name="settings_storage">Archiviazione</string>
+    <string name="settings_clear_cache">Svuota cache</string>
+    <string name="settings_clear_cache_desc">Rimuovi metadati e immagini memorizzati nella cache</string>
+    <string name="settings_cleared">Svuotata!</string>
+    <string name="settings_clear_cache_confirm">Questo rimuoverà tutti i metadati memorizzati nella cache. Potrebbe essere necessario ricaricare i contenuti.</string>
+
+    <string name="settings_backup_sync">Backup e sincronizzazione</string>
+    <string name="settings_last_backup">Ultimo backup: %1$s</string>
+    <string name="settings_export_backup">Esporta backup</string>
+    <string name="settings_import_backup">Importa backup</string>
+    <string name="settings_backup_desc">Esporta i tuoi addon, le preferenze, i progressi di visione e i preferiti dei canali in un file. Le chiavi API e i token non vengono mai inclusi.</string>
+
+    <string name="settings_account">Account</string>
+    <string name="settings_account_coming_soon">Sincronizzazione account in arrivo</string>
+    <string name="settings_account_desc">Crea un account per sincronizzare le tue preferenze su tutti i dispositivi.</string>
+
+    <string name="settings_about">Informazioni</string>
+    <string name="settings_privacy_policy">Informativa sulla privacy</string>
+    <string name="settings_terms">Termini e condizioni</string>
+    <string name="settings_help">Aiuto e documentazione</string>
+    <string name="settings_share_app">Condividi app</string>
+    <string name="settings_share_text">Scopri Torve — un bellissimo lettore multimediale e organizzatore di contenuti! https://torve.app</string>
+    <string name="settings_share_title">Condividi Torve</string>
+    <string name="settings_version">Torve v%1$s</string>
+
+    <!-- Paywall Screen -->
+    <string name="paywall_title">Torve Pro</string>
+    <string name="paywall_lifetime_active">Accesso a vita attivato</string>
+    <string name="paywall_full_access">Hai accesso completo a tutte le funzionalità</string>
+    <string name="paywall_free_status">Piano gratuito</string>
+    <string name="paywall_have_code">Hai un codice?</string>
+    <string name="paywall_enter_code">Inserisci codice sconto</string>
+    <string name="paywall_redeem">Riscatta</string>
+    <string name="paywall_redeem_success">Codice riscattato! Accesso a vita attivato.</string>
+    <string name="paywall_unlock">Sblocca Torve Pro</string>
+    <string name="paywall_subtitle">Guarda in streaming, scarica e guarda TV in diretta con un abbonamento Pro</string>
+    <string name="paywall_free">Gratuito</string>
+    <string name="paywall_pro">Pro</string>
+    <string name="paywall_search_browse">Cerca e sfoglia</string>
+    <string name="paywall_stream_playback">Riproduzione in streaming</string>
+    <string name="paywall_downloads">Download</string>
+    <string name="paywall_channels">TV in diretta</string>
+    <string name="paywall_multi_cloud">Multi-Cloud</string>
+    <string name="paywall_trakt_simkl">Sincronizzazione Trakt &amp; SIMKL</string>
+    <string name="paywall_ai_search">Ricerca IA</string>
+    <string name="paywall_rating_pills">Indicatori di valutazione</string>
+    <string name="paywall_custom_home">Home personalizzata</string>
+    <string name="paywall_advanced_filters">Filtri avanzati</string>
+    <string name="paywall_lifetime">A vita</string>
+    <string name="paywall_price">€9,99</string>
+    <string name="paywall_one_time">Pagamento unico, accesso per sempre</string>
+    <string name="paywall_best_value">MIGLIOR OFFERTA</string>
+    <string name="paywall_get_lifetime">Ottieni l\'accesso a vita</string>
+    <string name="paywall_restore">Ripristina acquisto</string>
+
+    <!-- Catalog Screen -->
+    <string name="catalog_failed_to_load">Caricamento non riuscito</string>
+    <string name="catalog_search_movies">Cerca film…</string>
+    <string name="catalog_search_tv">Cerca serie TV…</string>
+    <string name="catalog_search_results">Risultati della ricerca</string>
+    <string name="catalog_no_results">Nessun risultato trovato</string>
+    <string name="catalog_all">Tutti</string>
+    <string name="catalog_filters">Filtri</string>
+    <string name="catalog_clear_all">Cancella tutto</string>
+    <string name="catalog_sort_by">Ordina per</string>
+    <string name="catalog_min_rating">Valutazione minima</string>
+    <string name="catalog_any">Qualsiasi</string>
+    <string name="catalog_release_year">Anno di uscita</string>
+    <string name="catalog_from">Da</string>
+    <string name="catalog_to">A</string>
+    <string name="catalog_runtime">Durata</string>
+    <string name="catalog_apply_filters">Applica filtri</string>
+    <string name="catalog_classic">Classico</string>
+
+    <!-- Channels Screen -->
+    <string name="channels_no_playlists">Nessuna playlist</string>
+    <string name="channels_add_playlist_prompt">Aggiungi una playlist M3U o accesso provider per iniziare</string>
+    <string name="channels_add_playlist">Aggiungi playlist</string>
+    <string name="channels_add_title">Aggiungi playlist</string>
+    <string name="channels_playlist_name">Nome playlist</string>
+    <string name="channels_m3u_url">URL M3U</string>
+    <string name="channels_epg_optional">URL EPG (facoltativo)</string>
+    <string name="channels_server_url">URL del server</string>
+    <string name="channels_username">Nome utente</string>
+    <string name="channels_password">Password</string>
+    <string name="channels_manage_categories">Gestisci categorie</string>
+    <string name="channels_refresh">Aggiorna</string>
+
+    <!-- Downloads Screen -->
+    <string name="download_title">Download</string>
+    <string name="download_no_downloads">Nessun download</string>
+    <string name="download_empty_desc">I contenuti scaricati appariranno qui per la visione offline.</string>
+    <string name="download_queued">In coda</string>
+    <string name="download_paused">In pausa</string>
+    <string name="download_completed">Completato</string>
+    <string name="download_failed">Non riuscito</string>
+    <string name="download_resume">Riprendi</string>
+
+    <!-- Stream Actions -->
+    <string name="action_play_in_torve">Riproduci in Torve</string>
+    <string name="action_play_external">Riproduci nel lettore esterno…</string>
+    <string name="action_download">Scarica</string>
+    <string name="action_download_queued">Download in coda</string>
+    <string name="action_copy_url">Copia URL</string>
+    <string name="action_url_copied">URL copiato negli appunti</string>
+    <string name="action_stream_actions">Azioni stream</string>
+
+    <!-- Stream Picker -->
+    <string name="picker_select_stream">Seleziona stream</string>
+    <string name="picker_cached">In cache</string>
+    <string name="picker_streams_found">%1$d stream trovati</string>
+
+    <!-- Watchlist Screen -->
+    <string name="watchlist_title">Lista</string>
+    <string name="watchlist_all">Tutti</string>
+    <string name="watchlist_movies">Film</string>
+    <string name="watchlist_tv_shows">Serie TV</string>
+    <string name="watchlist_empty">La tua lista è vuota</string>
+    <string name="watchlist_empty_desc">Aggiungi film e serie alla tua lista per tenere traccia di ciò che vuoi guardare.</string>
+    <string name="watchlist_in_progress">In corso</string>
+    <string name="watchlist_history">Cronologia</string>
+    <string name="watchlist_nothing_in_progress">Niente in corso</string>
+    <string name="watchlist_start_watching">Inizia a guardare qualcosa per vederlo qui</string>
+    <string name="watchlist_no_history">Nessuna cronologia</string>
+    <string name="watchlist_history_desc">I contenuti guardati appariranno qui</string>
+    <string name="watchlist_watched_min">Guardato %1$d min</string>
+    <string name="watchlist_added">Aggiunto alla lista</string>
+    <string name="watchlist_removed">Rimosso dalla lista</string>
+
+    <!-- Calendar Screen -->
+    <string name="calendar_title">Calendario</string>
+    <string name="calendar_no_episodes">Nessun episodio in arrivo</string>
+    <string name="calendar_no_episodes_desc">Aggiungi serie TV alla tua lista Trakt per vedere i nuovi episodi qui.</string>
+    <string name="calendar_connect_trakt">Connetti Trakt per vedere il tuo calendario</string>
+    <string name="calendar_connect_trakt_desc">Collega il tuo account Trakt nelle Impostazioni per vedere i prossimi episodi della tua lista.</string>
+    <string name="calendar_error">Errore</string>
+
+    <!-- Episodes -->
+    <string name="episode_season">Stagione %1$d</string>
+    <string name="episode_all_seasons">Tutte le stagioni</string>
+    <string name="episode_mark_season_watched">Segna stagione %1$d come vista</string>
+    <string name="episode_format">S%1$dE%2$d</string>
+
+    <!-- Diagnostics Screen -->
+    <string name="diagnostics_title">Diagnostica</string>
+    <string name="diagnostics_service_health">Stato dei servizi</string>
+    <string name="diagnostics_sync_status">Stato sincronizzazione</string>
+    <string name="diagnostics_content_config">Contenuto e configurazione</string>
+    <string name="diagnostics_stream_prefs">Preferenze stream</string>
+    <string name="diagnostics_rating_config">Configurazione valutazioni</string>
+    <string name="diagnostics_integrations_detail">Dettaglio integrazioni</string>
+    <string name="diagnostics_connected">Connesso</string>
+    <string name="diagnostics_not_configured">Non configurato</string>
+    <string name="diagnostics_never">Mai</string>
+    <string name="diagnostics_copied">Copiato negli appunti</string>
+    <string name="diagnostics_copy">Copia</string>
+
+    <!-- Integrations Screen -->
+    <string name="integrations_title">Integrazioni</string>
+    <string name="integrations_subtitle">Connetti servizi esterni per sincronizzare la tua libreria e i progressi.</string>
+    <string name="integrations_omdb_desc">Chiave API gratuita per valutazioni IMDb, Rotten Tomatoes e Metacritic. Ottieni la tua su omdbapi.com</string>
+    <string name="integrations_omdb_hint">Ottieni una chiave gratuita su omdbapi.com (1.000 richieste/giorno).</string>
+    <string name="integrations_trakt_desc">Autorizzazione dispositivo OAuth e sincronizzazione bidirezionale (lista/cronologia/progressi).</string>
+    <string name="integrations_status_connected">Stato: Connesso</string>
+    <string name="integrations_status_not_connected">Stato: Non connesso</string>
+    <string name="integrations_last_sync">Ultima sincronizzazione: %1$s</string>
+    <string name="integrations_connecting">Connessione…</string>
+    <string name="integrations_syncing">Sincronizzazione…</string>
+    <string name="integrations_sync_complete">Sincronizzazione completata</string>
+    <string name="integrations_sync_now">Sincronizza ora</string>
+    <string name="integrations_simkl_desc">Tracciamento automatico di anime e serie con autorizzazione tramite codice dispositivo.</string>
+    <string name="integrations_jellyfin_desc">Connettiti al tuo server Jellyfin per la sincronizzazione della libreria e la ripresa della visione.</string>
+    <string name="integrations_server_url">URL del server</string>
+    <string name="integrations_test_connection">Testa connessione</string>
+    <string name="integrations_user_profile">Profilo utente</string>
+    <string name="integrations_admin">Admin</string>
+    <string name="integrations_plex_desc">Connetti il tuo server Plex per i badge della libreria e la ripresa della visione.</string>
+    <string name="integrations_plex_url_hint">URL del server (es. http://192.168.1.100:32400)</string>
+    <string name="integrations_access_token">Token di accesso</string>
+    <string name="integrations_plex_token_hint">Trova il tuo token su plex.tv/claim o nelle impostazioni dell\'app Plex.</string>
+    <string name="integrations_testing">Test in corso…</string>
+    <string name="integrations_your_code">Il tuo codice</string>
+    <string name="integrations_code_copied">Codice copiato</string>
+    <string name="integrations_open_browser">Apri nel browser</string>
+
+    <!-- MDBList Screen -->
+    <string name="mdblist_title">MDBList</string>
+    <string name="mdblist_api_key_hint">Ottieni la tua chiave API gratuita su mdblist.com/preferences</string>
+    <string name="mdblist_enter_key">Inserisci chiave API MDBList</string>
+    <string name="mdblist_saved">Salvato</string>
+    <string name="mdblist_save">Salva</string>
+    <string name="mdblist_popular">Popolari</string>
+    <string name="mdblist_most_popular">Liste più popolari</string>
+    <string name="mdblist_load_popular">Carica liste popolari</string>
+    <string name="mdblist_search_lists">Cerca liste</string>
+    <string name="mdblist_search_placeholder">Cerca liste pubbliche…</string>
+    <string name="mdblist_search_results">Risultati della ricerca</string>
+    <string name="mdblist_installed">Liste installate</string>
+    <string name="mdblist_no_lists">Nessuna lista aggiunta.</string>
+    <string name="mdblist_items">%1$d elementi</string>
+    <string name="mdblist_by">di %1$s</string>
+    <string name="mdblist_likes">%1$d mi piace</string>
+    <string name="mdblist_added">Aggiunto</string>
+
+    <!-- Rating Settings Screen -->
+    <string name="ratings_title">Valutazioni</string>
+    <string name="ratings_show_detail">Mostra nella pagina dettaglio</string>
+    <string name="ratings_show_detail_desc">Mostra le valutazioni nella schermata dettaglio film/serie</string>
+    <string name="ratings_torve_detail">Mostra punteggio Torve nel dettaglio</string>
+    <string name="ratings_torve_detail_desc">Mostra il punteggio Torve ponderato nella riga metadati</string>
+    <string name="ratings_torve_cards">Consenti punteggio Torve sulle carte</string>
+    <string name="ratings_torve_cards_desc">Abilita il punteggio Torve negli indicatori</string>
+    <string name="ratings_landscape">Consenti valutazioni su carte orizzontali</string>
+    <string name="ratings_landscape_desc">Mostra indicatori compatti su carte con sfondo</string>
+    <string name="ratings_torve_weights">Pesi del punteggio Torve</string>
+    <string name="ratings_weights_desc">I pesi vengono normalizzati usando le fonti disponibili</string>
+    <string name="ratings_add_provider">Aggiungi fornitore</string>
+    <string name="ratings_reset_weights">Ripristina pesi Torve</string>
+    <string name="ratings_pill_position">Posizione indicatore</string>
+    <string name="ratings_pill_position_desc">Dove mostrare gli indicatori di valutazione sulle carte</string>
+    <string name="ratings_max_on_card">Max valutazioni per carta</string>
+    <string name="ratings_max_on_card_desc">Quanti indicatori mostrare sulle carte poster</string>
+    <string name="ratings_pill_style">Stile indicatore</string>
+    <string name="ratings_with_icon">Con icona</string>
+    <string name="ratings_with_letter">Con lettera</string>
+    <string name="ratings_preview">Anteprima</string>
+    <string name="ratings_preview_desc">Anteprima compatta del posizionamento interno vs esterno</string>
+    <string name="ratings_sources">Fonti di valutazione</string>
+    <string name="ratings_sources_desc">Abilita le fonti e riordina con le frecce. Le fonti più in alto vengono mostrate per prime.</string>
+    <string name="ratings_inside_card">Dentro la carta</string>
+    <string name="ratings_outside_card">Fuori dalla carta</string>
+    <string name="ratings_inside">Interno</string>
+    <string name="ratings_outside">Esterno</string>
+    <string name="ratings_reset_defaults">Ripristina valori predefiniti</string>
+
+    <!-- Regex Patterns Screen -->
+    <string name="regex_title">Pattern Regex</string>
+    <string name="regex_filter_desc">Filtra i risultati dello stream per titolo. Gli stream corrispondenti saranno esclusi.</string>
+    <string name="regex_quick_add">Aggiunta rapida</string>
+    <string name="regex_added">Aggiunto: %1$s</string>
+    <string name="regex_label_hint">Etichetta</string>
+    <string name="regex_pattern_hint">Pattern regex</string>
+
+    <!-- Home Layout Screen -->
+    <string name="home_layout_title">Layout Home</string>
+    <string name="home_layout_reset">Ripristina</string>
+    <string name="home_layout_hint">Tieni premuto e trascina per riordinare. Tocca una sezione per personalizzare lo stile della carta.</string>
+    <string name="home_layout_add_custom">Aggiungi sezione personalizzata</string>
+    <string name="home_layout_addon">Addon</string>
+    <string name="home_layout_collapse">Comprimi</string>
+    <string name="home_layout_customize">Personalizza</string>
+    <string name="home_layout_card_style">Stile carta</string>
+    <string name="home_layout_reset_section">Ripristina sezione</string>
+
+    <!-- Home Customize Sheet -->
+    <string name="home_customize_title">Personalizza Home</string>
+    <string name="home_customize_done">Fatto</string>
+
+    <!-- Addon Catalog Screen -->
+    <string name="addon_catalog_title">Catalogo Addon</string>
+    <string name="addon_catalog_installed_count">%1$d installati</string>
+    <string name="addon_catalog_search_hint">Cerca o incolla URL addon…</string>
+    <string name="addon_catalog_installed">Installati</string>
+    <string name="addon_catalog_available">Disponibili</string>
+    <string name="addon_catalog_installing">Installazione…</string>
+    <string name="addon_catalog_install">Installa</string>
+    <string name="addon_catalog_open_browser">Apri nel browser</string>
+    <string name="addon_catalog_copy_url">Copia URL</string>
+    <string name="addon_catalog_manifest_hint">Se la pagina mostra un manifesto JSON, copia il suo URL e riprova.</string>
+    <string name="addon_category_all">Tutti</string>
+    <string name="addon_category_streams">Stream</string>
+    <string name="addon_category_catalogs">Cataloghi</string>
+    <string name="addon_category_subtitles">Sottotitoli</string>
+
+    <!-- Category Manager Sheet -->
+    <string name="categories_subtitle">Seleziona paesi e categorie che vuoi vedere</string>
+    <string name="categories_select_all">Seleziona tutto</string>
+    <string name="categories_deselect_all">Deseleziona tutto</string>
+
+    <!-- Stats Screen -->
+    <string name="stats_title">Le tue statistiche</string>
+    <string name="stats_movies">Film</string>
+    <string name="stats_episodes">Episodi</string>
+    <string name="stats_watch_time">Tempo di visione</string>
+    <string name="stats_this_week">Questa settimana</string>
+    <string name="stats_this_month">Questo mese</string>
+    <string name="stats_day_streak">Giorni consecutivi</string>
+    <string name="stats_no_data">Nessun dato di visione</string>
+    <string name="stats_start_watching">Inizia a guardare per vedere le tue statistiche</string>
+
+    <!-- TV Home Screen -->
+    <string name="tv_trending_movies">Film in tendenza</string>
+    <string name="tv_trending_tv">Serie TV in tendenza</string>
+
+    <!-- Common Extended -->
+    <string name="common_next">Avanti</string>
+    <string name="common_skip">Salta</string>
+    <string name="common_save">Salva</string>
+    <string name="common_rename">Rinomina</string>
+    <string name="common_duplicate">Duplica</string>
+    <string name="common_reset">Ripristina</string>
+    <string name="common_loading">Caricamento…</string>
+    <string name="common_play_now">Riproduci ora</string>
+    <string name="common_sort_by">Ordina per</string>
+    <string name="common_view_details">Visualizza dettagli</string>
+    <string name="common_open_browser">Apri nel browser</string>
+
+    <!-- Login -->
+    <string name="login_display_name">Nome visualizzato</string>
+    <string name="login_email">Email</string>
+    <string name="login_password">Password</string>
+    <string name="login_create_account">Crea account</string>
+    <string name="login_sign_in">Accedi</string>
+    <string name="login_switch_to_signin">Hai già un account? Accedi</string>
+    <string name="login_switch_to_register">Non hai un account? Registrati</string>
+    <string name="login_skip">Salta per ora</string>
+
+    <!-- Setup -->
+    <string name="setup_step_of">Passaggio %1$d di %2$d</string>
+    <string name="setup_get_started">Inizia</string>
+    <string name="setup_start_streaming">Inizia lo streaming</string>
+    <string name="setup_i_agree">Accetto</string>
+    <string name="setup_verify_connect">Verifica &amp; Connetti</string>
+    <string name="setup_connect_trakt">Connetti con Trakt.tv</string>
+    <string name="setup_m3u">M3U</string>
+    <string name="setup_provider_login">Accesso fornitore</string>
+    <string name="setup_channels_desc">Aggiungi una playlist M3U o accedi tramite un fornitore per guardare la TV in diretta. Potrai aggiungerne altri in seguito nella scheda Canali.</string>
+    <string name="setup_playlist_hint">es. I miei canali</string>
+    <string name="setup_m3u_hint">https://example.com/playlist.m3u</string>
+    <string name="setup_server_hint">http://example.com:8080</string>
+
+    <!-- Card Style -->
+    <string name="card_style_title">Stile scheda</string>
+    <string name="card_style_preset">Predefinito</string>
+    <string name="card_style_default_suffix">%1$s (Predefinito)</string>
+    <string name="card_style_set_default">Imposta come predefinito</string>
+    <string name="card_style_save_as_preset">Salva come predefinito</string>
+    <string name="card_style_quick_presets">Predefiniti rapidi</string>
+    <string name="card_style_quick_desc">Applica uno stile predefinito al preset corrente</string>
+    <string name="card_style_cinema">Cinema</string>
+    <string name="card_style_compact">Compatto</string>
+    <string name="card_style_classic">Classico</string>
+    <string name="card_style_live_preview">Anteprima dal vivo</string>
+    <string name="card_style_reset_all">Ripristina tutto ai valori predefiniti</string>
+    <string name="card_style_rename_title">Rinomina predefinito</string>
+    <string name="card_style_save_title">Salva predefinito</string>
+    <string name="card_style_delete_title">Eliminare il predefinito?</string>
+    <string name="card_style_delete_desc">Verrà rimosso \"%1$s\". Le sezioni che lo utilizzano torneranno allo stile predefinito.</string>
+
+    <!-- Player Extended -->
+    <string name="player_next_season">Stagione successiva</string>
+    <string name="player_next_episode">Episodio successivo</string>
+    <string name="player_audio_delay">Ritardo audio</string>
+    <string name="player_audio_delay_value">Ritardo: %1$d ms</string>
+
+    <!-- Download Extended -->
+    <string name="download_delete_title">Eliminare %1$s?</string>
+    <string name="download_delete_movie">Il film verrà eliminato (%1$s).</string>
+    <string name="download_delete_show">Tutti i %1$d episodi verranno eliminati (%2$s).</string>
+    <string name="download_delete_all_watched">Eliminare tutto il visto?</string>
+    <string name="download_delete_all_watched_desc">Verranno eliminati tutti i contenuti che hai finito di guardare.</string>
+    <string name="download_delete_season">Elimina stagione %1$d</string>
+
+    <!-- Settings Extended -->
+    <string name="settings_reset_appearance">Ripristina tutte le impostazioni di aspetto</string>
+    <string name="settings_reset_appearance_desc">Tutti i predefiniti di stile scheda personalizzati verranno eliminati e le impostazioni di visualizzazione delle valutazioni verranno ripristinate.</string>
+    <string name="settings_reset_appearance_title">Ripristinare l\'aspetto?</string>
+    <string name="settings_reset_appearance_confirm">Tutti i predefiniti di stile scheda personalizzati verranno eliminati in modo permanente e tutte le impostazioni di aspetto verranno ripristinate. Questa azione non può essere annullata.</string>
+
+    <!-- Integrations Extended -->
+    <string name="integrations_sync_in_progress">Sincronizzazione…</string>
+</resources>
