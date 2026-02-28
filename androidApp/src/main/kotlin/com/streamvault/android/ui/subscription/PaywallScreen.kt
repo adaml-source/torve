@@ -27,7 +27,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -80,8 +79,6 @@ fun PaywallScreen(
                 state = state,
                 onPurchase = { viewModel.purchase("mock_token_${System.currentTimeMillis()}") },
                 onRestore = { viewModel.restorePurchase("restore_token") },
-                onRebateCodeChange = { viewModel.updateRebateCode(it) },
-                onRedeem = { viewModel.redeemCode() },
             )
         }
     }
@@ -176,8 +173,6 @@ private fun FreeTierContent(
     state: com.streamvault.presentation.subscription.SubscriptionUiState,
     onPurchase: () -> Unit,
     onRestore: () -> Unit,
-    onRebateCodeChange: (String) -> Unit,
-    onRedeem: () -> Unit,
 ) {
     Column(
         modifier = Modifier.padding(16.dp),
@@ -281,7 +276,7 @@ private fun FreeTierContent(
             )
         }
 
-        if (state.rebateSuccess) {
+        if (state.rebateCodesEnabled && state.rebateSuccess) {
             Spacer(Modifier.height(8.dp))
             Text(
                 text = stringResource(R.string.paywall_redeem_success),

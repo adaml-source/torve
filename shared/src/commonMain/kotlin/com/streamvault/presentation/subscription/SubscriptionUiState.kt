@@ -1,5 +1,6 @@
 package com.streamvault.presentation.subscription
 
+import com.streamvault.data.subscription.RebateCodeApi
 import com.streamvault.domain.model.Subscription
 
 data class SubscriptionUiState(
@@ -13,4 +14,5 @@ data class SubscriptionUiState(
     val rebateCode: String = "",
     val isRedeeming: Boolean = false,
     val rebateSuccess: Boolean = false,
+    val rebateCodesEnabled: Boolean = RebateCodeApi.ENABLED,
 )

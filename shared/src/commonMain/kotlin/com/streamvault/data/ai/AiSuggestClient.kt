@@ -9,6 +9,7 @@ import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.isSuccess
+import kotlinx.datetime.Clock
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -45,6 +46,9 @@ class AiSuggestClient(private val httpClient: HttpClient) {
         isLenient = true
         coerceInputValues = true
     }
+    private var cachedGeminiModel: String? = null
+    private var cachedGeminiModelTimestamp: Long = 0
+    private val modelCacheDurationMs = 24 * 60 * 60 * 1000L
 
     suspend fun suggest(provider: AiProvider, apiKey: String, phrase: String): AiSuggestResult {
         return try {
@@ -151,10 +155,13 @@ class AiSuggestClient(private val httpClient: HttpClient) {
 
     private suspend fun callGemini(apiKey: String, systemPrompt: String, phrase: String): String {
         val requestBody = GeminiRequest(
+            systemInstruction = GeminiContent(
+                parts = listOf(GeminiPart(text = systemPrompt)),
+            ),
             contents = listOf(
                 GeminiContent(
                     role = "user",
-                    parts = listOf(GeminiPart(text = "$systemPrompt\n\n$phrase")),
+                    parts = listOf(GeminiPart(text = phrase)),
                 ),
             ),
         )
@@ -163,16 +170,17 @@ class AiSuggestClient(private val httpClient: HttpClient) {
             addAll(
                 listOf(
                     "gemini-3.0-flash",
-                    "gemini-3.0-flash-lite",
                     "gemini-3.0-pro",
+                    "gemini-3.0-flash-lite",
                 ),
             )
         }.distinct()
 
         var lastError: String? = null
         for (model in candidateModels) {
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+            val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent"
             val httpResponse = httpClient.post(url) {
+                header("x-goog-api-key", apiKey)
                 header("content-type", "application/json")
                 setBody(requestBody)
             }
@@ -192,27 +200,38 @@ class AiSuggestClient(private val httpClient: HttpClient) {
     }
 
     private suspend fun pickGeminiModel(apiKey: String): String {
+        val now = Clock.System.now().toEpochMilliseconds()
+        cachedGeminiModel?.let { cached ->
+            if (now - cachedGeminiModelTimestamp < modelCacheDurationMs) return cached
+        }
+
         val fallback = "gemini-3.0-flash"
-        return try {
-            val url = "https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey"
-            val response = httpClient.get(url).bodyAsText()
+        val model = try {
+            val url = "https://generativelanguage.googleapis.com/v1beta/models"
+            val response = httpClient.get(url) {
+                header("x-goog-api-key", apiKey)
+            }.bodyAsText()
             val parsed = jsonParser.decodeFromString(GeminiModelsResponse.serializer(), response)
             val candidates = parsed.models
                 .filter { it.supportedGenerationMethods.contains("generateContent") }
                 .mapNotNull { it.name?.removePrefix("models/") }
-            selectCheapestGemini(candidates) ?: fallback
+            selectBestGemini(candidates) ?: fallback
         } catch (_: Exception) {
             fallback
         }
+
+        cachedGeminiModel = model
+        cachedGeminiModelTimestamp = now
+        return model
     }
 
-    private fun selectCheapestGemini(models: List<String>): String? {
+    private fun selectBestGemini(models: List<String>): String? {
         if (models.isEmpty()) return null
-        // Prefer Gemini 3.x, fall back to any available 3.x model
+        // flash is the quality floor; flash-lite is fallback only
         val preferred = listOf(
-            "gemini-3.0-flash-lite",
             "gemini-3.0-flash",
             "gemini-3.0-pro",
+            "gemini-3.0-flash-lite",
         )
         return preferred.firstOrNull { pref ->
             models.any { it.startsWith(pref) }
@@ -376,6 +395,8 @@ data class OpenAiChoice(
 @Serializable
 data class GeminiRequest(
     val contents: List<GeminiContent>,
+    @SerialName("system_instruction")
+    val systemInstruction: GeminiContent? = null,
 )
 
 @Serializable

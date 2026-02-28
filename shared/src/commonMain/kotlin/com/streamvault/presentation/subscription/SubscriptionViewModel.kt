@@ -72,10 +72,12 @@ class SubscriptionViewModel(
     }
 
     fun updateRebateCode(code: String) {
+        if (!RebateCodeApi.ENABLED) return
         _state.update { it.copy(rebateCode = code) }
     }
 
     fun redeemCode() {
+        if (!RebateCodeApi.ENABLED) return
         val code = _state.value.rebateCode.trim()
         if (code.isEmpty()) return
         scope.launch {

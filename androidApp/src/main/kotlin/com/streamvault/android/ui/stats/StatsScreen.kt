@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Charcoal
@@ -147,6 +149,86 @@ fun StatsScreen(
             }
 
             Spacer(Modifier.height(24.dp))
+
+            if (state.topGenres.isNotEmpty()) {
+                Text(
+                    text = "Top Genres",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Snow,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+                state.topGenres.forEach { genre ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            text = genre.name,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = Snow,
+                        )
+                        Text(
+                            text = "${genre.count} watched",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = StreamVault.colors.textSecondary,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(24.dp))
+            }
+
+            if (state.activityByDay.isNotEmpty()) {
+                Text(
+                    text = "Most Active Days",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Snow,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+                val maxCount = state.activityByDay.values.maxOrNull() ?: 1
+                val dayOrder = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+                dayOrder.forEach { day ->
+                    val count = state.activityByDay[day] ?: 0
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = day.take(3),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = StreamVault.colors.textSecondary,
+                            modifier = Modifier.width(40.dp),
+                        )
+                        Box(
+                            modifier = Modifier
+                                .height(12.dp)
+                                .weight(1f)
+                                .padding(horizontal = 8.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .fillMaxWidth(fraction = if (maxCount > 0) count.toFloat() / maxCount else 0f)
+                                    .background(
+                                        Amber,
+                                        shape = RoundedCornerShape(4.dp),
+                                    ),
+                            )
+                        }
+                        Text(
+                            text = "$count",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = StreamVault.colors.textSecondary,
+                            modifier = Modifier.width(30.dp),
+                            textAlign = TextAlign.End,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(24.dp))
+            }
 
             if (state.totalMovies == 0 && state.totalEpisodes == 0) {
                 Box(
