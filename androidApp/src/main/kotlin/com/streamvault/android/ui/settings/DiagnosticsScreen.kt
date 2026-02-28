@@ -111,6 +111,68 @@ fun DiagnosticsScreen(
         }
         Spacer(Modifier.height(12.dp))
 
+        // Content & Configuration
+        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Charcoal)) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Content & Configuration", color = Snow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                DiagRow("Card style presets", "${state.cardStylePresets.size}")
+                DiagRow("Global default preset", state.globalDefaultPresetId ?: "default")
+                DiagRow("Regex patterns", "${state.regexPatterns.size} active")
+                DiagRow("Stream groups", "${state.streamGroups.size}")
+                DiagRow("Kodi devices", "${state.kodiHosts.size}")
+                DiagRow("AI provider", state.aiProvider.name)
+                DiagRow("AI key configured", if (state.activeAiApiKey.isNotBlank()) "Yes" else "No")
+                DiagRow("Debrid provider", state.debridProvider.name)
+                DiagRow("Connected debrid services", "${state.connectedDebridProviders.size}")
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+
+        // Stream Preferences
+        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Charcoal)) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Stream Preferences", color = Snow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                DiagRow("Max quality", state.maxQuality.name)
+                DiagRow("Min quality", state.minQuality.name)
+                DiagRow("Max file size", state.maxFileSizeMb?.let { "${it} MB" } ?: "No limit")
+                DiagRow("Cached only", state.cachedOnly.toString())
+                DiagRow("Codec preference", state.codecPreference.name)
+                DiagRow("HDR mode", state.hdrMode.name)
+                DiagRow("Dedupe results", state.dedupeResults.toString())
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+
+        // Ratings
+        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Charcoal)) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Rating Configuration", color = Snow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                DiagRow("Enabled providers", state.ratingPrefs.enabledProviders.joinToString(", ") { it.name })
+                DiagRow("Pill style", state.ratingPrefs.pillStyle.name)
+                DiagRow("Pill position", state.ratingPrefs.pillPosition.displayName)
+                DiagRow("Max ratings on card", "${state.ratingPrefs.maxRatingsOnCard}")
+                DiagRow("Show on detail page", state.ratingPrefs.showRatingsOnDetailPage.toString())
+                DiagRow("Torve on cards", state.ratingPrefs.showTorveScoreOnCards.toString())
+                DiagRow("Landscape ratings", state.ratingPrefs.allowRatingsOnLandscapeCards.toString())
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+
+        // Integrations detail
+        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Charcoal)) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Integrations Detail", color = Snow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                DiagRow("Jellyfin URL", if (state.jellyfinServerUrl.isNotBlank()) state.jellyfinServerUrl else "Not configured")
+                DiagRow("Jellyfin profiles", "${state.jellyfinProfiles.size}")
+                DiagRow("Plex URL", if (state.plexServerUrl.isNotBlank()) state.plexServerUrl else "Not configured")
+                DiagRow("Plex connected", state.plexConnected.toString())
+                DiagRow("Trakt scrobble", state.traktScrobbleEnabled.toString())
+                DiagRow("Theme", state.themeMode.name)
+                DiagRow("Language", state.appLanguage.displayName)
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+
         // Raw diagnostics
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Charcoal)) {
             Text(
@@ -167,6 +229,14 @@ private fun StatusRow(label: String, connected: Boolean) {
     }
 }
 
+@Composable
+private fun DiagRow(label: String, value: String) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, color = Silver, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+        Text(value, color = Snow, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+    }
+}
+
 private fun formatTimestamp(epochMs: Long?): String {
     if (epochMs == null) return "Never"
     return java.text.SimpleDateFormat("MMM d, HH:mm", java.util.Locale.getDefault())
@@ -183,14 +253,39 @@ private fun buildDiagnosticsText(
     val redacted = mapOf(
         "traktConnected" to settingsState.traktConnected.toString(),
         "debridConnected" to settingsState.debridConnected.toString(),
+        "debridProvider" to settingsState.debridProvider.name,
+        "connectedDebridCount" to settingsState.connectedDebridProviders.size.toString(),
         "simklConnected" to settingsState.simklConnected.toString(),
         "jellyfinConfigured" to settingsState.jellyfinApiKey.isNotBlank().toString(),
+        "jellyfinUrl" to settingsState.jellyfinServerUrl.takeIf { it.isNotBlank() }.orEmpty(),
         "plexConnected" to settingsState.plexConnected.toString(),
+        "plexUrl" to settingsState.plexServerUrl.takeIf { it.isNotBlank() }.orEmpty(),
         "regionCode" to settingsState.regionCode,
         "traktLastSync" to (settingsState.traktLastSyncTime?.toString() ?: ""),
         "availabilityLastSync" to (settingsState.availabilityLastSyncTime?.toString() ?: ""),
         "libraryOverlayLastSync" to (settingsState.libraryOverlayLastSyncTime?.toString() ?: ""),
         "ratingProviders" to settingsState.ratingPrefs.enabledProviders.joinToString(",") { it.name },
+        "ratingPillStyle" to settingsState.ratingPrefs.pillStyle.name,
+        "ratingPillPosition" to settingsState.ratingPrefs.pillPosition.name,
+        "maxRatingsOnCard" to settingsState.ratingPrefs.maxRatingsOnCard.toString(),
+        "cardStylePresets" to settingsState.cardStylePresets.size.toString(),
+        "globalDefaultPreset" to (settingsState.globalDefaultPresetId ?: "default"),
+        "regexPatterns" to settingsState.regexPatterns.size.toString(),
+        "streamGroups" to settingsState.streamGroups.size.toString(),
+        "kodiHosts" to settingsState.kodiHosts.size.toString(),
+        "aiProvider" to settingsState.aiProvider.name,
+        "aiKeyConfigured" to settingsState.activeAiApiKey.isNotBlank().toString(),
+        "mdblistConfigured" to settingsState.mdblistApiKey.isNotBlank().toString(),
+        "maxQuality" to settingsState.maxQuality.name,
+        "minQuality" to settingsState.minQuality.name,
+        "maxFileSizeMb" to (settingsState.maxFileSizeMb?.toString() ?: "unlimited"),
+        "cachedOnly" to settingsState.cachedOnly.toString(),
+        "codecPreference" to settingsState.codecPreference.name,
+        "hdrMode" to settingsState.hdrMode.name,
+        "traktScrobble" to settingsState.traktScrobbleEnabled.toString(),
+        "dedupeResults" to settingsState.dedupeResults.toString(),
+        "theme" to settingsState.themeMode.name,
+        "language" to settingsState.appLanguage.code,
     )
     return buildString {
         appendLine("Torve diagnostics")

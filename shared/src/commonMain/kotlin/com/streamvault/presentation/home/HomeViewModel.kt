@@ -6,6 +6,7 @@ import com.streamvault.domain.model.HomeSectionConfig
 import com.streamvault.domain.model.HomeSection
 import com.streamvault.domain.model.CardStylePreset
 import com.streamvault.domain.model.MediaItem
+import com.streamvault.domain.model.MediaRatings
 import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.model.ParentalFilter
 import com.streamvault.domain.model.ShelfConfig
@@ -14,6 +15,8 @@ import com.streamvault.domain.model.dedupeAcrossShelves
 import com.streamvault.domain.model.dedupeByStableKey
 import com.streamvault.domain.model.stableKey
 import com.streamvault.domain.model.updateSectionPresetId
+import com.streamvault.domain.integrations.IntegrationSecretKey
+import com.streamvault.domain.integrations.IntegrationSecretStore
 import com.streamvault.domain.integrations.LibraryOverlayService
 import com.streamvault.domain.recommendation.ScoredMediaItem
 import com.streamvault.domain.recommendation.GetRecommendationsUseCase
@@ -26,6 +29,7 @@ import com.streamvault.domain.repository.WatchHistoryRepository
 import com.streamvault.domain.repository.WatchProgressRepository
 import com.streamvault.domain.repository.WatchlistRepository
 import com.streamvault.data.addon.CatalogAggregator
+import com.streamvault.data.mdblist.MdbListApi
 import com.streamvault.data.mdblist.MdbListRepository
 import com.streamvault.data.mdblist.RatingsEnricher
 import com.streamvault.presentation.settings.SettingsViewModel
@@ -57,6 +61,7 @@ class HomeViewModel(
     private val mdbListRepo: MdbListRepository,
     private val ratingsEnricher: RatingsEnricher,
     private val libraryOverlayService: LibraryOverlayService,
+    private val integrationSecretStore: IntegrationSecretStore,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(HomeUiState())
@@ -84,15 +89,44 @@ class HomeViewModel(
     private val _homeLayoutOrder = MutableStateFlow<List<String>>(emptyList())
     val homeLayoutOrder: StateFlow<List<String>> = _homeLayoutOrder.asStateFlow()
 
+    // Addon shelf visibility (persisted)
+    private val _addonShelfVisibility = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+    val addonShelfVisibility: StateFlow<Map<String, Boolean>> = _addonShelfVisibility.asStateFlow()
+
     init {
         scope.launch {
             _sectionConfigs.value = loadSectionConfigs()
             _enabledServiceIds.value = loadEnabledServiceIds()
             _customSections.value = loadCustomSections()
-            _homeLayoutOrder.value = loadHomeLayoutOrder()
+            _addonShelfVisibility.value = loadAddonShelfVisibility()
+            _homeLayoutOrder.value = ensureAllSectionsInLayoutOrder(loadHomeLayoutOrder())
             loadHomeScreen()
         }
         loadProviderLogos()
+    }
+
+    /**
+     * Ensure every known section key appears in the layout order.
+     * New sections added to the enum get appended at their default order position.
+     */
+    private fun ensureAllSectionsInLayoutOrder(saved: List<String>): List<String> {
+        if (saved.isEmpty()) return saved // first-time users — HomeScreen falls back to order field
+        val existing = saved.toSet()
+        val missing = _sectionConfigs.value
+            .filter { "section:${it.section.name}" !in existing }
+            .sortedBy { it.order }
+            .map { "section:${it.section.name}" }
+        if (missing.isEmpty()) return saved
+        val result = saved.toMutableList()
+        // Insert each missing section at its order position (clamped to list size)
+        missing.forEach { key ->
+            val section = _sectionConfigs.value.firstOrNull { "section:${it.section.name}" == key }
+            val insertAt = (section?.order ?: result.size).coerceAtMost(result.size)
+            result.add(insertAt, key)
+        }
+        // Persist the updated order
+        updateHomeLayoutOrder(result)
+        return result
     }
 
     private fun loadProviderLogos() {
@@ -117,9 +151,13 @@ class HomeViewModel(
                 val presetIds = loadCardStylePresetIds()
                 val sanitized = defaults.map { def ->
                     val resolved = bySection[def.section] ?: def
-                    if (resolved.presetId != null && resolved.presetId !in presetIds) {
-                        resolved.copy(presetId = null)
-                    } else resolved
+                    when {
+                        resolved.presetId != null && resolved.presetId !in presetIds ->
+                            resolved.copy(presetId = "default")
+                        resolved.presetId == null ->
+                            resolved.copy(presetId = "default")
+                        else -> resolved
+                    }
                 }
                 sanitized
             } catch (_: Exception) {
@@ -159,7 +197,7 @@ class HomeViewModel(
             if (it.section == section) {
                 it.copy(
                     enabled = defaultConfig.enabled,
-                    presetId = null,
+                    presetId = "default",
                     customTitle = null,
                 )
             } else it
@@ -235,6 +273,54 @@ class HomeViewModel(
             try { prefsRepo.setString("home_layout_order", json.encodeToString(order)) }
             catch (_: Exception) { /* ignore */ }
         }
+    }
+
+    // ── Addon shelf visibility ──
+
+    private suspend fun loadAddonShelfVisibility(): Map<String, Boolean> {
+        val saved = try { prefsRepo.getString("addon_shelf_visibility") } catch (_: Exception) { null }
+        return if (saved != null) {
+            try {
+                json.decodeFromString<Map<String, Boolean>>(saved)
+            } catch (_: Exception) { emptyMap() }
+        } else emptyMap()
+    }
+
+    private fun saveAddonShelfVisibility(visibility: Map<String, Boolean>) {
+        scope.launch {
+            try { prefsRepo.setString("addon_shelf_visibility", json.encodeToString(visibility)) }
+            catch (_: Exception) { /* ignore */ }
+        }
+    }
+
+    fun toggleAddonShelfVisibility(shelfId: String) {
+        val current = _addonShelfVisibility.value
+        val isVisible = current[shelfId] ?: true
+        val updated = current + (shelfId to !isVisible)
+        _addonShelfVisibility.value = updated
+        _state.update { it.copy(addonShelfVisibility = updated) }
+        saveAddonShelfVisibility(updated)
+    }
+
+    /**
+     * Register each addon shelf in the layout order if not already present.
+     * Called after addon shelves are loaded so they appear in Home Layout.
+     */
+    private fun ensureAddonShelvesInLayout(addonShelves: List<CatalogShelf>) {
+        val current = _homeLayoutOrder.value
+        if (current.isEmpty()) return // first-time users — let default ordering apply
+        val existing = current.toSet()
+        val missing = addonShelves.filter { "addon:${it.id}" !in existing }
+        if (missing.isEmpty()) return
+        val result = current.toMutableList()
+        // Find ADDON_SHELVES section position and insert after it
+        val addonSectionIdx = result.indexOfFirst { it == "section:ADDON_SHELVES" }
+        var insertAt = if (addonSectionIdx >= 0) addonSectionIdx + 1 else result.size
+        missing.forEach { shelf ->
+            result.add(insertAt, "addon:${shelf.id}")
+            insertAt++
+        }
+        updateHomeLayoutOrder(result)
     }
 
     fun addCustomSection(section: CustomSection) {
@@ -415,6 +501,9 @@ class HomeViewModel(
                     .take(20)
                 val addonShelves = addonShelvesDeferred.await()
                 val mdbListShelves = mdbListShelvesDeferred.await()
+
+                // Register addon shelves in layout order for individual customization
+                ensureAddonShelvesInLayout(addonShelves)
 
                 // Load custom section content (parallel)
                 val allCustomSections = _customSections.value
@@ -658,6 +747,7 @@ class HomeViewModel(
                             popularDirectors = popularDirectors,
                             customShelves = finalCustom,
                             addonShelves = finalAddons,
+                            addonShelfVisibility = _addonShelfVisibility.value,
                             mdbListShelves = finalMdbList,
                             isLoading = false,
                         )
@@ -679,6 +769,7 @@ class HomeViewModel(
                             popularDirectors = popularDirectors,
                             customShelves = customShelves,
                             addonShelves = addonShelves,
+                            addonShelfVisibility = _addonShelfVisibility.value,
                             mdbListShelves = mdbListShelves,
                             isLoading = false,
                         )
@@ -703,9 +794,14 @@ class HomeViewModel(
 
     private fun launchRatingsEnrichment() {
         scope.launch {
+            // Purge expired cache entries (older than 30 days)
+            try { ratingsEnricher.clearExpiredCache() } catch (_: Exception) { }
+
             val apiKey = try {
-                prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY) ?: ""
-            } catch (_: Exception) { "" }
+                integrationSecretStore.get(IntegrationSecretKey.MDBLIST_API_KEY)
+                    ?: prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY)
+                    ?: MdbListApi.DEFAULT_API_KEY
+            } catch (_: Exception) { MdbListApi.DEFAULT_API_KEY }
             refreshRatings(apiKey)
         }
     }
@@ -729,6 +825,21 @@ class HomeViewModel(
             val enrichedHiddenGems = current.hiddenGemsShelf?.let { shelf ->
                 shelf.copy(items = ratingsEnricher.enrichList(shelf.items, apiKey))
             }
+            val enrichedWatchlist = ratingsEnricher.enrichList(current.watchlistItems, apiKey)
+            // Build ratings lookup for continue watching from all enriched items
+            val allItems = enrichedShelves.flatMap { it.items } +
+                enrichedAddonShelves.flatMap { it.items } +
+                enrichedMdbListShelves.flatMap { it.items } +
+                enrichedCustomShelves.values.flatten() +
+                enrichedWatchlist +
+                (enrichedHiddenGems?.items ?: emptyList())
+            val ratingsMap = mutableMapOf<String, MediaRatings>()
+            allItems.forEach { item ->
+                val r = item.ratings ?: return@forEach
+                ratingsMap[item.id] = r
+                item.tmdbId?.let { ratingsMap[it.toString()] = r }
+                item.imdbId?.let { ratingsMap[it] = r }
+            }
             _state.update {
                 it.copy(
                     shelves = enrichedShelves,
@@ -736,6 +847,8 @@ class HomeViewModel(
                     mdbListShelves = enrichedMdbListShelves,
                     customShelves = enrichedCustomShelves,
                     hiddenGemsShelf = enrichedHiddenGems,
+                    watchlistItems = enrichedWatchlist,
+                    continueWatchingRatings = ratingsMap,
                 )
             }
         }

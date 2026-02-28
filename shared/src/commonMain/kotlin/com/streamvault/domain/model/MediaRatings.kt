@@ -10,10 +10,10 @@ enum class RatingSource(
     val defaultOrder: Int,
 ) {
     TORVE("Torve Score", "T+", false, 0),
-    IMDB("IMDb", "I", true, 0),
-    ROTTEN_TOMATOES("Rotten Tomatoes", "R", true, 1),
-    RT_AUDIENCE("RT Audience", "A", false, 2),
-    TMDB("TMDB", "T", true, 3),
+    IMDB("IMDb", "I", true, 1),
+    ROTTEN_TOMATOES("Rotten Tomatoes", "R", true, 2),
+    RT_AUDIENCE("RT Audience", "A", false, 3),
+    TMDB("TMDB", "T", true, 0),
     METACRITIC("Metacritic", "M", false, 4),
     LETTERBOXD("Letterboxd", "L", false, 5),
     TRAKT("Trakt", "K", false, 6),
@@ -37,9 +37,16 @@ data class MediaRatings(
 
 @Serializable
 enum class RatingPillStyle {
-    COMPACT,
-    MINIMAL,
-    DETAILED,
+    ICON,
+    LETTER,
+    ;
+    companion object {
+        /** Migration: map old values to new ones. */
+        fun fromLegacy(name: String): RatingPillStyle = when (name) {
+            "COMPACT", "DETAILED", "MINIMAL" -> LETTER
+            else -> valueOf(name)
+        }
+    }
 }
 
 @Serializable
@@ -60,7 +67,7 @@ data class RatingDisplayPrefs(
         .sortedBy { it.defaultOrder },
     val maxRatingsOnCard: Int = 3,
     val allowRatingsOnLandscapeCards: Boolean = false,
-    val pillStyle: RatingPillStyle = RatingPillStyle.COMPACT,
+    val pillStyle: RatingPillStyle = RatingPillStyle.LETTER,
     val pillPosition: RatingPillPosition = RatingPillPosition.INSIDE,
 )
 

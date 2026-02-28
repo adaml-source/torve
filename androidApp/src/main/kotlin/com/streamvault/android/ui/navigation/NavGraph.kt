@@ -101,6 +101,7 @@ import com.streamvault.android.ui.theme.StreamVault
 import com.streamvault.domain.model.MediaType
 import com.streamvault.data.ai.KeywordSearchService
 import com.streamvault.data.mdblist.RatingsEnricher
+import com.streamvault.domain.integrations.IntegrationSecretStore
 import com.streamvault.domain.repository.MetadataRepository
 import com.streamvault.presentation.catalog.CatalogViewModel
 import com.streamvault.presentation.setup.SetupWizardViewModel
@@ -164,6 +165,7 @@ fun StreamVaultNavGraph(
     val keywordSearchService: KeywordSearchService = koinInject()
     val prefsRepo: com.streamvault.domain.repository.PreferencesRepository = koinInject()
     val ratingsEnricher: RatingsEnricher = koinInject()
+    val integrationSecretStore: IntegrationSecretStore = koinInject()
     val moviesCatalogViewModel = remember {
         CatalogViewModel(
             metadataRepo,
@@ -171,6 +173,7 @@ fun StreamVaultNavGraph(
             keywordSearchService = keywordSearchService,
             prefsRepo = prefsRepo,
             ratingsEnricher = ratingsEnricher,
+            integrationSecretStore = integrationSecretStore,
         )
     }
     val tvCatalogViewModel = remember {
@@ -180,6 +183,7 @@ fun StreamVaultNavGraph(
             keywordSearchService = keywordSearchService,
             prefsRepo = prefsRepo,
             ratingsEnricher = ratingsEnricher,
+            integrationSecretStore = integrationSecretStore,
         )
     }
 
@@ -331,6 +335,7 @@ fun StreamVaultNavGraph(
                         keywordSearchService = keywordSearchService,
                         prefsRepo = prefsRepo,
                         ratingsEnricher = ratingsEnricher,
+                        integrationSecretStore = integrationSecretStore,
                     ).also {
                         if (genreId > 0) it.selectGenre(genreId)
                     }
@@ -361,6 +366,7 @@ fun StreamVaultNavGraph(
                         keywordSearchService = keywordSearchService,
                         prefsRepo = prefsRepo,
                         ratingsEnricher = ratingsEnricher,
+                        integrationSecretStore = integrationSecretStore,
                         initialProviderId = providerId,
                     )
                 }

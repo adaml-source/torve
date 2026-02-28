@@ -1,5 +1,6 @@
 package com.streamvault.domain.sync
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -11,8 +12,10 @@ data class SyncPayload(
     val addons: List<SyncAddon> = emptyList(),
     val preferences: List<SyncPreference> = emptyList(),
     val watchProgress: List<SyncProgress> = emptyList(),
-    val iptvPlaylists: List<SyncPlaylist> = emptyList(),
-    val iptvFavorites: List<SyncFavorite> = emptyList(),
+    @SerialName("iptvPlaylists")
+    val channelPlaylists: List<SyncPlaylist> = emptyList(),
+    @SerialName("iptvFavorites")
+    val channelFavorites: List<SyncFavorite> = emptyList(),
 )
 
 @Serializable

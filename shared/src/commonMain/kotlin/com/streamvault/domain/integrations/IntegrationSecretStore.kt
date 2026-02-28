@@ -22,6 +22,7 @@ enum class IntegrationSecretKey {
     PERPLEXITY_API_KEY,
     DEEPSEEK_API_KEY,
     MDBLIST_API_KEY,
+    OMDB_API_KEY,
 }
 
 interface IntegrationSecretStore {

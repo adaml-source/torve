@@ -79,6 +79,7 @@ import com.streamvault.domain.model.CardOrientation
 import com.streamvault.domain.model.CardStyle
 import com.streamvault.domain.model.CardTitlePosition
 import com.streamvault.domain.model.MediaItem
+import com.streamvault.domain.model.MediaRatings
 import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.model.isOutside
 import com.streamvault.domain.model.resolvedAspectRatio
@@ -158,10 +159,12 @@ fun PosterCard(
         modifier = Modifier
             .width(layoutSpec.width)
             .then(modifier)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
+            .then(
+                if (scale != 1f) Modifier.graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                } else Modifier,
+            )
             .zIndex(if (isActive) 10f else 0f)
             .onFocusChanged { isFocused = it.isFocused },
     ) {
@@ -230,9 +233,17 @@ fun PosterCard(
             }
 
             // Rating badge — inside overlay
-            if (showInsideRatings && item.ratings != null) {
+            val itemRating = item.rating
+            val effectiveRatings = item.ratings?.let { r ->
+                if (r.tmdbScore == null && itemRating != null && itemRating > 0) {
+                    r.copy(tmdbScore = itemRating.toFloat())
+                } else r
+            } ?: itemRating?.takeIf { it > 0 }?.let {
+                MediaRatings(tmdbScore = it.toFloat())
+            }
+            if (showInsideRatings && effectiveRatings != null) {
                 MultiRatingPills(
-                    ratings = item.ratings!!,
+                    ratings = effectiveRatings,
                     prefs = ratingPrefs,
                     modifier = Modifier
                         .testTag("poster_ratings_inside")
@@ -370,10 +381,18 @@ fun PosterCard(
         }
 
         // Ratings outside poster image
-        if (showOutsideRatings && item.ratings != null) {
+        val outsideItemRating = item.rating
+        val outsideRatings = item.ratings?.let { r ->
+            if (r.tmdbScore == null && outsideItemRating != null && outsideItemRating > 0) {
+                r.copy(tmdbScore = outsideItemRating.toFloat())
+            } else r
+        } ?: outsideItemRating?.takeIf { it > 0 }?.let {
+            MediaRatings(tmdbScore = it.toFloat())
+        }
+        if (showOutsideRatings && outsideRatings != null) {
             Spacer(Modifier.height(6.dp))
             MultiRatingPills(
-                ratings = item.ratings!!,
+                ratings = outsideRatings,
                 prefs = ratingPrefs,
                 modifier = Modifier
                     .testTag("poster_ratings_outside")

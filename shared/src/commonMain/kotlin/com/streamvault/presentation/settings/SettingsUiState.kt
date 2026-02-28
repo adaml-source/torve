@@ -52,6 +52,8 @@ data class SettingsUiState(
     val traktConnected: Boolean = false,
     val traktError: String? = null,
     val traktLoading: Boolean = false,
+    val traktSyncing: Boolean = false,
+    val traktSyncSuccess: Boolean = false,
     // Trakt device auth
     val traktDeviceCode: TraktDeviceCode? = null,
     val isPollingTrakt: Boolean = false,
@@ -78,6 +80,8 @@ data class SettingsUiState(
     val geminiApiKey: String = "",
     val perplexityApiKey: String = "",
     val deepSeekApiKey: String = "",
+    val aiKeyValidating: Boolean = false,
+    val aiKeyValidationResult: String? = null, // "valid", "invalid", or error message
     // Stream quality & size restrictions
     val maxQuality: StreamQuality = StreamQuality.REMUX_4K,
     val minQuality: StreamQuality = StreamQuality.SD_480P,
@@ -108,6 +112,10 @@ data class SettingsUiState(
     val streamGroups: List<StreamGroup> = emptyList(),
     // Browse
     val dedupeResults: Boolean = true,
+    // OMDB
+    val omdbApiKey: String = "",
+    val omdbValidating: Boolean = false,
+    val omdbValidationResult: String? = null, // "valid", "invalid", or error message
     // MDBList
     val mdblistApiKey: String = "",
     // Integrations — Jellyfin

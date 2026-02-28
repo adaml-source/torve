@@ -29,13 +29,16 @@ import com.streamvault.data.channels.M3uParser
 import com.streamvault.data.channels.XtreamClient
 import com.streamvault.data.mdblist.MdbListApi
 import com.streamvault.data.mdblist.MdbListRepository
+import com.streamvault.data.mdblist.RatingsCacheRepository
 import com.streamvault.data.mdblist.RatingsEnricher
+import com.streamvault.data.ratings.OmdbClient
 import com.streamvault.data.simkl.SimklClient
 import com.streamvault.data.metadata.MetadataRepositoryImpl
 import com.streamvault.data.metadata.TmdbApiClient
 import com.streamvault.data.network.HttpClientFactory
 import com.streamvault.data.progress.PreferencesRepositoryImpl
 import com.streamvault.data.progress.WatchProgressRepositoryImpl
+import com.streamvault.data.subscription.RebateCodeApi
 import com.streamvault.data.subscription.SubscriptionRepositoryImpl
 import com.streamvault.data.history.WatchHistoryRepositoryImpl
 import com.streamvault.data.sync.SyncRepositoryImpl
@@ -132,7 +135,11 @@ val sharedModule = module {
     // MDBList
     single { MdbListApi(get()) }
     single { MdbListRepository(get(), get()) }
-    single { RatingsEnricher(get(), get()) }
+    single { RatingsCacheRepository(get()) }
+
+    // OMDB + Ratings
+    single { OmdbClient(get(), get()) }
+    single { RatingsEnricher(get(), get(), get(), get(), get()) }
 
     // Kodi
     single { KodiClient(get()) }
@@ -182,7 +189,8 @@ val sharedModule = module {
     // Shelf Config Repository
     single<ShelfConfigRepository> { ShelfConfigRepositoryImpl(get()) }
 
-    // Subscription Repository
+    // Subscription
+    single { RebateCodeApi(get()) }
     single<SubscriptionRepository> { SubscriptionRepositoryImpl(get()) }
 
     // Watchlist Repository
@@ -199,11 +207,11 @@ val sharedModule = module {
     factory { MoodMatcher(get()) }
 
     // ViewModels
-    single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     single { SearchViewModel(get(), get()) }
-    factory { DetailViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    factory { DetailViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     factoryOf(::PersonViewModel)
-    single { SettingsViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { SettingsViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     factoryOf(::AddonViewModel)
     single { ChannelsViewModel(get(), get(), get()) }
     factory { CalendarViewModel(get(), get()) }

@@ -32,6 +32,10 @@ class SeeAllViewModel(
     private val watchlistRepo: WatchlistRepository,
     private val prefsRepo: PreferencesRepository,
 ) {
+    companion object {
+        /** Temporary holder for shelf items that can't be paginated from an API. */
+        val pendingItems: MutableMap<String, Pair<String, List<MediaItem>>> = mutableMapOf()
+    }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(SeeAllUiState())
     val state: StateFlow<SeeAllUiState> = _state.asStateFlow()
@@ -82,6 +86,13 @@ class SeeAllViewModel(
     }
 
     private suspend fun fetchSection(sectionId: String, page: Int): Triple<String, List<MediaItem>, Boolean> {
+        if (sectionId.startsWith("shelf:")) {
+            val shelfId = sectionId.removePrefix("shelf:")
+            val (title, items) = pendingItems.remove(shelfId)
+                ?: return Triple("", emptyList(), false)
+            return Triple(title, items, false)
+        }
+
         if (sectionId.startsWith("custom:")) {
             val customId = sectionId.removePrefix("custom:")
             val section = loadCustomSections().firstOrNull { it.id == customId }

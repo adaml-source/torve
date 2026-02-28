@@ -472,3 +472,38 @@ DELETE FROM trakt_sync_queue WHERE id = ?;
 
 clearTraktQueue:
 DELETE FROM trakt_sync_queue;
+
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- Ratings Cache (persistent multi-source rating storage)
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+CREATE TABLE IF NOT EXISTS rating_cache (
+    cache_key TEXT NOT NULL PRIMARY KEY,
+    imdb_score REAL,
+    imdb_votes INTEGER,
+    rt_score INTEGER,
+    rt_audience INTEGER,
+    tmdb_score REAL,
+    metacritic_score INTEGER,
+    letterboxd_score REAL,
+    trakt_score REAL,
+    mdblist_score REAL,
+    mal_score REAL,
+    fetched_at INTEGER NOT NULL
+);
+
+getCachedRating:
+SELECT * FROM rating_cache WHERE cache_key = ?;
+
+upsertRating:
+INSERT OR REPLACE INTO rating_cache (cache_key, imdb_score, imdb_votes, rt_score, rt_audience, tmdb_score, metacritic_score, letterboxd_score, trakt_score, mdblist_score, mal_score, fetched_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+deleteRating:
+DELETE FROM rating_cache WHERE cache_key = ?;
+
+deleteStaleRatings:
+DELETE FROM rating_cache WHERE fetched_at < ?;
+
+deleteAllRatings:
+DELETE FROM rating_cache;

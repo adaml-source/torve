@@ -27,11 +27,7 @@ class SubscriptionRepositoryImpl(
 
     override suspend fun isPro(): Boolean {
         val sub = getActiveSubscription() ?: return false
-        if (!sub.isActive) return false
-        if (sub.tier == SubscriptionTier.LIFETIME) return true
-        // Monthly: check expiry
-        val expiresAt = sub.expiresAt ?: return false
-        return Clock.System.now().toEpochMilliseconds() < expiresAt
+        return sub.isActive && sub.tier == SubscriptionTier.LIFETIME
     }
 
     override suspend fun hasAccess(feature: PremiumFeature): Boolean {
@@ -40,24 +36,32 @@ class SubscriptionRepositoryImpl(
 
     override suspend fun activateSubscription(tier: SubscriptionTier, purchaseToken: String) {
         val now = Clock.System.now().toEpochMilliseconds()
-        val expiresAt = if (tier == SubscriptionTier.MONTHLY) {
-            now + 30L * 24 * 60 * 60 * 1000 // 30 days
-        } else null
-
         database.streamVaultQueries.deactivateAllSubscriptions()
         database.streamVaultQueries.insertSubscription(
             id = "sub_$now",
             tier = tier.name,
             purchase_token = purchaseToken,
-            expires_at = expiresAt,
+            expires_at = null,
             is_active = 1,
             platform = "android",
             purchased_at = now,
         )
     }
 
-    override suspend fun deactivateSubscription() {
-        database.streamVaultQueries.deactivateAllSubscriptions()
+    override suspend fun ensureFreeTier() {
+        val existing = getActiveSubscription()
+        if (existing == null) {
+            val now = Clock.System.now().toEpochMilliseconds()
+            database.streamVaultQueries.insertSubscription(
+                id = "sub_free",
+                tier = SubscriptionTier.FREE.name,
+                purchase_token = null,
+                expires_at = null,
+                is_active = 1,
+                platform = "android",
+                purchased_at = now,
+            )
+        }
     }
 
     override suspend fun restorePurchase(purchaseToken: String): Subscription? {

@@ -162,9 +162,9 @@ class AiSuggestClient(private val httpClient: HttpClient) {
             pickGeminiModel(apiKey)?.let { add(it) }
             addAll(
                 listOf(
-                    "gemini-2.5-flash",
-                    "gemini-2.5-flash-lite",
-                    "gemini-2.5-pro",
+                    "gemini-3.0-flash",
+                    "gemini-3.0-flash-lite",
+                    "gemini-3.0-pro",
                 ),
             )
         }.distinct()
@@ -192,7 +192,7 @@ class AiSuggestClient(private val httpClient: HttpClient) {
     }
 
     private suspend fun pickGeminiModel(apiKey: String): String {
-        val fallback = "gemini-2.5-flash"
+        val fallback = "gemini-3.0-flash"
         return try {
             val url = "https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey"
             val response = httpClient.get(url).bodyAsText()
@@ -208,14 +208,15 @@ class AiSuggestClient(private val httpClient: HttpClient) {
 
     private fun selectCheapestGemini(models: List<String>): String? {
         if (models.isEmpty()) return null
+        // Prefer Gemini 3.x, fall back to any available 3.x model
         val preferred = listOf(
-            "gemini-2.5-flash-lite",
-            "gemini-2.5-flash",
-            "gemini-2.5-pro",
+            "gemini-3.0-flash-lite",
+            "gemini-3.0-flash",
+            "gemini-3.0-pro",
         )
         return preferred.firstOrNull { pref ->
             models.any { it.startsWith(pref) }
-        } ?: models.firstOrNull { it.startsWith("gemini-2.5") }
+        } ?: models.firstOrNull { it.startsWith("gemini-3") }
     }
 
     private fun isModelNotFound(errorBody: String): Boolean {

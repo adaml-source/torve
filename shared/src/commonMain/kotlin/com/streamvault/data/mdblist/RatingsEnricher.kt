@@ -1,6 +1,8 @@
 package com.streamvault.data.mdblist
 
 import com.streamvault.data.metadata.TmdbApiClient
+import com.streamvault.data.ratings.OmdbClient
+import com.streamvault.data.trakt.TraktClient
 import com.streamvault.domain.model.MediaItem
 import com.streamvault.domain.model.MediaRatings
 import com.streamvault.domain.model.MediaType
@@ -8,62 +10,161 @@ import com.streamvault.domain.model.MediaType
 class RatingsEnricher(
     private val api: MdbListApi,
     private val tmdbApi: TmdbApiClient,
+    private val traktClient: TraktClient,
+    private val cacheRepo: RatingsCacheRepository,
+    private val omdbClient: OmdbClient,
 ) {
 
-    private val cache = mutableMapOf<String, MediaRatings>()
     private val imdbCache = mutableMapOf<String, String?>()
+    /** Set to true when we get a 429 — skip all further MDBList requests until next app session. */
+    @Volatile
+    var rateLimited: Boolean = false
+        private set
 
+    /**
+     * Enriches a single MediaItem with ratings from all available tiers:
+     *
+     * Tier 0: Persistent SQLite cache (30 days) — return immediately if fresh
+     * Tier 1: TMDB baseline — always available from item.rating
+     * Tier 2: OMDB (if key configured) — IMDb, RT, Metacritic in one call
+     * Tier 3: MDBList (if key configured) — full suite: all sources
+     * Tier 4: Trakt public API (free, always available) — fallback
+     *
+     * All fetched ratings are merged and cached for 30 days.
+     */
     suspend fun enrichSingle(item: MediaItem, apiKey: String): MediaItem {
-        if (apiKey.isBlank()) return item
         val tmdbId = item.tmdbId
+        val existing = item.ratings
+
+        // 1. Build cache key
+        val cacheKey = tmdbId?.let { "${item.type.name}:$it" }
+
+        // 2. Check persistent SQLite cache — fresh (< 30 days)? return cached ratings
+        cacheKey?.let {
+            val cached = cacheRepo.getCached(it)
+            if (cached != null) {
+                return item.copy(ratings = mergeRatings(existing, cached))
+            }
+        }
+
+        // Resolve IMDb ID (needed by OMDB + MDBList + Trakt)
         val imdbId = item.imdbId?.takeIf { it.startsWith("tt") }
             ?: resolveImdbId(item)
 
-        val existing = item.ratings
-        imdbId?.let {
-            val cached = cache[it]
-            if (cached != null) {
+        // Accumulate ratings from all tiers
+        var accumulated = MediaRatings(
+            tmdbScore = item.rating?.toFloat(), // TMDB baseline always available
+        )
+
+        // 3. Tier 2: OMDB — IMDb + RT + Metacritic (free key, 1000 calls/day)
+        if (imdbId != null) {
+            val omdbRatings = try {
+                omdbClient.fetchRatings(imdbId)
+            } catch (_: Exception) {
+                null
+            }
+            if (omdbRatings != null) {
+                accumulated = mergeRatings(accumulated, omdbRatings)
+            }
+        }
+
+        // 4. Tier 3: MDBList — full suite (if apiKey valid + not rate-limited)
+        if (apiKey.isNotBlank() && !rateLimited) {
+            val mdbRatings = try {
+                when {
+                    tmdbId != null && item.type == MediaType.MOVIE -> api.getRatingsByTmdbMovie(tmdbId, apiKey)
+                    tmdbId != null && item.type == MediaType.SERIES -> api.getRatingsByTmdbShow(tmdbId, apiKey)
+                    imdbId != null -> api.getRatings(imdbId, apiKey)
+                    else -> null
+                }
+            } catch (e: MdbListApi.RateLimitException) {
+                rateLimited = true
+                null
+            } catch (_: Exception) {
+                null
+            }
+
+            if (mdbRatings != null) {
+                val mdbMediaRatings = MediaRatings(
+                    imdbScore = mdbRatings.ratings.find { it.source == "imdb" }?.value,
+                    imdbVotes = mdbRatings.ratings.find { it.source == "imdb" }?.votes,
+                    rottenTomatoesScore = mdbRatings.ratings.find { it.source == "tomatoes" }?.value?.toInt(),
+                    rtAudienceScore = mdbRatings.ratings.find { it.source == "tomatoesaudience" }?.value?.toInt(),
+                    tmdbScore = mdbRatings.ratings.find { it.source == "tmdb" }?.value,
+                    metacriticScore = mdbRatings.ratings.find { it.source == "metacritic" }?.value?.toInt(),
+                    letterboxdScore = mdbRatings.ratings.find { it.source == "letterboxd" }?.value,
+                    traktScore = mdbRatings.ratings.find { it.source == "trakt" }?.value,
+                    mdblistScore = mdbRatings.ratings.find { it.source == "mdblist" }?.score,
+                    malScore = mdbRatings.ratings.find { it.source == "mal" }?.value,
+                )
+                accumulated = mergeRatings(accumulated, mdbMediaRatings)
+                val resolvedImdbId = mdbRatings.imdbId ?: imdbId
+
+                // Cache the final merged result
+                cacheKey?.let { cacheRepo.put(it, accumulated) }
                 return item.copy(
-                    imdbId = it,
-                    ratings = mergeRatings(existing, cached),
+                    imdbId = resolvedImdbId ?: imdbId,
+                    ratings = mergeRatings(existing, accumulated),
                 )
             }
         }
 
-        val mdbRatings = try {
-            when {
-                tmdbId != null && item.type == MediaType.MOVIE -> api.getRatingsByTmdbMovie(tmdbId, apiKey)
-                tmdbId != null && item.type == MediaType.SERIES -> api.getRatingsByTmdbShow(tmdbId, apiKey)
-                imdbId != null -> api.getRatings(imdbId, apiKey)
-                else -> null
-            }
-        } catch (_: Exception) {
-            null
-        } ?: return item.copy(imdbId = imdbId)
+        // If we got OMDB data, cache it even without MDBList
+        val hasOmdbData = accumulated.imdbScore != null ||
+            accumulated.rottenTomatoesScore != null ||
+            accumulated.metacriticScore != null
+        if (hasOmdbData) {
+            cacheKey?.let { cacheRepo.put(it, accumulated) }
+            return item.copy(
+                imdbId = imdbId ?: item.imdbId,
+                ratings = mergeRatings(existing, accumulated),
+            )
+        }
 
-        val ratings = MediaRatings(
-            imdbScore = mdbRatings.ratings.find { it.source == "imdb" }?.value,
-            imdbVotes = mdbRatings.ratings.find { it.source == "imdb" }?.votes,
-            rottenTomatoesScore = mdbRatings.ratings.find { it.source == "tomatoes" }?.value?.toInt(),
-            rtAudienceScore = mdbRatings.ratings.find { it.source == "tomatoesaudience" }?.value?.toInt(),
-            tmdbScore = mdbRatings.ratings.find { it.source == "tmdb" }?.value,
-            metacriticScore = mdbRatings.ratings.find { it.source == "metacritic" }?.value?.toInt(),
-            letterboxdScore = mdbRatings.ratings.find { it.source == "letterboxd" }?.value,
-            traktScore = mdbRatings.ratings.find { it.source == "trakt" }?.value,
-            mdblistScore = mdbRatings.ratings.find { it.source == "mdblist" }?.score,
-            malScore = mdbRatings.ratings.find { it.source == "mal" }?.value,
-        )
-        val resolvedImdbId = mdbRatings.imdbId ?: imdbId
-        resolvedImdbId?.let { cache[it] = ratings }
-        return item.copy(
-            imdbId = resolvedImdbId ?: imdbId,
-            ratings = mergeRatings(existing, ratings),
-        )
+        // 5. Tier 4: Trakt public API (free, always available)
+        if (imdbId != null) {
+            val traktRating = try {
+                when (item.type) {
+                    MediaType.MOVIE -> traktClient.getMoviePublicRating(imdbId)
+                    MediaType.SERIES -> traktClient.getShowPublicRating(imdbId)
+                }
+            } catch (_: Exception) {
+                null
+            }
+
+            if (traktRating != null && traktRating.rating > 0f) {
+                accumulated = mergeRatings(accumulated, MediaRatings(
+                    traktScore = traktRating.rating * 10f, // Trakt 0-10 → percentage
+                ))
+                // Don't persist Trakt-only fallback — partial data would poison cache
+                return item.copy(
+                    imdbId = imdbId,
+                    ratings = mergeRatings(existing, accumulated),
+                )
+            }
+        }
+
+        // 6. Fallback: item unchanged (TMDB score from item.rating still shows)
+        return item.copy(imdbId = imdbId ?: item.imdbId)
     }
 
     suspend fun enrichList(items: List<MediaItem>, apiKey: String): List<MediaItem> {
-        if (apiKey.isBlank()) return items
         return items.map { enrichSingle(it, apiKey) }
+    }
+
+    fun clearPersistentCache() {
+        cacheRepo.clearAll()
+    }
+
+    fun clearExpiredCache() {
+        cacheRepo.deleteStale()
+    }
+
+    /** Check if an item has any cached ratings (for background enrichment scheduling). */
+    fun hasCachedRatings(item: MediaItem): Boolean {
+        val tmdbId = item.tmdbId ?: return false
+        val cacheKey = "${item.type.name}:$tmdbId"
+        return cacheRepo.getCached(cacheKey) != null
     }
 
     private suspend fun resolveImdbId(item: MediaItem): String? {

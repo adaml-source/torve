@@ -61,6 +61,7 @@ data class M3uPlaylist(
     val epgUrl: String? = null,
     val refreshSeconds: Int? = null,
     val channels: List<Channel>,
+    val error: String? = null,
 )
 
 @Serializable

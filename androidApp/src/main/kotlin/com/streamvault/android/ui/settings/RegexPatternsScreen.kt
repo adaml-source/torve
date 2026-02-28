@@ -30,12 +30,14 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -60,6 +62,12 @@ private val PRESETS = listOf(
     "1080p+ Only" to "(?i)(?!.*(1080p|2160p|4k)).*",
     "No 3D" to "(?i)(3d|sbs|half.?ou)",
     "English Only" to "(?i)(french|german|spanish|italian|portuguese|hindi|arabic|russian|turkish|chinese|japanese|korean)",
+    "No HDR" to "(?i)(hdr|hdr10|hdr10\\+|dolby.?vision|dv)",
+    "No HEVC/x265" to "(?i)(hevc|x265|h\\.?265)",
+    "No Ads/Promo" to "(?i)(sample|trailer|promo|ads|teaser)",
+    "4K Only" to "(?i)(?!.*(2160p|4k|uhd)).*",
+    "No Dubbed" to "(?i)(dubbed|dual.?audio|multi.?audio|dub)",
+    "No HC Subs" to "(?i)(hc|hardcoded|hardsub)",
 )
 
 @Composable
@@ -68,6 +76,7 @@ fun RegexPatternsScreen(
     viewModel: SettingsViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
+    val context = LocalContext.current
 
     Column(
         Modifier
@@ -96,10 +105,16 @@ fun RegexPatternsScreen(
         }
 
         Text(
-            "Filter stream results by title. Matching streams will be excluded. Use standard regex syntax.",
+            "Filter stream results by title. Matching streams will be excluded.",
             style = MaterialTheme.typography.bodySmall,
             color = Silver,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+        )
+        Text(
+            "Patterns use standard regex. Use (?i) for case-insensitive. Use | to match alternatives.\nExample: (?i)(cam|ts) excludes streams containing 'cam' or 'ts'.\nLearn more at regex101.com",
+            style = MaterialTheme.typography.bodySmall,
+            color = Steel,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
         )
 
         Text(
@@ -118,8 +133,12 @@ fun RegexPatternsScreen(
                 FilterChip(
                     selected = exists,
                     onClick = {
-                        if (exists) viewModel.removeRegexPatternByValue(pattern)
-                        else viewModel.addRegexPattern(label, pattern)
+                        if (exists) {
+                            viewModel.removeRegexPatternByValue(pattern)
+                        } else {
+                            viewModel.addRegexPattern(label, pattern)
+                            Toast.makeText(context, "Added: $label", Toast.LENGTH_SHORT).show()
+                        }
                     },
                     label = { Text(label, fontSize = 12.sp) },
                     colors = FilterChipDefaults.filterChipColors(

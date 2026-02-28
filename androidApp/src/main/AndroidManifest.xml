@@ -20,7 +20,7 @@
         android:label="Torve"
         android:supportsRtl="true"
         android:localeConfig="@xml/locales_config"
-        android:theme="@style/Theme.StreamVault"
+        android:theme="@style/Theme.Torve"
         android:usesCleartextTraffic="true"
         android:networkSecurityConfig="@xml/network_security_config">
 

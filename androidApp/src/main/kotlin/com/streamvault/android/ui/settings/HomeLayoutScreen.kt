@@ -47,6 +47,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -70,6 +71,7 @@ import com.streamvault.android.ui.theme.Silver
 import com.streamvault.android.ui.theme.Smoke
 import com.streamvault.android.ui.theme.Snow
 import com.streamvault.android.ui.theme.Steel
+import com.streamvault.domain.model.CatalogShelf
 import com.streamvault.domain.model.CustomSection
 import com.streamvault.domain.model.HomeSection
 import com.streamvault.domain.model.HomeSectionConfig
@@ -89,6 +91,8 @@ private data class CustomItem(val section: CustomSection) : HomeLayoutItem {
     override val order: Int = section.order
 }
 
+private data class AddonItem(val shelfId: String, val title: String, val enabled: Boolean, override val order: Int) : HomeLayoutItem
+
 @Composable
 fun HomeLayoutScreen(
     onBack: () -> Unit,
@@ -99,22 +103,34 @@ fun HomeLayoutScreen(
 ) {
     val sectionConfigs by viewModel.sectionConfigs.collectAsState()
     val customSections by viewModel.customSections.collectAsState()
+    val homeState by viewModel.state.collectAsState()
+    val addonShelves = homeState.addonShelves
+    val addonShelfVisibility by viewModel.addonShelfVisibility.collectAsState()
+    val homeLayoutOrder by viewModel.homeLayoutOrder.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
     val cardStylePresets = settingsState.cardStylePresets
     val defaultPresetId = settingsState.globalDefaultPresetId
-    var orderedItems by remember(sectionConfigs, customSections) {
+    var orderedItems by remember(sectionConfigs, customSections, addonShelves, addonShelfVisibility, homeLayoutOrder) {
+        val orderIndex = homeLayoutOrder.withIndex().associate { it.value to it.index }
         mutableStateOf(
             buildList {
                 sectionConfigs
-                    .filter { it.section != HomeSection.DIRECTORS }
+                    .filter { it.section != HomeSection.DIRECTORS && it.section != HomeSection.ADDON_SHELVES }
                     .forEach { add(SectionItem(it)) }
                 customSections.forEach { add(CustomItem(it)) }
-            }.sortedWith(compareBy<HomeLayoutItem> { it.order }.thenBy {
-                when (it) {
-                    is SectionItem -> 0
-                    is CustomItem -> 1
+                addonShelves.forEachIndexed { idx, shelf ->
+                    val visible = addonShelfVisibility[shelf.id] ?: true
+                    val order = orderIndex["addon:${shelf.id}"] ?: (100 + idx)
+                    add(AddonItem(shelfId = shelf.id, title = shelf.title, enabled = visible, order = order))
                 }
-            })
+            }.sortedWith(compareBy<HomeLayoutItem> { item ->
+                val key = when (item) {
+                    is SectionItem -> "section:${item.config.section.name}"
+                    is CustomItem -> "custom:${item.section.id}"
+                    is AddonItem -> "addon:${item.shelfId}"
+                }
+                orderIndex[key] ?: (10_000 + item.order)
+            }.thenBy { it.order })
         )
     }
     var expandedSection by remember { mutableStateOf<HomeSection?>(null) }
@@ -150,14 +166,18 @@ fun HomeLayoutScreen(
                 viewModel.resetSections()
                 orderedItems = buildList {
                     HomeSection.entries
-                        .filter { it != HomeSection.DIRECTORS }
+                        .filter { it != HomeSection.DIRECTORS && it != HomeSection.ADDON_SHELVES }
                         .map { HomeSectionConfig(it, it.defaultEnabled, it.defaultOrder) }
                         .forEach { add(SectionItem(it)) }
                     customSections.forEach { add(CustomItem(it)) }
+                    addonShelves.forEachIndexed { idx, shelf ->
+                        add(AddonItem(shelfId = shelf.id, title = shelf.title, enabled = true, order = 100 + idx))
+                    }
                 }.sortedWith(compareBy<HomeLayoutItem> { it.order }.thenBy {
                     when (it) {
                         is SectionItem -> 0
                         is CustomItem -> 1
+                        is AddonItem -> 2
                     }
                 })
                 viewModel.updateHomeLayoutOrder(
@@ -165,6 +185,7 @@ fun HomeLayoutScreen(
                         when (it) {
                             is SectionItem -> "section:${it.config.section.name}"
                             is CustomItem -> "custom:${it.section.id}"
+                            is AddonItem -> "addon:${it.shelfId}"
                         }
                     },
                 )
@@ -193,6 +214,7 @@ fun HomeLayoutScreen(
                     when (item) {
                         is SectionItem -> "section_${item.config.section.name}"
                         is CustomItem -> "custom_${item.section.id}"
+                        is AddonItem -> "addon_${item.shelfId}"
                     }
                 },
             ) { index, item ->
@@ -328,6 +350,54 @@ fun HomeLayoutScreen(
                             modifier = Modifier.animateItem(),
                         )
                     }
+                    is AddonItem -> {
+                        AddonShelfRow(
+                            title = item.title,
+                            enabled = item.enabled,
+                            isDragged = isDragged,
+                            dragOffset = if (isDragged) dragOffset else 0f,
+                            onToggle = { enabled ->
+                                val updated = orderedItems.map {
+                                    if (it is AddonItem && it.shelfId == item.shelfId) {
+                                        it.copy(enabled = enabled)
+                                    } else it
+                                }
+                                orderedItems = updated
+                                viewModel.toggleAddonShelfVisibility(item.shelfId)
+                            },
+                            onDragStart = { draggedIndex = index },
+                            onDrag = { delta ->
+                                if (draggedIndex < 0) return@AddonShelfRow
+                                dragOffset += delta
+                                val currentItem = listState.layoutInfo.visibleItemsInfo
+                                    .find { it.index == draggedIndex + 1 }
+                                    ?: return@AddonShelfRow
+                                val itemHeight = currentItem.size.toFloat()
+                                val list = orderedItems.toMutableList()
+                                if (dragOffset > itemHeight * 0.5f && draggedIndex < list.size - 1) {
+                                    val moved = list.removeAt(draggedIndex)
+                                    list.add(draggedIndex + 1, moved)
+                                    orderedItems = list.mapIndexed { i, it -> it.withOrder(i) }
+                                    draggedIndex += 1
+                                    dragOffset -= itemHeight
+                                } else if (dragOffset < -itemHeight * 0.5f && draggedIndex > 1) {
+                                    val moved = list.removeAt(draggedIndex)
+                                    list.add(draggedIndex - 1, moved)
+                                    orderedItems = list.mapIndexed { i, it -> it.withOrder(i) }
+                                    draggedIndex -= 1
+                                    dragOffset += itemHeight
+                                }
+                            },
+                            onDragEnd = {
+                                if (draggedIndex >= 0) {
+                                    persistOrder(viewModel, orderedItems)
+                                }
+                                draggedIndex = -1
+                                dragOffset = 0f
+                            },
+                            modifier = Modifier.animateItem(),
+                        )
+                    }
                 }
             }
 
@@ -380,6 +450,10 @@ private fun CustomSectionRow(
     onDragEnd: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val currentOnDragStart by rememberUpdatedState(onDragStart)
+    val currentOnDrag by rememberUpdatedState(onDrag)
+    val currentOnDragEnd by rememberUpdatedState(onDragEnd)
+
     Row(
         modifier = modifier
             .zIndex(if (isDragged) 1f else 0f)
@@ -401,11 +475,11 @@ private fun CustomSectionRow(
                 .padding(4.dp)
                 .pointerInput(Unit) {
                     detectDragGestures(
-                        onDragStart = { onDragStart() },
-                        onDragEnd = { onDragEnd() },
-                        onDragCancel = { onDragEnd() },
+                        onDragStart = { currentOnDragStart() },
+                        onDragEnd = { currentOnDragEnd() },
+                        onDragCancel = { currentOnDragEnd() },
                         onDrag = { _, dragAmount ->
-                            onDrag(dragAmount.y)
+                            currentOnDrag(dragAmount.y)
                         },
                     )
                 },
@@ -446,9 +520,86 @@ private fun CustomSectionRow(
     }
 }
 
+@Composable
+private fun AddonShelfRow(
+    title: String,
+    enabled: Boolean,
+    isDragged: Boolean,
+    dragOffset: Float,
+    onToggle: (Boolean) -> Unit,
+    onDragStart: () -> Unit,
+    onDrag: (Float) -> Unit,
+    onDragEnd: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val currentOnDragStart by rememberUpdatedState(onDragStart)
+    val currentOnDrag by rememberUpdatedState(onDrag)
+    val currentOnDragEnd by rememberUpdatedState(onDragEnd)
+
+    Row(
+        modifier = modifier
+            .zIndex(if (isDragged) 1f else 0f)
+            .graphicsLayer {
+                translationY = dragOffset
+                shadowElevation = if (isDragged) 8f else 0f
+            }
+            .fillMaxWidth()
+            .padding(start = 12.dp, end = 20.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Rounded.DragHandle,
+            contentDescription = "Drag to reorder",
+            tint = Silver,
+            modifier = Modifier
+                .size(32.dp)
+                .padding(4.dp)
+                .pointerInput(Unit) {
+                    detectDragGestures(
+                        onDragStart = { currentOnDragStart() },
+                        onDragEnd = { currentOnDragEnd() },
+                        onDragCancel = { currentOnDragEnd() },
+                        onDrag = { _, dragAmount ->
+                            currentOnDrag(dragAmount.y)
+                        },
+                    )
+                },
+        )
+
+        Spacer(Modifier.width(8.dp))
+
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyLarge,
+            color = if (enabled) Snow else Ash,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.weight(1f),
+        )
+
+        Text(
+            text = "Addon",
+            style = MaterialTheme.typography.labelSmall,
+            color = Amber.copy(alpha = 0.7f),
+            modifier = Modifier.padding(end = 8.dp),
+        )
+
+        Switch(
+            checked = enabled,
+            onCheckedChange = onToggle,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Amber,
+                checkedTrackColor = AmberSubtle,
+                uncheckedThumbColor = Steel,
+                uncheckedTrackColor = Gunmetal,
+            ),
+        )
+    }
+}
+
 private fun HomeLayoutItem.withOrder(order: Int): HomeLayoutItem = when (this) {
     is SectionItem -> copy(config = config.copy(order = order))
     is CustomItem -> copy(section = section.copy(order = order))
+    is AddonItem -> copy(order = order)
 }
 
 private fun persistOrder(viewModel: HomeViewModel, items: List<HomeLayoutItem>) {
@@ -459,6 +610,7 @@ private fun persistOrder(viewModel: HomeViewModel, items: List<HomeLayoutItem>) 
             when (it) {
                 is SectionItem -> "section:${it.config.section.name}"
                 is CustomItem -> "custom:${it.section.id}"
+                is AddonItem -> "addon:${it.shelfId}"
             }
         },
     )
@@ -485,6 +637,10 @@ private fun SectionRow(
     onDragEnd: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val currentOnDragStart by rememberUpdatedState(onDragStart)
+    val currentOnDrag by rememberUpdatedState(onDrag)
+    val currentOnDragEnd by rememberUpdatedState(onDragEnd)
+
     Column(
         modifier = modifier
             .zIndex(if (isDragged) 1f else 0f)
@@ -516,13 +672,13 @@ private fun SectionRow(
                         if (!isHero) {
                             Modifier.pointerInput(Unit) {
                                 detectDragGesturesAfterLongPress(
-                                    onDragStart = { onDragStart() },
+                                    onDragStart = { currentOnDragStart() },
                                     onDrag = { change, offset ->
                                         change.consume()
-                                        onDrag(offset.y)
+                                        currentOnDrag(offset.y)
                                     },
-                                    onDragEnd = { onDragEnd() },
-                                    onDragCancel = { onDragEnd() },
+                                    onDragEnd = { currentOnDragEnd() },
+                                    onDragCancel = { currentOnDragEnd() },
                                 )
                             }
                         } else Modifier,
@@ -597,13 +753,8 @@ private fun SectionRow(
                     Text("Card Style", color = Silver, style = MaterialTheme.typography.labelLarge)
                     Spacer(Modifier.height(8.dp))
                     var expanded by remember { mutableStateOf(false) }
-                    val defaultPreset = presets.firstOrNull { it.presetId == defaultPresetId }
                     val selectedPreset = presets.firstOrNull { it.presetId == config.presetId }
-                    val label = when {
-                        config.presetId == null -> "Default" + (defaultPreset?.let { " (${it.name})" } ?: "")
-                        selectedPreset != null -> selectedPreset.name
-                        else -> "Default"
-                    }
+                    val label = selectedPreset?.name ?: "Default"
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -628,13 +779,6 @@ private fun SectionRow(
                         expanded = expanded,
                         onDismissRequest = { expanded = false },
                     ) {
-                        DropdownMenuItem(
-                            text = { Text("Default") },
-                            onClick = {
-                                expanded = false
-                                onPresetChange(null)
-                            },
-                        )
                         presets.forEach { preset ->
                             DropdownMenuItem(
                                 text = { Text(preset.name) },

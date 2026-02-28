@@ -2,6 +2,8 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.compose.compiler)
+    alias(libs.plugins.google.services)
+    alias(libs.plugins.firebase.crashlytics)
 }
 
 android {
@@ -9,7 +11,7 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.streamvault.android"
+        applicationId = "com.torve.app"
         minSdk = 24
         targetSdk = 36
         versionCode = 1
@@ -114,6 +116,11 @@ dependencies {
 
     // YouTube Player (in-app trailer playback)
     implementation("com.pierfrancescosoffritti.androidyoutubeplayer:core:12.1.0")
+
+    // Firebase
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-crashlytics")
+    implementation("com.google.firebase:firebase-analytics")
 
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)

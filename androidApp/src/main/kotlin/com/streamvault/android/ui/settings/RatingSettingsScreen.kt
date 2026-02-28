@@ -1,5 +1,6 @@
 package com.streamvault.android.ui.settings
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -20,15 +21,20 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
@@ -39,8 +45,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -50,6 +60,7 @@ import com.streamvault.android.ui.components.CardSize
 import com.streamvault.android.ui.components.PosterCard
 import com.streamvault.android.ui.components.getRatingSourceColor
 import com.streamvault.android.ui.components.getRatingSourceExample
+import com.streamvault.android.ui.components.ratingSourceIconRes
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.AmberSubtle
 import com.streamvault.android.ui.theme.Ash
@@ -210,23 +221,34 @@ fun RatingSettingsScreen(
                         Text("Torve Score Weights", color = Snow, fontWeight = FontWeight.SemiBold)
                         Text("Weights are normalized using available sources", color = Silver, fontSize = 12.sp)
                         Spacer(Modifier.height(10.dp))
-                        listOf(
-                            RatingSource.IMDB to "IMDb",
-                            RatingSource.TMDB to "TMDB",
-                            RatingSource.ROTTEN_TOMATOES to "Rotten Tomatoes",
-                            RatingSource.METACRITIC to "Metacritic",
-                        ).forEach { (source, label) ->
-                            val current = prefs.torveWeights[source] ?: 0
+                        prefs.torveWeights.entries.forEach { (source, weight) ->
                             Row(
                                 Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Text(label, color = Snow, fontSize = 13.sp)
-                                Text("$current", color = Amber, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text(source.displayName, color = Snow, fontSize = 13.sp)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("$weight", color = Amber, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    IconButton(
+                                        onClick = {
+                                            viewModel.updateRatingPrefs(
+                                                prefs.copy(torveWeights = prefs.torveWeights - source),
+                                            )
+                                        },
+                                        modifier = Modifier.size(28.dp),
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.Close,
+                                            contentDescription = "Remove ${source.displayName}",
+                                            tint = Steel,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                    }
+                                }
                             }
                             Slider(
-                                value = current.toFloat(),
+                                value = weight.toFloat(),
                                 onValueChange = { value ->
                                     viewModel.updateRatingPrefs(
                                         prefs.copy(torveWeights = prefs.torveWeights + (source to value.roundToInt())),
@@ -240,6 +262,40 @@ fun RatingSettingsScreen(
                                 ),
                             )
                         }
+
+                        // Add Provider button + dropdown
+                        val availableSources = RatingSource.entries
+                            .filter { it != RatingSource.TORVE && it !in prefs.torveWeights }
+                        if (availableSources.isNotEmpty()) {
+                            var addMenuExpanded by remember { mutableStateOf(false) }
+                            Box {
+                                OutlinedButton(
+                                    onClick = { addMenuExpanded = true },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Icon(Icons.Rounded.Add, contentDescription = null, tint = Amber, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Add Provider", color = Amber)
+                                }
+                                DropdownMenu(
+                                    expanded = addMenuExpanded,
+                                    onDismissRequest = { addMenuExpanded = false },
+                                ) {
+                                    availableSources.forEach { source ->
+                                        DropdownMenuItem(
+                                            text = { Text(source.displayName) },
+                                            onClick = {
+                                                viewModel.updateRatingPrefs(
+                                                    prefs.copy(torveWeights = prefs.torveWeights + (source to 0)),
+                                                )
+                                                addMenuExpanded = false
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
                         TextButton(
                             onClick = { viewModel.updateRatingPrefs(prefs.copy(torveWeights = defaultTorveWeights())) },
                             modifier = Modifier.fillMaxWidth(),
@@ -330,9 +386,8 @@ fun RatingSettingsScreen(
                                     onClick = { viewModel.updateRatingPrefs(prefs.copy(pillStyle = style)) },
                                     label = {
                                         Text(when (style) {
-                                            RatingPillStyle.COMPACT -> "Compact"
-                                            RatingPillStyle.MINIMAL -> "Minimal"
-                                            RatingPillStyle.DETAILED -> "Detailed"
+                                            RatingPillStyle.ICON -> "With Icon"
+                                            RatingPillStyle.LETTER -> "With Letter"
                                         })
                                     },
                                     colors = FilterChipDefaults.filterChipColors(
@@ -439,19 +494,28 @@ fun RatingSettingsScreen(
 
                         Spacer(Modifier.width(6.dp))
 
-                        // Source color icon
-                        Surface(
-                            Modifier.size(28.dp),
-                            shape = RoundedCornerShape(6.dp),
-                            color = sourceColor.copy(alpha = 0.2f),
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(
-                                    source.iconChar,
-                                    fontSize = 14.sp,
-                                    color = sourceColor,
-                                    fontWeight = FontWeight.Bold,
-                                )
+                        // Source icon
+                        val iconRes = ratingSourceIconRes(source)
+                        if (iconRes != null) {
+                            Image(
+                                painter = painterResource(id = iconRes),
+                                contentDescription = source.displayName,
+                                modifier = Modifier.size(28.dp),
+                            )
+                        } else {
+                            Surface(
+                                Modifier.size(28.dp),
+                                shape = RoundedCornerShape(6.dp),
+                                color = sourceColor.copy(alpha = 0.2f),
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        source.iconChar,
+                                        fontSize = 14.sp,
+                                        color = sourceColor,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
                             }
                         }
 

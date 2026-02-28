@@ -50,10 +50,11 @@ class MainActivity : AppCompatActivity() {
             var showSplash by rememberSaveable { mutableStateOf(true) }
 
             StreamVaultTheme(themeMode = settingsState.themeMode) {
-                if (showSplash) {
-                    // Release native splash immediately when compose is ready
-                    LaunchedEffect(Unit) { keepSplash = false }
+                // Release native splash as soon as compose is ready
+                // (must be outside the if/else so it also fires on Activity recreation, e.g. locale change)
+                LaunchedEffect(Unit) { keepSplash = false }
 
+                if (showSplash) {
                     TorveEyeSplashScreen(
                         onSplashComplete = { showSplash = false },
                     )

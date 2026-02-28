@@ -53,7 +53,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.streamvault.android.R
 import com.streamvault.domain.model.DebridServiceType
 import com.streamvault.domain.model.StreamQuality
 import com.streamvault.presentation.setup.SetupStep
@@ -83,7 +85,7 @@ fun SetupWizardScreen(
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "Step $stepIndex of ${totalSteps - 2}",
+                stringResource(R.string.setup_step_of, stepIndex, totalSteps - 2),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -128,7 +130,7 @@ fun SetupWizardScreen(
                 OutlinedButton(onClick = { viewModel.previousStep() }) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("Back")
+                    Text(stringResource(R.string.common_back))
                 }
             } else {
                 Spacer(Modifier.width(1.dp))
@@ -137,7 +139,7 @@ fun SetupWizardScreen(
             when (state.currentStep) {
                 SetupStep.WELCOME -> {
                     Button(onClick = { viewModel.nextStep() }) {
-                        Text("Get Started")
+                        Text(stringResource(R.string.setup_get_started))
                         Spacer(Modifier.width(4.dp))
                         Icon(Icons.AutoMirrored.Filled.ArrowForward, null, Modifier.size(18.dp))
                     }
@@ -149,7 +151,7 @@ fun SetupWizardScreen(
                     }) {
                         Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("Start Streaming")
+                        Text(stringResource(R.string.setup_start_streaming))
                     }
                 }
                 SetupStep.TERMS -> {
@@ -157,7 +159,7 @@ fun SetupWizardScreen(
                         onClick = { viewModel.nextStep() },
                         enabled = state.termsAccepted,
                     ) {
-                        Text("I Agree")
+                        Text(stringResource(R.string.setup_i_agree))
                         Spacer(Modifier.width(4.dp))
                         Icon(Icons.AutoMirrored.Filled.ArrowForward, null, Modifier.size(18.dp))
                     }
@@ -165,10 +167,10 @@ fun SetupWizardScreen(
                 SetupStep.DEBRID, SetupStep.TRAKT, SetupStep.CHANNELS -> {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         TextButton(onClick = { viewModel.skipStep() }) {
-                            Text("Skip")
+                            Text(stringResource(R.string.common_skip))
                         }
                         Button(onClick = { viewModel.nextStep() }) {
-                            Text("Next")
+                            Text(stringResource(R.string.common_next))
                             Spacer(Modifier.width(4.dp))
                             Icon(Icons.AutoMirrored.Filled.ArrowForward, null, Modifier.size(18.dp))
                         }
@@ -176,7 +178,7 @@ fun SetupWizardScreen(
                 }
                 SetupStep.QUALITY -> {
                     Button(onClick = { viewModel.nextStep() }) {
-                        Text("Next")
+                        Text(stringResource(R.string.common_next))
                         Spacer(Modifier.width(4.dp))
                         Icon(Icons.AutoMirrored.Filled.ArrowForward, null, Modifier.size(18.dp))
                     }
@@ -325,7 +327,7 @@ private fun DebridStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
                 value = state.debridProvider.label,
                 onValueChange = {},
                 readOnly = true,
-                label = { Text("Provider") },
+                label = { Text(stringResource(R.string.settings_provider)) },
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
                 modifier = Modifier.fillMaxWidth().menuAnchor(),
             )
@@ -350,7 +352,7 @@ private fun DebridStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
         OutlinedTextField(
             value = state.debridApiKey,
             onValueChange = { viewModel.setDebridApiKey(it) },
-            label = { Text("API Key") },
+            label = { Text(stringResource(R.string.settings_api_key)) },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
         )
@@ -382,7 +384,7 @@ private fun DebridStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
                     CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(8.dp))
                 }
-                Text("Verify & Connect")
+                Text(stringResource(R.string.setup_verify_connect))
             }
         }
 
@@ -495,7 +497,7 @@ private fun TraktStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                         Spacer(Modifier.width(8.dp))
                     }
-                    Text("Connect with Trakt.tv")
+                    Text(stringResource(R.string.setup_connect_trakt))
                 }
 
                 Spacer(Modifier.height(12.dp))
@@ -536,7 +538,7 @@ private fun QualityStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
                 value = state.maxQuality.label,
                 onValueChange = {},
                 readOnly = true,
-                label = { Text("Max Quality") },
+                label = { Text(stringResource(R.string.settings_max_quality)) },
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
                 modifier = Modifier.fillMaxWidth().menuAnchor(),
             )
@@ -587,7 +589,7 @@ private fun ChannelsStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
         Text("Channels", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         Text(
-            "Add an M3U playlist or Xtream Codes account to watch live TV channels. You can add more later in the Channels tab.",
+            stringResource(R.string.setup_channels_desc),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -599,12 +601,12 @@ private fun ChannelsStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
                 selected = !isXtream,
                 onClick = { viewModel.setChannelPlaylistType("m3u") },
                 shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-            ) { Text("M3U") }
+            ) { Text(stringResource(R.string.setup_m3u)) }
             SegmentedButton(
                 selected = isXtream,
                 onClick = { viewModel.setChannelPlaylistType("xtream") },
                 shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-            ) { Text("Xtream Codes") }
+            ) { Text(stringResource(R.string.setup_provider_login)) }
         }
 
         Spacer(Modifier.height(16.dp))
@@ -612,8 +614,8 @@ private fun ChannelsStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
         OutlinedTextField(
             value = state.channelPlaylistName,
             onValueChange = { viewModel.setChannelPlaylistName(it) },
-            label = { Text("Playlist Name") },
-            placeholder = { Text("e.g. My Channels") },
+            label = { Text(stringResource(R.string.channels_playlist_name)) },
+            placeholder = { Text(stringResource(R.string.setup_playlist_hint)) },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
         )
@@ -623,8 +625,8 @@ private fun ChannelsStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
             OutlinedTextField(
                 value = state.channelXtreamServer,
                 onValueChange = { viewModel.setChannelXtreamServer(it) },
-                label = { Text("Server URL") },
-                placeholder = { Text("http://example.com:8080") },
+                label = { Text(stringResource(R.string.channels_server_url)) },
+                placeholder = { Text(stringResource(R.string.setup_server_hint)) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )
@@ -632,7 +634,7 @@ private fun ChannelsStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
             OutlinedTextField(
                 value = state.channelXtreamUsername,
                 onValueChange = { viewModel.setChannelXtreamUsername(it) },
-                label = { Text("Username") },
+                label = { Text(stringResource(R.string.channels_username)) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )
@@ -640,7 +642,7 @@ private fun ChannelsStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
             OutlinedTextField(
                 value = state.channelXtreamPassword,
                 onValueChange = { viewModel.setChannelXtreamPassword(it) },
-                label = { Text("Password") },
+                label = { Text(stringResource(R.string.channels_password)) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )
@@ -648,8 +650,8 @@ private fun ChannelsStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
             OutlinedTextField(
                 value = state.channelPlaylistUrl,
                 onValueChange = { viewModel.setChannelPlaylistUrl(it) },
-                label = { Text("M3U Playlist URL") },
-                placeholder = { Text("https://example.com/playlist.m3u") },
+                label = { Text(stringResource(R.string.channels_m3u_url)) },
+                placeholder = { Text(stringResource(R.string.setup_m3u_hint)) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )

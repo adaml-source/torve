@@ -248,6 +248,13 @@ data class TraktPlaybackEpisode(
     val ids: TraktIds? = null,
 )
 
+// Public rating (no auth required — just trakt-api-key header)
+@Serializable
+data class TraktPublicRating(
+    val rating: Float = 0f,
+    val votes: Int = 0,
+)
+
 // Calendar
 data class TraktCalendarEpisode(
     val showTitle: String,

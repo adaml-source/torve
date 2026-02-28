@@ -2,6 +2,8 @@ package com.streamvault.presentation.mdblist
 
 import com.streamvault.data.mdblist.MdbListApi
 import com.streamvault.data.mdblist.MdbListRepository
+import com.streamvault.domain.integrations.IntegrationSecretKey
+import com.streamvault.domain.integrations.IntegrationSecretStore
 import com.streamvault.domain.model.MdbListInfo
 import com.streamvault.domain.model.MdbListShelfConfig
 import com.streamvault.domain.repository.PreferencesRepository
@@ -14,6 +16,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+enum class MdbListTab { POPULAR, SEARCH }
+
 data class MdbListUiState(
     val apiKey: String = "",
     val savedLists: List<MdbListShelfConfig> = emptyList(),
@@ -22,12 +26,15 @@ data class MdbListUiState(
     val isSearching: Boolean = false,
     val error: String? = null,
     val topLists: List<MdbListInfo> = emptyList(),
+    val isLoadingTop: Boolean = false,
+    val activeTab: MdbListTab = MdbListTab.POPULAR,
 )
 
 class MdbListViewModel(
     private val mdbListApi: MdbListApi,
     private val mdbListRepo: MdbListRepository,
     private val prefsRepo: PreferencesRepository,
+    private val integrationSecretStore: IntegrationSecretStore,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(MdbListUiState())
@@ -43,10 +50,32 @@ class MdbListViewModel(
 
     private fun loadSaved() {
         scope.launch {
-            val apiKey = prefsRepo.getString(KEY_MDBLIST_API_KEY) ?: ""
+            val apiKey = integrationSecretStore.get(IntegrationSecretKey.MDBLIST_API_KEY)
+                ?: prefsRepo.getString(KEY_MDBLIST_API_KEY)
+                ?: ""
             val saved = mdbListRepo.getSavedLists()
             _state.update { it.copy(apiKey = apiKey, savedLists = saved) }
+            if (apiKey.isNotBlank()) {
+                loadTopLists()
+            }
         }
+    }
+
+    /** Refresh API key from secure store (call after key is saved in settings). */
+    fun refreshApiKey() {
+        scope.launch {
+            val apiKey = integrationSecretStore.get(IntegrationSecretKey.MDBLIST_API_KEY)
+                ?: prefsRepo.getString(KEY_MDBLIST_API_KEY)
+                ?: ""
+            _state.update { it.copy(apiKey = apiKey) }
+            if (apiKey.isNotBlank() && _state.value.topLists.isEmpty()) {
+                loadTopLists()
+            }
+        }
+    }
+
+    fun setActiveTab(tab: MdbListTab) {
+        _state.update { it.copy(activeTab = tab) }
     }
 
     fun setSearchQuery(query: String) {
@@ -102,10 +131,13 @@ class MdbListViewModel(
         if (apiKey.isBlank()) return
 
         scope.launch {
+            _state.update { it.copy(isLoadingTop = true) }
             try {
-                val top = mdbListApi.getTopLists(apiKey)
-                _state.update { it.copy(topLists = top) }
-            } catch (_: Exception) { }
+                val top = mdbListApi.getTopLists(apiKey, limit = 20)
+                _state.update { it.copy(topLists = top, isLoadingTop = false) }
+            } catch (_: Exception) {
+                _state.update { it.copy(isLoadingTop = false) }
+            }
         }
     }
 }

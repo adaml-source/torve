@@ -28,7 +28,7 @@ class ChannelRepositoryImpl(
     private val epgCache = mutableMapOf<String, EpgData>()
 
     override suspend fun addPlaylist(name: String, url: String, epgUrl: String?): ChannelPlaylist {
-        val id = "iptv_${Clock.System.now().toEpochMilliseconds()}"
+        val id = "ch_${Clock.System.now().toEpochMilliseconds()}"
         val now = Clock.System.now().toEpochMilliseconds()
 
         // Fetch and parse the playlist

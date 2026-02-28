@@ -64,6 +64,9 @@ import com.streamvault.android.ui.components.PosterCard
 import com.streamvault.android.ui.components.SectionHeader
 import com.streamvault.android.ui.components.ShimmerBox
 import com.streamvault.android.ui.components.LocalCardStyle
+import com.streamvault.android.ui.components.LocalRatingPrefs
+import com.streamvault.android.ui.components.MultiRatingPills
+import com.streamvault.domain.model.MediaRatings
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Charcoal
 import com.streamvault.android.ui.theme.Gunmetal
@@ -85,6 +88,7 @@ import com.streamvault.domain.model.resolveCardStyle
 import com.streamvault.domain.model.resolvedWidthDp
 import com.streamvault.domain.recommendation.ScoredMediaItem
 import com.streamvault.presentation.home.HomeViewModel
+import com.streamvault.presentation.seeall.SeeAllViewModel
 import com.streamvault.presentation.watchlist.WatchlistViewModel
 import kotlinx.coroutines.delay
 import org.koin.compose.koinInject
@@ -92,6 +96,7 @@ import org.koin.compose.koinInject
 private sealed interface HomeRenderItem { val order: Int }
 private data class BuiltInItem(val config: HomeSectionConfig) : HomeRenderItem { override val order = config.order }
 private data class CustomItem(val section: CustomSection) : HomeRenderItem { override val order = section.order }
+private data class AddonShelfItem(val shelf: CatalogShelf, override val order: Int) : HomeRenderItem
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -142,6 +147,22 @@ fun HomeScreen(
             }
         }
     }
+    val filteredWatchlist = remember(state.watchlistItems, mediaType) {
+        if (mediaType == "all") state.watchlistItems
+        else state.watchlistItems.filter { item ->
+            when (mediaType) {
+                "tv" -> item.type == MediaType.SERIES
+                "movie" -> item.type == MediaType.MOVIE
+                else -> true
+            }
+        }
+    }
+    val watchlistMovies = remember(state.watchlistItems) {
+        state.watchlistItems.filter { it.type == MediaType.MOVIE }
+    }
+    val watchlistTv = remember(state.watchlistItems) {
+        state.watchlistItems.filter { it.type == MediaType.SERIES }
+    }
     val filteredRecommendations = remember(state.recommendedItems, mediaType) {
         if (mediaType == "all") state.recommendedItems
         else state.recommendedItems.filter { scored ->
@@ -157,6 +178,14 @@ fun HomeScreen(
         viewModel.refreshRatings(mdblistApiKey)
     }
 
+    // Reload home data when Trakt sync completes (new watchlist, history, etc.)
+    val traktLastSync = settingsState.traktLastSyncTime
+    LaunchedEffect(traktLastSync) {
+        if (traktLastSync != null && !state.isLoading) {
+            viewModel.refresh()
+        }
+    }
+
     val defaultCardStyle = resolveCardStyle(
         presets = settingsState.cardStylePresets,
         presetId = null,
@@ -164,6 +193,7 @@ fun HomeScreen(
     )
     androidx.compose.runtime.CompositionLocalProvider(
         LocalCardStyle provides defaultCardStyle,
+        LocalRatingPrefs provides defaultCardStyle.ratingPrefs,
     ) {
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         when {
@@ -196,15 +226,25 @@ fun HomeScreen(
 
             else -> {
                 // Render sections (built-in + custom) in user-defined order
-                val enabledItems = remember(sectionConfigs, customSections, homeLayoutOrder) {
+                val addonShelfVisibility = state.addonShelfVisibility
+                val enabledItems = remember(sectionConfigs, customSections, homeLayoutOrder, state.addonShelves, addonShelfVisibility) {
                     val orderIndex = homeLayoutOrder.withIndex().associate { it.value to it.index }
                     fun itemKey(item: HomeRenderItem): String = when (item) {
                         is BuiltInItem -> "section:${item.config.section.name}"
                         is CustomItem -> "custom:${item.section.id}"
+                        is AddonShelfItem -> "addon:${item.shelf.id}"
                     }
                     buildList<HomeRenderItem> {
                         sectionConfigs.filter { it.enabled }.forEach { add(BuiltInItem(it)) }
                         customSections.filter { it.enabled }.forEach { add(CustomItem(it)) }
+                        // Add individual addon shelves that are visible
+                        state.addonShelves.forEachIndexed { idx, shelf ->
+                            val visible = addonShelfVisibility[shelf.id] ?: true
+                            if (visible) {
+                                val addonOrder = orderIndex["addon:${shelf.id}"] ?: (10_000 + 100 + idx)
+                                add(AddonShelfItem(shelf, addonOrder))
+                            }
+                        }
                     }.sortedWith(
                         compareBy<HomeRenderItem> { item ->
                             orderIndex[itemKey(item)] ?: (10_000 + item.order)
@@ -264,6 +304,7 @@ fun HomeScreen(
                                                 ContinueWatchingCard(
                                                     progress = progress,
                                                     onClick = { onContinueWatchingClick(progress) },
+                                                    ratings = state.continueWatchingRatings[progress.mediaId],
                                                 )
                                             }
                                         }
@@ -291,18 +332,18 @@ fun HomeScreen(
                                             action = stringResource(R.string.home_see_all),
                                             onActionClick = { onSeeAllClick("watchlist") },
                                         )
-                                        if (state.watchlistItems.isNotEmpty()) {
+                                        if (filteredWatchlist.isNotEmpty()) {
                                             LazyRow(
                                                 contentPadding = PaddingValues(horizontal = 16.dp),
                                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                                             ) {
                                                 items(
-                                                    state.watchlistItems.size,
-                                                    key = { index -> "wl_${state.watchlistItems[index].id}_$index" },
+                                                    filteredWatchlist.size,
+                                                    key = { index -> "wl_${filteredWatchlist[index].id}_$index" },
                                                 ) { index ->
                                                     PosterCard(
-                                                        item = state.watchlistItems[index],
-                                                        onClick = { onMediaClick(state.watchlistItems[index]) },
+                                                        item = filteredWatchlist[index],
+                                                        onClick = { onMediaClick(filteredWatchlist[index]) },
                                                     )
                                                 }
                                             }
@@ -311,6 +352,66 @@ fun HomeScreen(
                                                 text = "Add movies and shows to your watchlist",
                                                 icon = Icons.Rounded.BookmarkBorder,
                                             )
+                                        }
+                                    }
+                                }
+                            }
+
+                            HomeSection.WATCHLIST_MOVIES -> {
+                                if (watchlistMovies.isNotEmpty()) {
+                                    item(key = "watchlist_movies") {
+                                        androidx.compose.runtime.CompositionLocalProvider(
+                                            LocalCardStyle provides sectionStyle,
+                                        ) {
+                                            SectionHeader(
+                                                title = config.customTitle ?: "Watchlist — Movies",
+                                                action = stringResource(R.string.home_see_all),
+                                                onActionClick = { onSeeAllClick("watchlist") },
+                                            )
+                                            LazyRow(
+                                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                            ) {
+                                                items(
+                                                    watchlistMovies.size,
+                                                    key = { index -> "wlm_${watchlistMovies[index].id}_$index" },
+                                                ) { index ->
+                                                    PosterCard(
+                                                        item = watchlistMovies[index],
+                                                        onClick = { onMediaClick(watchlistMovies[index]) },
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            HomeSection.WATCHLIST_TV -> {
+                                if (watchlistTv.isNotEmpty()) {
+                                    item(key = "watchlist_tv") {
+                                        androidx.compose.runtime.CompositionLocalProvider(
+                                            LocalCardStyle provides sectionStyle,
+                                        ) {
+                                            SectionHeader(
+                                                title = config.customTitle ?: "Watchlist — TV Shows",
+                                                action = stringResource(R.string.home_see_all),
+                                                onActionClick = { onSeeAllClick("watchlist") },
+                                            )
+                                            LazyRow(
+                                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                            ) {
+                                                items(
+                                                    watchlistTv.size,
+                                                    key = { index -> "wlt_${watchlistTv[index].id}_$index" },
+                                                ) { index ->
+                                                    PosterCard(
+                                                        item = watchlistTv[index],
+                                                        onClick = { onMediaClick(watchlistTv[index]) },
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -462,26 +563,9 @@ fun HomeScreen(
                             }
 
                             HomeSection.ADDON_SHELVES -> {
-                                if (state.addonShelves.isNotEmpty()) {
-                                    item(key = "addon_shelves") {
-                                        androidx.compose.runtime.CompositionLocalProvider(
-                                            LocalCardStyle provides sectionStyle,
-                                        ) {
-                                            Spacer(Modifier.height(8.dp))
-                                            Column {
-                                                state.addonShelves.forEach { shelf ->
-                                                    CatalogShelf(
-                                                        title = shelf.title,
-                                                        items = shelf.items,
-                                                        onItemClick = onMediaClick,
-                                                        onSeeAll = {},
-                                                    )
-                                                    Spacer(Modifier.height(8.dp))
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                                // Individual addon shelves are now rendered via AddonShelfItem
+                                // in the layout order. This section is kept for backwards
+                                // compatibility but doesn't render anything.
                             }
 
                             HomeSection.BECAUSE_YOU_WATCHED -> {
@@ -521,7 +605,10 @@ fun HomeScreen(
                                                         title = shelf.title,
                                                         items = shelf.items,
                                                         onItemClick = onMediaClick,
-                                                        onSeeAll = {},
+                                                        onSeeAll = {
+                                                            SeeAllViewModel.pendingItems[shelf.id] = shelf.title to shelf.items
+                                                            onSeeAllClick("shelf:${shelf.id}")
+                                                        },
                                                     )
                                                     Spacer(Modifier.height(8.dp))
                                                 }
@@ -543,6 +630,23 @@ fun HomeScreen(
                                             items = items,
                                             onItemClick = onMediaClick,
                                             onSeeAll = { onSeeAllClick("custom:${section.id}") },
+                                        )
+                                    }
+                                }
+                            }
+                            is AddonShelfItem -> {
+                                val shelf = item.shelf
+                                if (shelf.items.isNotEmpty()) {
+                                    item(key = "addon_${shelf.id}") {
+                                        Spacer(Modifier.height(8.dp))
+                                        CatalogShelf(
+                                            title = shelf.title,
+                                            items = shelf.items,
+                                            onItemClick = onMediaClick,
+                                            onSeeAll = {
+                                                SeeAllViewModel.pendingItems[shelf.id] = shelf.title to shelf.items
+                                                onSeeAllClick("shelf:${shelf.id}")
+                                            },
                                         )
                                     }
                                 }
@@ -777,7 +881,9 @@ fun ContinueWatchingCard(
     progress: WatchProgress,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    ratings: MediaRatings? = null,
 ) {
+    val ratingPrefs = LocalRatingPrefs.current
     Column(
         modifier = modifier
             .width(220.dp)
@@ -795,6 +901,16 @@ fun ContinueWatchingCard(
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
             )
+
+            // Rating pills at top-right
+            if (ratings != null && ratingPrefs.allowRatingsOnLandscapeCards) {
+                MultiRatingPills(
+                    ratings = ratings,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(4.dp),
+                )
+            }
 
             // Subtle gradient at bottom for progress bar visibility
             Box(

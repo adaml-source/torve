@@ -105,6 +105,13 @@ val POPULAR_ADDONS = listOf(
         "https://walter.trakt.tv/hotlink-ok/public/favicon.svg",
     ),
     PopularAddon(
+        "IMDB Catalogs",
+        "IMDB movie & series lists — Top 250, Most Popular, Box Office",
+        "https://1fe84bc728af-imdb-catalogs.baby-beamup.club/manifest.json",
+        listOf(AddonCategory.CATALOGS),
+        "https://1fe84bc728af-imdb-catalogs.baby-beamup.club/static/imdb-logo.png",
+    ),
+    PopularAddon(
         "RPDB Catalogs",
         "Rating poster database — catalogs with rating overlays",
         "https://1fe84bc728af-rpdb.baby-beamup.club/manifest.json",
@@ -134,18 +141,11 @@ val POPULAR_ADDONS = listOf(
         "https://comet.elfhosted.com/static/images/comet.png",
     ),
     PopularAddon(
-        "Jackettio",
-        "Streams via Jackett indexers — requires Jackett setup",
-        "https://jackettio.elfhosted.com/manifest.json",
+        "AIOStreams",
+        "All-in-one — consolidates multiple addons & debrid services",
+        "https://aiostreams.elfhosted.com/manifest.json",
         listOf(AddonCategory.STREAMS),
-        "https://jackettio.elfhosted.com/static/images/jackettio.png",
-    ),
-    PopularAddon(
-        "Peerflix",
-        "P2P streaming with instant playback",
-        "https://peerflix-addon.elfhosted.com/manifest.json",
-        listOf(AddonCategory.STREAMS),
-        "https://peerflix-addon.elfhosted.com/static/images/peerflix.png",
+        "https://aiostreams.elfhosted.com/static/images/aiostreams.png",
     ),
     // ── Subtitles ──
     PopularAddon(
@@ -154,27 +154,6 @@ val POPULAR_ADDONS = listOf(
         "https://opensubtitles-v3.strem.io/manifest.json",
         listOf(AddonCategory.SUBTITLES),
         "https://opensubtitles-v3.strem.io/images/opensubtitles-logo.png",
-    ),
-    PopularAddon(
-        "OpenSubtitles Pro",
-        "Enhanced OpenSubtitles with ad-free access",
-        "https://opensubtitlespro.elfhosted.com/manifest.json",
-        listOf(AddonCategory.SUBTITLES),
-        "https://opensubtitlespro.elfhosted.com/static/images/opensubtitlespro.png",
-    ),
-    PopularAddon(
-        "Subdl Subtitles",
-        "Subtitles from subdl.com — fast and comprehensive",
-        "https://subdl-subs.elfhosted.com/manifest.json",
-        listOf(AddonCategory.SUBTITLES),
-        "https://subdl-subs.elfhosted.com/static/images/subdl.png",
-    ),
-    PopularAddon(
-        "Subscene Subtitles",
-        "Community subtitles from Subscene",
-        "https://subscene-subs.elfhosted.com/manifest.json",
-        listOf(AddonCategory.SUBTITLES),
-        "https://subscene-subs.elfhosted.com/static/images/subscene.png",
     ),
 )
 

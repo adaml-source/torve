@@ -20,14 +20,14 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -44,7 +44,6 @@ import androidx.compose.ui.unit.dp
 import com.streamvault.android.R
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Snow
-import com.streamvault.domain.model.SubscriptionTier
 import com.streamvault.presentation.subscription.SubscriptionViewModel
 import org.koin.compose.koinInject
 
@@ -71,105 +70,227 @@ fun PaywallScreen(
         )
 
         if (state.isPro) {
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-            ) {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text(
-                        text = stringResource(R.string.paywall_youre_pro),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = stringResource(R.string.paywall_tier, state.subscription?.tier?.label ?: "Pro"),
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    TextButton(onClick = { viewModel.deactivate() }) {
-                        Text(stringResource(R.string.paywall_cancel), color = MaterialTheme.colorScheme.error)
-                    }
-                }
-            }
+            // Lifetime active view
+            LifetimeActiveContent(
+                onRestore = { viewModel.restorePurchase("restore_token") },
+            )
         } else {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
+            // Free tier view
+            FreeTierContent(
+                state = state,
+                onPurchase = { viewModel.purchase("mock_token_${System.currentTimeMillis()}") },
+                onRestore = { viewModel.restorePurchase("restore_token") },
+                onRebateCodeChange = { viewModel.updateRebateCode(it) },
+                onRedeem = { viewModel.redeemCode() },
+            )
+        }
+    }
+}
+
+@Composable
+private fun LifetimeActiveContent(
+    onRestore: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Spacer(Modifier.height(24.dp))
+
+        Icon(
+            Icons.Default.Check,
+            contentDescription = null,
+            tint = Color(0xFF22C55E),
+            modifier = Modifier.size(64.dp),
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        Text(
+            text = stringResource(R.string.paywall_lifetime_active),
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        Text(
+            text = stringResource(R.string.paywall_full_access),
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+
+        Spacer(Modifier.height(32.dp))
+
+        // All features with check marks
+        AllFeaturesChecked()
+
+        Spacer(Modifier.height(32.dp))
+
+        TextButton(onClick = onRestore) {
+            Text(stringResource(R.string.paywall_restore))
+        }
+    }
+}
+
+@Composable
+private fun AllFeaturesChecked() {
+    val features = listOf(
+        R.string.paywall_search_browse,
+        R.string.paywall_stream_playback,
+        R.string.paywall_downloads,
+        R.string.paywall_channels,
+        R.string.paywall_multi_cloud,
+        R.string.paywall_trakt_simkl,
+        R.string.paywall_ai_search,
+        R.string.paywall_rating_pills,
+        R.string.paywall_custom_home,
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        features.forEach { featureRes ->
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = stringResource(R.string.paywall_unlock),
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
+                Icon(
+                    Icons.Default.Check,
+                    contentDescription = null,
+                    tint = Color(0xFF22C55E),
+                    modifier = Modifier.size(20.dp),
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.width(12.dp))
                 Text(
-                    text = stringResource(R.string.paywall_subtitle),
+                    text = stringResource(featureRes),
                     style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
+                    color = Snow,
                 )
-
-                Spacer(Modifier.height(24.dp))
-
-                FeatureComparison()
-
-                Spacer(Modifier.height(24.dp))
-
-                PricingCard(
-                    title = stringResource(R.string.paywall_lifetime),
-                    price = stringResource(R.string.paywall_price),
-                    description = stringResource(R.string.paywall_one_time),
-                    selected = true,
-                    highlighted = true,
-                    onClick = { viewModel.selectTier(SubscriptionTier.LIFETIME) },
-                )
-
-                Spacer(Modifier.height(24.dp))
-
-                Button(
-                    onClick = {
-                        viewModel.purchase("mock_token_${System.currentTimeMillis()}")
-                    },
-                    modifier = Modifier.fillMaxWidth().height(56.dp),
-                    enabled = !state.isPurchasing,
-                    shape = RoundedCornerShape(16.dp),
-                ) {
-                    if (state.isPurchasing) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
-                            color = MaterialTheme.colorScheme.onPrimary,
-                        )
-                    } else {
-                        Text(
-                            text = stringResource(R.string.paywall_get_lifetime),
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                    }
-                }
-
-                Spacer(Modifier.height(12.dp))
-
-                TextButton(onClick = {
-                    viewModel.restorePurchase("restore_token")
-                }) {
-                    Text(stringResource(R.string.paywall_restore))
-                }
-
-                state.error?.let { error ->
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = error,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
             }
         }
+    }
+}
+
+@Composable
+private fun FreeTierContent(
+    state: com.streamvault.presentation.subscription.SubscriptionUiState,
+    onPurchase: () -> Unit,
+    onRestore: () -> Unit,
+    onRebateCodeChange: (String) -> Unit,
+    onRedeem: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = stringResource(R.string.paywall_free_status),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        Text(
+            text = stringResource(R.string.paywall_unlock),
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        Text(
+            text = stringResource(R.string.paywall_subtitle),
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+
+        Spacer(Modifier.height(24.dp))
+
+        FeatureComparison()
+
+        Spacer(Modifier.height(24.dp))
+
+        // Pricing card
+        OutlinedCard(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary),
+        ) {
+            Row(
+                modifier = Modifier.padding(20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.paywall_lifetime),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = stringResource(R.string.paywall_one_time),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text(
+                    text = stringResource(R.string.paywall_price),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        Button(
+            onClick = onPurchase,
+            modifier = Modifier.fillMaxWidth().height(56.dp),
+            enabled = !state.isPurchasing,
+            shape = RoundedCornerShape(16.dp),
+        ) {
+            if (state.isPurchasing) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(24.dp),
+                    color = MaterialTheme.colorScheme.onPrimary,
+                )
+            } else {
+                Text(
+                    text = stringResource(R.string.paywall_get_lifetime),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        TextButton(onClick = onRestore) {
+            Text(stringResource(R.string.paywall_restore))
+        }
+
+        state.error?.let { error ->
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = error,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+
+        if (state.rebateSuccess) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = stringResource(R.string.paywall_redeem_success),
+                color = Color(0xFF22C55E),
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+
+        Spacer(Modifier.height(24.dp))
     }
 }
 
@@ -193,9 +314,12 @@ private fun FeatureComparison() {
         FeatureRow(stringResource(R.string.paywall_search_browse), free = true, pro = true)
         FeatureRow(stringResource(R.string.paywall_stream_playback), free = false, pro = true)
         FeatureRow(stringResource(R.string.paywall_downloads), free = false, pro = true)
-        FeatureRow(stringResource(R.string.paywall_iptv), free = false, pro = true)
+        FeatureRow(stringResource(R.string.paywall_channels), free = false, pro = true)
         FeatureRow(stringResource(R.string.paywall_multi_cloud), free = false, pro = true)
-        FeatureRow(stringResource(R.string.paywall_advanced_filters), free = false, pro = true)
+        FeatureRow(stringResource(R.string.paywall_trakt_simkl), free = false, pro = true)
+        FeatureRow(stringResource(R.string.paywall_ai_search), free = false, pro = true)
+        FeatureRow(stringResource(R.string.paywall_rating_pills), free = false, pro = true)
+        FeatureRow(stringResource(R.string.paywall_custom_home), free = false, pro = true)
     }
 }
 
@@ -226,70 +350,6 @@ private fun FeatureRow(feature: String, free: Boolean, pro: Boolean) {
             } else {
                 Icon(Icons.Default.Close, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(20.dp))
             }
-        }
-    }
-}
-
-@Composable
-private fun PricingCard(
-    title: String,
-    price: String,
-    description: String,
-    selected: Boolean,
-    highlighted: Boolean = false,
-    onClick: () -> Unit,
-) {
-    val border = if (selected) {
-        BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
-    } else {
-        BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-    }
-
-    OutlinedCard(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        border = border,
-    ) {
-        Row(
-            modifier = Modifier.padding(20.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    if (highlighted) {
-                        Spacer(Modifier.width(8.dp))
-                        Card(
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary),
-                            shape = RoundedCornerShape(4.dp),
-                        ) {
-                            Text(
-                                text = stringResource(R.string.paywall_best_value),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                            )
-                        }
-                    }
-                }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Text(
-                text = price,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-            )
         }
     }
 }

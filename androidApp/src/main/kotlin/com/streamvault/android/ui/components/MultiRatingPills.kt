@@ -17,8 +17,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.streamvault.android.R
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.size
 import com.streamvault.domain.model.MediaRatings
 import com.streamvault.domain.model.RatingDisplayPrefs
 import com.streamvault.domain.model.RatingPillStyle
@@ -53,9 +57,9 @@ fun MultiRatingPills(
         maxRatingsOnCard = prefs.maxRatingsOnCard,
     )
 
-    val pills = providersToRender.map { source ->
+    val pills = providersToRender.mapNotNull { source ->
         val value = getRatingValue(source, ratings, prefs)
-        source to value
+        if (value != null) Triple(source, value, false) else null
     }
 
     if (pills.isEmpty()) return
@@ -67,12 +71,12 @@ fun MultiRatingPills(
         horizontalArrangement = Arrangement.spacedBy(3.dp),
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        pills.forEach { (source, value) ->
+        pills.forEach { (source, value, _) ->
             key(source) {
                 RatingChip(
                     source = source,
-                    displayValue = value ?: "--",
-                    isMissing = value == null,
+                    displayValue = value,
+                    isMissing = false,
                     style = prefs.pillStyle,
                     ratings = ratings,
                 )
@@ -105,7 +109,30 @@ private fun RatingChip(
         horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         when (style) {
-            RatingPillStyle.COMPACT -> {
+            RatingPillStyle.ICON -> {
+                val iconRes = ratingSourceIconRes(source)
+                if (iconRes != null) {
+                    Image(
+                        painter = painterResource(id = iconRes),
+                        contentDescription = source.displayName,
+                        modifier = Modifier.size(14.dp),
+                    )
+                } else {
+                    Text(
+                        text = source.iconChar,
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                        color = iconColor,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                Text(
+                    text = displayValue,
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, letterSpacing = 0.sp),
+                    color = textColor,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            RatingPillStyle.LETTER -> {
                 Text(
                     text = source.iconChar,
                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
@@ -117,28 +144,6 @@ private fun RatingChip(
                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, letterSpacing = 0.sp),
                     color = textColor,
                     fontWeight = FontWeight.SemiBold,
-                )
-            }
-            RatingPillStyle.MINIMAL -> {
-                Text(
-                    text = displayValue,
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-                    color = textColor,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-            RatingPillStyle.DETAILED -> {
-                Text(
-                    text = source.iconChar,
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                    color = iconColor,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    text = displayValue,
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-                    color = textColor,
-                    fontWeight = FontWeight.Bold,
                 )
             }
         }
@@ -210,6 +215,25 @@ fun getRatingSourceColor(source: RatingSource): Color = when (source) {
     RatingSource.TRAKT -> TraktRed
     RatingSource.MDBLIST -> MdblistOrange
     RatingSource.MAL -> MalBlue
+}
+
+/**
+ * Example display values for the settings screen.
+ */
+/**
+ * Map rating sources to their bundled icon drawables for ICON pill style.
+ */
+fun ratingSourceIconRes(source: RatingSource): Int? = when (source) {
+    RatingSource.IMDB -> R.drawable.ic_rating_imdb
+    RatingSource.ROTTEN_TOMATOES -> R.drawable.ic_rating_rt
+    RatingSource.RT_AUDIENCE -> R.drawable.ic_rating_rt
+    RatingSource.TMDB -> R.drawable.ic_rating_tmdb
+    RatingSource.METACRITIC -> R.drawable.ic_rating_metacritic
+    RatingSource.LETTERBOXD -> R.drawable.ic_rating_letterboxd
+    RatingSource.TRAKT -> R.drawable.ic_rating_trakt
+    RatingSource.MDBLIST -> R.drawable.ic_rating_mdblist
+    RatingSource.MAL -> R.drawable.ic_rating_mal
+    RatingSource.TORVE -> R.drawable.ic_rating_torve
 }
 
 /**

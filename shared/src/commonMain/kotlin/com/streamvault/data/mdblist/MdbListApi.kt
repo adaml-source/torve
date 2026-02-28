@@ -14,6 +14,13 @@ class MdbListApi(private val httpClient: HttpClient) {
 
     companion object {
         private const val BASE_URL = "https://api.mdblist.com"
+
+        /**
+         * Default MDBList API key used for rating lookups when the user hasn't
+         * configured their own key. Free tier — 1 000 requests / day.
+         * Get your own key at https://mdblist.com/preferences/
+         */
+        const val DEFAULT_API_KEY = "INSERT_YOUR_MDBLIST_API_KEY_HERE"
     }
 
     suspend fun getListItems(
@@ -48,7 +55,7 @@ class MdbListApi(private val httpClient: HttpClient) {
     suspend fun searchLists(query: String, apiKey: String): List<MdbListInfo> {
         val response = httpClient.get("$BASE_URL/lists/search") {
             parameter("apikey", apiKey)
-            parameter("s", query)
+            parameter("query", query)
         }
         if (!response.status.isSuccess()) {
             val body = try { response.bodyAsText().take(200) } catch (_: Exception) { "" }
@@ -85,7 +92,10 @@ class MdbListApi(private val httpClient: HttpClient) {
             parameter("apikey", apiKey)
             parameter("i", imdbId)
         }
-        if (!response.status.isSuccess()) return null
+        if (!response.status.isSuccess()) {
+            if (response.status.value == 429) throw RateLimitException()
+            return null
+        }
         return try { response.body() } catch (_: Exception) { null }
     }
 
@@ -93,7 +103,10 @@ class MdbListApi(private val httpClient: HttpClient) {
         val response = httpClient.get("$BASE_URL/tmdb/movie/$tmdbId") {
             parameter("apikey", apiKey)
         }
-        if (!response.status.isSuccess()) return null
+        if (!response.status.isSuccess()) {
+            if (response.status.value == 429) throw RateLimitException()
+            return null
+        }
         return try { response.body() } catch (_: Exception) { null }
     }
 
@@ -101,7 +114,12 @@ class MdbListApi(private val httpClient: HttpClient) {
         val response = httpClient.get("$BASE_URL/tmdb/show/$tmdbId") {
             parameter("apikey", apiKey)
         }
-        if (!response.status.isSuccess()) return null
+        if (!response.status.isSuccess()) {
+            if (response.status.value == 429) throw RateLimitException()
+            return null
+        }
         return try { response.body() } catch (_: Exception) { null }
     }
+
+    class RateLimitException : Exception("MDBList daily API limit exceeded")
 }

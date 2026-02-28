@@ -1,5 +1,7 @@
 package com.streamvault.presentation.subscription
 
+import com.streamvault.data.subscription.RebateCodeApi
+import com.streamvault.data.subscription.RebateResult
 import com.streamvault.domain.model.PremiumFeature
 import com.streamvault.domain.model.SubscriptionTier
 import com.streamvault.domain.repository.SubscriptionRepository
@@ -14,6 +16,7 @@ import kotlinx.coroutines.launch
 
 class SubscriptionViewModel(
     private val subscriptionRepo: SubscriptionRepository,
+    private val rebateCodeApi: RebateCodeApi,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(SubscriptionUiState())
@@ -27,6 +30,7 @@ class SubscriptionViewModel(
         scope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
             try {
+                subscriptionRepo.ensureFreeTier()
                 val sub = subscriptionRepo.getActiveSubscription()
                 val isPro = subscriptionRepo.isPro()
                 _state.update {
@@ -42,16 +46,11 @@ class SubscriptionViewModel(
         }
     }
 
-    fun selectTier(tier: SubscriptionTier) {
-        _state.update { it.copy(selectedTier = tier) }
-    }
-
     fun purchase(purchaseToken: String) {
-        val tier = _state.value.selectedTier
         scope.launch {
             _state.update { it.copy(isPurchasing = true, error = null) }
             try {
-                subscriptionRepo.activateSubscription(tier, purchaseToken)
+                subscriptionRepo.activateSubscription(SubscriptionTier.LIFETIME, purchaseToken)
                 loadSubscription()
                 _state.update { it.copy(isPurchasing = false, showPaywall = false) }
             } catch (e: Exception) {
@@ -72,13 +71,31 @@ class SubscriptionViewModel(
         }
     }
 
-    fun deactivate() {
+    fun updateRebateCode(code: String) {
+        _state.update { it.copy(rebateCode = code) }
+    }
+
+    fun redeemCode() {
+        val code = _state.value.rebateCode.trim()
+        if (code.isEmpty()) return
         scope.launch {
+            _state.update { it.copy(isRedeeming = true, error = null, rebateSuccess = false) }
             try {
-                subscriptionRepo.deactivateSubscription()
-                loadSubscription()
+                when (val result = rebateCodeApi.redeemCode(code)) {
+                    is RebateResult.Success -> {
+                        subscriptionRepo.activateSubscription(
+                            SubscriptionTier.LIFETIME,
+                            "rebate_$code",
+                        )
+                        _state.update { it.copy(isRedeeming = false, rebateSuccess = true, rebateCode = "") }
+                        loadSubscription()
+                    }
+                    is RebateResult.Error -> {
+                        _state.update { it.copy(isRedeeming = false, error = result.message) }
+                    }
+                }
             } catch (e: Exception) {
-                _state.update { it.copy(error = e.message) }
+                _state.update { it.copy(isRedeeming = false, error = e.message) }
             }
         }
     }

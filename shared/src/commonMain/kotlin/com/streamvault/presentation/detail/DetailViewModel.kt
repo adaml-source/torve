@@ -23,6 +23,10 @@ import com.streamvault.domain.repository.PreferencesRepository
 import com.streamvault.domain.repository.StreamRepository
 import com.streamvault.domain.repository.WatchHistoryRepository
 import com.streamvault.domain.repository.WatchProgressRepository
+import com.streamvault.data.mdblist.MdbListApi
+import com.streamvault.data.mdblist.RatingsEnricher
+import com.streamvault.domain.integrations.IntegrationSecretKey
+import com.streamvault.domain.integrations.IntegrationSecretStore
 import com.streamvault.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.datetime.Clock
@@ -48,6 +52,8 @@ class DetailViewModel(
     private val prefsRepo: PreferencesRepository,
     private val libraryOverlayService: LibraryOverlayService,
     private val streamSelector: StreamSelector,
+    private val ratingsEnricher: RatingsEnricher,
+    private val integrationSecretStore: IntegrationSecretStore,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(DetailUiState())
@@ -97,6 +103,7 @@ class DetailViewModel(
                 }
                 loadAvailability(item)
                 loadLibraryStatus(item)
+                enrichRatings(item)
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = e.message ?: "Failed to load") }
             }
@@ -129,6 +136,21 @@ class DetailViewModel(
                     )
                 }
             }
+        }
+    }
+
+    private fun enrichRatings(item: com.streamvault.domain.model.MediaItem) {
+        scope.launch {
+            val apiKey = try {
+                integrationSecretStore.get(IntegrationSecretKey.MDBLIST_API_KEY)
+                    ?: prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY)
+                    ?: MdbListApi.DEFAULT_API_KEY
+            } catch (_: Exception) { MdbListApi.DEFAULT_API_KEY }
+            if (apiKey.isBlank()) return@launch
+            try {
+                val enriched = ratingsEnricher.enrichSingle(item, apiKey)
+                _state.update { it.copy(mediaItem = enriched) }
+            } catch (_: Exception) { }
         }
     }
 

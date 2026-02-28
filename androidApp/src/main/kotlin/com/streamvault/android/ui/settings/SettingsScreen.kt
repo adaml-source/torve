@@ -41,6 +41,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -978,20 +979,47 @@ fun SettingsScreen(
                     label = "${state.aiProvider.label} API Key",
                     placeholder = state.aiProvider.keyPlaceholder,
                 )
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FilledTonalButton(
+                        onClick = { viewModel.validateAiApiKey() },
+                        enabled = !state.aiKeyValidating && state.activeAiApiKey.isNotBlank(),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = Amber,
+                            contentColor = Obsidian,
+                        ),
+                    ) {
+                        if (state.aiKeyValidating) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Obsidian, strokeWidth = 2.dp)
+                            Spacer(Modifier.width(6.dp))
+                        }
+                        Text(if (state.aiKeyValidating) "Testing..." else "Test Key")
+                    }
+                    state.aiKeyValidationResult?.let { result ->
+                        when (result) {
+                            "valid" -> Text(
+                                "Key works! (${state.aiProvider.label})",
+                                color = Emerald,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            else -> Text(
+                                result,
+                                color = Ruby,
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 2,
+                            )
+                        }
+                    }
+                }
                 Spacer(Modifier.height(4.dp))
                 Text(
                     "API keys only work when the provider account has funds. If your balance is zero, AI search will fail.",
                     style = MaterialTheme.typography.bodySmall,
                     color = StreamVault.colors.textSecondary,
                 )
-                if (state.activeAiApiKey.isNotBlank()) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "AI search enabled (${state.aiProvider.label})",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Emerald,
-                    )
-                }
             }
         }
 
@@ -1055,6 +1083,41 @@ fun SettingsScreen(
                 // Language selector
 
                 var languageExpanded by remember { mutableStateOf(false) }
+                var pendingLanguage by remember { mutableStateOf<AppLanguage?>(null) }
+
+                // Confirmation dialog before applying locale change (restarts activity)
+                pendingLanguage?.let { lang ->
+                    AlertDialog(
+                        onDismissRequest = { pendingLanguage = null },
+                        title = { Text(stringResource(R.string.settings_language), color = Snow) },
+                        text = {
+                            Text(
+                                stringResource(R.string.language_change_confirm, lang.displayName),
+                                color = StreamVault.colors.textSecondary,
+                            )
+                        },
+                        confirmButton = {
+                            Button(
+                                onClick = {
+                                    val selected = lang
+                                    pendingLanguage = null
+                                    viewModel.setAppLanguage(selected)
+                                    AppCompatDelegate.setApplicationLocales(
+                                        LocaleListCompat.forLanguageTags(selected.code),
+                                    )
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Amber),
+                            ) { Text("OK", color = Obsidian) }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { pendingLanguage = null }) {
+                                Text(stringResource(R.string.common_cancel), color = StreamVault.colors.textSecondary)
+                            }
+                        },
+                        containerColor = Charcoal,
+                    )
+                }
+
                 ExposedDropdownMenuBox(
                     expanded = languageExpanded,
                     onExpandedChange = { languageExpanded = !languageExpanded },
@@ -1089,11 +1152,10 @@ fun SettingsScreen(
                             DropdownMenuItem(
                                 text = { Text(lang.displayName) },
                                 onClick = {
-                                    viewModel.setAppLanguage(lang)
                                     languageExpanded = false
-                                    AppCompatDelegate.setApplicationLocales(
-                                        LocaleListCompat.forLanguageTags(lang.code),
-                                    )
+                                    if (lang != state.appLanguage) {
+                                        pendingLanguage = lang
+                                    }
                                 },
                             )
                         }
@@ -1403,10 +1465,10 @@ fun SettingsScreen(
             colors = ButtonDefaults.outlinedButtonColors(contentColor = Ruby),
             border = androidx.compose.foundation.BorderStroke(1.dp, Ruby.copy(alpha = 0.5f)),
         ) {
-            Text("Reset all appearance settings")
+            Text(stringResource(R.string.settings_reset_appearance))
         }
         Text(
-            text = "This will delete all custom card style presets and reset rating display settings to defaults.",
+            text = stringResource(R.string.settings_reset_appearance_desc),
             style = MaterialTheme.typography.bodySmall,
             color = StreamVault.colors.textTertiary,
         )
@@ -1414,9 +1476,9 @@ fun SettingsScreen(
         if (showResetAppearanceConfirm) {
             AlertDialog(
                 onDismissRequest = { showResetAppearanceConfirm = false },
-                title = { Text("Reset Appearance?") },
+                title = { Text(stringResource(R.string.settings_reset_appearance_title)) },
                 text = {
-                    Text("This will permanently delete all custom card style presets and reset all appearance settings to defaults. This cannot be undone.")
+                    Text(stringResource(R.string.settings_reset_appearance_confirm))
                 },
                 confirmButton = {
                     Button(
@@ -1426,12 +1488,12 @@ fun SettingsScreen(
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Ruby),
                     ) {
-                        Text("Reset")
+                        Text(stringResource(R.string.common_reset))
                     }
                 },
                 dismissButton = {
                     TextButton(onClick = { showResetAppearanceConfirm = false }) {
-                        Text("Cancel")
+                        Text(stringResource(R.string.common_cancel))
                     }
                 },
             )

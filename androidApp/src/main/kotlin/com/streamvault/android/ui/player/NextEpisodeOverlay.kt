@@ -18,6 +18,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.res.stringResource
+import com.streamvault.android.R
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -54,7 +56,7 @@ fun NextEpisodeOverlay(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    text = if (nextEpisodeInfo.isNewSeason) "Next Season" else "Next Episode",
+                    text = stringResource(if (nextEpisodeInfo.isNewSeason) R.string.player_next_season else R.string.player_next_episode),
                     style = MaterialTheme.typography.labelMedium,
                     color = Color.White.copy(alpha = 0.6f),
                 )
@@ -93,7 +95,7 @@ fun NextEpisodeOverlay(
                                 color = Color.Black,
                             )
                             Spacer(Modifier.width(6.dp))
-                            Text("Loading...")
+                            Text(stringResource(R.string.common_loading))
                         } else {
                             Icon(
                                 Icons.Default.SkipNext,
@@ -101,11 +103,11 @@ fun NextEpisodeOverlay(
                                 modifier = Modifier.size(18.dp),
                             )
                             Spacer(Modifier.width(4.dp))
-                            Text("Play Now")
+                            Text(stringResource(R.string.common_play_now))
                         }
                     }
                     TextButton(onClick = onCancel) {
-                        Text("Cancel", color = Color.White.copy(alpha = 0.7f))
+                        Text(stringResource(R.string.common_cancel), color = Color.White.copy(alpha = 0.7f))
                     }
                     if (!isResolving && countdown > 0) {
                         Text(

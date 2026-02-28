@@ -35,8 +35,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.streamvault.data.mdblist.RatingsEnricher
+import com.streamvault.domain.integrations.IntegrationSecretStore
 import com.streamvault.domain.model.MediaItem
 import com.streamvault.domain.repository.MetadataRepository
+import com.streamvault.domain.repository.PreferencesRepository
 import com.streamvault.presentation.catalog.CatalogViewModel
 import org.koin.compose.koinInject
 
@@ -45,8 +48,25 @@ fun TvHomeScreen(
     onMediaClick: (MediaItem) -> Unit,
 ) {
     val metadataRepo: MetadataRepository = koinInject()
-    val movieViewModel = remember { CatalogViewModel(metadataRepo, "movie") }
-    val tvViewModel = remember { CatalogViewModel(metadataRepo, "tv") }
+    val prefsRepo: PreferencesRepository = koinInject()
+    val ratingsEnricher: RatingsEnricher = koinInject()
+    val integrationSecretStore: IntegrationSecretStore = koinInject()
+    val movieViewModel = remember {
+        CatalogViewModel(
+            metadataRepo, "movie",
+            prefsRepo = prefsRepo,
+            ratingsEnricher = ratingsEnricher,
+            integrationSecretStore = integrationSecretStore,
+        )
+    }
+    val tvViewModel = remember {
+        CatalogViewModel(
+            metadataRepo, "tv",
+            prefsRepo = prefsRepo,
+            ratingsEnricher = ratingsEnricher,
+            integrationSecretStore = integrationSecretStore,
+        )
+    }
 
     val movieState by movieViewModel.state.collectAsState()
     val tvState by tvViewModel.state.collectAsState()

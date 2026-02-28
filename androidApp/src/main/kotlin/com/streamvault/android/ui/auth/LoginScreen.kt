@@ -18,6 +18,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.res.stringResource
+import com.streamvault.android.R
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -77,7 +79,7 @@ fun LoginScreen(
             OutlinedTextField(
                 value = displayName,
                 onValueChange = { displayName = it },
-                label = { Text("Display Name") },
+                label = { Text(stringResource(R.string.login_display_name)) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )
@@ -87,7 +89,7 @@ fun LoginScreen(
         OutlinedTextField(
             value = email,
             onValueChange = { email = it; error = null },
-            label = { Text("Email") },
+            label = { Text(stringResource(R.string.login_email)) },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
@@ -98,7 +100,7 @@ fun LoginScreen(
         OutlinedTextField(
             value = password,
             onValueChange = { password = it; error = null },
-            label = { Text("Password") },
+            label = { Text(stringResource(R.string.login_password)) },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
@@ -140,7 +142,7 @@ fun LoginScreen(
             if (isLoading) {
                 CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
             } else {
-                Text(if (isRegisterMode) "Create Account" else "Sign In")
+                Text(stringResource(if (isRegisterMode) R.string.login_create_account else R.string.login_sign_in))
             }
         }
 
@@ -148,8 +150,7 @@ fun LoginScreen(
 
         TextButton(onClick = { isRegisterMode = !isRegisterMode; error = null }) {
             Text(
-                if (isRegisterMode) "Already have an account? Sign In"
-                else "Don't have an account? Register",
+                stringResource(if (isRegisterMode) R.string.login_switch_to_signin else R.string.login_switch_to_register),
             )
         }
 
@@ -159,7 +160,7 @@ fun LoginScreen(
             onClick = onSkip,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Skip for now")
+            Text(stringResource(R.string.login_skip))
         }
     }
 }

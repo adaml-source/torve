@@ -113,6 +113,39 @@ fun StatsScreen(
                 }
             }
 
+            Spacer(Modifier.height(16.dp))
+
+            // This Week / This Month / Streak
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Charcoal),
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                ) {
+                    val weekHrs = state.thisWeekMinutes / 60
+                    val weekMin = state.thisWeekMinutes % 60
+                    StatBox(
+                        value = if (weekHrs > 0) "${weekHrs}h ${weekMin}m" else "${weekMin}m",
+                        label = "This Week",
+                    )
+                    val monthHrs = state.thisMonthMinutes / 60
+                    val monthMin = state.thisMonthMinutes % 60
+                    StatBox(
+                        value = if (monthHrs > 0) "${monthHrs}h ${monthMin}m" else "${monthMin}m",
+                        label = "This Month",
+                    )
+                    StatBox(
+                        value = "${state.longestStreak}",
+                        label = "Day Streak",
+                    )
+                }
+            }
+
             Spacer(Modifier.height(24.dp))
 
             if (state.totalMovies == 0 && state.totalEpisodes == 0) {

@@ -9,6 +9,6 @@ interface SubscriptionRepository {
     suspend fun isPro(): Boolean
     suspend fun hasAccess(feature: PremiumFeature): Boolean
     suspend fun activateSubscription(tier: SubscriptionTier, purchaseToken: String)
-    suspend fun deactivateSubscription()
+    suspend fun ensureFreeTier()
     suspend fun restorePurchase(purchaseToken: String): Subscription?
 }

@@ -14,11 +14,10 @@ class StreamVaultApp : Application() {
     override fun onCreate() {
         super.onCreate()
 
-        // TODO: Initialize crash reporting SDK here (e.g. Firebase Crashlytics, Sentry).
-        //  Example for Crashlytics:
-        //    FirebaseCrashlytics.getInstance().setCrashlyticsCollectionEnabled(!BuildConfig.DEBUG)
-        //  Example for Sentry:
-        //    SentryAndroid.init(this) { options -> options.dsn = BuildConfig.SENTRY_DSN }
+        // Firebase Crashlytics initializes automatically via the plugin.
+        // Disable collection in debug builds to keep the dashboard clean.
+        com.google.firebase.crashlytics.FirebaseCrashlytics.getInstance()
+            .setCrashlyticsCollectionEnabled(!BuildConfig.DEBUG)
         setupUncaughtExceptionHandler()
 
         startKoin {
@@ -34,9 +33,8 @@ class StreamVaultApp : Application() {
     private fun setupUncaughtExceptionHandler() {
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-            // TODO: Forward to crash reporting service before delegating to default handler.
-            //  e.g. FirebaseCrashlytics.getInstance().recordException(throwable)
-            android.util.Log.e("StreamVault", "Uncaught exception on ${thread.name}", throwable)
+            com.google.firebase.crashlytics.FirebaseCrashlytics.getInstance().recordException(throwable)
+            android.util.Log.e("Torve", "Uncaught exception on ${thread.name}", throwable)
             defaultHandler?.uncaughtException(thread, throwable)
         }
     }

@@ -32,6 +32,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.streamvault.android.ui.components.BackButton
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Gunmetal
@@ -50,8 +52,10 @@ import com.streamvault.android.ui.theme.Ruby
 import com.streamvault.android.ui.theme.Silver
 import com.streamvault.android.ui.theme.Snow
 import com.streamvault.android.ui.theme.Steel
+import com.streamvault.presentation.mdblist.MdbListTab
 import com.streamvault.presentation.mdblist.MdbListViewModel
 import com.streamvault.presentation.settings.SettingsViewModel
+import kotlinx.coroutines.delay
 import org.koin.compose.koinInject
 
 @Composable
@@ -63,6 +67,7 @@ fun MdbListSettingsScreen(
     val settingsState by settingsViewModel.state.collectAsState()
     val mdbState by mdbListViewModel.state.collectAsState()
     var apiKeyInput by remember { mutableStateOf(settingsState.mdblistApiKey) }
+    var showSaved by remember { mutableStateOf(false) }
 
     Column(
         Modifier
@@ -120,99 +125,143 @@ fun MdbListSettingsScreen(
                     Spacer(Modifier.width(8.dp))
                     TextButton(onClick = {
                         settingsViewModel.setMdblistApiKey(apiKeyInput)
+                        mdbListViewModel.refreshApiKey()
+                        showSaved = true
                     }) {
-                        Text("Save", color = Amber, fontWeight = FontWeight.Bold)
+                        Text(
+                            if (showSaved) "Saved" else "Save",
+                            color = Amber,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+                if (showSaved) {
+                    LaunchedEffect(Unit) {
+                        delay(2000)
+                        showSaved = false
                     }
                 }
             }
 
-            // Search for lists
+            // Tabs: Popular / Search
             item {
-                Spacer(Modifier.height(12.dp))
-                Text("Search Lists", style = MaterialTheme.typography.titleMedium, color = Snow, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(8.dp))
-                var searchInput by remember { mutableStateOf(mdbState.searchQuery) }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = searchInput,
-                        onValueChange = {
-                            searchInput = it
-                            mdbListViewModel.setSearchQuery(it)
-                        },
-                        modifier = Modifier.weight(1f),
-                        placeholder = { Text("Search public lists...", color = Steel) },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Snow,
-                            unfocusedTextColor = Snow,
-                            focusedBorderColor = Amber,
-                            unfocusedBorderColor = Gunmetal,
-                            cursorColor = Amber,
+                Spacer(Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = mdbState.activeTab == MdbListTab.POPULAR,
+                        onClick = { mdbListViewModel.setActiveTab(MdbListTab.POPULAR) },
+                        label = { Text("Popular") },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Amber,
+                            selectedLabelColor = Obsidian,
+                            containerColor = Gunmetal,
+                            labelColor = Snow,
                         ),
                     )
-                    Spacer(Modifier.width(8.dp))
-                    IconButton(onClick = { mdbListViewModel.search() }) {
-                        Icon(Icons.Default.Search, contentDescription = "Search", tint = Amber)
-                    }
-                }
-                if (mdbState.isSearching) {
-                    Spacer(Modifier.height(8.dp))
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Amber)
+                    FilterChip(
+                        selected = mdbState.activeTab == MdbListTab.SEARCH,
+                        onClick = { mdbListViewModel.setActiveTab(MdbListTab.SEARCH) },
+                        label = { Text("Search") },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Amber,
+                            selectedLabelColor = Obsidian,
+                            containerColor = Gunmetal,
+                            labelColor = Snow,
+                        ),
+                    )
                 }
             }
 
-            // Search results
-            if (mdbState.searchResults.isNotEmpty()) {
-                item {
-                    Text("Search Results", style = MaterialTheme.typography.titleSmall, color = Silver)
-                }
-                items(mdbState.searchResults, key = { it.id }) { listInfo ->
-                    val isAdded = mdbState.savedLists.any { it.listId == listInfo.id }
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .background(Gunmetal, RoundedCornerShape(8.dp))
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(listInfo.name, color = Snow, fontWeight = FontWeight.Medium)
-                            if (listInfo.description.isNotBlank()) {
-                                Text(
-                                    listInfo.description.take(80),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Silver,
-                                    maxLines = 2,
-                                )
+            when (mdbState.activeTab) {
+                MdbListTab.POPULAR -> {
+                    // Top / Popular lists
+                    item {
+                        Text("Most Popular Lists", style = MaterialTheme.typography.titleMedium, color = Snow, fontWeight = FontWeight.SemiBold)
+                        if (mdbState.topLists.isEmpty() && !mdbState.isLoadingTop && mdbState.apiKey.isNotBlank()) {
+                            Spacer(Modifier.height(4.dp))
+                            TextButton(onClick = { mdbListViewModel.loadTopLists() }) {
+                                Text("Load popular lists", color = Amber)
                             }
-                            Text(
-                                "${listInfo.items} items \u00b7 by ${listInfo.userName}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Steel,
+                        }
+                        if (mdbState.isLoadingTop) {
+                            Spacer(Modifier.height(8.dp))
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Amber)
+                        }
+                    }
+
+                    if (mdbState.topLists.isNotEmpty()) {
+                        items(mdbState.topLists, key = { "top_${it.id}" }) { listInfo ->
+                            ListInfoRow(
+                                listInfo = listInfo,
+                                isAdded = mdbState.savedLists.any { it.listId == listInfo.id },
+                                onAdd = { mdbListViewModel.addList(listInfo.id, listInfo.name) },
                             )
                         }
-                        if (!isAdded) {
-                            IconButton(onClick = { mdbListViewModel.addList(listInfo.id, listInfo.name) }) {
-                                Icon(Icons.Default.Add, contentDescription = "Add", tint = Amber)
+                    }
+                }
+
+                MdbListTab.SEARCH -> {
+                    // Search
+                    item {
+                        Text("Search Lists", style = MaterialTheme.typography.titleMedium, color = Snow, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(8.dp))
+                        var searchInput by remember { mutableStateOf(mdbState.searchQuery) }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = searchInput,
+                                onValueChange = {
+                                    searchInput = it
+                                    mdbListViewModel.setSearchQuery(it)
+                                },
+                                modifier = Modifier.weight(1f),
+                                placeholder = { Text("Search public lists...", color = Steel) },
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Snow,
+                                    unfocusedTextColor = Snow,
+                                    focusedBorderColor = Amber,
+                                    unfocusedBorderColor = Gunmetal,
+                                    cursorColor = Amber,
+                                ),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            IconButton(onClick = { mdbListViewModel.search() }) {
+                                Icon(Icons.Default.Search, contentDescription = "Search", tint = Amber)
                             }
-                        } else {
-                            Text("Added", color = Silver, style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (mdbState.isSearching) {
+                            Spacer(Modifier.height(8.dp))
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Amber)
+                        }
+                    }
+
+                    // Search results
+                    if (mdbState.searchResults.isNotEmpty()) {
+                        item {
+                            Text("Search Results", style = MaterialTheme.typography.titleSmall, color = Silver)
+                        }
+                        items(mdbState.searchResults, key = { "sr_${it.id}" }) { listInfo ->
+                            ListInfoRow(
+                                listInfo = listInfo,
+                                isAdded = mdbState.savedLists.any { it.listId == listInfo.id },
+                                onAdd = { mdbListViewModel.addList(listInfo.id, listInfo.name) },
+                            )
                         }
                     }
                 }
             }
 
-            // Saved lists
+            // Installed lists (always visible)
             item {
                 Spacer(Modifier.height(12.dp))
                 Text("Installed Lists", style = MaterialTheme.typography.titleMedium, color = Snow, fontWeight = FontWeight.SemiBold)
                 if (mdbState.savedLists.isEmpty()) {
                     Spacer(Modifier.height(8.dp))
-                    Text("No lists added yet. Search above to find lists.", color = Silver, style = MaterialTheme.typography.bodySmall)
+                    Text("No lists added yet.", color = Silver, style = MaterialTheme.typography.bodySmall)
                 }
             }
 
-            items(mdbState.savedLists, key = { it.listId }) { config ->
+            items(mdbState.savedLists, key = { "saved_${it.listId}" }) { config ->
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -246,6 +295,61 @@ fun MdbListSettingsScreen(
             }
 
             item { Spacer(Modifier.height(32.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun ListInfoRow(
+    listInfo: com.streamvault.domain.model.MdbListInfo,
+    isAdded: Boolean,
+    onAdd: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(Gunmetal, RoundedCornerShape(8.dp))
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(listInfo.name, color = Snow, fontWeight = FontWeight.Medium)
+            if (listInfo.description.isNotBlank()) {
+                Text(
+                    listInfo.description.take(80),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Silver,
+                    maxLines = 2,
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "${listInfo.items} items",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Steel,
+                )
+                if (listInfo.userName.isNotBlank()) {
+                    Text(
+                        "by ${listInfo.userName}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Steel,
+                    )
+                }
+                if (listInfo.likes > 0) {
+                    Text(
+                        "${listInfo.likes} likes",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Amber.copy(alpha = 0.7f),
+                    )
+                }
+            }
+        }
+        if (!isAdded) {
+            IconButton(onClick = onAdd) {
+                Icon(Icons.Default.Add, contentDescription = "Add", tint = Amber)
+            }
+        } else {
+            Text("Added", color = Silver, style = MaterialTheme.typography.bodySmall)
         }
     }
 }

@@ -49,6 +49,36 @@ class TraktClient(
     }
 
     // -------------------------------------------------------------------------
+    // Public Rating Lookup (no user auth — only client_id header)
+    // -------------------------------------------------------------------------
+
+    suspend fun getMoviePublicRating(imdbId: String): TraktPublicRating? {
+        return try {
+            val response = httpClient.get("$TRAKT_BASE/movies/$imdbId") {
+                traktHeaders().forEach { (k, v) -> header(k, v) }
+                parameter("extended", "full")
+            }
+            if (!response.status.isSuccess()) return null
+            response.body<TraktPublicRating>()
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    suspend fun getShowPublicRating(imdbId: String): TraktPublicRating? {
+        return try {
+            val response = httpClient.get("$TRAKT_BASE/shows/$imdbId") {
+                traktHeaders().forEach { (k, v) -> header(k, v) }
+                parameter("extended", "full")
+            }
+            if (!response.status.isSuccess()) return null
+            response.body<TraktPublicRating>()
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Device Code Flow
     // -------------------------------------------------------------------------
 

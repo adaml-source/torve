@@ -90,8 +90,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.streamvault.android.R
 import com.streamvault.android.download.DownloadWorker
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.AmberSubtle
@@ -1202,12 +1204,12 @@ private fun DownloadContextMenu(
     if (showDeleteConfirm) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("Delete ${group.title}?") },
+            title = { Text(stringResource(R.string.download_delete_title, group.title)) },
             text = {
                 Text(
                     when (group.type) {
-                        DownloadGroupType.MOVIE -> "This will delete the movie (${formatFileSize(group.totalSizeBytes)})."
-                        DownloadGroupType.SHOW -> "This will delete all ${group.itemCount} episodes (${formatFileSize(group.totalSizeBytes)})."
+                        DownloadGroupType.MOVIE -> stringResource(R.string.download_delete_movie, formatFileSize(group.totalSizeBytes))
+                        DownloadGroupType.SHOW -> stringResource(R.string.download_delete_show, group.itemCount, formatFileSize(group.totalSizeBytes))
                     },
                 )
             },
@@ -1215,10 +1217,10 @@ private fun DownloadContextMenu(
                 TextButton(onClick = {
                     onDelete()
                     showDeleteConfirm = false
-                }) { Text("Delete", color = Ruby) }
+                }) { Text(stringResource(R.string.common_delete), color = Ruby) }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
+                TextButton(onClick = { showDeleteConfirm = false }) { Text(stringResource(R.string.common_cancel)) }
             },
         )
     }
@@ -1417,16 +1419,16 @@ private fun CatalogueSettingsSheet(
     if (showDeleteWatchedConfirm) {
         AlertDialog(
             onDismissRequest = { showDeleteWatchedConfirm = false },
-            title = { Text("Delete All Watched?") },
-            text = { Text("This will delete all items you've finished watching.") },
+            title = { Text(stringResource(R.string.download_delete_all_watched)) },
+            text = { Text(stringResource(R.string.download_delete_all_watched_desc)) },
             confirmButton = {
                 TextButton(onClick = {
                     vm.deleteWatched()
                     showDeleteWatchedConfirm = false
-                }) { Text("Delete", color = Ruby) }
+                }) { Text(stringResource(R.string.common_delete), color = Ruby) }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteWatchedConfirm = false }) { Text("Cancel") }
+                TextButton(onClick = { showDeleteWatchedConfirm = false }) { Text(stringResource(R.string.common_cancel)) }
             },
         )
     }

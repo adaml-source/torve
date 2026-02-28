@@ -124,8 +124,8 @@ class SyncRepositoryImpl(
             addons = addons,
             preferences = preferences,
             watchProgress = progress,
-            iptvPlaylists = playlists,
-            iptvFavorites = favorites,
+            channelPlaylists = playlists,
+            channelFavorites = favorites,
         )
     }
 
@@ -211,7 +211,7 @@ class SyncRepositoryImpl(
         // Channel playlists: insert if URL not already present
         val existingPlaylists = queries.getAllPlaylists().executeAsList()
         val existingUrls = existingPlaylists.map { it.url }.toSet()
-        for (pl in payload.iptvPlaylists) {
+        for (pl in payload.channelPlaylists) {
             if (pl.url in existingUrls) {
                 conflicts++
                 continue
@@ -232,7 +232,7 @@ class SyncRepositoryImpl(
         }
 
         // Channel favorites: upsert by channelId
-        for (fav in payload.iptvFavorites) {
+        for (fav in payload.channelFavorites) {
             queries.insertFavorite(
                 channel_id = fav.channelId,
                 playlist_id = fav.playlistId,

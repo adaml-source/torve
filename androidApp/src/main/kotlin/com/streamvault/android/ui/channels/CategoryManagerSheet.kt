@@ -79,7 +79,7 @@ fun CategoryManagerSheet(
                 .padding(horizontal = 24.dp, vertical = 16.dp),
         ) {
             Text(
-                text = stringResource(R.string.iptv_manage_categories),
+                text = stringResource(R.string.channels_manage_categories),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = Snow,

@@ -33,6 +33,7 @@ class ChannelsViewModel(
     private val searchQueryFlow = MutableStateFlow("")
 
     init {
+        migrateOldPreferenceKeys()
         loadSavedFilters()
         loadHiddenItems()
         loadPlaylists()
@@ -41,10 +42,28 @@ class ChannelsViewModel(
         observeSearch()
     }
 
+    /** Migrate old "iptv_" preference keys to "channels_" (one-time, remove after v2 rollout). */
+    private fun migrateOldPreferenceKeys() {
+        scope.launch {
+            val oldKeys = listOf(
+                "iptv_country_filter" to "channels_country_filter",
+                "iptv_xxx_enabled" to "channels_xxx_enabled",
+                "iptv_hidden_categories" to "channels_hidden_categories",
+                "iptv_hidden_channels" to "channels_hidden_channels",
+            )
+            for ((oldKey, newKey) in oldKeys) {
+                prefsRepo.getString(oldKey)?.let { value ->
+                    prefsRepo.setString(newKey, value)
+                    prefsRepo.remove(oldKey)
+                }
+            }
+        }
+    }
+
     private fun loadSavedFilters() {
         scope.launch {
-            val countries = prefsRepo.getString("iptv_country_filter")
-            val xxx = prefsRepo.getString("iptv_xxx_enabled")
+            val countries = prefsRepo.getString("channels_country_filter")
+            val xxx = prefsRepo.getString("channels_xxx_enabled")
             _state.update {
                 it.copy(
                     selectedCountries = countries?.split(",")?.filter { c -> c.isNotBlank() }?.toSet() ?: emptySet(),
@@ -260,8 +279,8 @@ class ChannelsViewModel(
 
     private fun loadHiddenItems() {
         scope.launch {
-            val cats = prefsRepo.getString("iptv_hidden_categories")
-            val chs = prefsRepo.getString("iptv_hidden_channels")
+            val cats = prefsRepo.getString("channels_hidden_categories")
+            val chs = prefsRepo.getString("channels_hidden_channels")
             _state.update {
                 it.copy(
                     hiddenCategories = cats?.split("|||")?.filter { c -> c.isNotBlank() }?.toSet() ?: emptySet(),
@@ -276,7 +295,7 @@ class ChannelsViewModel(
         val updated = if (categoryName in current) current - categoryName else current + categoryName
         _state.update { it.copy(hiddenCategories = updated) }
         scope.launch {
-            prefsRepo.setString("iptv_hidden_categories", updated.joinToString("|||"))
+            prefsRepo.setString("channels_hidden_categories", updated.joinToString("|||"))
         }
         buildLiveCategories()
     }
@@ -286,7 +305,7 @@ class ChannelsViewModel(
         val updated = if (channelId in current) current - channelId else current + channelId
         _state.update { it.copy(hiddenChannels = updated) }
         scope.launch {
-            prefsRepo.setString("iptv_hidden_channels", updated.joinToString("|||"))
+            prefsRepo.setString("channels_hidden_channels", updated.joinToString("|||"))
         }
         buildLiveCategories()
     }
@@ -302,7 +321,7 @@ class ChannelsViewModel(
         val allNames = _state.value.allCategories.map { it.name }.toSet()
         _state.update { it.copy(hiddenCategories = allNames) }
         scope.launch {
-            prefsRepo.setString("iptv_hidden_categories", allNames.joinToString("|||"))
+            prefsRepo.setString("channels_hidden_categories", allNames.joinToString("|||"))
         }
         buildLiveCategories()
     }
@@ -310,7 +329,7 @@ class ChannelsViewModel(
     fun showAllCategories() {
         _state.update { it.copy(hiddenCategories = emptySet()) }
         scope.launch {
-            prefsRepo.setString("iptv_hidden_categories", "")
+            prefsRepo.setString("channels_hidden_categories", "")
         }
         buildLiveCategories()
     }
@@ -323,7 +342,7 @@ class ChannelsViewModel(
         val updated = _state.value.hiddenCategories + matching
         _state.update { it.copy(hiddenCategories = updated) }
         scope.launch {
-            prefsRepo.setString("iptv_hidden_categories", updated.joinToString("|||"))
+            prefsRepo.setString("channels_hidden_categories", updated.joinToString("|||"))
         }
         buildLiveCategories()
     }
@@ -336,7 +355,7 @@ class ChannelsViewModel(
         val updated = _state.value.hiddenCategories.filter { it.lowercase() !in matching }.toSet()
         _state.update { it.copy(hiddenCategories = updated) }
         scope.launch {
-            prefsRepo.setString("iptv_hidden_categories", updated.joinToString("|||"))
+            prefsRepo.setString("channels_hidden_categories", updated.joinToString("|||"))
         }
         buildLiveCategories()
     }
@@ -490,18 +509,18 @@ class ChannelsViewModel(
         val updated = if (country in current) current - country else current + country
         _state.update { it.copy(selectedCountries = updated) }
         scope.launch {
-            prefsRepo.setString("iptv_country_filter", updated.joinToString(","))
+            prefsRepo.setString("channels_country_filter", updated.joinToString(","))
         }
     }
 
     fun clearCountryFilter() {
         _state.update { it.copy(selectedCountries = emptySet()) }
-        scope.launch { prefsRepo.remove("iptv_country_filter") }
+        scope.launch { prefsRepo.remove("channels_country_filter") }
     }
 
     fun setXxxEnabled(enabled: Boolean) {
         _state.update { it.copy(xxxEnabled = enabled) }
-        scope.launch { prefsRepo.setString("iptv_xxx_enabled", enabled.toString()) }
+        scope.launch { prefsRepo.setString("channels_xxx_enabled", enabled.toString()) }
     }
 
     fun removePlaylist(playlistId: String) {

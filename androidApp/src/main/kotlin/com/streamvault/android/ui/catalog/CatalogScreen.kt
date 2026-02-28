@@ -523,46 +523,6 @@ fun CatalogScreen(
                             modifier = Modifier.padding(top = 4.dp),
                         )
                     }
-                    // Active search banner
-                    if (state.hasActiveSearch && state.searchResults.isNotEmpty()) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 4.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Gunmetal)
-                                .padding(horizontal = 12.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                if (state.aiSearchLabel != null) Icons.Rounded.AutoAwesome else Icons.Rounded.Search,
-                                contentDescription = null,
-                                tint = Amber,
-                                modifier = Modifier.size(14.dp),
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                text = state.aiSearchLabel ?: "\"${state.searchQuery}\"",
-                                color = Snow,
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Text(
-                                text = "${state.searchResults.size} results",
-                                color = StreamVault.colors.textTertiary,
-                                style = MaterialTheme.typography.labelSmall,
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            TextButton(
-                                onClick = { viewModel.clearSearch() },
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                            ) {
-                                Text("Clear", color = Amber, style = MaterialTheme.typography.labelSmall)
-                            }
-                        }
-                    }
                 }
             }
         }

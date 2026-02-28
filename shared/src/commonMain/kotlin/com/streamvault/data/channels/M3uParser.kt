@@ -7,22 +7,31 @@ class M3uParser {
 
     companion object {
         private const val MAX_CHANNELS = 50_000
+        private const val MAX_LINES = 50_000
     }
 
     fun parse(content: String, playlistId: String = ""): M3uPlaylist {
+        val trimmed = content.trimStart()
+        if (!trimmed.startsWith("#EXTM3U")) {
+            return M3uPlaylist(
+                channels = emptyList(),
+                error = "Invalid M3U: missing #EXTM3U header",
+            )
+        }
+
         val lines = content.lines().map { it.trim() }
+        if (lines.size > MAX_LINES) {
+            return M3uPlaylist(
+                channels = emptyList(),
+                error = "Playlist too large (${lines.size} lines, max $MAX_LINES)",
+            )
+        }
+
         val channels = mutableListOf<Channel>()
         var playlistEpgUrl: String? = null
         var playlistRefresh: Int? = null
 
         var i = 0
-
-        // Validate M3U format
-        if (lines.firstOrNull()?.startsWith("#EXTM3U") != true) {
-            throw IllegalArgumentException(
-                "Invalid playlist format. The file must be a valid M3U/M3U8 playlist.",
-            )
-        }
 
         // Parse header
         val header = lines[0]
@@ -35,33 +44,37 @@ class M3uParser {
         while (i < lines.size) {
             val line = lines[i]
             if (line.startsWith("#EXTINF:")) {
-                val builder = parseExtInf(line, playlistId)
+                try {
+                    val builder = parseExtInf(line, playlistId)
 
-                // Collect extra directives before URL
-                i++
-                while (i < lines.size && (lines[i].isBlank() || lines[i].startsWith("#"))) {
-                    when {
-                        lines[i].startsWith("#EXTVLCOPT:") ->
-                            builder.vlcOptions.add(lines[i].removePrefix("#EXTVLCOPT:"))
-                        lines[i].startsWith("#KODIPROP:") -> {
-                            val parts = lines[i].removePrefix("#KODIPROP:").split("=", limit = 2)
-                            if (parts.size == 2) builder.kodiProps[parts[0]] = parts[1]
-                        }
-                    }
+                    // Collect extra directives before URL
                     i++
-                }
+                    while (i < lines.size && (lines[i].isBlank() || lines[i].startsWith("#"))) {
+                        when {
+                            lines[i].startsWith("#EXTVLCOPT:") ->
+                                builder.vlcOptions.add(lines[i].removePrefix("#EXTVLCOPT:"))
+                            lines[i].startsWith("#KODIPROP:") -> {
+                                val parts = lines[i].removePrefix("#KODIPROP:").split("=", limit = 2)
+                                if (parts.size == 2) builder.kodiProps[parts[0]] = parts[1]
+                            }
+                        }
+                        i++
+                    }
 
-                // Next non-empty non-comment line = stream URL
-                if (i < lines.size && lines[i].isNotBlank() && !lines[i].startsWith("#")) {
-                    builder.url = lines[i]
-                    // Skip malformed entries (empty title or URL)
-                    if (builder.name.isNotBlank() && builder.url.isNotBlank()) {
-                        channels.add(builder.build())
-                        if (channels.size >= MAX_CHANNELS) {
-                            println("M3uParser: Channel limit ($MAX_CHANNELS) reached, truncating playlist")
-                            break
+                    // Next non-empty non-comment line = stream URL
+                    if (i < lines.size && lines[i].isNotBlank() && !lines[i].startsWith("#")) {
+                        builder.url = lines[i]
+                        // Skip malformed entries (empty title or URL)
+                        if (builder.name.isNotBlank() && builder.url.isNotBlank()) {
+                            channels.add(builder.build())
+                            if (channels.size >= MAX_CHANNELS) {
+                                println("M3uParser: Channel limit ($MAX_CHANNELS) reached, truncating playlist")
+                                break
+                            }
                         }
                     }
+                } catch (_: Exception) {
+                    // Skip malformed entry, continue parsing
                 }
             }
             i++

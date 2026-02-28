@@ -27,8 +27,7 @@ fun resolveCardStyle(
     globalDefaultPresetId: String?,
 ): CardStyle {
     if (presets.isEmpty()) return CardStyle()
+    val id = presetId ?: globalDefaultPresetId ?: return CardStyle()
     val byId = presets.associateBy { it.presetId }
-    val explicitId = presetId?.takeIf { byId.containsKey(it) }
-    val resolvedId = explicitId ?: globalDefaultPresetId
-    return byId[resolvedId]?.cardStyle ?: presets.first().cardStyle
+    return byId[id]?.cardStyle ?: CardStyle()
 }

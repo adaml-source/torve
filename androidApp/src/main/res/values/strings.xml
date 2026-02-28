@@ -71,7 +71,7 @@
     <!-- Settings Screen -->
     <string name="settings_title">Settings</string>
     <string name="settings_profiles">Profiles</string>
-    <string name="settings_subscription">Subscription</string>
+    <string name="settings_subscription">Purchase</string>
     <string name="settings_downloads">Downloads</string>
     <string name="settings_calendar">Calendar</string>
 
@@ -133,6 +133,7 @@
     <string name="settings_appearance">Appearance</string>
     <string name="settings_theme">Theme</string>
     <string name="settings_language">Language</string>
+    <string name="language_change_confirm">Changing the language to %1$s will restart the app. Continue?</string>
 
     <string name="settings_storage">Storage</string>
     <string name="settings_clear_cache">Clear Cache</string>
@@ -147,8 +148,8 @@
     <string name="settings_backup_desc">Export your addons, preferences, watch progress, and channel favorites to a file. API keys and tokens are never included.</string>
 
     <string name="settings_account">Account</string>
-    <string name="settings_account_coming_soon">Account sync coming soon</string>
-    <string name="settings_account_desc">Create an account to sync your preferences across devices.</string>
+    <string name="settings_account_coming_soon">Cloud sync in development</string>
+    <string name="settings_account_desc">Once available, you\'ll be able to create an account to sync your settings, watchlist, watch progress, and card style presets across all your devices. No action needed — this feature will be enabled automatically in a future update.</string>
 
     <string name="settings_about">About</string>
     <string name="settings_privacy_policy">Privacy Policy</string>
@@ -160,26 +161,34 @@
     <string name="settings_version">Torve v%1$s</string>
 
     <!-- Paywall Screen -->
-    <string name="paywall_title">Torve Pro</string>
-    <string name="paywall_youre_pro">You\'re a Pro!</string>
-    <string name="paywall_tier">Tier: %1$s</string>
-    <string name="paywall_cancel">Cancel Subscription</string>
+    <string name="paywall_title">Purchase</string>
     <string name="paywall_unlock">Unlock Torve Pro</string>
-    <string name="paywall_subtitle">Stream, download, and watch live channels with a Pro subscription</string>
+    <string name="paywall_subtitle">Get lifetime access to all features with a one-time purchase</string>
     <string name="paywall_free">Free</string>
     <string name="paywall_pro">Pro</string>
     <string name="paywall_search_browse">Search &amp; Browse</string>
-    <string name="paywall_stream_playback">Stream Playback</string>
+    <string name="paywall_stream_playback">Stream &amp; Play</string>
     <string name="paywall_downloads">Downloads</string>
-    <string name="paywall_iptv">Channels</string>
-    <string name="paywall_multi_cloud">Multi-Cloud</string>
+    <string name="paywall_channels">Live Channels</string>
+    <string name="paywall_multi_cloud">Debrid Cloud Services</string>
+    <string name="paywall_trakt_simkl">Trakt &amp; SIMKL Sync</string>
+    <string name="paywall_ai_search">AI Search</string>
+    <string name="paywall_rating_pills">Rating Pills</string>
+    <string name="paywall_custom_home">Custom Home Layout</string>
     <string name="paywall_advanced_filters">Advanced Filters</string>
     <string name="paywall_lifetime">Lifetime</string>
     <string name="paywall_price">€9.99</string>
-    <string name="paywall_one_time">One-time payment, forever access</string>
     <string name="paywall_best_value">BEST VALUE</string>
+    <string name="paywall_one_time">One-time, forever</string>
     <string name="paywall_get_lifetime">Get Lifetime Access</string>
     <string name="paywall_restore">Restore Purchase</string>
+    <string name="paywall_lifetime_active">Lifetime Activated</string>
+    <string name="paywall_full_access">You have full access to all features</string>
+    <string name="paywall_free_status">Free Tier</string>
+    <string name="paywall_have_code">Have a code?</string>
+    <string name="paywall_enter_code">Enter rebate code</string>
+    <string name="paywall_redeem">Redeem</string>
+    <string name="paywall_redeem_success">Code redeemed! Lifetime access activated.</string>
 
     <!-- Catalog Screen -->
     <string name="catalog_failed_to_load">Failed to load</string>
@@ -200,19 +209,19 @@
     <string name="catalog_apply_filters">Apply Filters</string>
     <string name="catalog_classic">Classic</string>
 
-    <!-- IPTV Screen -->
-    <string name="iptv_no_playlists">No Playlists</string>
-    <string name="iptv_add_playlist_prompt">Add an M3U or Xtream Codes playlist to get started</string>
-    <string name="iptv_add_playlist">Add Playlist</string>
-    <string name="iptv_add_title">Add Playlist</string>
-    <string name="iptv_playlist_name">Playlist Name</string>
-    <string name="iptv_m3u_url">M3U URL</string>
-    <string name="iptv_epg_optional">EPG URL (optional)</string>
-    <string name="iptv_server_url">Server URL</string>
-    <string name="iptv_username">Username</string>
-    <string name="iptv_password">Password</string>
-    <string name="iptv_manage_categories">Manage Categories</string>
-    <string name="iptv_refresh">Refresh</string>
+    <!-- Channels Screen -->
+    <string name="channels_no_playlists">No Playlists</string>
+    <string name="channels_add_playlist_prompt">Add an M3U playlist or provider login to get started</string>
+    <string name="channels_add_playlist">Add Playlist</string>
+    <string name="channels_add_title">Add Playlist</string>
+    <string name="channels_playlist_name">Playlist Name</string>
+    <string name="channels_m3u_url">M3U URL</string>
+    <string name="channels_epg_optional">EPG URL (optional)</string>
+    <string name="channels_server_url">Server URL</string>
+    <string name="channels_username">Username</string>
+    <string name="channels_password">Password</string>
+    <string name="channels_manage_categories">Manage Categories</string>
+    <string name="channels_refresh">Refresh</string>
 
     <!-- Downloads Screen -->
     <string name="download_title">Downloads</string>
@@ -268,4 +277,235 @@
     <string name="episode_all_seasons">All Seasons</string>
     <string name="episode_mark_season_watched">Mark Season %1$d Watched</string>
     <string name="episode_format">S%1$dE%2$d</string>
+
+    <!-- Diagnostics Screen -->
+    <string name="diagnostics_title">Diagnostics</string>
+    <string name="diagnostics_service_health">Service Health</string>
+    <string name="diagnostics_sync_status">Sync Status</string>
+    <string name="diagnostics_content_config">Content &amp; Configuration</string>
+    <string name="diagnostics_stream_prefs">Stream Preferences</string>
+    <string name="diagnostics_rating_config">Rating Configuration</string>
+    <string name="diagnostics_integrations_detail">Integrations Detail</string>
+    <string name="diagnostics_connected">Connected</string>
+    <string name="diagnostics_not_configured">Not configured</string>
+    <string name="diagnostics_never">Never</string>
+    <string name="diagnostics_copied">Copied to clipboard</string>
+    <string name="diagnostics_copy">Copy</string>
+
+    <!-- Integrations Screen -->
+    <string name="integrations_title">Integrations</string>
+    <string name="integrations_subtitle">Connect external services to sync your library and progress.</string>
+    <string name="integrations_omdb_desc">Free API key for IMDb, Rotten Tomatoes, and Metacritic ratings. Get yours at omdbapi.com</string>
+    <string name="integrations_omdb_hint">Get a free key at omdbapi.com (1,000 requests/day).</string>
+    <string name="integrations_trakt_desc">OAuth device authorization and two-way sync (watchlist/history/progress).</string>
+    <string name="integrations_status_connected">Status: Connected</string>
+    <string name="integrations_status_not_connected">Status: Not connected</string>
+    <string name="integrations_last_sync">Last sync: %1$s</string>
+    <string name="integrations_connecting">Connecting…</string>
+    <string name="integrations_syncing">Syncing…</string>
+    <string name="integrations_sync_complete">Sync complete</string>
+    <string name="integrations_sync_now">Sync now</string>
+    <string name="integrations_simkl_desc">Automatic anime and TV show tracking with device code authorization.</string>
+    <string name="integrations_jellyfin_desc">Connect to your Jellyfin server for library sync and continue-watching overlay.</string>
+    <string name="integrations_server_url">Server URL</string>
+    <string name="integrations_test_connection">Test Connection</string>
+    <string name="integrations_user_profile">User Profile</string>
+    <string name="integrations_admin">Admin</string>
+    <string name="integrations_plex_desc">Connect your Plex server for library badges and continue watching.</string>
+    <string name="integrations_plex_url_hint">Server URL (e.g. http://192.168.1.100:32400)</string>
+    <string name="integrations_access_token">Access Token</string>
+    <string name="integrations_plex_token_hint">Find your token at plex.tv/claim or in Plex app settings.</string>
+    <string name="integrations_testing">Testing…</string>
+    <string name="integrations_your_code">Your code</string>
+    <string name="integrations_code_copied">Code copied</string>
+    <string name="integrations_open_browser">Open in Browser</string>
+
+    <!-- MDBList Screen -->
+    <string name="mdblist_title">MDBList</string>
+    <string name="mdblist_api_key_hint">Get your free API key at mdblist.com/preferences</string>
+    <string name="mdblist_enter_key">Enter MDBList API key</string>
+    <string name="mdblist_saved">Saved</string>
+    <string name="mdblist_save">Save</string>
+    <string name="mdblist_popular">Popular</string>
+    <string name="mdblist_most_popular">Most Popular Lists</string>
+    <string name="mdblist_load_popular">Load popular lists</string>
+    <string name="mdblist_search_lists">Search Lists</string>
+    <string name="mdblist_search_placeholder">Search public lists…</string>
+    <string name="mdblist_search_results">Search Results</string>
+    <string name="mdblist_installed">Installed Lists</string>
+    <string name="mdblist_no_lists">No lists added yet.</string>
+    <string name="mdblist_items">%1$d items</string>
+    <string name="mdblist_by">by %1$s</string>
+    <string name="mdblist_likes">%1$d likes</string>
+    <string name="mdblist_added">Added</string>
+
+    <!-- Rating Settings Screen -->
+    <string name="ratings_title">Ratings</string>
+    <string name="ratings_show_detail">Show on Detail Page</string>
+    <string name="ratings_show_detail_desc">Display ratings on movie/show detail screen</string>
+    <string name="ratings_torve_detail">Show Torve Score on Detail</string>
+    <string name="ratings_torve_detail_desc">Displays weighted Torve Score in metadata row</string>
+    <string name="ratings_torve_cards">Allow Torve Score Pill on Cards</string>
+    <string name="ratings_torve_cards_desc">Enable Torve Score in provider pills</string>
+    <string name="ratings_landscape">Allow Ratings on Landscape Cards</string>
+    <string name="ratings_landscape_desc">Show compact rating pills on backdrop-style cards</string>
+    <string name="ratings_torve_weights">Torve Score Weights</string>
+    <string name="ratings_weights_desc">Weights are normalized using available sources</string>
+    <string name="ratings_add_provider">Add Provider</string>
+    <string name="ratings_reset_weights">Reset Torve Weights</string>
+    <string name="ratings_pill_position">Pill Position</string>
+    <string name="ratings_pill_position_desc">Where to show rating pills on poster cards</string>
+    <string name="ratings_max_on_card">Max Ratings on Card</string>
+    <string name="ratings_max_on_card_desc">How many rating pills to show on poster cards</string>
+    <string name="ratings_pill_style">Pill Style</string>
+    <string name="ratings_with_icon">With Icon</string>
+    <string name="ratings_with_letter">With Letter</string>
+    <string name="ratings_preview">Preview</string>
+    <string name="ratings_preview_desc">Compact preview of inside vs outside placement</string>
+    <string name="ratings_sources">Rating Sources</string>
+    <string name="ratings_sources_desc">Enable sources and reorder with arrows. Higher sources show first.</string>
+    <string name="ratings_inside_card">Inside Card</string>
+    <string name="ratings_outside_card">Outside Card</string>
+    <string name="ratings_inside">Inside</string>
+    <string name="ratings_outside">Outside</string>
+    <string name="ratings_reset_defaults">Reset to Defaults</string>
+
+    <!-- Regex Patterns Screen -->
+    <string name="regex_title">Regex Patterns</string>
+    <string name="regex_filter_desc">Filter stream results by title. Matching streams will be excluded.</string>
+    <string name="regex_quick_add">Quick Add</string>
+    <string name="regex_added">Added: %1$s</string>
+    <string name="regex_label_hint">Label</string>
+    <string name="regex_pattern_hint">Regex pattern</string>
+
+    <!-- Home Layout Screen -->
+    <string name="home_layout_title">Home Layout</string>
+    <string name="home_layout_reset">Reset</string>
+    <string name="home_layout_hint">Hold and drag to reorder. Tap a section to customize its poster style.</string>
+    <string name="home_layout_add_custom">Add Custom Section</string>
+    <string name="home_layout_addon">Addon</string>
+    <string name="home_layout_collapse">Collapse</string>
+    <string name="home_layout_customize">Customize</string>
+    <string name="home_layout_card_style">Card Style</string>
+    <string name="home_layout_reset_section">Reset section to default</string>
+
+    <!-- Home Customize Sheet -->
+    <string name="home_customize_title">Customize Home</string>
+    <string name="home_customize_done">Done</string>
+
+    <!-- Addon Catalog Screen -->
+    <string name="addon_catalog_title">Addon Catalog</string>
+    <string name="addon_catalog_installed_count">%1$d installed</string>
+    <string name="addon_catalog_search_hint">Search or paste addon URL…</string>
+    <string name="addon_catalog_installed">Installed</string>
+    <string name="addon_catalog_available">Available</string>
+    <string name="addon_catalog_installing">Installing…</string>
+    <string name="addon_catalog_install">Install</string>
+    <string name="addon_catalog_open_browser">Open in Browser</string>
+    <string name="addon_catalog_copy_url">Copy URL</string>
+    <string name="addon_catalog_manifest_hint">If the page shows a JSON manifest, copy its URL and try again.</string>
+    <string name="addon_category_all">All</string>
+    <string name="addon_category_streams">Streams</string>
+    <string name="addon_category_catalogs">Catalogs</string>
+    <string name="addon_category_subtitles">Subtitles</string>
+
+    <!-- Category Manager Sheet -->
+    <string name="categories_subtitle">Select countries and categories you want to see</string>
+    <string name="categories_select_all">Select All</string>
+    <string name="categories_deselect_all">Deselect All</string>
+
+    <!-- Stats Screen -->
+    <string name="stats_title">Your Stats</string>
+    <string name="stats_movies">Movies</string>
+    <string name="stats_episodes">Episodes</string>
+    <string name="stats_watch_time">Watch Time</string>
+    <string name="stats_this_week">This Week</string>
+    <string name="stats_this_month">This Month</string>
+    <string name="stats_day_streak">Day Streak</string>
+    <string name="stats_no_data">No watch data yet</string>
+    <string name="stats_start_watching">Start watching to see your stats</string>
+
+    <!-- TV Home Screen -->
+    <string name="tv_trending_movies">Trending Movies</string>
+    <string name="tv_trending_tv">Trending TV Shows</string>
+
+    <!-- Common Actions (extended) -->
+    <string name="common_next">Next</string>
+    <string name="common_skip">Skip</string>
+    <string name="common_save">Save</string>
+    <string name="common_rename">Rename</string>
+    <string name="common_duplicate">Duplicate</string>
+    <string name="common_reset">Reset</string>
+    <string name="common_loading">Loading…</string>
+    <string name="common_play_now">Play Now</string>
+    <string name="common_sort_by">Sort By</string>
+    <string name="common_view_details">View Details</string>
+    <string name="common_open_browser">Open in Browser</string>
+
+    <!-- Login Screen -->
+    <string name="login_display_name">Display Name</string>
+    <string name="login_email">Email</string>
+    <string name="login_password">Password</string>
+    <string name="login_create_account">Create Account</string>
+    <string name="login_sign_in">Sign In</string>
+    <string name="login_switch_to_signin">Already have an account? Sign In</string>
+    <string name="login_switch_to_register">Don\'t have an account? Register</string>
+    <string name="login_skip">Skip for now</string>
+
+    <!-- Setup Wizard -->
+    <string name="setup_step_of">Step %1$d of %2$d</string>
+    <string name="setup_get_started">Get Started</string>
+    <string name="setup_start_streaming">Start Streaming</string>
+    <string name="setup_i_agree">I Agree</string>
+    <string name="setup_verify_connect">Verify &amp; Connect</string>
+    <string name="setup_connect_trakt">Connect with Trakt.tv</string>
+    <string name="setup_m3u">M3U</string>
+    <string name="setup_provider_login">Provider Login</string>
+    <string name="setup_channels_desc">Add an M3U playlist or provider login to watch live TV channels. You can add more later in the Channels tab.</string>
+    <string name="setup_playlist_hint">e.g. My Channels</string>
+    <string name="setup_m3u_hint">https://example.com/playlist.m3u</string>
+    <string name="setup_server_hint">http://example.com:8080</string>
+
+    <!-- Card Style Settings -->
+    <string name="card_style_title">Card Style</string>
+    <string name="card_style_preset">Preset</string>
+    <string name="card_style_default_suffix">%1$s (Default)</string>
+    <string name="card_style_set_default">Set Default</string>
+    <string name="card_style_save_as_preset">Save as Preset</string>
+    <string name="card_style_quick_presets">Quick Presets</string>
+    <string name="card_style_quick_desc">Apply a predefined style to the current preset</string>
+    <string name="card_style_cinema">Cinema</string>
+    <string name="card_style_compact">Compact</string>
+    <string name="card_style_classic">Classic</string>
+    <string name="card_style_live_preview">Live Preview</string>
+    <string name="card_style_reset_all">Reset All to Defaults</string>
+    <string name="card_style_rename_title">Rename Preset</string>
+    <string name="card_style_save_title">Save Preset</string>
+    <string name="card_style_delete_title">Delete Preset?</string>
+    <string name="card_style_delete_desc">This will remove \"%1$s\". Sections using it will fall back to Default.</string>
+
+    <!-- Next Episode Overlay -->
+    <string name="player_next_season">Next Season</string>
+    <string name="player_next_episode">Next Episode</string>
+
+    <!-- Download Catalogue -->
+    <string name="download_delete_title">Delete %1$s?</string>
+    <string name="download_delete_movie">This will delete the movie (%1$s).</string>
+    <string name="download_delete_show">This will delete all %1$d episodes (%2$s).</string>
+    <string name="download_delete_all_watched">Delete All Watched?</string>
+    <string name="download_delete_all_watched_desc">This will delete all items you\'ve finished watching.</string>
+    <string name="download_delete_season">Delete Season %1$d</string>
+
+    <!-- Settings - Appearance Reset -->
+    <string name="settings_reset_appearance">Reset all appearance settings</string>
+    <string name="settings_reset_appearance_desc">This will delete all custom card style presets and reset rating display settings to defaults.</string>
+    <string name="settings_reset_appearance_title">Reset Appearance?</string>
+    <string name="settings_reset_appearance_confirm">This will permanently delete all custom card style presets and reset all appearance settings to defaults. This cannot be undone.</string>
+
+    <!-- Player Controls -->
+    <string name="player_audio_delay">Audio Delay</string>
+    <string name="player_audio_delay_value">Delay: %1$d ms</string>
+
+    <!-- Integrations (extended) -->
+    <string name="integrations_sync_in_progress">Syncing…</string>
 </resources>

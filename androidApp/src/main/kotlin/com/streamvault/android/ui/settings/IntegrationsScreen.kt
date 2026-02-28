@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -56,7 +57,9 @@ import com.streamvault.android.ui.theme.Gunmetal
 import com.streamvault.android.ui.theme.Silver
 import com.streamvault.android.ui.theme.Snow
 import com.streamvault.android.ui.theme.StreamVault
+import com.streamvault.android.ui.theme.Emerald
 import com.streamvault.android.ui.theme.Obsidian
+import com.streamvault.android.ui.theme.Ruby
 import com.streamvault.domain.integrations.IntegrationSecretKey
 import com.streamvault.domain.integrations.IntegrationSecretStore
 import com.streamvault.presentation.settings.SettingsViewModel
@@ -108,6 +111,59 @@ fun IntegrationsScreen(
 
         Spacer(Modifier.height(16.dp))
 
+        // ── OMDB ──
+        IntegrationCard(
+            title = "OMDB",
+            description = "Free API key for IMDb, Rotten Tomatoes, and Metacritic ratings. Get yours at omdbapi.com",
+        ) {
+            IntegrationTextField(
+                label = "API Key",
+                value = state.omdbApiKey,
+                onValueChange = { value ->
+                    viewModel.setOmdbApiKey(value)
+                    scope.launch {
+                        if (value.isBlank()) {
+                            secretStore.remove(IntegrationSecretKey.OMDB_API_KEY)
+                        } else {
+                            secretStore.put(IntegrationSecretKey.OMDB_API_KEY, value)
+                        }
+                    }
+                },
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = { viewModel.validateOmdbApiKey() },
+                    enabled = !state.omdbValidating && state.omdbApiKey.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
+                ) {
+                    if (state.omdbValidating) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Obsidian, strokeWidth = 2.dp)
+                        Spacer(Modifier.width(6.dp))
+                    }
+                    Text(if (state.omdbValidating) "Testing..." else "Save & Test")
+                }
+                state.omdbValidationResult?.let { result ->
+                    when (result) {
+                        "valid" -> Text("Key is valid", color = Emerald, style = MaterialTheme.typography.bodySmall)
+                        "invalid" -> Text("Key is invalid or inactive", color = Ruby, style = MaterialTheme.typography.bodySmall)
+                        else -> Text(result, color = Ruby, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Get a free key at omdbapi.com (1,000 requests/day).",
+                color = Silver.copy(alpha = 0.6f),
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
+
         // ── Trakt ──
         IntegrationCard(
             title = "Trakt",
@@ -144,8 +200,23 @@ fun IntegrationsScreen(
                 } else {
                     Button(
                         onClick = { viewModel.syncTraktNow() },
+                        enabled = !state.traktSyncing,
                         colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
-                    ) { Text("Sync now") }
+                    ) {
+                        if (state.traktSyncing) {
+                            androidx.compose.material3.CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                color = Obsidian,
+                                strokeWidth = 2.dp,
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text("Syncing...")
+                        } else if (state.traktSyncSuccess) {
+                            Text("Sync complete")
+                        } else {
+                            Text("Sync now")
+                        }
+                    }
                     Spacer(Modifier.weight(1f))
                     OutlinedButton(
                         onClick = { viewModel.disconnectTrakt() },

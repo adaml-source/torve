@@ -71,7 +71,7 @@
     <!-- Settings Screen -->
     <string name="settings_title">Ayarlar</string>
     <string name="settings_profiles">Profiller</string>
-    <string name="settings_subscription">Abonelik</string>
+    <string name="settings_subscription">Satın Al</string>
     <string name="settings_downloads">İndirmeler</string>
     <string name="settings_calendar">Takvim</string>
 
@@ -109,6 +109,8 @@
     <string name="settings_no_limit">Sınır yok</string>
     <string name="settings_cached_only">Yalnızca Önbelleğe Alınmış</string>
     <string name="settings_cached_only_desc">Anında oynatma için yalnızca önbelleğe alınmış yayınları göster</string>
+    <string name="settings_dedupe_results">Yinelenenleri Kaldır</string>
+    <string name="settings_dedupe_results_desc">Listelerde tekrarlanan film veya dizileri gizle</string>
     <string name="settings_hdr_content">HDR İçerik</string>
     <string name="settings_hdr_content_desc">HDR / Dolby Vision yayınlarını dahil et</string>
 
@@ -131,6 +133,7 @@
     <string name="settings_appearance">Görünüm</string>
     <string name="settings_theme">Tema</string>
     <string name="settings_language">Dil</string>
+    <string name="language_change_confirm">Dil %1$s olarak değiştirilecek ve uygulama yeniden başlatılacak. Devam edilsin mi?</string>
 
     <string name="settings_storage">Depolama</string>
     <string name="settings_clear_cache">Önbelleği Temizle</string>
@@ -142,7 +145,7 @@
     <string name="settings_last_backup">Son yedekleme: %1$s</string>
     <string name="settings_export_backup">Yedeği Dışa Aktar</string>
     <string name="settings_import_backup">Yedeği İçe Aktar</string>
-    <string name="settings_backup_desc">Eklentilerinizi, tercihlerinizi, izleme ilerlemenizi ve IPTV favorilerinizi bir dosyaya aktarın. API anahtarları ve tokenler asla dahil edilmez.</string>
+    <string name="settings_backup_desc">Eklentilerinizi, tercihlerinizi, izleme ilerlemenizi ve kanal favorilerinizi bir dosyaya aktarın. API anahtarları ve tokenler asla dahil edilmez.</string>
 
     <string name="settings_account">Hesap</string>
     <string name="settings_account_coming_soon">Hesap senkronizasyonu yakında</string>
@@ -159,18 +162,26 @@
 
     <!-- Paywall Screen -->
     <string name="paywall_title">Torve Pro</string>
-    <string name="paywall_youre_pro">Pro\'sunuz!</string>
-    <string name="paywall_tier">Seviye: %1$s</string>
-    <string name="paywall_cancel">Aboneliği İptal Et</string>
+    <string name="paywall_lifetime_active">Ömür boyu aktif</string>
+    <string name="paywall_full_access">Tüm özelliklere tam erişime sahipsiniz</string>
+    <string name="paywall_free_status">Ücretsiz Plan</string>
+    <string name="paywall_have_code">Kodunuz var mı?</string>
+    <string name="paywall_enter_code">İndirim kodu girin</string>
+    <string name="paywall_redeem">Kullan</string>
+    <string name="paywall_redeem_success">Kod kullanıldı! Ömür boyu erişim aktif.</string>
     <string name="paywall_unlock">Torve Pro\'nun Kilidini Aç</string>
-    <string name="paywall_subtitle">Pro abonelikle yayın izleyin, indirin ve IPTV izleyin</string>
+    <string name="paywall_subtitle">Pro abonelikle yayın izleyin, indirin ve canlı TV izleyin</string>
     <string name="paywall_free">Ücretsiz</string>
     <string name="paywall_pro">Pro</string>
     <string name="paywall_search_browse">Ara &amp; Gözat</string>
     <string name="paywall_stream_playback">Yayın Oynatma</string>
     <string name="paywall_downloads">İndirmeler</string>
-    <string name="paywall_iptv">IPTV / Canlı TV</string>
+    <string name="paywall_channels">Canlı TV</string>
     <string name="paywall_multi_cloud">Çoklu Bulut</string>
+    <string name="paywall_trakt_simkl">Trakt &amp; SIMKL Senkronizasyonu</string>
+    <string name="paywall_ai_search">Yapay Zeka Araması</string>
+    <string name="paywall_rating_pills">Puan Göstergeleri</string>
+    <string name="paywall_custom_home">Özel Ana Sayfa Düzeni</string>
     <string name="paywall_advanced_filters">Gelişmiş Filtreler</string>
     <string name="paywall_lifetime">Ömür Boyu</string>
     <string name="paywall_price">€9,99</string>
@@ -198,19 +209,19 @@
     <string name="catalog_apply_filters">Filtreleri Uygula</string>
     <string name="catalog_classic">Klasik</string>
 
-    <!-- IPTV Screen -->
-    <string name="iptv_no_playlists">IPTV Oynatma Listesi Yok</string>
-    <string name="iptv_add_playlist_prompt">Başlamak için bir M3U veya Xtream Codes oynatma listesi ekleyin</string>
-    <string name="iptv_add_playlist">Oynatma Listesi Ekle</string>
-    <string name="iptv_add_title">IPTV Oynatma Listesi Ekle</string>
-    <string name="iptv_playlist_name">Oynatma Listesi Adı</string>
-    <string name="iptv_m3u_url">M3U URL</string>
-    <string name="iptv_epg_optional">EPG URL (isteğe bağlı)</string>
-    <string name="iptv_server_url">Sunucu URL</string>
-    <string name="iptv_username">Kullanıcı Adı</string>
-    <string name="iptv_password">Şifre</string>
-    <string name="iptv_manage_categories">Kategorileri Yönet</string>
-    <string name="iptv_refresh">Yenile</string>
+    <!-- Channels Screen -->
+    <string name="channels_no_playlists">Oynatma Listesi Yok</string>
+    <string name="channels_add_playlist_prompt">Başlamak için bir M3U oynatma listesi veya sağlayıcı girişi ekleyin</string>
+    <string name="channels_add_playlist">Oynatma Listesi Ekle</string>
+    <string name="channels_add_title">Oynatma Listesi Ekle</string>
+    <string name="channels_playlist_name">Oynatma Listesi Adı</string>
+    <string name="channels_m3u_url">M3U URL</string>
+    <string name="channels_epg_optional">EPG URL (isteğe bağlı)</string>
+    <string name="channels_server_url">Sunucu URL</string>
+    <string name="channels_username">Kullanıcı Adı</string>
+    <string name="channels_password">Şifre</string>
+    <string name="channels_manage_categories">Kategorileri Yönet</string>
+    <string name="channels_refresh">Yenile</string>
 
     <!-- Downloads Screen -->
     <string name="download_title">İndirmeler</string>
@@ -266,4 +277,233 @@
     <string name="episode_all_seasons">Tüm Sezonlar</string>
     <string name="episode_mark_season_watched">Sezon %1$d izlendi olarak işaretle</string>
     <string name="episode_format">S%1$dE%2$d</string>
+
+    <!-- Diagnostics Screen -->
+    <string name="diagnostics_title">Tanılama</string>
+    <string name="diagnostics_service_health">Hizmet Durumu</string>
+    <string name="diagnostics_sync_status">Senkronizasyon Durumu</string>
+    <string name="diagnostics_content_config">İçerik ve Yapılandırma</string>
+    <string name="diagnostics_stream_prefs">Yayın Tercihleri</string>
+    <string name="diagnostics_rating_config">Puan Yapılandırması</string>
+    <string name="diagnostics_integrations_detail">Entegrasyon Detayları</string>
+    <string name="diagnostics_connected">Bağlı</string>
+    <string name="diagnostics_not_configured">Yapılandırılmamış</string>
+    <string name="diagnostics_never">Hiçbir zaman</string>
+    <string name="diagnostics_copied">Panoya kopyalandı</string>
+    <string name="diagnostics_copy">Kopyala</string>
+
+    <!-- Integrations Screen -->
+    <string name="integrations_title">Entegrasyonlar</string>
+    <string name="integrations_subtitle">Kütüphanenizi ve ilerlemenizi senkronize etmek için harici servisleri bağlayın.</string>
+    <string name="integrations_omdb_desc">IMDb, Rotten Tomatoes ve Metacritic puanları için ücretsiz API anahtarı. omdbapi.com adresinden alın</string>
+    <string name="integrations_omdb_hint">omdbapi.com adresinden ücretsiz anahtar alın (günde 1.000 istek).</string>
+    <string name="integrations_trakt_desc">OAuth cihaz yetkilendirmesi ve çift yönlü senkronizasyon (izleme listesi/geçmiş/ilerleme).</string>
+    <string name="integrations_status_connected">Durum: Bağlı</string>
+    <string name="integrations_status_not_connected">Durum: Bağlı değil</string>
+    <string name="integrations_last_sync">Son senkronizasyon: %1$s</string>
+    <string name="integrations_connecting">Bağlanıyor…</string>
+    <string name="integrations_syncing">Senkronize ediliyor…</string>
+    <string name="integrations_sync_complete">Senkronizasyon tamamlandı</string>
+    <string name="integrations_sync_now">Şimdi senkronize et</string>
+    <string name="integrations_simkl_desc">Cihaz kodu yetkilendirmesiyle otomatik anime ve dizi takibi.</string>
+    <string name="integrations_jellyfin_desc">Kütüphane senkronizasyonu ve izlemeye devam için Jellyfin sunucunuza bağlanın.</string>
+    <string name="integrations_server_url">Sunucu URL</string>
+    <string name="integrations_test_connection">Bağlantıyı Test Et</string>
+    <string name="integrations_user_profile">Kullanıcı Profili</string>
+    <string name="integrations_admin">Yönetici</string>
+    <string name="integrations_plex_desc">Kütüphane rozetleri ve izlemeye devam için Plex sunucunuzu bağlayın.</string>
+    <string name="integrations_plex_url_hint">Sunucu URL (ör. http://192.168.1.100:32400)</string>
+    <string name="integrations_access_token">Erişim Anahtarı</string>
+    <string name="integrations_plex_token_hint">Anahtarınızı plex.tv/claim adresinde veya Plex uygulama ayarlarında bulun.</string>
+    <string name="integrations_testing">Test ediliyor…</string>
+    <string name="integrations_your_code">Kodunuz</string>
+    <string name="integrations_code_copied">Kod kopyalandı</string>
+    <string name="integrations_open_browser">Tarayıcıda Aç</string>
+
+    <!-- MDBList Screen -->
+    <string name="mdblist_title">MDBList</string>
+    <string name="mdblist_api_key_hint">Ücretsiz API anahtarınızı mdblist.com/preferences adresinden alın</string>
+    <string name="mdblist_enter_key">MDBList API anahtarı girin</string>
+    <string name="mdblist_saved">Kaydedildi</string>
+    <string name="mdblist_save">Kaydet</string>
+    <string name="mdblist_popular">Popüler</string>
+    <string name="mdblist_most_popular">En Popüler Listeler</string>
+    <string name="mdblist_load_popular">Popüler listeleri yükle</string>
+    <string name="mdblist_search_lists">Listeleri Ara</string>
+    <string name="mdblist_search_placeholder">Herkese açık listeleri ara…</string>
+    <string name="mdblist_search_results">Arama Sonuçları</string>
+    <string name="mdblist_installed">Yüklü Listeler</string>
+    <string name="mdblist_no_lists">Henüz liste eklenmedi.</string>
+    <string name="mdblist_items">%1$d öğe</string>
+    <string name="mdblist_by">%1$s tarafından</string>
+    <string name="mdblist_likes">%1$d beğeni</string>
+    <string name="mdblist_added">Eklendi</string>
+
+    <!-- Rating Settings Screen -->
+    <string name="ratings_title">Puanlar</string>
+    <string name="ratings_show_detail">Detay Sayfasında Göster</string>
+    <string name="ratings_show_detail_desc">Film/dizi detay ekranında puanları göster</string>
+    <string name="ratings_torve_detail">Detayda Torve Puanını Göster</string>
+    <string name="ratings_torve_detail_desc">Meta veri satırında ağırlıklı Torve Puanını gösterir</string>
+    <string name="ratings_torve_cards">Kartlarda Torve Puanına İzin Ver</string>
+    <string name="ratings_torve_cards_desc">Göstergelerde Torve Puanını etkinleştir</string>
+    <string name="ratings_landscape">Yatay Kartlarda Puanlara İzin Ver</string>
+    <string name="ratings_landscape_desc">Arka plan kartlarında kompakt puan göstergeleri göster</string>
+    <string name="ratings_torve_weights">Torve Puan Ağırlıkları</string>
+    <string name="ratings_weights_desc">Ağırlıklar mevcut kaynaklar kullanılarak normalleştirilir</string>
+    <string name="ratings_add_provider">Sağlayıcı Ekle</string>
+    <string name="ratings_reset_weights">Torve Ağırlıklarını Sıfırla</string>
+    <string name="ratings_pill_position">Gösterge Konumu</string>
+    <string name="ratings_pill_position_desc">Poster kartlarında puan göstergelerinin yeri</string>
+    <string name="ratings_max_on_card">Karttaki Maks. Puan</string>
+    <string name="ratings_max_on_card_desc">Poster kartlarında kaç puan göstergesi gösterilecek</string>
+    <string name="ratings_pill_style">Gösterge Stili</string>
+    <string name="ratings_with_icon">Simgeli</string>
+    <string name="ratings_with_letter">Harfli</string>
+    <string name="ratings_preview">Önizleme</string>
+    <string name="ratings_preview_desc">İç ve dış yerleşimin kompakt önizlemesi</string>
+    <string name="ratings_sources">Puan Kaynakları</string>
+    <string name="ratings_sources_desc">Kaynakları etkinleştirin ve oklarla sıralayın. Üstteki kaynaklar önce gösterilir.</string>
+    <string name="ratings_inside_card">Kartın İçinde</string>
+    <string name="ratings_outside_card">Kartın Dışında</string>
+    <string name="ratings_inside">İç</string>
+    <string name="ratings_outside">Dış</string>
+    <string name="ratings_reset_defaults">Varsayılana Sıfırla</string>
+
+    <!-- Regex Patterns Screen -->
+    <string name="regex_title">Regex Kalıpları</string>
+    <string name="regex_filter_desc">Yayın sonuçlarını başlığa göre filtrele. Eşleşen yayınlar hariç tutulur.</string>
+    <string name="regex_quick_add">Hızlı Ekle</string>
+    <string name="regex_added">Eklendi: %1$s</string>
+    <string name="regex_label_hint">Etiket</string>
+    <string name="regex_pattern_hint">Regex kalıbı</string>
+
+    <!-- Home Layout Screen -->
+    <string name="home_layout_title">Ana Sayfa Düzeni</string>
+    <string name="home_layout_reset">Sıfırla</string>
+    <string name="home_layout_hint">Sıralamak için basılı tutup sürükleyin. Kart stilini özelleştirmek için bir bölüme dokunun.</string>
+    <string name="home_layout_add_custom">Özel Bölüm Ekle</string>
+    <string name="home_layout_addon">Eklenti</string>
+    <string name="home_layout_collapse">Daralt</string>
+    <string name="home_layout_customize">Özelleştir</string>
+    <string name="home_layout_card_style">Kart Stili</string>
+    <string name="home_layout_reset_section">Bölümü varsayılana sıfırla</string>
+
+    <!-- Home Customize Sheet -->
+    <string name="home_customize_title">Ana Sayfayı Özelleştir</string>
+    <string name="home_customize_done">Tamam</string>
+
+    <!-- Addon Catalog Screen -->
+    <string name="addon_catalog_title">Eklenti Kataloğu</string>
+    <string name="addon_catalog_installed_count">%1$d yüklü</string>
+    <string name="addon_catalog_search_hint">Arayın veya eklenti URL\'si yapıştırın…</string>
+    <string name="addon_catalog_installed">Yüklü</string>
+    <string name="addon_catalog_available">Mevcut</string>
+    <string name="addon_catalog_installing">Yükleniyor…</string>
+    <string name="addon_catalog_install">Yükle</string>
+    <string name="addon_catalog_open_browser">Tarayıcıda Aç</string>
+    <string name="addon_catalog_copy_url">URL Kopyala</string>
+    <string name="addon_catalog_manifest_hint">Sayfa bir JSON bildirimi gösteriyorsa, URL\'sini kopyalayıp tekrar deneyin.</string>
+    <string name="addon_category_all">Tümü</string>
+    <string name="addon_category_streams">Yayınlar</string>
+    <string name="addon_category_catalogs">Kataloglar</string>
+    <string name="addon_category_subtitles">Altyazılar</string>
+
+    <!-- Category Manager Sheet -->
+    <string name="categories_subtitle">Görmek istediğiniz ülkeleri ve kategorileri seçin</string>
+    <string name="categories_select_all">Tümünü Seç</string>
+    <string name="categories_deselect_all">Tümünü Kaldır</string>
+
+    <!-- Stats Screen -->
+    <string name="stats_title">İstatistikleriniz</string>
+    <string name="stats_movies">Filmler</string>
+    <string name="stats_episodes">Bölümler</string>
+    <string name="stats_watch_time">İzleme Süresi</string>
+    <string name="stats_this_week">Bu Hafta</string>
+    <string name="stats_this_month">Bu Ay</string>
+    <string name="stats_day_streak">Gün Serisi</string>
+    <string name="stats_no_data">Henüz izleme verisi yok</string>
+    <string name="stats_start_watching">İstatistiklerinizi görmek için izlemeye başlayın</string>
+
+    <!-- TV Home Screen -->
+    <string name="tv_trending_movies">Trend Filmler</string>
+    <string name="tv_trending_tv">Trend Diziler</string>
+
+    <!-- Common Extended -->
+    <string name="common_next">İleri</string>
+    <string name="common_skip">Atla</string>
+    <string name="common_save">Kaydet</string>
+    <string name="common_rename">Yeniden Adlandır</string>
+    <string name="common_duplicate">Çoğalt</string>
+    <string name="common_reset">Sıfırla</string>
+    <string name="common_loading">Yükleniyor…</string>
+    <string name="common_play_now">Şimdi Oynat</string>
+    <string name="common_sort_by">Sıralama</string>
+    <string name="common_view_details">Ayrıntıları Gör</string>
+    <string name="common_open_browser">Tarayıcıda Aç</string>
+
+    <!-- Login -->
+    <string name="login_display_name">Görünen Ad</string>
+    <string name="login_email">Email</string>
+    <string name="login_password">Şifre</string>
+    <string name="login_create_account">Hesap Oluştur</string>
+    <string name="login_sign_in">Giriş Yap</string>
+    <string name="login_switch_to_signin">Zaten hesabınız var mı? Giriş Yapın</string>
+    <string name="login_switch_to_register">Hesabınız yok mu? Kaydolun</string>
+    <string name="login_skip">Şimdilik atla</string>
+
+    <!-- Setup -->
+    <string name="setup_step_of">Adım %1$d / %2$d</string>
+    <string name="setup_get_started">Başla</string>
+    <string name="setup_start_streaming">Yayını Başlat</string>
+    <string name="setup_i_agree">Kabul Ediyorum</string>
+    <string name="setup_verify_connect">Doğrula &amp; Bağlan</string>
+    <string name="setup_connect_trakt">Trakt.tv ile Bağlan</string>
+    <string name="setup_m3u">M3U</string>
+    <string name="setup_provider_login">Sağlayıcı Girişi</string>
+    <string name="setup_channels_desc">Canlı TV izlemek için bir M3U oynatma listesi ekleyin veya sağlayıcı girişi yapın. Daha fazlasını daha sonra Kanallar sekmesinden ekleyebilirsiniz.</string>
+    <string name="setup_playlist_hint">ör. Kanallarım</string>
+    <string name="setup_m3u_hint">https://example.com/playlist.m3u</string>
+    <string name="setup_server_hint">http://example.com:8080</string>
+
+    <!-- Card Style -->
+    <string name="card_style_title">Kart Stili</string>
+    <string name="card_style_preset">Ön Ayar</string>
+    <string name="card_style_default_suffix">%1$s (Varsayılan)</string>
+    <string name="card_style_set_default">Varsayılan Yap</string>
+    <string name="card_style_save_as_preset">Ön Ayar Olarak Kaydet</string>
+    <string name="card_style_quick_presets">Hızlı Ön Ayarlar</string>
+    <string name="card_style_quick_desc">Mevcut ön ayara önceden tanımlanmış bir stil uygulayın</string>
+    <string name="card_style_cinema">Sinema</string>
+    <string name="card_style_compact">Kompakt</string>
+    <string name="card_style_classic">Klasik</string>
+    <string name="card_style_live_preview">Canlı Önizleme</string>
+    <string name="card_style_reset_all">Tümünü Varsayılana Sıfırla</string>
+    <string name="card_style_rename_title">Ön Ayarı Yeniden Adlandır</string>
+    <string name="card_style_save_title">Ön Ayarı Kaydet</string>
+    <string name="card_style_delete_title">Ön Ayar Silinsin mi?</string>
+    <string name="card_style_delete_desc">\"%1$s\" kaldırılacak. Bunu kullanan bölümler varsayılan stile dönecektir.</string>
+
+    <!-- Player Extended -->
+    <string name="player_next_season">Sonraki Sezon</string>
+    <string name="player_next_episode">Sonraki Bölüm</string>
+    <string name="player_audio_delay">Ses Gecikmesi</string>
+    <string name="player_audio_delay_value">Gecikme: %1$d ms</string>
+
+    <!-- Download Extended -->
+    <string name="download_delete_title">%1$s silinsin mi?</string>
+    <string name="download_delete_movie">Film silinecek (%1$s).</string>
+    <string name="download_delete_show">Tüm %1$d bölüm silinecek (%2$s).</string>
+    <string name="download_delete_all_watched">İzlenen Her Şey Silinsin mi?</string>
+    <string name="download_delete_all_watched_desc">İzlemeyi tamamladığınız tüm içerikler silinecektir.</string>
+    <string name="download_delete_season">Sezon %1$d\'i Sil</string>
+
+    <!-- Settings Extended -->
+    <string name="settings_reset_appearance">Tüm görünüm ayarlarını sıfırla</string>
+    <string name="settings_reset_appearance_desc">Tüm özel kart stili ön ayarları silinecek ve puan görüntüleme ayarları varsayılana döndürülecektir.</string>
+    <string name="settings_reset_appearance_title">Görünüm Sıfırlansın mı?</string>
+    <string name="settings_reset_appearance_confirm">Tüm özel kart stili ön ayarları kalıcı olarak silinecek ve tüm görünüm ayarları varsayılana döndürülecektir. Bu işlem geri alınamaz.</string>
+
+    <!-- Integrations Extended -->
+    <string name="integrations_sync_in_progress">Eşitleniyor…</string>
 </resources>

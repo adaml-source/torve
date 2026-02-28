@@ -88,13 +88,13 @@ fun ChannelsScreen(
                 )
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    text = stringResource(R.string.iptv_no_playlists),
+                    text = stringResource(R.string.channels_no_playlists),
                     style = MaterialTheme.typography.headlineSmall,
                     color = StreamVault.colors.textPrimary,
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = stringResource(R.string.iptv_add_playlist_prompt),
+                    text = stringResource(R.string.channels_add_playlist_prompt),
                     style = MaterialTheme.typography.bodyMedium,
                     color = StreamVault.colors.textTertiary,
                 )
@@ -109,7 +109,7 @@ fun ChannelsScreen(
                 ) {
                     Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.size(6.dp))
-                    Text(stringResource(R.string.iptv_add_playlist), fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.channels_add_playlist), fontWeight = FontWeight.SemiBold)
                 }
             }
         } else {
@@ -164,7 +164,7 @@ fun ChannelsScreen(
                     IconButton(onClick = { viewModel.toggleCategoryManager() }) {
                         Icon(
                             Icons.Rounded.Tune,
-                            contentDescription = stringResource(R.string.iptv_manage_categories),
+                            contentDescription = stringResource(R.string.channels_manage_categories),
                             tint = StreamVault.colors.textSecondary,
                             modifier = Modifier.size(22.dp),
                         )
@@ -172,7 +172,7 @@ fun ChannelsScreen(
                     IconButton(onClick = { viewModel.refreshPlaylist() }) {
                         Icon(
                             Icons.Rounded.Refresh,
-                            contentDescription = stringResource(R.string.iptv_refresh),
+                            contentDescription = stringResource(R.string.channels_refresh),
                             tint = StreamVault.colors.textSecondary,
                             modifier = Modifier.size(22.dp),
                         )
@@ -307,7 +307,7 @@ internal fun AddPlaylistDialog(
         textContentColor = MaterialTheme.colorScheme.onSurface,
         title = {
             Text(
-                stringResource(R.string.iptv_add_title),
+                stringResource(R.string.channels_add_title),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onBackground,
@@ -325,18 +325,18 @@ internal fun AddPlaylistDialog(
                         selected = isXtream,
                         onClick = { onTypeChange("xtream") },
                         shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-                    ) { Text("Xtream Codes", color = MaterialTheme.colorScheme.onSurface) }
+                    ) { Text("Provider Login", color = MaterialTheme.colorScheme.onSurface) }
                 }
 
-                StyledTextField(value = name, onValueChange = onNameChange, label = stringResource(R.string.iptv_playlist_name))
+                StyledTextField(value = name, onValueChange = onNameChange, label = stringResource(R.string.channels_playlist_name))
 
                 if (isXtream) {
-                    StyledTextField(value = xtreamServer, onValueChange = onXtreamServerChange, label = stringResource(R.string.iptv_server_url), placeholder = "http://example.com:8080")
-                    StyledTextField(value = xtreamUsername, onValueChange = onXtreamUsernameChange, label = stringResource(R.string.iptv_username))
-                    StyledTextField(value = xtreamPassword, onValueChange = onXtreamPasswordChange, label = stringResource(R.string.iptv_password))
+                    StyledTextField(value = xtreamServer, onValueChange = onXtreamServerChange, label = stringResource(R.string.channels_server_url), placeholder = "http://example.com:8080")
+                    StyledTextField(value = xtreamUsername, onValueChange = onXtreamUsernameChange, label = stringResource(R.string.channels_username))
+                    StyledTextField(value = xtreamPassword, onValueChange = onXtreamPasswordChange, label = stringResource(R.string.channels_password))
                 } else {
-                    StyledTextField(value = url, onValueChange = onUrlChange, label = stringResource(R.string.iptv_m3u_url))
-                    StyledTextField(value = epgUrl, onValueChange = onEpgUrlChange, label = stringResource(R.string.iptv_epg_optional))
+                    StyledTextField(value = url, onValueChange = onUrlChange, label = stringResource(R.string.channels_m3u_url))
+                    StyledTextField(value = epgUrl, onValueChange = onEpgUrlChange, label = stringResource(R.string.channels_epg_optional))
                 }
             }
         },

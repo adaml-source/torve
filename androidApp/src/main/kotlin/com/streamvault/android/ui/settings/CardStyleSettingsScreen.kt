@@ -55,7 +55,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.sp
+import com.streamvault.android.R
 import com.streamvault.android.ui.components.BackButton
 import com.streamvault.android.ui.components.CardSize
 import com.streamvault.android.ui.components.LocalCardStyle
@@ -136,7 +138,7 @@ fun CardStyleSettingsScreen(
         ) {
             BackButton(onClick = onBack)
             Text(
-                "Card Style",
+                stringResource(R.string.card_style_title),
                 style = MaterialTheme.typography.titleLarge,
                 color = Snow,
                 fontWeight = FontWeight.Bold,
@@ -156,14 +158,14 @@ fun CardStyleSettingsScreen(
                     colors = CardDefaults.cardColors(containerColor = Charcoal),
                 ) {
                     Column(Modifier.padding(16.dp)) {
-                        Text("Preset", style = MaterialTheme.typography.titleMedium, color = Snow)
+                        Text(stringResource(R.string.card_style_preset), style = MaterialTheme.typography.titleMedium, color = Snow)
                         Spacer(Modifier.height(8.dp))
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.horizontalScroll(rememberScrollState()),
                         ) {
                             presets.forEach { preset ->
-                                val label = if (preset.presetId == defaultPresetId) "${preset.name} (Default)" else preset.name
+                                val label = if (preset.presetId == defaultPresetId) stringResource(R.string.card_style_default_suffix, preset.name) else preset.name
                                 FilterChip(
                                     selected = preset.presetId == selectedPresetId,
                                     onClick = { selectedPresetId = preset.presetId },
@@ -185,7 +187,7 @@ fun CardStyleSettingsScreen(
                                 },
                                 enabled = currentPreset?.presetId != null && currentPreset.presetId != defaultPresetId,
                             ) {
-                                Text("Set Default", color = Amber)
+                                Text(stringResource(R.string.card_style_set_default), color = Amber)
                             }
                             TextButton(
                                 onClick = {
@@ -194,7 +196,7 @@ fun CardStyleSettingsScreen(
                                 },
                                 enabled = currentPreset != null,
                             ) {
-                                Text("Save as Preset", color = Amber)
+                                Text(stringResource(R.string.card_style_save_as_preset), color = Amber)
                             }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -204,7 +206,7 @@ fun CardStyleSettingsScreen(
                                 },
                                 enabled = currentPreset != null,
                             ) {
-                                Text("Duplicate", color = Amber)
+                                Text(stringResource(R.string.common_duplicate), color = Amber)
                             }
                             TextButton(
                                 onClick = {
@@ -213,7 +215,7 @@ fun CardStyleSettingsScreen(
                                 },
                                 enabled = currentPreset != null,
                             ) {
-                                Text("Rename", color = Amber)
+                                Text(stringResource(R.string.common_rename), color = Amber)
                             }
                             TextButton(
                                 onClick = { showDeleteDialog = true },
@@ -221,7 +223,7 @@ fun CardStyleSettingsScreen(
                                     currentPreset.presetId != defaultPresetId &&
                                     currentPreset.isBuiltIn.not(),
                             ) {
-                                Text("Delete", color = if (currentPreset != null &&
+                                Text(stringResource(R.string.common_delete), color = if (currentPreset != null &&
                                     currentPreset.presetId != defaultPresetId &&
                                     currentPreset.isBuiltIn.not()
                                 ) Amber else Silver)
@@ -238,12 +240,12 @@ fun CardStyleSettingsScreen(
                     colors = CardDefaults.cardColors(containerColor = Charcoal),
                 ) {
                     Column(Modifier.padding(16.dp)) {
-                        Text("Quick Presets", style = MaterialTheme.typography.titleMedium, color = Snow)
+                        Text(stringResource(R.string.card_style_quick_presets), style = MaterialTheme.typography.titleMedium, color = Snow)
                         Spacer(Modifier.height(4.dp))
-                        Text("Apply a predefined style to the current preset", style = MaterialTheme.typography.bodySmall, color = Silver)
+                        Text(stringResource(R.string.card_style_quick_desc), style = MaterialTheme.typography.bodySmall, color = Silver)
                         Spacer(Modifier.height(12.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            QuickPresetButton("Cinema") {
+                            QuickPresetButton(stringResource(R.string.card_style_cinema)) {
                                 updateStyle {
                                     CardStyle(
                                         size = CardSizePrefs(preset = CardSizePreset.L, orientation = CardOrientation.PORTRAIT),
@@ -254,7 +256,7 @@ fun CardStyleSettingsScreen(
                                     )
                                 }
                             }
-                            QuickPresetButton("Compact") {
+                            QuickPresetButton(stringResource(R.string.card_style_compact)) {
                                 updateStyle {
                                     CardStyle(
                                         size = CardSizePrefs(preset = CardSizePreset.S, orientation = CardOrientation.PORTRAIT),
@@ -265,7 +267,7 @@ fun CardStyleSettingsScreen(
                                     )
                                 }
                             }
-                            QuickPresetButton("Classic") {
+                            QuickPresetButton(stringResource(R.string.card_style_classic)) {
                                 updateStyle {
                                     CardStyle(
                                         size = CardSizePrefs(preset = CardSizePreset.M, orientation = CardOrientation.PORTRAIT),
@@ -290,7 +292,7 @@ fun CardStyleSettingsScreen(
                         modifier = Modifier.padding(16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Text("Live Preview", color = Snow, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.card_style_live_preview), color = Snow, fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.height(8.dp))
                         CardStyleLivePreview(style = currentStyle)
                     }
@@ -331,7 +333,7 @@ fun CardStyleSettingsScreen(
                     onClick = { updateStyle { CardStyle() } },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("Reset All to Defaults", color = Amber)
+                    Text(stringResource(R.string.card_style_reset_all), color = Amber)
                 }
                 Spacer(Modifier.height(32.dp))
             }
@@ -341,7 +343,7 @@ fun CardStyleSettingsScreen(
     if (showRenameDialog && currentPreset != null) {
         AlertDialog(
             onDismissRequest = { showRenameDialog = false },
-            title = { Text("Rename Preset", color = Snow) },
+            title = { Text(stringResource(R.string.card_style_rename_title), color = Snow) },
             text = {
                 OutlinedTextField(
                     value = nameDraft,
@@ -365,10 +367,10 @@ fun CardStyleSettingsScreen(
                         }
                         showRenameDialog = false
                     },
-                ) { Text("Save", color = Amber) }
+                ) { Text(stringResource(R.string.common_save), color = Amber) }
             },
             dismissButton = {
-                TextButton(onClick = { showRenameDialog = false }) { Text("Cancel", color = Silver) }
+                TextButton(onClick = { showRenameDialog = false }) { Text(stringResource(R.string.common_cancel), color = Silver) }
             },
             containerColor = Charcoal,
         )
@@ -377,7 +379,7 @@ fun CardStyleSettingsScreen(
     if (showCreateDialog && currentPreset != null) {
         AlertDialog(
             onDismissRequest = { showCreateDialog = false },
-            title = { Text("Save Preset", color = Snow) },
+            title = { Text(stringResource(R.string.card_style_save_title), color = Snow) },
             text = {
                 OutlinedTextField(
                     value = nameDraft,
@@ -402,10 +404,10 @@ fun CardStyleSettingsScreen(
                         }
                         showCreateDialog = false
                     },
-                ) { Text("Save", color = Amber) }
+                ) { Text(stringResource(R.string.common_save), color = Amber) }
             },
             dismissButton = {
-                TextButton(onClick = { showCreateDialog = false }) { Text("Cancel", color = Silver) }
+                TextButton(onClick = { showCreateDialog = false }) { Text(stringResource(R.string.common_cancel), color = Silver) }
             },
             containerColor = Charcoal,
         )
@@ -414,10 +416,10 @@ fun CardStyleSettingsScreen(
     if (showDeleteDialog && currentPreset != null) {
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
-            title = { Text("Delete Preset?", color = Snow) },
+            title = { Text(stringResource(R.string.card_style_delete_title), color = Snow) },
             text = {
                 Text(
-                    "This will remove \"${currentPreset.name}\". Sections using it will fall back to Default.",
+                    stringResource(R.string.card_style_delete_desc, currentPreset.name),
                     color = Silver,
                 )
             },
@@ -427,10 +429,10 @@ fun CardStyleSettingsScreen(
                         viewModel.deleteCardStylePreset(currentPreset.presetId)
                         showDeleteDialog = false
                     },
-                ) { Text("Delete", color = Amber) }
+                ) { Text(stringResource(R.string.common_delete), color = Amber) }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel", color = Silver) }
+                TextButton(onClick = { showDeleteDialog = false }) { Text(stringResource(R.string.common_cancel), color = Silver) }
             },
             containerColor = Charcoal,
         )

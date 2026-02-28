@@ -22,6 +22,11 @@ class StreamAggregator(
     private val debridClient: DebridClient,
     private val scorer: StreamScorer,
 ) {
+    /** Track addon failures for diagnostics (addon URL → last error message). */
+    private val addonFailures = mutableMapOf<String, String>()
+
+    fun getAddonHealth(): Map<String, String> = addonFailures.toMap()
+
     /**
      * Full stream resolution pipeline:
      * 1. Fan out to all installed addons in parallel (10s timeout each)
@@ -60,7 +65,9 @@ class StreamAggregator(
                             addonClient.getStreams(url, type, imdbId, season, episode)
                         }
                     } catch (_: Exception) {
-                        println("StreamAggregator: addon $url failed after retry: ${e.message}")
+                        val msg = e.message ?: "Unknown error"
+                        println("StreamAggregator: addon $url failed after retry: $msg")
+                        addonFailures[url] = msg
                         emptyList()
                     }
                 }

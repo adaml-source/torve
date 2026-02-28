@@ -2,11 +2,14 @@ package com.streamvault.presentation.catalog
 
 import com.streamvault.data.ai.AiProvider
 import com.streamvault.data.ai.KeywordSearchService
+import com.streamvault.data.mdblist.MdbListApi
 import com.streamvault.data.mdblist.RatingsEnricher
 import com.streamvault.domain.model.MediaItem
 import com.streamvault.domain.model.dedupeByStableKey
 import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.model.PagedResult
+import com.streamvault.domain.integrations.IntegrationSecretKey
+import com.streamvault.domain.integrations.IntegrationSecretStore
 import com.streamvault.domain.repository.MetadataRepository
 import com.streamvault.domain.repository.PreferencesRepository
 import com.streamvault.domain.repository.WatchProgressRepository
@@ -36,6 +39,7 @@ class CatalogViewModel(
     private val keywordSearchService: KeywordSearchService? = null,
     private val prefsRepo: PreferencesRepository? = null,
     private val ratingsEnricher: RatingsEnricher? = null,
+    private val integrationSecretStore: IntegrationSecretStore? = null,
     initialProviderId: Int? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -75,6 +79,15 @@ class CatalogViewModel(
                         topRatedItems = topRated,
                         shelvesLoaded = true,
                     )
+                }
+                enrichAndUpdateItems(trending) { items ->
+                    _state.update { it.copy(trendingItems = items) }
+                }
+                enrichAndUpdateItems(popular) { items ->
+                    _state.update { it.copy(popularItems = items) }
+                }
+                enrichAndUpdateItems(topRated) { items ->
+                    _state.update { it.copy(topRatedItems = items) }
                 }
             } catch (_: Exception) {
                 _state.update { it.copy(shelvesLoaded = true) }
@@ -373,11 +386,12 @@ class CatalogViewModel(
         update: (List<MediaItem>) -> Unit,
     ) {
         val enricher = ratingsEnricher ?: return
-        val repo = prefsRepo ?: return
         scope.launch {
             val apiKey = try {
-                repo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY) ?: ""
-            } catch (_: Exception) { "" }
+                integrationSecretStore?.get(IntegrationSecretKey.MDBLIST_API_KEY)
+                    ?: prefsRepo?.getString(SettingsViewModel.KEY_MDBLIST_API_KEY)
+                    ?: MdbListApi.DEFAULT_API_KEY
+            } catch (_: Exception) { MdbListApi.DEFAULT_API_KEY }
             if (apiKey.isBlank()) return@launch
             val enriched = enricher.enrichList(items, apiKey)
             update(enriched)

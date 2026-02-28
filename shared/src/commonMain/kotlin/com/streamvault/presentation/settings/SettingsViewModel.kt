@@ -1,6 +1,7 @@
 package com.streamvault.presentation.settings
 
 import com.streamvault.data.ai.AiProvider
+import com.streamvault.data.ai.AiSuggestClient
 import com.streamvault.data.debrid.DebridClient
 import com.streamvault.data.kodi.KodiClient
 import com.streamvault.data.kodi.KodiHost
@@ -15,12 +16,14 @@ import com.streamvault.domain.integrations.LibraryOverlayService
 import com.streamvault.domain.model.CardPrefs
 import com.streamvault.domain.model.CardStyle
 import com.streamvault.domain.model.CardStylePreset
+import com.streamvault.domain.model.HomeSectionConfig
 import com.streamvault.domain.model.CodecPreference
 import com.streamvault.domain.model.DEFAULT_STREAM_GROUPS
 import com.streamvault.domain.model.DebridServiceType
 import com.streamvault.domain.model.HdrMode
 import com.streamvault.domain.model.RegexPattern
 import com.streamvault.domain.model.StreamGroup
+import com.streamvault.data.ratings.OmdbClient
 import com.streamvault.domain.model.RatingDisplayPrefs
 import com.streamvault.domain.model.RatingSource
 import com.streamvault.domain.model.defaultTorveWeights
@@ -64,6 +67,8 @@ class SettingsViewModel(
     private val watchProgressRepo: WatchProgressRepository,
     private val integrationSecretStore: IntegrationSecretStore,
     private val libraryOverlayService: LibraryOverlayService,
+    private val omdbClient: OmdbClient,
+    private val aiSuggestClient: AiSuggestClient,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(SettingsUiState())
@@ -111,6 +116,7 @@ class SettingsViewModel(
         const val KEY_GEMINI_API_KEY = "gemini_api_key"
         const val KEY_PERPLEXITY_API_KEY = "perplexity_api_key"
         const val KEY_DEEPSEEK_API_KEY = "deepseek_api_key"
+        const val KEY_OMDB_API_KEY = "omdb_api_key"
         const val KEY_MDBLIST_API_KEY = "mdblist_api_key"
         const val KEY_JELLYFIN_SERVER_URL = "jellyfin_server_url"
         const val KEY_PLEX_SERVER_URL = "plex_server_url"
@@ -234,6 +240,8 @@ class SettingsViewModel(
             val legacyDeepSeekApiKey = prefsRepo.getString(KEY_DEEPSEEK_API_KEY) ?: ""
             val deepSeekApiKey = integrationSecretStore.get(IntegrationSecretKey.DEEPSEEK_API_KEY)
                 ?: legacyDeepSeekApiKey
+            val omdbApiKey = integrationSecretStore.get(IntegrationSecretKey.OMDB_API_KEY)
+                ?: prefsRepo.getString(KEY_OMDB_API_KEY) ?: ""
             val legacyMdblistApiKey = prefsRepo.getString(KEY_MDBLIST_API_KEY) ?: ""
             val mdblistApiKey = integrationSecretStore.get(IntegrationSecretKey.MDBLIST_API_KEY)
                 ?: legacyMdblistApiKey
@@ -292,6 +300,7 @@ class SettingsViewModel(
                     geminiApiKey = geminiApiKey,
                     perplexityApiKey = perplexityApiKey,
                     deepSeekApiKey = deepSeekApiKey,
+                    omdbApiKey = omdbApiKey,
                     mdblistApiKey = mdblistApiKey,
                     jellyfinServerUrl = jellyfinServerUrl,
                     jellyfinApiKey = "",
@@ -656,8 +665,16 @@ class SettingsViewModel(
 
     fun syncTraktNow() {
         scope.launch {
-            initialTraktImport()
-            checkTraktApiStatus()
+            _state.update { it.copy(traktSyncing = true, traktSyncSuccess = false) }
+            try {
+                initialTraktImport()
+                checkTraktApiStatus()
+                _state.update { it.copy(traktSyncing = false, traktSyncSuccess = true) }
+                delay(3000)
+                _state.update { it.copy(traktSyncSuccess = false) }
+            } catch (_: Exception) {
+                _state.update { it.copy(traktSyncing = false) }
+            }
         }
     }
 
@@ -735,12 +752,65 @@ class SettingsViewModel(
     }
 
     fun setActiveAiApiKey(key: String) {
+        _state.update { it.copy(aiKeyValidationResult = null) }
         when (_state.value.aiProvider) {
             AiProvider.CLAUDE -> setClaudeApiKey(key)
             AiProvider.CHATGPT -> setChatGptApiKey(key)
             AiProvider.GEMINI -> setGeminiApiKey(key)
             AiProvider.PERPLEXITY -> setPerplexityApiKey(key)
             AiProvider.DEEPSEEK -> setDeepSeekApiKey(key)
+        }
+    }
+
+    fun validateAiApiKey() {
+        val provider = _state.value.aiProvider
+        val key = _state.value.activeAiApiKey
+        if (key.isBlank()) {
+            _state.update { it.copy(aiKeyValidationResult = "Enter an API key first") }
+            return
+        }
+        _state.update { it.copy(aiKeyValidating = true, aiKeyValidationResult = null) }
+        scope.launch {
+            try {
+                aiSuggestClient.suggest(provider, key, "best sci-fi movies")
+                _state.update { it.copy(aiKeyValidating = false, aiKeyValidationResult = "valid") }
+            } catch (e: Exception) {
+                val msg = e.message?.take(120) ?: "Validation failed"
+                _state.update { it.copy(aiKeyValidating = false, aiKeyValidationResult = msg) }
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // OMDB
+    // -------------------------------------------------------------------------
+
+    fun setOmdbApiKey(key: String) {
+        _state.update { it.copy(omdbApiKey = key, omdbValidationResult = null) }
+        scope.launch {
+            integrationSecretStore.put(IntegrationSecretKey.OMDB_API_KEY, key)
+            prefsRepo.remove(KEY_OMDB_API_KEY)
+            // Also persist to preferences so OmdbClient can read it
+            prefsRepo.setString(OmdbClient.KEY_OMDB_API_KEY, key)
+        }
+    }
+
+    fun validateOmdbApiKey() {
+        val key = _state.value.omdbApiKey
+        if (key.isBlank()) {
+            _state.update { it.copy(omdbValidationResult = "Enter an API key first") }
+            return
+        }
+        _state.update { it.copy(omdbValidating = true, omdbValidationResult = null) }
+        scope.launch {
+            // Test with a well-known IMDb ID (The Shawshank Redemption)
+            val result = omdbClient.fetchRatings("tt0111161")
+            _state.update {
+                it.copy(
+                    omdbValidating = false,
+                    omdbValidationResult = if (result != null) "valid" else "invalid",
+                )
+            }
         }
     }
 
@@ -946,6 +1016,19 @@ class SettingsViewModel(
         val updated = current.cardStylePresets.filterNot { it.presetId == presetId }
         _state.update { it.copy(cardStylePresets = updated) }
         saveCardStylePresets(updated)
+        // Clean up section configs that reference the deleted preset
+        scope.launch {
+            val saved = try { prefsRepo.getString("home_section_configs") } catch (_: Exception) { null }
+            if (saved != null) {
+                try {
+                    val configs = jsonParser.decodeFromString<List<HomeSectionConfig>>(saved)
+                    val cleaned = configs.map { cfg ->
+                        if (cfg.presetId == presetId) cfg.copy(presetId = "default") else cfg
+                    }
+                    prefsRepo.setString("home_section_configs", jsonParser.encodeToString(cleaned))
+                } catch (_: Exception) { }
+            }
+        }
     }
 
     private fun saveCardStylePresets(presets: List<CardStylePreset>) {

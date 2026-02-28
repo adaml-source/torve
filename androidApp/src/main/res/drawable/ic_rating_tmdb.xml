@@ -1,0 +1,25 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="16dp"
+    android:height="16dp"
+    android:viewportWidth="185.04"
+    android:viewportHeight="185.04">
+    <!-- Dark blue rounded rect background -->
+    <path
+        android:fillColor="#032541"
+        android:pathData="M20,0h145.04a20,20 0,0 1,20 20v145.04a20,20 0,0 1,-20 20H20a20,20 0,0 1,-20 -20V20A20,20 0,0 1,20 0z"/>
+    <!-- TMDB icon mark: dot + two pills, vertically centered -->
+    <group android:translateY="26">
+        <!-- Dot (green) -->
+        <path
+            android:fillColor="#90CEA1"
+            android:pathData="M51.06,66.7A17.67,17.67,0,0,1,68.73,49A17.67,17.67,0,0,1,86.3,66.7A17.67,17.67,0,0,1,68.63,84.37A17.67,17.67,0,0,1,51.06,66.7z"/>
+        <!-- Top-right pill (blue) -->
+        <path
+            android:fillColor="#01B4E4"
+            android:pathData="M133.73,35.37h32.9A17.67,17.67,0,0,0,184.3,17.7A17.67,17.67,0,0,0,166.63,0h-32.9A17.67,17.67,0,0,0,116.06,17.7A17.67,17.67,0,0,0,133.73,35.37z"/>
+        <!-- Bottom-left pill (teal) -->
+        <path
+            android:fillColor="#3CBEC9"
+            android:pathData="M20.73,133.37h63.9A17.67,17.67,0,0,0,102.3,115.7A17.67,17.67,0,0,0,84.63,98H20.73A17.67,17.67,0,0,0,3.06,115.7A17.67,17.67,0,0,0,20.73,133.37z"/>
+    </group>
+</vector>

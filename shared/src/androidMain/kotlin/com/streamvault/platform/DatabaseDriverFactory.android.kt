@@ -231,6 +231,23 @@ actual class DatabaseDriverFactory(private val context: Context) {
             )""",
         )
 
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS rating_cache (
+                cache_key TEXT NOT NULL PRIMARY KEY,
+                imdb_score REAL,
+                imdb_votes INTEGER,
+                rt_score INTEGER,
+                rt_audience INTEGER,
+                tmdb_score REAL,
+                metacritic_score INTEGER,
+                letterboxd_score REAL,
+                trakt_score REAL,
+                mdblist_score REAL,
+                mal_score REAL,
+                fetched_at INTEGER NOT NULL
+            )""",
+        )
+
         // Migration: add next_retry_at column to trakt_sync_queue (for DBs created before this column existed)
         // Skip if column already present (table created with it, or previous migration ran)
         val cursor = db.query("PRAGMA table_info(trakt_sync_queue)")

@@ -70,6 +70,7 @@ import com.streamvault.android.ui.components.PosterCard
 import com.streamvault.android.ui.components.CardSize
 import com.streamvault.android.ui.components.SectionHeader
 import com.streamvault.android.ui.components.LocalCardStyle
+import com.streamvault.android.ui.components.MultiRatingPills
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Graphite
 import com.streamvault.android.ui.theme.HeroGradient
@@ -83,6 +84,7 @@ import android.net.Uri
 import com.streamvault.domain.model.Download
 import com.streamvault.domain.model.DownloadStatus
 import com.streamvault.domain.model.MediaItem
+import com.streamvault.domain.model.MediaRatings
 import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.model.AvailabilityOffer
 import com.streamvault.domain.model.AvailabilityOfferType
@@ -306,6 +308,27 @@ fun DetailScreen(
                                 item.genres.forEach { genre ->
                                     GenrePill(genre.name)
                                 }
+                            }
+                        }
+
+                        // Multi-source rating pills
+                        if (settingsState.ratingPrefs.showRatingsOnDetailPage) {
+                            val itemRating = item.rating
+                            val detailRatings = item.ratings?.let { r ->
+                                if (r.tmdbScore == null && itemRating != null && itemRating > 0) {
+                                    r.copy(tmdbScore = itemRating.toFloat())
+                                } else r
+                            } ?: itemRating?.takeIf { it > 0 }?.let {
+                                MediaRatings(tmdbScore = it.toFloat())
+                            }
+                            if (detailRatings != null) {
+                                Spacer(Modifier.height(12.dp))
+                                MultiRatingPills(
+                                    ratings = detailRatings,
+                                    prefs = settingsState.ratingPrefs.copy(
+                                        maxRatingsOnCard = settingsState.ratingPrefs.enabledProviders.size,
+                                    ),
+                                )
                             }
                         }
 
