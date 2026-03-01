@@ -2,22 +2,27 @@ package com.streamvault.android.ui.navigation
 
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
@@ -45,6 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -81,6 +87,8 @@ import com.streamvault.android.ui.seeall.SeeAllScreen
 import com.streamvault.android.ui.settings.AddonCatalogScreen
 import com.streamvault.android.ui.settings.RegexPatternsScreen
 import com.streamvault.android.ui.settings.SettingsScreen
+import com.streamvault.android.ui.sync.AccountScreen
+import com.streamvault.android.ui.sync.DevicesScreen
 import com.streamvault.android.ui.settings.StreamGroupsScreen
 import com.streamvault.android.ui.settings.CustomSectionEditorScreen
 import com.streamvault.android.ui.settings.DiagnosticsScreen
@@ -139,6 +147,18 @@ private val navTabDefs = listOf(
     NavTab("profile_tab", R.string.nav_settings, Icons.Filled.Settings, Icons.Outlined.Settings),
 )
 
+private const val MOBILE_HOME_ROUTE = "home"
+private const val TV_HOME_ROUTE = "tv_home"
+
+private val tvNavTabDefs = listOf(
+    NavTab(TV_HOME_ROUTE, R.string.nav_home, Icons.Filled.Home, Icons.Outlined.Home),
+    NavTab("movies", R.string.nav_movies, Icons.Filled.Movie, Icons.Outlined.Movie),
+    NavTab("tv_shows", R.string.nav_tv_shows, Icons.Filled.Tv, Icons.Outlined.Tv),
+    NavTab("live_tv", R.string.nav_channels, Icons.Filled.LiveTv, Icons.Outlined.LiveTv),
+    NavTab("watchlist_tab", R.string.nav_watchlist, Icons.Filled.Bookmark, Icons.Outlined.BookmarkBorder),
+    NavTab("profile_tab", R.string.nav_settings, Icons.Filled.Settings, Icons.Outlined.Settings),
+)
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Main Nav Graph
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -152,13 +172,14 @@ fun StreamVaultNavGraph(
     val currentRoute = navBackStackEntry?.destination?.route
 
     val showBottomBar = !isTvMode && currentRoute in navTabDefs.map { it.route }
+    val showTvNavRail = isTvMode && currentRoute in tvNavTabDefs.map { it.route }
 
     val setupViewModel: SetupWizardViewModel = koinInject()
     val watchlistViewModel: WatchlistViewModel = koinInject()
     val homeViewModel: HomeViewModel = koinInject()
     val watchlistState by watchlistViewModel.state.collectAsState()
     var didInitialWatchlistSync by remember { mutableStateOf(false) }
-    val dest = if (isTvMode) "tv_home" else "home"
+    val dest = if (isTvMode) TV_HOME_ROUTE else MOBILE_HOME_ROUTE
 
     // Hoist CatalogViewModels to NavGraph level so they survive detail navigation
     val metadataRepo: MetadataRepository = koinInject()
@@ -206,6 +227,7 @@ fun StreamVaultNavGraph(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(
+                    start = if (showTvNavRail) 138.dp else 0.dp,
                     bottom = if (showBottomBar) 56.dp else 0.dp,
                 ),
         ) {
@@ -214,7 +236,7 @@ fun StreamVaultNavGraph(
                 SetupWizardScreen(
                     viewModel = setupViewModel,
                     onComplete = {
-                        val target = if (isTvMode) "tv_home" else "home"
+                        val target = if (isTvMode) TV_HOME_ROUTE else MOBILE_HOME_ROUTE
                         navController.navigate(target) {
                             popUpTo("setup") { inclusive = true }
                         }
@@ -428,6 +450,8 @@ fun StreamVaultNavGraph(
                     onSubscriptionClick = { navController.navigate("paywall") },
                     onProfilesClick = { navController.navigate("profiles") },
                     onCalendarClick = { navController.navigate("calendar") },
+                    onAccountClick = { navController.navigate("sync_account") },
+                    onDevicesClick = { navController.navigate("sync_devices") },
                     onPrivacyPolicyClick = { navController.navigate("legal/privacy") },
                     onTermsClick = { navController.navigate("legal/terms") },
                     onHelpClick = { navController.navigate("legal/help") },
@@ -451,6 +475,8 @@ fun StreamVaultNavGraph(
                     onSubscriptionClick = { navController.navigate("paywall") },
                     onProfilesClick = { navController.navigate("profiles") },
                     onCalendarClick = { navController.navigate("calendar") },
+                    onAccountClick = { navController.navigate("sync_account") },
+                    onDevicesClick = { navController.navigate("sync_devices") },
                     onPrivacyPolicyClick = { navController.navigate("legal/privacy") },
                     onTermsClick = { navController.navigate("legal/terms") },
                     onHelpClick = { navController.navigate("legal/help") },
@@ -613,6 +639,17 @@ fun StreamVaultNavGraph(
                 ProfileScreen(onBack = { navController.popBackStack() })
             }
 
+            composable("sync_account") {
+                AccountScreen(
+                    onOpenDevices = { navController.navigate("sync_devices") },
+                    onBack = { navController.popBackStack() },
+                )
+            }
+
+            composable("sync_devices") {
+                DevicesScreen(onBack = { navController.popBackStack() })
+            }
+
             // Paywall
             composable("paywall") {
                 PaywallScreen(onBack = { navController.popBackStack() })
@@ -752,6 +789,24 @@ fun StreamVaultNavGraph(
         // Floating above content with a subtle top gradient scrim.
         // Not using stock NavigationBar — custom design for the cinematic feel.
         AnimatedVisibility(
+            visible = showTvNavRail,
+            modifier = Modifier.align(Alignment.CenterStart),
+            enter = slideInHorizontally { -it },
+            exit = slideOutHorizontally { -it },
+        ) {
+            TvNavRail(
+                currentRoute = currentRoute,
+                onTabClick = { route ->
+                    navController.navigate(route) {
+                        popUpTo(TV_HOME_ROUTE) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                },
+            )
+        }
+
+        AnimatedVisibility(
             visible = showBottomBar,
             modifier = Modifier.align(Alignment.BottomCenter),
             enter = slideInVertically { it },
@@ -797,6 +852,86 @@ fun StreamVaultNavGraph(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun TvNavRail(
+    currentRoute: String?,
+    onTabClick: (String) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxHeight()
+            .width(128.dp)
+            .background(Obsidian.copy(alpha = 0.96f))
+            .padding(horizontal = 10.dp, vertical = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = "Torve",
+            style = MaterialTheme.typography.titleMedium,
+            color = Color.White,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        )
+
+        tvNavTabDefs.forEach { tab ->
+            TvNavRailItem(
+                tab = tab,
+                selected = currentRoute == tab.route,
+                onClick = { onTabClick(tab.route) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun TvNavRailItem(
+    tab: NavTab,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    val icon = if (selected) tab.iconSelected else tab.iconUnselected
+    val label = stringResource(tab.labelResId)
+    val textColor = when {
+        isFocused -> Color.White
+        selected -> Amber
+        else -> StreamVault.colors.textTertiary
+    }
+    val backgroundColor = when {
+        isFocused -> Amber.copy(alpha = 0.30f)
+        selected -> Amber.copy(alpha = 0.16f)
+        else -> Color.Transparent
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(backgroundColor)
+            .onFocusChanged { isFocused = it.isFocused }
+            .focusable()
+            .clickable(
+                onClick = onClick,
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() },
+            )
+            .padding(horizontal = 8.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = textColor,
+            modifier = Modifier.size(18.dp),
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = textColor,
+        )
     }
 }
 

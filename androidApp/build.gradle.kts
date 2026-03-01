@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.google.services)
     alias(libs.plugins.firebase.crashlytics)
@@ -19,6 +20,18 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "BUILD_TIMESTAMP", "\"${System.currentTimeMillis()}\"")
+        buildConfigField("String", "SYNC_BASE_URL", "\"http://10.0.2.2:8080\"")
+        buildConfigField("String", "SYNC_WS_URL", "\"ws://10.0.2.2:8080/ws\"")
+    }
+
+    flavorDimensions += "formFactor"
+    productFlavors {
+        create("mobile") {
+            dimension = "formFactor"
+        }
+        create("tv") {
+            dimension = "formFactor"
+        }
     }
 
     buildFeatures {
@@ -122,8 +135,13 @@ dependencies {
     implementation("com.google.firebase:firebase-crashlytics")
     implementation("com.google.firebase:firebase-analytics")
 
+    // Google Play Billing
+    implementation("com.android.billingclient:billing-ktx:7.1.1")
+
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.kotlinx.serialization.json)
+    implementation("io.ktor:ktor-websockets:3.0.3")
 
     // Debug
     debugImplementation(libs.compose.ui.tooling)

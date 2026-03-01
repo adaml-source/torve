@@ -106,6 +106,8 @@ fun SettingsScreen(
     onSubscriptionClick: () -> Unit = {},
     onProfilesClick: () -> Unit = {},
     onCalendarClick: () -> Unit = {},
+    onAccountClick: () -> Unit = {},
+    onDevicesClick: () -> Unit = {},
     onPrivacyPolicyClick: () -> Unit = {},
     onTermsClick: () -> Unit = {},
     onHelpClick: () -> Unit = {},
@@ -186,6 +188,26 @@ fun SettingsScreen(
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
             ) {
                 Text(stringResource(R.string.settings_calendar))
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            OutlinedButton(
+                onClick = onAccountClick,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
+            ) {
+                Text("Account")
+            }
+            OutlinedButton(
+                onClick = onDevicesClick,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
+            ) {
+                Text("Devices")
             }
         }
 
@@ -949,7 +971,7 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("AI Provider", style = MaterialTheme.typography.bodySmall, color = StreamVault.colors.textSecondary)
+                                Text(stringResource(R.string.settings_ai_provider), style = MaterialTheme.typography.bodySmall, color = StreamVault.colors.textSecondary)
                                 Spacer(Modifier.height(2.dp))
                                 Text(state.aiProvider.label, style = MaterialTheme.typography.bodyMedium, color = Snow)
                             }
@@ -1454,12 +1476,12 @@ fun SettingsScreen(
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Ruby),
                     ) {
-                        Text("Reset")
+                        Text(stringResource(R.string.common_reset))
                     }
                 },
                 dismissButton = {
                     TextButton(onClick = { showResetAppearanceConfirm = false }) {
-                        Text("Cancel")
+                        Text(stringResource(R.string.common_cancel))
                     }
                 },
             )
@@ -1749,6 +1771,7 @@ private fun DebridDeviceCodeSection(
     isPolling: Boolean,
 ) {
     val context = LocalContext.current
+    val codeCopiedMessage = stringResource(R.string.settings_code_copied)
 
     // Clickable verification URL
     Text(
@@ -1774,7 +1797,7 @@ private fun DebridDeviceCodeSection(
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Column {
-            Text("Your code", style = MaterialTheme.typography.bodySmall, color = Silver)
+            Text(stringResource(R.string.settings_your_code), style = MaterialTheme.typography.bodySmall, color = Silver)
             Text(
                 text = userCode,
                 style = MaterialTheme.typography.titleLarge,
@@ -1786,12 +1809,12 @@ private fun DebridDeviceCodeSection(
             onClick = {
                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 clipboard.setPrimaryClip(ClipData.newPlainText("Device Code", userCode))
-                Toast.makeText(context, "Code copied", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, codeCopiedMessage, Toast.LENGTH_SHORT).show()
             },
         ) {
             Icon(
                 Icons.Default.ContentCopy,
-                contentDescription = "Copy code",
+                contentDescription = stringResource(R.string.diagnostics_copy),
                 tint = Amber,
                 modifier = Modifier.size(20.dp),
             )
@@ -1814,7 +1837,7 @@ private fun DebridDeviceCodeSection(
             modifier = Modifier.size(18.dp),
         )
         Spacer(Modifier.width(8.dp))
-        Text("Open in Browser")
+        Text(stringResource(R.string.settings_open_browser))
     }
 
     if (isPolling) {
@@ -1824,7 +1847,7 @@ private fun DebridDeviceCodeSection(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Amber)
-            Text("Waiting for authorization...", style = MaterialTheme.typography.bodySmall, color = Silver)
+            Text(stringResource(R.string.settings_waiting_auth), style = MaterialTheme.typography.bodySmall, color = Silver)
         }
     }
 }
