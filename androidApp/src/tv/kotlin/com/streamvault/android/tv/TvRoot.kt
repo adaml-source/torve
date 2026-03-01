@@ -231,6 +231,10 @@ fun TvRoot() {
                     onContentFocused = { route, requester ->
                         lastFocusedContentByRoute[route] = requester
                     },
+                    onVoiceSearchQuery = { query ->
+                        searchSeedQuery = query
+                        syncNotice = "Search: $query"
+                    },
                     searchSeedQuery = searchSeedQuery,
                 )
                 syncNotice?.let { notice ->

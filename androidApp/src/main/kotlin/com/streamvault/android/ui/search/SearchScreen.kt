@@ -67,6 +67,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.streamvault.android.sync.SyncCoordinator
+import com.streamvault.android.voice.VoiceInputPhase
+import com.streamvault.android.voice.VoiceInputUiState
 import com.streamvault.android.ui.components.CardSize
 import com.streamvault.android.ui.components.LocalCardStyle
 import com.streamvault.android.ui.components.PosterCard
@@ -111,6 +113,7 @@ fun SearchScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var showDevicePicker by remember { mutableStateOf(false) }
+    var voiceInputState by remember { mutableStateOf(VoiceInputUiState()) }
     val settingsState by settingsViewModel.state.collectAsState()
     val defaultCardStyle = resolveCardStyle(
         presets = settingsState.cardStylePresets,
@@ -196,6 +199,7 @@ fun SearchScreen(
             // Voice search
             VoiceSearchButton(
                 onResult = { viewModel.updateQuery(it) },
+                onStateChanged = { voiceInputState = it },
             )
 
             IconButton(
@@ -239,6 +243,39 @@ fun SearchScreen(
                     )
                 }
             }
+        }
+
+        when (voiceInputState.phase) {
+            VoiceInputPhase.Listening -> {
+                Text(
+                    text = "Listening",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Amber,
+                    modifier = Modifier.padding(start = 16.dp, top = 6.dp),
+                )
+            }
+
+            VoiceInputPhase.Processing -> {
+                Text(
+                    text = "Processing voice input",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = StreamVault.colors.textTertiary,
+                    modifier = Modifier.padding(start = 16.dp, top = 6.dp),
+                )
+            }
+
+            VoiceInputPhase.Error,
+            VoiceInputPhase.Unsupported,
+            -> {
+                Text(
+                    text = voiceInputState.message ?: "Voice input is not available on this device",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Amber,
+                    modifier = Modifier.padding(start = 16.dp, top = 6.dp),
+                )
+            }
+
+            VoiceInputPhase.Idle -> Unit
         }
 
         // ── Active Filter Chips ──

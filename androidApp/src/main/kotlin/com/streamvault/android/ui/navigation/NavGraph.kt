@@ -113,6 +113,7 @@ import com.streamvault.domain.integrations.IntegrationSecretStore
 import com.streamvault.domain.repository.MetadataRepository
 import com.streamvault.presentation.catalog.CatalogViewModel
 import com.streamvault.presentation.setup.SetupWizardViewModel
+import com.streamvault.presentation.search.SearchViewModel
 import com.streamvault.presentation.watchlist.WatchlistViewModel
 import com.streamvault.presentation.home.HomeViewModel
 import org.koin.compose.koinInject
@@ -177,6 +178,7 @@ fun StreamVaultNavGraph(
     val setupViewModel: SetupWizardViewModel = koinInject()
     val watchlistViewModel: WatchlistViewModel = koinInject()
     val homeViewModel: HomeViewModel = koinInject()
+    val searchViewModel: SearchViewModel = koinInject()
     val watchlistState by watchlistViewModel.state.collectAsState()
     var didInitialWatchlistSync by remember { mutableStateOf(false) }
     val dest = if (isTvMode) TV_HOME_ROUTE else MOBILE_HOME_ROUTE
@@ -335,6 +337,7 @@ fun StreamVaultNavGraph(
             // Search tab — Global search
             composable("search") {
                 SearchScreen(
+                    viewModel = searchViewModel,
                     onMediaClick = { item -> navController.navigateToDetail(item) },
                 )
             }
@@ -580,6 +583,15 @@ fun StreamVaultNavGraph(
                     episodeNumber = backStackEntry.arguments?.getInt("episodeNumber")?.takeIf { it > 0 },
                     showTmdbId = backStackEntry.arguments?.getInt("showTmdbId")?.takeIf { it > 0 },
                     showImdbId = backStackEntry.arguments?.getString("showImdbId")?.takeIf { it.isNotBlank() },
+                    onVoiceSearchCommand = { query ->
+                        val normalized = query.trim()
+                        if (normalized.isNotBlank()) {
+                            searchViewModel.updateQuery(normalized)
+                            navController.navigate("search") {
+                                launchSingleTop = true
+                            }
+                        }
+                    },
                     onBack = { navController.popBackStack() },
                 )
             }

@@ -31,6 +31,7 @@ fun TvNavHost(
     headerFocusRequester: FocusRequester,
     onFirstContentRequester: (String, FocusRequester) -> Unit,
     onContentFocused: (String, FocusRequester) -> Unit,
+    onVoiceSearchQuery: (String) -> Unit,
     searchSeedQuery: String? = null,
 ) {
     NavHost(
@@ -196,6 +197,17 @@ fun TvNavHost(
                 showTmdbId = backStackEntry.arguments?.getInt("showTmdbId")?.takeIf { it > 0 },
                 showImdbId = backStackEntry.arguments?.getString("showImdbId")?.takeIf { it.isNotBlank() },
                 startPositionMs = backStackEntry.arguments?.getLong("startPositionMs") ?: 0L,
+                onVoiceSearchCommand = { query ->
+                    val normalized = query.trim()
+                    if (normalized.isNotBlank()) {
+                        onVoiceSearchQuery(normalized)
+                        navController.navigate(TvRoutes.SEARCH) {
+                            popUpTo(TvRoutes.HOME) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                },
                 onBack = { navController.popBackStack() },
             )
         }

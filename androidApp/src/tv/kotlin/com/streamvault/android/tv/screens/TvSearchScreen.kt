@@ -22,7 +22,11 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -48,6 +52,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.streamvault.android.R
+import com.streamvault.android.voice.VoiceInputPhase
+import com.streamvault.android.voice.rememberVoiceInputController
 import com.streamvault.domain.model.MediaItem
 import com.streamvault.domain.repository.MetadataRepository
 import kotlinx.coroutines.delay
@@ -67,6 +73,13 @@ fun TvSearchScreen(
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val inputFocusRequester = remember { FocusRequester() }
+    val voiceButtonFocusRequester = remember { FocusRequester() }
+    val voiceController = rememberVoiceInputController(
+        prompt = "Search for movies and shows",
+        onTranscript = { spokenQuery ->
+            query = spokenQuery
+        },
+    )
 
     val popularQueries = remember {
         listOf("Action", "Comedy", "Sci-Fi", "Drama", "Thriller", "Animation")
@@ -110,17 +123,77 @@ fun TvSearchScreen(
             .padding(start = 40.dp, top = 18.dp, end = 34.dp, bottom = 22.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            singleLine = true,
-            label = { Text(stringResource(R.string.tv_search_hint)) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .focusRequester(inputFocusRequester)
-                .focusProperties { left = railFocusRequester }
-                .onFocusChanged { if (it.isFocused) onContentFocused(inputFocusRequester) },
-        )
+        Column(
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            androidx.compose.foundation.layout.Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    singleLine = true,
+                    label = { Text(stringResource(R.string.tv_search_hint)) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(inputFocusRequester)
+                        .focusProperties {
+                            left = railFocusRequester
+                            right = voiceButtonFocusRequester
+                        }
+                        .onFocusChanged { if (it.isFocused) onContentFocused(inputFocusRequester) },
+                )
+                IconButton(
+                    onClick = { voiceController.launch() },
+                    modifier = Modifier
+                        .focusRequester(voiceButtonFocusRequester)
+                        .focusProperties { left = inputFocusRequester }
+                        .onFocusChanged {
+                            if (it.isFocused) {
+                                onContentFocused(voiceButtonFocusRequester)
+                            }
+                        },
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Mic,
+                        contentDescription = stringResource(R.string.common_search),
+                        tint = Color(0xFFD6A45B),
+                    )
+                }
+            }
+
+            when (voiceController.uiState.value.phase) {
+                VoiceInputPhase.Listening -> {
+                    Text(
+                        text = "Listening",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color(0xFFD6A45B),
+                    )
+                }
+
+                VoiceInputPhase.Processing -> {
+                    Text(
+                        text = "Processing voice input",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color(0xCCDAE2EF),
+                    )
+                }
+
+                VoiceInputPhase.Error,
+                VoiceInputPhase.Unsupported,
+                -> {
+                    Text(
+                        text = voiceController.uiState.value.message
+                            ?: "Voice input is not available on this device",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color(0xFFFFB8B8),
+                    )
+                }
+
+                VoiceInputPhase.Idle -> Unit
+            }
+        }
 
         Text(
             text = stringResource(R.string.tv_section_popular_searches),

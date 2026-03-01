@@ -86,3 +86,30 @@ If your build environment blocks outbound network, skip Crashlytics mapping uplo
 - Confirm TV opens details, starts playback, and seeks near the sent position.
 - Confirm Back on TV returns to previous context with focus preserved.
 - Confirm no crash when target TV is offline and event is delivered after reconnect.
+
+## Phase 4 Migration Note
+
+- Mobile Search and TV Search now include voice-to-text with explicit UI states:
+  - `Listening`
+  - `Processing voice input`
+  - clear fallback message when voice input is unavailable
+- Player now supports voice commands while playback is active:
+  - `play`, `pause`, `resume`
+  - `forward`, `rewind`
+  - `search for <query>` to route directly into Search
+- Voice command results are shown as a lightweight confirmation overlay in the player controls.
+
+## Phase 4 Smoke Checklist
+
+- Mobile Search:
+  - Tap mic button, speak a query, verify query field updates and results load.
+  - Verify `Listening` and `Processing voice input` states are visible.
+  - On a device without voice recognizer, verify a clear fallback message is shown and app does not crash.
+- TV Search:
+  - Focus mic action with D-pad and trigger voice input.
+  - Verify spoken query populates search input and results update.
+  - Verify fallback message on devices without voice recognizer support.
+- Player:
+  - Trigger voice input and say `pause`, `play`, `forward`, `rewind`, and `search for action movies`.
+  - Verify playback actions execute and a confirmation overlay appears.
+  - Verify `search for ...` navigates to Search and applies the spoken query.

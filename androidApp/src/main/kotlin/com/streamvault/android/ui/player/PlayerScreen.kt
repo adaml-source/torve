@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Forward10
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay10
@@ -94,6 +95,10 @@ import com.streamvault.android.player.MPVPlayerEngine
 import com.streamvault.android.player.MPVView
 import com.streamvault.android.player.isCastFrameworkAvailable
 import com.streamvault.android.sync.SyncCoordinator
+import com.streamvault.android.voice.PlayerVoiceCommand
+import com.streamvault.android.voice.PlayerVoiceCommandParser
+import com.streamvault.android.voice.VoiceInputPhase
+import com.streamvault.android.voice.rememberVoiceInputController
 import com.streamvault.android.ui.sync.SyncDevicePickerDialog
 import com.streamvault.data.trakt.TraktClient
 import com.streamvault.data.trakt.TraktHistoryBody
@@ -138,6 +143,7 @@ fun PlayerScreen(
     showTmdbId: Int? = null,
     showImdbId: String? = null,
     startPositionMs: Long = 0L,
+    onVoiceSearchCommand: ((String) -> Unit)? = null,
     onBack: () -> Unit,
     watchProgressRepo: WatchProgressRepository = koinInject(),
     metadataRepo: MetadataRepository = koinInject(),
@@ -241,6 +247,14 @@ fun PlayerScreen(
     val tmdbId = mediaId.toIntOrNull() ?: 0
     val parsedMediaType = MediaType.fromString(mediaType)
     var hasMarkedWatched by remember { mutableStateOf(false) }
+    val voiceCommandNotRecognizedLabel = "Voice command not recognized"
+    val voiceCommandPlayLabel = "Play"
+    val voiceCommandPauseLabel = "Pause"
+    val voiceCommandForwardLabel = "Forward 10 seconds"
+    val voiceCommandRewindLabel = "Rewind 10 seconds"
+    val voiceCommandSearchLabel: (String) -> String = { query ->
+        "Search: $query"
+    }
 
     // Helper to check if scrobbling should fire
     val canScrobble = traktScrobbleEnabled && traktAccessToken.isNotBlank() && tmdbId > 0
@@ -301,6 +315,55 @@ fun PlayerScreen(
         engine.seekRelative(deltaMs)
         showControls = true
     }
+
+    var voiceFeedbackMessage by remember { mutableStateOf<String?>(null) }
+    val voiceController = rememberVoiceInputController(
+        prompt = "Control playback or say search for a title",
+        onTranscript = { transcript ->
+            when (val command = PlayerVoiceCommandParser.parse(transcript)) {
+                PlayerVoiceCommand.Play -> {
+                    if (!isPlaying) {
+                        togglePlayback()
+                    } else {
+                        showControls = true
+                    }
+                    voiceFeedbackMessage = voiceCommandPlayLabel
+                }
+
+                PlayerVoiceCommand.Pause -> {
+                    if (isPlaying) {
+                        togglePlayback()
+                    } else {
+                        showControls = true
+                    }
+                    voiceFeedbackMessage = voiceCommandPauseLabel
+                }
+
+                is PlayerVoiceCommand.Seek -> {
+                    seekBy(command.deltaMs)
+                    voiceFeedbackMessage = if (command.deltaMs > 0) {
+                        voiceCommandForwardLabel
+                    } else {
+                        voiceCommandRewindLabel
+                    }
+                }
+
+                is PlayerVoiceCommand.Search -> {
+                    val query = command.query.trim()
+                    if (query.isNotBlank() && onVoiceSearchCommand != null) {
+                        onVoiceSearchCommand.invoke(query)
+                        voiceFeedbackMessage = voiceCommandSearchLabel(query)
+                    } else {
+                        voiceFeedbackMessage = voiceCommandNotRecognizedLabel
+                    }
+                }
+
+                null -> {
+                    voiceFeedbackMessage = voiceCommandNotRecognizedLabel
+                }
+            }
+        },
+    )
 
     val handleBackAction: () -> Boolean = {
         when {
@@ -762,6 +825,13 @@ fun PlayerScreen(
         }
     }
 
+    LaunchedEffect(voiceFeedbackMessage) {
+        if (voiceFeedbackMessage != null) {
+            delay(2200)
+            voiceFeedbackMessage = null
+        }
+    }
+
     LaunchedEffect(Unit) {
         playerRootFocusRequester.requestFocus()
     }
@@ -1144,6 +1214,36 @@ fun PlayerScreen(
                         )
                     }
 
+                    IconButton(
+                        onClick = {
+                            if (
+                                voiceController.uiState.value.phase == VoiceInputPhase.Error ||
+                                voiceController.uiState.value.phase == VoiceInputPhase.Unsupported
+                            ) {
+                                voiceController.clearState()
+                            }
+                            voiceController.launch()
+                        },
+                    ) {
+                        val voiceTint = when (voiceController.uiState.value.phase) {
+                            VoiceInputPhase.Listening,
+                            VoiceInputPhase.Processing,
+                            -> com.streamvault.android.ui.theme.Amber
+
+                            VoiceInputPhase.Error,
+                            VoiceInputPhase.Unsupported,
+                            -> Color(0xFFFFB8B8)
+
+                            VoiceInputPhase.Idle -> Color.White
+                        }
+                        Icon(
+                            imageVector = Icons.Default.Mic,
+                            contentDescription = "Voice command",
+                            tint = voiceTint,
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+
                     if (subtitleTracks.isNotEmpty() || audioTracks.isNotEmpty()) {
                         IconButton(onClick = { showTrackDialog = true }) {
                             Icon(
@@ -1176,6 +1276,31 @@ fun PlayerScreen(
                                 modifier = Modifier.size(24.dp),
                             )
                         }
+                    }
+                }
+
+                val voiceOverlayMessage = when (voiceController.uiState.value.phase) {
+                    VoiceInputPhase.Listening -> "Listening"
+                    VoiceInputPhase.Processing -> "Processing voice input"
+                    VoiceInputPhase.Error,
+                    VoiceInputPhase.Unsupported,
+                    -> voiceController.uiState.value.message ?: "Voice input is not available on this device"
+
+                    VoiceInputPhase.Idle -> voiceFeedbackMessage
+                }
+                if (!voiceOverlayMessage.isNullOrBlank()) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = 68.dp)
+                            .background(Color(0xC0121B2B), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                    ) {
+                        Text(
+                            text = voiceOverlayMessage,
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelLarge,
+                        )
                     }
                 }
 
