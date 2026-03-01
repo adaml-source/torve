@@ -10,8 +10,10 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.annotation.OptIn
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -67,7 +69,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -83,6 +92,9 @@ import com.streamvault.android.player.CastManager
 import com.streamvault.android.player.ExoPlayerEngine
 import com.streamvault.android.player.MPVPlayerEngine
 import com.streamvault.android.player.MPVView
+import com.streamvault.android.player.isCastFrameworkAvailable
+import com.streamvault.android.sync.SyncCoordinator
+import com.streamvault.android.ui.sync.SyncDevicePickerDialog
 import com.streamvault.data.trakt.TraktClient
 import com.streamvault.data.trakt.TraktHistoryBody
 import com.streamvault.data.trakt.TraktHistoryMovie
@@ -107,6 +119,7 @@ import com.streamvault.domain.repository.WatchProgressRepository
 import com.streamvault.presentation.player.TraktScrobbler
 import com.streamvault.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
@@ -124,28 +137,31 @@ fun PlayerScreen(
     episodeNumber: Int? = null,
     showTmdbId: Int? = null,
     showImdbId: String? = null,
+    startPositionMs: Long = 0L,
     onBack: () -> Unit,
     watchProgressRepo: WatchProgressRepository = koinInject(),
     metadataRepo: MetadataRepository = koinInject(),
     streamRepo: StreamRepository = koinInject(),
     addonRepo: AddonRepository = koinInject(),
     settingsViewModel: SettingsViewModel = koinInject(),
+    syncCoordinator: SyncCoordinator = koinInject(),
     traktScrobbler: TraktScrobbler = koinInject(),
     traktClient: TraktClient = koinInject(),
     prefsRepo: PreferencesRepository = koinInject(),
 ) {
     val context = LocalContext.current
 
-    // Google Cast
-    val castManager = remember {
-        try { CastManager(context) } catch (_: Exception) { null }
-    }
-    val castAvailable = remember {
-        try {
-            com.google.android.gms.cast.framework.CastContext.getSharedInstance(context)
-            true
-        } catch (_: Exception) {
-            false
+    // Google Cast (guarded for devices without Play Services, e.g. Fire TV)
+    val castAvailable = remember(context) { isCastFrameworkAvailable(context) }
+    val castManager = remember(castAvailable, context) {
+        if (!castAvailable) {
+            null
+        } else {
+            try {
+                CastManager(context)
+            } catch (_: Throwable) {
+                null
+            }
         }
     }
 
@@ -172,6 +188,7 @@ fun PlayerScreen(
     }
 
     val scope = rememberCoroutineScope()
+    val syncState by syncCoordinator.state.collectAsState()
     var isPlaying by remember { mutableStateOf(false) }
     var currentPosition by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
@@ -188,7 +205,12 @@ fun PlayerScreen(
     var codecFallbackInProgress by remember { mutableStateOf(false) }
     var audioDelayMs by remember { mutableIntStateOf(0) }
     var showEqualizerSheet by remember { mutableStateOf(false) }
+    var showDevicePicker by remember { mutableStateOf(false) }
     var audioEqualizer by remember { mutableStateOf<AudioEqualizer?>(null) }
+    var pendingStartPositionMs by remember(url, mediaId, startPositionMs) {
+        mutableLongStateOf(startPositionMs.coerceAtLeast(0L))
+    }
+    val playerRootFocusRequester = remember { FocusRequester() }
 
     // Mutable episode state — updated when swapping to next episode
     var currentSeasonNumber by remember { mutableStateOf(seasonNumber) }
@@ -233,6 +255,83 @@ fun PlayerScreen(
             val exoEngine = ExoPlayerEngine(context)
             exoEngine.initialize()
             exoEngine as PlayerEngine
+        }
+    }
+
+    val togglePlayback: () -> Unit = {
+        if (isPlaying) {
+            engine.pause()
+            if (canScrobble) {
+                val progress = if (duration > 0) {
+                    (currentPosition.toDouble() / duration * 100).coerceIn(0.0, 100.0)
+                } else 0.0
+                scope.launch {
+                    traktScrobbler.pause(
+                        traktAccessToken,
+                        tmdbId,
+                        parsedMediaType,
+                        progress,
+                        currentSeasonNumber,
+                        currentEpisodeNumber,
+                    )
+                }
+            }
+        } else {
+            engine.resume()
+            if (canScrobble) {
+                val progress = if (duration > 0) {
+                    (currentPosition.toDouble() / duration * 100).coerceIn(0.0, 100.0)
+                } else 0.0
+                scope.launch {
+                    traktScrobbler.start(
+                        traktAccessToken,
+                        tmdbId,
+                        parsedMediaType,
+                        progress,
+                        currentSeasonNumber,
+                        currentEpisodeNumber,
+                    )
+                }
+            }
+        }
+        showControls = true
+    }
+
+    val seekBy: (Long) -> Unit = { deltaMs ->
+        engine.seekRelative(deltaMs)
+        showControls = true
+    }
+
+    val handleBackAction: () -> Boolean = {
+        when {
+            showTrackDialog -> {
+                showTrackDialog = false
+                true
+            }
+            showAudioDelayDialog -> {
+                showAudioDelayDialog = false
+                true
+            }
+            showEqualizerSheet -> {
+                showEqualizerSheet = false
+                true
+            }
+            showNextEpisodeOverlay -> {
+                showNextEpisodeOverlay = false
+                nextEpisodeCancelled = true
+                true
+            }
+            showControls -> false
+            else -> {
+                showControls = true
+                true
+            }
+        }
+    }
+
+    BackHandler {
+        if (!handleBackAction()) {
+            onBack()
         }
     }
 
@@ -477,6 +576,14 @@ fun PlayerScreen(
         }
 
         engine.play(currentUrl)
+        if (pendingStartPositionMs > 0L) {
+            val seekTarget = pendingStartPositionMs
+            scope.launch {
+                delay(450)
+                engine.seekTo(seekTarget)
+                pendingStartPositionMs = 0L
+            }
+        }
 
         // Scrobble start on initial playback
         if (canScrobble) {
@@ -492,6 +599,7 @@ fun PlayerScreen(
             // Save final progress on dispose
             val finalPosition = engine.state.positionMs
             val finalDuration = duration
+            val finalContentId = mediaId.ifBlank { showTmdbId?.toString().orEmpty() }
             if (mediaId.isNotBlank() && finalDuration > 0) {
                 scope.launch {
                     watchProgressRepo.saveProgress(
@@ -506,6 +614,15 @@ fun PlayerScreen(
                             seasonNumber = currentSeasonNumber,
                             episodeNumber = currentEpisodeNumber,
                         ),
+                    )
+                }
+            }
+            if (finalContentId.isNotBlank() && finalPosition > 0L) {
+                scope.launch {
+                    syncCoordinator.reportWatchState(
+                        contentId = finalContentId,
+                        provider = "torve",
+                        positionMs = finalPosition,
                     )
                 }
             }
@@ -582,6 +699,20 @@ fun PlayerScreen(
         }
     }
 
+    LaunchedEffect(mediaId, mediaType) {
+        val handoffContentId = mediaId.ifBlank { showTmdbId?.toString().orEmpty() }
+        if (handoffContentId.isBlank()) return@LaunchedEffect
+        while (isActive) {
+            delay(30_000)
+            if (!isPlaying || currentPosition <= 0L) continue
+            syncCoordinator.reportWatchState(
+                contentId = handoffContentId,
+                provider = "torve",
+                positionMs = currentPosition,
+            )
+        }
+    }
+
     // Auto-mark watched on Trakt at >80% progress
     LaunchedEffect(currentPosition, duration, hasMarkedWatched) {
         if (hasMarkedWatched || !canScrobble) return@LaunchedEffect
@@ -631,9 +762,57 @@ fun PlayerScreen(
         }
     }
 
+    LaunchedEffect(Unit) {
+        playerRootFocusRequester.requestFocus()
+    }
+
+    val handoffTargets = syncCoordinator.targetDevices()
+        .filter { it.deviceType.contains("tv", ignoreCase = true) }
+    val handoffContentId = mediaId.ifBlank { showTmdbId?.toString().orEmpty() }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .focusRequester(playerRootFocusRequester)
+            .focusable()
+            .onPreviewKeyEvent { keyEvent ->
+                if (keyEvent.type != KeyEventType.KeyDown) {
+                    return@onPreviewKeyEvent false
+                }
+                if ((showTrackDialog || showAudioDelayDialog || showEqualizerSheet) && keyEvent.key != Key.Back) {
+                    return@onPreviewKeyEvent false
+                }
+                when (keyEvent.key) {
+                    Key.Back -> {
+                        if (!handleBackAction()) {
+                            onBack()
+                        }
+                        true
+                    }
+                    Key.DirectionCenter,
+                    Key.Enter,
+                    Key.NumPadEnter,
+                    Key.Spacebar,
+                    Key.MediaPlayPause,
+                    -> {
+                        togglePlayback()
+                        true
+                    }
+                    Key.DirectionLeft -> {
+                        seekBy(-10_000)
+                        true
+                    }
+                    Key.DirectionRight -> {
+                        seekBy(10_000)
+                        true
+                    }
+                    Key.DirectionUp -> {
+                        showControls = true
+                        true
+                    }
+                    else -> false
+                }
+            }
             .background(Color.Black)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -932,7 +1111,7 @@ fun PlayerScreen(
                                 val routeBtn = androidx.mediarouter.app.MediaRouteButton(context)
                                 com.google.android.gms.cast.framework.CastButtonFactory.setUpMediaRouteButton(context, routeBtn)
                                 routeBtn.performClick()
-                            } catch (_: Exception) { }
+                            } catch (_: Throwable) { }
                         }) {
                             Icon(
                                 if (castManager?.isCasting == true) Icons.Default.CastConnected else Icons.Default.Cast,
@@ -941,6 +1120,28 @@ fun PlayerScreen(
                                 modifier = Modifier.size(24.dp),
                             )
                         }
+                    }
+
+                    IconButton(
+                        onClick = {
+                            if (!syncState.isAuthenticated) {
+                                Toast.makeText(context, "Sign in to transfer playback", Toast.LENGTH_SHORT).show()
+                                return@IconButton
+                            }
+                            if (handoffTargets.isEmpty()) {
+                                syncCoordinator.refreshDevices()
+                                Toast.makeText(context, "No paired TV devices found", Toast.LENGTH_SHORT).show()
+                                return@IconButton
+                            }
+                            showDevicePicker = true
+                        },
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Tv,
+                            contentDescription = "Play on device",
+                            tint = if (syncState.isAuthenticated) com.streamvault.android.ui.theme.Amber else Color.White,
+                            modifier = Modifier.size(24.dp),
+                        )
                     }
 
                     if (subtitleTracks.isNotEmpty() || audioTracks.isNotEmpty()) {
@@ -984,10 +1185,7 @@ fun PlayerScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     IconButton(
-                        onClick = {
-                            engine.seekRelative(-10_000)
-                            showControls = true
-                        },
+                        onClick = { seekBy(-10_000) },
                     ) {
                         Icon(
                             Icons.Default.Replay10,
@@ -1000,36 +1198,7 @@ fun PlayerScreen(
                     Spacer(Modifier.width(24.dp))
 
                     IconButton(
-                        onClick = {
-                            if (isPlaying) {
-                                engine.pause()
-                                if (canScrobble) {
-                                    val progress = if (duration > 0) {
-                                        (currentPosition.toDouble() / duration * 100).coerceIn(0.0, 100.0)
-                                    } else 0.0
-                                    scope.launch {
-                                        traktScrobbler.pause(
-                                            traktAccessToken, tmdbId, parsedMediaType, progress,
-                                            currentSeasonNumber, currentEpisodeNumber,
-                                        )
-                                    }
-                                }
-                            } else {
-                                engine.resume()
-                                if (canScrobble) {
-                                    val progress = if (duration > 0) {
-                                        (currentPosition.toDouble() / duration * 100).coerceIn(0.0, 100.0)
-                                    } else 0.0
-                                    scope.launch {
-                                        traktScrobbler.start(
-                                            traktAccessToken, tmdbId, parsedMediaType, progress,
-                                            currentSeasonNumber, currentEpisodeNumber,
-                                        )
-                                    }
-                                }
-                            }
-                            showControls = true
-                        },
+                        onClick = togglePlayback,
                     ) {
                         Icon(
                             imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
@@ -1042,10 +1211,7 @@ fun PlayerScreen(
                     Spacer(Modifier.width(24.dp))
 
                     IconButton(
-                        onClick = {
-                            engine.seekRelative(10_000)
-                            showControls = true
-                        },
+                        onClick = { seekBy(10_000) },
                     ) {
                         Icon(
                             Icons.Default.Forward10,
@@ -1091,6 +1257,39 @@ fun PlayerScreen(
                 }
             }
         }
+    }
+
+    if (showDevicePicker) {
+        SyncDevicePickerDialog(
+            title = "Play On Device",
+            devices = handoffTargets,
+            onSelectDevice = { device ->
+                showDevicePicker = false
+                if (handoffContentId.isBlank()) {
+                    Toast.makeText(context, "This title cannot be handed off", Toast.LENGTH_SHORT).show()
+                    return@SyncDevicePickerDialog
+                }
+                scope.launch {
+                    val result = syncCoordinator.sendPlaybackIntent(
+                        targetDeviceId = device.id,
+                        contentId = handoffContentId,
+                        providerTarget = "torve",
+                        positionMs = currentPosition,
+                        mediaType = mediaType,
+                    )
+                    if (result.isSuccess) {
+                        Toast.makeText(context, "Playback sent to ${device.deviceName}", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(
+                            context,
+                            result.exceptionOrNull()?.message ?: "Failed to transfer playback",
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                }
+            },
+            onDismiss = { showDevicePicker = false },
+        )
     }
 }
 
@@ -1336,12 +1535,12 @@ private fun AudioDelayDialog(
             TextButton(onClick = {
                 localDelay = 0
                 onReset()
-            }) { Text("Reset") }
+            }) { Text(stringResource(R.string.common_reset)) }
         },
-        title = { Text("Audio Delay") },
+        title = { Text(stringResource(R.string.player_audio_delay)) },
         text = {
             Column {
-                Text("Delay: $localDelay ms")
+                Text(stringResource(R.string.player_audio_delay_value, localDelay))
                 Slider(
                     value = localDelay.toFloat(),
                     onValueChange = {

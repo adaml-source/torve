@@ -1,4 +1,4 @@
-# Torve Sync Backend (Phase 2)
+# Torve Sync Backend (Phase 3)
 
 This service provides:
 - Account registration and login with JWT access and rotating refresh tokens.
@@ -34,5 +34,15 @@ The API is served on `http://localhost:8080`.
 - `POST /pairing/status`
 - `GET /devices`
 - `POST /devices/{id}/revoke`
+- `POST /events/search_push`
+- `POST /events/playback_intent`
+- `POST /watch_state/report`
 - `GET /health`
 - `WS /ws?token=<access-token>`
+
+## Phase 3 Migration Note
+
+- Added migration `alembic/versions/0002_phase3_watch_state_reports.py`.
+- Search push and playback handoff events are now available through `/events/*`.
+- Player watch progress can be reported through `/watch_state/report`.
+- Run `docker compose exec api alembic upgrade head` before enabling Phase 3 clients.

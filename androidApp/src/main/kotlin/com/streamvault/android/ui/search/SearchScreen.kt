@@ -1,5 +1,6 @@
 package com.streamvault.android.ui.search
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.ui.res.stringResource
 import com.streamvault.android.R
@@ -27,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.Search
@@ -48,22 +50,27 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.streamvault.android.sync.SyncCoordinator
 import com.streamvault.android.ui.components.CardSize
 import com.streamvault.android.ui.components.LocalCardStyle
 import com.streamvault.android.ui.components.PosterCard
+import com.streamvault.android.ui.sync.SyncDevicePickerDialog
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.AmberSubtle
 import com.streamvault.android.ui.theme.Charcoal
@@ -79,6 +86,7 @@ import com.streamvault.presentation.catalog.SortOption
 import com.streamvault.presentation.settings.SettingsViewModel
 import com.streamvault.presentation.search.SearchFilter
 import com.streamvault.presentation.search.SearchViewModel
+import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
 private val genreOptions = listOf(
@@ -96,8 +104,13 @@ fun SearchScreen(
     onMediaClick: (MediaItem) -> Unit,
     viewModel: SearchViewModel = koinInject(),
     settingsViewModel: SettingsViewModel = koinInject(),
+    syncCoordinator: SyncCoordinator = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
+    val syncState by syncCoordinator.state.collectAsState()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var showDevicePicker by remember { mutableStateOf(false) }
     val settingsState by settingsViewModel.state.collectAsState()
     val defaultCardStyle = resolveCardStyle(
         presets = settingsState.cardStylePresets,
@@ -106,6 +119,15 @@ fun SearchScreen(
     )
 
     CompositionLocalProvider(LocalCardStyle provides defaultCardStyle) {
+        LaunchedEffect(syncState.isAuthenticated) {
+            if (syncState.isAuthenticated && syncState.devices.isEmpty()) {
+                syncCoordinator.refreshDevices()
+            }
+        }
+
+        val tvTargets = syncCoordinator.targetDevices()
+            .filter { it.deviceType.contains("tv", ignoreCase = true) }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -136,7 +158,7 @@ fun SearchScreen(
                         Box {
                             if (state.query.isEmpty()) {
                                 Text(
-                                    text = "Search movies & TV shows...",
+                                    text = stringResource(R.string.search_placeholder),
                                     style = MaterialTheme.typography.bodyLarge,
                                     color = StreamVault.colors.textHint,
                                 )
@@ -154,7 +176,7 @@ fun SearchScreen(
                     ) {
                         Icon(
                             Icons.Rounded.Close,
-                            contentDescription = "Clear search",
+                            contentDescription = stringResource(R.string.search_clear),
                             tint = StreamVault.colors.textTertiary,
                             modifier = Modifier.size(18.dp),
                         )
@@ -176,6 +198,28 @@ fun SearchScreen(
                 onResult = { viewModel.updateQuery(it) },
             )
 
+            IconButton(
+                onClick = {
+                    if (!syncState.isAuthenticated) {
+                        Toast.makeText(context, "Sign in to send search to a device", Toast.LENGTH_SHORT).show()
+                        return@IconButton
+                    }
+                    if (tvTargets.isEmpty()) {
+                        syncCoordinator.refreshDevices()
+                        Toast.makeText(context, "No paired TV devices found", Toast.LENGTH_SHORT).show()
+                        return@IconButton
+                    }
+                    showDevicePicker = true
+                },
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Tv,
+                    contentDescription = "Send search to device",
+                    tint = if (syncState.isAuthenticated) Amber else StreamVault.colors.textTertiary,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+
             // Filter button with active indicator
             val activeCount = state.filter.activeCount
             BadgedBox(
@@ -190,7 +234,7 @@ fun SearchScreen(
                 IconButton(onClick = { viewModel.toggleFilterSheet() }) {
                     Icon(
                         Icons.Rounded.FilterList,
-                        contentDescription = "Filters",
+                        contentDescription = stringResource(R.string.catalog_filters),
                         tint = if (state.filter.isActive) Amber else StreamVault.colors.textTertiary,
                     )
                 }
@@ -210,7 +254,7 @@ fun SearchScreen(
                     FilterChip(
                         selected = true,
                         onClick = { viewModel.applyFilter(state.filter.copy(mediaType = null)) },
-                        label = { Text(if (type == "movie") "Movies" else "TV Shows") },
+                        label = { Text(if (type == "movie") stringResource(R.string.nav_movies) else stringResource(R.string.nav_tv_shows)) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = AmberSubtle,
                             selectedLabelColor = Amber,
@@ -327,7 +371,7 @@ fun SearchScreen(
                     FilterChip(
                         selected = true,
                         onClick = { viewModel.applyFilter(state.filter.copy(providersAvailabilityOnly = false)) },
-                        label = { Text("Provider Ready") },
+                        label = { Text(stringResource(R.string.search_provider_ready)) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = AmberSubtle,
                             selectedLabelColor = Amber,
@@ -366,7 +410,7 @@ fun SearchScreen(
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    text = "${displayItems.size} results",
+                    text = stringResource(R.string.search_results_count, displayItems.size),
                     color = Silver,
                     style = MaterialTheme.typography.labelSmall,
                 )
@@ -375,7 +419,7 @@ fun SearchScreen(
                     onClick = { viewModel.clearSearch() },
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
                 ) {
-                    Text("Clear", color = Amber, style = MaterialTheme.typography.labelSmall)
+                    Text(stringResource(R.string.common_clear), color = Amber, style = MaterialTheme.typography.labelSmall)
                 }
             }
         }
@@ -389,14 +433,14 @@ fun SearchScreen(
             ) {
                 if (state.peopleResults.isNotEmpty()) {
                     Text(
-                        text = "People: " + state.peopleResults.take(3).joinToString(", ") { it.name },
+                        text = stringResource(R.string.search_people_prefix) + state.peopleResults.take(3).joinToString(", ") { it.name },
                         color = Silver,
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
                 if (state.userLists.isNotEmpty()) {
                     Text(
-                        text = "Lists: " + state.userLists.joinToString(" • "),
+                        text = stringResource(R.string.search_lists_prefix) + state.userLists.joinToString(" • "),
                         color = StreamVault.colors.textTertiary,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -428,12 +472,12 @@ fun SearchScreen(
                         )
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            text = "No results found",
+                            text = stringResource(R.string.search_no_results),
                             style = MaterialTheme.typography.titleMedium,
                             color = StreamVault.colors.textPrimary,
                         )
                         Text(
-                            text = "Try a different search term or adjust filters",
+                            text = stringResource(R.string.search_try_different),
                             style = MaterialTheme.typography.bodyMedium,
                             color = StreamVault.colors.textTertiary,
                             modifier = Modifier.padding(top = 4.dp),
@@ -470,7 +514,7 @@ fun SearchScreen(
                             tint = StreamVault.colors.textHint,
                         )
                         Text(
-                            text = "Search for movies and TV shows",
+                            text = stringResource(R.string.search_prompt),
                             style = MaterialTheme.typography.bodyLarge,
                             color = StreamVault.colors.textTertiary,
                             modifier = Modifier.padding(top = 8.dp),
@@ -487,6 +531,37 @@ fun SearchScreen(
             currentFilter = state.filter,
             onApply = { viewModel.applyFilter(it) },
             onDismiss = { viewModel.dismissFilterSheet() },
+        )
+    }
+
+    if (showDevicePicker) {
+        SyncDevicePickerDialog(
+            title = "Send Search To Device",
+            devices = tvTargets,
+            onSelectDevice = { device ->
+                showDevicePicker = false
+                val queryToSend = state.query.trim()
+                if (queryToSend.isBlank()) {
+                    Toast.makeText(context, "Enter a search query first", Toast.LENGTH_SHORT).show()
+                    return@SyncDevicePickerDialog
+                }
+                scope.launch {
+                    val result = syncCoordinator.sendSearchPush(
+                        targetDeviceId = device.id,
+                        query = queryToSend,
+                    )
+                    if (result.isSuccess) {
+                        Toast.makeText(context, "Search sent to ${device.deviceName}", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(
+                            context,
+                            result.exceptionOrNull()?.message ?: "Failed to send search",
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                }
+            },
+            onDismiss = { showDevicePicker = false },
         )
     }
 }
@@ -532,7 +607,7 @@ private fun SearchFilterSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "Search Filters",
+                    stringResource(R.string.search_filters_title),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
@@ -559,7 +634,7 @@ private fun SearchFilterSheet(
 
             // ── Type ──
             Text(
-                "Type",
+                stringResource(R.string.search_type),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -586,7 +661,7 @@ private fun SearchFilterSheet(
 
             // ── Sort By ──
             Text(
-                "Sort By",
+                stringResource(R.string.catalog_sort_by),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -650,7 +725,7 @@ private fun SearchFilterSheet(
             // ── Minimum Rating ──
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "Minimum Rating",
+                    stringResource(R.string.catalog_min_rating),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface,
@@ -661,7 +736,7 @@ private fun SearchFilterSheet(
                     onClick = { hasRatingFilter = !hasRatingFilter },
                     label = {
                         Text(
-                            if (hasRatingFilter) "%.1f+".format(minRating) else "Any",
+                            if (hasRatingFilter) "%.1f+".format(minRating) else stringResource(R.string.catalog_any),
                             style = MaterialTheme.typography.labelMedium,
                         )
                     },
@@ -699,7 +774,7 @@ private fun SearchFilterSheet(
 
             // ── Year Range ──
             Text(
-                "Power Filters",
+                stringResource(R.string.search_power_filters),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -709,7 +784,7 @@ private fun SearchFilterSheet(
                 FilterChip(
                     selected = providersAvailabilityOnly,
                     onClick = { providersAvailabilityOnly = !providersAvailabilityOnly },
-                    label = { Text("Provider Ready") },
+                    label = { Text(stringResource(R.string.search_provider_ready)) },
                     shape = RoundedCornerShape(16.dp),
                 )
                 FilterChip(
@@ -733,7 +808,7 @@ private fun SearchFilterSheet(
             }
             Spacer(Modifier.height(20.dp))
             Text(
-                "Release Year",
+                stringResource(R.string.catalog_release_year),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -832,7 +907,7 @@ private fun SearchFilterSheet(
 
             // ── Runtime ──
             Text(
-                "Runtime",
+                stringResource(R.string.catalog_runtime),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -885,7 +960,7 @@ private fun SearchFilterSheet(
                 shape = RoundedCornerShape(12.dp),
             ) {
                 Text(
-                    "Apply Filters",
+                    stringResource(R.string.catalog_apply_filters),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )

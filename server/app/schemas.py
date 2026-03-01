@@ -95,3 +95,47 @@ class HealthResponse(BaseModel):
     status: str
     database: str
     redis: str
+
+
+class SearchPushPayload(BaseModel):
+    query: str = Field(min_length=1, max_length=300)
+    filters: dict[str, str] = Field(default_factory=dict)
+    issued_by_device_id: str | None = None
+
+
+class SearchPushRequest(BaseModel):
+    target_device_id: str = Field(min_length=8, max_length=64)
+    payload: SearchPushPayload
+
+
+class PlaybackIntentPayload(BaseModel):
+    content_id: str = Field(min_length=1, max_length=128)
+    provider_target: str = Field(min_length=1, max_length=80)
+    position_ms: int = Field(ge=0)
+    media_type: str | None = Field(default=None, max_length=16)
+    audio: str | None = Field(default=None, max_length=80)
+    subtitles: str | None = Field(default=None, max_length=80)
+    issued_by_device_id: str | None = None
+
+
+class PlaybackIntentRequest(BaseModel):
+    target_device_id: str = Field(min_length=8, max_length=64)
+    payload: PlaybackIntentPayload
+
+
+class EventDispatchResponse(BaseModel):
+    status: str
+    event_id: str
+    target_device_id: str
+    event_type: str
+
+
+class WatchStateReportRequest(BaseModel):
+    content_id: str = Field(min_length=1, max_length=128)
+    provider: str = Field(min_length=1, max_length=80)
+    position_ms: int = Field(ge=0)
+
+
+class WatchStateReportResponse(BaseModel):
+    status: str
+    reported_at: datetime

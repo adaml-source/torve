@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from .config import get_settings
 from .db import get_session
-from .models import Device, EventOutbox, PairingCode, Session, User, utcnow
+from .models import Device, EventOutbox, PairingCode, Session, User, WatchStateReport, utcnow
 from .realtime import ConnectionRegistry, deliver_pending_events, dispatch_event
 from .schemas import (
     AuthLoginRequest,
@@ -19,15 +19,20 @@ from .schemas import (
     AuthResponse,
     DeviceRegistration,
     DeviceResponse,
+    EventDispatchResponse,
     HealthResponse,
+    PlaybackIntentRequest,
     PairingClaimRequest,
     PairingClaimResponse,
     PairingCodeRequest,
     PairingCodeResponse,
     PairingStatusRequest,
     PairingStatusResponse,
+    SearchPushRequest,
     TokensResponse,
     UserResponse,
+    WatchStateReportRequest,
+    WatchStateReportResponse,
 )
 from .security import (
     create_access_token,
@@ -172,6 +177,24 @@ async def get_current_user(
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
     return user
+
+
+async def get_authorized_target_device(
+    session: AsyncSession,
+    user_id: str,
+    target_device_id: str,
+) -> Device:
+    target_result = await session.execute(
+        select(Device).where(
+            Device.id == target_device_id,
+            Device.user_id == user_id,
+            Device.revoked_at.is_(None),
+        ),
+    )
+    target_device = target_result.scalar_one_or_none()
+    if target_device is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target device not found")
+    return target_device
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -483,6 +506,121 @@ async def revoke_device(
         row.revoked_at = utcnow()
     await session.commit()
     return {"status": "ok"}
+
+
+@app.post("/events/search_push", response_model=EventDispatchResponse)
+async def send_search_push(
+    payload: SearchPushRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    token: Annotated[str, Depends(oauth2_scheme)],
+) -> EventDispatchResponse:
+    try:
+        token_payload = decode_token(token, expected_type="access")
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+
+    source_device_id = token_payload["device_id"]
+    target_device = await get_authorized_target_device(
+        session=session,
+        user_id=user.id,
+        target_device_id=payload.target_device_id,
+    )
+    event_payload = payload.payload.model_dump()
+    if not event_payload.get("issued_by_device_id"):
+        event_payload["issued_by_device_id"] = source_device_id
+
+    outbox_entry = await dispatch_event(
+        session=session,
+        registry=registry,
+        user_id=user.id,
+        target_device_id=target_device.id,
+        event_type="SEARCH_PUSH",
+        payload=event_payload,
+    )
+    await session.commit()
+    return EventDispatchResponse(
+        status="queued",
+        event_id=outbox_entry.id,
+        target_device_id=target_device.id,
+        event_type="SEARCH_PUSH",
+    )
+
+
+@app.post("/events/playback_intent", response_model=EventDispatchResponse)
+async def send_playback_intent(
+    payload: PlaybackIntentRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    token: Annotated[str, Depends(oauth2_scheme)],
+) -> EventDispatchResponse:
+    try:
+        token_payload = decode_token(token, expected_type="access")
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+
+    source_device_id = token_payload["device_id"]
+    target_device = await get_authorized_target_device(
+        session=session,
+        user_id=user.id,
+        target_device_id=payload.target_device_id,
+    )
+    event_payload = payload.payload.model_dump()
+    if not event_payload.get("issued_by_device_id"):
+        event_payload["issued_by_device_id"] = source_device_id
+
+    outbox_entry = await dispatch_event(
+        session=session,
+        registry=registry,
+        user_id=user.id,
+        target_device_id=target_device.id,
+        event_type="PLAYBACK_INTENT",
+        payload=event_payload,
+    )
+    await session.commit()
+    return EventDispatchResponse(
+        status="queued",
+        event_id=outbox_entry.id,
+        target_device_id=target_device.id,
+        event_type="PLAYBACK_INTENT",
+    )
+
+
+@app.post("/watch_state/report", response_model=WatchStateReportResponse)
+async def report_watch_state(
+    payload: WatchStateReportRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    token: Annotated[str, Depends(oauth2_scheme)],
+) -> WatchStateReportResponse:
+    try:
+        token_payload = decode_token(token, expected_type="access")
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+
+    source_device_id = token_payload["device_id"]
+    source_device_result = await session.execute(
+        select(Device).where(
+            Device.id == source_device_id,
+            Device.user_id == user.id,
+            Device.revoked_at.is_(None),
+        ),
+    )
+    source_device = source_device_result.scalar_one_or_none()
+    if source_device is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Source device not authorized")
+
+    report_row = WatchStateReport(
+        user_id=user.id,
+        device_id=source_device.id,
+        content_id=payload.content_id,
+        provider=payload.provider,
+        position_ms=payload.position_ms,
+        reported_at=utcnow(),
+    )
+    session.add(report_row)
+    await session.commit()
+    return WatchStateReportResponse(status="ok", reported_at=report_row.reported_at)
 
 
 @app.websocket("/ws")

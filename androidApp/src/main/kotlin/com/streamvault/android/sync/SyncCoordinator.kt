@@ -1,16 +1,22 @@
 package com.streamvault.android.sync
 
 import android.content.Context
-import android.os.Build
 import android.content.pm.PackageManager
+import android.os.Build
 import com.streamvault.android.sync.model.SyncAuthResponse
+import com.streamvault.android.sync.model.SyncInboundEvent
 import com.streamvault.android.sync.model.SyncDeviceDto
 import com.streamvault.android.sync.model.SyncDeviceRegistration
 import com.streamvault.android.sync.model.SyncLoginRequest
 import com.streamvault.android.sync.model.SyncPairingCodeRequest
+import com.streamvault.android.sync.model.SyncPlaybackIntentPayload
+import com.streamvault.android.sync.model.SyncPlaybackIntentRequest
 import com.streamvault.android.sync.model.SyncPairingCodeResponse
 import com.streamvault.android.sync.model.SyncPairingStatusRequest
 import com.streamvault.android.sync.model.SyncRegisterRequest
+import com.streamvault.android.sync.model.SyncSearchPushPayload
+import com.streamvault.android.sync.model.SyncSearchPushRequest
+import com.streamvault.android.sync.model.SyncWatchStateReportRequest
 import com.streamvault.android.sync.network.TorveSyncApiClient
 import com.streamvault.android.sync.realtime.SyncRealtimeEvent
 import com.streamvault.android.sync.realtime.SyncWebSocketManager
@@ -24,11 +30,15 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.decodeFromJsonElement
 
 data class SyncAccountState(
     val isLoading: Boolean = false,
@@ -62,6 +72,8 @@ class SyncCoordinator(
         ),
     )
     val state: StateFlow<SyncAccountState> = _state.asStateFlow()
+    private val _inboundEvents = MutableSharedFlow<SyncInboundEvent>(extraBufferCapacity = 32)
+    val inboundEvents: SharedFlow<SyncInboundEvent> = _inboundEvents.asSharedFlow()
 
     init {
         observeRealtimeEvents()
@@ -144,6 +156,87 @@ class SyncCoordinator(
                 api.revokeDevice(accessToken, deviceId)
                 loadDevices()
             }.onFailure { onError(it) }
+        }
+    }
+
+    fun targetDevices(includeSelf: Boolean = false): List<SyncDeviceDto> {
+        val selfId = _state.value.deviceId
+        return _state.value.devices.filter { device ->
+            val notRevoked = device.revokedAt == null
+            val isSelf = device.id == selfId
+            notRevoked && (includeSelf || !isSelf)
+        }
+    }
+
+    suspend fun sendSearchPush(
+        targetDeviceId: String,
+        query: String,
+        filters: Map<String, String> = emptyMap(),
+    ): Result<String> {
+        if (query.isBlank()) return Result.failure(IllegalArgumentException("Query is blank"))
+        val accessToken = ensureAccessToken() ?: return Result.failure(IllegalStateException("Not authenticated"))
+        return runCatching {
+            val response = api.sendSearchPush(
+                accessToken = accessToken,
+                payload = SyncSearchPushRequest(
+                    targetDeviceId = targetDeviceId,
+                    payload = SyncSearchPushPayload(
+                        query = query.trim(),
+                        filters = filters,
+                    ),
+                ),
+            )
+            response.eventId
+        }.onFailure { onError(it) }
+    }
+
+    suspend fun sendPlaybackIntent(
+        targetDeviceId: String,
+        contentId: String,
+        providerTarget: String,
+        positionMs: Long,
+        mediaType: String? = null,
+        audio: String? = null,
+        subtitles: String? = null,
+    ): Result<String> {
+        if (contentId.isBlank()) return Result.failure(IllegalArgumentException("Content id is blank"))
+        val accessToken = ensureAccessToken() ?: return Result.failure(IllegalStateException("Not authenticated"))
+        return runCatching {
+            val response = api.sendPlaybackIntent(
+                accessToken = accessToken,
+                payload = SyncPlaybackIntentRequest(
+                    targetDeviceId = targetDeviceId,
+                    payload = SyncPlaybackIntentPayload(
+                        contentId = contentId.trim(),
+                        providerTarget = providerTarget,
+                        positionMs = positionMs.coerceAtLeast(0L),
+                        mediaType = mediaType,
+                        audio = audio,
+                        subtitles = subtitles,
+                    ),
+                ),
+            )
+            response.eventId
+        }.onFailure { onError(it) }
+    }
+
+    suspend fun reportWatchState(
+        contentId: String,
+        provider: String,
+        positionMs: Long,
+    ): Result<Unit> {
+        if (contentId.isBlank()) return Result.failure(IllegalArgumentException("Content id is blank"))
+        val accessToken = ensureAccessToken() ?: return Result.failure(IllegalStateException("Not authenticated"))
+        return runCatching {
+            api.reportWatchState(
+                accessToken = accessToken,
+                payload = SyncWatchStateReportRequest(
+                    contentId = contentId.trim(),
+                    provider = provider,
+                    positionMs = positionMs.coerceAtLeast(0L),
+                ),
+            )
+            Unit
         }
     }
 
@@ -294,8 +387,11 @@ class SyncCoordinator(
                         )
                     }
                     is SyncRealtimeEvent.Message -> {
+                        decodeInboundEvent(event)?.let { decoded ->
+                            _inboundEvents.tryEmit(decoded)
+                        }
                         _state.value = _state.value.copy(
-                            recentEvents = listOf("${event.eventType}:${event.payload}") + previous,
+                            recentEvents = listOf("${event.eventType}#${event.eventId}:${event.payload}") + previous,
                         )
                     }
                 }
@@ -328,5 +424,36 @@ class SyncCoordinator(
             deviceType = deviceType,
             platform = "android",
         )
+    }
+
+    private fun decodeInboundEvent(message: SyncRealtimeEvent.Message): SyncInboundEvent? {
+        val payload = message.payload
+        return runCatching {
+            when (message.eventType) {
+                "SEARCH_PUSH" -> {
+                    val decoded = HttpClientFactory.json.decodeFromJsonElement<SyncSearchPushPayload>(payload)
+                    SyncInboundEvent.SearchPush(
+                        query = decoded.query,
+                        filters = decoded.filters,
+                        issuedByDeviceId = decoded.issuedByDeviceId,
+                    )
+                }
+
+                "PLAYBACK_INTENT" -> {
+                    val decoded = HttpClientFactory.json.decodeFromJsonElement<SyncPlaybackIntentPayload>(payload)
+                    SyncInboundEvent.PlaybackIntent(
+                        contentId = decoded.contentId,
+                        providerTarget = decoded.providerTarget,
+                        positionMs = decoded.positionMs,
+                        mediaType = decoded.mediaType,
+                        audio = decoded.audio,
+                        subtitles = decoded.subtitles,
+                        issuedByDeviceId = decoded.issuedByDeviceId,
+                    )
+                }
+
+                else -> null
+            }
+        }.getOrNull()
     }
 }

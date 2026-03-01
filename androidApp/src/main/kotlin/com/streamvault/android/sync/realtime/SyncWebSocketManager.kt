@@ -74,10 +74,16 @@ class SyncWebSocketManager {
                                     envelope.event?.let { evt ->
                                         _events.tryEmit(
                                             SyncRealtimeEvent.Message(
+                                                eventId = evt.id,
                                                 eventType = evt.type,
                                                 payload = evt.payload,
                                             ),
                                         )
+                                        val ackPayload = json.encodeToString(
+                                            SyncWsAckMessage.serializer(),
+                                            SyncWsAckMessage(eventId = evt.id),
+                                        )
+                                        session.send(Frame.Text(ackPayload))
                                     }
                                 }
                                 "ready" -> _events.tryEmit(SyncRealtimeEvent.Connected)
@@ -111,4 +117,3 @@ class SyncWebSocketManager {
         const val TAG = "SyncWebSocketManager"
     }
 }
-

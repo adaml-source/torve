@@ -17,6 +17,13 @@ data class SyncWsPingMessage(
 )
 
 @Serializable
+data class SyncWsAckMessage(
+    val type: String = "ack",
+    @SerialName("event_id")
+    val eventId: String,
+)
+
+@Serializable
 data class SyncWsEventEnvelope(
     val type: String,
     val event: SyncWsEventPayload? = null,
@@ -37,6 +44,9 @@ sealed class SyncRealtimeEvent {
     data object Connected : SyncRealtimeEvent()
     data object Disconnected : SyncRealtimeEvent()
     data class Error(val message: String) : SyncRealtimeEvent()
-    data class Message(val eventType: String, val payload: JsonElement) : SyncRealtimeEvent()
+    data class Message(
+        val eventId: String,
+        val eventType: String,
+        val payload: JsonElement,
+    ) : SyncRealtimeEvent()
 }
-

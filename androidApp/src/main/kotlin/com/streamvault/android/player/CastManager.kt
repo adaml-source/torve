@@ -8,8 +8,25 @@ import com.google.android.gms.cast.framework.CastContext
 import com.google.android.gms.cast.framework.CastSession
 import com.google.android.gms.cast.framework.SessionManager
 import com.google.android.gms.cast.framework.SessionManagerListener
+import com.google.android.gms.common.ConnectionResult
+import com.google.android.gms.common.GoogleApiAvailability
 import com.google.android.gms.common.images.WebImage
 import android.net.Uri
+
+fun isCastFrameworkAvailable(context: Context): Boolean {
+    return try {
+        val playServicesStatus = GoogleApiAvailability
+            .getInstance()
+            .isGooglePlayServicesAvailable(context)
+        if (playServicesStatus != ConnectionResult.SUCCESS) {
+            return false
+        }
+        CastContext.getSharedInstance(context)
+        true
+    } catch (_: Throwable) {
+        false
+    }
+}
 
 /**
  * Manages Google Cast (Chromecast) session and media playback.
@@ -69,7 +86,7 @@ class CastManager(context: Context) {
             castContext = CastContext.getSharedInstance(context)
             sessionManager = castContext?.sessionManager
             sessionManager?.addSessionManagerListener(sessionManagerListener, CastSession::class.java)
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
             // Cast not available (missing Google Play Services, etc.)
         }
     }

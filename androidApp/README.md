@@ -69,3 +69,20 @@ If your build environment blocks outbound network, skip Crashlytics mapping uplo
 - Confirm TV transitions to paired state and websocket status becomes `connected`.
 - Confirm Devices list shows both mobile and TV entries.
 - Revoke a device from mobile and verify it disappears or shows revoked after refresh.
+
+## Phase 3 Migration Note
+
+- Mobile Search adds a TV handoff action to push the current query to a paired TV.
+- Player adds a "Play on device" action that sends content and current position to a paired TV.
+- TV now listens for realtime `SEARCH_PUSH` and `PLAYBACK_INTENT` events and auto-navigates accordingly.
+- Player reports watch state periodically and on exit through `/watch_state/report`.
+
+## Phase 3 Smoke Checklist
+
+- Pair a mobile and TV device (Phase 2 flow).
+- On mobile Search, enter a query and use the TV send action.
+- Confirm TV navigates to Search with the query prefilled and results loaded.
+- On mobile Player, start playback and use Play on device for a paired TV.
+- Confirm TV opens details, starts playback, and seeks near the sent position.
+- Confirm Back on TV returns to previous context with focus preserved.
+- Confirm no crash when target TV is offline and event is delivered after reconnect.

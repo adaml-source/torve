@@ -132,3 +132,86 @@ data class SyncPairingStatusResponse(
 data class SyncStatusMessage(
     val status: String = "ok",
 )
+
+@Serializable
+data class SyncSearchPushPayload(
+    val query: String,
+    val filters: Map<String, String> = emptyMap(),
+    @SerialName("issued_by_device_id")
+    val issuedByDeviceId: String? = null,
+)
+
+@Serializable
+data class SyncSearchPushRequest(
+    @SerialName("target_device_id")
+    val targetDeviceId: String,
+    val payload: SyncSearchPushPayload,
+)
+
+@Serializable
+data class SyncPlaybackIntentPayload(
+    @SerialName("content_id")
+    val contentId: String,
+    @SerialName("provider_target")
+    val providerTarget: String,
+    @SerialName("position_ms")
+    val positionMs: Long,
+    @SerialName("media_type")
+    val mediaType: String? = null,
+    val audio: String? = null,
+    val subtitles: String? = null,
+    @SerialName("issued_by_device_id")
+    val issuedByDeviceId: String? = null,
+)
+
+@Serializable
+data class SyncPlaybackIntentRequest(
+    @SerialName("target_device_id")
+    val targetDeviceId: String,
+    val payload: SyncPlaybackIntentPayload,
+)
+
+@Serializable
+data class SyncEventDispatchResponse(
+    val status: String,
+    @SerialName("event_id")
+    val eventId: String,
+    @SerialName("target_device_id")
+    val targetDeviceId: String,
+    @SerialName("event_type")
+    val eventType: String,
+)
+
+@Serializable
+data class SyncWatchStateReportRequest(
+    @SerialName("content_id")
+    val contentId: String,
+    val provider: String,
+    @SerialName("position_ms")
+    val positionMs: Long,
+)
+
+@Serializable
+data class SyncWatchStateReportResponse(
+    val status: String,
+    @SerialName("reported_at")
+    val reportedAt: String,
+)
+
+sealed class SyncInboundEvent {
+    data class SearchPush(
+        val query: String,
+        val filters: Map<String, String> = emptyMap(),
+        val issuedByDeviceId: String? = null,
+    ) : SyncInboundEvent()
+
+    data class PlaybackIntent(
+        val contentId: String,
+        val providerTarget: String,
+        val positionMs: Long,
+        val mediaType: String? = null,
+        val audio: String? = null,
+        val subtitles: String? = null,
+        val issuedByDeviceId: String? = null,
+    ) : SyncInboundEvent()
+}

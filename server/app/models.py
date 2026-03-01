@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint, Index
+from sqlalchemy import BigInteger, DateTime, ForeignKey, String, Text, UniqueConstraint, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
@@ -94,3 +94,19 @@ class EventOutbox(Base):
     payload_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class WatchStateReport(Base):
+    __tablename__ = "watch_state_reports"
+    __table_args__ = (
+        Index("ix_watch_state_reports_user_reported_at", "user_id", "reported_at"),
+        Index("ix_watch_state_reports_device_reported_at", "device_id", "reported_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    device_id: Mapped[str] = mapped_column(String(36), ForeignKey("devices.id"), nullable=False)
+    content_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    provider: Mapped[str] = mapped_column(String(80), nullable=False)
+    position_ms: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
