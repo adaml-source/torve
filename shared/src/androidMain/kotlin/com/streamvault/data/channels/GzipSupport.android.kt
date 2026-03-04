@@ -2,8 +2,10 @@ package com.streamvault.data.channels
 
 import com.streamvault.db.StreamVaultDatabase
 import com.streamvault.domain.model.EpgData
+import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.utils.io.ByteReadChannel
-import io.ktor.utils.io.jvm.javaio.toInputStream
+import io.ktor.utils.io.readAvailable
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
@@ -12,8 +14,12 @@ import java.io.FilterInputStream
 import java.io.InputStream
 import java.io.PushbackInputStream
 import java.util.zip.GZIPInputStream
+import java.util.zip.ZipException
 
-private const val IO_BUFFER_BYTES = 64 * 1024
+private const val DOWNLOAD_BUFFER_BYTES = 32 * 1024
+private const val PARSE_BUFFER_BYTES = 64 * 1024
+private const val DOWNLOAD_PROGRESS_LOG_STEP_BYTES = 5L * 1024L * 1024L
+private const val LEGACY_CHANNEL_SPOOL_MAX_BYTES = 180L * 1024L * 1024L
 private const val GZIP_MAGIC_BYTE_1 = 0x1F
 private const val GZIP_MAGIC_BYTE_2 = 0x8B
 
@@ -46,14 +52,6 @@ private class CountingLimitInputStream(
         return read
     }
 
-    override fun skip(n: Long): Long {
-        val skipped = super.skip(n)
-        if (skipped > 0L) {
-            onRead(skipped)
-        }
-        return skipped
-    }
-
     private fun onRead(bytes: Long) {
         totalBytesRead += bytes
         if (totalBytesRead > maxBytes) {
@@ -63,61 +61,129 @@ private class CountingLimitInputStream(
 }
 
 internal actual object GzipSupport {
-    actual suspend fun parseXmlTvAutoStreamingToDbOrNull(
-        responseChannel: ByteReadChannel,
+    actual suspend fun downloadToTempFile(
+        response: HttpResponse,
+        maxCompressedBytes: Long,
+    ): EpgDownloadResult? {
+        val tempFile = createTempFile()
+        val contentEncoding = response.headers["Content-Encoding"].orEmpty()
+        val contentLength = response.headers["Content-Length"]?.toLongOrNull()
+        println(
+            "ChannelsEPG: downloadToTempFile ENTER maxCompressedBytes=$maxCompressedBytes contentLength=${contentLength ?: -1} contentEncoding=$contentEncoding",
+        )
+        if (contentLength != null && contentLength > maxCompressedBytes) {
+            runCatching { tempFile.delete() }
+            throw EpgStreamLimitException(
+                "EPG too large (${contentLength.toMegabytes()}MB compressed). Reduce provider EPG days.",
+            )
+        }
+
+        val channel: ByteReadChannel = response.bodyAsChannel()
+        var nextProgressLogAt = DOWNLOAD_PROGRESS_LOG_STEP_BYTES
+
+        try {
+            val bytesDownloaded = writeChannelToFile(
+                channel = channel,
+                outputFile = tempFile,
+                maxBytes = maxCompressedBytes,
+                limitMessage = { bytes ->
+                    "EPG too large (${bytes.toMegabytes()}MB compressed). Reduce provider EPG days."
+                },
+                onBytesWritten = { bytesWritten ->
+                    if (bytesWritten >= nextProgressLogAt) {
+                        println("ChannelsEPG: downloadToTempFile PROGRESS bytesDownloaded=$bytesWritten")
+                        while (bytesWritten >= nextProgressLogAt) {
+                            nextProgressLogAt += DOWNLOAD_PROGRESS_LOG_STEP_BYTES
+                        }
+                    }
+                },
+            )
+            println(
+                "ChannelsEPG: downloadToTempFile DONE bytesDownloaded=$bytesDownloaded path=${tempFile.absolutePath}",
+            )
+            return EpgDownloadResult(
+                tempFilePath = tempFile.absolutePath,
+                bytesDownloaded = bytesDownloaded,
+                contentEncoding = contentEncoding,
+                contentLength = contentLength,
+            )
+        } catch (t: Throwable) {
+            runCatching { tempFile.delete() }
+            throw t
+        }
+    }
+
+    actual suspend fun parseXmlTvAutoFromFileToDbOrNull(
+        tempFilePath: String,
         parser: EpgParser,
         db: StreamVaultDatabase,
         playlistId: String,
         generationId: Long,
         windowStartMs: Long,
         windowEndMs: Long,
-        contentLength: Long?,
         contentEncoding: String?,
-        maxCompressedBytes: Long,
+        contentLength: Long?,
         maxUncompressedBytes: Long,
-        spoolToFileThresholdBytes: Long,
         channelFilter: Set<String>?,
         resolveEpgChannelKey: ((xmltvChannelId: String, xmltvDisplayName: String?) -> String?)?,
         batchSize: Int,
         onProgress: ((EpgBatchProgress) -> Unit)?,
     ): EpgStreamIngestResult? {
-        val shouldSpoolToFile = contentLength == null ||
-            contentLength < 0L ||
-            contentLength >= spoolToFileThresholdBytes
-        return if (shouldSpoolToFile) {
-            parseWithTempFile(
-                responseChannel = responseChannel,
-                parser = parser,
-                db = db,
-                playlistId = playlistId,
-                generationId = generationId,
-                windowStartMs = windowStartMs,
-                windowEndMs = windowEndMs,
-                contentEncoding = contentEncoding,
-                maxCompressedBytes = maxCompressedBytes,
-                maxUncompressedBytes = maxUncompressedBytes,
-                channelFilter = channelFilter,
-                resolveEpgChannelKey = resolveEpgChannelKey,
-                batchSize = batchSize,
-                onProgress = onProgress,
+        val file = File(tempFilePath)
+        if (!file.exists() || !file.isFile) return null
+        val uncompressedLimitMessage =
+            "EPG XML exceeded ${maxUncompressedBytes.toMegabytes()}MB parse limit. Reduce provider EPG days."
+
+        var stats: EpgDbParseStats? = null
+        var bytesParsed = 0L
+        var gzipDetected = false
+
+        FileInputStream(file).use { fileInput ->
+            BufferedInputStream(fileInput, PARSE_BUFFER_BYTES).use { buffered ->
+                val preparedInput = prepareXmlInput(
+                    rawInput = buffered,
+                    contentEncoding = contentEncoding,
+                    contentLength = contentLength,
+                )
+                gzipDetected = preparedInput.isGzipDetected
+                preparedInput.input.use { xmlInput ->
+                    CountingLimitInputStream(
+                        delegate = xmlInput,
+                        maxBytes = maxUncompressedBytes,
+                        limitMessage = uncompressedLimitMessage,
+                    ).use { counted ->
+                        stats = parser.parseXmlTvStreamingToDb(
+                            input = counted,
+                            db = db,
+                            playlistId = playlistId,
+                            generationId = generationId,
+                            windowStartMs = windowStartMs,
+                            windowEndMs = windowEndMs,
+                            channelFilter = channelFilter,
+                            resolveEpgChannelKey = resolveEpgChannelKey,
+                            batchSize = batchSize,
+                            onProgress = onProgress,
+                        )
+                        bytesParsed = counted.totalBytesRead
+                    }
+                }
+            }
+        }
+
+        return stats?.let {
+            EpgStreamIngestResult(
+                stats = it,
+                isGzipDetected = gzipDetected,
+                usedTempFile = true,
+                bytesDownloaded = file.length(),
+                bytesParsed = bytesParsed,
             )
-        } else {
-            parseDirectStream(
-                responseChannel = responseChannel,
-                parser = parser,
-                db = db,
-                playlistId = playlistId,
-                generationId = generationId,
-                windowStartMs = windowStartMs,
-                windowEndMs = windowEndMs,
-                contentEncoding = contentEncoding,
-                maxCompressedBytes = maxCompressedBytes,
-                maxUncompressedBytes = maxUncompressedBytes,
-                channelFilter = channelFilter,
-                resolveEpgChannelKey = resolveEpgChannelKey,
-                batchSize = batchSize,
-                onProgress = onProgress,
-            )
+        }
+    }
+
+    actual fun deleteTempFile(tempFilePath: String) {
+        runCatching {
+            File(tempFilePath).delete()
         }
     }
 
@@ -134,9 +200,18 @@ internal actual object GzipSupport {
         batchSize: Int,
         onProgress: ((EpgBatchProgress) -> Unit)?,
     ): EpgDbParseStats? {
+        val tempFile = createTempFile()
         return runCatching {
-            xmlChannel.toInputStream().use { raw ->
-                BufferedInputStream(raw, IO_BUFFER_BYTES).use { buffered ->
+            writeChannelToFile(
+                channel = xmlChannel,
+                outputFile = tempFile,
+                maxBytes = LEGACY_CHANNEL_SPOOL_MAX_BYTES,
+                limitMessage = { bytes ->
+                    "EPG XML exceeded ${bytes.toMegabytes()}MB streaming limit."
+                },
+            )
+            FileInputStream(tempFile).use { raw ->
+                BufferedInputStream(raw, PARSE_BUFFER_BYTES).use { buffered ->
                     parser.parseXmlTvStreamingToDb(
                         input = buffered,
                         db = db,
@@ -151,6 +226,10 @@ internal actual object GzipSupport {
                     )
                 }
             }
+        }.onFailure {
+            runCatching { tempFile.delete() }
+        }.onSuccess {
+            runCatching { tempFile.delete() }
         }.getOrNull()
     }
 
@@ -162,10 +241,19 @@ internal actual object GzipSupport {
         maxChannels: Int,
         maxProgrammes: Int,
     ): EpgData? {
+        val tempFile = createTempFile()
         return runCatching {
-            compressedChannel.toInputStream().use { rawCompressed ->
-                BufferedInputStream(rawCompressed, IO_BUFFER_BYTES).use { buffered ->
-                    GZIPInputStream(buffered, IO_BUFFER_BYTES).use { gzipStream ->
+            writeChannelToFile(
+                channel = compressedChannel,
+                outputFile = tempFile,
+                maxBytes = LEGACY_CHANNEL_SPOOL_MAX_BYTES,
+                limitMessage = { bytes ->
+                    "EPG XML exceeded ${bytes.toMegabytes()}MB streaming limit."
+                },
+            )
+            FileInputStream(tempFile).use { rawCompressed ->
+                BufferedInputStream(rawCompressed, PARSE_BUFFER_BYTES).use { buffered ->
+                    GZIPInputStream(buffered, PARSE_BUFFER_BYTES).use { gzipStream ->
                         parser.parseXmlTvStreaming(
                             readChunk = { target ->
                                 gzipStream.read(target)
@@ -178,6 +266,10 @@ internal actual object GzipSupport {
                     }
                 }
             }
+        }.onFailure {
+            runCatching { tempFile.delete() }
+        }.onSuccess {
+            runCatching { tempFile.delete() }
         }.getOrNull()
     }
 
@@ -194,10 +286,19 @@ internal actual object GzipSupport {
         batchSize: Int,
         onProgress: ((EpgBatchProgress) -> Unit)?,
     ): EpgDbParseStats? {
+        val tempFile = createTempFile()
         return runCatching {
-            compressedChannel.toInputStream().use { rawCompressed ->
-                BufferedInputStream(rawCompressed, IO_BUFFER_BYTES).use { buffered ->
-                    GZIPInputStream(buffered, IO_BUFFER_BYTES).use { gzipStream ->
+            writeChannelToFile(
+                channel = compressedChannel,
+                outputFile = tempFile,
+                maxBytes = LEGACY_CHANNEL_SPOOL_MAX_BYTES,
+                limitMessage = { bytes ->
+                    "EPG XML exceeded ${bytes.toMegabytes()}MB streaming limit."
+                },
+            )
+            FileInputStream(tempFile).use { rawCompressed ->
+                BufferedInputStream(rawCompressed, PARSE_BUFFER_BYTES).use { buffered ->
+                    GZIPInputStream(buffered, PARSE_BUFFER_BYTES).use { gzipStream ->
                         parser.parseXmlTvStreamingToDb(
                             input = gzipStream,
                             db = db,
@@ -213,208 +314,98 @@ internal actual object GzipSupport {
                     }
                 }
             }
+        }.onFailure {
+            runCatching { tempFile.delete() }
+        }.onSuccess {
+            runCatching { tempFile.delete() }
         }.getOrNull()
     }
 }
 
-private suspend fun parseDirectStream(
-    responseChannel: ByteReadChannel,
-    parser: EpgParser,
-    db: StreamVaultDatabase,
-    playlistId: String,
-    generationId: Long,
-    windowStartMs: Long,
-    windowEndMs: Long,
-    contentEncoding: String?,
-    maxCompressedBytes: Long,
-    maxUncompressedBytes: Long,
-    channelFilter: Set<String>?,
-    resolveEpgChannelKey: ((xmltvChannelId: String, xmltvDisplayName: String?) -> String?)?,
-    batchSize: Int,
-    onProgress: ((EpgBatchProgress) -> Unit)?,
-): EpgStreamIngestResult {
-    val compressedLimitMessage =
-        "EPG download exceeded ${maxCompressedBytes.toMegabytes()}MB compressed limit. Reduce provider EPG days."
-    val uncompressedLimitMessage =
-        "EPG XML exceeded ${maxUncompressedBytes.toMegabytes()}MB parse limit. Reduce provider EPG days."
-
-    var stats: EpgDbParseStats? = null
-    var bytesDownloaded = 0L
-    var bytesParsed = 0L
-    var isGzipDetected = false
-
-    responseChannel.toInputStream().use { rawResponse ->
-        val countedNetwork = CountingLimitInputStream(
-            delegate = rawResponse,
-            maxBytes = maxCompressedBytes,
-            limitMessage = compressedLimitMessage,
-        )
-        countedNetwork.use { networkStream ->
-            val preparedInput = prepareXmlInput(
-                rawInput = BufferedInputStream(networkStream, IO_BUFFER_BYTES),
-                contentEncoding = contentEncoding,
-            )
-            isGzipDetected = preparedInput.isGzipDetected
-            preparedInput.input.use { xmlInput ->
-                CountingLimitInputStream(
-                    delegate = xmlInput,
-                    maxBytes = maxUncompressedBytes,
-                    limitMessage = uncompressedLimitMessage,
-                ).use { countedParsed ->
-                    stats = parser.parseXmlTvStreamingToDb(
-                        input = countedParsed,
-                        db = db,
-                        playlistId = playlistId,
-                        generationId = generationId,
-                        windowStartMs = windowStartMs,
-                        windowEndMs = windowEndMs,
-                        channelFilter = channelFilter,
-                        resolveEpgChannelKey = resolveEpgChannelKey,
-                        batchSize = batchSize,
-                        onProgress = onProgress,
-                    )
-                    bytesParsed = countedParsed.totalBytesRead
-                }
-            }
-            bytesDownloaded = networkStream.totalBytesRead
-        }
-    }
-
-    return EpgStreamIngestResult(
-        stats = requireNotNull(stats),
-        isGzipDetected = isGzipDetected,
-        usedTempFile = false,
-        bytesDownloaded = bytesDownloaded,
-        bytesParsed = bytesParsed,
-    )
-}
-
-private suspend fun parseWithTempFile(
-    responseChannel: ByteReadChannel,
-    parser: EpgParser,
-    db: StreamVaultDatabase,
-    playlistId: String,
-    generationId: Long,
-    windowStartMs: Long,
-    windowEndMs: Long,
-    contentEncoding: String?,
-    maxCompressedBytes: Long,
-    maxUncompressedBytes: Long,
-    channelFilter: Set<String>?,
-    resolveEpgChannelKey: ((xmltvChannelId: String, xmltvDisplayName: String?) -> String?)?,
-    batchSize: Int,
-    onProgress: ((EpgBatchProgress) -> Unit)?,
-): EpgStreamIngestResult {
-    val tempDir = resolveTempDir()
-    val tempFile = File.createTempFile("streamvault_epg_", ".tmp", tempDir)
-    val compressedLimitMessage =
-        "EPG download exceeded ${maxCompressedBytes.toMegabytes()}MB compressed limit. Reduce provider EPG days."
-    val uncompressedLimitMessage =
-        "EPG XML exceeded ${maxUncompressedBytes.toMegabytes()}MB parse limit. Reduce provider EPG days."
-
-    var bytesDownloaded = 0L
-    var bytesParsed = 0L
-    var stats: EpgDbParseStats? = null
-    var isGzipDetected = false
+private suspend fun writeChannelToFile(
+    channel: ByteReadChannel,
+    outputFile: File,
+    maxBytes: Long,
+    limitMessage: (Long) -> String,
+    onBytesWritten: ((Long) -> Unit)? = null,
+): Long {
+    val buffer = ByteArray(DOWNLOAD_BUFFER_BYTES)
+    var bytesWritten = 0L
     try {
-        responseChannel.toInputStream().use { rawResponse ->
-            CountingLimitInputStream(
-                delegate = BufferedInputStream(rawResponse, IO_BUFFER_BYTES),
-                maxBytes = maxCompressedBytes,
-                limitMessage = compressedLimitMessage,
-            ).use { countedNetwork ->
-                FileOutputStream(tempFile).use { output ->
-                    val buffer = ByteArray(IO_BUFFER_BYTES)
-                    while (true) {
-                        val read = countedNetwork.read(buffer)
-                        if (read < 0) break
-                        if (read == 0) continue
-                        output.write(buffer, 0, read)
-                    }
-                    output.flush()
+        FileOutputStream(outputFile).use { output ->
+            while (!channel.isClosedForRead) {
+                val read = channel.readAvailable(buffer, 0, buffer.size)
+                if (read < 0) break
+                if (read == 0) continue
+                bytesWritten += read.toLong()
+                if (bytesWritten > maxBytes) {
+                    throw EpgStreamLimitException(limitMessage(bytesWritten))
                 }
-                bytesDownloaded = countedNetwork.totalBytesRead
+                output.write(buffer, 0, read)
+                onBytesWritten?.invoke(bytesWritten)
             }
+            output.flush()
         }
-
-        FileInputStream(tempFile).use { rawFile ->
-            val preparedInput = prepareXmlInput(
-                rawInput = BufferedInputStream(rawFile, IO_BUFFER_BYTES),
-                contentEncoding = contentEncoding,
-            )
-            isGzipDetected = preparedInput.isGzipDetected
-            preparedInput.input.use { xmlInput ->
-                CountingLimitInputStream(
-                    delegate = xmlInput,
-                    maxBytes = maxUncompressedBytes,
-                    limitMessage = uncompressedLimitMessage,
-                ).use { countedParsed ->
-                    stats = parser.parseXmlTvStreamingToDb(
-                        input = countedParsed,
-                        db = db,
-                        playlistId = playlistId,
-                        generationId = generationId,
-                        windowStartMs = windowStartMs,
-                        windowEndMs = windowEndMs,
-                        channelFilter = channelFilter,
-                        resolveEpgChannelKey = resolveEpgChannelKey,
-                        batchSize = batchSize,
-                        onProgress = onProgress,
-                    )
-                    bytesParsed = countedParsed.totalBytesRead
-                }
-            }
-        }
+        return bytesWritten
+    } catch (t: Throwable) {
+        runCatching { channel.cancel(t) }
+        throw t
     } finally {
-        runCatching { tempFile.delete() }
+        runCatching { channel.cancel(null) }
     }
-
-    return EpgStreamIngestResult(
-        stats = requireNotNull(stats),
-        isGzipDetected = isGzipDetected,
-        usedTempFile = true,
-        bytesDownloaded = bytesDownloaded,
-        bytesParsed = bytesParsed,
-    )
 }
 
 private fun prepareXmlInput(
     rawInput: InputStream,
     contentEncoding: String?,
+    contentLength: Long?,
 ): PreparedXmlInput {
-    val pushbackInput = PushbackInputStream(rawInput, 2)
-    val first = pushbackInput.read()
-    val second = pushbackInput.read()
-    if (second >= 0) pushbackInput.unread(second)
-    if (first >= 0) pushbackInput.unread(first)
+    val pushback = PushbackInputStream(rawInput, 2)
+    val first = pushback.read()
+    val second = pushback.read()
+    if (second >= 0) pushback.unread(second)
+    if (first >= 0) pushback.unread(first)
 
     val magicGzip = first == GZIP_MAGIC_BYTE_1 && second == GZIP_MAGIC_BYTE_2
     val encodingGzip = contentEncoding?.contains("gzip", ignoreCase = true) == true
 
-    if (encodingGzip && !magicGzip) {
-        println("ChannelsEPG: gzip hint mismatch contentEncoding=$contentEncoding magic=false")
-    }
-
-    return if (magicGzip) {
-        PreparedXmlInput(
-            input = GZIPInputStream(pushbackInput, IO_BUFFER_BYTES),
+    if (magicGzip) {
+        return PreparedXmlInput(
+            input = GZIPInputStream(pushback, PARSE_BUFFER_BYTES),
             isGzipDetected = true,
         )
-    } else {
-        PreparedXmlInput(
-            input = pushbackInput,
-            isGzipDetected = false,
-        )
     }
+
+    if (encodingGzip) {
+        return try {
+            PreparedXmlInput(
+                input = GZIPInputStream(pushback, PARSE_BUFFER_BYTES),
+                isGzipDetected = true,
+            )
+        } catch (_: ZipException) {
+            println(
+                "ChannelsEPG: gzip header mismatch contentEncoding=$contentEncoding contentLength=${contentLength ?: -1}, parsing as raw XML",
+            )
+            PreparedXmlInput(
+                input = pushback,
+                isGzipDetected = false,
+            )
+        }
+    }
+
+    return PreparedXmlInput(
+        input = pushback,
+        isGzipDetected = false,
+    )
 }
 
-private fun resolveTempDir(): File {
-    val tmpDirPath = System.getProperty("java.io.tmpdir").orEmpty().ifBlank { "." }
-    val dir = File(tmpDirPath)
-    if (!dir.exists()) {
-        dir.mkdirs()
+private fun createTempFile(): File {
+    val tempDirPath = System.getProperty("java.io.tmpdir").orEmpty().ifBlank { "." }
+    val tempDir = File(tempDirPath)
+    if (!tempDir.exists()) {
+        tempDir.mkdirs()
     }
-    return dir
+    return File.createTempFile("streamvault_epg_", ".tmp", tempDir)
 }
 
 private fun Long.toMegabytes(): Long = this / (1024L * 1024L)
