@@ -5,6 +5,9 @@ import com.streamvault.domain.model.EpgProgramme
 import com.streamvault.domain.model.ChannelCategory
 import com.streamvault.domain.model.Channel
 import com.streamvault.domain.model.ChannelContentType
+import com.streamvault.domain.model.ChannelPlaylist
+import com.streamvault.domain.model.PlaylistType
+import com.streamvault.domain.model.canonicalEpgChannelKey
 import com.streamvault.data.channels.CatchupResolver
 import com.streamvault.domain.repository.ChannelRepository
 import com.streamvault.domain.repository.PreferencesRepository
@@ -20,6 +23,12 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.datetime.Clock
+
+private const val KEY_CHANNELS_AUDIO_PASSTHROUGH = "channels_audio_passthrough_enabled"
+private const val KEY_CHANNELS_PREFER_SURROUND = "channels_prefer_surround_codecs"
+private const val EPG_DEBUG_LOG_ENABLED = false
 
 class ChannelsViewModel(
     private val channelRepo: ChannelRepository,
@@ -39,6 +48,7 @@ class ChannelsViewModel(
         loadPlaylists()
         loadFavorites()
         loadRecentlyViewed()
+        loadAudioSettings()
         observeSearch()
     }
 
@@ -113,6 +123,26 @@ class ChannelsViewModel(
                 // Build categories and guide data
                 buildLiveCategories()
                 buildGuideChannels()
+            } catch (oom: OutOfMemoryError) {
+                val fallbackChannels = runCatching { channelRepo.getChannels(playlistId) }.getOrDefault(emptyList())
+                val fallbackEnriched = fallbackChannels.map { EnrichedChannel(channel = it) }
+                val fallbackGrouped = fallbackEnriched.groupBy { it.channel.groupTitle ?: "Ungrouped" }
+                val countries = fallbackEnriched.mapNotNull { it.channel.tvgCountry }
+                    .flatMap { it.split(",", ";").map { c -> c.trim() } }
+                    .filter { it.isNotBlank() }
+                    .distinct()
+                    .sorted()
+                _state.update {
+                    it.copy(
+                        channels = fallbackEnriched,
+                        groupedChannels = fallbackGrouped,
+                        isLoadingChannels = false,
+                        selectedGroup = null,
+                        availableCountries = countries,
+                        guideError = "EPG is too large for device memory. Reduce provider EPG days and retry.",
+                        epgState = EpgState.Error("EPG is too large for device memory. Reduce provider EPG days and retry."),
+                    )
+                }
             } catch (e: Exception) {
                 _state.update { it.copy(isLoadingChannels = false, error = e.message) }
             }
@@ -140,10 +170,14 @@ class ChannelsViewModel(
 
         // Country filter
         if (st.selectedCountries.isNotEmpty()) {
+            val selectedCountriesLower = st.selectedCountries.map { it.lowercase() }.toSet()
             result = result.filter { enriched ->
-                val country = enriched.channel.tvgCountry ?: return@filter true
-                val channelCountries = country.split(",", ";").map { it.trim().lowercase() }
-                st.selectedCountries.any { it.lowercase() in channelCountries }
+                val country = enriched.channel.tvgCountry ?: return@filter false
+                val channelCountries = country
+                    .split(",", ";")
+                    .map { it.trim().lowercase() }
+                    .filter { it.isNotBlank() }
+                channelCountries.any { it in selectedCountriesLower }
             }
         }
 
@@ -231,48 +265,162 @@ class ChannelsViewModel(
         _state.update { it.copy(categories = visibleCategories, allCategories = allCategories) }
     }
 
-    private fun buildGuideChannels() {
+    private fun buildGuideChannels(forceRefreshEpg: Boolean = false) {
         val st = _state.value
         val playlistId = st.selectedPlaylistId ?: return
+        // Invariant: guideProgrammes is keyed ONLY by canonical epg_channel_key.
+        // No alias keys, no fuzzy matching, no entry scans.
         // Guide shows channels that have EPG data (current or next programme)
         val withEpg = st.channels.filter { it.currentProgramme != null || it.nextProgramme != null }
-        // Fall back to all live channels if no EPG data
+        // Fall back to all live channels if no current/next programme is cached.
         val guide = if (withEpg.isNotEmpty()) withEpg else st.channels.filter {
             it.channel.contentType == ChannelContentType.LIVE || it.channel.contentType == ChannelContentType.UNKNOWN
-        }.take(100)
+        }
+
+        val selectedPlaylist = st.playlists.firstOrNull { it.id == playlistId }
+        val epgSourceUrl = selectedPlaylist.resolveEpgSourceUrl().orEmpty()
+
+        if (epgSourceUrl.isBlank()) {
+            println("ChannelsEPG: not configured playlistId=$playlistId source=none")
+            _state.update {
+                it.copy(
+                    guideChannels = guide,
+                    guideProgrammes = emptyMap(),
+                    isLoadingGuide = false,
+                    guideError = null,
+                    epgState = EpgState.NotConfigured,
+                )
+            }
+            return
+        }
 
         // Load full programme data for guide timeline
         scope.launch {
+            _state.update {
+                it.copy(
+                    guideChannels = guide,
+                    isLoadingGuide = true,
+                    guideError = null,
+                    epgState = EpgState.Loading,
+                )
+            }
+            val buildStartedAt = Clock.System.now().toEpochMilliseconds()
             try {
-                val epgData = channelRepo.getEpg(playlistId)
-                val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
-                val windowEnd = now + 6 * 3600 * 1000L // 6 hours ahead
+                println(
+                    "ChannelsEPG: load start playlistId=$playlistId source=$epgSourceUrl forceRefresh=$forceRefreshEpg",
+                )
 
-                val progMap = mutableMapOf<String, List<EpgProgramme>>()
-                guide.forEach { enriched ->
-                    val epgId = enriched.channel.tvgId
-                        ?: enriched.channel.tvgName
-                        ?: enriched.channel.name
-                    // Find matching EPG channel id
-                    val matchId = epgData.channels.keys.firstOrNull { key ->
-                        key.equals(enriched.channel.tvgId, ignoreCase = true)
-                    } ?: epgData.channels.entries.firstOrNull { (_, epgCh) ->
-                        epgCh.displayName.equals(enriched.channel.tvgName ?: enriched.channel.name, ignoreCase = true)
-                    }?.key
-
-                    if (matchId != null) {
-                        val progs = epgData.programmes
-                            .filter { it.channelId == matchId && it.endTime > now && it.startTime < windowEnd }
-                            .sortedBy { it.startTime }
-                        val chKey = enriched.channel.tvgId ?: "${enriched.channel.playlistId}_${enriched.channel.name}"
-                        progMap[chKey] = progs
-                    }
+                if (forceRefreshEpg) {
+                    withContext(Dispatchers.IO) { channelRepo.refreshEpg(playlistId) }
                 }
-                _state.update { it.copy(guideChannels = guide, guideProgrammes = progMap) }
-            } catch (_: Exception) {
-                _state.update { it.copy(guideChannels = guide) }
+
+                var epgData = withContext(Dispatchers.IO) { channelRepo.getEpg(playlistId) }
+                var epgLoadError = withContext(Dispatchers.IO) { channelRepo.getEpgLoadError(playlistId) }
+                if (epgData.programmesByChannelKey.isEmpty() && !forceRefreshEpg) {
+                    println("ChannelsEPG: cache empty for playlistId=$playlistId, refreshing epg only")
+                    try {
+                        withContext(Dispatchers.IO) { channelRepo.refreshEpg(playlistId) }
+                    } catch (e: Exception) {
+                        println("ChannelsEPG: refresh failed playlistId=$playlistId error=${e.message}")
+                    }
+                    epgData = withContext(Dispatchers.IO) { channelRepo.getEpg(playlistId) }
+                    epgLoadError = withContext(Dispatchers.IO) { channelRepo.getEpgLoadError(playlistId) }
+                }
+
+                if (epgData.programmesByChannelKey.isEmpty() && !epgLoadError.isNullOrBlank()) {
+                    throw IllegalStateException(epgLoadError)
+                }
+
+                println(
+                    "ChannelsEPG: source parsed playlistId=$playlistId generation=${epgData.generationId ?: -1} channels=${epgData.channels.size} programmes=${epgData.programmes.size} groupedKeys=${epgData.programmesByChannelKey.size}",
+                )
+
+                data class GuideBuildResult(
+                    val programmesByKey: Map<String, List<EpgProgramme>>,
+                    val matchedChannels: Int,
+                    val unmatchedChannels: Int,
+                )
+
+                val buildResult = withContext(Dispatchers.Default) {
+                    val programmesByKey = HashMap<String, List<EpgProgramme>>(guide.size)
+                    var matchedChannels = 0
+                    var unmatchedChannels = 0
+                    guide.forEach { enriched ->
+                        val key = canonicalEpgChannelKey(
+                            playlistId = playlistId,
+                            channel = enriched.channel,
+                        )
+                        if (key.isNullOrBlank()) {
+                            unmatchedChannels++
+                            return@forEach
+                        }
+                        val programmes = epgData.programmesByChannelKey[key].orEmpty()
+                        programmesByKey[key] = programmes
+                        if (programmes.isEmpty()) {
+                            unmatchedChannels++
+                        } else {
+                            matchedChannels++
+                        }
+                    }
+                    GuideBuildResult(
+                        programmesByKey = programmesByKey,
+                        matchedChannels = matchedChannels,
+                        unmatchedChannels = unmatchedChannels,
+                    )
+                }
+
+                println(
+                    "ChannelsEPG: mapped playlistId=$playlistId generation=${epgData.generationId ?: -1} guideChannels=${guide.size} mappedKeys=${buildResult.programmesByKey.size} matchedChannels=${buildResult.matchedChannels} unmatchedChannels=${buildResult.unmatchedChannels}",
+                )
+                debugLog(
+                    "ChannelsEPG: guide build complete playlistId=$playlistId generation=${epgData.generationId ?: -1} buildMs=${Clock.System.now().toEpochMilliseconds() - buildStartedAt} channels=${guide.size} programmeRows=${epgData.programmes.size} guideMapSize=${buildResult.programmesByKey.size}",
+                )
+
+                _state.update {
+                    it.copy(
+                        guideChannels = guide,
+                        guideProgrammes = buildResult.programmesByKey,
+                        isLoadingGuide = false,
+                        guideError = null,
+                        epgState = EpgState.Loaded(
+                            sourceUrl = epgSourceUrl,
+                            sourceChannelCount = epgData.channels.size,
+                            sourceProgrammeCount = epgData.programmes.size,
+                            matchedChannelCount = buildResult.matchedChannels,
+                            unmatchedChannelCount = buildResult.unmatchedChannels,
+                        ),
+                    )
+                }
+            } catch (oom: OutOfMemoryError) {
+                val message = "EPG is too large for device memory. Reduce provider EPG days and retry."
+                println("ChannelsEPG: load failed playlistId=$playlistId source=$epgSourceUrl error=$message")
+                _state.update {
+                    it.copy(
+                        guideChannels = guide,
+                        guideProgrammes = emptyMap(),
+                        isLoadingGuide = false,
+                        guideError = message,
+                        epgState = EpgState.Error(message),
+                    )
+                }
+            } catch (e: Exception) {
+                val message = e.message ?: "Failed to load EPG"
+                println("ChannelsEPG: load failed playlistId=$playlistId source=$epgSourceUrl error=$message")
+                _state.update {
+                    it.copy(
+                        guideChannels = guide,
+                        guideProgrammes = emptyMap(),
+                        isLoadingGuide = false,
+                        guideError = message,
+                        epgState = EpgState.Error(message),
+                    )
+                }
             }
         }
+    }
+
+    fun retryGuideLoad() {
+        buildGuideChannels(forceRefreshEpg = true)
     }
 
     // --- Hidden categories/channels management ---
@@ -433,6 +581,28 @@ class ChannelsViewModel(
         _state.update { it.copy(newPlaylistEpgUrl = url) }
     }
 
+    fun updatePlaylistEpgUrl(playlistId: String, epgUrl: String) {
+        scope.launch {
+            try {
+                val normalizedUrl = epgUrl.trim().ifBlank { "" }
+                channelRepo.updatePlaylistEpgUrl(playlistId, normalizedUrl.ifBlank { null })
+                val playlists = channelRepo.getPlaylists()
+                _state.update { it.copy(playlists = playlists) }
+                if (_state.value.selectedPlaylistId == playlistId) {
+                    buildGuideChannels(forceRefreshEpg = true)
+                }
+            } catch (e: Exception) {
+                val message = e.message ?: "Failed to update EPG URL"
+                _state.update {
+                    it.copy(
+                        guideError = message,
+                        epgState = EpgState.Error(message),
+                    )
+                }
+            }
+        }
+    }
+
     fun setNewPlaylistType(type: String) {
         _state.update { it.copy(newPlaylistType = type) }
     }
@@ -504,23 +674,76 @@ class ChannelsViewModel(
         _state.update { it.copy(showCountryFilter = !it.showCountryFilter) }
     }
 
+    fun setCountryFilterVisible(visible: Boolean) {
+        _state.update { it.copy(showCountryFilter = visible) }
+    }
+
     fun toggleCountry(country: String) {
+        val normalized = country.trim()
+        if (normalized.isBlank()) return
         val current = _state.value.selectedCountries
-        val updated = if (country in current) current - country else current + country
-        _state.update { it.copy(selectedCountries = updated) }
-        scope.launch {
-            prefsRepo.setString("channels_country_filter", updated.joinToString(","))
-        }
+        val updated = if (normalized in current) current - normalized else current + normalized
+        setCountryFilter(updated)
     }
 
     fun clearCountryFilter() {
-        _state.update { it.copy(selectedCountries = emptySet()) }
-        scope.launch { prefsRepo.remove("channels_country_filter") }
+        setCountryFilter(emptySet())
+    }
+
+    fun setCountryFilter(countries: Set<String>) {
+        val normalized = countries
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .toSet()
+        _state.update { it.copy(selectedCountries = normalized) }
+        scope.launch {
+            if (normalized.isEmpty()) {
+                prefsRepo.remove("channels_country_filter")
+            } else {
+                prefsRepo.setString("channels_country_filter", normalized.joinToString(","))
+            }
+        }
+        buildLiveCategories()
     }
 
     fun setXxxEnabled(enabled: Boolean) {
         _state.update { it.copy(xxxEnabled = enabled) }
         scope.launch { prefsRepo.setString("channels_xxx_enabled", enabled.toString()) }
+        buildLiveCategories()
+    }
+
+    private fun loadAudioSettings() {
+        scope.launch {
+            val passthrough = prefsRepo.getString(KEY_CHANNELS_AUDIO_PASSTHROUGH)
+                ?.toBooleanStrictOrNull() ?: false
+            val preferSurround = prefsRepo.getString(KEY_CHANNELS_PREFER_SURROUND)
+                ?.toBooleanStrictOrNull() ?: true
+            _state.update {
+                it.copy(
+                    audioPassthroughEnabled = passthrough,
+                    preferSurroundCodecs = preferSurround,
+                )
+            }
+        }
+    }
+
+    fun clearRecentlyViewed() {
+        scope.launch {
+            try {
+                channelRepo.clearRecentlyViewedChannels()
+                _state.update { it.copy(recentlyViewedChannels = emptyList()) }
+            } catch (_: Exception) { }
+        }
+    }
+
+    fun setAudioPassthroughEnabled(enabled: Boolean) {
+        _state.update { it.copy(audioPassthroughEnabled = enabled) }
+        scope.launch { prefsRepo.setString(KEY_CHANNELS_AUDIO_PASSTHROUGH, enabled.toString()) }
+    }
+
+    fun setPreferSurroundCodecs(enabled: Boolean) {
+        _state.update { it.copy(preferSurroundCodecs = enabled) }
+        scope.launch { prefsRepo.setString(KEY_CHANNELS_PREFER_SURROUND, enabled.toString()) }
     }
 
     fun removePlaylist(playlistId: String) {
@@ -618,7 +841,11 @@ class ChannelsViewModel(
 
     fun selectChannel(channel: Channel) {
         _state.update { it.copy(selectedChannel = channel) }
-        val epgId = channel.tvgId ?: return
+        val selectedPlaylistId = _state.value.selectedPlaylistId ?: channel.playlistId
+        val epgId = canonicalEpgChannelKey(
+            playlistId = selectedPlaylistId,
+            channel = channel,
+        ) ?: return
         scope.launch {
             try {
                 val programmes = channelRepo.getProgrammes(epgId)
@@ -639,5 +866,22 @@ class ChannelsViewModel(
 
     fun resolveCatchupUrl(channel: Channel, programme: EpgProgramme): String? {
         return catchupResolver.resolve(channel, programme)
+    }
+
+    private fun debugLog(message: String) {
+        if (EPG_DEBUG_LOG_ENABLED) {
+            println(message)
+        }
+    }
+
+    private fun ChannelPlaylist?.resolveEpgSourceUrl(): String? {
+        val playlist = this ?: return null
+        val explicit = playlist.epgUrl?.trim()?.takeIf { it.isNotEmpty() }
+        if (explicit != null) return explicit
+        if (playlist.type != PlaylistType.XTREAM) return null
+        val server = playlist.server?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() } ?: return null
+        val username = playlist.username?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val password = playlist.password?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        return "$server/xmltv.php?username=$username&password=$password"
     }
 }

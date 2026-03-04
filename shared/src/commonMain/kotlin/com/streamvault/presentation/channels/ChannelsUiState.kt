@@ -14,6 +14,21 @@ enum class ChannelsSortType { DEFAULT, NAME_AZ, NAME_ZA, RECENTLY_ADDED }
 
 enum class ChannelsFilterType { ALL, HD, FHD, UHD, FAVORITES }
 
+sealed interface EpgState {
+    data object NotConfigured : EpgState
+    data object Loading : EpgState
+    data class Loaded(
+        val sourceUrl: String,
+        val sourceChannelCount: Int,
+        val sourceProgrammeCount: Int,
+        val matchedChannelCount: Int,
+        val unmatchedChannelCount: Int,
+    ) : EpgState
+    data class Error(
+        val message: String,
+    ) : EpgState
+}
+
 data class ChannelsUiState(
     val playlists: List<ChannelPlaylist> = emptyList(),
     val selectedPlaylistId: String? = null,
@@ -64,4 +79,10 @@ data class ChannelsUiState(
     // EPG Guide
     val guideChannels: List<EnrichedChannel> = emptyList(),
     val guideProgrammes: Map<String, List<EpgProgramme>> = emptyMap(),
+    val isLoadingGuide: Boolean = false,
+    val guideError: String? = null,
+    val epgState: EpgState = EpgState.NotConfigured,
+    // Audio output (TV live player)
+    val audioPassthroughEnabled: Boolean = false,
+    val preferSurroundCodecs: Boolean = true,
 )

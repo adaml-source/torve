@@ -87,6 +87,8 @@ data class EpgProgramme(
 data class EpgData(
     val channels: Map<String, EpgChannel> = emptyMap(),
     val programmes: List<EpgProgramme> = emptyList(),
+    val programmesByChannelKey: Map<String, List<EpgProgramme>> = emptyMap(),
+    val generationId: Long? = null,
 )
 
 data class EnrichedChannel(
