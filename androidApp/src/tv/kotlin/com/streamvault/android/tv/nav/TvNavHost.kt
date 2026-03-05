@@ -8,12 +8,10 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.streamvault.android.tv.screens.TvDetailsScreen
-import com.streamvault.android.tv.screens.TvHomeScreen
-import com.streamvault.android.tv.screens.TvLibraryScreen
-import com.streamvault.android.tv.screens.TvMoviesScreen
-import com.streamvault.android.tv.screens.TvSearchScreen
-import com.streamvault.android.tv.screens.TvSettingsScreen
-import com.streamvault.android.tv.screens.TvShowsScreen
+import com.streamvault.android.tv.screens.TvHomeLayoutScreen
+import com.streamvault.android.tv.screens.TvLivePlayerScreen
+import com.streamvault.android.tv.screens.TvRatingsSettingsScreen
+import com.streamvault.android.tv.screens.TvSeeAllScreen
 import com.streamvault.android.ui.player.PlayerScreen
 import com.streamvault.domain.model.MediaItem
 import com.streamvault.domain.model.MediaType
@@ -24,99 +22,66 @@ private fun NavHostController.navigateToTvDetails(item: MediaItem, autoPlay: Boo
     navigate(TvRoutes.details(type = type, id = id, autoPlay = autoPlay))
 }
 
+/**
+ * NavHost that only handles sub-routes (overlay screens).
+ * Top-level tab screens (Home, Movies, Shows, etc.) are rendered as
+ * keep-alive composables in [com.streamvault.android.tv.TvRoot] and are
+ * NOT part of this NavHost.
+ */
 @Composable
 fun TvNavHost(
     navController: NavHostController,
     railFocusRequester: FocusRequester,
-    headerFocusRequester: FocusRequester,
-    onFirstContentRequester: (String, FocusRequester) -> Unit,
-    onContentFocused: (String, FocusRequester) -> Unit,
     onVoiceSearchQuery: (String) -> Unit,
-    searchSeedQuery: String? = null,
+    onSettingsClick: () -> Unit = {},
+    onFirstContentRequester: (FocusRequester) -> Unit = {},
+    onContentFocused: (FocusRequester) -> Unit = {},
 ) {
     NavHost(
         navController = navController,
-        startDestination = TvRoutes.HOME,
+        startDestination = TvRoutes.SUB_NAV_START,
     ) {
-        composable(TvRoutes.HOME) {
-            TvHomeScreen(
+        /* Empty placeholder — visible when no sub-route is active */
+        composable(TvRoutes.SUB_NAV_START) { /* nothing */ }
+
+        composable(TvRoutes.HOME_LAYOUT) {
+            TvHomeLayoutScreen(
                 railFocusRequester = railFocusRequester,
-                headerFocusRequester = headerFocusRequester,
-                onMediaClick = { item -> navController.navigateToTvDetails(item) },
-                onFirstContentRequester = { requester ->
-                    onFirstContentRequester(TvRoutes.HOME, requester)
-                },
-                onContentFocused = { requester ->
-                    onContentFocused(TvRoutes.HOME, requester)
-                },
+                onBack = { navController.popBackStack() },
+                onFirstContentRequester = onFirstContentRequester,
+                onContentFocused = onContentFocused,
             )
         }
 
-        composable(TvRoutes.MOVIES) {
-            TvMoviesScreen(
+        composable(TvRoutes.RATINGS_SETTINGS) {
+            TvRatingsSettingsScreen(
                 railFocusRequester = railFocusRequester,
-                headerFocusRequester = headerFocusRequester,
-                onMediaClick = { item -> navController.navigateToTvDetails(item) },
-                onFirstContentRequester = { requester ->
-                    onFirstContentRequester(TvRoutes.MOVIES, requester)
-                },
-                onContentFocused = { requester ->
-                    onContentFocused(TvRoutes.MOVIES, requester)
-                },
+                onBack = { navController.popBackStack() },
+                onFirstContentRequester = onFirstContentRequester,
+                onContentFocused = onContentFocused,
             )
         }
 
-        composable(TvRoutes.SHOWS) {
-            TvShowsScreen(
+        composable(
+            route = TvRoutes.SEE_ALL,
+            arguments = listOf(
+                navArgument("railKey") { type = NavType.StringType },
+                navArgument("mediaType") { type = NavType.StringType },
+                navArgument("title") { type = NavType.StringType },
+            ),
+        ) { backStackEntry ->
+            val railKey = backStackEntry.arguments?.getString("railKey") ?: ""
+            val mediaType = backStackEntry.arguments?.getString("mediaType") ?: "movie"
+            val title = backStackEntry.arguments?.getString("title") ?: ""
+            TvSeeAllScreen(
+                railKey = railKey,
+                mediaType = mediaType,
+                title = title,
                 railFocusRequester = railFocusRequester,
-                headerFocusRequester = headerFocusRequester,
                 onMediaClick = { item -> navController.navigateToTvDetails(item) },
-                onFirstContentRequester = { requester ->
-                    onFirstContentRequester(TvRoutes.SHOWS, requester)
-                },
-                onContentFocused = { requester ->
-                    onContentFocused(TvRoutes.SHOWS, requester)
-                },
-            )
-        }
-
-        composable(TvRoutes.SEARCH) {
-            TvSearchScreen(
-                railFocusRequester = railFocusRequester,
-                initialQuery = searchSeedQuery.orEmpty(),
-                onMediaClick = { item -> navController.navigateToTvDetails(item) },
-                onFirstContentRequester = { requester ->
-                    onFirstContentRequester(TvRoutes.SEARCH, requester)
-                },
-                onContentFocused = { requester ->
-                    onContentFocused(TvRoutes.SEARCH, requester)
-                },
-            )
-        }
-
-        composable(TvRoutes.LIBRARY) {
-            TvLibraryScreen(
-                railFocusRequester = railFocusRequester,
-                headerFocusRequester = headerFocusRequester,
-                onMediaClick = { item -> navController.navigateToTvDetails(item) },
-                onFirstContentRequester = { requester ->
-                    onFirstContentRequester(TvRoutes.LIBRARY, requester)
-                },
-                onContentFocused = { requester ->
-                    onContentFocused(TvRoutes.LIBRARY, requester)
-                },
-            )
-        }
-
-        composable(TvRoutes.SETTINGS) {
-            TvSettingsScreen(
-                railFocusRequester = railFocusRequester,
-                onFirstContentRequester = { requester ->
-                    onFirstContentRequester(TvRoutes.SETTINGS, requester)
-                },
-                onContentFocused = { requester ->
-                    onContentFocused(TvRoutes.SETTINGS, requester)
-                },
+                onBack = { navController.popBackStack() },
+                onFirstContentRequester = onFirstContentRequester,
+                onContentFocused = onContentFocused,
             )
         }
 
@@ -139,11 +104,21 @@ fun TvNavHost(
                 autoPlay = autoPlay,
                 railFocusRequester = railFocusRequester,
                 onBack = { navController.popBackStack() },
-                onFirstContentRequester = { requester ->
-                    onFirstContentRequester("tv_details", requester)
+                onFirstContentRequester = onFirstContentRequester,
+                onContentFocused = onContentFocused,
+                onMediaClick = { item -> navController.navigateToTvDetails(item) },
+                onSettingsClick = {
+                    navController.popBackStack()
+                    onSettingsClick()
                 },
-                onContentFocused = { requester ->
-                    onContentFocused("tv_details", requester)
+                onCastClick = { castId, castName ->
+                    navController.navigate(
+                        TvRoutes.seeAll(
+                            railKey = "person_credits_$castId",
+                            mediaType = "movie",
+                            title = castName,
+                        ),
+                    )
                 },
                 onPlayResolved = { url, fallbackUrl, mediaItem, season, episode ->
                     val mediaType = if (mediaItem.type == MediaType.SERIES) "tv" else "movie"
@@ -164,6 +139,22 @@ fun TvNavHost(
                         ),
                     )
                 },
+            )
+        }
+
+        composable(
+            route = TvRoutes.LIVE_PLAYER,
+            arguments = listOf(
+                navArgument("channelUrl") { type = NavType.StringType; defaultValue = "" },
+                navArgument("channelName") { type = NavType.StringType; defaultValue = "" },
+                navArgument("groupName") { type = NavType.StringType; defaultValue = "" },
+            ),
+        ) { backStackEntry ->
+            TvLivePlayerScreen(
+                channelUrl = backStackEntry.arguments?.getString("channelUrl") ?: "",
+                channelName = backStackEntry.arguments?.getString("channelName") ?: "",
+                groupName = backStackEntry.arguments?.getString("groupName") ?: "",
+                onBack = { navController.popBackStack() },
             )
         }
 
@@ -201,11 +192,6 @@ fun TvNavHost(
                     val normalized = query.trim()
                     if (normalized.isNotBlank()) {
                         onVoiceSearchQuery(normalized)
-                        navController.navigate(TvRoutes.SEARCH) {
-                            popUpTo(TvRoutes.HOME) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
                     }
                 },
                 onBack = { navController.popBackStack() },

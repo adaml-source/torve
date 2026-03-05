@@ -83,6 +83,8 @@ import com.streamvault.android.player.CastManager
 import com.streamvault.android.player.ExoPlayerEngine
 import com.streamvault.android.player.MPVPlayerEngine
 import com.streamvault.android.player.MPVView
+import com.streamvault.android.ui.sync.RequireSync
+import com.streamvault.android.ui.sync.SyncGateReason
 import com.streamvault.data.trakt.TraktClient
 import com.streamvault.data.trakt.TraktHistoryBody
 import com.streamvault.data.trakt.TraktHistoryMovie
@@ -104,6 +106,7 @@ import com.streamvault.domain.repository.MetadataRepository
 import com.streamvault.domain.repository.StreamRepository
 import com.streamvault.domain.repository.PreferencesRepository
 import com.streamvault.domain.repository.WatchProgressRepository
+import com.streamvault.domain.sync.AccountSyncManager
 import com.streamvault.presentation.player.TraktScrobbler
 import com.streamvault.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.delay
@@ -125,6 +128,7 @@ fun PlayerScreen(
     showTmdbId: Int? = null,
     showImdbId: String? = null,
     onBack: () -> Unit,
+    onSyncRequired: () -> Unit = {},
     watchProgressRepo: WatchProgressRepository = koinInject(),
     metadataRepo: MetadataRepository = koinInject(),
     streamRepo: StreamRepository = koinInject(),
@@ -133,8 +137,10 @@ fun PlayerScreen(
     traktScrobbler: TraktScrobbler = koinInject(),
     traktClient: TraktClient = koinInject(),
     prefsRepo: PreferencesRepository = koinInject(),
+    accountSyncManager: AccountSyncManager = koinInject(),
 ) {
     val context = LocalContext.current
+    val syncStatus by accountSyncManager.status.collectAsState()
 
     // Google Cast
     val castManager = remember {
@@ -974,6 +980,30 @@ fun PlayerScreen(
                                 tint = if (audioEqualizer?.enabled == true) com.streamvault.android.ui.theme.Amber else Color.White,
                                 modifier = Modifier.size(24.dp),
                             )
+                        }
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 56.dp, end = 12.dp)
+                        .width(220.dp),
+                ) {
+                    RequireSync(
+                        reason = SyncGateReason.PLAYBACK_HANDOFF,
+                        status = syncStatus,
+                        onProceed = onSyncRequired,
+                    ) {
+                        Button(
+                            onClick = {
+                                Toast.makeText(context, "Playback handoff sent in this build (stub)", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(Icons.Default.Tv, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Play on device")
                         }
                     }
                 }

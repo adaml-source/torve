@@ -8,9 +8,13 @@ import com.streamvault.domain.model.MediaItem
 fun TvMoviesScreen(
     railFocusRequester: FocusRequester,
     headerFocusRequester: FocusRequester,
+    heroOverlay: (@Composable () -> Unit)? = null,
     onMediaClick: (MediaItem) -> Unit,
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
+    onMediaFocused: ((MediaItem) -> Unit)? = null,
+    onSeeAll: ((railKey: String, title: String) -> Unit)? = null,
+    shouldAutoFocus: Boolean = true,
 ) {
     TvCatalogRailsScreen(
         mediaType = "movie",
@@ -19,6 +23,9 @@ fun TvMoviesScreen(
         onMediaClick = onMediaClick,
         onFirstContentRequester = onFirstContentRequester,
         onContentFocused = onContentFocused,
+        onMediaFocused = onMediaFocused,
+        onSeeAll = onSeeAll,
+        heroOverlay = heroOverlay,
+        shouldAutoFocus = shouldAutoFocus,
     )
 }
-

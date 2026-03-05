@@ -47,22 +47,37 @@ fun DevicesScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Devices", style = MaterialTheme.typography.headlineMedium)
+        Text("Pair TV", style = MaterialTheme.typography.headlineMedium)
+        Text(
+            text = "Local Wi-Fi only. Pair TVs in your home network.",
+            style = MaterialTheme.typography.bodyMedium,
+        )
 
         OutlinedTextField(
             value = pairingCode,
             onValueChange = { pairingCode = it },
-            label = { Text("Pairing Code") },
+            label = { Text("TV Pairing Code") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { syncCoordinator.claimPairingCode(pairingCode) }) {
-                Text("Claim TV")
+            Button(
+                onClick = { syncCoordinator.claimPairingCode(pairingCode) },
+                enabled = state.isAuthenticated,
+            ) {
+                Text("Pair TV")
             }
             OutlinedButton(onClick = { syncCoordinator.refreshDevices() }) {
                 Text("Refresh")
             }
+        }
+
+        if (!state.isAuthenticated) {
+            Text(
+                text = "Create a local profile first to pair devices.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
         }
 
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -95,7 +110,7 @@ private fun DeviceRow(
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(text = device.deviceName, style = MaterialTheme.typography.titleMedium)
-            Text(text = "${device.deviceType} • ${device.platform}", style = MaterialTheme.typography.bodySmall)
+            Text(text = "${device.deviceType} - ${device.platform}", style = MaterialTheme.typography.bodySmall)
             Text(text = "Last seen: ${device.lastSeenAt}", style = MaterialTheme.typography.bodySmall)
             if (device.revokedAt != null) {
                 Text(text = "Revoked: ${device.revokedAt}", color = MaterialTheme.colorScheme.error)
@@ -107,4 +122,3 @@ private fun DeviceRow(
         }
     }
 }
-

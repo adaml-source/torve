@@ -314,7 +314,8 @@ CREATE TABLE download_queue (
     season_number INTEGER,
     episode_number INTEGER,
     created_at INTEGER NOT NULL,
-    completed_at INTEGER
+    completed_at INTEGER,
+    bulk_group_id TEXT
 );
 
 getAllDownloads:
@@ -333,7 +334,7 @@ getDownloadByMediaId:
 SELECT * FROM download_queue WHERE media_id = ?;
 
 insertDownload:
-INSERT OR REPLACE INTO download_queue (id, media_id, media_type, title, poster_url, stream_url, file_path, file_size_bytes, downloaded_bytes, status, season_number, episode_number, created_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO download_queue (id, media_id, media_type, title, poster_url, stream_url, file_path, file_size_bytes, downloaded_bytes, status, season_number, episode_number, created_at, completed_at, bulk_group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 updateDownloadProgress:
 UPDATE download_queue SET downloaded_bytes = ?, status = ? WHERE id = ?;

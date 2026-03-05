@@ -40,15 +40,23 @@ data class DeviceCodecCaps(
      * [title] is optional; used to detect high-profile indicators in torrent names.
      */
     fun canDecode(codec: String?, bitDepth: String? = null, title: String? = null): Boolean {
-        if (codec.isNullOrBlank()) return true // unknown codec = allow, deprioritize later
-        val c = codec.uppercase()
         val t = title?.uppercase().orEmpty()
+
+        // Even when codec is unknown, reject if the title clearly indicates
+        // HEVC/DV content and this is a weak HEVC device
+        if (codec.isNullOrBlank()) {
+            if (isWeakHevcDevice && titleImpliesHevc(t)) return false
+            return true
+        }
+
+        val c = codec.uppercase()
         return when {
             c.contains("H.264") || c.contains("H264") || c.contains("X264") || c.contains("AVC") ->
                 supportsH264
 
-            c.contains("HEVC") || c.contains("H.265") || c.contains("H265") || c.contains("X265") -> {
-                // Weak HEVC device (emulator, low-end) = reject all HEVC
+            c.contains("HEVC") || c.contains("H.265") || c.contains("H265") || c.contains("X265") ||
+                c.contains("DV") || c.contains("DOLBY") -> {
+                // Weak HEVC device (emulator, low-end) = reject all HEVC / DV
                 if (isWeakHevcDevice) return false
 
                 val is10Bit = bitDepth == "10" ||
@@ -71,6 +79,11 @@ data class DeviceCodecCaps(
             else -> true // unknown codec, allow but deprioritize
         }
     }
+
+    private fun titleImpliesHevc(upperTitle: String): Boolean =
+        upperTitle.contains("HEVC") || upperTitle.contains("H.265") || upperTitle.contains("H265") ||
+            upperTitle.contains("X265") || upperTitle.contains("DOLBY VISION") ||
+            upperTitle.contains("DV") || upperTitle.contains("HDR")
 
     companion object {
         /** Safe fallback for platforms where we cannot query codecs — H.264 only. */

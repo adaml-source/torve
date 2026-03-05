@@ -51,6 +51,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -59,6 +60,7 @@ import com.streamvault.android.ui.components.BackButton
 import com.streamvault.android.ui.components.CardSize
 import com.streamvault.android.ui.components.PosterCard
 import com.streamvault.android.ui.components.getRatingSourceColor
+import com.streamvault.android.R
 import com.streamvault.android.ui.components.getRatingSourceExample
 import com.streamvault.android.ui.components.ratingSourceIconRes
 import com.streamvault.android.ui.theme.Amber
@@ -112,7 +114,7 @@ fun RatingSettingsScreen(
         ) {
             BackButton(onClick = onBack)
             Text(
-                "Ratings",
+                stringResource(R.string.ratings_title),
                 style = MaterialTheme.typography.titleLarge,
                 color = Snow,
                 fontWeight = FontWeight.Bold,
@@ -137,8 +139,8 @@ fun RatingSettingsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(Modifier.weight(1f)) {
-                                Text("Show on Detail Page", color = Snow, fontWeight = FontWeight.SemiBold)
-                                Text("Display ratings on movie/show detail screen", color = Silver, fontSize = 12.sp)
+                                Text(stringResource(R.string.ratings_show_detail), color = Snow, fontWeight = FontWeight.SemiBold)
+                                Text(stringResource(R.string.ratings_show_detail_desc), color = Silver, fontSize = 12.sp)
                             }
                             Switch(
                                 checked = prefs.showRatingsOnDetailPage,
@@ -155,8 +157,8 @@ fun RatingSettingsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(Modifier.weight(1f)) {
-                                Text("Show Torve Score on Detail", color = Snow, fontWeight = FontWeight.SemiBold)
-                                Text("Displays weighted Torve Score in metadata row", color = Silver, fontSize = 12.sp)
+                                Text(stringResource(R.string.ratings_torve_detail), color = Snow, fontWeight = FontWeight.SemiBold)
+                                Text(stringResource(R.string.ratings_torve_detail_desc), color = Silver, fontSize = 12.sp)
                             }
                             Switch(
                                 checked = prefs.showTorveScoreOnDetailPage,
@@ -173,8 +175,8 @@ fun RatingSettingsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(Modifier.weight(1f)) {
-                                Text("Allow Torve Score Pill on Cards", color = Snow, fontWeight = FontWeight.SemiBold)
-                                Text("Enable Torve Score in provider pills", color = Silver, fontSize = 12.sp)
+                                Text(stringResource(R.string.ratings_torve_cards), color = Snow, fontWeight = FontWeight.SemiBold)
+                                Text(stringResource(R.string.ratings_torve_cards_desc), color = Silver, fontSize = 12.sp)
                             }
                             Switch(
                                 checked = prefs.showTorveScoreOnCards,
@@ -191,8 +193,8 @@ fun RatingSettingsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(Modifier.weight(1f)) {
-                                Text("Allow Ratings on Landscape Cards", color = Snow, fontWeight = FontWeight.SemiBold)
-                                Text("Show compact rating pills on backdrop-style cards", color = Silver, fontSize = 12.sp)
+                                Text(stringResource(R.string.ratings_landscape), color = Snow, fontWeight = FontWeight.SemiBold)
+                                Text(stringResource(R.string.ratings_landscape_desc), color = Silver, fontSize = 12.sp)
                             }
                             Switch(
                                 checked = prefs.allowRatingsOnLandscapeCards,
@@ -218,8 +220,8 @@ fun RatingSettingsScreen(
                     colors = CardDefaults.cardColors(containerColor = Charcoal),
                 ) {
                     Column(Modifier.padding(16.dp)) {
-                        Text("Torve Score Weights", color = Snow, fontWeight = FontWeight.SemiBold)
-                        Text("Weights are normalized using available sources", color = Silver, fontSize = 12.sp)
+                        Text(stringResource(R.string.ratings_torve_weights), color = Snow, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.ratings_weights_desc), color = Silver, fontSize = 12.sp)
                         Spacer(Modifier.height(10.dp))
                         prefs.torveWeights.entries.forEach { (source, weight) ->
                             Row(
@@ -275,7 +277,7 @@ fun RatingSettingsScreen(
                                 ) {
                                     Icon(Icons.Rounded.Add, contentDescription = null, tint = Amber, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(6.dp))
-                                    Text("Add Provider", color = Amber)
+                                    Text(stringResource(R.string.ratings_add_provider), color = Amber)
                                 }
                                 DropdownMenu(
                                     expanded = addMenuExpanded,
@@ -300,7 +302,7 @@ fun RatingSettingsScreen(
                             onClick = { viewModel.updateRatingPrefs(prefs.copy(torveWeights = defaultTorveWeights())) },
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Text("Reset Torve Weights", color = Amber)
+                            Text(stringResource(R.string.ratings_reset_weights), color = Amber)
                         }
                     }
                 }
@@ -313,8 +315,8 @@ fun RatingSettingsScreen(
                     colors = CardDefaults.cardColors(containerColor = Charcoal),
                 ) {
                     Column(Modifier.padding(16.dp)) {
-                        Text("Pill Position", color = Snow, fontWeight = FontWeight.SemiBold)
-                        Text("Where to show rating pills on poster cards", color = Silver, fontSize = 12.sp)
+                        Text(stringResource(R.string.ratings_pill_position), color = Snow, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.ratings_pill_position_desc), color = Silver, fontSize = 12.sp)
                         Spacer(Modifier.height(12.dp))
                         PillPositionPicker(
                             selected = prefs.pillPosition,
@@ -336,7 +338,7 @@ fun RatingSettingsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
-                            Text("Max Ratings on Card", color = Snow, fontWeight = FontWeight.SemiBold)
+                            Text(stringResource(R.string.ratings_max_on_card), color = Snow, fontWeight = FontWeight.SemiBold)
                             Text(
                                 "${prefs.maxRatingsOnCard}",
                                 color = Amber,
@@ -344,7 +346,7 @@ fun RatingSettingsScreen(
                                 fontSize = 16.sp,
                             )
                         }
-                        Text("How many rating pills to show on poster cards", color = Silver, fontSize = 12.sp)
+                        Text(stringResource(R.string.ratings_max_on_card_desc), color = Silver, fontSize = 12.sp)
                         Spacer(Modifier.height(4.dp))
                         Slider(
                             value = prefs.maxRatingsOnCard.toFloat(),
@@ -377,7 +379,7 @@ fun RatingSettingsScreen(
                     colors = CardDefaults.cardColors(containerColor = Charcoal),
                 ) {
                     Column(Modifier.padding(16.dp)) {
-                        Text("Pill Style", color = Snow, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.ratings_pill_style), color = Snow, fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             RatingPillStyle.entries.forEach { style ->
@@ -386,8 +388,8 @@ fun RatingSettingsScreen(
                                     onClick = { viewModel.updateRatingPrefs(prefs.copy(pillStyle = style)) },
                                     label = {
                                         Text(when (style) {
-                                            RatingPillStyle.ICON -> "With Icon"
-                                            RatingPillStyle.LETTER -> "With Letter"
+                                            RatingPillStyle.ICON -> stringResource(R.string.ratings_with_icon)
+                                            RatingPillStyle.LETTER -> stringResource(R.string.ratings_with_letter)
                                         })
                                     },
                                     colors = FilterChipDefaults.filterChipColors(
@@ -410,8 +412,8 @@ fun RatingSettingsScreen(
                     colors = CardDefaults.cardColors(containerColor = Charcoal),
                 ) {
                     Column(Modifier.padding(16.dp)) {
-                        Text("Preview", color = Snow, fontWeight = FontWeight.SemiBold)
-                        Text("Compact preview of inside vs outside placement", color = Silver, fontSize = 12.sp)
+                        Text(stringResource(R.string.ratings_preview), color = Snow, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.ratings_preview_desc), color = Silver, fontSize = 12.sp)
                         Spacer(Modifier.height(12.dp))
                         RatingsPreviewRow(prefs = prefs, baseStyle = defaultCardStyle)
                     }
@@ -421,10 +423,10 @@ fun RatingSettingsScreen(
             // Per-source section header
             item {
                 Spacer(Modifier.height(4.dp))
-                Text("Rating Sources", style = MaterialTheme.typography.labelLarge, color = Ash,
+                Text(stringResource(R.string.ratings_sources), style = MaterialTheme.typography.labelLarge, color = Ash,
                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp))
                 Text(
-                    "Enable sources and reorder with arrows. Higher sources show first.",
+                    stringResource(R.string.ratings_sources_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = Silver,
                     modifier = Modifier.padding(horizontal = 4.dp),
@@ -466,7 +468,7 @@ fun RatingSettingsScreen(
                             ) {
                                 Icon(
                                     Icons.Rounded.KeyboardArrowUp,
-                                    contentDescription = "Move up",
+                                    contentDescription = stringResource(R.string.home_move_up),
                                     tint = if (index > 0) Amber else Steel,
                                     modifier = Modifier.size(18.dp),
                                 )
@@ -485,7 +487,7 @@ fun RatingSettingsScreen(
                             ) {
                                 Icon(
                                     Icons.Rounded.KeyboardArrowDown,
-                                    contentDescription = "Move down",
+                                    contentDescription = stringResource(R.string.home_move_down),
                                     tint = if (index < sortedSources.size - 1) Amber else Steel,
                                     modifier = Modifier.size(18.dp),
                                 )
@@ -563,7 +565,7 @@ fun RatingSettingsScreen(
                     onClick = { viewModel.updateRatingPrefs(RatingDisplayPrefs()) },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("Reset to Defaults", color = Amber)
+                    Text(stringResource(R.string.ratings_reset_defaults), color = Amber)
                 }
                 Spacer(Modifier.height(32.dp))
             }
@@ -578,8 +580,8 @@ private fun PillPositionPicker(
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         listOf(
-            RatingPillPosition.INSIDE to "Inside Card",
-            RatingPillPosition.OUTSIDE to "Outside Card",
+            RatingPillPosition.INSIDE to stringResource(R.string.ratings_inside_card),
+            RatingPillPosition.OUTSIDE to stringResource(R.string.ratings_outside_card),
         ).forEach { (position, label) ->
             FilterChip(
                 selected = selected == position,
@@ -629,7 +631,7 @@ private fun RatingsPreviewRow(prefs: RatingDisplayPrefs, baseStyle: CardStyle) {
             horizontalArrangement = Arrangement.spacedBy(gap),
         ) {
             RatingPreviewCard(
-                title = "Inside",
+                title = stringResource(R.string.ratings_inside),
                 position = RatingPillPosition.INSIDE,
                 selected = prefs.pillPosition == RatingPillPosition.INSIDE,
                 prefs = prefs,
@@ -638,7 +640,7 @@ private fun RatingsPreviewRow(prefs: RatingDisplayPrefs, baseStyle: CardStyle) {
                 baseStyle = baseStyle,
             )
             RatingPreviewCard(
-                title = "Outside",
+                title = stringResource(R.string.ratings_outside),
                 position = RatingPillPosition.OUTSIDE,
                 selected = prefs.pillPosition == RatingPillPosition.OUTSIDE,
                 prefs = prefs,

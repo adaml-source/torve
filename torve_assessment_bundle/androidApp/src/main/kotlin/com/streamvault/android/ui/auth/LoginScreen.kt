@@ -33,6 +33,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.streamvault.data.auth.AuthClient
+import com.streamvault.domain.sync.AccountSyncManager
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
@@ -41,6 +42,7 @@ fun LoginScreen(
     onLoginSuccess: () -> Unit,
     onSkip: () -> Unit,
     authClient: AuthClient = koinInject(),
+    accountSyncManager: AccountSyncManager = koinInject(),
 ) {
     val scope = rememberCoroutineScope()
     var isRegisterMode by remember { mutableStateOf(false) }
@@ -130,6 +132,7 @@ fun LoginScreen(
                     }
                     isLoading = false
                     if (result.success) {
+                        accountSyncManager.refreshStatus()
                         onLoginSuccess()
                     } else {
                         error = result.error
@@ -156,11 +159,24 @@ fun LoginScreen(
 
         Spacer(Modifier.height(16.dp))
 
+        Text(
+            text = stringResource(R.string.login_local_mode_description),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Spacer(Modifier.height(8.dp))
+
         OutlinedButton(
-            onClick = onSkip,
+            onClick = {
+                scope.launch {
+                    accountSyncManager.markLocalOnly()
+                    onSkip()
+                }
+            },
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text(stringResource(R.string.login_skip))
+            Text(stringResource(R.string.login_continue_local_mode))
         }
     }
 }

@@ -58,12 +58,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.streamvault.android.ui.components.CardSize
 import com.streamvault.android.ui.components.LocalCardStyle
 import com.streamvault.android.ui.components.PosterCard
+import com.streamvault.android.ui.sync.RequireSync
+import com.streamvault.android.ui.sync.SyncGateReason
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.AmberSubtle
 import com.streamvault.android.ui.theme.Charcoal
@@ -74,6 +77,7 @@ import com.streamvault.android.ui.theme.Snow
 import com.streamvault.android.ui.theme.StreamVault
 import com.streamvault.domain.model.MediaItem
 import com.streamvault.domain.model.resolveCardStyle
+import com.streamvault.domain.sync.AccountSyncManager
 import com.streamvault.presentation.catalog.RuntimeFilter
 import com.streamvault.presentation.catalog.SortOption
 import com.streamvault.presentation.settings.SettingsViewModel
@@ -94,11 +98,15 @@ private val genreOptions = listOf(
 @Composable
 fun SearchScreen(
     onMediaClick: (MediaItem) -> Unit,
+    onSyncRequired: () -> Unit = {},
     viewModel: SearchViewModel = koinInject(),
     settingsViewModel: SettingsViewModel = koinInject(),
+    accountSyncManager: AccountSyncManager = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
+    val syncStatus by accountSyncManager.status.collectAsState()
+    val context = LocalContext.current
     val defaultCardStyle = resolveCardStyle(
         presets = settingsState.cardStylePresets,
         presetId = null,
@@ -197,6 +205,29 @@ fun SearchScreen(
             }
         }
 
+
+        Spacer(Modifier.height(8.dp))
+
+        RequireSync(
+            reason = SyncGateReason.SEND_TO_TV,
+            status = syncStatus,
+            onProceed = onSyncRequired,
+        ) {
+            FilledTonalButton(
+                onClick = {
+                    android.widget.Toast.makeText(
+                        context,
+                        "Sent to TV in this build (stub)",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+            ) {
+                Text("Send current search to TV")
+            }
+        }
         // ── Active Filter Chips ──
         if (state.filter.isActive) {
             Row(
@@ -489,7 +520,6 @@ fun SearchScreen(
             onDismiss = { viewModel.dismissFilterSheet() },
         )
     }
-}
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

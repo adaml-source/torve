@@ -19,6 +19,8 @@ class MPVPlayerEngine(
 
     private val listeners = mutableListOf<PlayerListener>()
     private var initialized = false
+    private var audioPassthroughEnabled = false
+    private var preferSurroundCodecs = true
 
     fun initialize(): Boolean {
         if (!MPVLib.tryLoad()) return false
@@ -47,6 +49,7 @@ class MPVPlayerEngine(
         MPVLib.observeProperty("track-list/count", MPVLib.MPV_FORMAT_INT64)
 
         initialized = true
+        applyAudioOutputPreferences()
         return true
     }
 
@@ -144,6 +147,44 @@ class MPVPlayerEngine(
             (MPVLib.getPropertyDouble("audio-delay") * 1000).toInt()
         } catch (_: Exception) {
             0
+        }
+    }
+
+    fun setPictureFormat(aspectRatio: Float?, fill: Boolean) {
+        if (!initialized) return
+        if (fill) {
+            MPVLib.setPropertyDouble("video-aspect-override", -1.0)
+            MPVLib.setPropertyDouble("panscan", 1.0)
+        } else if (aspectRatio != null) {
+            MPVLib.setPropertyDouble("video-aspect-override", aspectRatio.toDouble())
+            MPVLib.setPropertyDouble("panscan", 0.0)
+        } else {
+            MPVLib.setPropertyDouble("video-aspect-override", -1.0)
+            MPVLib.setPropertyDouble("panscan", 0.0)
+        }
+    }
+
+    fun setAudioOutputPreferences(
+        passthroughEnabled: Boolean,
+        preferSurround: Boolean,
+    ) {
+        audioPassthroughEnabled = passthroughEnabled
+        preferSurroundCodecs = preferSurround
+        applyAudioOutputPreferences()
+    }
+
+    private fun applyAudioOutputPreferences() {
+        if (!initialized) return
+        if (audioPassthroughEnabled) {
+            MPVLib.setPropertyString("audio-spdif", "ac3,eac3,dts,dts-hd,truehd")
+            if (preferSurroundCodecs) {
+                MPVLib.setPropertyString("audio-channels", "auto-safe")
+            } else {
+                MPVLib.setPropertyString("audio-channels", "stereo")
+            }
+        } else {
+            MPVLib.setPropertyString("audio-spdif", "")
+            MPVLib.setPropertyString("audio-channels", if (preferSurroundCodecs) "auto-safe" else "stereo")
         }
     }
 

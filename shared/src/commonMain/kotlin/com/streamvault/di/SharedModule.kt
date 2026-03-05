@@ -14,6 +14,7 @@ import com.streamvault.data.addon.SubtitleAggregator
 import com.streamvault.data.addon.StreamRepositoryImpl
 import com.streamvault.data.auth.AuthClient
 import com.streamvault.data.debrid.DebridClient
+import com.streamvault.data.download.BulkDownloadManager
 import com.streamvault.data.download.DownloadCatalogueBuilder
 import com.streamvault.data.download.DownloadRepositoryImpl
 import com.streamvault.data.integrations.CompositeLibraryOverlayService
@@ -179,6 +180,9 @@ val sharedModule = module {
 
     // Download Repository
     single<DownloadRepository> { DownloadRepositoryImpl(get()) }
+
+    // Bulk Download Manager
+    single { BulkDownloadManager(get(), get(), get(), get()) }
 
     // Download Catalogue
     single { DownloadCatalogueBuilder() }

@@ -50,6 +50,8 @@ class ExoPlayerEngine(
 
     /** Prevents infinite loop if audio fallback also fails. */
     private var audioFallbackAttempted = false
+    private var audioPassthroughEnabled = false
+    private var preferSurroundCodecs = true
 
     private val exoListener = object : Player.Listener {
         override fun onIsPlayingChanged(playing: Boolean) {
@@ -189,11 +191,14 @@ class ExoPlayerEngine(
             .setLoadControl(loadControl)
             .build()
             .also { it.addListener(exoListener) }
+        setAudioOutputPreferences(audioPassthroughEnabled, preferSurroundCodecs)
     }
 
     override fun play(url: String) {
         audioFallbackAttempted = false
         exoPlayer?.apply {
+            stop()
+            clearMediaItems()
             setMediaItem(MediaItem.fromUri(url))
             prepare()
             playWhenReady = true
@@ -343,6 +348,45 @@ class ExoPlayerEngine(
     override fun getAudioDelay(): Int = delayProcessor.getDelayMs()
 
     override fun getAudioSessionId(): Int = exoPlayer?.audioSessionId ?: 0
+
+    fun setAudioOutputPreferences(
+        passthroughEnabled: Boolean,
+        preferSurround: Boolean,
+    ) {
+        audioPassthroughEnabled = passthroughEnabled
+        preferSurroundCodecs = preferSurround
+
+        val player = exoPlayer ?: return
+        val surroundPreferredMimes = arrayOf(
+            "audio/true-hd",
+            "audio/vnd.dts.hd",
+            "audio/vnd.dts",
+            "audio/eac3-joc",
+            "audio/eac3",
+            "audio/ac3",
+            "audio/mp4a-latm",
+            "audio/opus",
+            "audio/mpeg",
+        )
+        val stereoFirstMimes = arrayOf(
+            "audio/mp4a-latm",
+            "audio/opus",
+            "audio/mpeg",
+            "audio/eac3",
+            "audio/ac3",
+            "audio/vnd.dts",
+            "audio/vnd.dts.hd",
+            "audio/true-hd",
+        )
+
+        player.trackSelectionParameters = player.trackSelectionParameters
+            .buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+            .setPreferredAudioMimeTypes(
+                *(if (passthroughEnabled || preferSurround) surroundPreferredMimes else stereoFirstMimes),
+            )
+            .build()
+    }
 
     fun getExoPlayer(): ExoPlayer? = exoPlayer
 

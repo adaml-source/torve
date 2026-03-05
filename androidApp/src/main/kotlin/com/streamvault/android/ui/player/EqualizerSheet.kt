@@ -35,6 +35,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
+import com.streamvault.android.R
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -93,12 +95,12 @@ fun EqualizerSheet(
                     .verticalScroll(rememberScrollState()),
             ) {
                 // Header
-                Text("Equalizer", color = Snow, style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.eq_title), color = Snow, style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(8.dp))
 
                 // Enable toggle
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Enabled", color = Silver, style = MaterialTheme.typography.bodySmall)
+                    Text(stringResource(R.string.eq_enabled), color = Silver, style = MaterialTheme.typography.bodySmall)
                     Spacer(Modifier.weight(1f))
                     Switch(
                         checked = enabled,
@@ -137,7 +139,7 @@ fun EqualizerSheet(
 
                 // Bass boost
                 EffectSlider(
-                    label = "Bass",
+                    label = stringResource(R.string.eq_bass),
                     value = bassBoost,
                     enabled = enabled,
                     onValueChange = {
@@ -151,7 +153,7 @@ fun EqualizerSheet(
 
                 // Virtualizer
                 EffectSlider(
-                    label = "Surround",
+                    label = stringResource(R.string.eq_surround),
                     value = virtualizer,
                     enabled = enabled,
                     onValueChange = {
@@ -177,10 +179,10 @@ fun EqualizerSheet(
                         refreshKey++
                         onStateChanged(equalizer.toStateString())
                     }) {
-                        Text("Reset", color = Silver, style = MaterialTheme.typography.labelMedium)
+                        Text(stringResource(R.string.common_reset), color = Silver, style = MaterialTheme.typography.labelMedium)
                     }
                     TextButton(onClick = onDismiss) {
-                        Text("Close", color = Amber, style = MaterialTheme.typography.labelMedium)
+                        Text(stringResource(R.string.common_close), color = Amber, style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }
@@ -221,7 +223,7 @@ fun EqualizerSheet(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        "Equalizer not available for this audio session",
+                        stringResource(R.string.eq_not_available),
                         color = Silver,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -248,7 +250,7 @@ private fun PresetSelector(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = selected?.label ?: "Custom",
+                text = selected?.label ?: stringResource(R.string.eq_custom),
                 color = Snow,
                 style = MaterialTheme.typography.bodyMedium,
             )

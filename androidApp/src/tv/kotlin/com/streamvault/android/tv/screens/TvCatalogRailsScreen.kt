@@ -1,13 +1,18 @@
 package com.streamvault.android.tv.screens
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.res.stringResource
 import com.streamvault.android.R
+import com.streamvault.android.tv.TvScreenCache
 import com.streamvault.android.tv.components.TvContentRail
 import com.streamvault.android.tv.components.TvMediaRails
+import com.streamvault.android.tv.components.dedupeAcrossRails
 import com.streamvault.android.tv.components.rememberTvFocusMemory
 import com.streamvault.domain.model.MediaItem
 import com.streamvault.domain.repository.MetadataRepository
@@ -21,6 +26,8 @@ private data class CatalogRailsUiState(
     val error: String? = null,
 )
 
+private data class GenreSpec(val id: Int, val label: String)
+
 @Composable
 internal fun TvCatalogRailsScreen(
     mediaType: String,
@@ -29,27 +36,80 @@ internal fun TvCatalogRailsScreen(
     onMediaClick: (MediaItem) -> Unit,
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
+    onMediaFocused: ((MediaItem) -> Unit)? = null,
+    onSeeAll: ((railKey: String, title: String) -> Unit)? = null,
+    heroOverlay: (@Composable () -> Unit)? = null,
+    shouldAutoFocus: Boolean = true,
 ) {
     val metadataRepo: MetadataRepository = koinInject()
     val focusMemory = rememberTvFocusMemory()
-    val uiState by produceState(initialValue = CatalogRailsUiState(), metadataRepo, mediaType) {
-        value = CatalogRailsUiState(loading = true)
-        value = try {
+
+    val trendingLabel = if (mediaType == "movie") {
+        stringResource(R.string.tv_section_trending_movies)
+    } else {
+        stringResource(R.string.tv_section_trending_shows)
+    }
+    val popularLabel = if (mediaType == "movie") {
+        stringResource(R.string.tv_section_popular_movies)
+    } else {
+        stringResource(R.string.tv_section_popular_shows)
+    }
+    val topRatedLabel = if (mediaType == "movie") {
+        stringResource(R.string.tv_section_top_rated_movies)
+    } else {
+        stringResource(R.string.tv_section_top_rated_shows)
+    }
+
+    val genreSpecs = if (mediaType == "movie") {
+        listOf(
+            GenreSpec(28, stringResource(R.string.tv_genre_action)),
+            GenreSpec(35, stringResource(R.string.tv_genre_comedy)),
+            GenreSpec(878, stringResource(R.string.tv_genre_sci_fi)),
+            GenreSpec(27, stringResource(R.string.tv_genre_horror)),
+            GenreSpec(18, stringResource(R.string.tv_genre_drama)),
+            GenreSpec(16, stringResource(R.string.tv_genre_animation)),
+        )
+    } else {
+        listOf(
+            GenreSpec(10759, stringResource(R.string.tv_genre_action_adventure)),
+            GenreSpec(35, stringResource(R.string.tv_genre_comedy)),
+            GenreSpec(18, stringResource(R.string.tv_genre_drama)),
+            GenreSpec(10765, stringResource(R.string.tv_genre_sci_fi_fantasy)),
+            GenreSpec(80, stringResource(R.string.tv_genre_crime)),
+            GenreSpec(16, stringResource(R.string.tv_genre_animation)),
+        )
+    }
+
+    val cacheKey = "catalog_$mediaType"
+    var uiState by remember {
+        mutableStateOf(TvScreenCache.get<CatalogRailsUiState>(cacheKey) ?: CatalogRailsUiState())
+    }
+
+    LaunchedEffect(mediaType) {
+        if (uiState.rails.isNotEmpty()) return@LaunchedEffect
+        uiState = CatalogRailsUiState(loading = true)
+        uiState = try {
             val rails = coroutineScope {
                 val trendingDeferred = async { metadataRepo.getTrending(mediaType) }
                 val popularDeferred = async { metadataRepo.getPopular(mediaType) }
                 val topRatedDeferred = async { metadataRepo.getTopRated(mediaType) }
 
+                val genreDeferreds = genreSpecs.map { spec ->
+                    spec to async {
+                        try {
+                            metadataRepo.discover(
+                                type = mediaType,
+                                withGenres = spec.id.toString(),
+                            ).items.take(24)
+                        } catch (_: Throwable) {
+                            emptyList()
+                        }
+                    }
+                }
+
                 val trending = trendingDeferred.await().take(24)
                 val popular = popularDeferred.await().take(24)
                 val topRated = topRatedDeferred.await().take(24)
-
-                val trendingLabel =
-                    if (mediaType == "movie") "Trending Movies" else "Trending TV Shows"
-                val popularLabel =
-                    if (mediaType == "movie") "Popular Movies" else "Popular TV Shows"
-                val topRatedLabel =
-                    if (mediaType == "movie") "Top Rated Movies" else "Top Rated TV Shows"
 
                 buildList {
                     if (trending.isNotEmpty()) {
@@ -61,9 +121,21 @@ internal fun TvCatalogRailsScreen(
                     if (topRated.isNotEmpty()) {
                         add(TvContentRail("top_rated_$mediaType", topRatedLabel, topRated))
                     }
-                }
+                    for ((spec, deferred) in genreDeferreds) {
+                        val items = deferred.await()
+                        if (items.isNotEmpty()) {
+                            add(
+                                TvContentRail(
+                                    key = "genre_${mediaType}_${spec.id}",
+                                    title = spec.label,
+                                    items = items,
+                                ),
+                            )
+                        }
+                    }
+                }.dedupeAcrossRails()
             }
-            CatalogRailsUiState(loading = false, rails = rails)
+            CatalogRailsUiState(loading = false, rails = rails).also { TvScreenCache.put(cacheKey, it) }
         } catch (t: Throwable) {
             CatalogRailsUiState(loading = false, error = t.message ?: "Failed to load catalog")
         }
@@ -80,6 +152,9 @@ internal fun TvCatalogRailsScreen(
         focusMemory = focusMemory,
         loading = uiState.loading,
         emptyMessage = emptyMessage,
+        onMediaFocused = onMediaFocused,
+        onSeeAll = onSeeAll,
+        heroOverlay = heroOverlay,
+        shouldAutoFocus = shouldAutoFocus,
     )
 }
-

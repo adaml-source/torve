@@ -103,6 +103,28 @@ class WatchlistRepositoryImpl(
         syncSimklAdd(item)
     }
 
+    override suspend fun add(item: WatchlistItem, syncTrakt: Boolean, syncSimkl: Boolean) {
+        database.streamVaultQueries.insertWatchlistItem(
+            media_id = item.mediaId,
+            media_type = when (item.mediaType) {
+                MediaType.MOVIE -> "movie"
+                MediaType.SERIES -> "series"
+            },
+            tmdb_id = item.tmdbId.toLong(),
+            imdb_id = item.imdbId,
+            title = item.title,
+            poster_url = item.posterUrl,
+            backdrop_url = item.backdropUrl,
+            rating = item.rating,
+            year = item.year?.toLong(),
+            genres = item.genres,
+            added_at = item.addedAt,
+            sort_order = item.sortOrder.toLong(),
+        )
+        if (syncTrakt) syncTraktAdd(item)
+        if (syncSimkl) syncSimklAdd(item)
+    }
+
     override suspend fun remove(mediaId: String) {
         // Read item before deleting so we can sync to Trakt/Simkl
         val item = database.streamVaultQueries.getAllWatchlist().executeAsList()

@@ -38,6 +38,7 @@ data class Download(
     val episodeNumber: Int? = null,
     val createdAt: Long = 0,
     val completedAt: Long? = null,
+    val bulkGroupId: String? = null,
 ) {
     val progressPercent: Float
         get() = if (fileSizeBytes != null && fileSizeBytes > 0) {

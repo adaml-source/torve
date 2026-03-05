@@ -55,6 +55,8 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.ui.res.stringResource
+import com.streamvault.android.R
 import com.streamvault.android.ui.components.BackButton
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Ash
@@ -210,7 +212,7 @@ fun AddonCatalogScreen(
             BackButton(onClick = onBack)
             Spacer(Modifier.width(12.dp))
             Text(
-                "Addon Catalog",
+                stringResource(R.string.addon_catalog_title),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 color = Snow,
@@ -218,7 +220,7 @@ fun AddonCatalogScreen(
         }
 
         Text(
-            "${state.addons.size} installed",
+            stringResource(R.string.addon_catalog_installed_count, state.addons.size),
             style = MaterialTheme.typography.bodyMedium,
             color = Silver,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
@@ -228,7 +230,7 @@ fun AddonCatalogScreen(
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
-            placeholder = { Text("Search or paste addon URL...") },
+            placeholder = { Text(stringResource(R.string.addon_catalog_search_hint)) },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp),
@@ -255,7 +257,7 @@ fun AddonCatalogScreen(
                             viewModel.installAddon()
                             searchQuery = ""
                         }) {
-                            Icon(Icons.Default.Add, "Install", tint = Amber)
+                            Icon(Icons.Default.Add, stringResource(R.string.common_install), tint = Amber)
                         }
                     }
                 }
@@ -292,7 +294,7 @@ fun AddonCatalogScreen(
             if (state.addons.isNotEmpty()) {
                 item(key = "installed_header") {
                     Text(
-                        "Installed",
+                        stringResource(R.string.addon_catalog_installed),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                         color = Amber,
@@ -340,7 +342,7 @@ fun AddonCatalogScreen(
 
                         // Delete
                         IconButton(onClick = { viewModel.removeAddon(addon.manifestUrl) }) {
-                            Icon(Icons.Default.Delete, "Remove", tint = Ruby, modifier = Modifier.size(20.dp))
+                            Icon(Icons.Default.Delete, stringResource(R.string.common_remove), tint = Ruby, modifier = Modifier.size(20.dp))
                         }
                     }
                     HorizontalDivider(color = Steel.copy(alpha = 0.15f))
@@ -355,7 +357,7 @@ fun AddonCatalogScreen(
             if (availableAddons.isNotEmpty()) {
                 item(key = "available_header") {
                     Text(
-                        "Available",
+                        stringResource(R.string.addon_catalog_available),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                         color = Ash,
@@ -413,9 +415,9 @@ fun AddonCatalogScreen(
                                     strokeWidth = 2.dp,
                                 )
                                 Spacer(Modifier.width(8.dp))
-                                Text("Installing…", color = Amber)
+                                Text(stringResource(R.string.addon_catalog_installing), color = Amber)
                             } else {
-                                Text("Install", color = if (state.isInstalling) Steel else Amber)
+                                Text(stringResource(R.string.addon_catalog_install), color = if (state.isInstalling) Steel else Amber)
                             }
                         }
                     }
@@ -448,18 +450,18 @@ fun AddonCatalogScreen(
                                 },
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
                             ) {
-                                Text("Open in Browser")
+                                Text(stringResource(R.string.addon_catalog_open_browser))
                             }
                             TextButton(
                                 onClick = {
                                     clipboard.setText(androidx.compose.ui.text.AnnotatedString(lastUrl))
                                 },
                             ) {
-                                Text("Copy URL", color = Amber)
+                                Text(stringResource(R.string.addon_catalog_copy_url), color = Amber)
                             }
                         }
                         Text(
-                            text = "If the page shows a JSON manifest, copy its URL and try again.",
+                            text = stringResource(R.string.addon_catalog_manifest_hint),
                             style = MaterialTheme.typography.labelSmall,
                             color = Silver,
                             modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),

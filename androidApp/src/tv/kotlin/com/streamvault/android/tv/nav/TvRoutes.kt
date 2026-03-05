@@ -5,6 +5,7 @@ import androidx.annotation.StringRes
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -19,12 +20,22 @@ data class TvTopDestination(
 )
 
 object TvRoutes {
+    /** Empty start destination for the sub-route NavHost (details, player, etc.). */
+    const val SUB_NAV_START = "tv_none"
     const val HOME = "tv_home"
     const val MOVIES = "tv_movies"
     const val SHOWS = "tv_shows"
     const val SEARCH = "tv_search"
+    const val IPTV = "tv_iptv"
     const val LIBRARY = "tv_library"
     const val SETTINGS = "tv_settings"
+    const val HOME_LAYOUT = "tv_home_layout"
+    const val RATINGS_SETTINGS = "tv_ratings_settings"
+
+    const val SEE_ALL = "tv_see_all/{railKey}/{mediaType}/{title}"
+    fun seeAll(railKey: String, mediaType: String, title: String): String {
+        return "tv_see_all/${Uri.encode(railKey)}/${Uri.encode(mediaType)}/${Uri.encode(title)}"
+    }
 
     const val DETAILS = "tv_details/{type}/{id}?autoPlay={autoPlay}&handoffPositionMs={handoffPositionMs}"
     fun details(
@@ -34,6 +45,13 @@ object TvRoutes {
         handoffPositionMs: Long = 0L,
     ): String {
         return "tv_details/$type/$id?autoPlay=$autoPlay&handoffPositionMs=$handoffPositionMs"
+    }
+
+    const val LIVE_PLAYER = "tv_live_player?channelUrl={channelUrl}&channelName={channelName}&groupName={groupName}"
+    fun livePlayer(channelUrl: String, channelName: String, groupName: String): String {
+        return "tv_live_player?channelUrl=${Uri.encode(channelUrl)}" +
+            "&channelName=${Uri.encode(channelName)}" +
+            "&groupName=${Uri.encode(groupName)}"
     }
 
     const val PLAYER =
@@ -76,6 +94,7 @@ val tvTopDestinations = listOf(
     TvTopDestination(TvRoutes.HOME, R.string.nav_home, Icons.Filled.Home),
     TvTopDestination(TvRoutes.MOVIES, R.string.nav_movies, Icons.Filled.Movie),
     TvTopDestination(TvRoutes.SHOWS, R.string.nav_tv_shows, Icons.Filled.Tv),
+    TvTopDestination(TvRoutes.IPTV, R.string.tv_nav_iptv, Icons.Filled.LiveTv),
     TvTopDestination(TvRoutes.SEARCH, R.string.tv_nav_search, Icons.Filled.Search),
     TvTopDestination(TvRoutes.LIBRARY, R.string.tv_nav_library, Icons.Filled.Bookmark),
     TvTopDestination(TvRoutes.SETTINGS, R.string.tv_nav_settings, Icons.Filled.Settings),

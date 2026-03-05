@@ -59,6 +59,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import androidx.navigation.navDeepLink
 import com.streamvault.android.ui.auth.LoginScreen
 import com.streamvault.android.ui.calendar.CalendarScreen
 import com.streamvault.android.ui.catalog.CatalogScreen
@@ -94,6 +95,9 @@ import com.streamvault.android.ui.stats.StatsScreen
 import com.streamvault.android.ui.watchlist.WatchlistScreen
 import com.streamvault.android.ui.setup.SetupWizardScreen
 import com.streamvault.android.ui.subscription.PaywallScreen
+import com.streamvault.android.ui.sync.PairingClaimScreen
+import com.streamvault.android.ui.sync.SyncCenterScreen
+import com.streamvault.android.ui.sync.TvPairingScreen
 import com.streamvault.android.ui.tv.TvHomeScreen
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Obsidian
@@ -226,6 +230,7 @@ fun StreamVaultNavGraph(
             composable("tv_home") {
                 TvHomeScreen(
                     onMediaClick = { item -> navController.navigateToDetail(item) },
+                    onOpenPairing = { navController.navigate("tv_pairing") },
                 )
             }
 
@@ -314,6 +319,13 @@ fun StreamVaultNavGraph(
             composable("search") {
                 SearchScreen(
                     onMediaClick = { item -> navController.navigateToDetail(item) },
+                    onSyncRequired = {
+                        if (isTvMode) {
+                            navController.navigate("tv_pairing")
+                        } else {
+                            navController.navigate("login")
+                        }
+                    },
                 )
             }
 
@@ -441,6 +453,7 @@ fun StreamVaultNavGraph(
                     onCardStyleClick = { navController.navigate("card_style_settings") },
                     onIntegrationsClick = { navController.navigate("integrations") },
                     onDiagnosticsClick = { navController.navigate("diagnostics") },
+                    onSyncCenterClick = { navController.navigate("sync_center") },
                 )
             }
 
@@ -464,6 +477,7 @@ fun StreamVaultNavGraph(
                     onCardStyleClick = { navController.navigate("card_style_settings") },
                     onIntegrationsClick = { navController.navigate("integrations") },
                     onDiagnosticsClick = { navController.navigate("diagnostics") },
+                    onSyncCenterClick = { navController.navigate("sync_center") },
                 )
             }
 
@@ -555,6 +569,13 @@ fun StreamVaultNavGraph(
                     showTmdbId = backStackEntry.arguments?.getInt("showTmdbId")?.takeIf { it > 0 },
                     showImdbId = backStackEntry.arguments?.getString("showImdbId")?.takeIf { it.isNotBlank() },
                     onBack = { navController.popBackStack() },
+                    onSyncRequired = {
+                        if (isTvMode) {
+                            navController.navigate("tv_pairing")
+                        } else {
+                            navController.navigate("login")
+                        }
+                    },
                 )
             }
 
@@ -626,6 +647,42 @@ fun StreamVaultNavGraph(
                 )
             }
 
+
+            composable("sync_center") {
+                SyncCenterScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenLogin = { navController.navigate("login") },
+                    onOpenTvPairing = { navController.navigate("tv_pairing") },
+                    onOpenPairingClaim = { navController.navigate("pairing_claim") },
+                )
+            }
+
+            composable("tv_pairing") {
+                TvPairingScreen(
+                    onBack = { navController.popBackStack() },
+                )
+            }
+
+            composable(
+                route = "pairing_claim?code={code}",
+                arguments = listOf(
+                    navArgument("code") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    },
+                ),
+                deepLinks = listOf(
+                    navDeepLink { uriPattern = "torve://pair?code={code}" },
+                ),
+            ) { backStackEntry ->
+                val code = backStackEntry.arguments?.getString("code")?.let { Uri.decode(it) }
+                PairingClaimScreen(
+                    incomingCode = code,
+                    onBack = { navController.popBackStack() },
+                    onOpenLogin = { navController.navigate("login") },
+                )
+            }
             // See All screen — paginated grid for any section
             composable(
                 route = "seeall/{sectionId}",
@@ -703,6 +760,13 @@ fun StreamVaultNavGraph(
             composable("integrations") {
                 IntegrationsScreen(
                     onBack = { navController.popBackStack() },
+                    onSyncRequired = {
+                        if (isTvMode) {
+                            navController.navigate("tv_pairing")
+                        } else {
+                            navController.navigate("login")
+                        }
+                    },
                 )
             }
 

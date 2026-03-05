@@ -1,40 +1,42 @@
 package com.streamvault.android.ui.tv
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.tv.material3.Card
 import coil3.compose.AsyncImage
+import com.streamvault.android.R
 import com.streamvault.data.mdblist.RatingsEnricher
 import com.streamvault.domain.integrations.IntegrationSecretStore
 import com.streamvault.domain.model.MediaItem
@@ -53,7 +55,8 @@ fun TvHomeScreen(
     val integrationSecretStore: IntegrationSecretStore = koinInject()
     val movieViewModel = remember {
         CatalogViewModel(
-            metadataRepo, "movie",
+            metadataRepo = metadataRepo,
+            mediaType = "movie",
             prefsRepo = prefsRepo,
             ratingsEnricher = ratingsEnricher,
             integrationSecretStore = integrationSecretStore,
@@ -61,7 +64,8 @@ fun TvHomeScreen(
     }
     val tvViewModel = remember {
         CatalogViewModel(
-            metadataRepo, "tv",
+            metadataRepo = metadataRepo,
+            mediaType = "tv",
             prefsRepo = prefsRepo,
             ratingsEnricher = ratingsEnricher,
             integrationSecretStore = integrationSecretStore,
@@ -71,39 +75,94 @@ fun TvHomeScreen(
     val movieState by movieViewModel.state.collectAsState()
     val tvState by tvViewModel.state.collectAsState()
 
-    Column(
+    val movieItems = remember(movieState.trendingItems, movieState.items) {
+        val source = movieState.trendingItems.ifEmpty { movieState.items }
+        source.take(24)
+    }
+    val tvItems = remember(tvState.trendingItems, tvState.items) {
+        val source = tvState.trendingItems.ifEmpty { tvState.items }
+        source.take(24)
+    }
+
+    val firstCardFocusRequester = remember { FocusRequester() }
+    val shouldFocusMovies = movieItems.isNotEmpty()
+    val shouldFocusTv = !shouldFocusMovies && tvItems.isNotEmpty()
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF121212))
-            .verticalScroll(rememberScrollState())
-            .padding(vertical = 32.dp),
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(Color(0xFF0D1220), Color(0xFF151B2F), Color(0xFF0A0D18)),
+                ),
+            ),
     ) {
-        // App title
-        Text(
-            "Torve",
-            style = MaterialTheme.typography.headlineLarge,
-            color = Color.White,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 48.dp),
-        )
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 48.dp, vertical = 36.dp),
+            verticalArrangement = Arrangement.spacedBy(26.dp),
+        ) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = stringResource(R.string.app_name),
+                        style = MaterialTheme.typography.displaySmall,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = stringResource(R.string.home_recommended),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White.copy(alpha = 0.82f),
+                    )
+                }
+            }
 
-        Spacer(Modifier.height(24.dp))
+            if (movieState.isLoading || tvState.isLoading) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(120.dp),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        CircularProgressIndicator(color = Color(0xFFE8A838))
+                    }
+                }
+            }
 
-        // Trending Movies row
-        TvContentRow(
-            title = "Trending Movies",
-            items = movieState.items,
-            onItemClick = onMediaClick,
-        )
+            if (movieItems.isNotEmpty()) {
+                item {
+                    TvContentRow(
+                        title = stringResource(R.string.tv_trending_movies),
+                        items = movieItems,
+                        onItemClick = onMediaClick,
+                        initialFocusRequester = if (shouldFocusMovies) firstCardFocusRequester else null,
+                    )
+                }
+            }
 
-        Spacer(Modifier.height(24.dp))
+            if (tvItems.isNotEmpty()) {
+                item {
+                    TvContentRow(
+                        title = stringResource(R.string.tv_trending_tv),
+                        items = tvItems,
+                        onItemClick = onMediaClick,
+                        initialFocusRequester = if (shouldFocusTv) firstCardFocusRequester else null,
+                    )
+                }
+            }
 
-        // Trending TV Shows row
-        TvContentRow(
-            title = "Trending TV Shows",
-            items = tvState.items,
-            onItemClick = onMediaClick,
-        )
+            if (!movieState.isLoading && !tvState.isLoading && movieItems.isEmpty() && tvItems.isEmpty()) {
+                item {
+                    Text(
+                        text = stringResource(R.string.catalog_failed_to_load),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White.copy(alpha = 0.86f),
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -112,24 +171,37 @@ private fun TvContentRow(
     title: String,
     items: List<MediaItem>,
     onItemClick: (MediaItem) -> Unit,
+    initialFocusRequester: FocusRequester?,
 ) {
-    Column {
+    LaunchedEffect(initialFocusRequester, items.firstOrNull()?.id) {
+        if (initialFocusRequester != null && items.isNotEmpty()) {
+            initialFocusRequester.requestFocus()
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
-            title,
-            style = MaterialTheme.typography.titleLarge,
+            text = title,
+            style = MaterialTheme.typography.headlineSmall,
             color = Color.White,
             fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(horizontal = 48.dp),
         )
-        Spacer(Modifier.height(12.dp))
+
         LazyRow(
-            contentPadding = PaddingValues(horizontal = 48.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
+            contentPadding = PaddingValues(end = 12.dp),
         ) {
-            items(items, key = { it.tmdbId ?: it.hashCode() }) { item ->
+            itemsIndexed(items, key = { _, item -> item.tmdbId ?: item.id.hashCode() }) { index, item ->
                 TvMediaCard(
                     item = item,
                     onClick = { onItemClick(item) },
+                    modifier = Modifier.then(
+                        if (index == 0 && initialFocusRequester != null) {
+                            Modifier.focusRequester(initialFocusRequester)
+                        } else {
+                            Modifier
+                        },
+                    ),
                 )
             }
         }
@@ -140,67 +212,53 @@ private fun TvContentRow(
 private fun TvMediaCard(
     item: MediaItem,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    var isFocused = remember { false }
-
-    Box(
-        modifier = Modifier
-            .width(180.dp)
+    Card(
+        onClick = onClick,
+        modifier = modifier
+            .width(220.dp)
             .aspectRatio(2f / 3f)
-            .clip(RoundedCornerShape(8.dp))
-            .onFocusChanged { isFocused = it.isFocused }
-            .focusable()
-            .background(
-                if (isFocused) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
-                else Color.Transparent,
-            ),
+            .clip(MaterialTheme.shapes.medium),
     ) {
-        AsyncImage(
-            model = item.posterUrl,
-            contentDescription = item.title,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop,
-        )
-        // Gradient overlay with title
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.BottomCenter)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.8f)),
-                    ),
-                )
-                .padding(8.dp),
-        ) {
-            Column {
-                Text(
-                    item.title,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.White,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                val year = item.year
-                if (year != null) {
-                    Text(
-                        year.toString(),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White.copy(alpha = 0.7f),
+        Box(modifier = Modifier.fillMaxSize()) {
+            AsyncImage(
+                model = item.posterUrl,
+                contentDescription = item.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.9f)),
+                        ),
                     )
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = item.title,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    item.year?.let { year ->
+                        Text(
+                            text = year.toString(),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color.White.copy(alpha = 0.78f),
+                        )
+                    }
                 }
             }
         }
-
-        // Focus border
-        if (isFocused) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color.White.copy(alpha = 0.1f)),
-            )
-        }
     }
 }
+

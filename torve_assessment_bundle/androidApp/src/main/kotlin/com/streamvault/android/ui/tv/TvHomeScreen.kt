@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -40,17 +41,20 @@ import com.streamvault.domain.integrations.IntegrationSecretStore
 import com.streamvault.domain.model.MediaItem
 import com.streamvault.domain.repository.MetadataRepository
 import com.streamvault.domain.repository.PreferencesRepository
+import com.streamvault.domain.sync.AccountSyncManager
 import com.streamvault.presentation.catalog.CatalogViewModel
 import org.koin.compose.koinInject
 
 @Composable
 fun TvHomeScreen(
     onMediaClick: (MediaItem) -> Unit,
+    onOpenPairing: () -> Unit,
 ) {
     val metadataRepo: MetadataRepository = koinInject()
     val prefsRepo: PreferencesRepository = koinInject()
     val ratingsEnricher: RatingsEnricher = koinInject()
     val integrationSecretStore: IntegrationSecretStore = koinInject()
+    val accountSyncManager: AccountSyncManager = koinInject()
     val movieViewModel = remember {
         CatalogViewModel(
             metadataRepo, "movie",
@@ -70,6 +74,7 @@ fun TvHomeScreen(
 
     val movieState by movieViewModel.state.collectAsState()
     val tvState by tvViewModel.state.collectAsState()
+    val syncStatus by accountSyncManager.status.collectAsState()
 
     Column(
         modifier = Modifier
@@ -86,6 +91,20 @@ fun TvHomeScreen(
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(horizontal = 48.dp),
         )
+
+        Spacer(Modifier.height(8.dp))
+
+        Button(
+            onClick = onOpenPairing,
+            modifier = Modifier.padding(horizontal = 48.dp),
+        ) {
+            val label = if (syncStatus.pairedDevicesCount > 0) {
+                "Paired devices: ${syncStatus.pairedDevicesCount}"
+            } else {
+                "Pair with phone"
+            }
+            Text(label)
+        }
 
         Spacer(Modifier.height(24.dp))
 

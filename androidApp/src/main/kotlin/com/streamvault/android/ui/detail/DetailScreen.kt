@@ -34,6 +34,7 @@ import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -51,6 +52,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
@@ -78,6 +80,7 @@ import com.streamvault.android.ui.theme.Obsidian
 import com.streamvault.android.ui.theme.Snow
 import com.streamvault.android.ui.theme.StreamVault
 import com.streamvault.android.download.DownloadWorker
+import com.streamvault.data.download.BulkDownloadManager
 import androidx.compose.ui.platform.LocalContext
 import android.content.Intent
 import android.net.Uri
@@ -91,6 +94,7 @@ import com.streamvault.domain.model.AvailabilityOfferType
 import com.streamvault.domain.model.resolveCardStyle
 import com.streamvault.domain.model.calculateTorveScore
 import com.streamvault.android.player.DeviceCodecProbe
+import kotlinx.coroutines.launch
 import com.streamvault.presentation.detail.DetailViewModel
 import com.streamvault.presentation.download.DownloadViewModel
 import com.streamvault.presentation.settings.SettingsViewModel
@@ -113,6 +117,9 @@ fun DetailScreen(
     downloadViewModel: DownloadViewModel = koinInject(),
     watchlistViewModel: WatchlistViewModel = koinInject(),
 ) {
+    val bulkDownloadManager: BulkDownloadManager = koinInject()
+    val bulkProgress by bulkDownloadManager.progress.collectAsState()
+    val coroutineScope = rememberCoroutineScope()
     val state by viewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
     val watchlistState by watchlistViewModel.state.collectAsState()
@@ -571,6 +578,25 @@ fun DetailScreen(
                             }
                         }
 
+                        // ── Bulk download progress ──
+                        if (bulkProgress.isActive) {
+                            Spacer(Modifier.height(12.dp))
+                            Column {
+                                Text(
+                                    text = "Downloading ${bulkProgress.currentEpisodeLabel} (${bulkProgress.completedEpisodes}/${bulkProgress.totalEpisodes})",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Amber,
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                LinearProgressIndicator(
+                                    progress = { if (bulkProgress.totalEpisodes > 0) bulkProgress.completedEpisodes.toFloat() / bulkProgress.totalEpisodes else 0f },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = Amber,
+                                    trackColor = Graphite,
+                                )
+                            }
+                        }
+
                         // ── Episode Selector (TV Shows) ──
                         if (item.type == MediaType.SERIES && item.seasons.isNotEmpty()) {
                             Spacer(Modifier.height(24.dp))
@@ -597,12 +623,42 @@ fun DetailScreen(
                                 },
                                 onDownloadSeason = { season ->
                                     if (settingsState.debridConnected) {
-                                        viewModel.fetchStreams(season = season, episode = 1)
+                                        val media = state.mediaItem ?: return@EpisodeSelector
+                                        val seasonObj = media.seasons.find { it.seasonNumber == season }
+                                        val epCount = seasonObj?.episodeCount ?: return@EpisodeSelector
+                                        coroutineScope.launch {
+                                            val episodes = bulkDownloadManager.buildSeasonTargets(season, epCount)
+                                            val ids = bulkDownloadManager.enqueueBulk(
+                                                mediaItem = media,
+                                                episodes = episodes,
+                                                debridProvider = settingsViewModel.getDebridProvider(),
+                                                debridApiKey = settingsViewModel.getDebridApiKey(),
+                                                debridAccounts = settingsViewModel.getDebridAccounts(),
+                                                preferences = settingsViewModel.buildStreamPreferences(),
+                                                deviceCaps = DeviceCodecProbe.probe(),
+                                            )
+                                            ids.forEach { DownloadWorker.enqueue(context, it) }
+                                            downloadViewModel.loadDownloads()
+                                        }
                                     }
                                 },
                                 onDownloadAll = {
                                     if (settingsState.debridConnected) {
-                                        viewModel.fetchStreams(season = 1, episode = 1)
+                                        val media = state.mediaItem ?: return@EpisodeSelector
+                                        coroutineScope.launch {
+                                            val episodes = bulkDownloadManager.buildAllSeasonsTargets(media)
+                                            val ids = bulkDownloadManager.enqueueBulk(
+                                                mediaItem = media,
+                                                episodes = episodes,
+                                                debridProvider = settingsViewModel.getDebridProvider(),
+                                                debridApiKey = settingsViewModel.getDebridApiKey(),
+                                                debridAccounts = settingsViewModel.getDebridAccounts(),
+                                                preferences = settingsViewModel.buildStreamPreferences(),
+                                                deviceCaps = DeviceCodecProbe.probe(),
+                                            )
+                                            ids.forEach { DownloadWorker.enqueue(context, it) }
+                                            downloadViewModel.loadDownloads()
+                                        }
                                     }
                                 },
                                 onMarkSeasonWatched = { season ->
@@ -798,7 +854,7 @@ private fun WhereToWatchSection(
             Text(error, color = StreamVault.colors.textTertiary, style = MaterialTheme.typography.bodySmall)
         }
         offers.isEmpty() -> {
-            Text("No provider offers available in selected region.", color = StreamVault.colors.textTertiary, style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.detail_no_offers), color = StreamVault.colors.textTertiary, style = MaterialTheme.typography.bodySmall)
         }
         else -> {
             val grouped = offers.groupBy { it.offerType }

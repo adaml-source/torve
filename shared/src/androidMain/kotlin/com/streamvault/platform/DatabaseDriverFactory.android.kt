@@ -124,6 +124,46 @@ actual class DatabaseDriverFactory(private val context: Context) {
             )""",
         )
         db.execSQL(
+            """CREATE TABLE IF NOT EXISTS iptv_epg_channel (
+                playlist_id TEXT NOT NULL,
+                generation_id INTEGER NOT NULL DEFAULT 0,
+                channel_id TEXT NOT NULL,
+                epg_channel_key TEXT NOT NULL DEFAULT '',
+                xmltv_channel_id TEXT,
+                display_name TEXT NOT NULL,
+                icon_url TEXT,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (playlist_id, generation_id, epg_channel_key)
+            )""",
+        )
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS iptv_epg_programme (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                playlist_id TEXT NOT NULL,
+                generation_id INTEGER NOT NULL DEFAULT 0,
+                channel_id TEXT NOT NULL,
+                epg_channel_key TEXT NOT NULL DEFAULT '',
+                xmltv_channel_id TEXT,
+                start_time INTEGER NOT NULL,
+                end_time INTEGER NOT NULL,
+                title TEXT NOT NULL
+            )""",
+        )
+        runCatching { db.execSQL("ALTER TABLE iptv_epg_channel ADD COLUMN generation_id INTEGER NOT NULL DEFAULT 0") }
+        runCatching { db.execSQL("ALTER TABLE iptv_epg_channel ADD COLUMN epg_channel_key TEXT NOT NULL DEFAULT ''") }
+        runCatching { db.execSQL("ALTER TABLE iptv_epg_channel ADD COLUMN xmltv_channel_id TEXT") }
+        runCatching { db.execSQL("ALTER TABLE iptv_epg_programme ADD COLUMN generation_id INTEGER NOT NULL DEFAULT 0") }
+        runCatching { db.execSQL("ALTER TABLE iptv_epg_programme ADD COLUMN epg_channel_key TEXT NOT NULL DEFAULT ''") }
+        runCatching { db.execSQL("ALTER TABLE iptv_epg_programme ADD COLUMN xmltv_channel_id TEXT") }
+        db.execSQL(
+            """CREATE INDEX IF NOT EXISTS idx_iptv_epg_programme_playlist_generation_time
+               ON iptv_epg_programme(playlist_id, generation_id, start_time, end_time)""",
+        )
+        db.execSQL(
+            """CREATE INDEX IF NOT EXISTS idx_iptv_epg_programme_playlist_generation_channel_time
+               ON iptv_epg_programme(playlist_id, generation_id, epg_channel_key, start_time)""",
+        )
+        db.execSQL(
             """CREATE TABLE IF NOT EXISTS download_queue (
                 id TEXT NOT NULL PRIMARY KEY,
                 media_id TEXT NOT NULL,
@@ -138,9 +178,11 @@ actual class DatabaseDriverFactory(private val context: Context) {
                 season_number INTEGER,
                 episode_number INTEGER,
                 created_at INTEGER NOT NULL,
-                completed_at INTEGER
+                completed_at INTEGER,
+                bulk_group_id TEXT
             )""",
         )
+        runCatching { db.execSQL("ALTER TABLE download_queue ADD COLUMN bulk_group_id TEXT") }
         db.execSQL(
             """CREATE TABLE IF NOT EXISTS subscription (
                 id TEXT NOT NULL PRIMARY KEY,

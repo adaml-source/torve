@@ -60,6 +60,8 @@ import com.streamvault.android.ui.theme.StreamVault
 import com.streamvault.android.ui.theme.Emerald
 import com.streamvault.android.ui.theme.Obsidian
 import com.streamvault.android.ui.theme.Ruby
+import androidx.compose.ui.res.stringResource
+import com.streamvault.android.R
 import com.streamvault.domain.integrations.IntegrationSecretKey
 import com.streamvault.domain.integrations.IntegrationSecretStore
 import com.streamvault.presentation.settings.SettingsViewModel
@@ -97,14 +99,14 @@ fun IntegrationsScreen(
         BackButton(onClick = onBack)
         Spacer(Modifier.height(8.dp))
         Text(
-            "Integrations",
+            stringResource(R.string.integrations_title),
             style = MaterialTheme.typography.titleLarge,
             color = Snow,
             fontWeight = FontWeight.Bold,
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            "Connect external services to sync your library and progress.",
+            stringResource(R.string.integrations_subtitle),
             style = MaterialTheme.typography.bodySmall,
             color = Silver,
         )
@@ -114,10 +116,10 @@ fun IntegrationsScreen(
         // ── OMDB ──
         IntegrationCard(
             title = "OMDB",
-            description = "Free API key for IMDb, Rotten Tomatoes, and Metacritic ratings. Get yours at omdbapi.com",
+            description = stringResource(R.string.integrations_omdb_desc),
         ) {
             IntegrationTextField(
-                label = "API Key",
+                label = stringResource(R.string.settings_api_key),
                 value = state.omdbApiKey,
                 onValueChange = { value ->
                     viewModel.setOmdbApiKey(value)
@@ -144,19 +146,19 @@ fun IntegrationsScreen(
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Obsidian, strokeWidth = 2.dp)
                         Spacer(Modifier.width(6.dp))
                     }
-                    Text(if (state.omdbValidating) "Testing..." else "Save & Test")
+                    Text(if (state.omdbValidating) stringResource(R.string.integrations_testing) else stringResource(R.string.integrations_test_connection))
                 }
                 state.omdbValidationResult?.let { result ->
                     when (result) {
-                        "valid" -> Text("Key is valid", color = Emerald, style = MaterialTheme.typography.bodySmall)
-                        "invalid" -> Text("Key is invalid or inactive", color = Ruby, style = MaterialTheme.typography.bodySmall)
+                        "valid" -> Text(stringResource(R.string.integrations_status_connected), color = Emerald, style = MaterialTheme.typography.bodySmall)
+                        "invalid" -> Text(stringResource(R.string.integrations_key_invalid), color = Ruby, style = MaterialTheme.typography.bodySmall)
                         else -> Text(result, color = Ruby, style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
             Spacer(Modifier.height(4.dp))
             Text(
-                "Get a free key at omdbapi.com (1,000 requests/day).",
+                stringResource(R.string.integrations_omdb_hint),
                 color = Silver.copy(alpha = 0.6f),
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -167,18 +169,18 @@ fun IntegrationsScreen(
         // ── Trakt ──
         IntegrationCard(
             title = "Trakt",
-            description = "OAuth device authorization and two-way sync (watchlist/history/progress).",
+            description = stringResource(R.string.integrations_trakt_desc),
         ) {
             Text(
-                if (state.traktConnected) "Status: Connected" else "Status: Not connected",
+                if (state.traktConnected) stringResource(R.string.integrations_status_connected) else stringResource(R.string.integrations_status_not_connected),
                 color = if (state.traktConnected) Snow else Silver,
                 style = MaterialTheme.typography.bodySmall,
             )
             state.traktLastSyncTime?.let { lastSync ->
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "Last sync: " + java.text.SimpleDateFormat("MMM d, HH:mm", java.util.Locale.getDefault())
-                        .format(java.util.Date(lastSync)),
+                    stringResource(R.string.integrations_last_sync, java.text.SimpleDateFormat("MMM d, HH:mm", java.util.Locale.getDefault())
+                        .format(java.util.Date(lastSync))),
                     color = Silver,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -196,7 +198,7 @@ fun IntegrationsScreen(
                     Button(
                         onClick = { viewModel.startTraktDeviceAuth() },
                         colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
-                    ) { Text(if (state.traktLoading) "Connecting..." else "Connect") }
+                    ) { Text(if (state.traktLoading) stringResource(R.string.integrations_connecting) else stringResource(R.string.common_connect)) }
                 } else {
                     Button(
                         onClick = { viewModel.syncTraktNow() },
@@ -210,18 +212,18 @@ fun IntegrationsScreen(
                                 strokeWidth = 2.dp,
                             )
                             Spacer(Modifier.width(6.dp))
-                            Text("Syncing...")
+                            Text(stringResource(R.string.integrations_syncing))
                         } else if (state.traktSyncSuccess) {
-                            Text("Sync complete")
+                            Text(stringResource(R.string.integrations_sync_complete))
                         } else {
-                            Text("Sync now")
+                            Text(stringResource(R.string.integrations_sync_now))
                         }
                     }
                     Spacer(Modifier.weight(1f))
                     OutlinedButton(
                         onClick = { viewModel.disconnectTrakt() },
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Silver),
-                    ) { Text("Disconnect") }
+                    ) { Text(stringResource(R.string.common_disconnect)) }
                 }
             }
             state.traktError?.let {
@@ -235,10 +237,10 @@ fun IntegrationsScreen(
         // ── SIMKL ──
         IntegrationCard(
             title = "SIMKL",
-            description = "Automatic anime and TV show tracking with device code authorization.",
+            description = stringResource(R.string.integrations_simkl_desc),
         ) {
             Text(
-                if (state.simklConnected) "Status: Connected" + (state.simklUser?.username?.let { " ($it)" } ?: "") else "Status: Not connected",
+                if (state.simklConnected) stringResource(R.string.integrations_status_connected) + (state.simklUser?.username?.let { " ($it)" } ?: "") else stringResource(R.string.integrations_status_not_connected),
                 color = if (state.simklConnected) Snow else Silver,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -255,12 +257,12 @@ fun IntegrationsScreen(
                     Button(
                         onClick = { viewModel.startSimklDeviceAuth() },
                         colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
-                    ) { Text(if (state.simklLoading) "Connecting..." else "Connect") }
+                    ) { Text(if (state.simklLoading) stringResource(R.string.integrations_connecting) else stringResource(R.string.common_connect)) }
                 } else {
                     OutlinedButton(
                         onClick = { viewModel.disconnectSimkl() },
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Silver),
-                    ) { Text("Disconnect") }
+                    ) { Text(stringResource(R.string.common_disconnect)) }
                 }
             }
             state.simklError?.let {
@@ -274,16 +276,16 @@ fun IntegrationsScreen(
         // ── Jellyfin ──
         IntegrationCard(
             title = "Jellyfin",
-            description = "Connect to your Jellyfin server for library sync and continue-watching overlay.",
+            description = stringResource(R.string.integrations_jellyfin_desc),
         ) {
             IntegrationTextField(
-                label = "Server URL",
+                label = stringResource(R.string.integrations_server_url),
                 value = state.jellyfinServerUrl,
                 onValueChange = viewModel::setJellyfinServerUrl,
             )
             Spacer(Modifier.height(8.dp))
             IntegrationTextField(
-                label = "API Key",
+                label = stringResource(R.string.settings_api_key),
                 value = state.jellyfinApiKey,
                 onValueChange = { value ->
                     viewModel.setJellyfinApiKey(value)
@@ -302,7 +304,7 @@ fun IntegrationsScreen(
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
             ) {
-                Text("Test Connection")
+                Text(stringResource(R.string.integrations_test_connection))
             }
             state.jellyfinStatusMessage?.let {
                 Spacer(Modifier.height(6.dp))
@@ -312,7 +314,7 @@ fun IntegrationsScreen(
             // Profile selector (visible after successful connection)
             if (state.jellyfinProfiles.isNotEmpty()) {
                 Spacer(Modifier.height(12.dp))
-                Text("User Profile", color = Snow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.integrations_user_profile), color = Snow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(4.dp))
                 state.jellyfinProfiles.forEach { profile ->
                     Row(
@@ -328,7 +330,7 @@ fun IntegrationsScreen(
                             colors = RadioButtonDefaults.colors(selectedColor = Amber, unselectedColor = Silver),
                         )
                         Text(
-                            text = profile.name + if (profile.isAdmin) " (Admin)" else "",
+                            text = profile.name + if (profile.isAdmin) " (" + stringResource(R.string.integrations_admin) + ")" else "",
                             color = Snow,
                             style = MaterialTheme.typography.bodyMedium,
                         )
@@ -342,16 +344,16 @@ fun IntegrationsScreen(
         // ── Plex ──
         IntegrationCard(
             title = "Plex",
-            description = "Connect your Plex server for library badges and continue watching.",
+            description = stringResource(R.string.integrations_plex_desc),
         ) {
             IntegrationTextField(
-                label = "Server URL (e.g. http://192.168.1.100:32400)",
+                label = stringResource(R.string.integrations_plex_url_hint),
                 value = state.plexServerUrl,
                 onValueChange = viewModel::setPlexServerUrl,
             )
             Spacer(Modifier.height(8.dp))
             IntegrationTextField(
-                label = "Access Token",
+                label = stringResource(R.string.integrations_access_token),
                 value = state.plexAccessToken,
                 onValueChange = { value ->
                     viewModel.setPlexAccessToken(value)
@@ -366,7 +368,7 @@ fun IntegrationsScreen(
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                "Find your token at plex.tv/claim or in Plex app settings.",
+                stringResource(R.string.integrations_plex_token_hint),
                 color = Silver.copy(alpha = 0.6f),
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -374,7 +376,7 @@ fun IntegrationsScreen(
 
             if (state.plexConnected) {
                 Text(
-                    "Status: Connected",
+                    stringResource(R.string.integrations_status_connected),
                     color = Snow,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -391,17 +393,17 @@ fun IntegrationsScreen(
                     Button(
                         onClick = { viewModel.testPlexConnection() },
                         colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
-                    ) { Text(if (state.plexLoading) "Testing..." else "Connect") }
+                    ) { Text(if (state.plexLoading) stringResource(R.string.integrations_testing) else stringResource(R.string.common_connect)) }
                 } else {
                     Button(
                         onClick = { viewModel.testPlexConnection() },
                         colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
-                    ) { Text("Test Connection") }
+                    ) { Text(stringResource(R.string.integrations_test_connection)) }
                     Spacer(Modifier.weight(1f))
                     OutlinedButton(
                         onClick = { viewModel.disconnectPlex() },
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Silver),
-                    ) { Text("Disconnect") }
+                    ) { Text(stringResource(R.string.common_disconnect)) }
                 }
             }
         }
@@ -440,7 +442,7 @@ private fun DeviceCodeSection(
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Column {
-            Text("Your code", style = MaterialTheme.typography.bodySmall, color = Silver)
+            Text(stringResource(R.string.integrations_your_code), style = MaterialTheme.typography.bodySmall, color = Silver)
             Text(
                 text = userCode,
                 style = MaterialTheme.typography.titleLarge,
@@ -453,12 +455,12 @@ private fun DeviceCodeSection(
             onClick = {
                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 clipboard.setPrimaryClip(ClipData.newPlainText("Device Code", userCode))
-                Toast.makeText(context, "Code copied", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.integrations_code_copied), Toast.LENGTH_SHORT).show()
             },
         ) {
             Icon(
                 Icons.Default.ContentCopy,
-                contentDescription = "Copy code",
+                contentDescription = stringResource(R.string.diagnostics_copy),
                 tint = Amber,
                 modifier = Modifier.size(20.dp),
             )
@@ -481,7 +483,7 @@ private fun DeviceCodeSection(
             modifier = Modifier.size(18.dp),
         )
         Spacer(Modifier.width(8.dp))
-        Text("Open in Browser")
+        Text(stringResource(R.string.integrations_open_browser))
     }
 }
 

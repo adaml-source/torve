@@ -3,53 +3,56 @@ package com.streamvault.android.sync
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
-import com.streamvault.android.sync.model.SyncAuthResponse
-import com.streamvault.android.sync.model.SyncInboundEvent
+import android.util.Log
+import com.streamvault.android.sync.lan.LanEventEnvelope
+import com.streamvault.android.sync.lan.LanPairClaimRequest
+import com.streamvault.android.sync.lan.LanPairClaimResponse
+import com.streamvault.android.sync.lan.LanResolvedService
+import com.streamvault.android.sync.lan.LanStatusResponse
+import com.streamvault.android.sync.lan.LanSyncDiscovery
+import com.streamvault.android.sync.lan.LanSyncHttpClient
+import com.streamvault.android.sync.lan.LanSyncServer
 import com.streamvault.android.sync.model.SyncDeviceDto
-import com.streamvault.android.sync.model.SyncDeviceRegistration
-import com.streamvault.android.sync.model.SyncLoginRequest
-import com.streamvault.android.sync.model.SyncPairingCodeRequest
-import com.streamvault.android.sync.model.SyncPlaybackIntentPayload
-import com.streamvault.android.sync.model.SyncPlaybackIntentRequest
+import com.streamvault.android.sync.model.SyncInboundEvent
 import com.streamvault.android.sync.model.SyncPairingCodeResponse
-import com.streamvault.android.sync.model.SyncPairingStatusRequest
-import com.streamvault.android.sync.model.SyncRegisterRequest
+import com.streamvault.android.sync.model.SyncPlaybackIntentPayload
 import com.streamvault.android.sync.model.SyncSearchPushPayload
-import com.streamvault.android.sync.model.SyncSearchPushRequest
-import com.streamvault.android.sync.model.SyncWatchStateReportRequest
-import com.streamvault.android.sync.network.TorveSyncApiClient
-import com.streamvault.android.sync.realtime.SyncRealtimeEvent
-import com.streamvault.android.sync.realtime.SyncWebSocketManager
 import com.streamvault.android.sync.storage.EncryptedTokenStore
 import com.streamvault.android.sync.storage.InstallationIdStore
-import com.streamvault.android.sync.storage.SyncStoredSession
-import com.streamvault.data.network.HttpClientFactory
-import io.ktor.client.plugins.ClientRequestException
-import io.ktor.client.plugins.ServerResponseException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.encodeToJsonElement
+import java.security.MessageDigest
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
+import java.util.UUID
+import kotlin.random.Random
 
 data class SyncAccountState(
     val isLoading: Boolean = false,
     val isAuthenticated: Boolean = false,
     val userId: String? = null,
     val userEmail: String? = null,
+    val profileName: String? = null,
+    val hasPin: Boolean = false,
     val deviceId: String? = null,
     val devices: List<SyncDeviceDto> = emptyList(),
     val pairingCode: SyncPairingCodeResponse? = null,
     val pairingStatus: String? = null,
-    val wsStatus: String = "disconnected",
+    val wsStatus: String = "local-only",
     val recentEvents: List<String> = emptyList(),
     val error: String? = null,
 )
@@ -60,111 +63,165 @@ class SyncCoordinator(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val installationIdStore = InstallationIdStore(context)
     private val tokenStore = EncryptedTokenStore(context)
-    private val api = TorveSyncApiClient(HttpClientFactory.create())
-    private val websocketManager = SyncWebSocketManager()
+    private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val json = Json { ignoreUnknownKeys = true }
+    private val lanHttpClient = LanSyncHttpClient(json)
+    private val peerLock = Any()
+    private val endpointByDeviceId = mutableMapOf<String, LanResolvedService>()
+    private val serviceNameByDeviceId = mutableMapOf<String, String>()
+    private val serviceByName = mutableMapOf<String, LanResolvedService>()
+    @Volatile
+    private var lanReady: Boolean = false
 
-    private val _state = MutableStateFlow(
-        SyncAccountState(
-            isAuthenticated = tokenStore.getAccessToken()?.isNotBlank() == true,
-            userId = tokenStore.getUserId(),
-            userEmail = tokenStore.loadSession()?.email,
-            deviceId = tokenStore.getDeviceId(),
-        ),
+    private val lanServer = LanSyncServer(
+        json = json,
+        selfDeviceProvider = { buildSelfDevice(getOrCreateSelfDeviceId()) },
+        onPairClaim = { handleInboundPairClaim(it) },
+        onInboundEvent = { handleInboundLanEvent(it) },
     )
-    val state: StateFlow<SyncAccountState> = _state.asStateFlow()
+    private val lanDiscovery = LanSyncDiscovery(
+        context = context,
+        selfServiceNameHint = localServiceNameHint(),
+        onServiceResolved = { service -> onServiceResolved(service) },
+        onServiceLost = { serviceName -> onServiceLost(serviceName) },
+        onError = { message -> onLanError(message) },
+    )
+
+    private val _state = MutableStateFlow(buildInitialState())
+    val state = _state.asStateFlow()
     private val _inboundEvents = MutableSharedFlow<SyncInboundEvent>(extraBufferCapacity = 32)
     val inboundEvents: SharedFlow<SyncInboundEvent> = _inboundEvents.asSharedFlow()
 
     init {
-        observeRealtimeEvents()
-        if (_state.value.isAuthenticated) {
-            startRealtime()
-            scope.launch { loadDevices() }
-        }
+        startLanTransport()
+        scope.launch { loadDevices() }
     }
 
     fun installationId(): String = installationIdStore.getOrCreateInstallationId()
 
-    fun login(email: String, password: String) {
-        scope.launch {
-            mutateLoading()
-            runCatching {
-                val response = api.login(
-                    SyncLoginRequest(
-                        email = email.trim(),
-                        password = password,
-                        device = currentDeviceRegistration(),
-                    ),
-                )
-                onAuthSuccess(response)
-                loadDevices()
-            }.onFailure { onError(it) }
+    fun createLocalProfile(profileName: String, pin: String?) {
+        val normalizedName = profileName.trim()
+        if (normalizedName.isEmpty()) {
+            _state.value = _state.value.copy(error = "Profile name is required.")
+            return
         }
+        if (!pin.isNullOrBlank() && !pin.matches(Regex("^[0-9]{4,8}$"))) {
+            _state.value = _state.value.copy(error = "PIN must be 4 to 8 digits.")
+            return
+        }
+        val hashedPin = pin?.takeIf { it.isNotBlank() }?.let { hashPin(it) }
+        prefs.edit()
+            .putString(KEY_PROFILE_NAME, normalizedName)
+            .putString(KEY_PROFILE_PIN_HASH, hashedPin)
+            .apply()
+        val selfDeviceId = getOrCreateSelfDeviceId()
+        val updatedDevices = ensureSelfDevice(readDevices(), selfDeviceId)
+        persistDevices(updatedDevices)
+        _state.value = _state.value.copy(
+            isLoading = false,
+            isAuthenticated = true,
+            userId = localUserId(),
+            userEmail = normalizedName,
+            profileName = normalizedName,
+            hasPin = hashedPin != null,
+            deviceId = selfDeviceId,
+            devices = updatedDevices,
+            wsStatus = onlineTransportStatus(),
+            error = null,
+            pairingStatus = "Local profile ready. Pair TVs on this Wi-Fi network.",
+        )
+    }
+
+    fun clearLocalProfile() {
+        val selfDeviceId = getOrCreateSelfDeviceId()
+        val selfDevice = ensureSelfDevice(emptyList(), selfDeviceId)
+        persistDevices(selfDevice)
+        prefs.edit()
+            .remove(KEY_PROFILE_NAME)
+            .remove(KEY_PROFILE_PIN_HASH)
+            .remove(KEY_PENDING_PAIR_CODE)
+            .remove(KEY_PENDING_PAIR_EXPIRES_AT)
+            .apply()
+        tokenStore.clear()
+        _state.value = _state.value.copy(
+            isLoading = false,
+            isAuthenticated = false,
+            userId = null,
+            userEmail = null,
+            profileName = null,
+            hasPin = false,
+            deviceId = selfDeviceId,
+            devices = selfDevice,
+            pairingCode = null,
+            pairingStatus = "Local mode active.",
+            wsStatus = onlineTransportStatus(),
+            error = null,
+        )
+    }
+
+    fun login(email: String, password: String) {
+        val fallback = email.trim().substringBefore("@").ifBlank { "Torve User" }
+        val maybePin = password.takeIf { it.matches(Regex("^[0-9]{4,8}$")) }
+        createLocalProfile(fallback, maybePin)
     }
 
     fun register(email: String, password: String) {
-        scope.launch {
-            mutateLoading()
-            runCatching {
-                val response = api.register(
-                    SyncRegisterRequest(
-                        email = email.trim(),
-                        password = password,
-                        device = currentDeviceRegistration(),
-                    ),
-                )
-                onAuthSuccess(response)
-                loadDevices()
-            }.onFailure { onError(it) }
-        }
+        login(email, password)
     }
 
     fun logout() {
-        scope.launch {
-            val accessToken = tokenStore.getAccessToken()
-            val refreshToken = tokenStore.getRefreshToken()
-            if (!accessToken.isNullOrBlank()) {
-                runCatching { api.logout(accessToken, refreshToken) }
-            }
-            websocketManager.stop()
-            tokenStore.clear()
-            _state.value = SyncAccountState()
-        }
+        clearLocalProfile()
     }
 
     suspend fun loadDevices() {
-        val accessToken = ensureAccessToken() ?: return
-        runCatching {
-            val devices = api.getDevices(accessToken)
-            _state.value = _state.value.copy(
-                isLoading = false,
-                isAuthenticated = true,
-                devices = devices,
-                error = null,
-            )
-        }.onFailure { onError(it) }
+        val selfDeviceId = getOrCreateSelfDeviceId()
+        val devices = ensureSelfDevice(readDevices(), selfDeviceId)
+        persistDevices(devices)
+        _state.value = _state.value.copy(
+            isLoading = false,
+            devices = devices,
+            deviceId = selfDeviceId,
+            wsStatus = onlineTransportStatus(),
+            error = null,
+        )
     }
 
     fun refreshDevices() {
-        scope.launch { loadDevices() }
+        scope.launch {
+            loadDevices()
+            refreshKnownPeers()
+        }
     }
 
     fun revokeDevice(deviceId: String) {
-        scope.launch {
-            val accessToken = ensureAccessToken() ?: return@launch
-            runCatching {
-                api.revokeDevice(accessToken, deviceId)
-                loadDevices()
-            }.onFailure { onError(it) }
+        val selfId = _state.value.deviceId
+        if (deviceId == selfId) {
+            _state.value = _state.value.copy(error = "This device cannot revoke itself.")
+            return
         }
+        val updated = _state.value.devices.map { device ->
+            if (device.id == deviceId) {
+                device.copy(revokedAt = utcNow(), lastSeenAt = utcNow())
+            } else {
+                device
+            }
+        }
+        synchronized(peerLock) {
+            endpointByDeviceId.remove(deviceId)
+            serviceNameByDeviceId.remove(deviceId)
+        }
+        persistDevices(updated)
+        _state.value = _state.value.copy(devices = updated, error = null)
     }
 
     fun targetDevices(includeSelf: Boolean = false): List<SyncDeviceDto> {
         val selfId = _state.value.deviceId
+        val reachable = synchronized(peerLock) { endpointByDeviceId.keys.toSet() }
         return _state.value.devices.filter { device ->
             val notRevoked = device.revokedAt == null
             val isSelf = device.id == selfId
-            notRevoked && (includeSelf || !isSelf)
+            val isReachable = device.id == selfId || reachable.contains(device.id)
+            notRevoked && isReachable && (includeSelf || !isSelf)
         }
     }
 
@@ -174,20 +231,42 @@ class SyncCoordinator(
         filters: Map<String, String> = emptyMap(),
     ): Result<String> {
         if (query.isBlank()) return Result.failure(IllegalArgumentException("Query is blank"))
-        val accessToken = ensureAccessToken() ?: return Result.failure(IllegalStateException("Not authenticated"))
-        return runCatching {
-            val response = api.sendSearchPush(
-                accessToken = accessToken,
-                payload = SyncSearchPushRequest(
-                    targetDeviceId = targetDeviceId,
-                    payload = SyncSearchPushPayload(
-                        query = query.trim(),
-                        filters = filters,
-                    ),
+        if (!_state.value.isAuthenticated) return Result.failure(IllegalStateException("Create a local profile first."))
+        val target = _state.value.devices.firstOrNull { it.id == targetDeviceId && it.revokedAt == null }
+            ?: return Result.failure(IllegalStateException("Target device is not paired."))
+        val eventId = UUID.randomUUID().toString()
+        appendRecentEvent("search_push:$eventId:${target.deviceName}:${query.trim()}")
+        if (target.id == _state.value.deviceId) {
+            _inboundEvents.tryEmit(
+                SyncInboundEvent.SearchPush(
+                    query = query.trim(),
+                    filters = filters,
+                    issuedByDeviceId = _state.value.deviceId,
                 ),
             )
-            response.eventId
-        }.onFailure { onError(it) }
+            return Result.success(eventId)
+        }
+        val endpoint = synchronized(peerLock) { endpointByDeviceId[target.id] }
+            ?: return Result.failure(IllegalStateException("Target TV is not reachable on local Wi-Fi."))
+        val event = LanEventEnvelope(
+            eventId = eventId,
+            eventType = EVENT_SEARCH_PUSH,
+            sourceDeviceId = _state.value.deviceId.orEmpty(),
+            targetDeviceId = target.id,
+            payload = json.encodeToJsonElement(
+                SyncSearchPushPayload(
+                    query = query.trim(),
+                    filters = filters,
+                    issuedByDeviceId = _state.value.deviceId,
+                ),
+            ),
+        )
+        val result = lanHttpClient.sendEvent(endpoint, event).getOrElse { return Result.failure(it) }
+        return if (result.status == "ok") {
+            Result.success(eventId)
+        } else {
+            Result.failure(IllegalStateException(result.message ?: "Failed to send search push."))
+        }
     }
 
     suspend fun sendPlaybackIntent(
@@ -200,24 +279,50 @@ class SyncCoordinator(
         subtitles: String? = null,
     ): Result<String> {
         if (contentId.isBlank()) return Result.failure(IllegalArgumentException("Content id is blank"))
-        val accessToken = ensureAccessToken() ?: return Result.failure(IllegalStateException("Not authenticated"))
-        return runCatching {
-            val response = api.sendPlaybackIntent(
-                accessToken = accessToken,
-                payload = SyncPlaybackIntentRequest(
-                    targetDeviceId = targetDeviceId,
-                    payload = SyncPlaybackIntentPayload(
-                        contentId = contentId.trim(),
-                        providerTarget = providerTarget,
-                        positionMs = positionMs.coerceAtLeast(0L),
-                        mediaType = mediaType,
-                        audio = audio,
-                        subtitles = subtitles,
-                    ),
+        if (!_state.value.isAuthenticated) return Result.failure(IllegalStateException("Create a local profile first."))
+        val target = _state.value.devices.firstOrNull { it.id == targetDeviceId && it.revokedAt == null }
+            ?: return Result.failure(IllegalStateException("Target device is not paired."))
+        val eventId = UUID.randomUUID().toString()
+        appendRecentEvent("playback_intent:$eventId:${target.deviceName}:$contentId@$positionMs")
+        if (target.id == _state.value.deviceId) {
+            _inboundEvents.tryEmit(
+                SyncInboundEvent.PlaybackIntent(
+                    contentId = contentId.trim(),
+                    providerTarget = providerTarget,
+                    positionMs = positionMs.coerceAtLeast(0L),
+                    mediaType = mediaType,
+                    audio = audio,
+                    subtitles = subtitles,
+                    issuedByDeviceId = _state.value.deviceId,
                 ),
             )
-            response.eventId
-        }.onFailure { onError(it) }
+            return Result.success(eventId)
+        }
+        val endpoint = synchronized(peerLock) { endpointByDeviceId[target.id] }
+            ?: return Result.failure(IllegalStateException("Target TV is not reachable on local Wi-Fi."))
+        val event = LanEventEnvelope(
+            eventId = eventId,
+            eventType = EVENT_PLAYBACK_INTENT,
+            sourceDeviceId = _state.value.deviceId.orEmpty(),
+            targetDeviceId = target.id,
+            payload = json.encodeToJsonElement(
+                SyncPlaybackIntentPayload(
+                    contentId = contentId.trim(),
+                    providerTarget = providerTarget,
+                    positionMs = positionMs.coerceAtLeast(0L),
+                    mediaType = mediaType,
+                    audio = audio,
+                    subtitles = subtitles,
+                    issuedByDeviceId = _state.value.deviceId,
+                ),
+            ),
+        )
+        val result = lanHttpClient.sendEvent(endpoint, event).getOrElse { return Result.failure(it) }
+        return if (result.status == "ok") {
+            Result.success(eventId)
+        } else {
+            Result.failure(IllegalStateException(result.message ?: "Failed to transfer playback."))
+        }
     }
 
     suspend fun reportWatchState(
@@ -226,234 +331,449 @@ class SyncCoordinator(
         positionMs: Long,
     ): Result<Unit> {
         if (contentId.isBlank()) return Result.failure(IllegalArgumentException("Content id is blank"))
-        val accessToken = ensureAccessToken() ?: return Result.failure(IllegalStateException("Not authenticated"))
-        return runCatching {
-            api.reportWatchState(
-                accessToken = accessToken,
-                payload = SyncWatchStateReportRequest(
-                    contentId = contentId.trim(),
-                    provider = provider,
-                    positionMs = positionMs.coerceAtLeast(0L),
-                ),
-            )
-            Unit
-        }
+        if (!_state.value.isAuthenticated) return Result.failure(IllegalStateException("Create a local profile first."))
+        appendRecentEvent("watch_state:${contentId.trim()}:${provider}:${positionMs.coerceAtLeast(0L)}")
+        return Result.success(Unit)
     }
 
     fun claimPairingCode(code: String) {
+        val normalized = normalizePairingCode(code)
+        if (normalized.isBlank()) {
+            _state.value = _state.value.copy(error = "Enter a valid pairing code.")
+            return
+        }
+        if (!_state.value.isAuthenticated) {
+            _state.value = _state.value.copy(error = "Create a local profile before pairing TVs.")
+            return
+        }
         scope.launch {
-            val accessToken = ensureAccessToken() ?: return@launch
-            mutateLoading()
-            runCatching {
-                api.claimPairingCode(accessToken, code.trim())
-                loadDevices()
+            _state.value = _state.value.copy(isLoading = true, error = null)
+            val discovered = synchronized(peerLock) { serviceByName.values.toList() }
+            if (discovered.isEmpty()) {
                 _state.value = _state.value.copy(
                     isLoading = false,
-                    error = null,
-                    pairingStatus = "Pairing code claimed",
+                    error = "No Torve TVs discovered on local Wi-Fi.",
                 )
-            }.onFailure { onError(it) }
+                return@launch
+            }
+            val selfDevice = buildSelfDevice(getOrCreateSelfDeviceId())
+            val request = LanPairClaimRequest(
+                code = normalized,
+                sourceDevice = selfDevice,
+            )
+            var pairedDevice: SyncDeviceDto? = null
+            var pairedService: LanResolvedService? = null
+            for (service in discovered) {
+                val response = lanHttpClient.claimPairingCode(service, request).getOrNull() ?: continue
+                if (response.status == "paired" && response.device != null) {
+                    pairedDevice = response.device
+                    pairedService = service
+                    break
+                }
+            }
+            if (pairedDevice == null || pairedService == null) {
+                _state.value = _state.value.copy(
+                    isLoading = false,
+                    error = "Pairing code not found on local Wi-Fi.",
+                )
+                return@launch
+            }
+            synchronized(peerLock) {
+                endpointByDeviceId[pairedDevice.id] = pairedService
+                serviceNameByDeviceId[pairedDevice.id] = pairedService.serviceName
+            }
+            val updated = upsertDevice(_state.value.devices, pairedDevice.copy(lastSeenAt = utcNow(), revokedAt = null))
+            persistDevices(updated)
+            _state.value = _state.value.copy(
+                isLoading = false,
+                devices = updated,
+                error = null,
+                pairingStatus = "Paired ${pairedDevice.deviceName} on local Wi-Fi.",
+                wsStatus = onlineTransportStatus(),
+            )
+            appendRecentEvent("pair_claimed:${pairedDevice.deviceName}")
         }
     }
 
     fun startTvPairingFlow() {
-        scope.launch {
-            mutateLoading()
-            runCatching {
-                val pairingCode = api.createPairingCode(
-                    SyncPairingCodeRequest(
-                        installationId = installationId(),
-                        deviceName = Build.MODEL ?: "Torve TV",
-                        deviceType = "tv",
-                        platform = "android",
-                    ),
-                )
-                _state.value = _state.value.copy(
-                    isLoading = false,
-                    pairingCode = pairingCode,
-                    pairingStatus = "pending",
-                    error = null,
-                )
-                waitForTvPairingClaim(pairingCode.code)
-            }.onFailure { onError(it) }
-        }
-    }
-
-    private suspend fun waitForTvPairingClaim(code: String) {
-        repeat(60) {
-            delay(3_000L)
-            val response = runCatching {
-                api.checkPairingStatus(
-                    SyncPairingStatusRequest(
-                        code = code,
-                        installationId = installationId(),
-                    ),
-                )
-            }.getOrNull() ?: return
-
-            if (response.status == "claimed" && response.tokens != null && response.pairedDevice != null) {
-                val pairedUserId = response.user?.id ?: tokenStore.getUserId().orEmpty().ifBlank { "paired_user" }
-                val pairedEmail = response.user?.email ?: tokenStore.loadSession()?.email.orEmpty().ifBlank { "paired@torve.local" }
-                tokenStore.saveSession(
-                    SyncStoredSession(
-                        accessToken = response.tokens.accessToken,
-                        refreshToken = response.tokens.refreshToken,
-                        deviceId = response.pairedDevice.id,
-                        userId = pairedUserId,
-                        email = pairedEmail,
-                    ),
-                )
-                _state.value = _state.value.copy(
-                    isLoading = false,
-                    isAuthenticated = true,
-                    userId = pairedUserId,
-                    userEmail = pairedEmail,
-                    deviceId = response.pairedDevice.id,
-                    pairingStatus = "claimed",
-                    error = null,
-                )
-                startRealtime()
-                loadDevices()
-                return
-            }
-            if (response.status == "expired") {
-                _state.value = _state.value.copy(
-                    isLoading = false,
-                    pairingStatus = "expired",
-                    error = "Pairing code expired. Generate a new code.",
-                )
-                return
-            }
-        }
-    }
-
-    private fun onAuthSuccess(response: SyncAuthResponse) {
-        tokenStore.saveSession(
-            SyncStoredSession(
-                accessToken = response.tokens.accessToken,
-                refreshToken = response.tokens.refreshToken,
-                deviceId = response.device.id,
-                userId = response.user.id,
-                email = response.user.email,
-            ),
-        )
+        _state.value = _state.value.copy(isLoading = true, error = null)
+        val code = generatePairingCode()
+        val expiresAt = utcAt(System.currentTimeMillis() + 10 * 60 * 1_000L)
+        prefs.edit()
+            .putString(KEY_PENDING_PAIR_CODE, code)
+            .putString(KEY_PENDING_PAIR_EXPIRES_AT, expiresAt)
+            .apply()
         _state.value = _state.value.copy(
             isLoading = false,
-            isAuthenticated = true,
-            userId = response.user.id,
-            userEmail = response.user.email,
-            deviceId = response.device.id,
+            pairingCode = SyncPairingCodeResponse(code = code, expiresAt = expiresAt),
+            pairingStatus = "Open Torve on your phone and enter this code to pair over local Wi-Fi.",
+            wsStatus = onlineTransportStatus(),
+        )
+    }
+
+    private fun startLanTransport() {
+        scope.launch {
+            runCatching {
+                lanServer.startIfNeeded()
+                lanDiscovery.start(lanServer.port)
+                lanReady = true
+                _state.value = _state.value.copy(wsStatus = onlineTransportStatus(), error = null)
+            }.onFailure { error ->
+                lanReady = false
+                _state.value = _state.value.copy(
+                    wsStatus = "local-lan-error",
+                    error = "Local sync transport failed: ${error.message}",
+                )
+                Log.e(TAG, "LAN transport start failed", error)
+            }
+        }
+    }
+
+    private fun onServiceResolved(service: LanResolvedService) {
+        synchronized(peerLock) {
+            serviceByName[service.serviceName] = service
+        }
+        scope.launch {
+            val hello = lanHttpClient.fetchHello(service).getOrNull() ?: return@launch
+            val remote = hello.device
+            val selfId = getOrCreateSelfDeviceId()
+            if (remote.id == selfId) return@launch
+            synchronized(peerLock) {
+                endpointByDeviceId[remote.id] = service
+                serviceNameByDeviceId[remote.id] = service.serviceName
+            }
+            val devices = _state.value.devices
+            if (devices.any { it.id == remote.id }) {
+                val updated = devices.map { existing ->
+                    if (existing.id == remote.id) {
+                        existing.copy(
+                            installationId = remote.installationId,
+                            deviceName = remote.deviceName,
+                            deviceType = remote.deviceType,
+                            platform = remote.platform,
+                            lastSeenAt = utcNow(),
+                            revokedAt = null,
+                        )
+                    } else {
+                        existing
+                    }
+                }
+                persistDevices(updated)
+                _state.value = _state.value.copy(
+                    devices = updated,
+                    wsStatus = onlineTransportStatus(),
+                )
+            }
+        }
+    }
+
+    private fun onServiceLost(serviceName: String) {
+        val lostDeviceIds = mutableListOf<String>()
+        synchronized(peerLock) {
+            serviceByName.remove(serviceName)
+            val iterator = serviceNameByDeviceId.iterator()
+            while (iterator.hasNext()) {
+                val entry = iterator.next()
+                if (entry.value == serviceName) {
+                    endpointByDeviceId.remove(entry.key)
+                    lostDeviceIds += entry.key
+                    iterator.remove()
+                }
+            }
+        }
+        if (lostDeviceIds.isNotEmpty()) {
+            appendRecentEvent("peer_offline:${lostDeviceIds.joinToString(",")}")
+        }
+    }
+
+    private fun onLanError(message: String) {
+        _state.value = _state.value.copy(error = message, wsStatus = onlineTransportStatus())
+    }
+
+    private suspend fun refreshKnownPeers() {
+        val discovered = synchronized(peerLock) { serviceByName.values.toList() }
+        discovered.forEach { service ->
+            val hello = lanHttpClient.fetchHello(service).getOrNull() ?: return@forEach
+            val remote = hello.device
+            if (remote.id == getOrCreateSelfDeviceId()) return@forEach
+            synchronized(peerLock) {
+                endpointByDeviceId[remote.id] = service
+                serviceNameByDeviceId[remote.id] = service.serviceName
+            }
+        }
+        _state.value = _state.value.copy(wsStatus = onlineTransportStatus())
+    }
+
+    private fun handleInboundPairClaim(request: LanPairClaimRequest): LanPairClaimResponse {
+        val active = _state.value.pairingCode ?: return LanPairClaimResponse(
+            status = "invalid_code",
+            message = "No active pairing code.",
+        )
+        if (isPairingExpired(active.expiresAt)) {
+            _state.value = _state.value.copy(
+                pairingCode = null,
+                pairingStatus = "Pairing code expired. Generate a new code.",
+            )
+            return LanPairClaimResponse(
+                status = "expired",
+                message = "Pairing code expired.",
+            )
+        }
+        if (normalizePairingCode(request.code) != normalizePairingCode(active.code)) {
+            return LanPairClaimResponse(
+                status = "invalid_code",
+                message = "Pairing code mismatch.",
+            )
+        }
+        val source = request.sourceDevice.copy(lastSeenAt = utcNow(), revokedAt = null)
+        val updated = upsertDevice(_state.value.devices, source)
+        persistDevices(updated)
+        prefs.edit()
+            .remove(KEY_PENDING_PAIR_CODE)
+            .remove(KEY_PENDING_PAIR_EXPIRES_AT)
+            .apply()
+        _state.value = _state.value.copy(
+            devices = updated,
+            pairingCode = null,
+            pairingStatus = "Paired with ${source.deviceName}.",
+            wsStatus = onlineTransportStatus(),
             error = null,
         )
-        startRealtime()
-    }
-
-    private suspend fun ensureAccessToken(): String? {
-        val accessToken = tokenStore.getAccessToken()
-        if (!accessToken.isNullOrBlank()) return accessToken
-        val refreshToken = tokenStore.getRefreshToken() ?: return null
-        return runCatching {
-            val refreshed = api.refresh(refreshToken)
-            onAuthSuccess(refreshed)
-            refreshed.tokens.accessToken
-        }.getOrNull()
-    }
-
-    private fun startRealtime() {
-        websocketManager.start(
-            accessTokenProvider = { tokenStore.getAccessToken() },
-            deviceIdProvider = { tokenStore.getDeviceId() },
+        appendRecentEvent("pair_accepted:${source.deviceName}")
+        return LanPairClaimResponse(
+            status = "paired",
+            device = buildSelfDevice(getOrCreateSelfDeviceId()),
+            message = "paired",
         )
     }
 
-    private fun observeRealtimeEvents() {
-        scope.launch {
-            websocketManager.events.collectLatest { event ->
-                val previous = _state.value.recentEvents.take(19)
-                when (event) {
-                    SyncRealtimeEvent.Connecting -> {
-                        _state.value = _state.value.copy(wsStatus = "connecting")
-                    }
-                    SyncRealtimeEvent.Connected -> {
-                        _state.value = _state.value.copy(wsStatus = "connected")
-                    }
-                    SyncRealtimeEvent.Disconnected -> {
-                        _state.value = _state.value.copy(wsStatus = "disconnected")
-                    }
-                    is SyncRealtimeEvent.Error -> {
-                        _state.value = _state.value.copy(
-                            wsStatus = "error",
-                            recentEvents = listOf("error:${event.message}") + previous,
-                        )
-                    }
-                    is SyncRealtimeEvent.Message -> {
-                        decodeInboundEvent(event)?.let { decoded ->
-                            _inboundEvents.tryEmit(decoded)
-                        }
-                        _state.value = _state.value.copy(
-                            recentEvents = listOf("${event.eventType}#${event.eventId}:${event.payload}") + previous,
-                        )
-                    }
+    private fun handleInboundLanEvent(event: LanEventEnvelope): LanStatusResponse {
+        val selfId = _state.value.deviceId ?: getOrCreateSelfDeviceId()
+        if (event.targetDeviceId != selfId) {
+            return LanStatusResponse(status = "ignored", message = "Not target device.")
+        }
+        return runCatching {
+            when (event.eventType) {
+                EVENT_SEARCH_PUSH -> {
+                    val payload = json.decodeFromJsonElement<SyncSearchPushPayload>(event.payload)
+                    _inboundEvents.tryEmit(
+                        SyncInboundEvent.SearchPush(
+                            query = payload.query,
+                            filters = payload.filters,
+                            issuedByDeviceId = payload.issuedByDeviceId ?: event.sourceDeviceId,
+                        ),
+                    )
+                    appendRecentEvent("search_received:${event.eventId}:${payload.query}")
+                }
+
+                EVENT_PLAYBACK_INTENT -> {
+                    val payload = json.decodeFromJsonElement<SyncPlaybackIntentPayload>(event.payload)
+                    _inboundEvents.tryEmit(
+                        SyncInboundEvent.PlaybackIntent(
+                            contentId = payload.contentId,
+                            providerTarget = payload.providerTarget,
+                            positionMs = payload.positionMs,
+                            mediaType = payload.mediaType,
+                            audio = payload.audio,
+                            subtitles = payload.subtitles,
+                            issuedByDeviceId = payload.issuedByDeviceId ?: event.sourceDeviceId,
+                        ),
+                    )
+                    appendRecentEvent("playback_received:${event.eventId}:${payload.contentId}")
+                }
+
+                else -> {
+                    return LanStatusResponse(
+                        status = "bad_request",
+                        message = "Unsupported event type ${event.eventType}.",
+                    )
                 }
             }
+            LanStatusResponse(status = "ok")
+        }.getOrElse { error ->
+            LanStatusResponse(status = "error", message = error.message ?: "Failed to decode event.")
         }
     }
 
-    private fun mutateLoading() {
-        _state.value = _state.value.copy(isLoading = true, error = null)
-    }
-
-    private fun onError(t: Throwable) {
-        val message = when (t) {
-            is ClientRequestException -> "Request failed: ${t.response.status.value}"
-            is ServerResponseException -> "Server error: ${t.response.status.value}"
-            else -> t.message ?: "Unknown error"
+    private fun buildInitialState(): SyncAccountState {
+        migrateLegacySession()
+        val profileName = prefs.getString(KEY_PROFILE_NAME, null)?.trim().takeUnless { it.isNullOrBlank() }
+        val hasPin = !prefs.getString(KEY_PROFILE_PIN_HASH, null).isNullOrBlank()
+        val selfDeviceId = getOrCreateSelfDeviceId()
+        val devices = ensureSelfDevice(readDevices(), selfDeviceId)
+        persistDevices(devices)
+        val pendingCode = prefs.getString(KEY_PENDING_PAIR_CODE, null)
+        val pendingExpires = prefs.getString(KEY_PENDING_PAIR_EXPIRES_AT, null)
+        val pendingPairing = if (!pendingCode.isNullOrBlank() && !pendingExpires.isNullOrBlank() && !isPairingExpired(pendingExpires)) {
+            SyncPairingCodeResponse(code = pendingCode, expiresAt = pendingExpires)
+        } else {
+            prefs.edit().remove(KEY_PENDING_PAIR_CODE).remove(KEY_PENDING_PAIR_EXPIRES_AT).apply()
+            null
         }
-        _state.value = _state.value.copy(
+        val authenticated = profileName != null
+        return SyncAccountState(
             isLoading = false,
-            error = message,
+            isAuthenticated = authenticated,
+            userId = if (authenticated) localUserId() else null,
+            userEmail = profileName,
+            profileName = profileName,
+            hasPin = hasPin,
+            deviceId = selfDeviceId,
+            devices = devices,
+            pairingCode = pendingPairing,
+            pairingStatus = when {
+                pendingPairing != null -> "Pairing code ${pendingPairing.code}"
+                authenticated -> null
+                else -> "Local mode active."
+            },
+            wsStatus = onlineTransportStatus(),
         )
     }
 
-    private fun currentDeviceRegistration(): SyncDeviceRegistration {
-        val isTv = context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
-        val deviceType = if (isTv) "tv" else "mobile"
-        return SyncDeviceRegistration(
-            installationId = installationId(),
-            deviceName = Build.MODEL ?: "Android Device",
-            deviceType = deviceType,
-            platform = "android",
-        )
+    private fun migrateLegacySession() {
+        val existingName = prefs.getString(KEY_PROFILE_NAME, null)
+        if (!existingName.isNullOrBlank()) return
+        val legacy = tokenStore.loadSession() ?: return
+        val migratedName = legacy.email.substringBefore("@").ifBlank { legacy.email }
+        prefs.edit()
+            .putString(KEY_PROFILE_NAME, migratedName)
+            .putString(KEY_SELF_DEVICE_ID, legacy.deviceId)
+            .apply()
+        tokenStore.clear()
     }
 
-    private fun decodeInboundEvent(message: SyncRealtimeEvent.Message): SyncInboundEvent? {
-        val payload = message.payload
-        return runCatching {
-            when (message.eventType) {
-                "SEARCH_PUSH" -> {
-                    val decoded = HttpClientFactory.json.decodeFromJsonElement<SyncSearchPushPayload>(payload)
-                    SyncInboundEvent.SearchPush(
-                        query = decoded.query,
-                        filters = decoded.filters,
-                        issuedByDeviceId = decoded.issuedByDeviceId,
-                    )
-                }
+    private fun getOrCreateSelfDeviceId(): String {
+        val existing = prefs.getString(KEY_SELF_DEVICE_ID, null)
+        if (!existing.isNullOrBlank()) return existing
+        val generated = "self-${installationId()}"
+        prefs.edit().putString(KEY_SELF_DEVICE_ID, generated).apply()
+        return generated
+    }
 
-                "PLAYBACK_INTENT" -> {
-                    val decoded = HttpClientFactory.json.decodeFromJsonElement<SyncPlaybackIntentPayload>(payload)
-                    SyncInboundEvent.PlaybackIntent(
-                        contentId = decoded.contentId,
-                        providerTarget = decoded.providerTarget,
-                        positionMs = decoded.positionMs,
-                        mediaType = decoded.mediaType,
-                        audio = decoded.audio,
-                        subtitles = decoded.subtitles,
-                        issuedByDeviceId = decoded.issuedByDeviceId,
-                    )
-                }
+    private fun readDevices(): List<SyncDeviceDto> {
+        val raw = prefs.getString(KEY_DEVICES_JSON, null) ?: return emptyList()
+        return runCatching { json.decodeFromString<List<SyncDeviceDto>>(raw) }.getOrDefault(emptyList())
+    }
 
-                else -> null
+    private fun persistDevices(devices: List<SyncDeviceDto>) {
+        prefs.edit()
+            .putString(KEY_DEVICES_JSON, json.encodeToString(devices))
+            .apply()
+    }
+
+    private fun ensureSelfDevice(devices: List<SyncDeviceDto>, selfDeviceId: String): List<SyncDeviceDto> {
+        val self = buildSelfDevice(selfDeviceId)
+        return if (devices.any { it.id == selfDeviceId }) {
+            devices.map { existing ->
+                if (existing.id == selfDeviceId) {
+                    existing.copy(
+                        installationId = self.installationId,
+                        deviceName = self.deviceName,
+                        deviceType = self.deviceType,
+                        platform = self.platform,
+                        lastSeenAt = utcNow(),
+                    )
+                } else {
+                    existing
+                }
             }
-        }.getOrNull()
+        } else {
+            listOf(self) + devices
+        }
+    }
+
+    private fun upsertDevice(devices: List<SyncDeviceDto>, candidate: SyncDeviceDto): List<SyncDeviceDto> {
+        return if (devices.any { it.id == candidate.id }) {
+            devices.map { if (it.id == candidate.id) candidate else it }
+        } else {
+            devices + candidate
+        }
+    }
+
+    private fun buildSelfDevice(selfDeviceId: String): SyncDeviceDto {
+        val isTv = context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+        val type = if (isTv) "tv" else "mobile"
+        val platform = if (isTv) "android_tv" else "android"
+        return SyncDeviceDto(
+            id = selfDeviceId,
+            installationId = installationId(),
+            deviceName = Build.MODEL ?: if (isTv) "Torve TV" else "Android Device",
+            deviceType = type,
+            platform = platform,
+            lastSeenAt = utcNow(),
+            revokedAt = null,
+        )
+    }
+
+    private fun appendRecentEvent(entry: String) {
+        val history = listOf("${utcNow()}:$entry") + _state.value.recentEvents.take(19)
+        _state.value = _state.value.copy(
+            recentEvents = history,
+            error = null,
+            wsStatus = onlineTransportStatus(),
+        )
+    }
+
+    private fun normalizePairingCode(raw: String): String {
+        return raw.uppercase(Locale.US).filter { it.isLetterOrDigit() }.take(6)
+    }
+
+    private fun generatePairingCode(): String {
+        val alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        return buildString {
+            repeat(6) {
+                append(alphabet[Random.nextInt(alphabet.length)])
+            }
+        }
+    }
+
+    private fun isPairingExpired(expiresAtIso: String): Boolean {
+        return runCatching {
+            parseUtc(expiresAtIso) < System.currentTimeMillis()
+        }.getOrDefault(true)
+    }
+
+    private fun hashPin(pin: String): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(pin.toByteArray())
+        return digest.joinToString("") { byte -> "%02x".format(byte) }
+    }
+
+    private fun localUserId(): String = "local-${installationId()}"
+
+    private fun localServiceNameHint(): String {
+        val suffix = installationId().replace("-", "").takeLast(8)
+        return "Torve-$suffix"
+    }
+
+    private fun onlineTransportStatus(): String {
+        return if (lanReady) "local-lan-online" else "local-only"
+    }
+
+    private fun utcNow(): String = utcAt(System.currentTimeMillis())
+
+    private fun utcAt(epochMs: Long): String {
+        val formatter = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+        formatter.timeZone = TimeZone.getTimeZone("UTC")
+        return formatter.format(Date(epochMs))
+    }
+
+    private fun parseUtc(iso: String): Long {
+        val formatter = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+        formatter.timeZone = TimeZone.getTimeZone("UTC")
+        return formatter.parse(iso)?.time ?: 0L
+    }
+
+    private companion object {
+        const val TAG = "SyncCoordinator"
+        const val EVENT_SEARCH_PUSH = "SEARCH_PUSH"
+        const val EVENT_PLAYBACK_INTENT = "PLAYBACK_INTENT"
+
+        const val PREFS_NAME = "torve_sync_local_state"
+        const val KEY_PROFILE_NAME = "local_profile_name"
+        const val KEY_PROFILE_PIN_HASH = "local_profile_pin_hash"
+        const val KEY_SELF_DEVICE_ID = "self_device_id"
+        const val KEY_DEVICES_JSON = "paired_devices_json"
+        const val KEY_PENDING_PAIR_CODE = "pending_pair_code"
+        const val KEY_PENDING_PAIR_EXPIRES_AT = "pending_pair_expires_at"
     }
 }

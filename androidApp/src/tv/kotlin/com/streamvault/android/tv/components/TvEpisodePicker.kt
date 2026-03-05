@@ -1,0 +1,382 @@
+package com.streamvault.android.tv.components
+
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import coil3.compose.AsyncImage
+import com.streamvault.android.R
+import com.streamvault.android.ui.theme.*
+import com.streamvault.domain.model.Episode
+import com.streamvault.domain.model.Season
+import com.streamvault.domain.model.WatchProgress
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+
+@Composable
+fun TvEpisodePicker(
+    seasons: List<Season>,
+    selectedSeason: Int,
+    seasonDetail: Season?,
+    isLoadingSeasonDetail: Boolean,
+    watchedEpisodes: Set<String>,
+    watchProgress: WatchProgress?,
+    railFocusRequester: FocusRequester,
+    onSeasonSelected: (Int) -> Unit,
+    onEpisodeSelected: (season: Int, episode: Int) -> Unit,
+    onSeasonDownload: ((Int) -> Unit)? = null,
+    onFirstContentRequester: (FocusRequester) -> Unit,
+    onContentFocused: (FocusRequester) -> Unit,
+) {
+    val seasonsLabel = stringResource(R.string.tv_episodes_title)
+    Column(
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(
+            text = seasonsLabel,
+            style = MaterialTheme.typography.headlineSmall,
+            color = Snow,
+            fontWeight = FontWeight.SemiBold,
+        )
+
+        // Season tabs
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(end = 12.dp),
+        ) {
+            itemsIndexed(
+                items = seasons.filter { it.seasonNumber > 0 },
+                key = { _, s -> "season_${s.seasonNumber}" },
+            ) { index, season ->
+                val requester = remember("season_tab_${season.seasonNumber}") { FocusRequester() }
+                if (index == 0) {
+                    onFirstContentRequester(requester)
+                }
+                TvSeasonChip(
+                    seasonNumber = season.seasonNumber,
+                    isSelected = season.seasonNumber == selectedSeason,
+                    modifier = Modifier.focusRequester(requester),
+                    onFocused = { onContentFocused(requester) },
+                    onClick = { onSeasonSelected(season.seasonNumber) },
+                )
+            }
+
+            if (onSeasonDownload != null) {
+                item(key = "dl_season") {
+                    TvDownloadSeasonChip(
+                        seasonNumber = selectedSeason,
+                        onFocused = {},
+                        onClick = { onSeasonDownload(selectedSeason) },
+                    )
+                }
+            }
+        }
+
+        // Episode cards
+        when {
+            isLoadingSeasonDetail -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(160.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator(color = Amber)
+                }
+            }
+
+            seasonDetail != null && seasonDetail.episodes.isNotEmpty() -> {
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    contentPadding = PaddingValues(end = 16.dp),
+                ) {
+                    itemsIndexed(
+                        items = seasonDetail.episodes,
+                        key = { _, ep -> "ep_${selectedSeason}_${ep.episodeNumber}" },
+                    ) { _, episode ->
+                        val episodeKey = "s${selectedSeason}e${episode.episodeNumber}"
+                        val isWatched = episodeKey in watchedEpisodes
+                        val episodeProgress = if (
+                            watchProgress?.seasonNumber == selectedSeason &&
+                            watchProgress.episodeNumber == episode.episodeNumber
+                        ) {
+                            watchProgress.progressPercent
+                        } else {
+                            null
+                        }
+
+                        TvEpisodeCard(
+                            episode = episode,
+                            seasonNumber = selectedSeason,
+                            isWatched = isWatched,
+                            progress = episodeProgress,
+                            onClick = { onEpisodeSelected(selectedSeason, episode.episodeNumber) },
+                        )
+                    }
+                }
+            }
+
+            else -> {
+                Text(
+                    text = stringResource(R.string.tv_no_episodes),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Silver,
+                    modifier = Modifier.padding(vertical = 12.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TvSeasonChip(
+    seasonNumber: Int,
+    isSelected: Boolean,
+    modifier: Modifier = Modifier,
+    onFocused: () -> Unit,
+    onClick: () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(targetValue = if (focused) 1.05f else 1f, label = "seasonScale")
+    val borderColor by animateColorAsState(
+        targetValue = when {
+            focused -> AmberLight
+            isSelected -> Amber.copy(alpha = 0.67f)
+            else -> Steel.copy(alpha = 0.4f)
+        },
+        label = "seasonBorder",
+    )
+    val bgColor = when {
+        focused -> Gunmetal
+        isSelected -> Graphite
+        else -> Charcoal
+    }
+
+    Box(
+        modifier = modifier
+            .zIndex(if (focused) 1f else 0f)
+            .scale(scale)
+            .border(2.dp, borderColor, RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(14.dp))
+            .background(bgColor)
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused()
+            }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            )
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+    ) {
+        Text(
+            text = "S$seasonNumber",
+            style = MaterialTheme.typography.titleMedium,
+            color = if (isSelected || focused) Snow else Silver,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+        )
+    }
+}
+
+@Composable
+private fun TvEpisodeCard(
+    episode: Episode,
+    seasonNumber: Int,
+    isWatched: Boolean,
+    progress: Float?,
+    onClick: () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(targetValue = if (focused) 1.06f else 1f, label = "episodeScale")
+    val borderColor by animateColorAsState(
+        targetValue = if (focused) AmberLight else Color.Transparent,
+        label = "episodeBorder",
+    )
+
+    Box(
+        modifier = Modifier
+            .width(260.dp)
+            .aspectRatio(16f / 9f)
+            .zIndex(if (focused) 1f else 0f)
+            .scale(scale)
+            .border(2.dp, borderColor, RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(12.dp))
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            ),
+    ) {
+        if (episode.stillUrl != null) {
+            AsyncImage(
+                model = episode.stillUrl,
+                contentDescription = episode.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Charcoal),
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomCenter)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            Obsidian.copy(alpha = 0.9f),
+                        ),
+                    ),
+                )
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = "E${episode.episodeNumber} ${episode.name}",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = Snow,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                if (episode.runtime != null) {
+                    Text(
+                        text = "${episode.runtime}m",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Silver,
+                    )
+                }
+            }
+        }
+
+        // Watched badge
+        if (isWatched) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .background(Charcoal.copy(alpha = 0.8f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 6.dp, vertical = 3.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.tv_watched),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AmberLight,
+                )
+            }
+        }
+
+        // Progress bar
+        if (progress != null && progress > 0f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(3.dp)
+                    .align(Alignment.BottomCenter),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .background(Snow.copy(alpha = 0.27f)),
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(fraction = progress.coerceIn(0f, 1f))
+                        .height(3.dp)
+                        .background(AmberLight),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TvDownloadSeasonChip(
+    seasonNumber: Int,
+    modifier: Modifier = Modifier,
+    onFocused: () -> Unit,
+    onClick: () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(targetValue = if (focused) 1.05f else 1f, label = "dlSeasonScale")
+    val borderColor by animateColorAsState(
+        targetValue = if (focused) AmberLight else Steel.copy(alpha = 0.4f),
+        label = "dlSeasonBorder",
+    )
+    val bgColor = if (focused) Gunmetal else Charcoal
+
+    Row(
+        modifier = modifier
+            .zIndex(if (focused) 1f else 0f)
+            .scale(scale)
+            .border(2.dp, borderColor, RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(14.dp))
+            .background(bgColor)
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused()
+            }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            )
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "\u2B07 S$seasonNumber",
+            style = MaterialTheme.typography.titleMedium,
+            color = if (focused) Snow else Silver,
+            fontWeight = FontWeight.Normal,
+        )
+    }
+}

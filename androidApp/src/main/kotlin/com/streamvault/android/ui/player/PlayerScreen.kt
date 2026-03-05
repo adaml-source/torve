@@ -12,8 +12,10 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.annotation.OptIn
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.ui.draw.scale
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -72,6 +74,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -121,6 +124,7 @@ import com.streamvault.domain.repository.MetadataRepository
 import com.streamvault.domain.repository.StreamRepository
 import com.streamvault.domain.repository.PreferencesRepository
 import com.streamvault.domain.repository.WatchProgressRepository
+import com.streamvault.presentation.channels.ChannelsViewModel
 import com.streamvault.presentation.player.TraktScrobbler
 import com.streamvault.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.delay
@@ -149,6 +153,7 @@ fun PlayerScreen(
     metadataRepo: MetadataRepository = koinInject(),
     streamRepo: StreamRepository = koinInject(),
     addonRepo: AddonRepository = koinInject(),
+    channelsViewModel: ChannelsViewModel = koinInject(),
     settingsViewModel: SettingsViewModel = koinInject(),
     syncCoordinator: SyncCoordinator = koinInject(),
     traktScrobbler: TraktScrobbler = koinInject(),
@@ -217,6 +222,7 @@ fun PlayerScreen(
         mutableLongStateOf(startPositionMs.coerceAtLeast(0L))
     }
     val playerRootFocusRequester = remember { FocusRequester() }
+    val playButtonFocusRequester = remember { FocusRequester() }
 
     // Mutable episode state — updated when swapping to next episode
     var currentSeasonNumber by remember { mutableStateOf(seasonNumber) }
@@ -241,6 +247,7 @@ fun PlayerScreen(
     var dismissedSkipSegments by remember { mutableStateOf<Set<String>>(emptySet()) }
 
     // Trakt scrobble state
+    val channelsState by channelsViewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
     val traktAccessToken = settingsState.traktAccessToken
     val traktScrobbleEnabled = settingsState.traktScrobbleEnabled
@@ -269,6 +276,21 @@ fun PlayerScreen(
             val exoEngine = ExoPlayerEngine(context)
             exoEngine.initialize()
             exoEngine as PlayerEngine
+        }
+    }
+
+    // Apply global audio output preferences for all playback (not only live TV).
+    LaunchedEffect(useMpv, channelsState.audioPassthroughEnabled, channelsState.preferSurroundCodecs) {
+        if (useMpv) {
+            (engine as? MPVPlayerEngine)?.setAudioOutputPreferences(
+                passthroughEnabled = channelsState.audioPassthroughEnabled,
+                preferSurround = channelsState.preferSurroundCodecs,
+            )
+        } else {
+            (engine as? ExoPlayerEngine)?.setAudioOutputPreferences(
+                passthroughEnabled = channelsState.audioPassthroughEnabled,
+                preferSurround = channelsState.preferSurroundCodecs,
+            )
         }
     }
 
@@ -817,10 +839,11 @@ fun PlayerScreen(
         } else null
     }
 
-    // Auto-hide controls
-    LaunchedEffect(showControls) {
-        if (showControls && isPlaying) {
-            delay(4000)
+    // Auto-hide controls after 5 seconds (works for live streams too)
+    var controlsInteractionTick by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(showControls, controlsInteractionTick) {
+        if (showControls) {
+            delay(5000)
             showControls = false
         }
     }
@@ -834,6 +857,22 @@ fun PlayerScreen(
 
     LaunchedEffect(Unit) {
         playerRootFocusRequester.requestFocus()
+    }
+
+    // When controls appear, move focus to the play button so D-pad navigation works
+    LaunchedEffect(showControls) {
+        if (showControls) {
+            delay(50) // Let composition settle
+            try {
+                playButtonFocusRequester.requestFocus()
+            } catch (_: IllegalStateException) {
+                // Not yet attached
+            }
+        } else {
+            try {
+                playerRootFocusRequester.requestFocus()
+            } catch (_: IllegalStateException) { }
+        }
     }
 
     val handoffTargets = syncCoordinator.targetDevices()
@@ -852,6 +891,32 @@ fun PlayerScreen(
                 if ((showTrackDialog || showAudioDelayDialog || showEqualizerSheet) && keyEvent.key != Key.Back) {
                     return@onPreviewKeyEvent false
                 }
+
+                // When controls are visible, let D-pad navigate between buttons.
+                // Only intercept Back and media keys at root level.
+                if (showControls) {
+                    return@onPreviewKeyEvent when (keyEvent.key) {
+                        Key.Back -> {
+                            showControls = false
+                            true
+                        }
+                        Key.Spacebar, Key.MediaPlayPause -> {
+                            togglePlayback()
+                            true
+                        }
+                        Key.DirectionUp, Key.DirectionDown,
+                        Key.DirectionLeft, Key.DirectionRight,
+                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter,
+                        -> {
+                            // Reset auto-hide timer on any navigation
+                            controlsInteractionTick++
+                            false // let focus system handle navigation
+                        }
+                        else -> false
+                    }
+                }
+
+                // Controls hidden — handle all D-pad keys for media shortcuts
                 when (keyEvent.key) {
                     Key.Back -> {
                         if (!handleBackAction()) {
@@ -876,7 +941,7 @@ fun PlayerScreen(
                         seekBy(10_000)
                         true
                     }
-                    Key.DirectionUp -> {
+                    Key.DirectionUp, Key.DirectionDown -> {
                         showControls = true
                         true
                     }
@@ -1147,7 +1212,7 @@ fun PlayerScreen(
                         .padding(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconButton(onClick = onBack) {
+                    FocusableIconButton(onClick = onBack) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.common_back),
@@ -1169,7 +1234,7 @@ fun PlayerScreen(
                     }
                     // Cast button
                     if (castAvailable) {
-                        IconButton(onClick = {
+                        FocusableIconButton(onClick = {
                             try {
                                 if (currentUrl.isNotBlank()) {
                                     castManager?.requestCast(
@@ -1192,18 +1257,18 @@ fun PlayerScreen(
                         }
                     }
 
-                    IconButton(
+                    FocusableIconButton(
                         onClick = {
-                            if (!syncState.isAuthenticated) {
-                                Toast.makeText(context, "Sign in to transfer playback", Toast.LENGTH_SHORT).show()
-                                return@IconButton
+                            when {
+                                !syncState.isAuthenticated -> {
+                                    Toast.makeText(context, "Create a local profile to transfer playback", Toast.LENGTH_SHORT).show()
+                                }
+                                handoffTargets.isEmpty() -> {
+                                    syncCoordinator.refreshDevices()
+                                    Toast.makeText(context, "No paired TV devices found", Toast.LENGTH_SHORT).show()
+                                }
+                                else -> showDevicePicker = true
                             }
-                            if (handoffTargets.isEmpty()) {
-                                syncCoordinator.refreshDevices()
-                                Toast.makeText(context, "No paired TV devices found", Toast.LENGTH_SHORT).show()
-                                return@IconButton
-                            }
-                            showDevicePicker = true
                         },
                     ) {
                         Icon(
@@ -1214,7 +1279,7 @@ fun PlayerScreen(
                         )
                     }
 
-                    IconButton(
+                    FocusableIconButton(
                         onClick = {
                             if (
                                 voiceController.uiState.value.phase == VoiceInputPhase.Error ||
@@ -1245,7 +1310,7 @@ fun PlayerScreen(
                     }
 
                     if (subtitleTracks.isNotEmpty() || audioTracks.isNotEmpty()) {
-                        IconButton(onClick = { showTrackDialog = true }) {
+                        FocusableIconButton(onClick = { showTrackDialog = true }) {
                             Icon(
                                 Icons.Default.Settings,
                                 contentDescription = stringResource(R.string.player_track_selection),
@@ -1255,7 +1320,7 @@ fun PlayerScreen(
                         }
                     }
 
-                    IconButton(onClick = { showAudioDelayDialog = true }) {
+                    FocusableIconButton(onClick = { showAudioDelayDialog = true }) {
                         Icon(
                             Icons.Default.Tune,
                             contentDescription = "Audio delay",
@@ -1265,7 +1330,7 @@ fun PlayerScreen(
                     }
 
                     if (audioEqualizer != null) {
-                        IconButton(onClick = {
+                        FocusableIconButton(onClick = {
                             showEqualizerSheet = !showEqualizerSheet
                             showControls = true
                         }) {
@@ -1309,7 +1374,7 @@ fun PlayerScreen(
                     modifier = Modifier.align(Alignment.Center),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconButton(
+                    FocusableIconButton(
                         onClick = { seekBy(-10_000) },
                     ) {
                         Icon(
@@ -1322,8 +1387,9 @@ fun PlayerScreen(
 
                     Spacer(Modifier.width(24.dp))
 
-                    IconButton(
+                    FocusableIconButton(
                         onClick = togglePlayback,
+                        modifier = Modifier.focusRequester(playButtonFocusRequester),
                     ) {
                         Icon(
                             imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
@@ -1335,7 +1401,7 @@ fun PlayerScreen(
 
                     Spacer(Modifier.width(24.dp))
 
-                    IconButton(
+                    FocusableIconButton(
                         onClick = { seekBy(10_000) },
                     ) {
                         Icon(
@@ -1415,6 +1481,39 @@ fun PlayerScreen(
             },
             onDismiss = { showDevicePicker = false },
         )
+    }
+}
+
+/** IconButton wrapper that shows an Amber border when focused (for D-pad / TV navigation). */
+@Composable
+private fun FocusableIconButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val scale by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (focused) 1.15f else 1f,
+        label = "iconBtnScale",
+    )
+    Box(
+        modifier = modifier
+            .scale(scale)
+            .border(
+                width = if (focused) 2.dp else 0.dp,
+                color = if (focused) com.streamvault.android.ui.theme.Amber else Color.Transparent,
+                shape = RoundedCornerShape(8.dp),
+            )
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            )
+            .padding(8.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        content()
     }
 }
 

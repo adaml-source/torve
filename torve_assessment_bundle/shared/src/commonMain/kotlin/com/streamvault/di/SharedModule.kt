@@ -67,6 +67,7 @@ import com.streamvault.domain.repository.SubscriptionRepository
 import com.streamvault.domain.repository.WatchHistoryRepository
 import com.streamvault.domain.repository.WatchProgressRepository
 import com.streamvault.domain.repository.WatchlistRepository
+import com.streamvault.domain.sync.AccountSyncManager
 import com.streamvault.domain.sync.SyncRepository
 import com.streamvault.platform.DatabaseDriverFactory
 import com.streamvault.presentation.addon.AddonViewModel
@@ -170,6 +171,7 @@ val sharedModule = module {
 
     // Preferences
     single<PreferencesRepository> { PreferencesRepositoryImpl(get()) }
+    single { AccountSyncManager(get(), get()) }
 
     // Addon Repository
     single<AddonRepository> { AddonRepositoryImpl(get(), get(), get()) }

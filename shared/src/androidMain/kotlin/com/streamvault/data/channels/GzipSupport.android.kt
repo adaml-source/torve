@@ -127,6 +127,8 @@ internal actual object GzipSupport {
         channelFilter: Set<String>?,
         resolveEpgChannelKey: ((xmltvChannelId: String, xmltvDisplayName: String?) -> String?)?,
         batchSize: Int,
+        maxProgrammesPerChannel: Int,
+        maxProgrammesTotal: Int,
         onProgress: ((EpgBatchProgress) -> Unit)?,
     ): EpgStreamIngestResult? {
         val file = File(tempFilePath)
@@ -162,6 +164,8 @@ internal actual object GzipSupport {
                             channelFilter = channelFilter,
                             resolveEpgChannelKey = resolveEpgChannelKey,
                             batchSize = batchSize,
+                            maxProgrammesPerChannel = maxProgrammesPerChannel,
+                            maxProgrammesTotal = maxProgrammesTotal,
                             onProgress = onProgress,
                         )
                         bytesParsed = counted.totalBytesRead

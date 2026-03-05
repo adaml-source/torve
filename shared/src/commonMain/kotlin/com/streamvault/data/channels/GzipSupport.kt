@@ -2,7 +2,15 @@ package com.streamvault.data.channels
 
 import com.streamvault.domain.model.EpgData
 import com.streamvault.db.StreamVaultDatabase
+import io.ktor.client.statement.HttpResponse
 import io.ktor.utils.io.ByteReadChannel
+
+internal data class EpgDownloadResult(
+    val tempFilePath: String,
+    val bytesDownloaded: Long,
+    val contentEncoding: String,
+    val contentLength: Long?,
+)
 
 internal data class EpgStreamIngestResult(
     val stats: EpgDbParseStats,
@@ -15,24 +23,31 @@ internal data class EpgStreamIngestResult(
 internal class EpgStreamLimitException(message: String) : IllegalStateException(message)
 
 internal expect object GzipSupport {
-    suspend fun parseXmlTvAutoStreamingToDbOrNull(
-        responseChannel: ByteReadChannel,
+    suspend fun downloadToTempFile(
+        response: HttpResponse,
+        maxCompressedBytes: Long,
+    ): EpgDownloadResult?
+
+    suspend fun parseXmlTvAutoFromFileToDbOrNull(
+        tempFilePath: String,
         parser: EpgParser,
         db: StreamVaultDatabase,
         playlistId: String,
         generationId: Long,
         windowStartMs: Long,
         windowEndMs: Long,
-        contentLength: Long?,
         contentEncoding: String?,
-        maxCompressedBytes: Long,
+        contentLength: Long?,
         maxUncompressedBytes: Long,
-        spoolToFileThresholdBytes: Long,
         channelFilter: Set<String>?,
         resolveEpgChannelKey: ((xmltvChannelId: String, xmltvDisplayName: String?) -> String?)?,
         batchSize: Int,
+        maxProgrammesPerChannel: Int,
+        maxProgrammesTotal: Int,
         onProgress: ((EpgBatchProgress) -> Unit)?,
     ): EpgStreamIngestResult?
+
+    fun deleteTempFile(tempFilePath: String)
 
     suspend fun parseXmlTvStreamingToDbOrNull(
         xmlChannel: ByteReadChannel,

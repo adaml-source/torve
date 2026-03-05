@@ -7,6 +7,7 @@ interface WatchlistRepository {
     suspend fun getByType(mediaType: String): List<WatchlistItem>
     suspend fun isInWatchlist(mediaId: String): Boolean
     suspend fun add(item: WatchlistItem)
+    suspend fun add(item: WatchlistItem, syncTrakt: Boolean, syncSimkl: Boolean)
     suspend fun remove(mediaId: String)
     suspend fun clear()
     suspend fun syncFromTrakt()

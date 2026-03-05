@@ -117,6 +117,9 @@ dependencies {
     // YouTube Player (in-app trailer playback)
     implementation("com.pierfrancescosoffritti.androidyoutubeplayer:core:12.1.0")
 
+    // QR code generation for TV pairing flow
+    implementation("com.google.zxing:core:3.5.3")
+
     // Firebase
     implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
     implementation("com.google.firebase:firebase-crashlytics")

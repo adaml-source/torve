@@ -30,16 +30,20 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import android.app.Activity
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.streamvault.android.R
+import com.streamvault.android.billing.GooglePlayBillingManager
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Snow
 import com.streamvault.presentation.subscription.SubscriptionViewModel
@@ -50,8 +54,25 @@ import org.koin.compose.koinInject
 fun PaywallScreen(
     onBack: () -> Unit,
     viewModel: SubscriptionViewModel = koinInject(),
+    billingManager: GooglePlayBillingManager = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
+    val purchaseResult by billingManager.purchaseResult.collectAsState()
+    val activity = LocalContext.current as? Activity
+
+    LaunchedEffect(purchaseResult) {
+        when (val result = purchaseResult) {
+            is GooglePlayBillingManager.PurchaseResult.Success -> {
+                viewModel.purchase(result.purchaseToken)
+                billingManager.clearPurchaseResult()
+            }
+            is GooglePlayBillingManager.PurchaseResult.AlreadyOwned -> {
+                viewModel.purchase("restored_purchase")
+                billingManager.clearPurchaseResult()
+            }
+            else -> { /* Cancelled or Error — no action */ }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -68,16 +89,15 @@ fun PaywallScreen(
         )
 
         if (state.isPro) {
-            // Lifetime active view
             LifetimeActiveContent(
-                onRestore = { viewModel.restorePurchase("restore_token") },
+                onRestore = { billingManager.queryExistingPurchases() },
             )
         } else {
-            // Free tier view
             FreeTierContent(
                 state = state,
-                onPurchase = { viewModel.purchase("mock_token_${System.currentTimeMillis()}") },
-                onRestore = { viewModel.restorePurchase("restore_token") },
+                formattedPrice = billingManager.getFormattedPrice(),
+                onPurchase = { activity?.let { billingManager.launchPurchase(it) } },
+                onRestore = { billingManager.queryExistingPurchases() },
             )
         }
     }
@@ -170,6 +190,7 @@ private fun AllFeaturesChecked() {
 @Composable
 private fun FreeTierContent(
     state: com.streamvault.presentation.subscription.SubscriptionUiState,
+    formattedPrice: String? = null,
     onPurchase: () -> Unit,
     onRestore: () -> Unit,
 ) {
@@ -231,7 +252,7 @@ private fun FreeTierContent(
                     )
                 }
                 Text(
-                    text = stringResource(R.string.paywall_price),
+                    text = formattedPrice ?: stringResource(R.string.paywall_price),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary,

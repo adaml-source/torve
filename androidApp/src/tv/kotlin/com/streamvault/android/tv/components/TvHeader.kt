@@ -1,154 +1,71 @@
 package com.streamvault.android.tv.components
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusProperties
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
-import com.streamvault.android.R
+import com.streamvault.android.ui.theme.HeroGradient
+import com.streamvault.android.ui.theme.Obsidian
 import com.streamvault.domain.model.MediaItem
 
+/**
+ * Full-bleed hero background layer. Renders a backdrop image that fills the
+ * entire content area behind the scrollable rails. Text and buttons are NOT
+ * here — they live in TvHeroOverlay inside the scrollable LazyColumn.
+ *
+ * Uses the same HeroGradient from mobile's HeroSlide for visual consistency.
+ */
 @Composable
-fun TvHeader(
-    sectionTitle: String,
-    subtitle: String,
+fun TvHeroBackground(
     featuredItem: MediaItem?,
-    primaryActionFocusRequester: FocusRequester,
-    railFocusRequester: FocusRequester,
-    onPlayFeatured: () -> Unit,
-    onOpenFeatured: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(290.dp)
-            .padding(top = 18.dp, end = 34.dp)
-            .clip(RoundedCornerShape(22.dp)),
-    ) {
-        AsyncImage(
-            model = featuredItem?.backdropUrl ?: featuredItem?.posterUrl,
-            contentDescription = featuredItem?.title,
-            modifier = Modifier.matchParentSize(),
-            contentScale = ContentScale.Crop,
-        )
+    Box(modifier = modifier.fillMaxSize()) {
+        val imageUrl = featuredItem?.backdropUrl ?: featuredItem?.posterUrl
+        val scale = ContentScale.Fit
 
+        Crossfade(
+            targetState = imageUrl,
+            animationSpec = tween(500),
+            label = "heroBackdrop",
+        ) { url ->
+            if (url != null) {
+                AsyncImage(
+                    model = url,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = scale,
+                )
+            }
+        }
+
+        // Cinematic gradient — same as mobile HeroGradient
         Box(
             modifier = Modifier
-                .matchParentSize()
+                .fillMaxSize()
+                .background(Brush.verticalGradient(HeroGradient)),
+        )
+
+        // Left-side readability gradient for text overlay
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
                 .background(
                     Brush.horizontalGradient(
                         colors = listOf(
-                            Color(0xF7101422),
-                            Color(0xE6101526),
-                            Color(0xA2101526),
-                            Color(0x55101526),
+                            Obsidian.copy(alpha = 0.7f),
+                            Obsidian.copy(alpha = 0.3f),
+                            Obsidian.copy(alpha = 0f),
                         ),
+                        endX = 900f,
                     ),
                 ),
         )
-
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(horizontal = 28.dp, vertical = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = sectionTitle,
-                style = MaterialTheme.typography.displaySmall,
-                color = Color.White,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.titleMedium,
-                color = Color(0xCCECF1FF),
-            )
-            if (!featuredItem?.title.isNullOrBlank()) {
-                Text(
-                    text = featuredItem?.title.orEmpty(),
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = Color.White,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            if (!featuredItem?.overview.isNullOrBlank()) {
-                Text(
-                    text = featuredItem?.overview.orEmpty(),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color(0xCCECF1FF),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.width(700.dp),
-                )
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(
-                    onClick = onPlayFeatured,
-                    modifier = Modifier
-                        .focusRequester(primaryActionFocusRequester)
-                        .focusProperties { left = railFocusRequester },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFD6A45B),
-                        contentColor = Color(0xFF111419),
-                    ),
-                ) {
-                    Text(stringResource(R.string.tv_action_play))
-                }
-
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0x55273247))
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = onOpenFeatured,
-                        )
-                        .focusable()
-                        .padding(horizontal = 16.dp, vertical = 11.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = stringResource(R.string.tv_action_details),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = Color.White,
-                    )
-                }
-            }
-        }
     }
 }
-

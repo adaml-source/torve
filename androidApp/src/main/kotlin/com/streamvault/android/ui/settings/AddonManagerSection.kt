@@ -37,6 +37,8 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.streamvault.android.R
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Charcoal
 import com.streamvault.android.ui.theme.Gunmetal
@@ -57,7 +59,7 @@ fun AddonManagerSection(
 
     Column(modifier = modifier.fillMaxWidth()) {
         Text(
-            text = "Content Sources",
+            text = stringResource(R.string.addon_content_sources),
             style = MaterialTheme.typography.titleMedium,
             color = Amber,
             fontWeight = FontWeight.SemiBold,
@@ -72,7 +74,7 @@ fun AddonManagerSection(
                 // Installed addons
                 if (state.addons.isEmpty() && !state.isLoading) {
                     Text(
-                        "No content sources installed. Add one below.",
+                        stringResource(R.string.addon_no_sources),
                         style = MaterialTheme.typography.bodySmall,
                         color = StreamVault.colors.textSecondary,
                     )
@@ -118,7 +120,7 @@ fun AddonManagerSection(
                         ) {
                             Icon(
                                 Icons.Default.Delete,
-                                contentDescription = "Remove",
+                                contentDescription = stringResource(R.string.common_remove),
                                 tint = Ruby,
                                 modifier = Modifier.size(16.dp),
                             )
@@ -141,7 +143,7 @@ fun AddonManagerSection(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Extension URL", style = MaterialTheme.typography.bodySmall, color = StreamVault.colors.textSecondary)
+                        Text(stringResource(R.string.addon_extension_url), style = MaterialTheme.typography.bodySmall, color = StreamVault.colors.textSecondary)
                         Spacer(Modifier.height(4.dp))
                         BasicTextField(
                             value = state.installUrl,
@@ -184,7 +186,7 @@ fun AddonManagerSection(
                                 color = Obsidian,
                             )
                         } else {
-                            Icon(Icons.Default.Add, contentDescription = "Install")
+                            Icon(Icons.Default.Add, contentDescription = stringResource(R.string.common_install))
                         }
                     }
                 }

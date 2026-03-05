@@ -325,7 +325,7 @@ internal fun AddPlaylistDialog(
                         selected = isXtream,
                         onClick = { onTypeChange("xtream") },
                         shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-                    ) { Text("Provider Login", color = MaterialTheme.colorScheme.onSurface) }
+                    ) { Text(stringResource(R.string.setup_provider_login), color = MaterialTheme.colorScheme.onSurface) }
                 }
 
                 StyledTextField(value = name, onValueChange = onNameChange, label = stringResource(R.string.channels_playlist_name))

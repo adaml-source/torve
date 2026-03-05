@@ -43,6 +43,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
+import com.streamvault.android.R
 import com.streamvault.android.ui.components.BackButton
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.AmberSubtle
@@ -93,32 +95,32 @@ fun RegexPatternsScreen(
             BackButton(onClick = onBack)
             Spacer(Modifier.width(12.dp))
             Text(
-                "Regex Patterns",
+                stringResource(R.string.regex_title),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 color = Snow,
                 modifier = Modifier.weight(1f),
             )
             IconButton(onClick = { viewModel.addRegexPattern() }) {
-                Icon(Icons.Default.Add, "Add", tint = Amber)
+                Icon(Icons.Default.Add, stringResource(R.string.common_add), tint = Amber)
             }
         }
 
         Text(
-            "Filter stream results by title. Matching streams will be excluded.",
+            stringResource(R.string.regex_filter_desc),
             style = MaterialTheme.typography.bodySmall,
             color = Silver,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
         )
         Text(
-            "Patterns use standard regex. Use (?i) for case-insensitive. Use | to match alternatives.\nExample: (?i)(cam|ts) excludes streams containing 'cam' or 'ts'.\nLearn more at regex101.com",
+            stringResource(R.string.regex_help_text),
             style = MaterialTheme.typography.bodySmall,
             color = Steel,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
         )
 
         Text(
-            "Quick Add",
+            stringResource(R.string.regex_quick_add),
             style = MaterialTheme.typography.labelLarge,
             color = Ash,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
@@ -137,7 +139,7 @@ fun RegexPatternsScreen(
                             viewModel.removeRegexPatternByValue(pattern)
                         } else {
                             viewModel.addRegexPattern(label, pattern)
-                            Toast.makeText(context, "Added: $label", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, context.getString(R.string.regex_added, label), Toast.LENGTH_SHORT).show()
                         }
                     },
                     label = { Text(label, fontSize = 12.sp) },
@@ -188,7 +190,7 @@ private fun RegexPatternRow(
                     editLabel = it
                     onUpdate(pattern.copy(label = it))
                 },
-                placeholder = { Text("Label", style = MaterialTheme.typography.bodySmall) },
+                placeholder = { Text(stringResource(R.string.regex_label_hint), style = MaterialTheme.typography.bodySmall) },
                 modifier = Modifier.weight(1f),
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodySmall.copy(color = Snow),
@@ -211,7 +213,7 @@ private fun RegexPatternRow(
                 ),
             )
             IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Default.Delete, "Delete", tint = Ruby, modifier = Modifier.size(18.dp))
+                Icon(Icons.Default.Delete, stringResource(R.string.common_delete), tint = Ruby, modifier = Modifier.size(18.dp))
             }
         }
         Spacer(Modifier.height(4.dp))
@@ -221,7 +223,7 @@ private fun RegexPatternRow(
                 editPattern = it
                 onUpdate(pattern.copy(pattern = it))
             },
-            placeholder = { Text("Regex pattern", style = MaterialTheme.typography.bodySmall) },
+            placeholder = { Text(stringResource(R.string.regex_pattern_hint), style = MaterialTheme.typography.bodySmall) },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             textStyle = MaterialTheme.typography.bodySmall.copy(color = Snow),

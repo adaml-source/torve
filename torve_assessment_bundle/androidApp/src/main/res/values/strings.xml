@@ -142,6 +142,8 @@
     <string name="settings_clear_cache_confirm">This will remove all cached metadata. You may need to reload content.</string>
 
     <string name="settings_backup_sync">Backup &amp; Sync</string>
+    <string name="settings_account_sync">Account &amp; Sync</string>
+    <string name="settings_backup">Backup</string>
     <string name="settings_last_backup">Last backup: %1$s</string>
     <string name="settings_export_backup">Export Backup</string>
     <string name="settings_import_backup">Import Backup</string>
@@ -451,6 +453,8 @@
     <string name="login_switch_to_signin">Already have an account? Sign In</string>
     <string name="login_switch_to_register">Don\'t have an account? Register</string>
     <string name="login_skip">Skip for now</string>
+    <string name="login_continue_local_mode">Continue in Local Mode</string>
+    <string name="login_local_mode_description">Local mode keeps settings only on this device. You can enable Sync later in Settings.</string>
 
     <!-- Setup Wizard -->
     <string name="setup_step_of">Step %1$d of %2$d</string>

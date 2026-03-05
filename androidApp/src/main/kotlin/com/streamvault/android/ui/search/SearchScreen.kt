@@ -205,7 +205,7 @@ fun SearchScreen(
             IconButton(
                 onClick = {
                     if (!syncState.isAuthenticated) {
-                        Toast.makeText(context, "Sign in to send search to a device", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Create a local profile to send search to a TV", Toast.LENGTH_SHORT).show()
                         return@IconButton
                     }
                     if (tvTargets.isEmpty()) {

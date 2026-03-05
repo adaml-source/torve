@@ -2,56 +2,46 @@ package com.streamvault.android.tv
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
+import com.streamvault.android.ui.theme.Obsidian
+
+/** Collapsed rail width — content always starts here, never shifts. */
+internal val RAIL_COLLAPSED_WIDTH = 76.dp
 
 @Composable
 fun TvScaffold(
     leftRail: @Composable () -> Unit,
-    header: @Composable () -> Unit,
+    background: @Composable () -> Unit,
     content: @Composable () -> Unit,
+    isFullscreen: Boolean = false,
 ) {
-    Row(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.linearGradient(
-                    colors = listOf(
-                        Color(0xFF06080F),
-                        Color(0xFF0B1020),
-                        Color(0xFF121827),
-                    ),
-                ),
-            ),
+            .background(Obsidian),
     ) {
-        leftRail()
-
-        Column(
+        // Content area always starts after the collapsed rail width.
+        // This prevents layout shifts when the rail expands/collapses.
+        // In fullscreen mode (e.g. player), remove the padding so content fills the screen.
+        Box(
             modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight(),
+                .fillMaxSize()
+                .then(if (isFullscreen) Modifier else Modifier.padding(start = RAIL_COLLAPSED_WIDTH)),
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(),
-            ) {
-                header()
-            }
+            // Layer 1: full-bleed hero backdrop
+            background()
+            // Layer 2: scrollable content overlaid on top
+            content()
+        }
 
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-            ) {
-                content()
-            }
+        // Rail renders on top (overlays content when expanded).
+        Box(modifier = Modifier.zIndex(1f)) {
+            leftRail()
         }
     }
 }

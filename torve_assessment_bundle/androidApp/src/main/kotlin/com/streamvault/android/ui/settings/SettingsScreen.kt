@@ -74,12 +74,6 @@ import androidx.compose.ui.unit.dp
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
 import com.streamvault.android.R
-import com.streamvault.domain.model.DebridServiceType
-import com.streamvault.domain.model.StreamQuality
-import com.streamvault.data.auth.AuthClient
-import com.streamvault.data.auth.AuthUser
-import com.streamvault.domain.model.CodecPreference
-import com.streamvault.domain.model.HdrMode
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Charcoal
 import com.streamvault.android.ui.theme.Emerald
@@ -90,6 +84,13 @@ import com.streamvault.android.ui.theme.Silver
 import com.streamvault.android.ui.theme.Snow
 import com.streamvault.android.ui.theme.Steel
 import com.streamvault.android.ui.theme.StreamVault
+import com.streamvault.domain.model.CodecPreference
+import com.streamvault.domain.model.DebridServiceType
+import com.streamvault.domain.model.HdrMode
+import com.streamvault.domain.model.StreamQuality
+import com.streamvault.domain.sync.AccountSyncManager
+import com.streamvault.domain.sync.IdentityState
+import com.streamvault.domain.sync.SyncState
 import com.streamvault.presentation.addon.AddonViewModel
 import com.streamvault.presentation.channels.ChannelsViewModel
 import com.streamvault.presentation.settings.AppLanguage
@@ -119,9 +120,12 @@ fun SettingsScreen(
     onCardStyleClick: () -> Unit = {},
     onIntegrationsClick: () -> Unit = {},
     onDiagnosticsClick: () -> Unit = {},
+    onSyncCenterClick: () -> Unit = {},
     viewModel: SettingsViewModel = koinInject(),
+    accountSyncManager: AccountSyncManager = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
+    val syncStatus by accountSyncManager.status.collectAsState()
     LaunchedEffect(Unit) {
         if (state.regionCode.isBlank() || state.regionCode == "US") {
             val country = Locale.getDefault().country.uppercase()
@@ -1196,8 +1200,44 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(24.dp))
 
-        // ── Backup & Sync ──
-        SectionHeader(title = stringResource(R.string.settings_backup_sync))
+        // Account & Sync
+        SectionHeader(title = stringResource(R.string.settings_account_sync))
+        Spacer(Modifier.height(8.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Charcoal),
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                val syncSubtitle = when {
+                    syncStatus.sync == SyncState.OFF -> "Off"
+                    syncStatus.sync == SyncState.ON && syncStatus.identity == IdentityState.SIGNED_IN -> "On"
+                    syncStatus.sync == SyncState.ON && syncStatus.identity == IdentityState.LOCAL -> "Action needed"
+                    syncStatus.sync == SyncState.PAUSED -> "Paused"
+                    else -> "Off"
+                }
+
+                SettingsNavRow(
+                    title = "Sync across devices",
+                    subtitle = syncSubtitle,
+                    onClick = onSyncCenterClick,
+                )
+
+                HorizontalDivider(color = Steel.copy(alpha = 0.3f))
+                Spacer(Modifier.height(10.dp))
+
+                Text(
+                    text = "Local mode keeps data on this device. Enable Sync only when you want cross device persistence.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = StreamVault.colors.textSecondary,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        // Backup
+        SectionHeader(title = stringResource(R.string.settings_backup))
         Spacer(Modifier.height(8.dp))
 
         Card(
@@ -1313,31 +1353,6 @@ fun SettingsScreen(
                     stringResource(R.string.settings_backup_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = StreamVault.colors.textSecondary,
-                )
-            }
-        }
-
-        Spacer(Modifier.height(24.dp))
-
-        // ── Account ──
-        SectionHeader(title = stringResource(R.string.settings_account))
-        Spacer(Modifier.height(8.dp))
-
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Charcoal),
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    stringResource(R.string.settings_account_coming_soon),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = StreamVault.colors.textSecondary,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    stringResource(R.string.settings_account_desc),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = StreamVault.colors.textTertiary,
                 )
             }
         }

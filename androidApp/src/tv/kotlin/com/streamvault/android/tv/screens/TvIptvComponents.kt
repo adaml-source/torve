@@ -1,10 +1,10 @@
 package com.streamvault.android.tv.screens
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -80,7 +81,10 @@ internal fun TvIptvControlChip(
 ) {
     var focused by remember { mutableStateOf(false) }
     val bg = if (focused) Amber.copy(alpha = 0.22f) else Charcoal.copy(alpha = 0.5f)
-    val border = if (focused) Amber else Steel.copy(alpha = 0.4f)
+    val borderColor by animateColorAsState(
+        targetValue = if (focused) Amber else Color.Transparent,
+        label = "controlChipBorder",
+    )
     Text(
         text = label,
         color = if (focused) Snow else Silver,
@@ -89,16 +93,15 @@ internal fun TvIptvControlChip(
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(bg)
-            .border(1.dp, border, RoundedCornerShape(16.dp))
             .onFocusChanged { focused = it.isFocused }
-            .focusable()
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick,
             )
+            .border(2.dp, borderColor, RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(16.dp))
+            .background(bg)
             .padding(horizontal = 12.dp, vertical = 6.dp),
     )
 }
@@ -388,6 +391,14 @@ internal fun TvCountryFilterOverlay(
                         itemsIndexed(countries, key = { _, code -> "country_${groupKey}_$code" }) { index, code ->
                             val selected = code in selectedCountries
                             var focused by remember { mutableStateOf(false) }
+                            val countryBorderColor by animateColorAsState(
+                                targetValue = when {
+                                    focused -> Amber
+                                    selected -> Amber.copy(alpha = 0.45f)
+                                    else -> Color.Transparent
+                                },
+                                label = "countryBorder",
+                            )
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -398,6 +409,17 @@ internal fun TvCountryFilterOverlay(
                                             Modifier
                                         },
                                     )
+                                    .onFocusChanged { focused = it.isFocused }
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                        onClick = { onToggleCountry(code) },
+                                    )
+                                    .border(
+                                        2.dp,
+                                        countryBorderColor,
+                                        RoundedCornerShape(10.dp),
+                                    )
                                     .clip(RoundedCornerShape(10.dp))
                                     .background(
                                         when {
@@ -405,22 +427,6 @@ internal fun TvCountryFilterOverlay(
                                             selected -> AmberSubtle
                                             else -> Graphite.copy(alpha = 0.5f)
                                         },
-                                    )
-                                    .border(
-                                        1.dp,
-                                        when {
-                                            focused -> Amber
-                                            selected -> Amber.copy(alpha = 0.45f)
-                                            else -> Steel.copy(alpha = 0.3f)
-                                        },
-                                        RoundedCornerShape(10.dp),
-                                    )
-                                    .onFocusChanged { focused = it.isFocused }
-                                    .focusable()
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null,
-                                        onClick = { onToggleCountry(code) },
                                     )
                                     .padding(horizontal = 14.dp, vertical = 10.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -500,30 +506,33 @@ internal fun IptvCategoryItem(
         isSelected -> AmberSubtle
         else -> Color.Transparent
     }
-    val borderColor = when {
-        focused -> Amber
-        isSelected -> Amber.copy(alpha = 0.4f)
-        else -> Color.Transparent
-    }
+    val catBorderColor by animateColorAsState(
+        targetValue = when {
+            focused -> Amber
+            isSelected -> Amber.copy(alpha = 0.4f)
+            else -> Color.Transparent
+        },
+        label = "catBorder",
+    )
 
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .scale(scale)
-            .padding(horizontal = 6.dp, vertical = 2.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(bgColor)
-            .border(1.dp, borderColor, RoundedCornerShape(10.dp))
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
             }
-            .focusable()
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick,
             )
+            .zIndex(if (focused) 1f else 0f)
+            .scale(scale)
+            .padding(horizontal = 6.dp, vertical = 2.dp)
+            .border(2.dp, catBorderColor, RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(10.dp))
+            .background(bgColor)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

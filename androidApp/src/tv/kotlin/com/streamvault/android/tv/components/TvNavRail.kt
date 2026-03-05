@@ -1,12 +1,12 @@
 package com.streamvault.android.tv.components
 
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -29,22 +29,39 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.streamvault.android.tv.RAIL_COLLAPSED_WIDTH
 import com.streamvault.android.tv.nav.TvTopDestination
+import com.streamvault.android.ui.splash.TorveLogomark
+import com.streamvault.android.ui.theme.Amber
+import com.streamvault.android.ui.theme.AmberGlow
+import com.streamvault.android.ui.theme.AmberSubtle
+import com.streamvault.android.ui.theme.Obsidian
+import com.streamvault.android.ui.theme.Silver
+import com.streamvault.android.ui.theme.Snow
 
+private val RAIL_EXPANDED_WIDTH = 228.dp
+
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun TvNavRail(
     destinations: List<TvTopDestination>,
@@ -56,48 +73,57 @@ fun TvNavRail(
     onNavigate: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val railWidth by animateDpAsState(targetValue = if (isExpanded) 228.dp else 94.dp, label = "railWidth")
+    val railWidth by animateDpAsState(
+        targetValue = if (isExpanded) RAIL_EXPANDED_WIDTH else RAIL_COLLAPSED_WIDTH,
+        label = "railWidth",
+    )
     val itemRequesters = remember(destinations) {
         destinations.associate { it.route to FocusRequester() }
     }
 
+    var railHasFocus by remember { mutableStateOf(false) }
+
     Column(
         modifier = modifier
             .fillMaxHeight()
-            .width(railWidth)
+            // Clip to animated width — hides overflow when collapsed
+            .clip(RectangleShape)
+            // Measure content at expanded width (items stay stable),
+            // but report animated width (rail visually shrinks).
+            .layout { measurable, constraints ->
+                val expandedPx = RAIL_EXPANDED_WIDTH.roundToPx()
+                val placeable = measurable.measure(
+                    constraints.copy(minWidth = expandedPx, maxWidth = expandedPx),
+                )
+                layout(railWidth.roundToPx(), placeable.height) {
+                    placeable.placeRelative(0, 0)
+                }
+            }
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        Color(0xE60A1020),
-                        Color(0xE60B1324),
+                        Obsidian.copy(alpha = 0.9f),
+                        Obsidian.copy(alpha = 0.9f),
                     ),
                 ),
             )
             .focusRequester(railFocusRequester)
-            .onFocusChanged { onRailFocusChanged(it.hasFocus) }
-            .focusable()
+            .onFocusChanged {
+                railHasFocus = it.hasFocus
+                onRailFocusChanged(it.hasFocus)
+            }
+            .focusProperties {
+                enter = { itemRequesters[selectedRoute] ?: FocusRequester.Default }
+            }
             .focusGroup()
-            .padding(horizontal = 14.dp, vertical = 24.dp),
+            .padding(horizontal = 8.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "T",
-                style = MaterialTheme.typography.headlineSmall,
-                color = Color.White,
-            )
-            AnimatedVisibility(visible = isExpanded) {
-                Text(
-                    text = "orve",
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = Color.White,
-                    modifier = Modifier.padding(start = 2.dp),
-                )
-            }
-        }
+        TorveLogomark(
+            size = 28.dp,
+            showWordmark = isExpanded,
+            modifier = Modifier.padding(start = 2.dp, top = 6.dp, bottom = 6.dp),
+        )
 
         destinations.forEach { destination ->
             TvNavRailItem(
@@ -107,15 +133,19 @@ fun TvNavRail(
                 modifier = Modifier.focusRequester(
                     itemRequesters.getValue(destination.route),
                 ),
-                onMoveToContent = onMoveToContent,
+                onMoveToContent = {
+                    onNavigate(destination.route)
+                    onMoveToContent()
+                },
                 onClick = { onNavigate(destination.route) },
+                onItemFocused = { },
             )
         }
     }
 
-    LaunchedEffect(isExpanded, selectedRoute) {
-        if (isExpanded) {
-            itemRequesters[selectedRoute]?.requestFocus()
+    LaunchedEffect(selectedRoute, railHasFocus) {
+        if (railHasFocus) {
+            runCatching { itemRequesters[selectedRoute]?.requestFocus() }
         }
     }
 }
@@ -127,6 +157,7 @@ private fun TvNavRailItem(
     expanded: Boolean,
     onMoveToContent: () -> Unit,
     onClick: () -> Unit,
+    onItemFocused: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -135,29 +166,48 @@ private fun TvNavRailItem(
         label = "railItemScale",
     )
     val background = when {
-        focused -> Color(0x33D6A45B)
-        selected -> Color(0x22D6A45B)
+        focused -> AmberSubtle
+        selected -> AmberGlow
         else -> Color.Transparent
     }
-    val borderColor = when {
-        focused -> Color(0xFFDFB068)
-        selected -> Color(0x66DFB068)
-        else -> Color.Transparent
-    }
-    val tint = if (focused || selected) Color.White else Color(0xFFB3BDD0)
+    val borderColor by animateColorAsState(
+        targetValue = when {
+            focused -> Amber
+            selected -> Amber.copy(alpha = 0.4f)
+            else -> Color.Transparent
+        },
+        label = "railBorder",
+    )
+    val tint = if (focused || selected) Snow else Silver
+    val itemHorizontalPadding = if (expanded) 12.dp else 6.dp
+    val indicatorSpacing = if (expanded) 10.dp else 6.dp
 
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .zIndex(if (focused) 1f else 0f)
             .scale(scale)
             .clip(RoundedCornerShape(14.dp))
             .background(background)
-            .onFocusChanged { focused = it.isFocused }
-            .focusable()
+            .border(
+                width = if (focused) 2.dp else 0.dp,
+                color = borderColor,
+                shape = RoundedCornerShape(14.dp),
+            )
+            .onFocusChanged {
+                val wasFocused = focused
+                focused = it.isFocused
+                if (it.isFocused && !wasFocused) onItemFocused()
+            }
             .onPreviewKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionRight) {
-                    onMoveToContent()
-                    true
+                if (event.type == KeyEventType.KeyDown) {
+                    when (event.key) {
+                        Key.DirectionRight, Key.Enter, Key.DirectionCenter -> {
+                            onMoveToContent()
+                            true
+                        }
+                        else -> false
+                    }
                 } else {
                     false
                 }
@@ -167,7 +217,7 @@ private fun TvNavRailItem(
                 interactionSource = remember { MutableInteractionSource() },
                 onClick = onClick,
             )
-            .padding(horizontal = 12.dp, vertical = 11.dp),
+            .padding(horizontal = itemHorizontalPadding, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Spacer(
@@ -176,7 +226,7 @@ private fun TvNavRailItem(
                 .background(borderColor, RoundedCornerShape(2.dp)),
         )
 
-        Spacer(modifier = Modifier.width(10.dp))
+        Spacer(modifier = Modifier.width(indicatorSpacing))
 
         Icon(
             imageVector = destination.icon,
@@ -185,13 +235,12 @@ private fun TvNavRailItem(
             modifier = Modifier.size(22.dp),
         )
 
-        AnimatedVisibility(visible = expanded) {
-            Text(
-                text = stringResource(destination.labelResId),
-                style = MaterialTheme.typography.titleMedium,
-                color = tint,
-                modifier = Modifier.padding(start = 12.dp),
-            )
-        }
+        // Always rendered (stable layout); alpha hides when collapsed
+        Text(
+            text = stringResource(destination.labelResId),
+            style = MaterialTheme.typography.titleMedium,
+            color = tint,
+            modifier = Modifier.padding(start = 10.dp).alpha(if (expanded) 1f else 0f),
+        )
     }
 }

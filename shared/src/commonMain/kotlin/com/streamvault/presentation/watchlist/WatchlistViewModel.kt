@@ -94,6 +94,42 @@ class WatchlistViewModel(
         }
     }
 
+    fun addToWatchlist(mediaItem: MediaItem, syncTrakt: Boolean, syncSimkl: Boolean) {
+        val mediaId = mediaItem.id
+        scope.launch {
+            try {
+                val item = WatchlistItem(
+                    mediaId = mediaId,
+                    mediaType = mediaItem.type,
+                    tmdbId = mediaItem.tmdbId ?: 0,
+                    imdbId = mediaItem.imdbId,
+                    title = mediaItem.title,
+                    posterUrl = mediaItem.posterUrl,
+                    backdropUrl = mediaItem.backdropUrl,
+                    rating = mediaItem.rating,
+                    year = mediaItem.year,
+                    genres = mediaItem.genres.joinToString(", ") { it.name },
+                    addedAt = Clock.System.now().toEpochMilliseconds(),
+                )
+                watchlistRepo.add(item, syncTrakt, syncSimkl)
+                val targets = buildList {
+                    add("Watchlist")
+                    if (syncTrakt) add("Trakt")
+                    if (syncSimkl) add("Simkl")
+                }
+                _state.update {
+                    it.copy(
+                        items = listOf(item) + it.items,
+                        watchlistIds = it.watchlistIds + mediaId,
+                        snackbarMessage = "Added to ${targets.joinToString(" + ")}",
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update { it.copy(snackbarMessage = "Error: ${e.message}") }
+            }
+        }
+    }
+
     fun clearSnackbar() {
         _state.update { it.copy(snackbarMessage = null) }
     }

@@ -13,8 +13,8 @@ import kotlin.coroutines.coroutineContext
 
 private const val DEFAULT_DB_BATCH_SIZE = 75
 private const val TITLE_MAX_LEN = 120
-private const val MAX_PROGRAMMES_PER_CHANNEL_DEFAULT = 120
-private const val MAX_PROGRAMMES_TOTAL_DEFAULT = 20_000
+private const val MAX_PROGRAMMES_PER_CHANNEL_DEFAULT = 240
+private const val MAX_PROGRAMMES_TOTAL_DEFAULT = 150_000
 private const val MB_DIVISOR = 1024L * 1024L
 
 private data class EpgChannelInsert(

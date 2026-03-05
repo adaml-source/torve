@@ -53,6 +53,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import androidx.compose.ui.res.stringResource
+import com.streamvault.android.R
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Emerald
 import com.streamvault.android.ui.theme.Ruby
@@ -81,7 +83,7 @@ fun DownloadedShowDetailScreen(
 
     if (group == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Show not found", color = Silver)
+            Text(stringResource(R.string.download_show_not_found), color = Silver)
         }
         return
     }
@@ -121,7 +123,7 @@ fun DownloadedShowDetailScreen(
                     .statusBarsPadding()
                     .padding(8.dp),
             ) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Snow)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), tint = Snow)
             }
         }
 
@@ -136,10 +138,10 @@ fun DownloadedShowDetailScreen(
             Spacer(Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 group.year?.let { Text("$it", color = Silver, fontSize = 13.sp) }
-                Text("${group.itemCount} episodes", color = Silver, fontSize = 13.sp)
+                Text(stringResource(R.string.download_episodes_count, group.itemCount), color = Silver, fontSize = 13.sp)
                 Text(formatFileSize(group.totalSizeBytes), color = Amber, fontSize = 13.sp)
                 Text(
-                    "${group.watchedCount}/${group.totalCount} watched",
+                    stringResource(R.string.download_watched_count, group.watchedCount, group.totalCount),
                     color = Silver,
                     fontSize = 13.sp,
                 )
@@ -163,7 +165,7 @@ fun DownloadedShowDetailScreen(
                         onClick = { expandedSeason = season.seasonNumber },
                         text = {
                             Text(
-                                "Season ${season.seasonNumber}",
+                                stringResource(R.string.episode_season, season.seasonNumber),
                                 fontWeight = if (expandedSeason == season.seasonNumber)
                                     FontWeight.Bold else FontWeight.Normal,
                             )
@@ -187,10 +189,10 @@ fun DownloadedShowDetailScreen(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        Text("${season.episodes.size} episodes", color = Silver, fontSize = 12.sp)
+                        Text(stringResource(R.string.download_episodes_count, season.episodes.size), color = Silver, fontSize = 12.sp)
                         Text(formatFileSize(season.totalSizeBytes), color = Silver, fontSize = 12.sp)
                         Text(
-                            "${season.watchedCount}/${season.episodes.size} watched",
+                            stringResource(R.string.download_watched_count, season.watchedCount, season.episodes.size),
                             color = Silver,
                             fontSize = 12.sp,
                         )
@@ -217,7 +219,7 @@ fun DownloadedShowDetailScreen(
                     ) {
                         Icon(Icons.Default.Delete, null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Delete Season $expandedSeason")
+                        Text(stringResource(R.string.download_delete_season, expandedSeason))
                     }
                 }
             }
@@ -253,7 +255,7 @@ private fun EpisodeRow(
                 contentAlignment = Alignment.Center,
             ) {
                 if (episode.isWatched) {
-                    Icon(Icons.Default.Check, "Watched", tint = Emerald, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.Check, stringResource(R.string.detail_watched), tint = Emerald, modifier = Modifier.size(18.dp))
                 } else {
                     Text(
                         "${episode.episodeNumber ?: "?"}",
@@ -299,13 +301,13 @@ private fun EpisodeRow(
 
             // Play button
             IconButton(onClick = onPlay, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Default.PlayArrow, "Play", tint = Amber)
+                Icon(Icons.Default.PlayArrow, stringResource(R.string.common_play), tint = Amber)
             }
 
             // Delete button
             IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
                 Icon(
-                    Icons.Default.Delete, "Delete",
+                    Icons.Default.Delete, stringResource(R.string.common_delete),
                     tint = Ruby.copy(alpha = 0.6f),
                     modifier = Modifier.size(16.dp),
                 )

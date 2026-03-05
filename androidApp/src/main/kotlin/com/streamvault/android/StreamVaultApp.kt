@@ -6,9 +6,11 @@ import com.streamvault.android.download.DownloadWorker
 import com.streamvault.android.notification.EpisodeNotificationWorker
 import com.streamvault.android.sync.TraktSyncWorker
 import com.streamvault.di.sharedModule
+import com.streamvault.android.billing.GooglePlayBillingManager
 import org.koin.android.ext.koin.androidContext
 import org.koin.android.ext.koin.androidLogger
 import org.koin.core.context.startKoin
+import org.koin.java.KoinJavaComponent.getKoin
 
 class StreamVaultApp : Application() {
     override fun onCreate() {
@@ -25,6 +27,7 @@ class StreamVaultApp : Application() {
             androidContext(this@StreamVaultApp)
             modules(sharedModule, androidAppModule)
         }
+        getKoin().get<GooglePlayBillingManager>().initialize()
         EpisodeNotificationWorker.schedule(this)
         TraktSyncWorker.schedule(this)
         DownloadWorker.ensureChannel(this)

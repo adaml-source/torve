@@ -38,7 +38,7 @@ class RebateCodeApi(private val httpClient: HttpClient) {
         attempts.add(now)
 
         return try {
-            val response = httpClient.post("$BASE_URL/redeemCode") {
+            val response = httpClient.post(BASE_URL) {
                 contentType(ContentType.Application.Json)
                 setBody("""{"code":"$code","deviceId":"$deviceId"}""")
             }

@@ -22,8 +22,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -69,6 +69,9 @@ import kotlinx.coroutines.delay
 private const val CHANNEL_COL_WIDTH_DP = 200
 private const val SLOT_WIDTH_DP = 180 // width per 30-min slot
 private const val EPG_WINDOW_HOURS = 6
+private const val EPG_MAX_FORWARD_HOURS = 12
+private const val EPG_WINDOW_DURATION_MS = EPG_WINDOW_HOURS * 3600_000L
+private const val EPG_MAX_PAGE_OFFSET = EPG_MAX_FORWARD_HOURS / EPG_WINDOW_HOURS
 private const val SLOTS = EPG_WINDOW_HOURS * 2 // 12 half-hour slots
 private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
 
@@ -81,13 +84,14 @@ fun LiveEpgGuideOverlay(
     onShowChannelList: () -> Unit,
 ) {
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var windowPageOffset by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) {
         while (true) {
             delay(30_000)
             nowMs = System.currentTimeMillis()
         }
     }
-    val windowStart = remember(nowMs) {
+    val alignedWindowStart = remember(nowMs) {
         Calendar.getInstance().apply {
             timeInMillis = nowMs
             set(Calendar.MINUTE, if (get(Calendar.MINUTE) < 30) 0 else 30)
@@ -95,7 +99,10 @@ fun LiveEpgGuideOverlay(
             set(Calendar.MILLISECOND, 0)
         }.timeInMillis
     }
-    val windowEnd = windowStart + EPG_WINDOW_HOURS * 3600_000L
+    val windowStart = alignedWindowStart + (windowPageOffset * EPG_WINDOW_DURATION_MS)
+    val windowEnd = windowStart + EPG_WINDOW_DURATION_MS
+    val canPageBackward = windowPageOffset > 0
+    val canPageForward = windowPageOffset < EPG_MAX_PAGE_OFFSET
     val totalWidthDp = SLOTS * SLOT_WIDTH_DP
 
     val listState = rememberLazyListState()
@@ -112,16 +119,7 @@ fun LiveEpgGuideOverlay(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Obsidian.copy(alpha = 0.95f))
-            .onPreviewKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft) {
-                    // At far-left edge, open channel list
-                    onShowChannelList()
-                    true
-                } else {
-                    false
-                }
-            },
+            .background(Obsidian.copy(alpha = 0.95f)),
     ) {
         Column(modifier = Modifier.fillMaxSize().padding(top = 24.dp)) {
             // Title
@@ -204,9 +202,22 @@ fun LiveEpgGuideOverlay(
                             windowEnd = windowEnd,
                             nowMs = nowMs,
                             totalWidthDp = totalWidthDp,
+                            canPageBackward = canPageBackward,
+                            canPageForward = canPageForward,
                             focusRequester = if (index == 0) firstChannelFocus else null,
                             onTune = { onTuneChannel(enrichedChannel.channel) },
                             onFocused = { },
+                            onTimeBackward = {
+                                if (windowPageOffset > 0) {
+                                    windowPageOffset -= 1
+                                }
+                            },
+                            onTimeForward = {
+                                if (windowPageOffset < EPG_MAX_PAGE_OFFSET) {
+                                    windowPageOffset += 1
+                                }
+                            },
+                            onAtLeftEdge = onShowChannelList,
                         )
                     }
                 }
@@ -233,9 +244,14 @@ private fun EpgChannelRow(
     windowEnd: Long,
     nowMs: Long,
     totalWidthDp: Int,
+    canPageBackward: Boolean,
+    canPageForward: Boolean,
     focusRequester: FocusRequester?,
     onTune: () -> Unit,
     onFocused: () -> Unit,
+    onTimeBackward: () -> Unit,
+    onTimeForward: () -> Unit,
+    onAtLeftEdge: () -> Unit,
 ) {
     val ch = enrichedChannel.channel
     val rowHeight = 56.dp
@@ -255,7 +271,19 @@ private fun EpgChannelRow(
                 .width(CHANNEL_COL_WIDTH_DP.dp)
                 .fillMaxHeight()
                 .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
-                .onFocusChanged { if (it.isFocused) onFocused() },
+                .onFocusChanged { if (it.isFocused) onFocused() }
+                .onPreviewKeyEvent { event ->
+                    if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft) {
+                        if (canPageBackward) {
+                            onTimeBackward()
+                        } else {
+                            onAtLeftEdge()
+                        }
+                        true
+                    } else {
+                        false
+                    }
+                },
             shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(0.dp)),
             colors = ClickableSurfaceDefaults.colors(
                 containerColor = Graphite,
@@ -292,8 +320,9 @@ private fun EpgChannelRow(
 
         // Programme cells
         val firstVisibleIndex = programmes.indexOfFirst { it.endTime > windowStart && it.startTime < windowEnd }
-        if (firstVisibleIndex < 0) {
-            // No programme data — single empty cell
+        val lastVisibleIndex = programmes.indexOfLast { it.endTime > windowStart && it.startTime < windowEnd }
+        if (firstVisibleIndex < 0 || lastVisibleIndex < firstVisibleIndex) {
+            // No programme data - single empty cell
             Box(
                 modifier = Modifier
                     .width(totalWidthDp.dp)
@@ -310,10 +339,8 @@ private fun EpgChannelRow(
             }
         } else {
             Row {
-                for (index in firstVisibleIndex until programmes.size) {
+                for (index in firstVisibleIndex..lastVisibleIndex) {
                     val prog = programmes[index]
-                    if (prog.startTime >= windowEnd) break
-                    if (prog.endTime <= windowStart) continue
                     val clampedStart = prog.startTime.coerceAtLeast(windowStart)
                     val clampedEnd = prog.endTime.coerceAtMost(windowEnd)
                     if (clampedEnd <= clampedStart) continue
@@ -326,7 +353,13 @@ private fun EpgChannelRow(
                         width = cellWidth,
                         height = rowHeight,
                         isNow = isNow,
+                        isFirstFocusableCell = index == firstVisibleIndex,
+                        isLastFocusableCell = index == lastVisibleIndex,
+                        canPageBackward = canPageBackward,
+                        canPageForward = canPageForward,
                         onTune = onTune,
+                        onTimeBackward = onTimeBackward,
+                        onTimeForward = onTimeForward,
                     )
                 }
             }
@@ -340,24 +373,55 @@ private fun ProgrammeCell(
     width: Dp,
     height: Dp,
     isNow: Boolean,
+    isFirstFocusableCell: Boolean,
+    isLastFocusableCell: Boolean,
+    canPageBackward: Boolean,
+    canPageForward: Boolean,
     onTune: () -> Unit,
+    onTimeBackward: () -> Unit,
+    onTimeForward: () -> Unit,
 ) {
     Surface(
         onClick = onTune,
         modifier = Modifier
             .width(width)
-            .height(height),
+            .height(height)
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) {
+                    return@onPreviewKeyEvent false
+                }
+                when (event.key) {
+                    Key.DirectionLeft -> {
+                        if (!isFirstFocusableCell) {
+                            false
+                        } else if (canPageBackward) {
+                            onTimeBackward()
+                            true
+                        } else {
+                            false
+                        }
+                    }
+
+                    Key.DirectionRight -> {
+                        if (!isLastFocusableCell) {
+                            false
+                        } else if (canPageForward) {
+                            onTimeForward()
+                            true
+                        } else {
+                            false
+                        }
+                    }
+
+                    else -> false
+                }
+            },
         shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(0.dp)),
         colors = ClickableSurfaceDefaults.colors(
             containerColor = if (isNow) AmberSubtle else Obsidian.copy(alpha = 0.3f),
-            focusedContainerColor = Amber.copy(alpha = 0.3f),
+            focusedContainerColor = Amber.copy(alpha = 0.45f),
         ),
-        border = ClickableSurfaceDefaults.border(
-            focusedBorder = androidx.tv.material3.Border(
-                border = androidx.compose.foundation.BorderStroke(1.dp, Amber),
-                shape = RoundedCornerShape(0.dp),
-            ),
-        ),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
     ) {
         Column(
             modifier = Modifier
@@ -374,10 +438,12 @@ private fun ProgrammeCell(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = "${timeFormat.format(Date(programme.startTime))}–${timeFormat.format(Date(programme.endTime))}",
+                text = "${timeFormat.format(Date(programme.startTime))}-${timeFormat.format(Date(programme.endTime))}",
                 color = Silver.copy(alpha = 0.7f),
                 fontSize = 10.sp,
             )
         }
     }
 }
+
+

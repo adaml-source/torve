@@ -28,6 +28,7 @@ class DownloadRepositoryImpl(
             episode_number = download.episodeNumber?.toLong(),
             created_at = now,
             completed_at = null,
+            bulk_group_id = download.bulkGroupId,
         )
         return download.copy(createdAt = now)
     }
@@ -103,6 +104,7 @@ class DownloadRepositoryImpl(
             episodeNumber = episode_number?.toInt(),
             createdAt = created_at,
             completedAt = completed_at,
+            bulkGroupId = bulk_group_id,
         )
     }
 }

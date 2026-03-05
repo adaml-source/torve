@@ -33,7 +33,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -394,16 +393,6 @@ private fun EpgProgrammeCell(
             .fillMaxHeight()
             .focusRequester(cellFocusRequester)
             .focusProperties { canFocus = isFocusEnabled }
-            .graphicsLayer {
-                val scale = if (isFocused) 1.03f else 1f
-                scaleX = scale
-                scaleY = scale
-            }
-            .border(
-                width = if (isFocused) 2.dp else 0.5.dp,
-                color = if (isFocused) Amber else Steel.copy(alpha = 0.35f),
-                shape = RoundedCornerShape(0.dp),
-            )
             .onFocusChanged {
                 isFocused = it.isFocused
                 if (it.isFocused) {
@@ -435,24 +424,9 @@ private fun EpgProgrammeCell(
         shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(0.dp)),
         colors = ClickableSurfaceDefaults.colors(
             containerColor = if (isNow) AmberSubtle else Graphite.copy(alpha = 0.45f),
-            focusedContainerColor = Amber.copy(alpha = 0.42f),
+            focusedContainerColor = Amber.copy(alpha = 0.45f),
         ),
-        border = ClickableSurfaceDefaults.border(
-            border = androidx.tv.material3.Border(
-                border = androidx.compose.foundation.BorderStroke(
-                    width = 0.5.dp,
-                    color = Steel.copy(alpha = 0.35f),
-                ),
-                shape = RoundedCornerShape(0.dp),
-            ),
-            focusedBorder = androidx.tv.material3.Border(
-                border = androidx.compose.foundation.BorderStroke(
-                    width = 4.dp,
-                    color = Amber,
-                ),
-                shape = RoundedCornerShape(0.dp),
-            ),
-        ),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
     ) {
         Text(
             text = programme?.title ?: "No EPG for this channel",

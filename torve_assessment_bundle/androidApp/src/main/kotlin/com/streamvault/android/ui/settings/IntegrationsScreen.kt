@@ -51,6 +51,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.streamvault.android.ui.components.BackButton
+import com.streamvault.android.ui.sync.RequireSync
+import com.streamvault.android.ui.sync.SyncGateReason
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Charcoal
 import com.streamvault.android.ui.theme.Gunmetal
@@ -62,6 +64,7 @@ import com.streamvault.android.ui.theme.Obsidian
 import com.streamvault.android.ui.theme.Ruby
 import com.streamvault.domain.integrations.IntegrationSecretKey
 import com.streamvault.domain.integrations.IntegrationSecretStore
+import com.streamvault.domain.sync.AccountSyncManager
 import com.streamvault.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
@@ -69,9 +72,12 @@ import org.koin.compose.koinInject
 @Composable
 fun IntegrationsScreen(
     onBack: () -> Unit,
+    onSyncRequired: () -> Unit = {},
     viewModel: SettingsViewModel = koinInject(),
+    accountSyncManager: AccountSyncManager = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
+    val syncStatus by accountSyncManager.status.collectAsState()
     val context = LocalContext.current
     val secretStore: IntegrationSecretStore = koinInject()
     val scope = rememberCoroutineScope()
@@ -164,6 +170,11 @@ fun IntegrationsScreen(
 
         Spacer(Modifier.height(12.dp))
 
+        RequireSync(
+            reason = SyncGateReason.CLOUD_PROVIDER_TOKENS,
+            status = syncStatus,
+            onProceed = onSyncRequired,
+        ) {
         // ── Trakt ──
         IntegrationCard(
             title = "Trakt",
@@ -405,6 +416,7 @@ fun IntegrationsScreen(
                 }
             }
         }
+        }
     }
 }
 
@@ -537,5 +549,6 @@ private fun IntegrationTextField(
                 }
             },
         )
+        }
     }
 }

@@ -90,6 +90,7 @@ import com.streamvault.android.ui.theme.Silver
 import com.streamvault.android.ui.theme.Snow
 import com.streamvault.android.ui.theme.Steel
 import com.streamvault.android.ui.theme.StreamVault
+import com.streamvault.android.sync.SyncCoordinator
 import com.streamvault.presentation.addon.AddonViewModel
 import com.streamvault.presentation.channels.ChannelsViewModel
 import com.streamvault.presentation.settings.AppLanguage
@@ -122,8 +123,10 @@ fun SettingsScreen(
     onIntegrationsClick: () -> Unit = {},
     onDiagnosticsClick: () -> Unit = {},
     viewModel: SettingsViewModel = koinInject(),
+    syncCoordinator: SyncCoordinator = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
+    val syncState by syncCoordinator.state.collectAsState()
     LaunchedEffect(Unit) {
         if (state.regionCode.isBlank() || state.regionCode == "US") {
             val country = Locale.getDefault().country.uppercase()
@@ -200,7 +203,7 @@ fun SettingsScreen(
                 modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
             ) {
-                Text("Account")
+                Text("Local Profile")
             }
             OutlinedButton(
                 onClick = onDevicesClick,
@@ -1219,7 +1222,7 @@ fun SettingsScreen(
         Spacer(Modifier.height(24.dp))
 
         // ── Backup & Sync ──
-        SectionHeader(title = stringResource(R.string.settings_backup_sync))
+        SectionHeader(title = "Backup")
         Spacer(Modifier.height(8.dp))
 
         Card(
@@ -1342,7 +1345,8 @@ fun SettingsScreen(
         Spacer(Modifier.height(24.dp))
 
         // ── Account ──
-        SectionHeader(title = stringResource(R.string.settings_account))
+        // Account & Sync
+        SectionHeader(title = "Account & Sync")
         Spacer(Modifier.height(8.dp))
 
         Card(
@@ -1350,20 +1354,58 @@ fun SettingsScreen(
             colors = CardDefaults.cardColors(containerColor = Charcoal),
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
+                val syncStatusTitle = if (syncState.isAuthenticated) "Local Sync Ready" else "Local Mode"
+                val syncStatusSubtext = if (syncState.isAuthenticated) {
+                    "Profile ${syncState.profileName ?: syncState.userEmail ?: "Unknown"} is ready for local Wi-Fi pairing."
+                } else {
+                    "Create a local profile to pair TVs and hand off playback on your Wi-Fi."
+                }
+
                 Text(
-                    stringResource(R.string.settings_account_coming_soon),
+                    text = syncStatusTitle,
                     style = MaterialTheme.typography.bodyMedium,
+                    color = Snow,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = syncStatusSubtext,
+                    style = MaterialTheme.typography.bodySmall,
                     color = StreamVault.colors.textSecondary,
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    stringResource(R.string.settings_account_desc),
+                    text = "Transport: ${syncState.wsStatus}",
                     style = MaterialTheme.typography.bodySmall,
                     color = StreamVault.colors.textTertiary,
                 )
+
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Button(
+                        onClick = onAccountClick,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Amber,
+                            contentColor = Obsidian,
+                        ),
+                    ) {
+                        Text(if (syncState.isAuthenticated) "Manage Profile" else "Create Profile")
+                    }
+                    OutlinedButton(
+                        onClick = onDevicesClick,
+                        modifier = Modifier.weight(1f),
+                        enabled = syncState.isAuthenticated,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
+                    ) {
+                        Text("Pair TV")
+                    }
+                }
             }
         }
-
         Spacer(Modifier.height(24.dp))
 
         // ── About & Legal ──

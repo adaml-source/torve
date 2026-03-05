@@ -60,6 +60,8 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.ui.res.stringResource
+import com.streamvault.android.R
 import com.streamvault.android.ui.components.BackButton
 import com.streamvault.android.ui.home.icon
 import com.streamvault.android.ui.theme.Amber
@@ -156,7 +158,7 @@ fun HomeLayoutScreen(
             BackButton(onClick = onBack)
             Spacer(Modifier.width(12.dp))
             Text(
-                "Home Layout",
+                stringResource(R.string.home_layout_title),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 color = Snow,
@@ -191,7 +193,7 @@ fun HomeLayoutScreen(
                 )
                 expandedSection = null
             }) {
-                Text("Reset", color = Amber)
+                Text(stringResource(R.string.home_layout_reset), color = Amber)
             }
         }
 
@@ -201,7 +203,7 @@ fun HomeLayoutScreen(
         ) {
             item(key = "sections_header") {
                 Text(
-                    "Hold and drag to reorder. Tap a section to customize its poster style.",
+                    stringResource(R.string.home_layout_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = Silver,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
@@ -420,13 +422,13 @@ fun HomeLayoutScreen(
                     ) {
                         Icon(
                             Icons.Rounded.Add,
-                            contentDescription = "Add",
+                            contentDescription = stringResource(R.string.common_add),
                             tint = Amber,
                             modifier = Modifier.size(20.dp),
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            "Add Custom Section",
+                            stringResource(R.string.home_layout_add_custom),
                             style = MaterialTheme.typography.bodyLarge,
                             color = Amber,
                             fontWeight = FontWeight.Medium,
@@ -577,7 +579,7 @@ private fun AddonShelfRow(
         )
 
         Text(
-            text = "Addon",
+            text = stringResource(R.string.home_layout_addon),
             style = MaterialTheme.typography.labelSmall,
             color = Amber.copy(alpha = 0.7f),
             modifier = Modifier.padding(end = 8.dp),
@@ -714,7 +716,7 @@ private fun SectionRow(
                 ) {
                     Icon(
                         if (isExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                        contentDescription = if (isExpanded) "Collapse" else "Customize",
+                        contentDescription = if (isExpanded) stringResource(R.string.home_layout_collapse) else stringResource(R.string.home_layout_customize),
                         tint = Silver,
                         modifier = Modifier.size(20.dp),
                     )
@@ -750,11 +752,11 @@ private fun SectionRow(
             ) {
                 Column(Modifier.padding(16.dp)) {
                     // Card style preset selector
-                    Text("Card Style", color = Silver, style = MaterialTheme.typography.labelLarge)
+                    Text(stringResource(R.string.home_layout_card_style), color = Silver, style = MaterialTheme.typography.labelLarge)
                     Spacer(Modifier.height(8.dp))
                     var expanded by remember { mutableStateOf(false) }
                     val selectedPreset = presets.firstOrNull { it.presetId == config.presetId }
-                    val label = selectedPreset?.name ?: "Default"
+                    val label = selectedPreset?.name ?: stringResource(R.string.common_default)
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -794,7 +796,7 @@ private fun SectionRow(
                         onClick = onResetSection,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text("Reset section to default", color = Amber)
+                        Text(stringResource(R.string.home_layout_reset_section), color = Amber)
                     }
                 }
             }

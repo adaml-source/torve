@@ -16,7 +16,6 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.streamvault.android.ui.navigation.StreamVaultNavGraph
 import com.streamvault.android.ui.splash.TorveEyeSplashScreen
 import com.streamvault.android.ui.theme.StreamVaultTheme
-import com.streamvault.android.ui.tv.isRunningOnTv
 import com.streamvault.presentation.settings.AppLanguage
 import com.streamvault.presentation.settings.SettingsViewModel
 import org.koin.java.KoinJavaComponent.getKoin
@@ -30,7 +29,6 @@ class MainActivity : AppCompatActivity() {
 
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val isTv = isRunningOnTv(this)
         val settingsViewModel: SettingsViewModel = getKoin().get()
 
         // Restore saved locale via AppCompat (works on all API levels 24+).
@@ -60,7 +58,7 @@ class MainActivity : AppCompatActivity() {
                         onSplashComplete = { showSplash = false },
                     )
                 } else {
-                    StreamVaultNavGraph(isTvMode = isTv)
+                    StreamVaultNavGraph()
                 }
             }
         }

@@ -59,8 +59,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.streamvault.android.R
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.AmberSubtle
 import com.streamvault.android.ui.theme.Ash
@@ -113,7 +115,7 @@ fun HomeCustomizeSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "Customize Home",
+                    stringResource(R.string.home_customize_title),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = Snow,
@@ -125,7 +127,7 @@ fun HomeCustomizeSheet(
                         .map { HomeSectionConfig(it, it.defaultEnabled, it.defaultOrder) }
                         .sortedBy { it.order }
                 }) {
-                    Text("Reset", color = Amber)
+                    Text(stringResource(R.string.common_reset), color = Amber)
                 }
             }
 
@@ -189,7 +191,7 @@ fun HomeCustomizeSheet(
                 ),
                 shape = RoundedCornerShape(12.dp),
             ) {
-                Text("Done", fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.home_customize_done), fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -220,7 +222,7 @@ private fun SectionConfigRow(
             ) {
                 Icon(
                     Icons.Rounded.KeyboardArrowUp,
-                    contentDescription = "Move up",
+                    contentDescription = stringResource(R.string.home_move_up),
                     tint = if (isFirst) Smoke else Silver,
                     modifier = Modifier.size(18.dp),
                 )
@@ -232,7 +234,7 @@ private fun SectionConfigRow(
             ) {
                 Icon(
                     Icons.Rounded.KeyboardArrowDown,
-                    contentDescription = "Move down",
+                    contentDescription = stringResource(R.string.home_move_down),
                     tint = if (isLast) Smoke else Silver,
                     modifier = Modifier.size(18.dp),
                 )
@@ -340,7 +342,7 @@ fun StreamingServicesRow(
     if (services.isEmpty()) return
     Column(modifier = modifier) {
         com.streamvault.android.ui.components.SectionHeader(
-            title = "Streaming Services",
+            title = stringResource(R.string.home_streaming_services),
         )
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
@@ -390,7 +392,7 @@ fun StreamingServicesRow(
         }
         Spacer(Modifier.height(6.dp))
         Text(
-            text = "Data provided by TMDB",
+            text = stringResource(R.string.home_tmdb_credit),
             style = MaterialTheme.typography.labelSmall,
             color = Silver,
             modifier = Modifier.padding(horizontal = 16.dp),

@@ -18,8 +18,10 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.streamvault.android.R
 
 // TODO: Before Play Store release, host this privacy policy text at a public URL
 //  and reference that URL in the Google Play Store listing's privacy policy field.
@@ -29,10 +31,10 @@ import androidx.compose.ui.unit.dp
 fun PrivacyPolicyScreen(onBack: () -> Unit) {
     Column(modifier = Modifier.fillMaxSize()) {
         TopAppBar(
-            title = { Text("Privacy Policy") },
+            title = { Text(stringResource(R.string.settings_privacy_policy)) },
             navigationIcon = {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back))
                 }
             },
             colors = TopAppBarDefaults.topAppBarColors(
@@ -46,7 +48,7 @@ fun PrivacyPolicyScreen(onBack: () -> Unit) {
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
-            Text("Last updated: February 2026", style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.privacy_last_updated), style = MaterialTheme.typography.bodySmall)
             Spacer(Modifier.height(16.dp))
 
             SectionTitle("1. Data We Collect")

@@ -30,8 +30,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.streamvault.android.R
 import com.streamvault.android.ui.components.BackButton
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Charcoal
@@ -70,7 +72,7 @@ fun DiagnosticsScreen(
     ) {
         BackButton(onClick = onBack)
         Spacer(Modifier.height(8.dp))
-        Text("Diagnostics", style = MaterialTheme.typography.titleLarge, color = Snow, fontWeight = FontWeight.Bold)
+        Text(stringResource(R.string.diagnostics_title), style = MaterialTheme.typography.titleLarge, color = Snow, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
 
         // Device & App info
@@ -88,7 +90,7 @@ fun DiagnosticsScreen(
         // Service Health
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Charcoal)) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Service Health", color = Snow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.diagnostics_service_health), color = Snow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
                 StatusRow("Debrid", state.debridConnected)
                 StatusRow("Trakt", state.traktConnected)
                 StatusRow("SIMKL", state.simklConnected)
@@ -103,7 +105,7 @@ fun DiagnosticsScreen(
         // Sync timestamps
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Charcoal)) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Sync Status", color = Snow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.diagnostics_sync_status), color = Snow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
                 Text("Trakt last sync: ${formatTimestamp(state.traktLastSyncTime)}", color = Silver, style = MaterialTheme.typography.bodySmall)
                 Text("Availability last sync: ${formatTimestamp(state.availabilityLastSyncTime)}", color = Silver, style = MaterialTheme.typography.bodySmall)
                 Text("Library overlay last sync: ${formatTimestamp(state.libraryOverlayLastSyncTime)}", color = Silver, style = MaterialTheme.typography.bodySmall)
@@ -114,7 +116,7 @@ fun DiagnosticsScreen(
         // Content & Configuration
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Charcoal)) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Content & Configuration", color = Snow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.diagnostics_content_config), color = Snow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
                 DiagRow("Card style presets", "${state.cardStylePresets.size}")
                 DiagRow("Global default preset", state.globalDefaultPresetId ?: "default")
                 DiagRow("Regex patterns", "${state.regexPatterns.size} active")
@@ -131,7 +133,7 @@ fun DiagnosticsScreen(
         // Stream Preferences
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Charcoal)) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Stream Preferences", color = Snow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.diagnostics_stream_prefs), color = Snow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
                 DiagRow("Max quality", state.maxQuality.name)
                 DiagRow("Min quality", state.minQuality.name)
                 DiagRow("Max file size", state.maxFileSizeMb?.let { "${it} MB" } ?: "No limit")
@@ -146,7 +148,7 @@ fun DiagnosticsScreen(
         // Ratings
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Charcoal)) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Rating Configuration", color = Snow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.diagnostics_rating_config), color = Snow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
                 DiagRow("Enabled providers", state.ratingPrefs.enabledProviders.joinToString(", ") { it.name })
                 DiagRow("Pill style", state.ratingPrefs.pillStyle.name)
                 DiagRow("Pill position", state.ratingPrefs.pillPosition.displayName)
@@ -161,7 +163,7 @@ fun DiagnosticsScreen(
         // Integrations detail
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Charcoal)) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Integrations Detail", color = Snow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.diagnostics_integrations_detail), color = Snow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
                 DiagRow("Jellyfin URL", if (state.jellyfinServerUrl.isNotBlank()) state.jellyfinServerUrl else "Not configured")
                 DiagRow("Jellyfin profiles", "${state.jellyfinProfiles.size}")
                 DiagRow("Plex URL", if (state.plexServerUrl.isNotBlank()) state.plexServerUrl else "Not configured")
@@ -185,6 +187,7 @@ fun DiagnosticsScreen(
         Spacer(Modifier.height(12.dp))
 
         // Actions
+        val copiedMessage = stringResource(R.string.diagnostics_copied)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             Button(
                 onClick = {
@@ -198,18 +201,18 @@ fun DiagnosticsScreen(
                 modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
             ) {
-                Text("Share")
+                Text(stringResource(R.string.common_share))
             }
             OutlinedButton(
                 onClick = {
                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     clipboard.setPrimaryClip(ClipData.newPlainText("Torve diagnostics", diagnostics))
-                    Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, copiedMessage, Toast.LENGTH_SHORT).show()
                 },
                 modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
             ) {
-                Text("Copy")
+                Text(stringResource(R.string.diagnostics_copy))
             }
         }
         Spacer(Modifier.height(16.dp))
@@ -221,7 +224,7 @@ private fun StatusRow(label: String, connected: Boolean) {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label, color = Silver, style = MaterialTheme.typography.bodySmall)
         Text(
-            if (connected) "Connected" else "Not configured",
+            if (connected) stringResource(R.string.diagnostics_connected) else stringResource(R.string.diagnostics_not_configured),
             color = if (connected) Snow else Silver,
             style = MaterialTheme.typography.bodySmall,
             fontWeight = if (connected) FontWeight.SemiBold else FontWeight.Normal,

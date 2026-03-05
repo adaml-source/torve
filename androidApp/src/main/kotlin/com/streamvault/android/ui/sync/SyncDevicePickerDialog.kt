@@ -45,7 +45,7 @@ fun SyncDevicePickerDialog(
                             Column(modifier = Modifier.padding(vertical = 2.dp)) {
                                 Text(text = device.deviceName, style = MaterialTheme.typography.titleSmall)
                                 Text(
-                                    text = "${device.deviceType} • ${device.platform}",
+                                    text = "${device.deviceType} - ${device.platform}",
                                     style = MaterialTheme.typography.bodySmall,
                                 )
                             }

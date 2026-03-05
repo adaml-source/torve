@@ -1,15 +1,16 @@
 package com.streamvault.android.tv.screens
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,10 +29,10 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,17 +48,24 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.streamvault.android.R
+import com.streamvault.android.tv.components.TvClickToEditOutlinedTextField
+import com.streamvault.android.ui.theme.*
 import com.streamvault.android.voice.VoiceInputPhase
 import com.streamvault.android.voice.rememberVoiceInputController
+import com.streamvault.data.ai.KeywordSearchService
 import com.streamvault.domain.model.MediaItem
 import com.streamvault.domain.repository.MetadataRepository
+import com.streamvault.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.delay
 import org.koin.compose.koinInject
+
+private enum class SearchMode { STANDARD, AI }
 
 @Composable
 fun TvSearchScreen(
@@ -66,12 +74,20 @@ fun TvSearchScreen(
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
     initialQuery: String = "",
+    shouldAutoFocus: Boolean = true,
 ) {
     val metadataRepo: MetadataRepository = koinInject()
+    val settingsViewModel: SettingsViewModel = koinInject()
+    val keywordSearchService: KeywordSearchService = koinInject()
+    val settingsState by settingsViewModel.state.collectAsState()
+
     var query by rememberSaveable { mutableStateOf(initialQuery) }
     var results by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var searchMode by rememberSaveable { mutableStateOf(SearchMode.STANDARD) }
+    var aiResultTitle by remember { mutableStateOf<String?>(null) }
+    var aiFallback by remember { mutableStateOf(false) }
     val inputFocusRequester = remember { FocusRequester() }
     val voiceButtonFocusRequester = remember { FocusRequester() }
     val voiceController = rememberVoiceInputController(
@@ -81,13 +97,20 @@ fun TvSearchScreen(
         },
     )
 
+    val hasAiKey = settingsState.activeAiApiKey.isNotBlank()
+
     val popularQueries = remember {
         listOf("Action", "Comedy", "Sci-Fi", "Drama", "Thriller", "Animation")
     }
 
     LaunchedEffect(Unit) {
         onFirstContentRequester(inputFocusRequester)
-        inputFocusRequester.requestFocus()
+    }
+
+    LaunchedEffect(shouldAutoFocus) {
+        if (shouldAutoFocus) {
+            inputFocusRequester.requestFocus()
+        }
     }
 
     LaunchedEffect(initialQuery) {
@@ -97,7 +120,11 @@ fun TvSearchScreen(
         }
     }
 
-    LaunchedEffect(query) {
+    // Standard search
+    LaunchedEffect(query, searchMode) {
+        if (searchMode != SearchMode.STANDARD) return@LaunchedEffect
+        aiResultTitle = null
+        aiFallback = false
         if (query.length < 2) {
             results = emptyList()
             loading = false
@@ -117,6 +144,87 @@ fun TvSearchScreen(
         }
     }
 
+    // AI search
+    LaunchedEffect(query, searchMode) {
+        if (searchMode != SearchMode.AI) return@LaunchedEffect
+        aiFallback = false
+        if (query.length < 2 || !hasAiKey) {
+            results = emptyList()
+            loading = false
+            error = null
+            aiResultTitle = null
+            return@LaunchedEffect
+        }
+        loading = true
+        error = null
+        aiResultTitle = null
+        try {
+            delay(300)
+            val aiResult = keywordSearchService.searchWithAi(
+                settingsState.aiProvider,
+                settingsState.activeAiApiKey,
+                query,
+            )
+            aiResultTitle = aiResult.title
+
+            val resolvedItems: List<MediaItem> = when (aiResult.mode) {
+                "specific" -> {
+                    aiResult.specificItems.mapNotNull { item ->
+                        try {
+                            metadataRepo.getDetail(item.mediaType, item.tmdbId)
+                        } catch (_: Throwable) {
+                            null
+                        }
+                    }
+                }
+                "person_credits", "person_filtered" -> {
+                    val personId = aiResult.personId
+                    if (personId != null) {
+                        try {
+                            metadataRepo.getPersonCredits(personId)
+                        } catch (_: Throwable) {
+                            emptyList()
+                        }
+                    } else emptyList()
+                }
+                else -> { // "discover"
+                    try {
+                        val mediaType = aiResult.mediaType ?: "movie"
+                        val genreString = aiResult.genreIds.takeIf { it.isNotEmpty() }
+                            ?.joinToString(",")
+                        val keywordString = aiResult.keywordIds.takeIf { it.isNotEmpty() }
+                            ?.joinToString(",")
+                        metadataRepo.discover(
+                            type = mediaType,
+                            sortBy = aiResult.sortBy,
+                            withGenres = genreString,
+                            withKeywords = keywordString,
+                            minRating = aiResult.minRating,
+                            year = aiResult.yearFrom,
+                            yearTo = aiResult.yearTo,
+                        ).items.take(60)
+                    } catch (_: Throwable) {
+                        emptyList()
+                    }
+                }
+            }
+
+            results = resolvedItems.take(60)
+        } catch (_: Throwable) {
+            // Fallback to standard search
+            aiFallback = true
+            aiResultTitle = null
+            try {
+                results = metadataRepo.searchMulti(query, 1).take(60)
+            } catch (t: Throwable) {
+                results = emptyList()
+                error = t.message ?: "Search failed"
+            }
+        } finally {
+            loading = false
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -126,11 +234,11 @@ fun TvSearchScreen(
         Column(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            androidx.compose.foundation.layout.Row(
+            Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                OutlinedTextField(
+                TvClickToEditOutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
                     singleLine = true,
@@ -158,7 +266,42 @@ fun TvSearchScreen(
                     Icon(
                         imageVector = Icons.Default.Mic,
                         contentDescription = stringResource(R.string.common_search),
-                        tint = Color(0xFFD6A45B),
+                        tint = Amber,
+                    )
+                }
+            }
+
+            // Search mode toggle row
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                val stdRequester = remember { FocusRequester() }
+                TvSearchChip(
+                    text = stringResource(R.string.tv_search_mode_standard),
+                    selected = searchMode == SearchMode.STANDARD,
+                    modifier = Modifier
+                        .focusRequester(stdRequester)
+                        .focusProperties { left = railFocusRequester },
+                    onFocused = { onContentFocused(stdRequester) },
+                    onClick = { searchMode = SearchMode.STANDARD },
+                )
+
+                val aiRequester = remember { FocusRequester() }
+                if (hasAiKey) {
+                    TvSearchChip(
+                        text = stringResource(R.string.tv_search_mode_ai),
+                        selected = searchMode == SearchMode.AI,
+                        modifier = Modifier.focusRequester(aiRequester),
+                        onFocused = { onContentFocused(aiRequester) },
+                        onClick = { searchMode = SearchMode.AI },
+                    )
+                } else {
+                    TvSearchChip(
+                        text = "${stringResource(R.string.tv_search_mode_ai)} (${stringResource(R.string.tv_search_ai_configure)})",
+                        selected = false,
+                        modifier = Modifier.focusRequester(aiRequester),
+                        onFocused = { onContentFocused(aiRequester) },
+                        onClick = { /* disabled — no API key */ },
                     )
                 }
             }
@@ -166,17 +309,17 @@ fun TvSearchScreen(
             when (voiceController.uiState.value.phase) {
                 VoiceInputPhase.Listening -> {
                     Text(
-                        text = "Listening",
+                        text = stringResource(R.string.tv_voice_listening),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color(0xFFD6A45B),
+                        color = Amber,
                     )
                 }
 
                 VoiceInputPhase.Processing -> {
                     Text(
-                        text = "Processing voice input",
+                        text = stringResource(R.string.tv_voice_processing),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color(0xCCDAE2EF),
+                        color = Silver,
                     )
                 }
 
@@ -185,9 +328,9 @@ fun TvSearchScreen(
                 -> {
                     Text(
                         text = voiceController.uiState.value.message
-                            ?: "Voice input is not available on this device",
+                            ?: stringResource(R.string.tv_voice_unavailable),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color(0xFFFFB8B8),
+                        color = Ruby.copy(alpha = 0.7f),
                     )
                 }
 
@@ -198,7 +341,7 @@ fun TvSearchScreen(
         Text(
             text = stringResource(R.string.tv_section_popular_searches),
             style = MaterialTheme.typography.titleLarge,
-            color = Color.White,
+            color = Snow,
         )
 
         LazyRow(
@@ -226,7 +369,7 @@ fun TvSearchScreen(
                         .height(220.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    CircularProgressIndicator(color = Color(0xFFD6A45B))
+                    CircularProgressIndicator(color = Amber)
                 }
             }
 
@@ -234,7 +377,7 @@ fun TvSearchScreen(
                 Text(
                     text = error.orEmpty(),
                     style = MaterialTheme.typography.bodyLarge,
-                    color = Color(0xFFFFB8B8),
+                    color = Ruby.copy(alpha = 0.7f),
                 )
             }
 
@@ -242,15 +385,30 @@ fun TvSearchScreen(
                 Text(
                     text = stringResource(R.string.tv_search_empty),
                     style = MaterialTheme.typography.bodyLarge,
-                    color = Color(0xCCDAE2EF),
+                    color = Silver,
                 )
             }
 
             else -> {
+                // AI result label or fallback notice
+                if (aiResultTitle != null && searchMode == SearchMode.AI) {
+                    Text(
+                        text = stringResource(R.string.tv_search_ai_label, aiResultTitle!!),
+                        style = MaterialTheme.typography.titleLarge,
+                        color = Amber,
+                    )
+                } else if (aiFallback) {
+                    Text(
+                        text = stringResource(R.string.tv_search_ai_fallback),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Silver,
+                    )
+                }
+
                 Text(
                     text = stringResource(R.string.tv_section_search_results),
                     style = MaterialTheme.typography.titleLarge,
-                    color = Color.White,
+                    color = Snow,
                 )
 
                 LazyVerticalGrid(
@@ -292,33 +450,47 @@ fun TvSearchScreen(
 private fun TvSearchChip(
     text: String,
     modifier: Modifier,
+    selected: Boolean = false,
     onFocused: () -> Unit,
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(targetValue = if (focused) 1.03f else 1f, label = "chipScale")
+    val borderColor by animateColorAsState(
+        targetValue = when {
+            selected -> Amber
+            focused -> AmberLight
+            else -> Color.Transparent
+        },
+        label = "chipBorder",
+    )
+    val bgColor = when {
+        selected -> Amber.copy(alpha = 0.15f)
+        focused -> Graphite
+        else -> Charcoal
+    }
     Box(
         modifier = modifier
-            .scale(scale)
-            .clip(RoundedCornerShape(14.dp))
-            .background(if (focused) Color(0xFF1F3048) else Color(0xFF172334))
-            .border(1.dp, if (focused) Color(0xFFCDA166) else Color(0x334E5C72), RoundedCornerShape(14.dp))
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
             }
-            .focusable()
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick,
             )
+            .zIndex(if (focused) 1f else 0f)
+            .scale(scale)
+            .border(2.dp, borderColor, RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(14.dp))
+            .background(bgColor)
             .padding(horizontal = 14.dp, vertical = 10.dp),
     ) {
         Text(
             text = text,
             style = MaterialTheme.typography.titleMedium,
-            color = Color.White,
+            color = if (selected) Amber else Snow,
         )
     }
 }
@@ -332,21 +504,25 @@ private fun TvSearchResultCard(
 ) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(targetValue = if (focused) 1.05f else 1f, label = "resultScale")
+    val borderColor by animateColorAsState(
+        targetValue = if (focused) AmberLight else Color.Transparent,
+        label = "resultBorder",
+    )
     Box(
         modifier = modifier
-            .scale(scale)
-            .clip(RoundedCornerShape(12.dp))
-            .border(2.dp, if (focused) Color(0xFFCFA86C) else Color.Transparent, RoundedCornerShape(12.dp))
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
             }
-            .focusable()
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick,
-            ),
+            )
+            .zIndex(if (focused) 1f else 0f)
+            .scale(scale)
+            .border(2.dp, borderColor, RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(12.dp)),
     ) {
         AsyncImage(
             model = item.posterUrl ?: item.backdropUrl,
@@ -358,13 +534,13 @@ private fun TvSearchResultCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
-                .background(Color(0xC0101624))
+                .background(Obsidian.copy(alpha = 0.75f))
                 .padding(horizontal = 8.dp, vertical = 8.dp),
         ) {
             Text(
                 text = item.title,
                 style = MaterialTheme.typography.titleSmall,
-                color = Color.White,
+                color = Snow,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )

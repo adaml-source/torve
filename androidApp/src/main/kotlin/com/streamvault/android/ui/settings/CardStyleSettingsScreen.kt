@@ -111,6 +111,8 @@ fun CardStyleSettingsScreen(
     var showCreateDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var nameDraft by remember { mutableStateOf("") }
+    val presetCopyTemplate = stringResource(R.string.card_style_preset_copy_template)
+    val newPresetName = stringResource(R.string.card_style_new_preset)
 
     fun updateStyle(update: (CardStyle) -> CardStyle) {
         currentPreset?.let { preset ->
@@ -191,7 +193,7 @@ fun CardStyleSettingsScreen(
                             }
                             TextButton(
                                 onClick = {
-                                    nameDraft = currentPreset?.name?.let { "$it Copy" } ?: "New Preset"
+                                    nameDraft = currentPreset?.name?.let { String.format(presetCopyTemplate, it) } ?: newPresetName
                                     showCreateDialog = true
                                 },
                                 enabled = currentPreset != null,
@@ -441,10 +443,11 @@ fun CardStyleSettingsScreen(
 
 @Composable
 private fun CardStyleLivePreview(style: CardStyle) {
+    val previewTitle = stringResource(R.string.card_style_preview_title)
     val previewItem = MediaItem(
         id = "settings_preview",
         type = MediaType.MOVIE,
-        title = "Signal in the Dust",
+        title = previewTitle,
         year = 2026,
         rating = 7.9,
         ratings = MediaRatings(
@@ -474,11 +477,11 @@ private fun CardSizeSection(
         colors = CardDefaults.cardColors(containerColor = Charcoal),
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text("Card Size", style = MaterialTheme.typography.titleMedium, color = Snow)
+            Text(stringResource(R.string.card_style_card_size), style = MaterialTheme.typography.titleMedium, color = Snow)
             Spacer(Modifier.height(12.dp))
 
             // Orientation picker
-            Text("Orientation", color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.card_style_orientation), color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 CardOrientation.entries.forEach { orientation ->
@@ -524,7 +527,7 @@ private fun CardSizeSection(
             Spacer(Modifier.height(16.dp))
 
             // Size preset picker
-            Text("Size", color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.card_style_size), color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(8.dp))
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -549,7 +552,7 @@ private fun CardSizeSection(
             AnimatedVisibility(visible = prefs.preset == CardSizePreset.CUSTOM) {
                 Column {
                     Spacer(Modifier.height(12.dp))
-                    Text("Card Width: ${prefs.customWidthDp}dp", color = Silver, fontSize = 12.sp)
+                    Text(stringResource(R.string.card_style_card_width, prefs.customWidthDp), color = Silver, fontSize = 12.sp)
                     Slider(
                         value = prefs.customWidthDp.toFloat(),
                         onValueChange = { onUpdate(prefs.copy(customWidthDp = it.roundToInt())) },
@@ -562,8 +565,8 @@ private fun CardSizeSection(
                         ),
                     )
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("60dp (tiny)", color = Ash, fontSize = 10.sp)
-                        Text("300dp (huge)", color = Ash, fontSize = 10.sp)
+                        Text(stringResource(R.string.card_style_custom_width_min), color = Ash, fontSize = 10.sp)
+                        Text(stringResource(R.string.card_style_custom_width_max), color = Ash, fontSize = 10.sp)
                     }
                 }
             }
@@ -571,7 +574,7 @@ private fun CardSizeSection(
             Spacer(Modifier.height(16.dp))
 
             // Live preview
-            Text("Preview", color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.card_style_live_preview), color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(8.dp))
             Box(
                 Modifier
@@ -624,8 +627,8 @@ private fun CardHoverSection(
         Column(Modifier.padding(16.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Hover / Focus Zoom", color = Snow, fontWeight = FontWeight.SemiBold)
-                    Text("Cards grow when hovered, focused, or long-pressed", color = Silver, fontSize = 12.sp)
+                    Text(stringResource(R.string.card_style_hover_zoom), color = Snow, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.card_style_hover_zoom_desc), color = Silver, fontSize = 12.sp)
                 }
                 Switch(
                     checked = prefs.enabled,
@@ -648,7 +651,7 @@ private fun CardHoverSection(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        Text("Zoom Amount", color = Silver, fontSize = 13.sp)
+                        Text(stringResource(R.string.card_style_zoom_amount), color = Silver, fontSize = 13.sp)
                         Text("${prefs.scalePercent}%", color = Amber, fontWeight = FontWeight.Bold)
                     }
                     Slider(
@@ -670,7 +673,7 @@ private fun CardHoverSection(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        Text("Animation Speed", color = Silver, fontSize = 13.sp)
+                        Text(stringResource(R.string.card_style_animation_speed), color = Silver, fontSize = 13.sp)
                         Text("${prefs.animationDurationMs}ms", color = Amber, fontWeight = FontWeight.Bold)
                     }
                     Slider(
@@ -686,19 +689,19 @@ private fun CardHoverSection(
 
                     Spacer(Modifier.height(8.dp))
 
-                    ToggleRow("Elevation / Shadow", prefs.elevationOnHover) {
+                    ToggleRow(stringResource(R.string.card_style_elevation_shadow), prefs.elevationOnHover) {
                         onUpdate(prefs.copy(elevationOnHover = it))
                     }
-                    ToggleRow("Accent Border", prefs.borderOnHover) {
+                    ToggleRow(stringResource(R.string.card_style_accent_border), prefs.borderOnHover) {
                         onUpdate(prefs.copy(borderOnHover = it))
                     }
-                    ToggleRow("Dim Other Cards", prefs.dimOtherCards) {
+                    ToggleRow(stringResource(R.string.card_style_dim_other_cards), prefs.dimOtherCards) {
                         onUpdate(prefs.copy(dimOtherCards = it))
                     }
 
                     // Live hover preview
                     Spacer(Modifier.height(16.dp))
-                    Text("Preview (tap middle card)", color = Silver, fontSize = 13.sp)
+                    Text(stringResource(R.string.card_style_preview_tap), color = Silver, fontSize = 13.sp)
                     Spacer(Modifier.height(8.dp))
                     HoverPreview(prefs)
                 }
@@ -770,7 +773,7 @@ private fun HoverPreview(prefs: CardHoverPrefs) {
                 contentAlignment = Alignment.Center,
             ) {
                 if (isTarget) {
-                    Text("TAP", color = Amber, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.card_style_tap), color = Amber, fontSize = 8.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -791,8 +794,8 @@ private fun WatchedIndicatorSection(
         Column(Modifier.padding(16.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Watched Indicator", color = Snow, fontWeight = FontWeight.SemiBold)
-                    Text("Mark movies and shows you've already seen", color = Silver, fontSize = 12.sp)
+                    Text(stringResource(R.string.card_style_watched_indicator), color = Snow, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.card_style_watched_desc), color = Silver, fontSize = 12.sp)
                 }
                 Switch(
                     checked = prefs.enabled,
@@ -810,7 +813,7 @@ private fun WatchedIndicatorSection(
                 Column {
                     Spacer(Modifier.height(16.dp))
 
-                    Text("Indicator Style", color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.card_style_indicator_style), color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(8.dp))
 
                     // Style picker — scrollable row with mini previews
@@ -864,7 +867,7 @@ private fun WatchedIndicatorSection(
 
                     Spacer(Modifier.height(16.dp))
 
-                    ToggleRow("Dim Watched Posters", prefs.dimWatched) {
+                    ToggleRow(stringResource(R.string.card_style_dim_watched_posters), prefs.dimWatched) {
                         onUpdate(prefs.copy(dimWatched = it))
                     }
                     AnimatedVisibility(visible = prefs.dimWatched) {
@@ -873,7 +876,7 @@ private fun WatchedIndicatorSection(
                                 Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                             ) {
-                                Text("Dim Amount", color = Silver, fontSize = 12.sp)
+                                Text(stringResource(R.string.card_style_dim_amount), color = Silver, fontSize = 12.sp)
                                 Text("${(prefs.dimAmount * 100).roundToInt()}%", color = Amber, fontWeight = FontWeight.Bold)
                             }
                             Slider(
@@ -889,10 +892,10 @@ private fun WatchedIndicatorSection(
                         }
                     }
 
-                    ToggleRow("Progress Bar (partial watches)", prefs.progressBarForPartial) {
+                    ToggleRow(stringResource(R.string.card_style_progress_bar_partial), prefs.progressBarForPartial) {
                         onUpdate(prefs.copy(progressBarForPartial = it))
                     }
-                    ToggleRow("Rewatch Count Badge", prefs.rewatchBadge) {
+                    ToggleRow(stringResource(R.string.card_style_rewatch_badge), prefs.rewatchBadge) {
                         onUpdate(prefs.copy(rewatchBadge = it))
                     }
                 }
@@ -913,7 +916,7 @@ private fun AppearanceSection(
         colors = CardDefaults.cardColors(containerColor = Charcoal),
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text("Appearance", style = MaterialTheme.typography.titleMedium, color = Snow)
+            Text(stringResource(R.string.card_style_appearance), style = MaterialTheme.typography.titleMedium, color = Snow)
             Spacer(Modifier.height(12.dp))
 
             // Corner radius
@@ -921,7 +924,7 @@ private fun AppearanceSection(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text("Corner Radius", color = Silver, fontSize = 13.sp)
+                Text(stringResource(R.string.card_style_corner_radius), color = Silver, fontSize = 13.sp)
                 Text("${prefs.cornerRadiusDp}dp", color = Amber, fontWeight = FontWeight.Bold)
             }
             Slider(
@@ -943,7 +946,7 @@ private fun AppearanceSection(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text("Card Spacing", color = Silver, fontSize = 13.sp)
+                Text(stringResource(R.string.card_style_card_spacing), color = Silver, fontSize = 13.sp)
                 Text("${prefs.cardSpacingDp}dp", color = Amber, fontWeight = FontWeight.Bold)
             }
             Slider(
@@ -961,7 +964,7 @@ private fun AppearanceSection(
             Spacer(Modifier.height(8.dp))
 
             // Title position
-            Text("Title Position", color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.card_style_title_position), color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 CardTitlePosition.entries.forEach { pos ->
@@ -971,9 +974,9 @@ private fun AppearanceSection(
                         label = {
                             Text(
                                 when (pos) {
-                                    CardTitlePosition.BELOW -> "Below"
-                                    CardTitlePosition.OVERLAY_BOTTOM -> "Overlay"
-                                    CardTitlePosition.HIDDEN -> "Hidden"
+                                    CardTitlePosition.BELOW -> stringResource(R.string.card_style_title_pos_below)
+                                    CardTitlePosition.OVERLAY_BOTTOM -> stringResource(R.string.card_style_title_pos_overlay)
+                                    CardTitlePosition.HIDDEN -> stringResource(R.string.card_style_title_pos_hidden)
                                 },
                                 fontSize = 12.sp,
                             )
@@ -991,7 +994,7 @@ private fun AppearanceSection(
             Spacer(Modifier.height(8.dp))
 
             // Scroll animation
-            Text("Scroll Animation", color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.card_style_scroll_animation), color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(8.dp))
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1004,10 +1007,10 @@ private fun AppearanceSection(
                         label = {
                             Text(
                                 when (anim) {
-                                    CardScrollAnimation.NONE -> "None"
-                                    CardScrollAnimation.FADE_IN -> "Fade In"
-                                    CardScrollAnimation.SLIDE_UP -> "Slide Up"
-                                    CardScrollAnimation.SCALE_IN -> "Scale In"
+                                    CardScrollAnimation.NONE -> stringResource(R.string.card_style_scroll_none)
+                                    CardScrollAnimation.FADE_IN -> stringResource(R.string.card_style_scroll_fade_in)
+                                    CardScrollAnimation.SLIDE_UP -> stringResource(R.string.card_style_scroll_slide_up)
+                                    CardScrollAnimation.SCALE_IN -> stringResource(R.string.card_style_scroll_scale_in)
                                 },
                                 fontSize = 12.sp,
                             )
@@ -1025,12 +1028,12 @@ private fun AppearanceSection(
             Spacer(Modifier.height(12.dp))
 
             // Toggle options
-            ToggleRow("Show Year", prefs.showYear) { onUpdate(prefs.copy(showYear = it)) }
-            ToggleRow("Bottom Gradient", prefs.showBottomGradient) { onUpdate(prefs.copy(showBottomGradient = it)) }
-            ToggleRow("Card Border", prefs.showBorder) { onUpdate(prefs.copy(showBorder = it)) }
-            ToggleRow("Genre Tags", prefs.showGenreTags) { onUpdate(prefs.copy(showGenreTags = it)) }
-            ToggleRow("Type Badge (Movie/TV)", prefs.showTypeBadge) { onUpdate(prefs.copy(showTypeBadge = it)) }
-            ToggleRow("Runtime", prefs.showRuntime) { onUpdate(prefs.copy(showRuntime = it)) }
+            ToggleRow(stringResource(R.string.card_style_show_year), prefs.showYear) { onUpdate(prefs.copy(showYear = it)) }
+            ToggleRow(stringResource(R.string.card_style_bottom_gradient), prefs.showBottomGradient) { onUpdate(prefs.copy(showBottomGradient = it)) }
+            ToggleRow(stringResource(R.string.card_style_card_border), prefs.showBorder) { onUpdate(prefs.copy(showBorder = it)) }
+            ToggleRow(stringResource(R.string.card_style_genre_tags), prefs.showGenreTags) { onUpdate(prefs.copy(showGenreTags = it)) }
+            ToggleRow(stringResource(R.string.card_style_type_badge), prefs.showTypeBadge) { onUpdate(prefs.copy(showTypeBadge = it)) }
+            ToggleRow(stringResource(R.string.card_style_runtime), prefs.showRuntime) { onUpdate(prefs.copy(showRuntime = it)) }
         }
     }
 }

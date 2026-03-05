@@ -1,0 +1,7 @@
+androidApp/src/tv/kotlin/com/streamvault/android/tv/screens/TvLivePlayerScreen.kt
+androidApp/src/tv/kotlin/com/streamvault/android/tv/screens/LivePlayerOverlay.kt
+androidApp/src/tv/kotlin/com/streamvault/android/tv/screens/LiveChannelInfoOverlay.kt
+androidApp/src/tv/kotlin/com/streamvault/android/tv/screens/LiveMenuBarOverlay.kt
+androidApp/src/tv/kotlin/com/streamvault/android/tv/screens/LiveEpgGuideOverlay.kt
+androidApp/src/tv/kotlin/com/streamvault/android/tv/screens/LiveChannelListOverlay.kt
+androidApp/src/tv/kotlin/com/streamvault/android/tv/screens/LiveSettingsOverlay.kt

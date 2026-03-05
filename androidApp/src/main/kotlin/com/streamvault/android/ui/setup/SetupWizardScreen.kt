@@ -196,24 +196,24 @@ private fun WelcomeStep() {
         verticalArrangement = Arrangement.Center,
     ) {
         Text(
-            text = "Torve",
+            text = stringResource(R.string.app_name),
             style = MaterialTheme.typography.displaySmall,
             fontWeight = FontWeight.Bold,
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = "Your all-in-one streaming companion",
+            text = stringResource(R.string.setup_welcome_subtitle),
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(32.dp))
 
         val features = listOf(
-            "Stream movies & TV shows from multiple sources",
-            "Cloud service integration for optimized playback",
-            "Live channels with M3U playlist support",
-            "Download content for offline viewing",
-            "Track your watchlist with Trakt.tv",
+            stringResource(R.string.setup_feature_stream),
+            stringResource(R.string.setup_feature_cloud),
+            stringResource(R.string.setup_feature_channels),
+            stringResource(R.string.setup_feature_download),
+            stringResource(R.string.setup_feature_trakt),
         )
         features.forEach { feature ->
             Row(
@@ -235,7 +235,7 @@ private fun WelcomeStep() {
 
         Spacer(Modifier.height(24.dp))
         Text(
-            "Let's set things up in a few quick steps.",
+            stringResource(R.string.setup_lets_go),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -247,7 +247,7 @@ private fun WelcomeStep() {
 private fun TermsStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
     Column {
         Text(
-            "Terms of Use",
+            stringResource(R.string.setup_terms_title),
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
         )
@@ -259,9 +259,7 @@ private fun TermsStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
             ),
         ) {
             Text(
-                text = "Torve is a media organizer and player. You are responsible for ensuring " +
-                    "you have the right to access any content through third-party sources you " +
-                    "configure. Torve does not host, provide, or control any media content.",
+                text = stringResource(R.string.setup_terms_text),
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(16.dp),
             )
@@ -275,7 +273,7 @@ private fun TermsStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
             ),
         ) {
             Text(
-                text = "This product uses the TMDB API but is not endorsed or certified by TMDB.",
+                text = stringResource(R.string.setup_tmdb_text),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(16.dp),
@@ -297,7 +295,7 @@ private fun TermsStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
             )
             Spacer(Modifier.width(8.dp))
             Text(
-                "I understand and accept these terms",
+                stringResource(R.string.setup_accept_terms),
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
@@ -308,10 +306,10 @@ private fun TermsStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
 @Composable
 private fun DebridStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
     Column {
-        Text("Cloud Service", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text(stringResource(R.string.settings_cloud_service), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         Text(
-            "Connect your premium cloud storage service for optimized streaming and faster playback.",
+            stringResource(R.string.setup_cloud_desc),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -371,7 +369,7 @@ private fun DebridStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
                 ) {
                     Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.width(8.dp))
-                    Text("Connected successfully!", fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.setup_connected_success), fontWeight = FontWeight.Medium)
                 }
             }
         } else {
@@ -398,10 +396,10 @@ private fun DebridStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
 @Composable
 private fun TraktStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
     Column {
-        Text("Trakt.tv", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text(stringResource(R.string.settings_trakt), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         Text(
-            "Connect Trakt to sync your watchlist, track progress, and get personalized recommendations.",
+            stringResource(R.string.setup_trakt_desc),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -421,10 +419,10 @@ private fun TraktStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
                         Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.primary)
                         Spacer(Modifier.width(8.dp))
                         Column {
-                            Text("Connected to Trakt!", fontWeight = FontWeight.Medium)
+                            Text(stringResource(R.string.setup_trakt_connected), fontWeight = FontWeight.Medium)
                             state.traktUsername?.let { username ->
                                 Text(
-                                    "Logged in as $username",
+                                    stringResource(R.string.setup_logged_in_as, username),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -446,7 +444,7 @@ private fun TraktStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Text(
-                            "Go to:",
+                            stringResource(R.string.setup_go_to),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -459,7 +457,7 @@ private fun TraktStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
                         )
                         Spacer(Modifier.height(16.dp))
                         Text(
-                            "Enter this code:",
+                            stringResource(R.string.setup_enter_code),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -478,7 +476,7 @@ private fun TraktStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
                             )
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                "Waiting for authorization...",
+                                stringResource(R.string.setup_waiting_auth),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -502,7 +500,7 @@ private fun TraktStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
 
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "You'll be asked to visit trakt.tv/activate and enter a code to authorize.",
+                    stringResource(R.string.setup_trakt_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -520,10 +518,10 @@ private fun TraktStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
 @Composable
 private fun QualityStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
     Column {
-        Text("Quality Preferences", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text(stringResource(R.string.setup_quality_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         Text(
-            "Set your preferred stream quality. You can change this later in Settings.",
+            stringResource(R.string.setup_quality_desc),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -565,9 +563,9 @@ private fun QualityStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("Cached Only", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                Text(stringResource(R.string.settings_cached_only), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                 Text(
-                    "Only show cached streams for instant playback",
+                    stringResource(R.string.settings_cached_only_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -586,7 +584,7 @@ private fun ChannelsStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
     val isXtream = state.channelPlaylistType == "xtream"
 
     Column {
-        Text("Channels", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text(stringResource(R.string.setup_channels_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         Text(
             stringResource(R.string.setup_channels_desc),
@@ -674,13 +672,13 @@ private fun DoneStep() {
         )
         Spacer(Modifier.height(16.dp))
         Text(
-            "You're All Set!",
+            stringResource(R.string.setup_done_title),
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            "Torve is ready. You can adjust settings anytime from the Settings tab.",
+            stringResource(R.string.setup_done_desc),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,

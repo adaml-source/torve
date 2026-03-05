@@ -42,23 +42,17 @@ object HttpClientFactory {
 
     fun createEpgStreamingClient(
         forceIdentityEncoding: Boolean,
-    ): HttpClient = HttpClient(platformHttpEngine()) {
+    ): HttpClient = HttpClient(createEpgStreamingEngineFactory(forceIdentityEncoding)) {
         expectSuccess = false
 
         install(HttpTimeout) {
-            requestTimeoutMillis = 30_000
-            connectTimeoutMillis = 10_000
-            socketTimeoutMillis = 30_000
+            requestTimeoutMillis = 120_000
+            connectTimeoutMillis = 20_000
+            socketTimeoutMillis = 120_000
         }
 
         install(Logging) {
             level = LogLevel.NONE
-        }
-
-        defaultRequest {
-            if (forceIdentityEncoding) {
-                headers.append("Accept-Encoding", "identity")
-            }
         }
     }
 }

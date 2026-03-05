@@ -554,6 +554,13 @@ fun TvIptvScreen(
                             when (event.key) {
                                 Key.DirectionLeft -> {
                                     if (focusedZone != FocusZone.EPG_GRID) return@onPreviewKeyEvent false
+                                    if (lastGridColIndex > 0) return@onPreviewKeyEvent false
+                                    if (windowPageOffset > 0) {
+                                        windowPageOffset -= 1
+                                        lastGridColIndex = -1
+                                        gridFocusRequestToken += 1
+                                        return@onPreviewKeyEvent true
+                                    }
                                     focusListZone()
                                     true
                                 }

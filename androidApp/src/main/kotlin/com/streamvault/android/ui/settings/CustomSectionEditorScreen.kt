@@ -48,10 +48,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.streamvault.android.R
 import com.streamvault.android.ui.components.BackButton
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Gunmetal
@@ -555,7 +557,7 @@ fun CustomSectionEditorScreen(
             OutlinedTextField(
                 value = title,
                 onValueChange = { title = it },
-                label = { Text("Section Name") },
+                label = { Text(stringResource(R.string.custom_section_name)) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 colors = textFieldColors,
@@ -567,7 +569,7 @@ fun CustomSectionEditorScreen(
                 Spacer(Modifier.height(20.dp))
 
                 // Media Type
-                SectionLabel("Media Type")
+                SectionLabel(stringResource(R.string.custom_media_type))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf("movie" to "Movies", "tv" to "TV Shows", "both" to "Both").forEach { (value, label) ->
                         FilterChip(
@@ -583,7 +585,7 @@ fun CustomSectionEditorScreen(
                 Spacer(Modifier.height(20.dp))
 
                 // Sort By
-                SectionLabel("Sort By")
+                SectionLabel(stringResource(R.string.catalog_sort_by))
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     sortOptions.forEach { (value, label) ->
                         FilterChip(
@@ -599,7 +601,7 @@ fun CustomSectionEditorScreen(
                 Spacer(Modifier.height(20.dp))
 
                 // Genres
-                SectionLabel("Genres")
+                SectionLabel(stringResource(R.string.custom_genres))
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -621,7 +623,7 @@ fun CustomSectionEditorScreen(
                 // Keywords (from AI search)
                 if (keywordIds.isNotEmpty()) {
                     Spacer(Modifier.height(20.dp))
-                    SectionLabel("Keywords")
+                    SectionLabel(stringResource(R.string.custom_keywords))
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -651,7 +653,7 @@ fun CustomSectionEditorScreen(
                     OutlinedTextField(
                         value = minRating,
                         onValueChange = { minRating = it.filter { c -> c.isDigit() || c == '.' } },
-                        label = { Text("Min Rating") },
+                        label = { Text(stringResource(R.string.custom_min_rating)) },
                         modifier = Modifier.weight(1f),
                         singleLine = true,
                         colors = textFieldColors,
@@ -660,7 +662,7 @@ fun CustomSectionEditorScreen(
                     OutlinedTextField(
                         value = yearFrom,
                         onValueChange = { yearFrom = it.filter { c -> c.isDigit() } },
-                        label = { Text("Year From") },
+                        label = { Text(stringResource(R.string.custom_year_from)) },
                         modifier = Modifier.weight(1f),
                         singleLine = true,
                         colors = textFieldColors,
@@ -669,7 +671,7 @@ fun CustomSectionEditorScreen(
                     OutlinedTextField(
                         value = yearTo,
                         onValueChange = { yearTo = it.filter { c -> c.isDigit() } },
-                        label = { Text("Year To") },
+                        label = { Text(stringResource(R.string.custom_year_to)) },
                         modifier = Modifier.weight(1f),
                         singleLine = true,
                         colors = textFieldColors,
@@ -916,7 +918,7 @@ private fun PersonSearchField(
     OutlinedTextField(
         value = query,
         onValueChange = onQueryChange,
-        placeholder = { Text("Search person...", color = Silver) },
+        placeholder = { Text(stringResource(R.string.custom_search_person), color = Silver) },
         modifier = Modifier.fillMaxWidth(),
         singleLine = true,
         trailingIcon = {

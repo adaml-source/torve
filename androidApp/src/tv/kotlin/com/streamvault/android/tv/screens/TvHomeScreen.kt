@@ -1,15 +1,20 @@
 package com.streamvault.android.tv.screens
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.res.stringResource
 import com.streamvault.android.R
+import com.streamvault.android.tv.TvScreenCache
 import com.streamvault.android.tv.toMediaItemOrNull
+import com.streamvault.android.tv.components.TvCardStyle
 import com.streamvault.android.tv.components.TvContentRail
 import com.streamvault.android.tv.components.TvMediaRails
+import com.streamvault.android.tv.components.dedupeAcrossRails
 import com.streamvault.android.tv.components.rememberTvFocusMemory
 import com.streamvault.domain.model.MediaItem
 import com.streamvault.domain.repository.MetadataRepository
@@ -31,14 +36,28 @@ fun TvHomeScreen(
     onMediaClick: (MediaItem) -> Unit,
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
+    onMediaFocused: ((MediaItem) -> Unit)? = null,
+    onSeeAll: ((railKey: String, title: String) -> Unit)? = null,
+    heroOverlay: (@Composable () -> Unit)? = null,
+    shouldAutoFocus: Boolean = true,
 ) {
     val metadataRepo: MetadataRepository = koinInject()
     val watchProgressRepo: WatchProgressRepository = koinInject()
     val focusMemory = rememberTvFocusMemory()
 
-    val uiState by produceState(initialValue = TvHomeUiState(), metadataRepo, watchProgressRepo) {
-        value = TvHomeUiState(loading = true)
-        value = try {
+    val continueWatchingLabel = stringResource(R.string.tv_section_continue_watching)
+    val recommendedLabel = stringResource(R.string.tv_section_recommended)
+    val trendingMoviesLabel = stringResource(R.string.tv_section_trending_movies)
+    val trendingShowsLabel = stringResource(R.string.tv_section_trending_shows)
+
+    var uiState by remember {
+        mutableStateOf(TvScreenCache.get<TvHomeUiState>("home") ?: TvHomeUiState())
+    }
+
+    LaunchedEffect(Unit) {
+        if (uiState.rails.isNotEmpty()) return@LaunchedEffect
+        uiState = TvHomeUiState(loading = true)
+        uiState = try {
             val rails = coroutineScope {
                 val inProgressDeferred = async { watchProgressRepo.getInProgress(20) }
                 val trendingMoviesDeferred = async { metadataRepo.getTrending("movie") }
@@ -46,10 +65,15 @@ fun TvHomeScreen(
                 val popularMoviesDeferred = async { metadataRepo.getPopular("movie") }
                 val popularShowsDeferred = async { metadataRepo.getPopular("tv") }
 
-                val inProgress = inProgressDeferred.await()
+                val inProgressRaw = inProgressDeferred.await()
+                val inProgress = inProgressRaw
                     .mapNotNull { it.toMediaItemOrNull() }
                     .filter { it.tmdbId != null }
                     .take(20)
+
+                val progressMap = inProgressRaw
+                    .filter { it.progressPercent > 0f }
+                    .associate { it.mediaId to it.progressPercent }
 
                 val trendingMovies = trendingMoviesDeferred.await().take(24)
                 val trendingShows = trendingShowsDeferred.await().take(24)
@@ -62,8 +86,10 @@ fun TvHomeScreen(
                         add(
                             TvContentRail(
                                 key = "continue_watching",
-                                title = "Continue Watching",
+                                title = continueWatchingLabel,
                                 items = inProgress,
+                                cardStyle = TvCardStyle.BACKDROP,
+                                progressByMediaId = progressMap,
                             ),
                         )
                     }
@@ -71,7 +97,7 @@ fun TvHomeScreen(
                         add(
                             TvContentRail(
                                 key = "recommended",
-                                title = "Recommended",
+                                title = recommendedLabel,
                                 items = recommended,
                             ),
                         )
@@ -80,7 +106,7 @@ fun TvHomeScreen(
                         add(
                             TvContentRail(
                                 key = "trending_movies",
-                                title = "Trending Movies",
+                                title = trendingMoviesLabel,
                                 items = trendingMovies,
                             ),
                         )
@@ -89,14 +115,14 @@ fun TvHomeScreen(
                         add(
                             TvContentRail(
                                 key = "trending_shows",
-                                title = "Trending TV Shows",
+                                title = trendingShowsLabel,
                                 items = trendingShows,
                             ),
                         )
                     }
-                }
+                }.dedupeAcrossRails()
             }
-            TvHomeUiState(loading = false, rails = rails)
+            TvHomeUiState(loading = false, rails = rails).also { TvScreenCache.put("home", it) }
         } catch (t: Throwable) {
             TvHomeUiState(loading = false, error = t.message ?: "Failed to load home content")
         }
@@ -113,6 +139,9 @@ fun TvHomeScreen(
         loading = uiState.loading,
         emptyMessage = emptyMessage,
         focusMemory = focusMemory,
+        onMediaFocused = onMediaFocused,
+        onSeeAll = onSeeAll,
+        heroOverlay = heroOverlay,
+        shouldAutoFocus = shouldAutoFocus,
     )
 }
-

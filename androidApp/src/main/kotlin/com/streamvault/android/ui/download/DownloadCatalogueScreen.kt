@@ -326,10 +326,10 @@ private fun CatalogueTopBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Snow)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), tint = Snow)
             }
             Text(
-                "Downloads",
+                stringResource(R.string.download_title),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 color = Snow,
@@ -337,7 +337,7 @@ private fun CatalogueTopBar(
             )
             if (!state.isEmpty) {
                 Text(
-                    "${state.totalItemCount} items",
+                    stringResource(R.string.download_items_count, state.totalItemCount),
                     color = Silver,
                     fontSize = 12.sp,
                     modifier = Modifier.padding(end = 8.dp),
@@ -388,7 +388,7 @@ private fun CatalogueTopBar(
                 CompactActionChip(Icons.Default.FolderOpen, prefs.groupingMode.label.take(10), onGroupClick)
 
                 IconButton(onClick = onSettingsClick, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Default.Tune, "Settings", tint = Silver, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.Tune, stringResource(R.string.settings_title), tint = Silver, modifier = Modifier.size(18.dp))
                 }
             }
         }
@@ -419,7 +419,7 @@ private fun StorageSummaryBar(state: CatalogueState) {
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
-                    "${state.movieCount} movies \u2022 ${state.showCount} shows (${state.episodeCount} ep)",
+                    stringResource(R.string.download_storage_counts, state.movieCount, state.showCount, state.episodeCount),
                     color = Silver, fontSize = 11.sp,
                 )
                 Text(totalSize, color = Amber, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
@@ -436,7 +436,7 @@ private fun StorageSummaryBar(state: CatalogueState) {
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                "${formatFileSize(availableBytes)} free \u2022 $usedPercent% used by Torve",
+                stringResource(R.string.download_storage_free_used, formatFileSize(availableBytes), usedPercent),
                 color = Smoke, fontSize = 10.sp,
             )
         }
@@ -459,7 +459,7 @@ private fun ActiveDownloadsStrip(
             .padding(vertical = 8.dp),
     ) {
         Text(
-            "Active Downloads (${downloads.size})",
+            stringResource(R.string.download_active_downloads, downloads.size),
             color = Amber,
             fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
@@ -493,8 +493,8 @@ private fun ActiveDownloadsStrip(
                         Text(
                             when (download.status) {
                                 DownloadStatus.DOWNLOADING -> "${(download.progressPercent * 100).toInt()}%"
-                                DownloadStatus.PAUSED -> "Paused"
-                                DownloadStatus.PENDING -> "Queued"
+                                DownloadStatus.PAUSED -> stringResource(R.string.download_paused)
+                                DownloadStatus.PENDING -> stringResource(R.string.download_queued)
                                 else -> download.status.name
                             },
                             color = statusColor,
@@ -514,11 +514,11 @@ private fun ActiveDownloadsStrip(
                         Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
                             if (download.status == DownloadStatus.DOWNLOADING) {
                                 IconButton(onClick = { downloadVM.pauseDownload(download.id) }, Modifier.size(24.dp)) {
-                                    Icon(Icons.Default.Close, "Pause", tint = Silver, modifier = Modifier.size(14.dp))
+                                    Icon(Icons.Default.Close, stringResource(R.string.common_pause), tint = Silver, modifier = Modifier.size(14.dp))
                                 }
                             } else if (download.status == DownloadStatus.PAUSED || download.status == DownloadStatus.PENDING) {
                                 IconButton(onClick = { downloadVM.resumeDownload(download.id) }, Modifier.size(24.dp)) {
-                                    Icon(Icons.Default.PlayArrow, "Resume", tint = Amber, modifier = Modifier.size(14.dp))
+                                    Icon(Icons.Default.PlayArrow, stringResource(R.string.download_resume), tint = Amber, modifier = Modifier.size(14.dp))
                                 }
                             }
                         }
@@ -589,11 +589,11 @@ private fun FilterChipsRow(
                     FilterChip(
                         selected = prefs.filterGenre != null,
                         onClick = { showGenreDropdown = true },
-                        label = { Text(prefs.filterGenre ?: "Genre", fontSize = 11.sp) },
+                        label = { Text(prefs.filterGenre ?: stringResource(R.string.download_filter_genre), fontSize = 11.sp) },
                         trailingIcon = {
                             if (prefs.filterGenre != null) {
                                 Icon(
-                                    Icons.Default.Close, "Clear",
+                                    Icons.Default.Close, stringResource(R.string.common_clear),
                                     modifier = Modifier
                                         .size(14.dp)
                                         .clickable { onUpdate(prefs.copy(filterGenre = null)) },
@@ -623,11 +623,11 @@ private fun FilterChipsRow(
                     FilterChip(
                         selected = prefs.filterQuality != null,
                         onClick = { showQualityDropdown = true },
-                        label = { Text(prefs.filterQuality ?: "Quality", fontSize = 11.sp) },
+                        label = { Text(prefs.filterQuality ?: stringResource(R.string.download_filter_quality), fontSize = 11.sp) },
                         trailingIcon = {
                             if (prefs.filterQuality != null) {
                                 Icon(
-                                    Icons.Default.Close, "Clear",
+                                    Icons.Default.Close, stringResource(R.string.common_clear),
                                     modifier = Modifier
                                         .size(14.dp)
                                         .clickable { onUpdate(prefs.copy(filterQuality = null)) },
@@ -716,12 +716,13 @@ private fun ListCatalogue(
     onDetail: (String) -> Unit,
     onLongPress: (DownloadGroup) -> Unit,
 ) {
+    val allDownloadsTitle = stringResource(R.string.download_all_downloads)
     LazyColumn(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         state.sections.forEach { section ->
-            if (state.sections.size > 1 || section.title != "All Downloads") {
+            if (state.sections.size > 1 || section.title != allDownloadsTitle) {
                 item {
                     Text(
                         section.title, color = Amber, fontWeight = FontWeight.Bold,
@@ -774,7 +775,7 @@ private fun DownloadGroupListRow(
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     group.year?.let { Text("$it", color = Silver, fontSize = 11.sp) }
                     if (group.type == DownloadGroupType.SHOW) {
-                        Text("${group.itemCount} ep", color = Silver, fontSize = 11.sp)
+                        Text(stringResource(R.string.download_episodes_short, group.itemCount), color = Silver, fontSize = 11.sp)
                     }
                     if (prefs.showFileSize) {
                         Text(formatFileSize(group.totalSizeBytes), color = Silver, fontSize = 11.sp)
@@ -948,7 +949,7 @@ private fun CoverCard(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     group.year?.let { Text("$it", color = Silver, fontSize = 13.sp) }
                     if (group.type == DownloadGroupType.SHOW) {
-                        Text("${group.itemCount} episodes", color = Silver, fontSize = 13.sp)
+                        Text(stringResource(R.string.download_episodes_count, group.itemCount), color = Silver, fontSize = 13.sp)
                     }
                     Text(formatFileSize(group.totalSizeBytes), color = Amber, fontSize = 13.sp)
                 }
@@ -1044,7 +1045,7 @@ private fun DownloadGroupCard(
                         .background(Color(0xFF0D0D1A).copy(alpha = 0.85f), RoundedCornerShape(4.dp))
                         .padding(horizontal = 6.dp, vertical = 2.dp),
                 ) {
-                    Text("${group.itemCount} EP", color = Amber, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.download_episodes_short_caps, group.itemCount), color = Amber, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 }
             }
 
@@ -1115,7 +1116,7 @@ private fun DownloadGroupCard(
                 ) {
                     Icon(
                         Icons.Default.CheckCircle,
-                        contentDescription = "Watched",
+                        contentDescription = stringResource(R.string.detail_watched),
                         tint = Emerald.copy(alpha = 0.85f),
                         modifier = Modifier.size(32.dp),
                     )
@@ -1125,7 +1126,7 @@ private fun DownloadGroupCard(
             // Show type icon
             if (group.type == DownloadGroupType.SHOW) {
                 Icon(
-                    Icons.Default.Tv, contentDescription = "TV Show",
+                    Icons.Default.Tv, contentDescription = stringResource(R.string.download_tv_show),
                     tint = Color.White.copy(alpha = 0.7f),
                     modifier = Modifier
                         .align(Alignment.BottomStart)
@@ -1146,7 +1147,7 @@ private fun DownloadGroupCard(
         }
         if (group.type == DownloadGroupType.SHOW) {
             Text(
-                "${group.watchedCount}/${group.totalCount} watched",
+                stringResource(R.string.download_watched_count, group.watchedCount, group.totalCount),
                 color = if (group.watchedCount == group.totalCount) Emerald else Silver,
                 fontSize = 10.sp,
             )
@@ -1183,7 +1184,7 @@ private fun DownloadContextMenu(
                 Column {
                     Text(group.title, color = Snow, fontWeight = FontWeight.Bold)
                     Text(
-                        "${if (group.type == DownloadGroupType.MOVIE) "Movie" else "${group.itemCount} episodes"} \u2022 ${formatFileSize(group.totalSizeBytes)}",
+                        "${if (group.type == DownloadGroupType.MOVIE) stringResource(R.string.download_movie) else stringResource(R.string.download_episodes_count, group.itemCount)} \u2022 ${formatFileSize(group.totalSizeBytes)}",
                         color = Silver, fontSize = 12.sp,
                     )
                 }
@@ -1193,9 +1194,9 @@ private fun DownloadContextMenu(
             HorizontalDivider(color = Color(0xFF333333))
             Spacer(Modifier.height(8.dp))
 
-            ContextMenuItem(Icons.Default.PlayArrow, "Play", Amber) { onPlay() }
-            ContextMenuItem(Icons.Default.Info, "View Details", Silver) { onDetail() }
-            ContextMenuItem(Icons.Default.Delete, "Delete", Ruby) { showDeleteConfirm = true }
+            ContextMenuItem(Icons.Default.PlayArrow, stringResource(R.string.common_play), Amber) { onPlay() }
+            ContextMenuItem(Icons.Default.Info, stringResource(R.string.common_view_details), Silver) { onDetail() }
+            ContextMenuItem(Icons.Default.Delete, stringResource(R.string.common_delete), Ruby) { showDeleteConfirm = true }
 
             Spacer(Modifier.height(16.dp))
         }
@@ -1239,7 +1240,7 @@ private fun SortBottomSheet(
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(16.dp)) {
-            Text("Sort By", color = Snow, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.common_sort_by), color = Snow, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(12.dp))
             CatalogueSortBy.entries.forEach { sort ->
                 val selected = prefs.sortBy == sort
@@ -1277,7 +1278,7 @@ private fun GroupBottomSheet(
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(16.dp)) {
-            Text("Group By", color = Snow, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.download_group_by), color = Snow, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(12.dp))
             CatalogueGrouping.entries.forEach { grouping ->
                 val selected = prefs.groupingMode == grouping
@@ -1320,7 +1321,7 @@ private fun CatalogueSettingsSheet(
         LazyColumn(Modifier.padding(16.dp)) {
             item {
                 Text(
-                    "Catalogue Settings", color = Snow, fontWeight = FontWeight.Bold,
+                    stringResource(R.string.download_catalogue_settings), color = Snow, fontWeight = FontWeight.Bold,
                     style = MaterialTheme.typography.titleMedium,
                 )
                 Spacer(Modifier.height(16.dp))
@@ -1328,13 +1329,13 @@ private fun CatalogueSettingsSheet(
 
             // Grid columns
             item {
-                Text("Grid Columns", color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.download_grid_columns), color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     FilterChip(
                         selected = prefs.gridColumns == 0,
                         onClick = { onUpdate(prefs.copy(gridColumns = 0)) },
-                        label = { Text("Auto", fontSize = 11.sp) },
+                        label = { Text(stringResource(R.string.download_auto), fontSize = 11.sp) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = AmberSubtle,
                             selectedLabelColor = Amber,
@@ -1357,35 +1358,35 @@ private fun CatalogueSettingsSheet(
 
             // Card info toggles
             item {
-                Text("Card Info", color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.download_card_info), color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
             }
-            item { ToggleRow("Storage Info Bar", prefs.showStorageInfo) { onUpdate(prefs.copy(showStorageInfo = it)) } }
-            item { ToggleRow("Quality Badges", prefs.showQualityBadges) { onUpdate(prefs.copy(showQualityBadges = it)) } }
-            item { ToggleRow("Episode Count", prefs.showEpisodeCount) { onUpdate(prefs.copy(showEpisodeCount = it)) } }
-            item { ToggleRow("File Size", prefs.showFileSize) { onUpdate(prefs.copy(showFileSize = it)) } }
-            item { ToggleRow("Download Date", prefs.showDownloadDate) { onUpdate(prefs.copy(showDownloadDate = it)) } }
-            item { ToggleRow("Watch Progress", prefs.showWatchProgress) { onUpdate(prefs.copy(showWatchProgress = it)) } }
+            item { ToggleRow(stringResource(R.string.download_storage_info_bar), prefs.showStorageInfo) { onUpdate(prefs.copy(showStorageInfo = it)) } }
+            item { ToggleRow(stringResource(R.string.download_quality_badges), prefs.showQualityBadges) { onUpdate(prefs.copy(showQualityBadges = it)) } }
+            item { ToggleRow(stringResource(R.string.download_episode_count), prefs.showEpisodeCount) { onUpdate(prefs.copy(showEpisodeCount = it)) } }
+            item { ToggleRow(stringResource(R.string.download_file_size), prefs.showFileSize) { onUpdate(prefs.copy(showFileSize = it)) } }
+            item { ToggleRow(stringResource(R.string.download_download_date), prefs.showDownloadDate) { onUpdate(prefs.copy(showDownloadDate = it)) } }
+            item { ToggleRow(stringResource(R.string.download_watch_progress), prefs.showWatchProgress) { onUpdate(prefs.copy(showWatchProgress = it)) } }
 
             // Special sections
             item {
                 Spacer(Modifier.height(16.dp))
-                Text("Special Sections", color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.download_special_sections), color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
             }
-            item { ToggleRow("Continue Watching", prefs.showContinueWatchingSection) { onUpdate(prefs.copy(showContinueWatchingSection = it)) } }
-            item { ToggleRow("Recently Added", prefs.showRecentlyAddedSection) { onUpdate(prefs.copy(showRecentlyAddedSection = it)) } }
+            item { ToggleRow(stringResource(R.string.download_continue_watching), prefs.showContinueWatchingSection) { onUpdate(prefs.copy(showContinueWatchingSection = it)) } }
+            item { ToggleRow(stringResource(R.string.download_recently_added), prefs.showRecentlyAddedSection) { onUpdate(prefs.copy(showRecentlyAddedSection = it)) } }
 
             // Auto-cleanup
             item {
                 Spacer(Modifier.height(16.dp))
-                Text("Auto-Cleanup", color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.download_auto_cleanup), color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
             }
-            item { ToggleRow("Auto-Delete After Watched", prefs.autoDeleteWatched) { onUpdate(prefs.copy(autoDeleteWatched = it)) } }
+            item { ToggleRow(stringResource(R.string.download_auto_delete_watched), prefs.autoDeleteWatched) { onUpdate(prefs.copy(autoDeleteWatched = it)) } }
             if (prefs.autoDeleteWatched) {
                 item {
-                    Text("Delete after: ${prefs.autoDeleteAfterDays} days", color = Silver, fontSize = 12.sp)
+                    Text(stringResource(R.string.download_delete_after, prefs.autoDeleteAfterDays), color = Silver, fontSize = 12.sp)
                     Slider(
                         value = prefs.autoDeleteAfterDays.toFloat(),
                         onValueChange = { onUpdate(prefs.copy(autoDeleteAfterDays = it.toInt())) },
@@ -1398,7 +1399,7 @@ private fun CatalogueSettingsSheet(
             // Bulk actions
             item {
                 Spacer(Modifier.height(16.dp))
-                Text("Bulk Actions", color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.download_bulk_actions), color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
                 Row(
                     Modifier
@@ -1409,7 +1410,7 @@ private fun CatalogueSettingsSheet(
                 ) {
                     Icon(Icons.Default.Delete, null, tint = Ruby, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(12.dp))
-                    Text("Delete All Watched", color = Ruby)
+                    Text(stringResource(R.string.download_delete_all_watched), color = Ruby)
                 }
                 Spacer(Modifier.height(16.dp))
             }
@@ -1452,10 +1453,10 @@ private fun EmptyDownloadsState() {
                 modifier = Modifier.size(64.dp), tint = Smoke,
             )
             Spacer(Modifier.height(16.dp))
-            Text("No Downloads Yet", style = MaterialTheme.typography.titleMedium, color = Snow)
+            Text(stringResource(R.string.download_no_downloads), style = MaterialTheme.typography.titleMedium, color = Snow)
             Spacer(Modifier.height(8.dp))
             Text(
-                "Downloaded movies and shows will appear here",
+                stringResource(R.string.download_empty_desc),
                 style = MaterialTheme.typography.bodyMedium, color = Silver, textAlign = TextAlign.Center,
             )
         }

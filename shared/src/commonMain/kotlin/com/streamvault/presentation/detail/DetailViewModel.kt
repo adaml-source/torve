@@ -225,9 +225,13 @@ class DetailViewModel(
         }
     }
 
-    fun fetchStreams(season: Int? = null, episode: Int? = null) {
+    fun fetchStreams(season: Int? = null, episode: Int? = null, forceManualPick: Boolean = false) {
         val item = _state.value.mediaItem ?: return
-        val imdbId = item.imdbId ?: return
+        val imdbId = item.imdbId
+        if (imdbId == null) {
+            _state.update { it.copy(streamsError = "No IMDB ID — cannot fetch streams for this title") }
+            return
+        }
 
         scope.launch {
             _state.update {
@@ -271,24 +275,34 @@ class DetailViewModel(
                     return@launch
                 }
 
-                if (preferences.autoPlayEnabled) {
+                if (preferences.autoPlayEnabled && !forceManualPick) {
                     // Pre-filter streams by device codec caps to avoid codec errors.
                     // On capable devices this is a no-op (HEVC/VP9/AV1 all pass).
                     // On weak HEVC devices (emulators, low-end) this filters out
                     // unsupported HEVC streams BEFORE they reach the player.
                     val playable = streams.filter { s ->
                         deviceCodecCaps.canDecode(s.codec, title = s.title)
-                    }.ifEmpty { streams } // fallback to unfiltered if all rejected
-
-                    val best = playable.first()
-                    val info = buildAutoPlayMessage(best)
-                    _state.update {
-                        it.copy(
-                            autoPlayStream = best,
-                            autoPlayMessage = info,
-                        )
                     }
-                    autoResolveStream(playable, 0, preferences)
+
+                    if (playable.isEmpty()) {
+                        // No codec-compatible streams — show picker so user can choose
+                        _state.update {
+                            it.copy(
+                                showStreamPicker = true,
+                                streamsError = "No compatible streams found for this device — pick manually or try a different quality",
+                            )
+                        }
+                    } else {
+                        val best = playable.first()
+                        val info = buildAutoPlayMessage(best)
+                        _state.update {
+                            it.copy(
+                                autoPlayStream = best,
+                                autoPlayMessage = info,
+                            )
+                        }
+                        autoResolveStream(playable, 0, preferences)
+                    }
                 } else {
                     _state.update { it.copy(showStreamPicker = true) }
                 }

@@ -2,27 +2,35 @@ package com.streamvault.data.channels
 
 import com.streamvault.domain.model.EpgData
 import com.streamvault.db.StreamVaultDatabase
+import io.ktor.client.statement.HttpResponse
 import io.ktor.utils.io.ByteReadChannel
 
 internal actual object GzipSupport {
-    actual suspend fun parseXmlTvAutoStreamingToDbOrNull(
-        responseChannel: ByteReadChannel,
+    actual suspend fun downloadToTempFile(
+        response: HttpResponse,
+        maxCompressedBytes: Long,
+    ): EpgDownloadResult? = null
+
+    actual suspend fun parseXmlTvAutoFromFileToDbOrNull(
+        tempFilePath: String,
         parser: EpgParser,
         db: StreamVaultDatabase,
         playlistId: String,
         generationId: Long,
         windowStartMs: Long,
         windowEndMs: Long,
-        contentLength: Long?,
         contentEncoding: String?,
-        maxCompressedBytes: Long,
+        contentLength: Long?,
         maxUncompressedBytes: Long,
-        spoolToFileThresholdBytes: Long,
         channelFilter: Set<String>?,
         resolveEpgChannelKey: ((xmltvChannelId: String, xmltvDisplayName: String?) -> String?)?,
         batchSize: Int,
+        maxProgrammesPerChannel: Int,
+        maxProgrammesTotal: Int,
         onProgress: ((EpgBatchProgress) -> Unit)?,
     ): EpgStreamIngestResult? = null
+
+    actual fun deleteTempFile(tempFilePath: String) = Unit
 
     actual suspend fun parseXmlTvStreamingToDbOrNull(
         xmlChannel: ByteReadChannel,

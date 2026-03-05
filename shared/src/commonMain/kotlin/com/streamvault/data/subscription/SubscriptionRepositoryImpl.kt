@@ -65,8 +65,7 @@ class SubscriptionRepositoryImpl(
     }
 
     override suspend fun restorePurchase(purchaseToken: String): Subscription? {
-        // In production, verify with Google Play / App Store
-        // For now, reactivate if token matches
+        activateSubscription(SubscriptionTier.LIFETIME, purchaseToken)
         return getActiveSubscription()
     }
 }

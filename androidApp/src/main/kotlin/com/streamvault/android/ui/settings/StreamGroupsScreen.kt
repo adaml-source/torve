@@ -37,6 +37,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.streamvault.android.R
 import com.streamvault.android.ui.components.BackButton
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.AmberSubtle
@@ -71,19 +73,19 @@ fun StreamGroupsScreen(
             BackButton(onClick = onBack)
             Spacer(Modifier.width(12.dp))
             Text(
-                "Stream Groups",
+                stringResource(R.string.stream_groups_title),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 color = Snow,
                 modifier = Modifier.weight(1f),
             )
             IconButton(onClick = { viewModel.addStreamGroup() }) {
-                Icon(Icons.Default.Add, "Add", tint = Amber)
+                Icon(Icons.Default.Add, stringResource(R.string.common_add), tint = Amber)
             }
         }
 
         Text(
-            "Organize and prioritize stream sources. Streams matching a group pattern are sorted together by priority (lower = higher).",
+            stringResource(R.string.stream_groups_desc),
             style = MaterialTheme.typography.bodySmall,
             color = Silver,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
@@ -93,7 +95,7 @@ fun StreamGroupsScreen(
             Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
         ) {
             TextButton(onClick = { viewModel.resetStreamGroups() }) {
-                Text("Reset to Defaults", color = Amber)
+                Text(stringResource(R.string.ratings_reset_defaults), color = Amber)
             }
         }
 
@@ -133,7 +135,7 @@ private fun StreamGroupRow(
                     editName = it
                     onUpdate(group.copy(name = it))
                 },
-                placeholder = { Text("Group name", style = MaterialTheme.typography.bodySmall) },
+                placeholder = { Text(stringResource(R.string.stream_groups_name_hint), style = MaterialTheme.typography.bodySmall) },
                 modifier = Modifier.weight(1f),
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodySmall.copy(color = Snow),
@@ -173,7 +175,7 @@ private fun StreamGroupRow(
                 ),
             )
             IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Default.Delete, "Delete", tint = Ruby, modifier = Modifier.size(18.dp))
+                Icon(Icons.Default.Delete, stringResource(R.string.common_delete), tint = Ruby, modifier = Modifier.size(18.dp))
             }
         }
         Spacer(Modifier.height(4.dp))
@@ -183,7 +185,7 @@ private fun StreamGroupRow(
                 editPattern = it
                 onUpdate(group.copy(matchPattern = it))
             },
-            placeholder = { Text("Match regex", style = MaterialTheme.typography.bodySmall) },
+            placeholder = { Text(stringResource(R.string.stream_groups_regex_hint), style = MaterialTheme.typography.bodySmall) },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             textStyle = MaterialTheme.typography.bodySmall.copy(color = Snow),
