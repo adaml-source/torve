@@ -43,7 +43,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.streamvault.android.R
-import com.streamvault.android.billing.GooglePlayBillingManager
+import com.streamvault.android.billing.BillingManager
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Snow
 import com.streamvault.presentation.subscription.SubscriptionViewModel
@@ -54,7 +54,7 @@ import org.koin.compose.koinInject
 fun PaywallScreen(
     onBack: () -> Unit,
     viewModel: SubscriptionViewModel = koinInject(),
-    billingManager: GooglePlayBillingManager = koinInject(),
+    billingManager: BillingManager = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
     val purchaseResult by billingManager.purchaseResult.collectAsState()
@@ -62,11 +62,11 @@ fun PaywallScreen(
 
     LaunchedEffect(purchaseResult) {
         when (val result = purchaseResult) {
-            is GooglePlayBillingManager.PurchaseResult.Success -> {
+            is BillingManager.PurchaseResult.Success -> {
                 viewModel.purchase(result.purchaseToken)
                 billingManager.clearPurchaseResult()
             }
-            is GooglePlayBillingManager.PurchaseResult.AlreadyOwned -> {
+            is BillingManager.PurchaseResult.AlreadyOwned -> {
                 viewModel.purchase("restored_purchase")
                 billingManager.clearPurchaseResult()
             }

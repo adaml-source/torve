@@ -24,8 +24,16 @@ android {
         buildConfigField("String", "SYNC_WS_URL", "\"ws://10.0.2.2:8080/ws\"")
     }
 
-    flavorDimensions += "formFactor"
+    flavorDimensions += listOf("store", "formFactor")
     productFlavors {
+        create("google") {
+            dimension = "store"
+        }
+        create("amazon") {
+            dimension = "store"
+            // Different applicationId so it can coexist with Google Play version
+            applicationIdSuffix = ".amazon"
+        }
         create("mobile") {
             dimension = "formFactor"
         }
@@ -114,14 +122,6 @@ dependencies {
     // WorkManager — background tasks (notifications)
     implementation("androidx.work:work-runtime-ktx:2.10.0")
 
-    // Glance — App Widgets
-    implementation("androidx.glance:glance-appwidget:1.1.1")
-    implementation("androidx.glance:glance-material3:1.1.1")
-
-    // Google Cast (Chromecast)
-    implementation("com.google.android.gms:play-services-cast-framework:22.0.0")
-    implementation("androidx.mediarouter:mediarouter:1.7.0")
-
     // Android TV / Leanback
     implementation("androidx.leanback:leanback:1.0.0")
     implementation("androidx.tv:tv-foundation:1.0.0-alpha11")
@@ -130,13 +130,23 @@ dependencies {
     // YouTube Player (in-app trailer playback)
     implementation("com.pierfrancescosoffritti.androidyoutubeplayer:core:12.1.0")
 
-    // Firebase
-    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
-    implementation("com.google.firebase:firebase-crashlytics")
-    implementation("com.google.firebase:firebase-analytics")
+    // ── Google-only dependencies (excluded from Amazon builds) ──
 
-    // Google Play Billing
-    implementation("com.android.billingclient:billing-ktx:7.1.1")
+    // Google Cast (Chromecast) — no GMS on Fire TV
+    "googleImplementation"("com.google.android.gms:play-services-cast-framework:22.0.0")
+    "googleImplementation"("androidx.mediarouter:mediarouter:1.7.0")
+
+    // Glance — App Widgets — not supported on Fire TV
+    "googleImplementation"("androidx.glance:glance-appwidget:1.1.1")
+    "googleImplementation"("androidx.glance:glance-material3:1.1.1")
+
+    // Firebase — requires GMS
+    "googleImplementation"(platform("com.google.firebase:firebase-bom:33.7.0"))
+    "googleImplementation"("com.google.firebase:firebase-crashlytics")
+    "googleImplementation"("com.google.firebase:firebase-analytics")
+
+    // Google Play Billing — replaced by stub on Amazon
+    "googleImplementation"("com.android.billingclient:billing-ktx:7.1.1")
 
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)

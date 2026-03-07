@@ -38,17 +38,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.mediarouter.app.MediaRouteButton
-import com.google.android.gms.cast.framework.CastButtonFactory
-import com.google.android.gms.cast.framework.CastContext
 import com.streamvault.android.R
-import com.streamvault.android.player.CastManager
+import com.streamvault.android.cast.CastService
 import com.streamvault.android.player.ExternalPlayerLauncher
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Charcoal
 import com.streamvault.android.ui.theme.Snow
 import com.streamvault.android.ui.theme.Steel
 import com.streamvault.android.ui.theme.StreamVault
+import org.koin.compose.koinInject
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,18 +62,8 @@ fun StreamActionSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val installedPlayers = ExternalPlayerLauncher.getInstalledPlayers(context)
 
-    // Google Cast
-    val castManager = remember {
-        try { CastManager(context) } catch (_: Exception) { null }
-    }
-    val castAvailable = remember {
-        try {
-            CastContext.getSharedInstance(context)
-            true
-        } catch (_: Exception) {
-            false
-        }
-    }
+    // Google Cast (injected; no-op on Amazon)
+    val castService: CastService = koinInject()
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -107,36 +95,20 @@ fun StreamActionSheet(
             )
 
             // Cast to device
-            if (castAvailable && castManager != null) {
+            if (castService.isAvailable) {
                 ActionItem(
-                    icon = if (castManager.isCasting) Icons.Default.CastConnected else Icons.Default.Cast,
-                    label = if (castManager.isCasting) "Cast (Connected)" else "Cast to Device",
+                    icon = if (castService.isCasting) Icons.Default.CastConnected else Icons.Default.Cast,
+                    label = if (castService.isCasting) "Cast (Connected)" else "Cast to Device",
                     onClick = {
-                        if (castManager.isCasting) {
-                            castManager.requestCast(
-                                url = url,
-                                title = title,
-                                posterUrl = posterUrl.ifBlank { null },
-                            )
-                            onDismiss()
+                        castService.requestCast(
+                            url = url,
+                            title = title,
+                            posterUrl = posterUrl.ifBlank { null },
+                        )
+                        if (!castService.isCasting) {
+                            castService.showCastDialog()
                         } else {
-                            castManager.requestCast(
-                                url = url,
-                                title = title,
-                                posterUrl = posterUrl.ifBlank { null },
-                            )
-                            // Open the Cast dialog via MediaRouteButton programmatically
-                            try {
-                                val castContext = CastContext.getSharedInstance(context)
-                                val routeSelector = castContext.mergedSelector
-                                if (routeSelector != null) {
-                                    val mediaRouteButton = MediaRouteButton(context)
-                                    CastButtonFactory.setUpMediaRouteButton(context, mediaRouteButton)
-                                    mediaRouteButton.performClick()
-                                }
-                            } catch (_: Exception) {
-                                Toast.makeText(context, "Cast not available", Toast.LENGTH_SHORT).show()
-                            }
+                            onDismiss()
                         }
                     },
                 )

@@ -453,7 +453,7 @@ fun TvSettingsScreen(
         // Subscription — Google Play billing only
         item(key = "subscription") {
             val requester = remember("subscription") { FocusRequester() }
-            val billingManager: com.streamvault.android.billing.GooglePlayBillingManager = koinInject()
+            val billingManager: com.streamvault.android.billing.BillingManager = koinInject()
             val purchaseResult by billingManager.purchaseResult.collectAsState()
             val activity = LocalContext.current as? android.app.Activity
 
@@ -461,17 +461,17 @@ fun TvSettingsScreen(
 
             LaunchedEffect(purchaseResult) {
                 when (val result = purchaseResult) {
-                    is com.streamvault.android.billing.GooglePlayBillingManager.PurchaseResult.Success -> {
+                    is com.streamvault.android.billing.BillingManager.PurchaseResult.Success -> {
                         subscriptionViewModel.purchase(result.purchaseToken)
                         billingManager.clearPurchaseResult()
                         TvNotificationQueue.post("Torve Pro activated!", NotificationType.SUCCESS)
                     }
-                    is com.streamvault.android.billing.GooglePlayBillingManager.PurchaseResult.AlreadyOwned -> {
+                    is com.streamvault.android.billing.BillingManager.PurchaseResult.AlreadyOwned -> {
                         subscriptionViewModel.purchase("restored_purchase")
                         billingManager.clearPurchaseResult()
                         TvNotificationQueue.post("Purchase restored!", NotificationType.SUCCESS)
                     }
-                    is com.streamvault.android.billing.GooglePlayBillingManager.PurchaseResult.Error -> {
+                    is com.streamvault.android.billing.BillingManager.PurchaseResult.Error -> {
                         TvNotificationQueue.post(result.message, NotificationType.ERROR)
                         billingManager.clearPurchaseResult()
                     }

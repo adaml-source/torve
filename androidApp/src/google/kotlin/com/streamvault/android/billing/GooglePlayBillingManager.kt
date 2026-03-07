@@ -13,27 +13,13 @@ import com.android.billingclient.api.PurchasesUpdatedListener
 import com.android.billingclient.api.QueryProductDetailsParams
 import com.android.billingclient.api.QueryPurchasesParams
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-class GooglePlayBillingManager(context: Context) : PurchasesUpdatedListener {
+class GooglePlayBillingManager(context: Context) : BillingManager, PurchasesUpdatedListener {
 
     companion object {
         private const val PRODUCT_ID = "torve_pro_lifetime"
-    }
-
-    sealed class BillingState {
-        data object Disconnected : BillingState()
-        data object Connecting : BillingState()
-        data object Connected : BillingState()
-        data class Ready(val formattedPrice: String?) : BillingState()
-        data class Error(val message: String) : BillingState()
-    }
-
-    sealed class PurchaseResult {
-        data class Success(val purchaseToken: String) : PurchaseResult()
-        data object AlreadyOwned : PurchaseResult()
-        data object Cancelled : PurchaseResult()
-        data class Error(val message: String) : PurchaseResult()
     }
 
     private val billingClient = BillingClient.newBuilder(context)
@@ -41,30 +27,30 @@ class GooglePlayBillingManager(context: Context) : PurchasesUpdatedListener {
         .enablePendingPurchases()
         .build()
 
-    private val _billingState = MutableStateFlow<BillingState>(BillingState.Disconnected)
-    val billingState = _billingState.asStateFlow()
+    private val _billingState = MutableStateFlow<BillingManager.BillingState>(BillingManager.BillingState.Disconnected)
+    override val billingState: StateFlow<BillingManager.BillingState> = _billingState.asStateFlow()
 
-    private val _purchaseResult = MutableStateFlow<PurchaseResult?>(null)
-    val purchaseResult = _purchaseResult.asStateFlow()
+    private val _purchaseResult = MutableStateFlow<BillingManager.PurchaseResult?>(null)
+    override val purchaseResult: StateFlow<BillingManager.PurchaseResult?> = _purchaseResult.asStateFlow()
 
     private var productDetails: com.android.billingclient.api.ProductDetails? = null
 
-    fun initialize() {
-        _billingState.value = BillingState.Connecting
+    override fun initialize() {
+        _billingState.value = BillingManager.BillingState.Connecting
         billingClient.startConnection(object : BillingClientStateListener {
             override fun onBillingSetupFinished(result: BillingResult) {
                 if (result.responseCode == BillingClient.BillingResponseCode.OK) {
-                    _billingState.value = BillingState.Connected
+                    _billingState.value = BillingManager.BillingState.Connected
                     queryProductDetails()
                 } else {
-                    _billingState.value = BillingState.Error(
+                    _billingState.value = BillingManager.BillingState.Error(
                         result.debugMessage ?: "Billing setup failed"
                     )
                 }
             }
 
             override fun onBillingServiceDisconnected() {
-                _billingState.value = BillingState.Disconnected
+                _billingState.value = BillingManager.BillingState.Disconnected
             }
         })
     }
@@ -85,16 +71,16 @@ class GooglePlayBillingManager(context: Context) : PurchasesUpdatedListener {
             if (result.responseCode == BillingClient.BillingResponseCode.OK && detailsList.isNotEmpty()) {
                 productDetails = detailsList.first()
                 val price = detailsList.first().oneTimePurchaseOfferDetails?.formattedPrice
-                _billingState.value = BillingState.Ready(formattedPrice = price)
+                _billingState.value = BillingManager.BillingState.Ready(formattedPrice = price)
             } else {
-                _billingState.value = BillingState.Ready(formattedPrice = null)
+                _billingState.value = BillingManager.BillingState.Ready(formattedPrice = null)
             }
         }
     }
 
-    fun launchPurchase(activity: Activity) {
+    override fun launchPurchase(activity: Activity) {
         val details = productDetails ?: run {
-            _purchaseResult.value = PurchaseResult.Error("Product not available")
+            _purchaseResult.value = BillingManager.PurchaseResult.Error("Product not available")
             return
         }
 
@@ -110,13 +96,13 @@ class GooglePlayBillingManager(context: Context) : PurchasesUpdatedListener {
 
         val result = billingClient.launchBillingFlow(activity, flowParams)
         if (result.responseCode != BillingClient.BillingResponseCode.OK) {
-            _purchaseResult.value = PurchaseResult.Error(
+            _purchaseResult.value = BillingManager.PurchaseResult.Error(
                 result.debugMessage ?: "Failed to launch billing flow"
             )
         }
     }
 
-    fun queryExistingPurchases() {
+    override fun queryExistingPurchases() {
         val params = QueryPurchasesParams.newBuilder()
             .setProductType(BillingClient.ProductType.INAPP)
             .build()
@@ -131,18 +117,18 @@ class GooglePlayBillingManager(context: Context) : PurchasesUpdatedListener {
                     if (!lifetimePurchase.isAcknowledged) {
                         acknowledgePurchase(lifetimePurchase)
                     }
-                    _purchaseResult.value = PurchaseResult.AlreadyOwned
+                    _purchaseResult.value = BillingManager.PurchaseResult.AlreadyOwned
                 }
             }
         }
     }
 
-    fun getFormattedPrice(): String? {
+    override fun getFormattedPrice(): String? {
         val state = _billingState.value
-        return if (state is BillingState.Ready) state.formattedPrice else null
+        return if (state is BillingManager.BillingState.Ready) state.formattedPrice else null
     }
 
-    fun clearPurchaseResult() {
+    override fun clearPurchaseResult() {
         _purchaseResult.value = null
     }
 
@@ -154,18 +140,18 @@ class GooglePlayBillingManager(context: Context) : PurchasesUpdatedListener {
                         if (!purchase.isAcknowledged) {
                             acknowledgePurchase(purchase)
                         }
-                        _purchaseResult.value = PurchaseResult.Success(purchase.purchaseToken)
+                        _purchaseResult.value = BillingManager.PurchaseResult.Success(purchase.purchaseToken)
                     }
                 }
             }
             BillingClient.BillingResponseCode.USER_CANCELED -> {
-                _purchaseResult.value = PurchaseResult.Cancelled
+                _purchaseResult.value = BillingManager.PurchaseResult.Cancelled
             }
             BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED -> {
-                _purchaseResult.value = PurchaseResult.AlreadyOwned
+                _purchaseResult.value = BillingManager.PurchaseResult.AlreadyOwned
             }
             else -> {
-                _purchaseResult.value = PurchaseResult.Error(
+                _purchaseResult.value = BillingManager.PurchaseResult.Error(
                     result.debugMessage ?: "Purchase failed"
                 )
             }

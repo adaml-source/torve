@@ -99,11 +99,10 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.streamvault.android.player.AudioEqualizer
 import com.streamvault.android.device.DeviceFormFactor
-import com.streamvault.android.player.CastManager
+import com.streamvault.android.cast.CastService
 import com.streamvault.android.player.ExoPlayerEngine
 import com.streamvault.android.player.MPVPlayerEngine
 import com.streamvault.android.player.MPVView
-import com.streamvault.android.player.isCastFrameworkAvailable
 import com.streamvault.android.sync.SyncCoordinator
 import com.streamvault.android.tv.settings.rememberTvReduceMotionPreference
 import com.streamvault.android.voice.PlayerVoiceCommand
@@ -179,19 +178,9 @@ fun PlayerScreen(
     val context = LocalContext.current
     val isTv = remember(context) { DeviceFormFactor.isTv(context) }
 
-    // Google Cast (guarded for devices without Play Services, e.g. Fire TV)
-    val castAvailable = remember(context) { isCastFrameworkAvailable(context) }
-    val castManager = remember(castAvailable, context) {
-        if (!castAvailable) {
-            null
-        } else {
-            try {
-                CastManager(context)
-            } catch (_: Throwable) {
-                null
-            }
-        }
-    }
+    // Google Cast (injected; no-op on Amazon builds)
+    val castService: CastService = koinInject()
+    val castAvailable = castService.isAvailable
 
     // Immersive fullscreen + landscape + keep screen on
     DisposableEffect(Unit) {
@@ -1768,26 +1757,22 @@ fun PlayerScreen(
                     if (castAvailable) {
                         FocusableIconButton(
                             onClick = {
-                                try {
-                                    if (currentUrl.isNotBlank()) {
-                                        castManager?.requestCast(
-                                            url = currentUrl,
-                                            title = currentTitle,
-                                            posterUrl = posterUrl.ifBlank { null },
-                                        )
-                                    }
-                                    val routeBtn = androidx.mediarouter.app.MediaRouteButton(context)
-                                    com.google.android.gms.cast.framework.CastButtonFactory.setUpMediaRouteButton(context, routeBtn)
-                                    routeBtn.performClick()
-                                } catch (_: Throwable) { }
+                                if (currentUrl.isNotBlank()) {
+                                    castService.requestCast(
+                                        url = currentUrl,
+                                        title = currentTitle,
+                                        posterUrl = posterUrl.ifBlank { null },
+                                    )
+                                }
+                                castService.showCastDialog()
                             },
                             modifier = topMenuItemModifier(TopMenuFocusTarget.CAST),
                             onFocused = { lastTopMenuFocusTarget = TopMenuFocusTarget.CAST },
                         ) {
                             Icon(
-                                if (castManager?.isCasting == true) Icons.Default.CastConnected else Icons.Default.Cast,
+                                if (castService.isCasting) Icons.Default.CastConnected else Icons.Default.Cast,
                                 contentDescription = "Cast",
-                                tint = if (castManager?.isCasting == true) com.streamvault.android.ui.theme.Amber else Color.White,
+                                tint = if (castService.isCasting) com.streamvault.android.ui.theme.Amber else Color.White,
                                 modifier = Modifier.size(24.dp),
                             )
                         }
