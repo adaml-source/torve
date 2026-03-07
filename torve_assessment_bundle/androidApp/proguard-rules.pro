@@ -13,16 +13,16 @@
     kotlinx.serialization.KSerializer serializer(...);
 }
 
--keep,includedescriptorclasses class com.streamvault.**$$serializer { *; }
--keepclassmembers class com.streamvault.** {
+-keep,includedescriptorclasses class com.torve.**$$serializer { *; }
+-keepclassmembers class com.torve.** {
     *** Companion;
 }
--keepclasseswithmembers class com.streamvault.** {
+-keepclasseswithmembers class com.torve.** {
     kotlinx.serialization.KSerializer serializer(...);
 }
 
 # Keep all @Serializable data classes
--keep @kotlinx.serialization.Serializable class com.streamvault.** { *; }
+-keep @kotlinx.serialization.Serializable class com.torve.** { *; }
 
 # ── Ktor ──
 -keep class io.ktor.** { *; }
@@ -31,7 +31,7 @@
 -keep class io.ktor.client.engine.** { *; }
 
 # ── SQLDelight ──
--keep class com.streamvault.db.** { *; }
+-keep class com.torve.db.** { *; }
 -keep class app.cash.sqldelight.** { *; }
 
 # ── Koin ──
@@ -51,11 +51,11 @@
 -dontwarn coil3.**
 
 # ── Domain models (used via reflection in serialization) ──
--keep class com.streamvault.domain.model.** { *; }
--keep class com.streamvault.data.debrid.** { *; }
--keep class com.streamvault.data.trakt.** { *; }
--keep class com.streamvault.data.addon.StremioModels** { *; }
--keep class com.streamvault.data.metadata.TmdbModels** { *; }
+-keep class com.torve.domain.model.** { *; }
+-keep class com.torve.data.debrid.** { *; }
+-keep class com.torve.data.trakt.** { *; }
+-keep class com.torve.data.addon.StremioModels** { *; }
+-keep class com.torve.data.metadata.TmdbModels** { *; }
 
 # ── Coroutines ──
 -keepnames class kotlinx.coroutines.internal.MainDispatcherFactory {}

@@ -34,7 +34,7 @@ struct PaywallScreen: View {
             }
             .padding()
         }
-        .navigationTitle("StreamVault Pro")
+        .navigationTitle("Torve Pro")
     }
 
     // MARK: - Header
@@ -45,11 +45,11 @@ struct PaywallScreen: View {
                 .font(.system(size: 56))
                 .foregroundColor(SVColor.amber)
 
-            Text("StreamVault Pro")
+            Text("Torve Pro")
                 .font(.largeTitle)
                 .fontWeight(.bold)
 
-            Text("Unlock the full StreamVault experience")
+            Text("Unlock the full Torve experience")
                 .font(.subheadline)
                 .foregroundColor(SVColor.onSurfaceVariant)
                 .multilineTextAlignment(.center)

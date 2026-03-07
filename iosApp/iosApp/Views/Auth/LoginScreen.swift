@@ -29,7 +29,7 @@ struct LoginScreen: View {
 
                 Spacer().frame(height: 12)
 
-                Text("StreamVault")
+                Text("Torve")
                     .font(.largeTitle)
                     .fontWeight(.bold)
                     .foregroundColor(SVColor.amber)

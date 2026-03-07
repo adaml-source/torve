@@ -27,7 +27,7 @@ struct DevicesScreen: View {
             } header: {
                 Text("Registered Devices")
             } footer: {
-                Text("Devices that have signed in to your StreamVault account. Synced data is shared across all registered devices.")
+                Text("Devices that have signed in to your Torve account. Synced data is shared across all registered devices.")
             }
 
             Section {

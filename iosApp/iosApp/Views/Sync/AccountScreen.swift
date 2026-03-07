@@ -46,7 +46,7 @@ struct AccountScreen: View {
                         Text("Not signed in")
                             .fontWeight(.semibold)
                     }
-                    Text("StreamVault Account")
+                    Text("Torve Account")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }

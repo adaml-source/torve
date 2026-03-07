@@ -23,7 +23,7 @@ struct ProfileTabScreen: View {
                 quickAccessSection
 
                 // App version
-                Text("StreamVault v0.5.0")
+                Text("Torve v1.0.0")
                     .font(SVFont.caption)
                     .foregroundColor(SVColor.onSurfaceVariant.opacity(0.5))
                     .padding(.top, 8)
@@ -56,7 +56,7 @@ struct ProfileTabScreen: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(settingsWrapper.state.traktUser?.username ?? "StreamVault User")
+                Text(settingsWrapper.state.traktUser?.username ?? "Torve User")
                     .font(.title3)
                     .fontWeight(.bold)
                     .foregroundColor(SVColor.onSurface)

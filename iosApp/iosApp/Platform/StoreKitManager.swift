@@ -7,8 +7,8 @@ final class StoreKitManager: ObservableObject {
     @Published var purchasedProductIds: Set<String> = []
     @Published var isPurchasing = false
 
-    static let monthlyId = "com.streamvault.pro.monthly"
-    static let lifetimeId = "com.streamvault.pro.lifetime"
+    static let monthlyId = "com.torve.pro.monthly"
+    static let lifetimeId = "com.torve.pro.lifetime"
 
     init() {
         Task { await loadProducts() }

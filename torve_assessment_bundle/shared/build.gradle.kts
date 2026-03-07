@@ -62,7 +62,7 @@ kotlin {
 }
 
 android {
-    namespace = "com.streamvault.shared"
+    namespace = "com.torve.shared"
     compileSdk = 36
     defaultConfig {
         minSdk = 24
@@ -75,8 +75,8 @@ android {
 
 sqldelight {
     databases {
-        create("StreamVaultDatabase") {
-            packageName.set("com.streamvault.db")
+        create("TorveDatabase") {
+            packageName.set("com.torve.db")
         }
     }
 }

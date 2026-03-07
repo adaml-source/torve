@@ -7,7 +7,7 @@ plugins {
 }
 
 android {
-    namespace = "com.streamvault.android"
+    namespace = "com.torve.android"
     compileSdk = 36
 
     defaultConfig {

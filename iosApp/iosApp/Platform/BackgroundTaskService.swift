@@ -9,8 +9,8 @@ import Foundation
 /// Info.plist under BGTaskSchedulerPermittedIdentifiers.
 final class BackgroundTaskService {
 
-    static let traktSyncId = "com.streamvault.traktSync"
-    static let episodeCheckId = "com.streamvault.episodeCheck"
+    static let traktSyncId = "com.torve.traktSync"
+    static let episodeCheckId = "com.torve.episodeCheck"
 
     // MARK: - Registration
 

@@ -103,7 +103,7 @@ struct SetupWizardScreen: View {
                 .font(.system(size: 72))
                 .foregroundColor(SVColor.amber)
 
-            Text("Welcome to StreamVault")
+            Text("Welcome to Torve")
                 .font(.largeTitle)
                 .fontWeight(.bold)
                 .multilineTextAlignment(.center)
@@ -133,7 +133,7 @@ struct SetupWizardScreen: View {
 
             ScrollView {
                 Text("""
-                StreamVault is a media player. It does not host, store, or distribute any media content. \
+                Torve is a media player. It does not host, store, or distribute any media content. \
                 Users are responsible for ensuring they have legal access to any content they play.
 
                 By using this app, you agree to:

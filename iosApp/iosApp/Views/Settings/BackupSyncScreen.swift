@@ -111,7 +111,7 @@ struct BackupSyncScreen: View {
     private func exportBackup() {
         wrapper.viewModel.exportBackup { jsonStr in
             let tempURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent("streamvault_backup.json")
+                .appendingPathComponent("torve_backup.json")
             do {
                 try jsonStr.write(to: tempURL, atomically: true, encoding: .utf8)
                 DispatchQueue.main.async {

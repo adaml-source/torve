@@ -77,7 +77,7 @@ struct HomeScreen: View {
             }
             .padding(.vertical)
         }
-        .navigationTitle("StreamVault")
+        .navigationTitle("Torve")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 NavigationLink(value: Route.search) {

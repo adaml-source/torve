@@ -58,7 +58,7 @@ final class iOSSyncCoordinator: ObservableObject {
     private let lanHttpClient = iOSLanSyncHttpClient()
     private let webSocketManager = iOSWebSocketManager()
 
-    private let peerQueue = DispatchQueue(label: "com.streamvault.sync.peers")
+    private let peerQueue = DispatchQueue(label: "com.torve.sync.peers")
     private var endpointByDeviceId: [String: LanResolvedService] = [:]
     private var serviceNameByDeviceId: [String: String] = [:]
     private var serviceByName: [String: LanResolvedService] = [:]

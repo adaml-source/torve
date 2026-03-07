@@ -128,7 +128,7 @@ struct StreamingServicesScreen: View {
             } header: {
                 Text("Your Services")
             } footer: {
-                Text("Choose which services appear on your home screen. Content from these services will be available to browse and play through StreamVault.\n\nData provided by TMDB.")
+                Text("Choose which services appear on your home screen. Content from these services will be available to browse and play through Torve.\n\nData provided by TMDB.")
             }
         }
         .navigationTitle("Streaming Services")

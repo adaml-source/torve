@@ -15,13 +15,13 @@ struct PrivacyPolicyScreen: View {
                 Group {
                     sectionText(
                         title: "Overview",
-                        body: "StreamVault is committed to protecting your privacy. This policy explains what data we collect, how we use it, and your rights regarding your personal information."
+                        body: "Torve is committed to protecting your privacy. This policy explains what data we collect, how we use it, and your rights regarding your personal information."
                     )
 
                     sectionText(
                         title: "Data We Collect",
                         body: """
-                        StreamVault collects minimal data to provide its services:
+                        Torve collects minimal data to provide its services:
 
                         - Account credentials (encrypted and stored locally or in your device keychain)
                         - Viewing preferences and playback settings
@@ -43,12 +43,12 @@ struct PrivacyPolicyScreen: View {
 
                     sectionText(
                         title: "Third-Party Services",
-                        body: "StreamVault integrates with third-party services (Trakt, SIMKL, debrid providers, TMDB, OMDB) at your direction. Data shared with these services is governed by their respective privacy policies. StreamVault acts only as a client and does not proxy or store your interactions with these services."
+                        body: "Torve integrates with third-party services (Trakt, SIMKL, debrid providers, TMDB, OMDB) at your direction. Data shared with these services is governed by their respective privacy policies. Torve acts only as a client and does not proxy or store your interactions with these services."
                     )
 
                     sectionText(
                         title: "Local Storage",
-                        body: "All sensitive data (API keys, tokens, credentials) is stored in the iOS Keychain or Android Keystore. Non-sensitive preferences are stored in local app storage. No data is transmitted to StreamVault servers."
+                        body: "All sensitive data (API keys, tokens, credentials) is stored in the iOS Keychain or Android Keystore. Non-sensitive preferences are stored in local app storage. No data is transmitted to Torve servers."
                     )
 
                     sectionText(

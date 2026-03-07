@@ -4,7 +4,7 @@ import Security
 
 final class IOSKeychainSecretStore: IntegrationSecretStore, SecureStorage {
 
-    private let serviceName = "com.streamvault.secrets"
+    private let serviceName = "com.torve.secrets"
 
     // MARK: - IntegrationSecretStore
 

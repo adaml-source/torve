@@ -27,7 +27,7 @@ struct SplashScreen: View {
                 .opacity(logoOpacity)
 
                 // App name
-                Text("StreamVault")
+                Text("Torve")
                     .font(.system(size: 32, weight: .bold))
                     .foregroundColor(SVColor.onSurface)
                     .opacity(titleOpacity)

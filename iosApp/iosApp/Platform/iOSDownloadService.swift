@@ -4,7 +4,7 @@ final class IOSDownloadService: NSObject {
     static let shared = IOSDownloadService()
 
     private lazy var session: URLSession = {
-        let config = URLSessionConfiguration.background(withIdentifier: "com.streamvault.downloads")
+        let config = URLSessionConfiguration.background(withIdentifier: "com.torve.downloads")
         config.isDiscretionary = false
         config.sessionSendsLaunchEvents = true
         return URLSession(configuration: config, delegate: self, delegateQueue: nil)

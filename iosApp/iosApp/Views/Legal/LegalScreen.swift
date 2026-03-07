@@ -70,13 +70,13 @@ struct LegalScreen: View {
             }
 
             Section("Disclaimer") {
-                Text("StreamVault does not host, store, or distribute any media content. It acts solely as a client application that connects to user-configured third-party services. Users are responsible for ensuring compliance with applicable laws in their jurisdiction.")
+                Text("Torve does not host, store, or distribute any media content. It acts solely as a client application that connects to user-configured third-party services. Users are responsible for ensuring compliance with applicable laws in their jurisdiction.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
 
             Section("Copyright") {
-                Text("Copyright 2024-2026 StreamVault. All rights reserved.")
+                Text("Copyright 2024-2026 Torve. All rights reserved.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
