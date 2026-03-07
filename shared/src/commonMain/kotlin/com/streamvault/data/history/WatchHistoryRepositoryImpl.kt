@@ -2,9 +2,15 @@ package com.streamvault.data.history
 
 import com.streamvault.data.metadata.TmdbApiClient
 import com.streamvault.data.metadata.TmdbMappers
+import com.streamvault.data.simkl.SimklClient
+import com.streamvault.data.simkl.SimklIds
+import com.streamvault.data.simkl.SimklSyncBody
+import com.streamvault.data.simkl.SimklSyncItem
 import com.streamvault.data.trakt.api.TraktAuthorizedApi
 import com.streamvault.data.trakt.repo.TraktSyncRepository
 import com.streamvault.db.StreamVaultDatabase
+import com.streamvault.domain.integrations.IntegrationSecretKey
+import com.streamvault.domain.integrations.IntegrationSecretStore
 import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.model.WatchHistoryEntry
 import com.streamvault.domain.repository.WatchHistoryRepository
@@ -15,6 +21,8 @@ class WatchHistoryRepositoryImpl(
     private val traktApi: TraktAuthorizedApi,
     private val tmdbClient: TmdbApiClient,
     private val traktSyncRepo: TraktSyncRepository,
+    private val simklClient: SimklClient,
+    private val integrationSecretStore: IntegrationSecretStore,
 ) : WatchHistoryRepository {
     private val queries get() = database.streamVaultQueries
 
@@ -45,12 +53,25 @@ class WatchHistoryRepositoryImpl(
             show_title = entry.showTitle,
         )
         val tmdbId = entry.mediaId.toIntOrNull() ?: return
+        val isMovie = entry.mediaType.equals("movie", ignoreCase = true)
         runCatching {
             traktSyncRepo.enqueueHistoryAdd(
                 tmdbId = tmdbId,
-                mediaType = if (entry.mediaType.equals("movie", ignoreCase = true)) MediaType.MOVIE else MediaType.SERIES,
+                mediaType = if (isMovie) MediaType.MOVIE else MediaType.SERIES,
                 imdbId = null,
             )
+        }
+        runCatching {
+            val token = integrationSecretStore.get(IntegrationSecretKey.SIMKL_ACCESS_TOKEN)
+            if (!token.isNullOrBlank()) {
+                val ids = SimklIds(tmdb = tmdbId)
+                val body = if (isMovie) {
+                    SimklSyncBody(movies = listOf(SimklSyncItem(ids)))
+                } else {
+                    SimklSyncBody(shows = listOf(SimklSyncItem(ids)))
+                }
+                simklClient.addToHistory(token, body)
+            }
         }
     }
 

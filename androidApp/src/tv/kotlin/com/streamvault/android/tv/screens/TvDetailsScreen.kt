@@ -64,6 +64,8 @@ import coil3.compose.AsyncImage
 import com.streamvault.android.R
 import com.streamvault.android.ui.theme.*
 import com.streamvault.android.player.DeviceCodecProbe
+import com.streamvault.android.tv.NotificationType
+import com.streamvault.android.tv.TvNotificationQueue
 import com.streamvault.android.tv.components.TvEpisodePicker
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CloudDone
@@ -78,7 +80,9 @@ import com.streamvault.domain.model.MediaType
 import com.streamvault.presentation.detail.DetailViewModel
 import com.streamvault.presentation.download.DownloadViewModel
 import com.streamvault.presentation.settings.SettingsViewModel
+import com.streamvault.presentation.subscription.SubscriptionViewModel
 import com.streamvault.presentation.watchlist.WatchlistViewModel
+import com.streamvault.domain.model.PremiumFeature
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
@@ -113,6 +117,7 @@ fun TvDetailsScreen(
     val watchlistViewModel: WatchlistViewModel = koinInject()
     val downloadViewModel: DownloadViewModel = koinInject()
     val bulkDownloadManager: BulkDownloadManager = koinInject()
+    val subscriptionViewModel: SubscriptionViewModel = koinInject()
     val coroutineScope = rememberCoroutineScope()
     val watchlistState by watchlistViewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
@@ -131,7 +136,7 @@ fun TvDetailsScreen(
     var didAutoPlay by rememberSaveable(type, id) { mutableStateOf(false) }
     var pendingDownloadAction by remember { mutableStateOf<DownloadAction>(DownloadAction.None) }
     var showWatchlistPicker by remember { mutableStateOf(false) }
-    var downloadToastMessage by remember { mutableStateOf<String?>(null) }
+    // downloadToastMessage replaced by TvNotificationQueue
 
     BackHandler(onBack = onBack)
 
@@ -155,6 +160,13 @@ fun TvDetailsScreen(
     LaunchedEffect(state.mediaItem?.id) {
         if (state.mediaItem != null) {
             runCatching { playFocusRequester.requestFocus() }
+        }
+    }
+
+    // Surface stream errors as visible notifications
+    LaunchedEffect(state.streamsError) {
+        state.streamsError?.let { error ->
+            TvNotificationQueue.post(error, NotificationType.ERROR)
         }
     }
 
@@ -245,19 +257,13 @@ fun TvDetailsScreen(
             episodeNumber = state.streamContextEpisode,
         )
         downloadViewModel.enqueueDownload(download)
-        downloadToastMessage = context.getString(R.string.tv_download_queued)
+        TvNotificationQueue.post(context.getString(R.string.tv_download_queued), NotificationType.SUCCESS)
 
         pendingDownloadAction = DownloadAction.None
         detailViewModel.clearResolvedStream()
     }
 
-    // Auto-dismiss download toast
-    LaunchedEffect(downloadToastMessage) {
-        if (downloadToastMessage != null) {
-            kotlinx.coroutines.delay(2000)
-            downloadToastMessage = null
-        }
-    }
+    // Download toast now handled by TvNotificationQueue (auto-dismiss in TvRoot)
 
     val mediaItem = state.mediaItem
     val isInWatchlist = mediaItem?.let { watchlistViewModel.isInWatchlist(it.id) } == true
@@ -367,6 +373,7 @@ fun TvDetailsScreen(
                                 enabled = !isBusy,
                                 onFocused = { onContentFocused(playFocusRequester) },
                                 onClick = {
+                                    if (!subscriptionViewModel.checkAccess(PremiumFeature.STREAM_PLAYBACK)) return@TvActionButton
                                     if (!settingsState.debridConnected) {
                                         onSettingsClick()
                                     } else if (item.type == MediaType.SERIES) {
@@ -462,6 +469,7 @@ fun TvDetailsScreen(
                                     enabled = !isBusy,
                                     onFocused = { onContentFocused(downloadMovieFocusRequester) },
                                     onClick = {
+                                        if (!subscriptionViewModel.checkAccess(PremiumFeature.DOWNLOAD)) return@TvActionButton
                                         pendingDownloadAction = DownloadAction.Movie
                                         detailViewModel.fetchStreams(forceManualPick = true)
                                     },
@@ -474,6 +482,7 @@ fun TvDetailsScreen(
                                     enabled = !isBusy,
                                     onFocused = { onContentFocused(downloadAllFocusRequester) },
                                     onClick = {
+                                        if (!subscriptionViewModel.checkAccess(PremiumFeature.DOWNLOAD)) return@TvActionButton
                                         val media = state.mediaItem ?: return@TvActionButton
                                         coroutineScope.launch {
                                             val episodes = bulkDownloadManager.buildAllSeasonsTargets(media)
@@ -488,7 +497,7 @@ fun TvDetailsScreen(
                                             )
                                             ids.forEach { DownloadWorker.enqueue(context, it) }
                                             downloadViewModel.loadDownloads()
-                                            downloadToastMessage = "Queued ${ids.size} episodes for download"
+                                            TvNotificationQueue.post("Queued ${ids.size} episodes for download", NotificationType.SUCCESS)
                                         }
                                     },
                                 )
@@ -785,7 +794,7 @@ fun TvDetailsScreen(
                                 )
                                 ids.forEach { DownloadWorker.enqueue(context, it) }
                                 downloadViewModel.loadDownloads()
-                                downloadToastMessage = "Queued ${ids.size} episodes for download"
+                                TvNotificationQueue.post("Queued ${ids.size} episodes for download", NotificationType.SUCCESS)
                             }
                         },
                         onFirstContentRequester = onFirstContentRequester,
@@ -1127,25 +1136,7 @@ fun TvDetailsScreen(
         }
     }
 
-    // Download queued toast
-    downloadToastMessage?.let { msg ->
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 32.dp)
-                .align(Alignment.BottomCenter),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = msg,
-                style = MaterialTheme.typography.titleMedium,
-                color = Snow,
-                modifier = Modifier
-                    .background(Charcoal.copy(alpha = 0.9f), RoundedCornerShape(12.dp))
-                    .padding(horizontal = 24.dp, vertical = 12.dp),
-            )
-        }
-    }
+    // Download toast now rendered by TvNotificationQueue in TvRoot
 
     } // end Box
 }

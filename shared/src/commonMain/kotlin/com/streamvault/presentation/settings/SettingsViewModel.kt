@@ -140,6 +140,11 @@ class SettingsViewModel(
         loadSavedSettings()
     }
 
+    /** Re-read all settings from disk/secure store. Call after sync import. */
+    fun refreshSettings() {
+        loadSavedSettings()
+    }
+
     private fun loadSavedSettings() {
         scope.launch {
             val provider = prefsRepo.getString(KEY_DEBRID_PROVIDER)?.let {
@@ -314,9 +319,16 @@ class SettingsViewModel(
                 )
             }
 
-            // Verify stored credentials
+            // Migrate legacy keys to IntegrationSecretStore
             if (legacyJellyfinApiKey.isNotBlank()) {
+                integrationSecretStore.put(IntegrationSecretKey.JELLYFIN_API_KEY, legacyJellyfinApiKey)
                 prefsRepo.remove("jellyfin_api_key")
+            }
+            // OMDB: migrate from prefs to secure store if not yet there
+            val legacyOmdbApiKey = prefsRepo.getString(KEY_OMDB_API_KEY) ?: ""
+            if (legacyOmdbApiKey.isNotBlank() && integrationSecretStore.get(IntegrationSecretKey.OMDB_API_KEY) == null) {
+                integrationSecretStore.put(IntegrationSecretKey.OMDB_API_KEY, legacyOmdbApiKey)
+                prefsRepo.remove(KEY_OMDB_API_KEY)
             }
             // legacy debrid key migration handled above
             if (legacyTraktAccessToken.isNotBlank() && traktTokens == null) {

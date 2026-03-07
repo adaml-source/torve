@@ -2,13 +2,13 @@ import SwiftUI
 import shared
 
 struct FilterSheetView: View {
-    let activeFilter: IptvFilterType
-    let activeSort: IptvSortType
-    let onFilterSelected: (IptvFilterType) -> Void
-    let onSortSelected: (IptvSortType) -> Void
+    let activeFilter: ChannelsFilterType
+    let activeSort: ChannelsSortType
+    let onFilterSelected: (ChannelsFilterType) -> Void
+    let onSortSelected: (ChannelsSortType) -> Void
     let onDismiss: () -> Void
 
-    private let filters: [(IptvFilterType, String)] = [
+    private let filters: [(ChannelsFilterType, String)] = [
         (.all, "All"),
         (.hd, "HD"),
         (.fhd, "FHD"),
@@ -16,7 +16,7 @@ struct FilterSheetView: View {
         (.favorites, "Favorites"),
     ]
 
-    private let sorts: [(IptvSortType, String)] = [
+    private let sorts: [(ChannelsSortType, String)] = [
         (.default_, "Default"),
         (.nameAz, "Name A-Z"),
         (.nameZa, "Name Z-A"),

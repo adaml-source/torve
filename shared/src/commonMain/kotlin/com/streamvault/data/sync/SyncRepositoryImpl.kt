@@ -9,6 +9,8 @@ import com.streamvault.domain.model.HomeSectionConfig
 import com.streamvault.domain.model.RatingDisplayPrefs
 import com.streamvault.domain.model.RatingSource
 import com.streamvault.domain.model.defaultTorveWeights
+import com.streamvault.domain.integrations.IntegrationSecretKey
+import com.streamvault.domain.integrations.IntegrationSecretStore
 import com.streamvault.domain.sync.*
 import com.streamvault.presentation.settings.SettingsViewModel
 import kotlinx.datetime.Clock
@@ -17,16 +19,13 @@ import kotlinx.serialization.json.Json
 
 internal val SENSITIVE_PREFERENCE_KEYS = setOf(
     "debrid_api_key",
-    "debrid_provider",
     "debrid_rd_refresh_token",
     "debrid_rd_client_id",
     "debrid_rd_client_secret",
     "debrid_rd_expires_at",
-    "trakt_client_id",
     "trakt_client_secret",
     "trakt_access_token",
     "trakt_refresh_token",
-    "simkl_client_id",
     "simkl_access_token",
     "kodi_hosts_json",
 )
@@ -41,23 +40,23 @@ internal fun isSensitivePreferenceKey(key: String): Boolean {
 class SyncRepositoryImpl(
     private val database: StreamVaultDatabase,
     private val json: Json,
+    private val subscriptionRepo: com.streamvault.domain.repository.SubscriptionRepository? = null,
+    private val secretStore: IntegrationSecretStore? = null,
 ) : SyncRepository {
     private val tolerantJson = Json { ignoreUnknownKeys = true }
 
     companion object {
-        /** Keys that contain credentials/tokens — never exported. */
+        /** Keys that contain credentials/tokens — never exported as preferences.
+         *  Credentials are synced separately via [integrationSecrets]. */
         private val SENSITIVE_KEYS = setOf(
             "debrid_api_key",
-            "debrid_provider",          // tied to api_key, re-entered on new device
             "debrid_rd_refresh_token",
             "debrid_rd_client_id",
             "debrid_rd_client_secret",
             "debrid_rd_expires_at",
-            "trakt_client_id",
             "trakt_client_secret",
             "trakt_access_token",
             "trakt_refresh_token",
-            "simkl_client_id",
             "simkl_access_token",
             "kodi_hosts_json",
         )
@@ -66,6 +65,32 @@ class SyncRepositoryImpl(
         private fun isSensitive(key: String): Boolean {
             return isSensitivePreferenceKey(key)
         }
+
+        /** Integration secrets that are safe to sync between paired devices on the same LAN. */
+        val SYNCABLE_SECRET_KEYS = listOf(
+            IntegrationSecretKey.TRAKT_TOKENS,
+            IntegrationSecretKey.TRAKT_ACCESS_TOKEN,
+            IntegrationSecretKey.TRAKT_REFRESH_TOKEN,
+            IntegrationSecretKey.TRAKT_CLIENT_SECRET,
+            IntegrationSecretKey.SIMKL_ACCESS_TOKEN,
+            IntegrationSecretKey.OMDB_API_KEY,
+            IntegrationSecretKey.MDBLIST_API_KEY,
+            IntegrationSecretKey.JELLYFIN_API_KEY,
+            IntegrationSecretKey.PLEX_ACCESS_TOKEN,
+            IntegrationSecretKey.DEBRID_API_KEY,
+            IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID,
+            IntegrationSecretKey.DEBRID_API_KEY_ALL_DEBRID,
+            IntegrationSecretKey.DEBRID_API_KEY_PREMIUMIZE,
+            IntegrationSecretKey.DEBRID_API_KEY_TORBOX,
+            IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN,
+            IntegrationSecretKey.DEBRID_RD_CLIENT_ID,
+            IntegrationSecretKey.DEBRID_RD_CLIENT_SECRET,
+            IntegrationSecretKey.CLAUDE_API_KEY,
+            IntegrationSecretKey.CHATGPT_API_KEY,
+            IntegrationSecretKey.GEMINI_API_KEY,
+            IntegrationSecretKey.PERPLEXITY_API_KEY,
+            IntegrationSecretKey.DEEPSEEK_API_KEY,
+        )
     }
 
     // ── Export ────────────────────────────────────────────────
@@ -107,6 +132,10 @@ class SyncRepositoryImpl(
                 name = row.name,
                 url = row.url,
                 epgUrl = row.epg_url,
+                type = row.type ?: "m3u",
+                server = row.server,
+                username = row.username,
+                password = row.password,
             )
         }
 
@@ -119,6 +148,17 @@ class SyncRepositoryImpl(
             )
         }
 
+        val subToken = subscriptionRepo?.getActiveSubscription()?.purchaseToken
+
+        val secrets = if (secretStore != null) {
+            SYNCABLE_SECRET_KEYS.mapNotNull { key ->
+                val value = secretStore.get(key) ?: return@mapNotNull null
+                SyncIntegrationSecret(key = key.name, value = value)
+            }
+        } else {
+            emptyList()
+        }
+
         return SyncPayload(
             exportedAt = Clock.System.now().toEpochMilliseconds(),
             addons = addons,
@@ -126,6 +166,8 @@ class SyncRepositoryImpl(
             watchProgress = progress,
             channelPlaylists = playlists,
             channelFavorites = favorites,
+            subscriptionToken = subToken,
+            integrationSecrets = secrets,
         )
     }
 
@@ -184,35 +226,93 @@ class SyncRepositoryImpl(
             prefsImported++
         }
 
-        // Watch progress: max(position) to never lose viewing progress
+        // Watch progress: prefer recency, but never let stale progress roll back playback.
         for (wp in payload.watchProgress) {
             val local = queries.getProgress(wp.mediaId).executeAsOneOrNull()
-            if (local != null && local.position_ms > wp.positionMs) {
-                // Local is ahead — keep local
-                conflicts++
-                continue
+            val resolved = if (local == null) {
+                wp
+            } else {
+                val localUpdatedAt = local.updated_at
+                val remoteUpdatedAt = wp.updatedAt
+                val localRatio = if (local.duration_ms > 0) {
+                    local.position_ms.toDouble() / local.duration_ms.toDouble()
+                } else {
+                    0.0
+                }
+                val remoteRatio = if (wp.durationMs > 0) {
+                    wp.positionMs.toDouble() / wp.durationMs.toDouble()
+                } else {
+                    0.0
+                }
+
+                val newerRemote = remoteUpdatedAt > localUpdatedAt + 20_000
+                val newerLocal = localUpdatedAt > remoteUpdatedAt + 20_000
+                val remoteAhead = remoteRatio > localRatio + 0.03 || wp.positionMs > local.position_ms + 20_000
+                val localAhead = localRatio > remoteRatio + 0.03 || local.position_ms > wp.positionMs + 20_000
+
+                when {
+                    newerLocal && !remoteAhead -> {
+                        conflicts++
+                        null
+                    }
+                    newerRemote || remoteAhead -> {
+                        wp.copy(
+                            durationMs = wp.durationMs.coerceAtLeast(local.duration_ms),
+                            updatedAt = maxOf(remoteUpdatedAt, localUpdatedAt),
+                        )
+                    }
+                    localAhead -> {
+                        conflicts++
+                        null
+                    }
+                    else -> {
+                        wp.copy(
+                            mediaType = wp.mediaType.ifBlank { local.media_type },
+                            title = wp.title.ifBlank { local.title },
+                            posterUrl = wp.posterUrl ?: local.poster_url,
+                            backdropUrl = wp.backdropUrl ?: local.backdrop_url,
+                            positionMs = maxOf(wp.positionMs, local.position_ms),
+                            durationMs = maxOf(wp.durationMs, local.duration_ms),
+                            seasonNumber = wp.seasonNumber ?: local.season_number?.toInt(),
+                            episodeNumber = wp.episodeNumber ?: local.episode_number?.toInt(),
+                            showTitle = wp.showTitle ?: local.show_title,
+                            updatedAt = maxOf(remoteUpdatedAt, localUpdatedAt),
+                        )
+                    }
+                }
             }
+
+            if (resolved == null) continue
             queries.upsertProgress(
-                media_id = wp.mediaId,
-                media_type = wp.mediaType,
-                title = wp.title,
-                poster_url = wp.posterUrl,
-                backdrop_url = wp.backdropUrl,
-                position_ms = wp.positionMs,
-                duration_ms = wp.durationMs,
-                season_number = wp.seasonNumber?.toLong(),
-                episode_number = wp.episodeNumber?.toLong(),
-                show_title = wp.showTitle,
-                updated_at = wp.updatedAt,
+                media_id = resolved.mediaId,
+                media_type = resolved.mediaType,
+                title = resolved.title,
+                poster_url = resolved.posterUrl,
+                backdrop_url = resolved.backdropUrl,
+                position_ms = resolved.positionMs,
+                duration_ms = resolved.durationMs,
+                season_number = resolved.seasonNumber?.toLong(),
+                episode_number = resolved.episodeNumber?.toLong(),
+                show_title = resolved.showTitle,
+                updated_at = resolved.updatedAt,
             )
             progressImported++
         }
-
-        // Channel playlists: insert if URL not already present
+        // Channel playlists: insert if URL not already present (match by URL for m3u, by server+username for xtream)
         val existingPlaylists = queries.getAllPlaylists().executeAsList()
         val existingUrls = existingPlaylists.map { it.url }.toSet()
+        val existingXtream = existingPlaylists
+            .filter { (it.type ?: "m3u") == "xtream" }
+            .map { "${it.server}|${it.username}" }
+            .toSet()
         for (pl in payload.channelPlaylists) {
-            if (pl.url in existingUrls) {
+            val isXtream = pl.type == "xtream"
+            val isDuplicate = if (isXtream && pl.server != null) {
+                "${pl.server}|${pl.username}" in existingXtream
+            } else {
+                pl.url in existingUrls
+            }
+            if (isDuplicate) {
                 conflicts++
                 continue
             }
@@ -223,10 +323,10 @@ class SyncRepositoryImpl(
                 epg_url = pl.epgUrl,
                 channel_count = 0,
                 last_updated = null,
-                type = "m3u",
-                server = null,
-                username = null,
-                password = null,
+                type = pl.type,
+                server = pl.server,
+                username = pl.username,
+                password = pl.password,
             )
             playlistsImported++
         }
@@ -244,12 +344,34 @@ class SyncRepositoryImpl(
             favoritesImported++
         }
 
+        // Integration secrets: write to secure store + mirror keys that services read from prefs
+        var secretsImported = 0
+        if (secretStore != null) {
+            for (secret in payload.integrationSecrets) {
+                val key = runCatching { IntegrationSecretKey.valueOf(secret.key) }.getOrNull()
+                    ?: continue
+                if (key !in SYNCABLE_SECRET_KEYS) continue
+                secretStore.put(key, secret.value)
+                secretsImported++
+                // OmdbClient reads from preferences table — mirror the key there
+                if (key == IntegrationSecretKey.OMDB_API_KEY) {
+                    queries.setPreference("omdb_api_key", secret.value)
+                }
+            }
+        }
+
+        // Import subscription token if present
+        payload.subscriptionToken?.let { token ->
+            subscriptionRepo?.restorePurchase(token)
+        }
+
         return SyncResult(
             addonsImported = addonsImported,
             preferencesImported = prefsImported,
             progressImported = progressImported,
             playlistsImported = playlistsImported,
             favoritesImported = favoritesImported,
+            secretsImported = secretsImported,
             conflicts = conflicts,
         )
     }

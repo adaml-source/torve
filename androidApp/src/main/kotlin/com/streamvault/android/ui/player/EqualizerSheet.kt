@@ -64,8 +64,7 @@ fun EqualizerSheet(
     var refreshKey by remember { mutableIntStateOf(0) }
 
     val freqLabels = remember(equalizer) {
-        equalizer.bandFrequencies.map { freqMHz ->
-            val hz = freqMHz / 1000
+        equalizer.bandFrequencies.map { hz ->
             if (hz >= 1000) "${hz / 1000}k" else "$hz"
         }
     }

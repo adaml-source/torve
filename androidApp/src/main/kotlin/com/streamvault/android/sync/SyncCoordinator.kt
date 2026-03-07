@@ -17,6 +17,7 @@ import com.streamvault.android.sync.model.SyncInboundEvent
 import com.streamvault.android.sync.model.SyncPairingCodeResponse
 import com.streamvault.android.sync.model.SyncPlaybackIntentPayload
 import com.streamvault.android.sync.model.SyncSearchPushPayload
+import com.streamvault.android.sync.model.SyncSettingsPushPayload
 import com.streamvault.android.sync.storage.EncryptedTokenStore
 import com.streamvault.android.sync.storage.InstallationIdStore
 import kotlinx.coroutines.CoroutineScope
@@ -325,6 +326,50 @@ class SyncCoordinator(
         }
     }
 
+    suspend fun sendSettingsPush(
+        targetDeviceId: String,
+        categories: List<String>,
+        payloadJson: String,
+    ): Result<String> {
+        if (categories.isEmpty()) return Result.failure(IllegalArgumentException("No categories selected"))
+        if (!_state.value.isAuthenticated) return Result.failure(IllegalStateException("Create a local profile first."))
+        val target = _state.value.devices.firstOrNull { it.id == targetDeviceId && it.revokedAt == null }
+            ?: return Result.failure(IllegalStateException("Target device is not paired."))
+        val eventId = UUID.randomUUID().toString()
+        appendRecentEvent("settings_push:$eventId:${target.deviceName}:${categories.joinToString(",")}")
+        if (target.id == _state.value.deviceId) {
+            _inboundEvents.tryEmit(
+                SyncInboundEvent.SettingsPush(
+                    categories = categories,
+                    payloadJson = payloadJson,
+                    issuedByDeviceId = _state.value.deviceId,
+                ),
+            )
+            return Result.success(eventId)
+        }
+        val endpoint = synchronized(peerLock) { endpointByDeviceId[target.id] }
+            ?: return Result.failure(IllegalStateException("Target TV is not reachable on local Wi-Fi."))
+        val event = LanEventEnvelope(
+            eventId = eventId,
+            eventType = EVENT_SETTINGS_PUSH,
+            sourceDeviceId = _state.value.deviceId.orEmpty(),
+            targetDeviceId = target.id,
+            payload = json.encodeToJsonElement(
+                SyncSettingsPushPayload(
+                    categories = categories,
+                    payloadJson = payloadJson,
+                    issuedByDeviceId = _state.value.deviceId,
+                ),
+            ),
+        )
+        val result = lanHttpClient.sendEvent(endpoint, event).getOrElse { return Result.failure(it) }
+        return if (result.status == "ok") {
+            Result.success(eventId)
+        } else {
+            Result.failure(IllegalStateException(result.message ?: "Failed to push settings."))
+        }
+    }
+
     suspend fun reportWatchState(
         contentId: String,
         provider: String,
@@ -393,6 +438,10 @@ class SyncCoordinator(
             )
             appendRecentEvent("pair_claimed:${pairedDevice.deviceName}")
         }
+    }
+
+    fun clearError() {
+        _state.value = _state.value.copy(error = null)
     }
 
     fun startTvPairingFlow() {
@@ -582,6 +631,18 @@ class SyncCoordinator(
                     appendRecentEvent("playback_received:${event.eventId}:${payload.contentId}")
                 }
 
+                EVENT_SETTINGS_PUSH -> {
+                    val payload = json.decodeFromJsonElement<SyncSettingsPushPayload>(event.payload)
+                    _inboundEvents.tryEmit(
+                        SyncInboundEvent.SettingsPush(
+                            categories = payload.categories,
+                            payloadJson = payload.payloadJson,
+                            issuedByDeviceId = payload.issuedByDeviceId ?: event.sourceDeviceId,
+                        ),
+                    )
+                    appendRecentEvent("settings_received:${event.eventId}:${payload.categories.joinToString(",")}")
+                }
+
                 else -> {
                     return LanStatusResponse(
                         status = "bad_request",
@@ -767,6 +828,7 @@ class SyncCoordinator(
         const val TAG = "SyncCoordinator"
         const val EVENT_SEARCH_PUSH = "SEARCH_PUSH"
         const val EVENT_PLAYBACK_INTENT = "PLAYBACK_INTENT"
+        const val EVENT_SETTINGS_PUSH = "SETTINGS_PUSH"
 
         const val PREFS_NAME = "torve_sync_local_state"
         const val KEY_PROFILE_NAME = "local_profile_name"

@@ -5,13 +5,13 @@ import shared
 struct StreamVaultApp: App {
 
     init() {
-        // Initialize Koin DI
-        KoinHelperKt.doInitKoin()
+        KoinHelperKt.doInitKoin(platformModules: [IOSAppModule.create()])
     }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .preferredColorScheme(.dark)
         }
     }
 }

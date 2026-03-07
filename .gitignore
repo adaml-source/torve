@@ -1,5 +1,7 @@
 *.iml
 .gradle
+.gradle-user-home/
+.gradle-user/
 /local.properties
 /.idea
 .DS_Store
@@ -12,3 +14,24 @@ local.properties
 /shared/build
 *.apk
 *.aab
+
+# Claude Code local settings
+.claude/
+
+# Build / temp artifacts
+.android/
+androidApp/.android/
+.kotlin/
+.tmp_*
+apk_check/
+store_bundles/
+torve_assessment_bundle/
+analytics.settings
+
+# Sensitive
+androidApp/google-services.json
+
+# Asset exports
+extracted_banner.png
+extracted_icon.png
+tv_banner_source.png

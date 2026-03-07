@@ -170,8 +170,8 @@ fun ProfileTabScreen(
                 )
                 ProfileNavItem(
                     icon = Icons.Filled.LiveTv,
-                    label = "Live Channels",
-                    subtitle = "Live channels & playlists",
+                    label = "Channels",
+                    subtitle = "Channels & playlists",
                     onClick = onChannelsClick,
                 )
                 ProfileNavItem(

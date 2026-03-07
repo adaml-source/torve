@@ -71,7 +71,7 @@ fun PrivacyPolicyScreen(onBack: () -> Unit) {
                     "\u2022 AI Providers: If you configure an AI search provider (e.g., Claude, " +
                     "ChatGPT, Gemini), your search queries are sent to that provider's API. " +
                     "No other personal data is included.\n" +
-                    "\u2022 Debrid Services: If you configure a debrid service, content hashes " +
+                    "\u2022 Cloud Services: If you configure a cloud cache service, content identifiers " +
                     "are sent to check availability. Your API key is sent for authentication.\n" +
                     "\u2022 Jellyfin/Plex: If configured, Torve communicates with your media server " +
                     "to retrieve library and playback data.",
@@ -85,7 +85,7 @@ fun PrivacyPolicyScreen(onBack: () -> Unit) {
 
             SectionTitle("4. Third-Party Services")
             BodyText(
-                "Third-party services you connect to Torve (Trakt, AI providers, debrid services, " +
+                "Third-party services you connect to Torve (Trakt, AI providers, cloud services, " +
                     "media servers) are governed by their own privacy policies. We encourage you " +
                     "to review those policies before connecting your accounts.",
             )

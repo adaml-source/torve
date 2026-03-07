@@ -201,10 +201,10 @@ val sharedModule = module {
     single<WatchlistRepository> { WatchlistRepositoryImpl(get(), get(), get(), get(), get(), get(), get()) }
 
     // Watch History Repository
-    single<WatchHistoryRepository> { WatchHistoryRepositoryImpl(get(), get(), get(), get()) }
+    single<WatchHistoryRepository> { WatchHistoryRepositoryImpl(get(), get(), get(), get(), get(), get()) }
 
     // Sync Repository
-    single<SyncRepository> { SyncRepositoryImpl(get(), get()) }
+    single<SyncRepository> { SyncRepositoryImpl(get(), get(), get(), get()) }
 
     // Use Cases
     factory { GetRecommendationsUseCase(get(), get()) }
@@ -213,7 +213,7 @@ val sharedModule = module {
     // ViewModels
     single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     single { SearchViewModel(get(), get()) }
-    factory { DetailViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    factory { DetailViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     factoryOf(::PersonViewModel)
     single { SettingsViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     factoryOf(::AddonViewModel)

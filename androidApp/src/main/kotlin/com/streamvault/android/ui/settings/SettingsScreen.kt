@@ -40,8 +40,12 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -91,6 +95,7 @@ import com.streamvault.android.ui.theme.Snow
 import com.streamvault.android.ui.theme.Steel
 import com.streamvault.android.ui.theme.StreamVault
 import com.streamvault.android.sync.SyncCoordinator
+import com.streamvault.domain.sync.SyncRepository
 import com.streamvault.presentation.addon.AddonViewModel
 import com.streamvault.presentation.channels.ChannelsViewModel
 import com.streamvault.presentation.settings.AppLanguage
@@ -124,9 +129,11 @@ fun SettingsScreen(
     onDiagnosticsClick: () -> Unit = {},
     viewModel: SettingsViewModel = koinInject(),
     syncCoordinator: SyncCoordinator = koinInject(),
+    syncRepository: SyncRepository = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
     val syncState by syncCoordinator.state.collectAsState()
+    var showSyncSheet by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         if (state.regionCode.isBlank() || state.regionCode == "US") {
             val country = Locale.getDefault().country.uppercase()
@@ -1404,8 +1411,32 @@ fun SettingsScreen(
                         Text("Pair TV")
                     }
                 }
+                val hasPairedTvs = syncState.isAuthenticated &&
+                    syncCoordinator.targetDevices().any { it.deviceType == "tv" }
+                if (hasPairedTvs) {
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = { showSyncSheet = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Emerald,
+                            contentColor = Snow,
+                        ),
+                    ) {
+                        Text("Sync Settings to TV")
+                    }
+                }
             }
         }
+
+        if (showSyncSheet) {
+            SyncToTvBottomSheet(
+                syncCoordinator = syncCoordinator,
+                syncRepository = syncRepository,
+                onDismiss = { showSyncSheet = false },
+            )
+        }
+
         Spacer(Modifier.height(24.dp))
 
         // ── About & Legal ──
@@ -1890,6 +1921,217 @@ private fun DebridDeviceCodeSection(
         ) {
             CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Amber)
             Text(stringResource(R.string.settings_waiting_auth), style = MaterialTheme.typography.bodySmall, color = Silver)
+        }
+    }
+}
+
+private enum class SyncCategory(val label: String, val key: String) {
+    ADDONS("Addons", "addons"),
+    QUALITY("Quality & Streaming Preferences", "preferences"),
+    INTEGRATIONS("Integrations (Trakt, OMDB, MDBList, Cloud, AI)", "integrations"),
+    PLAYLISTS("Channel Playlists", "playlists"),
+    FAVORITES("Channel Favorites", "favorites"),
+    PROGRESS("Watch Progress", "progress"),
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SyncToTvBottomSheet(
+    syncCoordinator: SyncCoordinator,
+    syncRepository: SyncRepository,
+    onDismiss: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val tvDevices = remember { syncCoordinator.targetDevices().filter { it.deviceType == "tv" } }
+    var selectedCategories by remember {
+        mutableStateOf(setOf(SyncCategory.ADDONS, SyncCategory.QUALITY, SyncCategory.INTEGRATIONS, SyncCategory.PLAYLISTS))
+    }
+    var selectedDeviceId by remember { mutableStateOf(tvDevices.firstOrNull()?.id) }
+    var isSending by remember { mutableStateOf(false) }
+    var resultMessage by remember { mutableStateOf<String?>(null) }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Charcoal,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 8.dp)
+                .padding(bottom = 32.dp),
+        ) {
+            Text(
+                text = "Sync Settings to TV",
+                style = MaterialTheme.typography.titleLarge,
+                color = Snow,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Select what to push to your paired TV.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Silver,
+            )
+            Spacer(Modifier.height(16.dp))
+
+            SyncCategory.entries.forEach { category ->
+                val checked = category in selectedCategories
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            selectedCategories = if (checked) {
+                                selectedCategories - category
+                            } else {
+                                selectedCategories + category
+                            }
+                        }
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(
+                        checked = checked,
+                        onCheckedChange = { isChecked ->
+                            selectedCategories = if (isChecked) {
+                                selectedCategories + category
+                            } else {
+                                selectedCategories - category
+                            }
+                        },
+                        colors = CheckboxDefaults.colors(
+                            checkedColor = Amber,
+                            uncheckedColor = Silver,
+                            checkmarkColor = Obsidian,
+                        ),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = category.label,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Snow,
+                    )
+                }
+            }
+
+            if (tvDevices.size > 1) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = "Target Device",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Silver,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.height(4.dp))
+                tvDevices.forEach { device ->
+                    val isSelected = device.id == selectedDeviceId
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { selectedDeviceId = device.id }
+                            .background(
+                                if (isSelected) Amber.copy(alpha = 0.15f) else Gunmetal,
+                                RoundedCornerShape(8.dp),
+                            )
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = device.deviceName,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (isSelected) Amber else Snow,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (isSelected) {
+                            Icon(
+                                Icons.Default.Check,
+                                contentDescription = null,
+                                tint = Amber,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                }
+            }
+
+            resultMessage?.let { msg ->
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = msg,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (msg.startsWith("Error")) Ruby else Emerald,
+                )
+            }
+
+            Spacer(Modifier.height(20.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Silver),
+                ) {
+                    Text("Cancel")
+                }
+                Button(
+                    onClick = {
+                        val targetId = selectedDeviceId ?: return@Button
+                        val categories = selectedCategories.map { it.key }
+                        if (categories.isEmpty()) return@Button
+                        isSending = true
+                        resultMessage = null
+                        scope.launch {
+                            val result = runCatching {
+                                val fullPayload = syncRepository.exportSyncPayload()
+                                val filtered = fullPayload.copy(
+                                    addons = if ("addons" in categories) fullPayload.addons else emptyList(),
+                                    preferences = if ("preferences" in categories) fullPayload.preferences else emptyList(),
+                                    channelPlaylists = if ("playlists" in categories) fullPayload.channelPlaylists else emptyList(),
+                                    channelFavorites = if ("favorites" in categories) fullPayload.channelFavorites else emptyList(),
+                                    watchProgress = if ("progress" in categories) fullPayload.watchProgress else emptyList(),
+                                    integrationSecrets = if ("integrations" in categories) fullPayload.integrationSecrets else emptyList(),
+                                )
+                                val syncJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+                                val payloadJson = syncJson.encodeToString(
+                                    com.streamvault.domain.sync.SyncPayload.serializer(),
+                                    filtered,
+                                )
+                                syncCoordinator.sendSettingsPush(
+                                    targetDeviceId = targetId,
+                                    categories = categories,
+                                    payloadJson = payloadJson,
+                                ).getOrThrow()
+                            }
+                            isSending = false
+                            resultMessage = if (result.isSuccess) {
+                                "Synced successfully!"
+                            } else {
+                                "Error: ${result.exceptionOrNull()?.message ?: "Unknown error"}"
+                            }
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    enabled = selectedCategories.isNotEmpty() && selectedDeviceId != null && !isSending,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Amber,
+                        contentColor = Obsidian,
+                    ),
+                ) {
+                    if (isSending) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = Obsidian,
+                        )
+                    } else {
+                        Text("Sync")
+                    }
+                }
+            }
         }
     }
 }

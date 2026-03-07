@@ -47,4 +47,5 @@ data class DetailUiState(
     val autoPlayMessage: String? = null,
     val fallbackAttempt: Int = 0,
     val autoPlayFailed: Boolean = false,
+    val kodiSendResult: String? = null,
 )

@@ -2,10 +2,10 @@ import SwiftUI
 import shared
 
 struct IptvHomeView: View {
-    let recentlyViewed: [IptvChannel]
-    let favorites: [IptvChannel]
-    let liveCategories: [IptvCategory]
-    let onChannelPlay: (IptvChannel) -> Void
+    let recentlyViewed: [Channel]
+    let favorites: [Channel]
+    let liveCategories: [ChannelCategory]
+    let onChannelPlay: (Channel) -> Void
 
     var body: some View {
         ScrollView {
@@ -16,7 +16,7 @@ struct IptvHomeView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         LazyHStack(spacing: 12) {
                             ForEach(recentlyViewed, id: \.url) { channel in
-                                CompactChannelCard(channel: channel) {
+                                CompactChannelCardView(channel: channel) {
                                     onChannelPlay(channel)
                                 }
                             }
@@ -31,7 +31,7 @@ struct IptvHomeView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         LazyHStack(spacing: 12) {
                             ForEach(favorites, id: \.url) { channel in
-                                CompactChannelCard(channel: channel) {
+                                CompactChannelCardView(channel: channel) {
                                     onChannelPlay(channel)
                                 }
                             }
@@ -46,7 +46,7 @@ struct IptvHomeView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         LazyHStack(spacing: 12) {
                             ForEach(Array(category.channels.prefix(10)), id: \.channel.url) { enriched in
-                                CompactChannelCard(channel: enriched.channel) {
+                                CompactChannelCardView(channel: enriched.channel) {
                                     onChannelPlay(enriched.channel)
                                 }
                             }
@@ -78,8 +78,8 @@ private struct SectionHeaderView: View {
     }
 }
 
-private struct CompactChannelCard: View {
-    let channel: IptvChannel
+private struct CompactChannelCardView: View {
+    let channel: Channel
     let onTap: () -> Void
 
     var body: some View {

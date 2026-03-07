@@ -16,6 +16,8 @@ data class SyncPayload(
     val channelPlaylists: List<SyncPlaylist> = emptyList(),
     @SerialName("iptvFavorites")
     val channelFavorites: List<SyncFavorite> = emptyList(),
+    val subscriptionToken: String? = null,
+    val integrationSecrets: List<SyncIntegrationSecret> = emptyList(),
 )
 
 @Serializable
@@ -52,6 +54,10 @@ data class SyncPlaylist(
     val name: String,
     val url: String,
     val epgUrl: String? = null,
+    val type: String = "m3u",
+    val server: String? = null,
+    val username: String? = null,
+    val password: String? = null,
 )
 
 @Serializable
@@ -63,11 +69,18 @@ data class SyncFavorite(
 )
 
 @Serializable
+data class SyncIntegrationSecret(
+    val key: String,
+    val value: String,
+)
+
+@Serializable
 data class SyncResult(
     val addonsImported: Int = 0,
     val preferencesImported: Int = 0,
     val progressImported: Int = 0,
     val playlistsImported: Int = 0,
     val favoritesImported: Int = 0,
+    val secretsImported: Int = 0,
     val conflicts: Int = 0,
 )

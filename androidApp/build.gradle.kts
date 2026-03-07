@@ -146,6 +146,8 @@ dependencies {
     // Debug
     debugImplementation(libs.compose.ui.tooling)
 
+    testImplementation("junit:junit:4.13.2")
+
     // Android UI tests
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")

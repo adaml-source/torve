@@ -320,7 +320,7 @@ internal fun AddPlaylistDialog(
                         selected = !isXtream,
                         onClick = { onTypeChange("m3u") },
                         shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-                    ) { Text("M3U", color = MaterialTheme.colorScheme.onSurface) }
+                    ) { Text("URL", color = MaterialTheme.colorScheme.onSurface) }
                     SegmentedButton(
                         selected = isXtream,
                         onClick = { onTypeChange("xtream") },

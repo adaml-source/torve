@@ -11,7 +11,7 @@ import androidx.compose.ui.zIndex
 import com.streamvault.android.ui.theme.Obsidian
 
 /** Collapsed rail width — content always starts here, never shifts. */
-internal val RAIL_COLLAPSED_WIDTH = 76.dp
+internal val RAIL_COLLAPSED_WIDTH = 52.dp
 
 @Composable
 fun TvScaffold(

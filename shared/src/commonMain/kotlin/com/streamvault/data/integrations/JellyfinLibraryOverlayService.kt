@@ -111,7 +111,9 @@ class JellyfinLibraryOverlayService(
         val base = serverUrl.trim().trimEnd('/')
         if (base.isBlank() || apiKey.isBlank()) return false
         return runCatching {
-            httpClient.get("$base/System/Info/Public").body<JellyfinPublicInfo>()
+            httpClient.get("$base/System/Info") {
+                header("X-Emby-Token", apiKey)
+            }.body<JellyfinPublicInfo>()
             true
         }.getOrDefault(false)
     }

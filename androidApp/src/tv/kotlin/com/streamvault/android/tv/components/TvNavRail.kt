@@ -48,10 +48,14 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.res.stringResource
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import com.streamvault.android.R
 import com.streamvault.android.tv.RAIL_COLLAPSED_WIDTH
 import com.streamvault.android.tv.nav.TvTopDestination
-import com.streamvault.android.ui.splash.TorveLogomark
+import com.streamvault.android.tv.settings.rememberTvReduceMotionPreference
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.AmberGlow
 import com.streamvault.android.ui.theme.AmberSubtle
@@ -59,7 +63,7 @@ import com.streamvault.android.ui.theme.Obsidian
 import com.streamvault.android.ui.theme.Silver
 import com.streamvault.android.ui.theme.Snow
 
-private val RAIL_EXPANDED_WIDTH = 228.dp
+private val RAIL_EXPANDED_WIDTH = 160.dp
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -79,6 +83,15 @@ fun TvNavRail(
     )
     val itemRequesters = remember(destinations) {
         destinations.associate { it.route to FocusRequester() }
+    }
+    val orderedRoutes = remember(destinations) { destinations.map { it.route } }
+
+    fun neighborRoute(route: String, delta: Int): String? {
+        val size = orderedRoutes.size
+        if (size <= 0) return null
+        val index = orderedRoutes.indexOf(route).takeIf { it >= 0 } ?: 0
+        val neighborIndex = ((index + delta) % size + size) % size
+        return orderedRoutes[neighborIndex]
     }
 
     var railHasFocus by remember { mutableStateOf(false) }
@@ -119,34 +132,62 @@ fun TvNavRail(
             .padding(horizontal = 8.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        TorveLogomark(
-            size = 28.dp,
+        TorveEllipseMark(
             showWordmark = isExpanded,
             modifier = Modifier.padding(start = 2.dp, top = 6.dp, bottom = 6.dp),
         )
 
         destinations.forEach { destination ->
+            val currentRequester = itemRequesters.getValue(destination.route)
+            val upRequester = neighborRoute(destination.route, -1)
+                ?.let { itemRequesters[it] }
+                ?: currentRequester
+            val downRequester = neighborRoute(destination.route, 1)
+                ?.let { itemRequesters[it] }
+                ?: currentRequester
+            val isSelected = selectedRoute == destination.route
             TvNavRailItem(
                 destination = destination,
-                selected = selectedRoute == destination.route,
+                selected = isSelected,
                 expanded = isExpanded,
-                modifier = Modifier.focusRequester(
-                    itemRequesters.getValue(destination.route),
-                ),
+                modifier = Modifier
+                    .focusRequester(currentRequester)
+                    .focusProperties {
+                        up = upRequester
+                        down = downRequester
+                        left = currentRequester
+                    },
                 onMoveToContent = {
                     onNavigate(destination.route)
                     onMoveToContent()
                 },
+                // Always consume Right and use explicit focus restore.
+                // Natural spatial focus traversal causes drift (e.g. Settings scrolls 4 rows).
+                onMoveRight = {
+                    if (!isSelected) onNavigate(destination.route)
+                    onMoveToContent()
+                },
                 onClick = { onNavigate(destination.route) },
-                onItemFocused = { },
+                onItemFocused = { onNavigate(destination.route) },
             )
         }
     }
 
-    LaunchedEffect(selectedRoute, railHasFocus) {
-        if (railHasFocus) {
-            runCatching { itemRequesters[selectedRoute]?.requestFocus() }
+    // Only refocus the selected item when the rail *gains* focus (user pressed Left).
+    // Do NOT refocus when selectedRoute changes — that would fight with content focus restore.
+    var prevRailHasFocus by remember { mutableStateOf(false) }
+    LaunchedEffect(railHasFocus) {
+        if (railHasFocus && !prevRailHasFocus) {
+            val preferred = itemRequesters[selectedRoute]
+            val fallback = orderedRoutes.firstOrNull()?.let { itemRequesters[it] }
+            runCatching {
+                when {
+                    preferred != null -> preferred.requestFocus()
+                    fallback != null -> fallback.requestFocus()
+                }
+            }
         }
+        prevRailHasFocus = railHasFocus
     }
 }
 
@@ -156,29 +197,37 @@ private fun TvNavRailItem(
     selected: Boolean,
     expanded: Boolean,
     onMoveToContent: () -> Unit,
+    onMoveRight: () -> Unit,
     onClick: () -> Unit,
     onItemFocused: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val reduceMotion = rememberTvReduceMotionPreference()
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
-        targetValue = if (focused) 1.04f else 1f,
+        targetValue = if (reduceMotion) 1f else if (focused) 1.04f else 1f,
         label = "railItemScale",
     )
     val background = when {
         focused -> AmberSubtle
-        selected -> AmberGlow
+        selected && expanded -> AmberGlow
         else -> Color.Transparent
     }
     val borderColor by animateColorAsState(
         targetValue = when {
             focused -> Amber
-            selected -> Amber.copy(alpha = 0.4f)
             else -> Color.Transparent
         },
         label = "railBorder",
     )
-    val tint = if (focused || selected) Snow else Silver
+    val tint by animateColorAsState(
+        targetValue = when {
+            focused -> Snow
+            selected -> Amber
+            else -> Silver
+        },
+        label = "railTint",
+    )
     val itemHorizontalPadding = if (expanded) 12.dp else 6.dp
     val indicatorSpacing = if (expanded) 10.dp else 6.dp
 
@@ -202,7 +251,11 @@ private fun TvNavRailItem(
             .onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown) {
                     when (event.key) {
-                        Key.DirectionRight, Key.Enter, Key.DirectionCenter -> {
+                        Key.DirectionRight -> {
+                            onMoveRight()
+                            true
+                        }
+                        Key.Enter, Key.DirectionCenter -> {
                             onMoveToContent()
                             true
                         }
@@ -223,7 +276,14 @@ private fun TvNavRailItem(
         Spacer(
             modifier = Modifier
                 .size(width = 2.dp, height = 22.dp)
-                .background(borderColor, RoundedCornerShape(2.dp)),
+                .background(
+                    when {
+                        focused -> Amber
+                        selected -> Amber.copy(alpha = 0.5f)
+                        else -> Color.Transparent
+                    },
+                    RoundedCornerShape(2.dp),
+                ),
         )
 
         Spacer(modifier = Modifier.width(indicatorSpacing))
@@ -241,6 +301,32 @@ private fun TvNavRailItem(
             style = MaterialTheme.typography.titleMedium,
             color = tint,
             modifier = Modifier.padding(start = 10.dp).alpha(if (expanded) 1f else 0f),
+        )
+    }
+}
+
+/**
+ * Collapsed: torve_eye.png (just the eye ellipses).
+ * Expanded: torve_logo.png (T + eye + RVE).
+ */
+@Composable
+private fun TorveEllipseMark(
+    modifier: Modifier = Modifier,
+    showWordmark: Boolean = false,
+) {
+    if (showWordmark) {
+        androidx.compose.foundation.Image(
+            painter = painterResource(R.drawable.torve_logo),
+            contentDescription = "Torve",
+            contentScale = ContentScale.Fit,
+            modifier = modifier.height(28.dp),
+        )
+    } else {
+        androidx.compose.foundation.Image(
+            painter = painterResource(R.drawable.torve_eye),
+            contentDescription = "Torve",
+            contentScale = ContentScale.Fit,
+            modifier = modifier.size(32.dp),
         )
     }
 }

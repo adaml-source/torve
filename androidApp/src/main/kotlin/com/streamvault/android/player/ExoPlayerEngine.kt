@@ -44,6 +44,7 @@ class ExoPlayerEngine(
     private var currentAudioTracks = listOf<TrackDescription>()
     private var trackGroups = listOf<Tracks.Group>()
     private val delayProcessor = DelayAudioProcessor()
+    val equalizerProcessor = EqualizerAudioProcessor()
 
     /** Set by the player screen to enable codec-error fallback at the stream level. */
     var onCodecError: ((errorCode: Int) -> Unit)? = null
@@ -168,7 +169,7 @@ class ExoPlayerEngine(
     }
 
     fun initialize() {
-        val processor = delayProcessor
+        val processors = arrayOf(equalizerProcessor, delayProcessor)
         val renderersFactory = object : DefaultRenderersFactory(context) {
             override fun buildAudioSink(
                 context: Context,
@@ -176,7 +177,7 @@ class ExoPlayerEngine(
                 enableAudioTrackPlaybackParams: Boolean,
             ): DefaultAudioSink {
                 return DefaultAudioSink.Builder(context)
-                    .setAudioProcessors(arrayOf(processor))
+                    .setAudioProcessors(processors)
                     .setEnableFloatOutput(enableFloatOutput)
                     .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
                     .build()

@@ -66,7 +66,7 @@ class StreamAggregator(
                         }
                     } catch (_: Exception) {
                         val msg = e.message ?: "Unknown error"
-                        println("StreamAggregator: addon $url failed after retry: $msg")
+                        // println("StreamAggregator: addon $url failed after retry: $msg")
                         addonFailures[url] = msg
                         emptyList()
                     }
@@ -88,7 +88,7 @@ class StreamAggregator(
                         if (isCached) cacheStatus[hash] = true
                     }
                 } catch (e: Exception) {
-                    println("StreamAggregator: debrid cache check failed for $provider: ${e.message}")
+                    // println("StreamAggregator: debrid cache check failed for $provider: ${e.message}")
                 }
             }
         }

@@ -2,6 +2,7 @@ package com.streamvault.android.ui.player
 
 import android.app.Activity
 import android.content.pm.ActivityInfo
+import android.os.SystemClock
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
@@ -19,9 +20,11 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -72,8 +75,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
@@ -90,20 +95,29 @@ import com.streamvault.android.R
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaSession
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.streamvault.android.player.AudioEqualizer
+import com.streamvault.android.device.DeviceFormFactor
 import com.streamvault.android.player.CastManager
 import com.streamvault.android.player.ExoPlayerEngine
 import com.streamvault.android.player.MPVPlayerEngine
 import com.streamvault.android.player.MPVView
 import com.streamvault.android.player.isCastFrameworkAvailable
 import com.streamvault.android.sync.SyncCoordinator
+import com.streamvault.android.tv.settings.rememberTvReduceMotionPreference
 import com.streamvault.android.voice.PlayerVoiceCommand
 import com.streamvault.android.voice.PlayerVoiceCommandParser
 import com.streamvault.android.voice.VoiceInputPhase
 import com.streamvault.android.voice.rememberVoiceInputController
 import com.streamvault.android.ui.sync.SyncDevicePickerDialog
+import com.streamvault.data.simkl.SimklClient
+import com.streamvault.data.simkl.SimklIds
+import com.streamvault.data.simkl.SimklSyncBody
+import com.streamvault.data.simkl.SimklSyncItem
 import com.streamvault.data.trakt.TraktClient
+import com.streamvault.domain.integrations.IntegrationSecretKey
+import com.streamvault.domain.integrations.IntegrationSecretStore
 import com.streamvault.data.trakt.TraktHistoryBody
 import com.streamvault.data.trakt.TraktHistoryMovie
 import com.streamvault.data.trakt.TraktHistoryShow
@@ -158,9 +172,12 @@ fun PlayerScreen(
     syncCoordinator: SyncCoordinator = koinInject(),
     traktScrobbler: TraktScrobbler = koinInject(),
     traktClient: TraktClient = koinInject(),
+    simklClient: SimklClient = koinInject(),
+    integrationSecretStore: IntegrationSecretStore = koinInject(),
     prefsRepo: PreferencesRepository = koinInject(),
 ) {
     val context = LocalContext.current
+    val isTv = remember(context) { DeviceFormFactor.isTv(context) }
 
     // Google Cast (guarded for devices without Play Services, e.g. Fire TV)
     val castAvailable = remember(context) { isCastFrameworkAvailable(context) }
@@ -208,6 +225,7 @@ fun PlayerScreen(
     var isSeeking by remember { mutableStateOf(false) }
     var showTrackDialog by remember { mutableStateOf(false) }
     var showAudioDelayDialog by remember { mutableStateOf(false) }
+    var showPictureFormatPicker by remember { mutableStateOf(false) }
     var subtitleTracks by remember { mutableStateOf<List<TrackDescription>>(emptyList()) }
     var audioTracks by remember { mutableStateOf<List<TrackDescription>>(emptyList()) }
     var useMpv by remember { mutableStateOf(false) }
@@ -217,12 +235,34 @@ fun PlayerScreen(
     var audioDelayMs by remember { mutableIntStateOf(0) }
     var showEqualizerSheet by remember { mutableStateOf(false) }
     var showDevicePicker by remember { mutableStateOf(false) }
+    var playbackSpeed by remember { mutableFloatStateOf(1.0f) }
+    var pictureFormat by remember { mutableStateOf(PlayerPictureFormat.SOURCE) }
     var audioEqualizer by remember { mutableStateOf<AudioEqualizer?>(null) }
-    var pendingStartPositionMs by remember(url, mediaId, startPositionMs) {
-        mutableLongStateOf(startPositionMs.coerceAtLeast(0L))
+    var exoPlayerView by remember { mutableStateOf<PlayerView?>(null) }
+    var topMenuFocusTick by remember { mutableIntStateOf(0) }
+    var lastTopMenuFocusTarget by remember { mutableStateOf(TopMenuFocusTarget.BACK) }
+    var seekRepeatDirection by remember { mutableIntStateOf(0) }
+    var seekRepeatCount by remember { mutableIntStateOf(0) }
+    var seekRepeatLastAtMs by remember { mutableLongStateOf(0L) }
+    val resumePromptInitialPositionMs = remember(url, mediaId, startPositionMs) {
+        startPositionMs.coerceAtLeast(0L)
     }
+    var pendingStartPositionMs by remember(url, mediaId, startPositionMs) { mutableLongStateOf(0L) }
+    var showResumePrompt by remember(url, mediaId, startPositionMs) {
+        mutableStateOf(resumePromptInitialPositionMs >= 20_000L)
+    }
+    var initialStartPositionConsumed by remember(url, mediaId, startPositionMs) { mutableStateOf(false) }
     val playerRootFocusRequester = remember { FocusRequester() }
     val playButtonFocusRequester = remember { FocusRequester() }
+    val topMenuFocusRequester = remember { FocusRequester() }
+    val topCastFocusRequester = remember { FocusRequester() }
+    val topHandoffFocusRequester = remember { FocusRequester() }
+    val topVoiceFocusRequester = remember { FocusRequester() }
+    val topTracksFocusRequester = remember { FocusRequester() }
+    val topAudioDelayFocusRequester = remember { FocusRequester() }
+    val topEqualizerFocusRequester = remember { FocusRequester() }
+    val topPictureFormatFocusRequester = remember { FocusRequester() }
+    val topSpeedFocusRequester = remember { FocusRequester() }
 
     // Mutable episode state — updated when swapping to next episode
     var currentSeasonNumber by remember { mutableStateOf(seasonNumber) }
@@ -262,9 +302,88 @@ fun PlayerScreen(
     val voiceCommandSearchLabel: (String) -> String = { query ->
         "Search: $query"
     }
+    val playbackPrefsKey = remember(mediaType, mediaId, showTmdbId, showImdbId, title, url) {
+        buildPlayerPlaybackPrefsKey(
+            mediaType = mediaType,
+            mediaId = mediaId,
+            showTmdbId = showTmdbId,
+            showImdbId = showImdbId,
+            title = title,
+            url = url,
+        )
+    }
+    var playbackPrefsLoaded by remember(playbackPrefsKey) { mutableStateOf(false) }
+    val trackPrefsKey = remember(playbackPrefsKey) { "${playbackPrefsKey}_tracks" }
+    var trackPrefsLoaded by remember(trackPrefsKey) { mutableStateOf(false) }
+    var preferredAudioTrackTag by remember(trackPrefsKey) { mutableStateOf<String?>(null) }
+    var preferredSubtitleTrackTag by remember(trackPrefsKey) { mutableStateOf<String?>(null) }
+    var subtitlesPreferredEnabled by remember(trackPrefsKey) { mutableStateOf(true) }
+    var trackPrefsAppliedForUrl by remember { mutableStateOf(false) }
 
     // Helper to check if scrobbling should fire
     val canScrobble = traktScrobbleEnabled && traktAccessToken.isNotBlank() && tmdbId > 0
+
+    fun focusRequesterForTopTarget(target: TopMenuFocusTarget): FocusRequester {
+        return when (target) {
+            TopMenuFocusTarget.BACK -> topMenuFocusRequester
+            TopMenuFocusTarget.CAST -> topCastFocusRequester
+            TopMenuFocusTarget.HANDOFF -> topHandoffFocusRequester
+            TopMenuFocusTarget.VOICE -> topVoiceFocusRequester
+            TopMenuFocusTarget.TRACKS -> topTracksFocusRequester
+            TopMenuFocusTarget.AUDIO_DELAY -> topAudioDelayFocusRequester
+            TopMenuFocusTarget.EQUALIZER -> topEqualizerFocusRequester
+            TopMenuFocusTarget.PICTURE_FORMAT -> topPictureFormatFocusRequester
+            TopMenuFocusTarget.SPEED -> topSpeedFocusRequester
+        }
+    }
+
+    val visibleTopMenuTargets = buildList {
+        add(TopMenuFocusTarget.BACK)
+        if (castAvailable) add(TopMenuFocusTarget.CAST)
+        add(TopMenuFocusTarget.HANDOFF)
+        add(TopMenuFocusTarget.VOICE)
+        if (subtitleTracks.isNotEmpty() || audioTracks.isNotEmpty()) add(TopMenuFocusTarget.TRACKS)
+        add(TopMenuFocusTarget.AUDIO_DELAY)
+        if (audioEqualizer != null) add(TopMenuFocusTarget.EQUALIZER)
+        if (isTv) add(TopMenuFocusTarget.PICTURE_FORMAT)
+        add(TopMenuFocusTarget.SPEED)
+    }
+
+    fun topMenuNeighbor(target: TopMenuFocusTarget, delta: Int): TopMenuFocusTarget {
+        val size = visibleTopMenuTargets.size
+        if (size <= 0) return TopMenuFocusTarget.BACK
+        val index = visibleTopMenuTargets.indexOf(target).takeIf { it >= 0 } ?: 0
+        val neighborIndex = PlayerNavigationMath.cyclicIndex(index, size, delta)
+        return visibleTopMenuTargets[neighborIndex]
+    }
+
+    fun topMenuItemModifier(target: TopMenuFocusTarget): Modifier {
+        return Modifier
+            .focusRequester(focusRequesterForTopTarget(target))
+            .focusProperties {
+                left = focusRequesterForTopTarget(topMenuNeighbor(target, -1))
+                right = focusRequesterForTopTarget(topMenuNeighbor(target, 1))
+                down = playButtonFocusRequester
+            }
+    }
+
+    fun requestTopMenuFocus(preferred: TopMenuFocusTarget? = null): Boolean {
+        val targets = (
+            listOfNotNull(preferred, lastTopMenuFocusTarget, TopMenuFocusTarget.BACK) +
+                visibleTopMenuTargets
+            ).distinct()
+        for (target in targets) {
+            val requested = runCatching {
+                focusRequesterForTopTarget(target).requestFocus()
+                true
+            }.getOrDefault(false)
+            if (requested) {
+                lastTopMenuFocusTarget = target
+                return true
+            }
+        }
+        return false
+    }
 
     // Create the player engine once (not keyed on URL for in-place swaps)
     val engine = remember {
@@ -291,6 +410,17 @@ fun PlayerScreen(
                 passthroughEnabled = channelsState.audioPassthroughEnabled,
                 preferSurround = channelsState.preferSurroundCodecs,
             )
+        }
+    }
+
+    LaunchedEffect(useMpv, pictureFormat, exoPlayerView) {
+        if (useMpv) {
+            (engine as? MPVPlayerEngine)?.setPictureFormat(
+                aspectRatio = pictureFormat.aspectRatio,
+                fill = pictureFormat.fill,
+            )
+        } else {
+            exoPlayerView?.resizeMode = pictureFormat.exoResizeMode
         }
     }
 
@@ -336,6 +466,22 @@ fun PlayerScreen(
     val seekBy: (Long) -> Unit = { deltaMs ->
         engine.seekRelative(deltaMs)
         showControls = true
+    }
+
+    fun resetSeekAcceleration() {
+        seekRepeatDirection = 0
+        seekRepeatCount = 0
+        seekRepeatLastAtMs = 0L
+    }
+
+    fun acceleratedSeekDelta(direction: Int): Long {
+        val nowMs = SystemClock.uptimeMillis()
+        val isRepeatBurst = seekRepeatDirection == direction && (nowMs - seekRepeatLastAtMs) <= 360L
+        seekRepeatCount = if (isRepeatBurst) (seekRepeatCount + 1) else 0
+        seekRepeatDirection = direction
+        seekRepeatLastAtMs = nowMs
+        val multiplier = PlayerNavigationMath.seekAccelerationMultiplier(seekRepeatCount)
+        return direction * 10_000L * multiplier
     }
 
     var voiceFeedbackMessage by remember { mutableStateOf<String?>(null) }
@@ -389,16 +535,42 @@ fun PlayerScreen(
 
     val handleBackAction: () -> Boolean = {
         when {
+            showResumePrompt -> {
+                showResumePrompt = false
+                initialStartPositionConsumed = true
+                pendingStartPositionMs = 0L
+                showControls = true
+                topMenuFocusTick++
+                true
+            }
             showTrackDialog -> {
                 showTrackDialog = false
+                showControls = true
+                topMenuFocusTick++
                 true
             }
             showAudioDelayDialog -> {
                 showAudioDelayDialog = false
+                showControls = true
+                topMenuFocusTick++
+                true
+            }
+            showPictureFormatPicker -> {
+                showPictureFormatPicker = false
+                showControls = true
+                topMenuFocusTick++
                 true
             }
             showEqualizerSheet -> {
                 showEqualizerSheet = false
+                showControls = true
+                topMenuFocusTick++
+                true
+            }
+            showDevicePicker -> {
+                showDevicePicker = false
+                showControls = true
+                topMenuFocusTick++
                 true
             }
             showNextEpisodeOverlay -> {
@@ -420,17 +592,96 @@ fun PlayerScreen(
         }
     }
 
-    LaunchedEffect(engine) {
-        audioDelayMs = engine.getAudioDelay()
-        // Initialize equalizer from audio session
-        val sessionId = engine.getAudioSessionId()
-        if (sessionId > 0) {
-            val eq = AudioEqualizer(sessionId)
-            // Restore saved EQ state
+    LaunchedEffect(engine, playbackPrefsKey) {
+        val persisted = prefsRepo.getString(playbackPrefsKey)?.let(::parsePlayerPlaybackPrefs)
+        if (persisted != null) {
+            audioDelayMs = persisted.audioDelayMs
+            playbackSpeed = persisted.playbackSpeed
+            pictureFormat = persisted.pictureFormat
+            engine.setAudioDelay(audioDelayMs)
+            engine.setSpeed(playbackSpeed)
+        } else {
+            audioDelayMs = engine.getAudioDelay()
+            engine.setSpeed(playbackSpeed)
+        }
+        val trackPrefs = prefsRepo.getString(trackPrefsKey)?.let(::parsePlayerTrackPrefs)
+        if (trackPrefs != null) {
+            preferredAudioTrackTag = trackPrefs.audioTrackTag
+            preferredSubtitleTrackTag = trackPrefs.subtitleTrackTag
+            subtitlesPreferredEnabled = trackPrefs.subtitlesEnabled
+        } else {
+            preferredAudioTrackTag = null
+            preferredSubtitleTrackTag = null
+            subtitlesPreferredEnabled = true
+        }
+        playbackPrefsLoaded = true
+        trackPrefsLoaded = true
+        // Initialize software EQ via ExoPlayer audio processor pipeline
+        val eqProcessor = (engine as? ExoPlayerEngine)?.equalizerProcessor
+        if (eqProcessor != null) {
+            val eq = AudioEqualizer(eqProcessor)
             val savedState = prefsRepo.getString("eq_state")
             if (savedState != null) eq.restoreFromState(savedState)
             audioEqualizer = eq
         }
+    }
+
+    LaunchedEffect(playbackPrefsLoaded, playbackPrefsKey, audioDelayMs, playbackSpeed, pictureFormat) {
+        if (!playbackPrefsLoaded) return@LaunchedEffect
+        prefsRepo.setString(
+            playbackPrefsKey,
+            serializePlayerPlaybackPrefs(
+                PlayerPlaybackPrefs(
+                    audioDelayMs = audioDelayMs,
+                    playbackSpeed = playbackSpeed,
+                    pictureFormat = pictureFormat,
+                ),
+            ),
+        )
+    }
+
+    LaunchedEffect(trackPrefsLoaded, trackPrefsKey, preferredAudioTrackTag, preferredSubtitleTrackTag, subtitlesPreferredEnabled) {
+        if (!trackPrefsLoaded) return@LaunchedEffect
+        prefsRepo.setString(
+            trackPrefsKey,
+            serializePlayerTrackPrefs(
+                PlayerTrackPrefs(
+                    audioTrackTag = preferredAudioTrackTag,
+                    subtitleTrackTag = preferredSubtitleTrackTag,
+                    subtitlesEnabled = subtitlesPreferredEnabled,
+                ),
+            ),
+        )
+    }
+
+    LaunchedEffect(currentUrl) {
+        trackPrefsAppliedForUrl = false
+    }
+
+    LaunchedEffect(trackPrefsLoaded, trackPrefsAppliedForUrl, audioTracks, subtitleTracks, currentUrl) {
+        if (!trackPrefsLoaded || trackPrefsAppliedForUrl) return@LaunchedEffect
+        if (audioTracks.isEmpty() && subtitleTracks.isEmpty()) return@LaunchedEffect
+
+        preferredAudioTrackTag?.let { preferredTag ->
+            audioTracks.firstOrNull { trackPreferenceTag(it) == preferredTag }?.let { track ->
+                if (!track.isSelected) {
+                    engine.selectAudioTrack(track.id)
+                }
+            }
+        }
+        if (subtitlesPreferredEnabled) {
+            preferredSubtitleTrackTag?.let { preferredTag ->
+                subtitleTracks.firstOrNull { trackPreferenceTag(it) == preferredTag }?.let { track ->
+                    if (!track.isSelected) {
+                        engine.selectSubtitleTrack(track.id)
+                    }
+                }
+            }
+        } else if (subtitleTracks.any { it.isSelected }) {
+            engine.disableSubtitles()
+        }
+
+        trackPrefsAppliedForUrl = true
     }
 
     // Load season data for next-episode calculation (TV shows only)
@@ -661,13 +912,9 @@ fun PlayerScreen(
         }
 
         engine.play(currentUrl)
-        if (pendingStartPositionMs > 0L) {
-            val seekTarget = pendingStartPositionMs
-            scope.launch {
-                delay(450)
-                engine.seekTo(seekTarget)
-                pendingStartPositionMs = 0L
-            }
+        if (!initialStartPositionConsumed && !showResumePrompt && resumePromptInitialPositionMs > 0L) {
+            pendingStartPositionMs = resumePromptInitialPositionMs
+            initialStartPositionConsumed = true
         }
 
         // Scrobble start on initial playback
@@ -798,24 +1045,38 @@ fun PlayerScreen(
         }
     }
 
-    // Auto-mark watched on Trakt at >80% progress
+    // Auto-mark watched on Trakt + Simkl at >80% progress
     LaunchedEffect(currentPosition, duration, hasMarkedWatched) {
-        if (hasMarkedWatched || !canScrobble) return@LaunchedEffect
-        if (duration <= 0) return@LaunchedEffect
+        if (hasMarkedWatched) return@LaunchedEffect
+        if (duration <= 0 || tmdbId <= 0) return@LaunchedEffect
         val progressPercent = currentPosition.toDouble() / duration
         if (progressPercent > 0.80) {
             hasMarkedWatched = true
-            try {
-                val ids = TraktIds(tmdb = tmdbId)
-                val body = if (parsedMediaType == MediaType.MOVIE) {
-                    TraktHistoryBody(movies = listOf(TraktHistoryMovie(ids = ids)))
-                } else {
-                    TraktHistoryBody(shows = listOf(TraktHistoryShow(ids = ids)))
-                }
-                traktClient.addToHistory(traktAccessToken, body)
-            } catch (_: Exception) {
-                // Best-effort — don't crash the player
+            // Trakt
+            if (canScrobble) {
+                try {
+                    val ids = TraktIds(tmdb = tmdbId)
+                    val body = if (parsedMediaType == MediaType.MOVIE) {
+                        TraktHistoryBody(movies = listOf(TraktHistoryMovie(ids = ids)))
+                    } else {
+                        TraktHistoryBody(shows = listOf(TraktHistoryShow(ids = ids)))
+                    }
+                    traktClient.addToHistory(traktAccessToken, body)
+                } catch (_: Exception) { }
             }
+            // Simkl
+            try {
+                val simklToken = integrationSecretStore.get(IntegrationSecretKey.SIMKL_ACCESS_TOKEN)
+                if (!simklToken.isNullOrBlank()) {
+                    val simklIds = SimklIds(tmdb = tmdbId)
+                    val simklBody = if (parsedMediaType == MediaType.MOVIE) {
+                        SimklSyncBody(movies = listOf(SimklSyncItem(simklIds)))
+                    } else {
+                        SimklSyncBody(shows = listOf(SimklSyncItem(simklIds)))
+                    }
+                    simklClient.addToHistory(simklToken, simklBody)
+                }
+            } catch (_: Exception) { }
         }
     }
 
@@ -839,13 +1100,28 @@ fun PlayerScreen(
         } else null
     }
 
-    // Auto-hide controls after 5 seconds (works for live streams too)
-    var controlsInteractionTick by remember { mutableLongStateOf(0L) }
-    LaunchedEffect(showControls, controlsInteractionTick) {
-        if (showControls) {
-            delay(5000)
+    LaunchedEffect(showResumePrompt) {
+        if (showResumePrompt) {
             showControls = false
         }
+    }
+
+    // Auto-hide controls after 5 seconds on non-TV devices.
+    var controlsInteractionTick by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(showControls, controlsInteractionTick, isTv, showTrackDialog, showAudioDelayDialog, showPictureFormatPicker, showEqualizerSheet, showDevicePicker, showResumePrompt) {
+        if (!showControls) return@LaunchedEffect
+        if (isTv) return@LaunchedEffect
+        if (showTrackDialog || showAudioDelayDialog || showPictureFormatPicker || showEqualizerSheet || showDevicePicker || showResumePrompt) return@LaunchedEffect
+        delay(5000)
+        showControls = false
+    }
+
+    LaunchedEffect(currentUrl, pendingStartPositionMs, showResumePrompt) {
+        val seekTarget = pendingStartPositionMs
+        if (seekTarget <= 0L || showResumePrompt) return@LaunchedEffect
+        delay(450)
+        engine.seekTo(seekTarget)
+        pendingStartPositionMs = 0L
     }
 
     LaunchedEffect(voiceFeedbackMessage) {
@@ -859,12 +1135,41 @@ fun PlayerScreen(
         playerRootFocusRequester.requestFocus()
     }
 
-    // When controls appear, move focus to the play button so D-pad navigation works
-    LaunchedEffect(showControls) {
+    // Restore top-menu focus on TV so opening/closing overlays never leaves focus lost.
+    LaunchedEffect(
+        showControls,
+        topMenuFocusTick,
+        isTv,
+        showTrackDialog,
+        showAudioDelayDialog,
+        showPictureFormatPicker,
+        showEqualizerSheet,
+        showDevicePicker,
+        showResumePrompt,
+    ) {
         if (showControls) {
-            delay(50) // Let composition settle
+            if (showTrackDialog || showAudioDelayDialog || showPictureFormatPicker || showEqualizerSheet || showDevicePicker || showResumePrompt) {
+                return@LaunchedEffect
+            }
+            delay(50)
             try {
-                playButtonFocusRequester.requestFocus()
+                if (isTv) {
+                    var focused = false
+                    for (attempt in 0 until 6) {
+                        if (requestTopMenuFocus(lastTopMenuFocusTarget)) {
+                            focused = true
+                            break
+                        }
+                        if (attempt < 5) {
+                            delay(40)
+                        }
+                    }
+                    if (!focused) {
+                        requestTopMenuFocus(TopMenuFocusTarget.BACK)
+                    }
+                } else {
+                    playButtonFocusRequester.requestFocus()
+                }
             } catch (_: IllegalStateException) {
                 // Not yet attached
             }
@@ -888,7 +1193,7 @@ fun PlayerScreen(
                 if (keyEvent.type != KeyEventType.KeyDown) {
                     return@onPreviewKeyEvent false
                 }
-                if ((showTrackDialog || showAudioDelayDialog || showEqualizerSheet) && keyEvent.key != Key.Back) {
+                if ((showTrackDialog || showAudioDelayDialog || showPictureFormatPicker || showEqualizerSheet || showDevicePicker || showResumePrompt) && keyEvent.key != Key.Back) {
                     return@onPreviewKeyEvent false
                 }
 
@@ -897,28 +1202,66 @@ fun PlayerScreen(
                 if (showControls) {
                     return@onPreviewKeyEvent when (keyEvent.key) {
                         Key.Back -> {
-                            showControls = false
+                            resetSeekAcceleration()
+                            if (!handleBackAction()) {
+                                showControls = false
+                            }
                             true
                         }
                         Key.Spacebar, Key.MediaPlayPause -> {
+                            resetSeekAcceleration()
                             togglePlayback()
                             true
                         }
-                        Key.DirectionUp, Key.DirectionDown,
-                        Key.DirectionLeft, Key.DirectionRight,
-                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter,
-                        -> {
-                            // Reset auto-hide timer on any navigation
+                        Key.DirectionUp -> {
+                            resetSeekAcceleration()
                             controlsInteractionTick++
-                            false // let focus system handle navigation
+                            if (isTv) {
+                                val focused = requestTopMenuFocus(lastTopMenuFocusTarget)
+                                if (!focused) {
+                                    runCatching { playButtonFocusRequester.requestFocus() }
+                                }
+                                true
+                            } else {
+                                false
+                            }
                         }
-                        else -> false
+                        Key.DirectionDown -> {
+                            resetSeekAcceleration()
+                            controlsInteractionTick++
+                            if (isTv) {
+                                val focused = runCatching {
+                                    playButtonFocusRequester.requestFocus()
+                                    true
+                                }.getOrDefault(false)
+                                if (!focused) {
+                                    requestTopMenuFocus(lastTopMenuFocusTarget)
+                                }
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        Key.DirectionLeft, Key.DirectionRight -> {
+                            controlsInteractionTick++
+                            false
+                        }
+                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                            resetSeekAcceleration()
+                            controlsInteractionTick++
+                            false
+                        }
+                        else -> {
+                            resetSeekAcceleration()
+                            false
+                        }
                     }
                 }
 
                 // Controls hidden — handle all D-pad keys for media shortcuts
                 when (keyEvent.key) {
                     Key.Back -> {
+                        resetSeekAcceleration()
                         if (!handleBackAction()) {
                             onBack()
                         }
@@ -930,31 +1273,42 @@ fun PlayerScreen(
                     Key.Spacebar,
                     Key.MediaPlayPause,
                     -> {
+                        resetSeekAcceleration()
                         togglePlayback()
                         true
                     }
                     Key.DirectionLeft -> {
-                        seekBy(-10_000)
+                        seekBy(acceleratedSeekDelta(direction = -1))
                         true
                     }
                     Key.DirectionRight -> {
-                        seekBy(10_000)
+                        seekBy(acceleratedSeekDelta(direction = 1))
                         true
                     }
                     Key.DirectionUp, Key.DirectionDown -> {
+                        resetSeekAcceleration()
                         showControls = true
                         true
                     }
-                    else -> false
+                    else -> {
+                        resetSeekAcceleration()
+                        false
+                    }
                 }
             }
             .background(Color.Black)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-            ) {
-                showControls = !showControls
-            },
+            .then(
+                if (!isTv) {
+                    Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) {
+                        showControls = !showControls
+                    }
+                } else {
+                    Modifier
+                },
+            ),
     ) {
         // Video surface
         if (useMpv) {
@@ -980,13 +1334,18 @@ fun PlayerScreen(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT,
                         )
+                        resizeMode = pictureFormat.exoResizeMode
+                        exoPlayerView = this
                     }
                 },
                 update = { view ->
                     view.player = (engine as? ExoPlayerEngine)?.getExoPlayer()
+                    view.resizeMode = pictureFormat.exoResizeMode
+                    exoPlayerView = view
                 },
                 onRelease = { view ->
                     view.player = null
+                    if (exoPlayerView == view) exoPlayerView = null
                 },
                 modifier = Modifier.fillMaxSize(),
             )
@@ -994,67 +1353,83 @@ fun PlayerScreen(
 
         // Error overlay
         errorMessage?.let { msg ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.85f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(32.dp),
+            if (isTv) {
+                TvPlaybackErrorBanner(
+                    message = msg,
+                    onRetry = {
+                        errorMessage = null
+                        engine.play(currentUrl)
+                    },
+                    onDismiss = {
+                        errorMessage = null
+                    },
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 72.dp),
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.85f)),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        Icons.Default.ErrorOutline,
-                        contentDescription = null,
-                        tint = Color(0xFFE8A838),
-                        modifier = Modifier.size(48.dp),
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    Text(
-                        text = stringResource(R.string.player_playback_error),
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = Color.White,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = msg,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(alpha = 0.7f),
-                    )
-                    if (currentUrl.isNotBlank()) {
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            text = currentUrl.take(80) + if (currentUrl.length > 80) "..." else "",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.3f),
-                            maxLines = 2,
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(32.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.ErrorOutline,
+                            contentDescription = null,
+                            tint = Color(0xFFE8A838),
+                            modifier = Modifier.size(48.dp),
                         )
-                    }
-                    Spacer(Modifier.height(24.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Button(
-                            onClick = {
-                                errorMessage = null
-                                engine.play(currentUrl)
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFFE8A838),
-                                contentColor = Color.Black,
-                            ),
-                            shape = RoundedCornerShape(8.dp),
-                        ) {
-                            Text(stringResource(R.string.player_retry))
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            text = stringResource(R.string.player_playback_error),
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = Color.White,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = msg,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White.copy(alpha = 0.7f),
+                        )
+                        if (currentUrl.isNotBlank()) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = currentUrl.take(80) + if (currentUrl.length > 80) "..." else "",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(alpha = 0.3f),
+                                maxLines = 2,
+                            )
                         }
-                        Button(
-                            onClick = onBack,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF2E2E40),
-                                contentColor = Color.White,
-                            ),
-                            shape = RoundedCornerShape(8.dp),
-                        ) {
-                            Text(stringResource(R.string.player_go_back))
+                        Spacer(Modifier.height(24.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Button(
+                                onClick = {
+                                    errorMessage = null
+                                    engine.play(currentUrl)
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFFE8A838),
+                                    contentColor = Color.Black,
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                            ) {
+                                Text(stringResource(R.string.player_retry))
+                            }
+                            Button(
+                                onClick = onBack,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF2E2E40),
+                                    contentColor = Color.White,
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                            ) {
+                                Text(stringResource(R.string.player_go_back))
+                            }
                         }
                     }
                 }
@@ -1063,54 +1438,140 @@ fun PlayerScreen(
 
         // Track selection dialog
         if (showTrackDialog) {
-            TrackSelectionDialog(
-                subtitleTracks = subtitleTracks,
-                audioTracks = audioTracks,
-                onSelectSubtitle = { track ->
-                    if (track == null) {
-                        engine.disableSubtitles()
-                    } else {
-                        engine.selectSubtitleTrack(track.id)
-                    }
-                    showTrackDialog = false
-                },
-                onSelectAudio = { track ->
-                    engine.selectAudioTrack(track.id)
-                    showTrackDialog = false
-                },
-                onDismiss = { showTrackDialog = false },
-            )
+            if (isTv) {
+                TvTrackSelectionOverlay(
+                    subtitleTracks = subtitleTracks,
+                    audioTracks = audioTracks,
+                    onSelectSubtitle = { track ->
+                        if (track == null) {
+                            engine.disableSubtitles()
+                            subtitlesPreferredEnabled = false
+                            preferredSubtitleTrackTag = null
+                        } else {
+                            engine.selectSubtitleTrack(track.id)
+                            subtitlesPreferredEnabled = true
+                            preferredSubtitleTrackTag = trackPreferenceTag(track)
+                        }
+                        showTrackDialog = false
+                        topMenuFocusTick++
+                    },
+                    onSelectAudio = { track ->
+                        engine.selectAudioTrack(track.id)
+                        preferredAudioTrackTag = trackPreferenceTag(track)
+                        showTrackDialog = false
+                        topMenuFocusTick++
+                    },
+                    onDismiss = {
+                        showTrackDialog = false
+                        topMenuFocusTick++
+                    },
+                )
+            } else {
+                TrackSelectionDialog(
+                    subtitleTracks = subtitleTracks,
+                    audioTracks = audioTracks,
+                    onSelectSubtitle = { track ->
+                        if (track == null) {
+                            engine.disableSubtitles()
+                            subtitlesPreferredEnabled = false
+                            preferredSubtitleTrackTag = null
+                        } else {
+                            engine.selectSubtitleTrack(track.id)
+                            subtitlesPreferredEnabled = true
+                            preferredSubtitleTrackTag = trackPreferenceTag(track)
+                        }
+                        showTrackDialog = false
+                    },
+                    onSelectAudio = { track ->
+                        engine.selectAudioTrack(track.id)
+                        preferredAudioTrackTag = trackPreferenceTag(track)
+                        showTrackDialog = false
+                    },
+                    onDismiss = { showTrackDialog = false },
+                )
+            }
         }
 
         if (showAudioDelayDialog) {
-            AudioDelayDialog(
-                currentDelayMs = audioDelayMs,
-                onDelayChange = { newDelay ->
-                    audioDelayMs = newDelay
-                    engine.setAudioDelay(newDelay)
+            if (isTv) {
+                TvAudioDelayOverlay(
+                    currentDelayMs = audioDelayMs,
+                    onSave = { newDelay ->
+                        audioDelayMs = newDelay
+                        engine.setAudioDelay(newDelay)
+                        showAudioDelayDialog = false
+                        topMenuFocusTick++
+                    },
+                    onReset = {
+                        audioDelayMs = 0
+                        engine.setAudioDelay(0)
+                    },
+                    onDismiss = {
+                        showAudioDelayDialog = false
+                        topMenuFocusTick++
+                    },
+                )
+            } else {
+                AudioDelayDialog(
+                    currentDelayMs = audioDelayMs,
+                    onDelayChange = { newDelay ->
+                        audioDelayMs = newDelay
+                        engine.setAudioDelay(newDelay)
+                    },
+                    onReset = {
+                        audioDelayMs = 0
+                        engine.setAudioDelay(0)
+                    },
+                    onDismiss = { showAudioDelayDialog = false },
+                )
+            }
+        }
+
+        if (showPictureFormatPicker && isTv) {
+            TvPictureFormatOverlay(
+                currentFormat = pictureFormat,
+                onSelect = { selected ->
+                    pictureFormat = selected
+                    showControls = true
+                    showPictureFormatPicker = false
+                    topMenuFocusTick++
                 },
-                onReset = {
-                    audioDelayMs = 0
-                    engine.setAudioDelay(0)
+                onDismiss = {
+                    showPictureFormatPicker = false
+                    topMenuFocusTick++
                 },
-                onDismiss = { showAudioDelayDialog = false },
             )
         }
 
         // Equalizer sheet
         if (showEqualizerSheet) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.BottomCenter,
-            ) {
+            if (isTv) {
                 audioEqualizer?.let { eq ->
-                    EqualizerSheet(
+                    TvEqualizerOverlay(
                         equalizer = eq,
-                        onDismiss = { showEqualizerSheet = false },
+                        onDismiss = {
+                            showEqualizerSheet = false
+                            topMenuFocusTick++
+                        },
                         onStateChanged = { state ->
                             scope.launch { prefsRepo.setString("eq_state", state) }
                         },
                     )
+                }
+            } else {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.BottomCenter,
+                ) {
+                    audioEqualizer?.let { eq ->
+                        EqualizerSheet(
+                            equalizer = eq,
+                            onDismiss = { showEqualizerSheet = false },
+                            onStateChanged = { state ->
+                                scope.launch { prefsRepo.setString("eq_state", state) }
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -1197,8 +1658,75 @@ fun PlayerScreen(
             )
         }
 
+        if (showResumePrompt) {
+            val resumeTarget = if (duration > 0L) {
+                resumePromptInitialPositionMs.coerceAtMost(duration)
+            } else {
+                resumePromptInitialPositionMs
+            }
+            if (isTv) {
+                TvResumePlaybackOverlay(
+                    title = currentTitle.ifBlank { "Resume Playback" },
+                    resumeFromMs = resumeTarget,
+                    onResume = {
+                        pendingStartPositionMs = resumeTarget
+                        initialStartPositionConsumed = true
+                        showResumePrompt = false
+                        showControls = false
+                    },
+                    onStartOver = {
+                        pendingStartPositionMs = 0L
+                        initialStartPositionConsumed = true
+                        showResumePrompt = false
+                        showControls = false
+                    },
+                )
+            } else {
+                AlertDialog(
+                    onDismissRequest = {
+                        pendingStartPositionMs = 0L
+                        initialStartPositionConsumed = true
+                        showResumePrompt = false
+                    },
+                    title = { Text("Resume Playback") },
+                    text = { Text("Continue from ${formatTime(resumeTarget)} or start over?") },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                pendingStartPositionMs = resumeTarget
+                                initialStartPositionConsumed = true
+                                showResumePrompt = false
+                            },
+                        ) {
+                            Text("Resume")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = {
+                                pendingStartPositionMs = 0L
+                                initialStartPositionConsumed = true
+                                showResumePrompt = false
+                            },
+                        ) {
+                            Text("Start Over")
+                        }
+                    },
+                )
+            }
+        }
+
+        val tvModalOverlayOpen = isTv && (
+            showTrackDialog ||
+                showAudioDelayDialog ||
+                showPictureFormatPicker ||
+                showEqualizerSheet ||
+                showResumePrompt ||
+                showDevicePicker
+            )
+
         // Controls overlay
-        if (showControls) {
+        if (showControls && !tvModalOverlayOpen) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -1212,7 +1740,11 @@ fun PlayerScreen(
                         .padding(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    FocusableIconButton(onClick = onBack) {
+                    FocusableIconButton(
+                        onClick = onBack,
+                        modifier = topMenuItemModifier(TopMenuFocusTarget.BACK),
+                        onFocused = { lastTopMenuFocusTarget = TopMenuFocusTarget.BACK },
+                    ) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.common_back),
@@ -1234,20 +1766,24 @@ fun PlayerScreen(
                     }
                     // Cast button
                     if (castAvailable) {
-                        FocusableIconButton(onClick = {
-                            try {
-                                if (currentUrl.isNotBlank()) {
-                                    castManager?.requestCast(
-                                        url = currentUrl,
-                                        title = currentTitle,
-                                        posterUrl = posterUrl.ifBlank { null },
-                                    )
-                                }
-                                val routeBtn = androidx.mediarouter.app.MediaRouteButton(context)
-                                com.google.android.gms.cast.framework.CastButtonFactory.setUpMediaRouteButton(context, routeBtn)
-                                routeBtn.performClick()
-                            } catch (_: Throwable) { }
-                        }) {
+                        FocusableIconButton(
+                            onClick = {
+                                try {
+                                    if (currentUrl.isNotBlank()) {
+                                        castManager?.requestCast(
+                                            url = currentUrl,
+                                            title = currentTitle,
+                                            posterUrl = posterUrl.ifBlank { null },
+                                        )
+                                    }
+                                    val routeBtn = androidx.mediarouter.app.MediaRouteButton(context)
+                                    com.google.android.gms.cast.framework.CastButtonFactory.setUpMediaRouteButton(context, routeBtn)
+                                    routeBtn.performClick()
+                                } catch (_: Throwable) { }
+                            },
+                            modifier = topMenuItemModifier(TopMenuFocusTarget.CAST),
+                            onFocused = { lastTopMenuFocusTarget = TopMenuFocusTarget.CAST },
+                        ) {
                             Icon(
                                 if (castManager?.isCasting == true) Icons.Default.CastConnected else Icons.Default.Cast,
                                 contentDescription = "Cast",
@@ -1270,6 +1806,8 @@ fun PlayerScreen(
                                 else -> showDevicePicker = true
                             }
                         },
+                        modifier = topMenuItemModifier(TopMenuFocusTarget.HANDOFF),
+                        onFocused = { lastTopMenuFocusTarget = TopMenuFocusTarget.HANDOFF },
                     ) {
                         Icon(
                             imageVector = Icons.Default.Tv,
@@ -1289,6 +1827,8 @@ fun PlayerScreen(
                             }
                             voiceController.launch()
                         },
+                        modifier = topMenuItemModifier(TopMenuFocusTarget.VOICE),
+                        onFocused = { lastTopMenuFocusTarget = TopMenuFocusTarget.VOICE },
                     ) {
                         val voiceTint = when (voiceController.uiState.value.phase) {
                             VoiceInputPhase.Listening,
@@ -1310,7 +1850,11 @@ fun PlayerScreen(
                     }
 
                     if (subtitleTracks.isNotEmpty() || audioTracks.isNotEmpty()) {
-                        FocusableIconButton(onClick = { showTrackDialog = true }) {
+                        FocusableIconButton(
+                            onClick = { showTrackDialog = true },
+                            modifier = topMenuItemModifier(TopMenuFocusTarget.TRACKS),
+                            onFocused = { lastTopMenuFocusTarget = TopMenuFocusTarget.TRACKS },
+                        ) {
                             Icon(
                                 Icons.Default.Settings,
                                 contentDescription = stringResource(R.string.player_track_selection),
@@ -1320,7 +1864,11 @@ fun PlayerScreen(
                         }
                     }
 
-                    FocusableIconButton(onClick = { showAudioDelayDialog = true }) {
+                    FocusableIconButton(
+                        onClick = { showAudioDelayDialog = true },
+                        modifier = topMenuItemModifier(TopMenuFocusTarget.AUDIO_DELAY),
+                        onFocused = { lastTopMenuFocusTarget = TopMenuFocusTarget.AUDIO_DELAY },
+                    ) {
                         Icon(
                             Icons.Default.Tune,
                             contentDescription = "Audio delay",
@@ -1330,10 +1878,14 @@ fun PlayerScreen(
                     }
 
                     if (audioEqualizer != null) {
-                        FocusableIconButton(onClick = {
-                            showEqualizerSheet = !showEqualizerSheet
-                            showControls = true
-                        }) {
+                        FocusableIconButton(
+                            onClick = {
+                                showEqualizerSheet = !showEqualizerSheet
+                                showControls = true
+                            },
+                            modifier = topMenuItemModifier(TopMenuFocusTarget.EQUALIZER),
+                            onFocused = { lastTopMenuFocusTarget = TopMenuFocusTarget.EQUALIZER },
+                        ) {
                             Icon(
                                 Icons.Default.Equalizer,
                                 contentDescription = "Equalizer",
@@ -1341,6 +1893,45 @@ fun PlayerScreen(
                                 modifier = Modifier.size(24.dp),
                             )
                         }
+                    }
+
+                    if (isTv) {
+                        FocusableIconButton(
+                            onClick = {
+                                showPictureFormatPicker = true
+                                showControls = true
+                            },
+                            modifier = topMenuItemModifier(TopMenuFocusTarget.PICTURE_FORMAT),
+                            onFocused = { lastTopMenuFocusTarget = TopMenuFocusTarget.PICTURE_FORMAT },
+                        ) {
+                            Text(
+                                text = pictureFormat.shortLabel,
+                                color = if (pictureFormat == PlayerPictureFormat.SOURCE) Color.White else com.streamvault.android.ui.theme.Amber,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                            )
+                        }
+                    }
+
+                    // Playback speed
+                    FocusableIconButton(
+                        onClick = {
+                            val speeds = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
+                            val currentIndex = speeds.indexOf(playbackSpeed).takeIf { it >= 0 } ?: 2
+                            val nextIndex = (currentIndex + 1) % speeds.size
+                            playbackSpeed = speeds[nextIndex]
+                            engine.setSpeed(playbackSpeed)
+                            showControls = true
+                        },
+                        modifier = topMenuItemModifier(TopMenuFocusTarget.SPEED),
+                        onFocused = { lastTopMenuFocusTarget = TopMenuFocusTarget.SPEED },
+                    ) {
+                        Text(
+                            text = "${playbackSpeed}x",
+                            color = if (playbackSpeed != 1.0f) com.streamvault.android.ui.theme.Amber else Color.White,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                        )
                     }
                 }
 
@@ -1389,7 +1980,11 @@ fun PlayerScreen(
 
                     FocusableIconButton(
                         onClick = togglePlayback,
-                        modifier = Modifier.focusRequester(playButtonFocusRequester),
+                        modifier = Modifier
+                            .focusRequester(playButtonFocusRequester)
+                            .focusProperties {
+                                up = focusRequesterForTopTarget(lastTopMenuFocusTarget)
+                            },
                     ) {
                         Icon(
                             imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
@@ -1420,6 +2015,11 @@ fun PlayerScreen(
                         .align(Alignment.BottomCenter)
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                 ) {
+                    val seekPreviewPositionMs = if (isSeeking && duration > 0L) {
+                        (sliderPosition * duration).toLong().coerceIn(0L, duration)
+                    } else {
+                        currentPosition
+                    }
                     Slider(
                         value = sliderPosition,
                         onValueChange = {
@@ -1432,6 +2032,35 @@ fun PlayerScreen(
                         },
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    if (duration > 0L && skipSegments.isNotEmpty()) {
+                        BoxWithConstraints(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(7.dp),
+                        ) {
+                            skipSegments.forEach { segment ->
+                                val startFraction = (segment.startMs.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
+                                val endFraction = (segment.endMs.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
+                                val segmentWidthFraction = (endFraction - startFraction).coerceAtLeast(0.004f)
+                                Box(
+                                    modifier = Modifier
+                                        .padding(start = maxWidth * startFraction)
+                                        .width((maxWidth * segmentWidthFraction).coerceAtLeast(2.dp))
+                                        .fillMaxHeight()
+                                        .clip(RoundedCornerShape(2.dp))
+                                        .background(Color(0xB3E8A838)),
+                                )
+                            }
+                        }
+                    }
+                    if (isSeeking) {
+                        Text(
+                            text = "Preview ${formatTime(seekPreviewPositionMs)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White.copy(alpha = 0.86f),
+                            modifier = Modifier.align(Alignment.End),
+                        )
+                    }
                     Row(modifier = Modifier.fillMaxWidth()) {
                         Text(
                             text = formatTime(currentPosition),
@@ -1456,6 +2085,7 @@ fun PlayerScreen(
             devices = handoffTargets,
             onSelectDevice = { device ->
                 showDevicePicker = false
+                topMenuFocusTick++
                 if (handoffContentId.isBlank()) {
                     Toast.makeText(context, "This title cannot be handed off", Toast.LENGTH_SHORT).show()
                     return@SyncDevicePickerDialog
@@ -1479,7 +2109,10 @@ fun PlayerScreen(
                     }
                 }
             },
-            onDismiss = { showDevicePicker = false },
+            onDismiss = {
+                showDevicePicker = false
+                topMenuFocusTick++
+            },
         )
     }
 }
@@ -1489,11 +2122,13 @@ fun PlayerScreen(
 private fun FocusableIconButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    onFocused: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
+    val reduceMotion = rememberTvReduceMotionPreference()
     var focused by remember { mutableStateOf(false) }
     val scale by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = if (focused) 1.15f else 1f,
+        targetValue = if (reduceMotion) 1f else if (focused) 1.15f else 1f,
         label = "iconBtnScale",
     )
     Box(
@@ -1504,7 +2139,13 @@ private fun FocusableIconButton(
                 color = if (focused) com.streamvault.android.ui.theme.Amber else Color.Transparent,
                 shape = RoundedCornerShape(8.dp),
             )
-            .onFocusChanged { focused = it.isFocused }
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) {
+                    onFocused?.invoke()
+                }
+            }
+            .focusable()
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -1627,6 +2268,113 @@ private suspend fun resolveAndPlayNextEpisode(
     }
 }
 
+
+private enum class TopMenuFocusTarget {
+    BACK,
+    CAST,
+    HANDOFF,
+    VOICE,
+    TRACKS,
+    AUDIO_DELAY,
+    EQUALIZER,
+    PICTURE_FORMAT,
+    SPEED,
+}
+
+
+private enum class PlayerPictureFormat(
+    val shortLabel: String,
+    val label: String,
+    val aspectRatio: Float?,
+    val fill: Boolean,
+    val exoResizeMode: Int,
+) {
+    SOURCE("SRC", "Source", null, false, AspectRatioFrameLayout.RESIZE_MODE_FIT),
+    FULLSCREEN("FILL", "Fullscreen", null, true, AspectRatioFrameLayout.RESIZE_MODE_FILL),
+    RATIO_16_9("16:9", "16:9", 16f / 9f, false, AspectRatioFrameLayout.RESIZE_MODE_FIT),
+    RATIO_4_3("4:3", "4:3", 4f / 3f, false, AspectRatioFrameLayout.RESIZE_MODE_FIT),
+    RATIO_21_9("21:9", "21:9", 21f / 9f, false, AspectRatioFrameLayout.RESIZE_MODE_FIT),
+    ;
+
+    fun next(): PlayerPictureFormat {
+        val all = entries
+        val index = all.indexOf(this)
+        return all[(index + 1) % all.size]
+    }
+}
+
+private data class PlayerPlaybackPrefs(
+    val audioDelayMs: Int,
+    val playbackSpeed: Float,
+    val pictureFormat: PlayerPictureFormat,
+)
+
+private data class PlayerTrackPrefs(
+    val audioTrackTag: String?,
+    val subtitleTrackTag: String?,
+    val subtitlesEnabled: Boolean,
+)
+
+private fun buildPlayerPlaybackPrefsKey(
+    mediaType: String,
+    mediaId: String,
+    showTmdbId: Int?,
+    showImdbId: String?,
+    title: String,
+    url: String,
+): String {
+    val id = when {
+        mediaId.isNotBlank() -> "${mediaType}:media:$mediaId"
+        showTmdbId != null && showTmdbId > 0 -> "${mediaType}:tmdb:$showTmdbId"
+        !showImdbId.isNullOrBlank() -> "${mediaType}:imdb:$showImdbId"
+        title.isNotBlank() -> "${mediaType}:title:${title.lowercase()}"
+        else -> "${mediaType}:url:${url.take(180)}"
+    }
+    return "player_playback_prefs_${id.hashCode().toUInt().toString(16)}"
+}
+
+private fun serializePlayerPlaybackPrefs(prefs: PlayerPlaybackPrefs): String {
+    return "${prefs.audioDelayMs}|${prefs.playbackSpeed}|${prefs.pictureFormat.name}"
+}
+
+private fun parsePlayerPlaybackPrefs(raw: String): PlayerPlaybackPrefs? {
+    val parts = raw.split('|')
+    if (parts.size < 3) return null
+    val delay = parts[0].toIntOrNull() ?: return null
+    val speed = parts[1].toFloatOrNull() ?: return null
+    val format = runCatching { PlayerPictureFormat.valueOf(parts[2]) }
+        .getOrElse { PlayerPictureFormat.SOURCE }
+    return PlayerPlaybackPrefs(
+        audioDelayMs = delay.coerceIn(-2000, 2000),
+        playbackSpeed = speed.coerceIn(0.25f, 3.0f),
+        pictureFormat = format,
+    )
+}
+
+private fun serializePlayerTrackPrefs(prefs: PlayerTrackPrefs): String {
+    val audio = prefs.audioTrackTag.orEmpty()
+    val subtitle = prefs.subtitleTrackTag.orEmpty()
+    return "$audio|$subtitle|${if (prefs.subtitlesEnabled) "1" else "0"}"
+}
+
+private fun parsePlayerTrackPrefs(raw: String): PlayerTrackPrefs? {
+    val parts = raw.split('|')
+    if (parts.size < 3) return null
+    return PlayerTrackPrefs(
+        audioTrackTag = parts[0].ifBlank { null },
+        subtitleTrackTag = parts[1].ifBlank { null },
+        subtitlesEnabled = parts[2] == "1",
+    )
+}
+
+private fun trackPreferenceTag(track: TrackDescription): String {
+    return track.language
+        ?.trim()
+        ?.lowercase()
+        ?.takeIf { it.isNotEmpty() }
+        ?: track.label.trim().lowercase().take(48)
+}
+
 private fun formatTime(ms: Long): String {
     if (ms <= 0) return "0:00"
     val totalSeconds = ms / 1000
@@ -1637,6 +2385,114 @@ private fun formatTime(ms: Long): String {
         "%d:%02d:%02d".format(hours, minutes, seconds)
     } else {
         "%d:%02d".format(minutes, seconds)
+    }
+}
+
+@Composable
+private fun TvPictureFormatOverlay(
+    currentFormat: PlayerPictureFormat,
+    onSelect: (PlayerPictureFormat) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    BackHandler(onBack = onDismiss)
+    val options = PlayerPictureFormat.entries
+    val itemRequesters = remember(options) { List(options.size) { FocusRequester() } }
+
+    LaunchedEffect(currentFormat, options) {
+        val index = options.indexOf(currentFormat).takeIf { it >= 0 } ?: 0
+        val requester = itemRequesters.getOrNull(index) ?: return@LaunchedEffect
+        repeat(8) {
+            val requested = runCatching { requester.requestFocus(); true }.getOrDefault(false)
+            if (requested) return@LaunchedEffect
+            delay(40)
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xE0121620)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth(0.62f)
+                .clip(RoundedCornerShape(18.dp))
+                .background(Color(0xFF111827))
+                .padding(horizontal = 20.dp, vertical = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = "Picture Format",
+                style = MaterialTheme.typography.headlineSmall,
+                color = Color.White,
+            )
+            Text(
+                text = "Enter applies instantly. Back closes.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.White.copy(alpha = 0.7f),
+            )
+
+            options.forEachIndexed { index, option ->
+                var focused by remember(option) { mutableStateOf(false) }
+                val selected = option == currentFormat
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(itemRequesters[index])
+                        .onFocusChanged { focused = it.isFocused }
+                        .focusable()
+                        .onPreviewKeyEvent { event ->
+                            if (event.type == KeyEventType.KeyDown &&
+                                (event.key == Key.DirectionCenter || event.key == Key.Enter || event.key == Key.NumPadEnter)
+                            ) {
+                                onSelect(option)
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = { onSelect(option) },
+                        )
+                        .border(
+                            width = if (focused) 2.dp else 1.dp,
+                            color = when {
+                                focused -> com.streamvault.android.ui.theme.Amber
+                                selected -> com.streamvault.android.ui.theme.Amber.copy(alpha = 0.6f)
+                                else -> Color.White.copy(alpha = 0.15f)
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                        )
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(
+                            when {
+                                focused -> Color(0xFF22304A)
+                                selected -> Color(0x332C3E62)
+                                else -> Color(0x221B2438)
+                            },
+                        )
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = option.label,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = Color.White,
+                    )
+                    if (selected) {
+                        Text(
+                            text = "Active",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = com.streamvault.android.ui.theme.Amber,
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1782,4 +2638,111 @@ private fun AudioDelayDialog(
             }
         },
     )
+}
+
+@Composable
+private fun TvPlaybackErrorBanner(
+    message: String,
+    onRetry: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth(0.88f)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xE0151A22))
+            .border(1.dp, Color(0x77E8A838), RoundedCornerShape(12.dp))
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Icon(
+            imageVector = Icons.Default.ErrorOutline,
+            contentDescription = null,
+            tint = Color(0xFFE8A838),
+            modifier = Modifier.size(20.dp),
+        )
+        Text(
+            text = message,
+            color = Color.White,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 2,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onRetry) { Text(stringResource(R.string.player_retry)) }
+        TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_close)) }
+    }
+}
+
+@Composable
+private fun TvResumePlaybackOverlay(
+    title: String,
+    resumeFromMs: Long,
+    onResume: () -> Unit,
+    onStartOver: () -> Unit,
+) {
+    BackHandler(onBack = onStartOver)
+    val resumeRequester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        repeat(8) {
+            val requested = runCatching { resumeRequester.requestFocus(); true }.getOrDefault(false)
+            if (requested) return@LaunchedEffect
+            delay(40)
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xA6000000)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth(0.64f)
+                .clip(RoundedCornerShape(18.dp))
+                .background(Color(0xFF101621))
+                .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(18.dp))
+                .padding(horizontal = 20.dp, vertical = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleLarge,
+                color = Color.White,
+                maxLines = 1,
+            )
+            Text(
+                text = "Continue from ${formatTime(resumeFromMs)} or start over?",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White.copy(alpha = 0.84f),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                FocusableIconButton(
+                    onClick = onResume,
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(resumeRequester),
+                ) {
+                    Text(
+                        text = "Resume",
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+                FocusableIconButton(
+                    onClick = onStartOver,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        text = "Start Over",
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+            }
+        }
+    }
 }

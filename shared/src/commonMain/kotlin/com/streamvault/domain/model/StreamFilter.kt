@@ -21,5 +21,5 @@ val DEFAULT_STREAM_GROUPS = listOf(
     StreamGroup("4K / HDR", "(?i)(2160p|4k|uhd|hdr|dv)", 0),
     StreamGroup("1080p", "(?i)(1080p)", 1),
     StreamGroup("720p", "(?i)(720p)", 2),
-    StreamGroup("Real-Debrid", "(?i)(\\[RD\\]|debrid)", 0),
+    StreamGroup("Cloud", "(?i)(\\[RD\\]|debrid)", 0),
 )

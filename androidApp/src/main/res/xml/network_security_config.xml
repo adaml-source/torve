@@ -8,8 +8,8 @@
         <domain includeSubdomains="true">localhost</domain>
     </domain-config>
 
-    <!-- Allow cleartext globally — needed for user-configured servers -->
-    <!-- All sensitive API calls (debrid, Trakt, TMDB, OMDB) use HTTPS -->
+    <!-- Allow cleartext globally — needed for user-configured media servers (Jellyfin, Plex, Kodi) -->
+    <!-- that may run on non-standard ports/IPs. All API calls use HTTPS. -->
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />

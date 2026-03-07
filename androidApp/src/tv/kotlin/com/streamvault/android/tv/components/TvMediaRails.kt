@@ -122,6 +122,17 @@ fun TvMediaRails(
     val requesterMap = remember { mutableMapOf<String, FocusRequester>() }
     val signature = remember(rails) { rails.joinToString("|") { "${it.key}:${it.items.size}" } }
 
+    // Prune stale entries when rails change so disposed FocusRequesters
+    // don't accumulate and cause crashes on focus restore.
+    LaunchedEffect(signature) {
+        val validKeys = mutableSetOf<String>()
+        for (rail in rails) {
+            for (i in rail.items.indices) { validKeys.add("${rail.key}:$i") }
+            validKeys.add("${rail.key}:see_all")
+        }
+        requesterMap.keys.retainAll(validKeys)
+    }
+
     LaunchedEffect(signature, shouldAutoFocus) {
         if (!shouldAutoFocus) return@LaunchedEffect
         if (rails.isEmpty()) return@LaunchedEffect
@@ -131,7 +142,7 @@ fun TvMediaRails(
         } ?: firstKey
         val targetIndex = focusMemory.lastFocusedIndexByRow[targetRowKey] ?: 0
         val target = requesterMap["$targetRowKey:$targetIndex"] ?: requesterMap["$firstKey:0"]
-        target?.requestFocus()
+        try { target?.requestFocus() } catch (_: Throwable) { }
     }
 
     when {
@@ -147,10 +158,20 @@ fun TvMediaRails(
         }
 
         rails.isEmpty() -> {
+            val emptyRequester = remember { FocusRequester() }
+            onFirstContentRequester(emptyRequester)
             Box(
                 modifier = modifier
                     .fillMaxSize()
-                    .padding(horizontal = 44.dp),
+                    .padding(horizontal = 44.dp)
+                    .focusRequester(emptyRequester)
+                    .focusProperties { left = railFocusRequester }
+                    .onFocusChanged { if (it.isFocused) onContentFocused(emptyRequester) }
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {},
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -213,7 +234,10 @@ fun TvMediaRails(
                                         if (itemIndex == 0) {
                                             left = railFocusRequester
                                         }
-                                        if (rowIndex == 0 && headerFocusRequester != null) {
+                                        // Only redirect UP to the header when the hero overlay
+                                        // is actually rendered — otherwise the FocusRequester
+                                        // is unattached and causes a crash.
+                                        if (rowIndex == 0 && headerFocusRequester != null && heroOverlay != null) {
                                             up = headerFocusRequester
                                         }
                                     }
@@ -264,7 +288,7 @@ fun TvMediaRails(
                                         modifier = Modifier
                                             .focusRequester(seeAllRequester)
                                             .focusProperties {
-                                                if (rowIndex == 0 && headerFocusRequester != null) {
+                                                if (rowIndex == 0 && headerFocusRequester != null && heroOverlay != null) {
                                                     up = headerFocusRequester
                                                 }
                                             },

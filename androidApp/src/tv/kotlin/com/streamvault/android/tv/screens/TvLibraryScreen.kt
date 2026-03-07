@@ -33,6 +33,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.res.stringResource
@@ -46,6 +47,7 @@ import com.streamvault.android.tv.components.rememberTvFocusMemory
 import com.streamvault.android.tv.toMediaItem
 import com.streamvault.android.ui.theme.*
 import com.streamvault.domain.model.DownloadMediaType
+import com.streamvault.domain.model.DownloadStatus
 import com.streamvault.domain.model.MediaItem
 import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.repository.WatchlistRepository
@@ -58,7 +60,7 @@ private data class TvLibraryUiState(
     val error: String? = null,
 )
 
-private enum class LibraryTab { WATCHLIST, DOWNLOADS, RECORDINGS }
+private enum class LibraryTab { WATCHLIST, DOWNLOADS }
 
 @Composable
 fun TvLibraryScreen(
@@ -80,7 +82,6 @@ fun TvLibraryScreen(
         val tabLabels = listOf(
             stringResource(R.string.tv_library_tab_watchlist),
             stringResource(R.string.tv_library_tab_downloads),
-            stringResource(R.string.tv_library_tab_recordings),
         )
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -97,7 +98,12 @@ fun TvLibraryScreen(
                 TvLibraryTabChip(
                     label = label,
                     isSelected = index == selectedTab,
-                    modifier = Modifier.focusRequester(requester),
+                    modifier = Modifier
+                        .focusRequester(requester)
+                        .then(
+                            if (index == 0) Modifier.focusProperties { left = railFocusRequester }
+                            else Modifier
+                        ),
                     onFocused = { onContentFocused(requester) },
                     onClick = { selectedTab = index },
                 )
@@ -127,7 +133,7 @@ fun TvLibraryScreen(
                 onSeeAll = onSeeAll,
                 shouldAutoFocus = shouldAutoFocus,
             )
-            LibraryTab.RECORDINGS -> RecordingsPlaceholder()
+            // Recordings tab removed
         }
     }
 }
@@ -155,7 +161,6 @@ private fun WatchlistContent(
     }
 
     LaunchedEffect(Unit) {
-        if (uiState.rails.isNotEmpty()) return@LaunchedEffect
         uiState = TvLibraryUiState(loading = true)
         uiState = try {
             val allItems = watchlistRepo.getAll()
@@ -220,11 +225,11 @@ private fun DownloadsContent(
     val catalogueState by downloadCatalogueViewModel.state.collectAsState()
     val focusMemory = rememberTvFocusMemory()
 
-    LaunchedEffect(Unit) {
-        downloadCatalogueViewModel.loadCatalogue()
-    }
+    // loadCatalogue() is already called in the ViewModel's init block;
+    // calling it again here would reset isLoading and briefly clear the rails,
+    // which can cause focus loss and crashes during navigation.
 
-    val rails = remember(catalogueState.allDownloadedItems) {
+    val rails = remember(catalogueState.allDownloadedItems, catalogueState.activeDownloads) {
         val items = catalogueState.allDownloadedItems
         val movieItems = items.filter { it.type == DownloadMediaType.MOVIE }.map { dl ->
             MediaItem(
@@ -242,7 +247,21 @@ private fun DownloadsContent(
                 posterUrl = dl.posterUrl,
             )
         }
+        val activeItems = catalogueState.activeDownloads
+            .filter { it.status == DownloadStatus.DOWNLOADING || it.status == DownloadStatus.PENDING }
+            .map { dl ->
+                val pct = if ((dl.fileSizeBytes ?: 0) > 0) (dl.downloadedBytes * 100 / dl.fileSizeBytes!!) else 0
+                MediaItem(
+                    id = dl.mediaId,
+                    type = if (dl.mediaType == MediaType.SERIES) MediaType.SERIES else MediaType.MOVIE,
+                    title = "${dl.title} (${pct}%)",
+                    posterUrl = dl.posterUrl,
+                )
+            }
         buildList {
+            if (activeItems.isNotEmpty()) {
+                add(TvContentRail(key = "dl_active", title = "Downloading", items = activeItems))
+            }
             if (movieItems.isNotEmpty()) {
                 add(TvContentRail(key = "dl_movies", title = "Downloaded Movies", items = movieItems.distinctBy { it.id }))
             }
@@ -264,23 +283,9 @@ private fun DownloadsContent(
         loading = catalogueState.isLoading,
         emptyMessage = emptyMessage,
         onMediaFocused = onMediaFocused,
-        onSeeAll = onSeeAll,
+        onSeeAll = null, // No See All for downloads — items are local, not from metadata API
         shouldAutoFocus = shouldAutoFocus,
     )
-}
-
-@Composable
-private fun RecordingsPlaceholder() {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = stringResource(R.string.tv_library_recordings_coming_soon),
-            style = MaterialTheme.typography.bodyLarge,
-            color = Silver,
-        )
-    }
 }
 
 @Composable

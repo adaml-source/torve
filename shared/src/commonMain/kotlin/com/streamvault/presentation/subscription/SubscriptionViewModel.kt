@@ -34,7 +34,7 @@ class SubscriptionViewModel(
             try {
                 subscriptionRepo.ensureFreeTier()
                 val sub = subscriptionRepo.getActiveSubscription()
-                val isPro = subscriptionRepo.isPro()
+                val isPro = true // TODO: revert — dev override // subscriptionRepo.isPro()
                 _state.update {
                     it.copy(
                         subscription = sub,
@@ -116,7 +116,7 @@ class SubscriptionViewModel(
                 PremiumFeature.STREAM_PLAYBACK -> "Stream Playback"
                 PremiumFeature.DOWNLOAD -> "Downloads"
                 PremiumFeature.CHANNELS -> "Channels"
-                PremiumFeature.MULTI_DEBRID -> "Multi-Debrid"
+                PremiumFeature.MULTI_DEBRID -> "Multi-Cloud"
                 PremiumFeature.ADVANCED_FILTERS -> "Advanced Filters"
             }
             _state.update { it.copy(showPaywall = true, paywallFeature = featureName) }

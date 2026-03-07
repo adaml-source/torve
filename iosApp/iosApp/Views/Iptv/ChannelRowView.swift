@@ -6,7 +6,7 @@ struct ChannelRowView: View {
     let onPlay: () -> Void
     let onFavorite: () -> Void
 
-    private var channel: IptvChannel { enriched.channel }
+    private var channel: Channel { enriched.channel }
 
     var body: some View {
         Button(action: onPlay) {

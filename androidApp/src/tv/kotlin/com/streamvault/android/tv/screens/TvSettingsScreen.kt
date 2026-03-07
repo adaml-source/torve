@@ -37,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,6 +48,11 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.streamvault.android.ui.theme.*
@@ -56,6 +62,8 @@ import androidx.compose.ui.zIndex
 // LocaleListCompat removed — no longer applying locale inline
 import com.streamvault.android.R
 import com.streamvault.android.sync.SyncCoordinator
+import com.streamvault.android.tv.settings.isTvReduceMotionEnabled
+import com.streamvault.android.tv.settings.setTvReduceMotionEnabled
 import com.streamvault.android.tv.components.TvClickToEditOutlinedTextField
 import com.streamvault.android.ui.settings.AddonCategory
 import com.streamvault.android.ui.settings.POPULAR_ADDONS
@@ -68,6 +76,11 @@ import com.streamvault.presentation.mdblist.MdbListTab
 import com.streamvault.presentation.mdblist.MdbListViewModel
 import com.streamvault.presentation.settings.AppLanguage
 import com.streamvault.presentation.settings.SettingsViewModel
+import com.streamvault.presentation.stats.StatsViewModel
+import com.streamvault.presentation.subscription.SubscriptionViewModel
+import com.streamvault.android.tv.TvNotificationQueue
+import com.streamvault.android.tv.NotificationType
+import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
 enum class TvSetupMode { ANDROID_PHONE, IOS_PHONE, TV_ONLY }
@@ -85,9 +98,12 @@ fun TvSettingsScreen(
     channelsViewModel: ChannelsViewModel = koinInject(),
     addonViewModel: AddonViewModel = koinInject(),
     mdbListViewModel: MdbListViewModel = koinInject(),
+    subscriptionViewModel: SubscriptionViewModel = koinInject(),
+    statsViewModel: StatsViewModel = koinInject(),
 ) {
     val syncState by syncCoordinator.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
+    val subscriptionState by subscriptionViewModel.state.collectAsState()
     val channelsState by channelsViewModel.state.collectAsState()
     val addonState by addonViewModel.state.collectAsState()
     val mdbListState by mdbListViewModel.state.collectAsState()
@@ -133,6 +149,7 @@ fun TvSettingsScreen(
     var addonCategory by remember { mutableStateOf(AddonCategory.ALL) }
 
     val context = LocalContext.current
+    var reduceMotionEnabled by remember(context) { mutableStateOf(isTvReduceMotionEnabled(context)) }
     val prefs = remember { context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE) }
     var setupMode by remember {
         mutableStateOf(prefs.getString("setup_mode", null)?.let { TvSetupMode.valueOf(it) })
@@ -161,9 +178,29 @@ fun TvSettingsScreen(
     var previousShowAddPlaylist by remember { mutableStateOf(showAddPlaylist) }
     onFirstContentRequester(settingsContentRequester)
 
+    // When setup mode changes, the LazyColumn swaps — refocus the first card
+    LaunchedEffect(setupMode) {
+        kotlinx.coroutines.delay(150)
+        runCatching { settingsContentRequester.requestFocus() }
+    }
+
+    val playlistFormRequester = remember { FocusRequester() }
+
     LaunchedEffect(showAddPlaylist) {
         if (previousShowAddPlaylist && !showAddPlaylist) {
             onContentFocused(addPlaylistCardRequester)
+        }
+        if (!previousShowAddPlaylist && showAddPlaylist) {
+            // Scroll to form and focus first interactive element
+            kotlinx.coroutines.delay(100)
+            val formIndex = settingsListState.layoutInfo.totalItemsCount - 1
+            if (formIndex >= 0) {
+                settingsListState.animateScrollToItem(
+                    (formIndex - 2).coerceAtLeast(0),
+                )
+            }
+            kotlinx.coroutines.delay(50)
+            runCatching { playlistFormRequester.requestFocus() }
         }
         previousShowAddPlaylist = showAddPlaylist
     }
@@ -325,10 +362,40 @@ fun TvSettingsScreen(
     }
 
     // ── Main settings (mode selected) ──
+    val wrapScope = rememberCoroutineScope()
     LazyColumn(
         state = settingsListState,
         modifier = Modifier
-            .fillMaxSize(),
+            .fillMaxSize()
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                val totalItems = settingsListState.layoutInfo.totalItemsCount
+                if (totalItems == 0) return@onPreviewKeyEvent false
+                when (event.key) {
+                    Key.DirectionUp -> {
+                        // If first visible item is index 0 and scrolled to top, wrap to bottom
+                        val first = settingsListState.firstVisibleItemIndex
+                        val offset = settingsListState.firstVisibleItemScrollOffset
+                        if (first == 0 && offset == 0) {
+                            wrapScope.launch {
+                                settingsListState.scrollToItem(totalItems - 1)
+                            }
+                            true
+                        } else false
+                    }
+                    Key.DirectionDown -> {
+                        // If the last visible item is the final item, wrap to top
+                        val lastVisible = settingsListState.layoutInfo.visibleItemsInfo.lastOrNull()
+                        if (lastVisible != null && lastVisible.index >= totalItems - 1) {
+                            wrapScope.launch {
+                                settingsListState.scrollToItem(0)
+                            }
+                            true
+                        } else false
+                    }
+                    else -> false
+                }
+            },
         contentPadding = PaddingValues(start = 40.dp, top = 20.dp, end = 40.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -366,6 +433,96 @@ fun TvSettingsScreen(
                 onFocused = { onContentFocused(requester) },
                 onClick = { syncCoordinator.startTvPairingFlow() },
             )
+        }
+
+        // Sync error (if any)
+        syncState.error?.let { syncError ->
+            item(key = "sync_error") {
+                val requester = remember("sync_error") { FocusRequester() }
+                TvSettingCard(
+                    title = stringResource(R.string.tv_settings_sync_error),
+                    subtitle = syncError,
+                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                    focusRequester = requester,
+                    onFocused = { onContentFocused(requester) },
+                    onClick = { syncCoordinator.clearError() },
+                )
+            }
+        }
+
+        // Subscription — Google Play billing only
+        item(key = "subscription") {
+            val requester = remember("subscription") { FocusRequester() }
+            val billingManager: com.streamvault.android.billing.GooglePlayBillingManager = koinInject()
+            val purchaseResult by billingManager.purchaseResult.collectAsState()
+            val activity = LocalContext.current as? android.app.Activity
+
+            LaunchedEffect(Unit) { billingManager.initialize() }
+
+            LaunchedEffect(purchaseResult) {
+                when (val result = purchaseResult) {
+                    is com.streamvault.android.billing.GooglePlayBillingManager.PurchaseResult.Success -> {
+                        subscriptionViewModel.purchase(result.purchaseToken)
+                        billingManager.clearPurchaseResult()
+                        TvNotificationQueue.post("Torve Pro activated!", NotificationType.SUCCESS)
+                    }
+                    is com.streamvault.android.billing.GooglePlayBillingManager.PurchaseResult.AlreadyOwned -> {
+                        subscriptionViewModel.purchase("restored_purchase")
+                        billingManager.clearPurchaseResult()
+                        TvNotificationQueue.post("Purchase restored!", NotificationType.SUCCESS)
+                    }
+                    is com.streamvault.android.billing.GooglePlayBillingManager.PurchaseResult.Error -> {
+                        TvNotificationQueue.post(result.message, NotificationType.ERROR)
+                        billingManager.clearPurchaseResult()
+                    }
+                    else -> {}
+                }
+            }
+
+            val formattedPrice = billingManager.getFormattedPrice()
+            val subLabel = if (subscriptionState.isPro) {
+                "Lifetime — Active"
+            } else {
+                "Free — ${formattedPrice ?: "$4.99"} for Lifetime"
+            }
+
+            Column {
+                TvSettingCard(
+                    title = stringResource(R.string.tv_settings_subscription),
+                    subtitle = subLabel,
+                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                    focusRequester = requester,
+                    onFocused = { onContentFocused(requester) },
+                    onClick = {
+                        if (!subscriptionState.isPro) {
+                            activity?.let { billingManager.launchPurchase(it) }
+                        }
+                    },
+                )
+
+                if (!subscriptionState.isPro) {
+                    val restoreFocused = remember { mutableStateOf(false) }
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .onFocusChanged { restoreFocused.value = it.isFocused }
+                            .focusProperties { left = railFocusRequester }
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                            ) { billingManager.queryExistingPurchases() }
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (restoreFocused.value) Graphite else Charcoal)
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                    ) {
+                        Text(
+                            text = "Restore Purchase",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (restoreFocused.value) Snow else Silver,
+                        )
+                    }
+                }
+            }
         }
 
         when (setupMode) {
@@ -462,6 +619,7 @@ fun TvSettingsScreen(
                         onClick = {
                             if (hasPairedPhone) {
                                 syncCoordinator.refreshDevices()
+                                TvNotificationQueue.post("Waiting for sync\u2026 Open Torve on your phone and tap \"Sync Settings to TV\".")
                             } else {
                                 syncCoordinator.startTvPairingFlow()
                             }
@@ -551,430 +709,6 @@ fun TvSettingsScreen(
                             }
                         },
                     )
-                }
-
-                // ── Channels section (TV-only) ──
-                item(key = "section_channels") {
-                    TvSectionHeader(text = stringResource(R.string.tv_settings_section_channels))
-                }
-
-                if (channelsState.playlists.isEmpty()) {
-                    item(key = "no_playlists") {
-                        val requester = remember("no_playlists") { FocusRequester() }
-                        TvSettingCard(
-                            title = stringResource(R.string.tv_settings_no_playlists),
-                            subtitle = stringResource(R.string.tv_settings_tap_to_edit),
-                            modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
-                            focusRequester = requester,
-                            onFocused = { onContentFocused(requester) },
-                            onClick = { showAddPlaylist = true },
-                        )
-                    }
-                } else {
-                    items(
-                        channelsState.playlists,
-                        key = { "playlist_${it.id}" },
-                    ) { playlist ->
-                        val requester = remember("playlist_${playlist.id}") { FocusRequester() }
-                        val isConfirming = confirmRemoveId == playlist.id
-                        TvSettingCard(
-                            title = playlist.name,
-                            subtitle = if (isConfirming) {
-                                stringResource(R.string.tv_settings_playlist_confirm_remove)
-                            } else {
-                                "${playlist.channelCount} ${stringResource(R.string.tv_settings_section_channels)}"
-                            },
-                            modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
-                            focusRequester = requester,
-                            onFocused = { onContentFocused(requester) },
-                            onClick = {
-                                if (isConfirming) {
-                                    channelsViewModel.removePlaylist(playlist.id)
-                                    confirmRemoveId = null
-                                    onContentFocused(addPlaylistCardRequester)
-                                } else {
-                                    confirmRemoveId = playlist.id
-                                }
-                            },
-                        )
-                    }
-                }
-
-                selectedPlaylistForEpg?.let { playlist ->
-                    item(key = "playlist_epg_url") {
-                        val subtitle = if (playlist.epgUrl.isNullOrBlank()) {
-                            "${playlist.name} • ${stringResource(R.string.tv_settings_not_set)}"
-                        } else {
-                            "${playlist.name} • ${stringResource(R.string.tv_settings_set)}"
-                        }
-                        TvSettingCard(
-                            title = stringResource(R.string.channels_epg_optional),
-                            subtitle = subtitle,
-                            modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
-                            focusRequester = editPlaylistEpgCardRequester,
-                            onFocused = { onContentFocused(editPlaylistEpgCardRequester) },
-                            onClick = {
-                                if (showEditSelectedPlaylistEpg) {
-                                    onContentFocused(editPlaylistEpgCardRequester)
-                                }
-                                showEditSelectedPlaylistEpg = !showEditSelectedPlaylistEpg
-                            },
-                        )
-                    }
-                }
-
-                // Add playlist card
-                item(key = "add_playlist") {
-                    TvSettingCard(
-                        title = stringResource(R.string.tv_settings_add_playlist),
-                        subtitle = if (showAddPlaylist) stringResource(R.string.tv_settings_tap_to_edit)
-                                   else stringResource(R.string.tv_settings_tap_to_edit),
-                        modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
-                        focusRequester = addPlaylistCardRequester,
-                        onFocused = { onContentFocused(addPlaylistCardRequester) },
-                        onClick = {
-                            if (showAddPlaylist) {
-                                onContentFocused(addPlaylistCardRequester)
-                            }
-                            showAddPlaylist = !showAddPlaylist
-                        },
-                    )
-                }
-
-                if (showEditSelectedPlaylistEpg && selectedPlaylistForEpg != null) {
-                    item(key = "playlist_epg_form") {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(Charcoal.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
-                                .border(1.dp, Steel.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
-                                .padding(20.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            TvClickToEditOutlinedTextField(
-                                value = selectedPlaylistEpgDraft,
-                                onValueChange = { selectedPlaylistEpgDraft = it },
-                                label = { Text(stringResource(R.string.channels_epg_optional)) },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                            val saveRequester = remember("selected_playlist_epg_save") { FocusRequester() }
-                            TvSettingCard(
-                                title = stringResource(R.string.tv_settings_playlist_save),
-                                subtitle = "",
-                                modifier = Modifier.fillMaxWidth(),
-                                focusRequester = saveRequester,
-                                onFocused = { onContentFocused(saveRequester) },
-                                onClick = {
-                                    channelsViewModel.updatePlaylistEpgUrl(
-                                        playlistId = selectedPlaylistForEpg.id,
-                                        epgUrl = selectedPlaylistEpgDraft,
-                                    )
-                                    showEditSelectedPlaylistEpg = false
-                                    onContentFocused(editPlaylistEpgCardRequester)
-                                },
-                            )
-                        }
-                    }
-                }
-
-                item(key = "channels_audio_passthrough") {
-                    val requester = remember("channels_audio_passthrough") { FocusRequester() }
-                    TvSettingCard(
-                        title = stringResource(R.string.tv_settings_live_audio_passthrough),
-                        subtitle = if (channelsState.audioPassthroughEnabled) {
-                            stringResource(R.string.tv_settings_enabled)
-                        } else {
-                            stringResource(R.string.tv_settings_disabled)
-                        },
-                        modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
-                        focusRequester = requester,
-                        onFocused = { onContentFocused(requester) },
-                        onClick = {
-                            channelsViewModel.setAudioPassthroughEnabled(!channelsState.audioPassthroughEnabled)
-                        },
-                    )
-                }
-
-                item(key = "channels_audio_surround") {
-                    val requester = remember("channels_audio_surround") { FocusRequester() }
-                    TvSettingCard(
-                        title = stringResource(R.string.tv_settings_live_audio_surround),
-                        subtitle = if (channelsState.preferSurroundCodecs) {
-                            stringResource(R.string.tv_settings_enabled)
-                        } else {
-                            stringResource(R.string.tv_settings_disabled)
-                        },
-                        modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
-                        focusRequester = requester,
-                        onFocused = { onContentFocused(requester) },
-                        onClick = {
-                            channelsViewModel.setPreferSurroundCodecs(!channelsState.preferSurroundCodecs)
-                        },
-                    )
-                }
-
-                // ── Channel Manager ──
-                item(key = "manage_channels") {
-                    val requester = remember("manage_channels") { FocusRequester() }
-                    val allCats = channelsState.allCategories
-                    val hiddenCount = allCats.count { it.name in channelsState.hiddenCategories }
-                    val visibleCount = allCats.size - hiddenCount
-                    TvSettingCard(
-                        title = stringResource(R.string.tv_settings_manage_channels),
-                        subtitle = if (allCats.isEmpty()) {
-                            stringResource(R.string.tv_settings_no_categories)
-                        } else {
-                            stringResource(R.string.tv_settings_channels_visible, visibleCount, allCats.size)
-                        },
-                        modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
-                        focusRequester = requester,
-                        onFocused = { onContentFocused(requester) },
-                        onClick = { showChannelManager = !showChannelManager },
-                    )
-                }
-
-                if (showChannelManager && channelsState.allCategories.isNotEmpty()) {
-                    // Show All / Hide All buttons
-                    item(key = "channel_mgr_actions") {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.padding(bottom = 4.dp),
-                        ) {
-                            val showAllReq = remember("cm_show_all") { FocusRequester() }
-                            TvSettingCard(
-                                title = stringResource(R.string.tv_settings_show_all),
-                                subtitle = "",
-                                modifier = Modifier.weight(1f),
-                                focusRequester = showAllReq,
-                                onFocused = { onContentFocused(showAllReq) },
-                                onClick = { channelsViewModel.showAllCategories() },
-                            )
-                            val hideAllReq = remember("cm_hide_all") { FocusRequester() }
-                            TvSettingCard(
-                                title = stringResource(R.string.tv_settings_hide_all),
-                                subtitle = "",
-                                modifier = Modifier.weight(1f),
-                                focusRequester = hideAllReq,
-                                onFocused = { onContentFocused(hideAllReq) },
-                                onClick = { channelsViewModel.hideAllCategories() },
-                            )
-                        }
-                    }
-
-                    // Group categories by country (computed outside LazyListScope)
-                    val allCats = channelsState.allCategories
-                    val hiddenCats = channelsState.hiddenCategories
-                    val countryCats = allCats
-                        .groupBy { it.countryCode?.uppercase() ?: "OTHER" }
-                        .toSortedMap(compareBy { if (it == "OTHER") "ZZZ" else it })
-
-                    countryCats.forEach { (country, cats) ->
-                        val visibleInCountry = cats.count { it.name !in hiddenCats }
-                        val allHiddenInCountry = visibleInCountry == 0
-                        val isExpanded = expandedCountry == country
-
-                        // Country header row — click to expand/collapse
-                        item(key = "country_$country") {
-                            val req = remember("country_$country") { FocusRequester() }
-                            TvSettingCard(
-                                title = "$country  ($visibleInCountry / ${cats.size})",
-                                subtitle = if (isExpanded) "Press to collapse" else "${cats.size} groups — press to expand",
-                                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
-                                focusRequester = req,
-                                onFocused = { onContentFocused(req) },
-                                onClick = {
-                                    expandedCountry = if (isExpanded) null else country
-                                },
-                            )
-                        }
-
-                        // Toggle all for this country when expanded
-                        if (isExpanded) {
-                            item(key = "country_toggle_$country") {
-                                val req = remember("country_toggle_$country") { FocusRequester() }
-                                TvSettingCard(
-                                    title = if (allHiddenInCountry) "Show all $country" else "Hide all $country",
-                                    subtitle = "$visibleInCountry / ${cats.size} visible",
-                                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
-                                    focusRequester = req,
-                                    onFocused = { onContentFocused(req) },
-                                    onClick = {
-                                        if (allHiddenInCountry) {
-                                            channelsViewModel.showCountryCategories(country)
-                                        } else {
-                                            channelsViewModel.hideCountryCategories(country)
-                                        }
-                                    },
-                                )
-                            }
-                        }
-
-                        // Individual category rows when expanded
-                        if (isExpanded) {
-                            items(cats, key = { "cat_${country}_${it.name}" }) { cat ->
-                                val isHidden = cat.name in hiddenCats
-                                val req = remember("cat_${cat.name}") { FocusRequester() }
-                                TvSettingCard(
-                                    title = "    ${cat.name}",
-                                    subtitle = if (isHidden) {
-                                        stringResource(R.string.tv_live_hidden)
-                                    } else {
-                                        "${cat.channelCount} channels"
-                                    },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .focusProperties { left = railFocusRequester },
-                                    focusRequester = req,
-                                    onFocused = { onContentFocused(req) },
-                                    onClick = { channelsViewModel.toggleHiddenCategory(cat.name) },
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Inline playlist add form
-                if (showAddPlaylist) {
-                    item(key = "playlist_form") {
-                        var addPlaylistType by remember { mutableStateOf("m3u") }
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(Charcoal.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
-                                .border(1.dp, Steel.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
-                                .padding(20.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            // Type selector pills
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                listOf(
-                                    "m3u" to stringResource(R.string.tv_settings_playlist_type_m3u),
-                                    "xtream" to stringResource(R.string.tv_settings_playlist_type_xtream),
-                                ).forEach { (type, label) ->
-                                    val selected = addPlaylistType == type
-                                    var focused by remember { mutableStateOf(false) }
-                                    val pillScale by animateFloatAsState(
-                                        if (focused) 1.05f else if (selected) 1f else 0.95f,
-                                        label = "pill",
-                                    )
-                                    val bg = when {
-                                        selected -> Amber
-                                        focused -> Steel.copy(alpha = 0.6f)
-                                        else -> Charcoal
-                                    }
-                                    val pillBorderColor by animateColorAsState(
-                                        targetValue = when {
-                                            focused -> Amber
-                                            selected -> Amber
-                                            else -> Color.Transparent
-                                        },
-                                        label = "pillBorder",
-                                    )
-                                    Text(
-                                        text = label,
-                                        color = if (selected) Color.Black else Color.White,
-                                        style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = if (selected || focused) FontWeight.Bold else FontWeight.Normal,
-                                        modifier = Modifier
-                                            .zIndex(if (focused) 1f else 0f)
-                                            .scale(pillScale)
-                                            .onFocusChanged { focused = it.isFocused }
-                                            .background(bg, RoundedCornerShape(20.dp))
-                                            .border(
-                                                2.dp,
-                                                pillBorderColor,
-                                                RoundedCornerShape(20.dp),
-                                            )
-                                            .clickable {
-                                                addPlaylistType = type
-                                                channelsViewModel.setNewPlaylistType(type)
-                                            }
-                                            .padding(horizontal = 18.dp, vertical = 8.dp),
-                                    )
-                                }
-                            }
-
-                            // Name field — always visible
-                            TvClickToEditOutlinedTextField(
-                                value = channelsState.newPlaylistName,
-                                onValueChange = { channelsViewModel.setNewPlaylistName(it) },
-                                label = { Text(stringResource(R.string.tv_settings_playlist_name)) },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-
-                            if (addPlaylistType == "m3u") {
-                                // M3U URL field
-                                TvClickToEditOutlinedTextField(
-                                    value = channelsState.newPlaylistUrl,
-                                    onValueChange = { channelsViewModel.setNewPlaylistUrl(it) },
-                                    label = { Text(stringResource(R.string.tv_settings_playlist_url)) },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                                TvClickToEditOutlinedTextField(
-                                    value = channelsState.newPlaylistEpgUrl,
-                                    onValueChange = { channelsViewModel.setNewPlaylistEpgUrl(it) },
-                                    label = { Text(stringResource(R.string.channels_epg_optional)) },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                            } else {
-                                // Xtream fields
-                                TvClickToEditOutlinedTextField(
-                                    value = channelsState.newXtreamServer,
-                                    onValueChange = { channelsViewModel.setNewXtreamServer(it) },
-                                    label = { Text(stringResource(R.string.tv_settings_xtream_server)) },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                                TvClickToEditOutlinedTextField(
-                                    value = channelsState.newXtreamUsername,
-                                    onValueChange = { channelsViewModel.setNewXtreamUsername(it) },
-                                    label = { Text(stringResource(R.string.tv_settings_xtream_username)) },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                                TvClickToEditOutlinedTextField(
-                                    value = channelsState.newXtreamPassword,
-                                    onValueChange = { channelsViewModel.setNewXtreamPassword(it) },
-                                    label = { Text(stringResource(R.string.tv_settings_xtream_password)) },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                            }
-
-                            val saveRequester = remember { FocusRequester() }
-                            TvSettingCard(
-                                title = if (channelsState.isAddingPlaylist) {
-                                    stringResource(R.string.tv_settings_validating)
-                                } else {
-                                    stringResource(R.string.tv_settings_playlist_save)
-                                },
-                                subtitle = "",
-                                modifier = Modifier.fillMaxWidth(),
-                                focusRequester = saveRequester,
-                                onFocused = { onContentFocused(saveRequester) },
-                                onClick = {
-                                    if (channelsState.isAddingPlaylist) return@TvSettingCard
-                                    channelsViewModel.setNewPlaylistType(addPlaylistType)
-                                    channelsViewModel.addPlaylist()
-                                },
-                            )
-
-                            channelsState.error?.takeIf { it.isNotBlank() }?.let { error ->
-                                Text(
-                                    text = error,
-                                    color = Color(0xFFFF8A80),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                )
-                            }
-                        }
-                    }
                 }
 
                 // ── Integrations section (TV-only) ──
@@ -1586,6 +1320,431 @@ fun TvSettingsScreen(
             null -> {} // unreachable
         }
 
+        // ── Channels section (all modes) ──
+        item(key = "section_channels") {
+            TvSectionHeader(text = stringResource(R.string.tv_settings_section_channels))
+        }
+
+        if (channelsState.playlists.isEmpty()) {
+            item(key = "no_playlists") {
+                val requester = remember("no_playlists") { FocusRequester() }
+                TvSettingCard(
+                    title = stringResource(R.string.tv_settings_no_playlists),
+                    subtitle = stringResource(R.string.tv_settings_tap_to_edit),
+                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                    focusRequester = requester,
+                    onFocused = { onContentFocused(requester) },
+                    onClick = { showAddPlaylist = true },
+                )
+            }
+        } else {
+            items(
+                channelsState.playlists,
+                key = { "playlist_${it.id}" },
+            ) { playlist ->
+                val requester = remember("playlist_${playlist.id}") { FocusRequester() }
+                val isConfirming = confirmRemoveId == playlist.id
+                TvSettingCard(
+                    title = playlist.name,
+                    subtitle = if (isConfirming) {
+                        stringResource(R.string.tv_settings_playlist_confirm_remove)
+                    } else {
+                        "${playlist.channelCount} ${stringResource(R.string.tv_settings_section_channels)}"
+                    },
+                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                    focusRequester = requester,
+                    onFocused = { onContentFocused(requester) },
+                    onClick = {
+                        if (isConfirming) {
+                            channelsViewModel.removePlaylist(playlist.id)
+                            confirmRemoveId = null
+                            onContentFocused(addPlaylistCardRequester)
+                        } else {
+                            confirmRemoveId = playlist.id
+                        }
+                    },
+                )
+            }
+        }
+
+        selectedPlaylistForEpg?.let { playlist ->
+            item(key = "playlist_epg_url") {
+                val subtitle = if (playlist.epgUrl.isNullOrBlank()) {
+                    "${playlist.name} • ${stringResource(R.string.tv_settings_not_set)}"
+                } else {
+                    "${playlist.name} • ${stringResource(R.string.tv_settings_set)}"
+                }
+                TvSettingCard(
+                    title = stringResource(R.string.channels_epg_optional),
+                    subtitle = subtitle,
+                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                    focusRequester = editPlaylistEpgCardRequester,
+                    onFocused = { onContentFocused(editPlaylistEpgCardRequester) },
+                    onClick = {
+                        if (showEditSelectedPlaylistEpg) {
+                            onContentFocused(editPlaylistEpgCardRequester)
+                        }
+                        showEditSelectedPlaylistEpg = !showEditSelectedPlaylistEpg
+                    },
+                )
+            }
+        }
+
+        // Add playlist card
+        item(key = "add_playlist") {
+            TvSettingCard(
+                title = stringResource(R.string.tv_settings_add_playlist),
+                subtitle = if (showAddPlaylist) stringResource(R.string.tv_settings_tap_to_edit)
+                           else stringResource(R.string.tv_settings_tap_to_edit),
+                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                focusRequester = addPlaylistCardRequester,
+                onFocused = { onContentFocused(addPlaylistCardRequester) },
+                onClick = {
+                    if (showAddPlaylist) {
+                        onContentFocused(addPlaylistCardRequester)
+                    }
+                    showAddPlaylist = !showAddPlaylist
+                },
+            )
+        }
+
+        if (showEditSelectedPlaylistEpg && selectedPlaylistForEpg != null) {
+            item(key = "playlist_epg_form") {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Charcoal.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+                        .border(1.dp, Steel.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                        .padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    TvClickToEditOutlinedTextField(
+                        value = selectedPlaylistEpgDraft,
+                        onValueChange = { selectedPlaylistEpgDraft = it },
+                        label = { Text(stringResource(R.string.channels_epg_optional)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    val saveRequester = remember("selected_playlist_epg_save") { FocusRequester() }
+                    TvSettingCard(
+                        title = stringResource(R.string.tv_settings_playlist_save),
+                        subtitle = "",
+                        modifier = Modifier.fillMaxWidth(),
+                        focusRequester = saveRequester,
+                        onFocused = { onContentFocused(saveRequester) },
+                        onClick = {
+                            channelsViewModel.updatePlaylistEpgUrl(
+                                playlistId = selectedPlaylistForEpg.id,
+                                epgUrl = selectedPlaylistEpgDraft,
+                            )
+                            showEditSelectedPlaylistEpg = false
+                            onContentFocused(editPlaylistEpgCardRequester)
+                        },
+                    )
+                }
+            }
+        }
+
+        item(key = "channels_audio_passthrough") {
+            val requester = remember("channels_audio_passthrough") { FocusRequester() }
+            TvSettingCard(
+                title = stringResource(R.string.tv_settings_live_audio_passthrough),
+                subtitle = if (channelsState.audioPassthroughEnabled) {
+                    stringResource(R.string.tv_settings_enabled)
+                } else {
+                    stringResource(R.string.tv_settings_disabled)
+                },
+                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                focusRequester = requester,
+                onFocused = { onContentFocused(requester) },
+                onClick = {
+                    channelsViewModel.setAudioPassthroughEnabled(!channelsState.audioPassthroughEnabled)
+                },
+            )
+        }
+
+        item(key = "channels_audio_surround") {
+            val requester = remember("channels_audio_surround") { FocusRequester() }
+            TvSettingCard(
+                title = stringResource(R.string.tv_settings_live_audio_surround),
+                subtitle = if (channelsState.preferSurroundCodecs) {
+                    stringResource(R.string.tv_settings_enabled)
+                } else {
+                    stringResource(R.string.tv_settings_disabled)
+                },
+                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                focusRequester = requester,
+                onFocused = { onContentFocused(requester) },
+                onClick = {
+                    channelsViewModel.setPreferSurroundCodecs(!channelsState.preferSurroundCodecs)
+                },
+            )
+        }
+
+        // ── Channel Manager ──
+        item(key = "manage_channels") {
+            val requester = remember("manage_channels") { FocusRequester() }
+            val allCats = channelsState.allCategories
+            val hiddenCount = allCats.count { it.name in channelsState.hiddenCategories }
+            val visibleCount = allCats.size - hiddenCount
+            TvSettingCard(
+                title = stringResource(R.string.tv_settings_manage_channels),
+                subtitle = if (allCats.isEmpty()) {
+                    stringResource(R.string.tv_settings_no_categories)
+                } else {
+                    stringResource(R.string.tv_settings_channels_visible, visibleCount, allCats.size)
+                },
+                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                focusRequester = requester,
+                onFocused = { onContentFocused(requester) },
+                onClick = { showChannelManager = !showChannelManager },
+            )
+        }
+
+        if (showChannelManager && channelsState.allCategories.isNotEmpty()) {
+            // Show All / Hide All buttons
+            item(key = "channel_mgr_actions") {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.padding(bottom = 4.dp),
+                ) {
+                    val showAllReq = remember("cm_show_all") { FocusRequester() }
+                    TvSettingCard(
+                        title = stringResource(R.string.tv_settings_show_all),
+                        subtitle = "",
+                        modifier = Modifier.weight(1f),
+                        focusRequester = showAllReq,
+                        onFocused = { onContentFocused(showAllReq) },
+                        onClick = { channelsViewModel.showAllCategories() },
+                    )
+                    val hideAllReq = remember("cm_hide_all") { FocusRequester() }
+                    TvSettingCard(
+                        title = stringResource(R.string.tv_settings_hide_all),
+                        subtitle = "",
+                        modifier = Modifier.weight(1f),
+                        focusRequester = hideAllReq,
+                        onFocused = { onContentFocused(hideAllReq) },
+                        onClick = { channelsViewModel.hideAllCategories() },
+                    )
+                }
+            }
+
+            // Group categories by country (computed outside LazyListScope)
+            val allCats = channelsState.allCategories
+            val hiddenCats = channelsState.hiddenCategories
+            val countryCats = allCats
+                .groupBy { it.countryCode?.uppercase() ?: "OTHER" }
+                .toSortedMap(compareBy { if (it == "OTHER") "ZZZ" else it })
+
+            countryCats.forEach { (country, cats) ->
+                val visibleInCountry = cats.count { it.name !in hiddenCats }
+                val allHiddenInCountry = visibleInCountry == 0
+                val isExpanded = expandedCountry == country
+
+                // Country header row — click to expand/collapse
+                item(key = "country_$country") {
+                    val req = remember("country_$country") { FocusRequester() }
+                    TvSettingCard(
+                        title = "$country  ($visibleInCountry / ${cats.size})",
+                        subtitle = if (isExpanded) "Press to collapse" else "${cats.size} groups — press to expand",
+                        modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                        focusRequester = req,
+                        onFocused = { onContentFocused(req) },
+                        onClick = {
+                            expandedCountry = if (isExpanded) null else country
+                        },
+                    )
+                }
+
+                // Toggle all for this country when expanded
+                if (isExpanded) {
+                    item(key = "country_toggle_$country") {
+                        val req = remember("country_toggle_$country") { FocusRequester() }
+                        TvSettingCard(
+                            title = if (allHiddenInCountry) "Show all $country" else "Hide all $country",
+                            subtitle = "$visibleInCountry / ${cats.size} visible",
+                            modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                            focusRequester = req,
+                            onFocused = { onContentFocused(req) },
+                            onClick = {
+                                if (allHiddenInCountry) {
+                                    channelsViewModel.showCountryCategories(country)
+                                } else {
+                                    channelsViewModel.hideCountryCategories(country)
+                                }
+                            },
+                        )
+                    }
+                }
+
+                // Individual category rows when expanded
+                if (isExpanded) {
+                    items(cats, key = { "cat_${country}_${it.name}" }) { cat ->
+                        val isHidden = cat.name in hiddenCats
+                        val req = remember("cat_${cat.name}") { FocusRequester() }
+                        TvSettingCard(
+                            title = "    ${cat.name}",
+                            subtitle = if (isHidden) {
+                                stringResource(R.string.tv_live_hidden)
+                            } else {
+                                "${cat.channelCount} channels"
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .focusProperties { left = railFocusRequester },
+                            focusRequester = req,
+                            onFocused = { onContentFocused(req) },
+                            onClick = { channelsViewModel.toggleHiddenCategory(cat.name) },
+                        )
+                    }
+                }
+            }
+        }
+
+        // Inline playlist add form
+        if (showAddPlaylist) {
+            item(key = "playlist_form") {
+                var addPlaylistType by remember { mutableStateOf("m3u") }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Charcoal.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+                        .border(1.dp, Steel.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                        .padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    // Type selector pills
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        listOf(
+                            "m3u" to stringResource(R.string.tv_settings_playlist_type_m3u),
+                            "xtream" to stringResource(R.string.tv_settings_playlist_type_xtream),
+                        ).forEachIndexed { pillIndex, (type, label) ->
+                            val selected = addPlaylistType == type
+                            var focused by remember { mutableStateOf(false) }
+                            val pillScale by animateFloatAsState(
+                                if (focused) 1.05f else if (selected) 1f else 0.95f,
+                                label = "pill",
+                            )
+                            val bg = when {
+                                selected -> Amber
+                                focused -> Steel.copy(alpha = 0.6f)
+                                else -> Charcoal
+                            }
+                            val pillBorderColor by animateColorAsState(
+                                targetValue = when {
+                                    focused -> Amber
+                                    selected -> Amber
+                                    else -> Color.Transparent
+                                },
+                                label = "pillBorder",
+                            )
+                            Text(
+                                text = label,
+                                color = if (selected) Color.Black else Color.White,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = if (selected || focused) FontWeight.Bold else FontWeight.Normal,
+                                modifier = Modifier
+                                    .then(if (pillIndex == 0) Modifier.focusRequester(playlistFormRequester) else Modifier)
+                                    .zIndex(if (focused) 1f else 0f)
+                                    .scale(pillScale)
+                                    .onFocusChanged { focused = it.isFocused }
+                                    .background(bg, RoundedCornerShape(20.dp))
+                                    .border(
+                                        2.dp,
+                                        pillBorderColor,
+                                        RoundedCornerShape(20.dp),
+                                    )
+                                    .clickable {
+                                        addPlaylistType = type
+                                        channelsViewModel.setNewPlaylistType(type)
+                                    }
+                                    .padding(horizontal = 18.dp, vertical = 8.dp),
+                            )
+                        }
+                    }
+
+                    // Name field — always visible
+                    TvClickToEditOutlinedTextField(
+                        value = channelsState.newPlaylistName,
+                        onValueChange = { channelsViewModel.setNewPlaylistName(it) },
+                        label = { Text(stringResource(R.string.tv_settings_playlist_name)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+
+                    if (addPlaylistType == "m3u") {
+                        // M3U URL field
+                        TvClickToEditOutlinedTextField(
+                            value = channelsState.newPlaylistUrl,
+                            onValueChange = { channelsViewModel.setNewPlaylistUrl(it) },
+                            label = { Text(stringResource(R.string.tv_settings_playlist_url)) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        TvClickToEditOutlinedTextField(
+                            value = channelsState.newPlaylistEpgUrl,
+                            onValueChange = { channelsViewModel.setNewPlaylistEpgUrl(it) },
+                            label = { Text(stringResource(R.string.channels_epg_optional)) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else {
+                        // Xtream fields
+                        TvClickToEditOutlinedTextField(
+                            value = channelsState.newXtreamServer,
+                            onValueChange = { channelsViewModel.setNewXtreamServer(it) },
+                            label = { Text(stringResource(R.string.tv_settings_xtream_server)) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        TvClickToEditOutlinedTextField(
+                            value = channelsState.newXtreamUsername,
+                            onValueChange = { channelsViewModel.setNewXtreamUsername(it) },
+                            label = { Text(stringResource(R.string.tv_settings_xtream_username)) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        TvClickToEditOutlinedTextField(
+                            value = channelsState.newXtreamPassword,
+                            onValueChange = { channelsViewModel.setNewXtreamPassword(it) },
+                            label = { Text(stringResource(R.string.tv_settings_xtream_password)) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+
+                    val saveRequester = remember { FocusRequester() }
+                    TvSettingCard(
+                        title = if (channelsState.isAddingPlaylist) {
+                            stringResource(R.string.tv_settings_validating)
+                        } else {
+                            stringResource(R.string.tv_settings_playlist_save)
+                        },
+                        subtitle = "",
+                        modifier = Modifier.fillMaxWidth(),
+                        focusRequester = saveRequester,
+                        onFocused = { onContentFocused(saveRequester) },
+                        onClick = {
+                            if (channelsState.isAddingPlaylist) return@TvSettingCard
+                            channelsViewModel.setNewPlaylistType(addPlaylistType)
+                            channelsViewModel.addPlaylist()
+                        },
+                    )
+
+                    channelsState.error?.takeIf { it.isNotBlank() }?.let { error ->
+                        Text(
+                            text = error,
+                            color = Color(0xFFFF8A80),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+            }
+        }
+
         // ── Stream Quality & Playback section (all modes) ──
         item(key = "section_stream_quality") {
             TvSectionHeader(text = streamQualitySectionLabel)
@@ -1656,6 +1815,21 @@ fun TvSettingsScreen(
         }
 
         // ── Language & Region section ──
+        item(key = "reduce_motion") {
+            val requester = remember("reduce_motion") { FocusRequester() }
+            TvSettingCard(
+                title = "Reduce Motion",
+                subtitle = if (reduceMotionEnabled) "On" else "Off",
+                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                focusRequester = requester,
+                onFocused = { onContentFocused(requester) },
+                onClick = {
+                    reduceMotionEnabled = !reduceMotionEnabled
+                    setTvReduceMotionEnabled(context, reduceMotionEnabled)
+                },
+            )
+        }
+
         item(key = "section_language_region") {
             TvSectionHeader(text = languageRegionSectionLabel)
         }
@@ -1751,11 +1925,14 @@ fun TvSettingsScreen(
             TvSectionHeader(text = aboutSectionLabel)
         }
 
-        item(key = "about") {
-            val requester = remember("about") { FocusRequester() }
+        item(key = "about_version") {
+            val requester = remember("about_version") { FocusRequester() }
+            val versionName = runCatching {
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName
+            }.getOrDefault("1.0.0")
             TvSettingCard(
                 title = versionLabel,
-                subtitle = "Torve TV",
+                subtitle = "Torve TV v$versionName",
                 modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                 focusRequester = requester,
                 onFocused = { onContentFocused(requester) },
@@ -1766,6 +1943,39 @@ fun TvSettingsScreen(
                         aboutTapCount = 0
                     }
                 },
+            )
+        }
+
+        item(key = "about_legal") {
+            val requester = remember("about_legal") { FocusRequester() }
+            TvSettingCard(
+                title = stringResource(R.string.tv_settings_legal),
+                subtitle = stringResource(R.string.tv_settings_legal_subtitle),
+                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                focusRequester = requester,
+                onFocused = { onContentFocused(requester) },
+                onClick = {
+                    val intent = android.content.Intent(
+                        android.content.Intent.ACTION_VIEW,
+                        android.net.Uri.parse("https://torve.tv/privacy"),
+                    )
+                    runCatching { context.startActivity(intent) }
+                },
+            )
+        }
+
+        item(key = "about_stats") {
+            val requester = remember("about_stats") { FocusRequester() }
+            val statsState by statsViewModel.state.collectAsState()
+            LaunchedEffect(Unit) { statsViewModel.loadStats() }
+            val hours = statsState.totalMinutes / 60
+            TvSettingCard(
+                title = stringResource(R.string.tv_settings_stats),
+                subtitle = "${statsState.totalMovies} movies · ${statsState.totalEpisodes} episodes · ${hours}h watched",
+                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                focusRequester = requester,
+                onFocused = { onContentFocused(requester) },
+                onClick = {},
             )
         }
 
@@ -1827,6 +2037,10 @@ fun TvSettingsScreen(
                     LocaleListCompat.forLanguageTags(lang.code),
                 )
                 showLanguagePicker = false
+                TvNotificationQueue.post(
+                    context.getString(R.string.tv_settings_language_restart),
+                    NotificationType.INFO,
+                )
             },
             onDismiss = { showLanguagePicker = false },
         )

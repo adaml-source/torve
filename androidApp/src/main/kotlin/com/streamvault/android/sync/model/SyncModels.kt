@@ -198,6 +198,15 @@ data class SyncWatchStateReportResponse(
     val reportedAt: String,
 )
 
+@Serializable
+data class SyncSettingsPushPayload(
+    val categories: List<String> = emptyList(),
+    @SerialName("payload_json")
+    val payloadJson: String,
+    @SerialName("issued_by_device_id")
+    val issuedByDeviceId: String? = null,
+)
+
 sealed class SyncInboundEvent {
     data class SearchPush(
         val query: String,
@@ -212,6 +221,12 @@ sealed class SyncInboundEvent {
         val mediaType: String? = null,
         val audio: String? = null,
         val subtitles: String? = null,
+        val issuedByDeviceId: String? = null,
+    ) : SyncInboundEvent()
+
+    data class SettingsPush(
+        val categories: List<String>,
+        val payloadJson: String,
         val issuedByDeviceId: String? = null,
     ) : SyncInboundEvent()
 }

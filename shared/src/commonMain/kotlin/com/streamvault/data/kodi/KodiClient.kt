@@ -54,7 +54,11 @@ data class KodiHost(
     val ip: String,
     val port: Int = 8080,
 ) {
-    val jsonRpcUrl: String get() = "http://$ip:$port/jsonrpc"
+    val jsonRpcUrl: String get() {
+        val sanitizedIp = ip.filter { it.isLetterOrDigit() || it == '.' || it == ':' || it == '-' }
+        val sanitizedPort = port.coerceIn(1, 65535)
+        return "http://$sanitizedIp:$sanitizedPort/jsonrpc"
+    }
 }
 
 @Serializable

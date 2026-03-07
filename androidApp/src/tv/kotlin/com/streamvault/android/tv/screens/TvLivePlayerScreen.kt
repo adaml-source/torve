@@ -12,14 +12,18 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -51,6 +55,7 @@ import com.streamvault.android.player.MPVPlayerEngine
 import com.streamvault.android.player.MPVView
 import com.streamvault.android.ui.theme.Amber
 import com.streamvault.android.ui.theme.Obsidian
+import com.streamvault.android.ui.theme.Snow
 import com.streamvault.domain.model.Channel
 import com.streamvault.domain.model.EnrichedChannel
 import com.streamvault.domain.player.PlayerEngine
@@ -62,6 +67,8 @@ import org.koin.compose.koinInject
 
 private const val AUTO_HIDE_DELAY_MS = 5_000L
 private const val LONG_PRESS_THRESHOLD_MS = 800L
+private const val ZAP_COALESCE_DELAY_MS = 180L
+private const val ERROR_BANNER_DURATION_MS = 4_000L
 
 private enum class LivePictureFormat(
     val key: String,
@@ -113,11 +120,20 @@ fun TvLivePlayerScreen(
 
     // ── Player state observation ──
     var playerState by remember { mutableStateOf(PlayerState()) }
+    var audioTracks by remember { mutableStateOf<List<com.streamvault.domain.player.TrackDescription>>(emptyList()) }
+    var subtitleTracks by remember { mutableStateOf<List<com.streamvault.domain.player.TrackDescription>>(emptyList()) }
+    var errorBannerMessage by remember { mutableStateOf<String?>(null) }
 
     DisposableEffect(engine) {
         val listener = object : PlayerListener {
             override fun onStateChanged(state: PlayerState) { playerState = state }
-            override fun onError(message: String) { /* handled below via retry */ }
+            override fun onTracksChanged(audio: List<com.streamvault.domain.player.TrackDescription>, subtitles: List<com.streamvault.domain.player.TrackDescription>) {
+                audioTracks = audio
+                subtitleTracks = subtitles
+            }
+            override fun onError(message: String) {
+                errorBannerMessage = message
+            }
         }
         engine.addListener(listener)
         onDispose { engine.removeListener(listener) }
@@ -130,6 +146,7 @@ fun TvLivePlayerScreen(
 
     // ── Overlay state ──
     var activeOverlay by remember { mutableStateOf(LivePlayerOverlay.NONE) }
+    var overlayBackStack by remember { mutableStateOf<List<LivePlayerOverlay>>(emptyList()) }
     var overlayTimestamp by remember { mutableLongStateOf(0L) }
 
     // ── Stream info for menu bar ──
@@ -145,6 +162,30 @@ fun TvLivePlayerScreen(
 
     suspend fun requestPlayerRootFocus() {
         runCatching { playerRootFocusRequester.requestFocus() }
+    }
+
+    fun openOverlay(target: LivePlayerOverlay) {
+        if (target == activeOverlay) return
+        if (activeOverlay != LivePlayerOverlay.NONE) {
+            overlayBackStack = (overlayBackStack + activeOverlay).takeLast(5)
+        }
+        activeOverlay = target
+        overlayTimestamp = System.currentTimeMillis()
+    }
+
+    fun closeOverlayOrReturnToPrevious(): Boolean {
+        if (activeOverlay == LivePlayerOverlay.NONE) return false
+        val previous = overlayBackStack.lastOrNull()
+        overlayBackStack = if (overlayBackStack.isNotEmpty()) overlayBackStack.dropLast(1) else emptyList()
+        activeOverlay = previous ?: LivePlayerOverlay.NONE
+        overlayTimestamp = System.currentTimeMillis()
+        return true
+    }
+
+    fun closeAllOverlays() {
+        overlayBackStack = emptyList()
+        activeOverlay = LivePlayerOverlay.NONE
+        overlayTimestamp = System.currentTimeMillis()
     }
 
     // ── Resolve the initial channel from ViewModel state ──
@@ -171,6 +212,7 @@ fun TvLivePlayerScreen(
     // ── Start playback when channel is set ──
     LaunchedEffect(currentChannel?.url) {
         currentChannel?.let { ch ->
+            delay(ZAP_COALESCE_DELAY_MS)
             engine.play(ch.url)
             viewModel.recordChannelViewed(ch)
         }
@@ -217,12 +259,21 @@ fun TvLivePlayerScreen(
         }
     }
 
+    LaunchedEffect(errorBannerMessage) {
+        if (!errorBannerMessage.isNullOrBlank()) {
+            delay(ERROR_BANNER_DURATION_MS)
+            if (!errorBannerMessage.isNullOrBlank()) {
+                errorBannerMessage = null
+            }
+        }
+    }
+
     // ── Auto-hide timer for CHANNEL_INFO and MENU_BAR ──
     LaunchedEffect(activeOverlay, overlayTimestamp) {
         if (activeOverlay == LivePlayerOverlay.CHANNEL_INFO || activeOverlay == LivePlayerOverlay.MENU_BAR) {
             delay(AUTO_HIDE_DELAY_MS)
             if (activeOverlay == LivePlayerOverlay.CHANNEL_INFO || activeOverlay == LivePlayerOverlay.MENU_BAR) {
-                activeOverlay = LivePlayerOverlay.NONE
+                closeAllOverlays()
             }
         }
     }
@@ -239,9 +290,7 @@ fun TvLivePlayerScreen(
 
     // ── Back handler ──
     BackHandler(enabled = true) {
-        if (activeOverlay != LivePlayerOverlay.NONE) {
-            activeOverlay = LivePlayerOverlay.NONE
-        } else {
+        if (!closeOverlayOrReturnToPrevious()) {
             onBack()
         }
     }
@@ -253,6 +302,9 @@ fun TvLivePlayerScreen(
     LaunchedEffect(activeOverlay) {
         centerKeyDownTime = 0L
         if (activeOverlay == LivePlayerOverlay.NONE) {
+            if (overlayBackStack.isNotEmpty()) {
+                overlayBackStack = emptyList()
+            }
             delay(40)
             requestPlayerRootFocus()
         }
@@ -319,11 +371,10 @@ fun TvLivePlayerScreen(
                                 val held = System.currentTimeMillis() - downTime
                                 if (held >= LONG_PRESS_THRESHOLD_MS) {
                                     // Long press → settings
-                                    activeOverlay = LivePlayerOverlay.SETTINGS_PANEL
+                                    openOverlay(LivePlayerOverlay.SETTINGS_PANEL)
                                 } else {
                                     // Short press on fullscreen playback → channel switch list
-                                    activeOverlay = LivePlayerOverlay.CHANNEL_LIST
-                                    overlayTimestamp = System.currentTimeMillis()
+                                    openOverlay(LivePlayerOverlay.CHANNEL_LIST)
                                 }
                                 true
                             }
@@ -333,12 +384,11 @@ fun TvLivePlayerScreen(
 
                     // ── Menu key → Menu Bar ──
                     event.key == Key.Menu && event.type == KeyEventType.KeyDown -> {
-                        activeOverlay = if (activeOverlay == LivePlayerOverlay.MENU_BAR) {
-                            LivePlayerOverlay.NONE
+                        if (activeOverlay == LivePlayerOverlay.MENU_BAR) {
+                            closeOverlayOrReturnToPrevious()
                         } else {
-                            LivePlayerOverlay.MENU_BAR
+                            openOverlay(LivePlayerOverlay.MENU_BAR)
                         }
-                        overlayTimestamp = System.currentTimeMillis()
                         true
                     }
 
@@ -352,8 +402,7 @@ fun TvLivePlayerScreen(
                     (event.key == Key.DirectionLeft || event.key == Key.DirectionRight) &&
                         event.type == KeyEventType.KeyDown &&
                         activeOverlay == LivePlayerOverlay.NONE -> {
-                        activeOverlay = LivePlayerOverlay.CHANNEL_INFO
-                        overlayTimestamp = System.currentTimeMillis()
+                        openOverlay(LivePlayerOverlay.CHANNEL_INFO)
                         true
                     }
 
@@ -368,7 +417,7 @@ fun TvLivePlayerScreen(
                     // ── Back key during CHANNEL_INFO → dismiss overlay ──
                     event.key == Key.Back && event.type == KeyEventType.KeyDown &&
                         activeOverlay == LivePlayerOverlay.CHANNEL_INFO -> {
-                        activeOverlay = LivePlayerOverlay.NONE
+                        closeOverlayOrReturnToPrevious()
                         true
                     }
 
@@ -376,14 +425,14 @@ fun TvLivePlayerScreen(
                     event.key == Key.DirectionUp && event.type == KeyEventType.KeyDown &&
                         (activeOverlay == LivePlayerOverlay.NONE || activeOverlay == LivePlayerOverlay.CHANNEL_INFO) -> {
                         zapChannel(-1)
-                        activeOverlay = LivePlayerOverlay.CHANNEL_INFO
+                        openOverlay(LivePlayerOverlay.CHANNEL_INFO)
                         overlayTimestamp = System.currentTimeMillis()
                         true
                     }
                     event.key == Key.DirectionDown && event.type == KeyEventType.KeyDown &&
                         (activeOverlay == LivePlayerOverlay.NONE || activeOverlay == LivePlayerOverlay.CHANNEL_INFO) -> {
                         zapChannel(1)
-                        activeOverlay = LivePlayerOverlay.CHANNEL_INFO
+                        openOverlay(LivePlayerOverlay.CHANNEL_INFO)
                         overlayTimestamp = System.currentTimeMillis()
                         true
                     }
@@ -392,7 +441,8 @@ fun TvLivePlayerScreen(
                     event.key == Key.ChannelUp && event.type == KeyEventType.KeyDown -> {
                         zapChannel(-1)
                         if (activeOverlay == LivePlayerOverlay.NONE) {
-                            activeOverlay = LivePlayerOverlay.CHANNEL_INFO
+                            openOverlay(LivePlayerOverlay.CHANNEL_INFO)
+                        } else {
                             overlayTimestamp = System.currentTimeMillis()
                         }
                         true
@@ -400,7 +450,8 @@ fun TvLivePlayerScreen(
                     event.key == Key.ChannelDown && event.type == KeyEventType.KeyDown -> {
                         zapChannel(1)
                         if (activeOverlay == LivePlayerOverlay.NONE) {
-                            activeOverlay = LivePlayerOverlay.CHANNEL_INFO
+                            openOverlay(LivePlayerOverlay.CHANNEL_INFO)
+                        } else {
                             overlayTimestamp = System.currentTimeMillis()
                         }
                         true
@@ -472,6 +523,24 @@ fun TvLivePlayerScreen(
             )
         }
 
+        errorBannerMessage?.let { message ->
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 28.dp)
+                    .fillMaxWidth(0.82f)
+                    .background(Color(0xE0181E29), RoundedCornerShape(10.dp))
+                    .border(1.dp, Amber.copy(alpha = 0.6f), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                Text(
+                    text = message,
+                    color = Snow,
+                    maxLines = 2,
+                )
+            }
+        }
+
         // ── Channel Info Overlay ──
         AnimatedVisibility(
             visible = activeOverlay == LivePlayerOverlay.CHANNEL_INFO,
@@ -486,24 +555,24 @@ fun TvLivePlayerScreen(
                     recentChannels = state.recentlyViewedChannels,
                     favoriteChannels = state.favorites,
                     onOpenEpgGuide = {
-                        activeOverlay = LivePlayerOverlay.EPG_GUIDE
+                        openOverlay(LivePlayerOverlay.EPG_GUIDE)
                     },
                     onOpenHistory = {
-                        activeOverlay = LivePlayerOverlay.CHANNEL_LIST
+                        openOverlay(LivePlayerOverlay.CHANNEL_LIST)
                     },
                     onTuneChannel = { ch ->
                         tuneToChannel(ch, state.categories) { newCh, group, idx ->
                             currentChannel = newCh
                             currentGroupName = group
                             channelNumber = idx + 1
-                            activeOverlay = LivePlayerOverlay.NONE
+                            closeAllOverlays()
                         }
                     },
                     onClearRecent = {
                         viewModel.clearRecentlyViewed()
                     },
                     onDismiss = {
-                        activeOverlay = LivePlayerOverlay.NONE
+                        closeOverlayOrReturnToPrevious()
                     },
                 )
             }
@@ -528,20 +597,20 @@ fun TvLivePlayerScreen(
                 videoResolution = videoResolution,
                 audioCodec = audioCodec,
                 onSearch = {
-                    activeOverlay = LivePlayerOverlay.CHANNEL_LIST
+                    openOverlay(LivePlayerOverlay.CHANNEL_LIST)
                 },
                 onChannelList = {
-                    activeOverlay = LivePlayerOverlay.CHANNEL_LIST
+                    openOverlay(LivePlayerOverlay.CHANNEL_LIST)
                 },
                 onRecordings = {
-                    activeOverlay = LivePlayerOverlay.EPG_GUIDE
+                    openOverlay(LivePlayerOverlay.EPG_GUIDE)
                 },
                 onMultiview = {
-                    activeOverlay = LivePlayerOverlay.CHANNEL_LIST
+                    openOverlay(LivePlayerOverlay.CHANNEL_LIST)
                 },
                 onPip = {
                     if (enterPipMode()) {
-                        activeOverlay = LivePlayerOverlay.NONE
+                        closeAllOverlays()
                     }
                 },
             )
@@ -562,11 +631,11 @@ fun TvLivePlayerScreen(
                         currentChannel = newCh
                         currentGroupName = group
                         channelNumber = idx + 1
-                        activeOverlay = LivePlayerOverlay.NONE
+                        closeAllOverlays()
                     }
                 },
                 onShowChannelList = {
-                    activeOverlay = LivePlayerOverlay.CHANNEL_LIST
+                    openOverlay(LivePlayerOverlay.CHANNEL_LIST)
                 },
             )
         }
@@ -577,7 +646,6 @@ fun TvLivePlayerScreen(
             enter = fadeIn(),
             exit = fadeOut(),
         ) {
-            android.util.Log.d("GroupDebug", "opening overlay currentGroupName='$currentGroupName' currentChannelUrl='${currentChannel?.url ?: ""}'")
             LiveChannelListOverlay(
                 categories = state.categories,
                 currentChannelUrl = currentChannel?.url ?: "",
@@ -588,12 +656,12 @@ fun TvLivePlayerScreen(
                         currentChannel = newCh
                         currentGroupName = group
                         channelNumber = idx + 1
-                        activeOverlay = LivePlayerOverlay.NONE
+                        closeAllOverlays()
                     }
                 },
                 onToggleFavorite = { viewModel.toggleFavorite(it) },
                 onDismiss = {
-                    activeOverlay = LivePlayerOverlay.NONE
+                    closeOverlayOrReturnToPrevious()
                 },
             )
         }
@@ -625,6 +693,11 @@ fun TvLivePlayerScreen(
                 onSetXxxEnabled = { viewModel.setXxxEnabled(it) },
                 onSetAudioPassthroughEnabled = { viewModel.setAudioPassthroughEnabled(it) },
                 onSetPreferSurroundCodecs = { viewModel.setPreferSurroundCodecs(it) },
+                audioTracks = audioTracks,
+                subtitleTracks = subtitleTracks,
+                onSelectAudioTrack = { engine.selectAudioTrack(it) },
+                onSelectSubtitleTrack = { engine.selectSubtitleTrack(it) },
+                onDisableSubtitles = { engine.disableSubtitles() },
             )
         }
     }
@@ -670,5 +743,3 @@ private inline fun tuneToChannel(
     val (group, idx) = findChannelGroupAndIndex(channel, categories, preferredGroupName)
     onResult(channel, group ?: channel.groupTitle.orEmpty(), idx)
 }
-
-

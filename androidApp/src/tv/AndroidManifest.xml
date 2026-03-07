@@ -27,6 +27,7 @@
 
         <activity
             android:name=".TvMainActivity"
+            android:banner="@drawable/tv_banner"
             android:theme="@style/Theme.Torve.Splash"
             android:exported="true"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout"

@@ -86,7 +86,7 @@
     <string name="settings_api_status">API: %1$s</string>
     <string name="settings_simkl">SIMKL</string>
     <string name="settings_connect_simkl">Conectar SIMKL</string>
-    <string name="settings_live_tv">TV en Vivo</string>
+    <string name="settings_live_tv">Canales</string>
     <string name="settings_no_playlists">No hay listas de reproducción configuradas</string>
     <string name="settings_channels_count">%1$d canales</string>
     <string name="settings_add_playlist">Agregar lista</string>
@@ -189,12 +189,12 @@
     <string name="catalog_classic">Clásico</string>
 
     <string name="channels_no_playlists">Sin listas</string>
-    <string name="channels_add_playlist_prompt">Agrega una lista M3U o inicio de sesión del proveedor para comenzar</string>
+    <string name="channels_add_playlist_prompt">Agrega una playlist o inicio de sesión del proveedor para comenzar</string>
     <string name="channels_add_playlist">Agregar lista</string>
     <string name="channels_add_title">Agregar lista</string>
     <string name="channels_playlist_name">Nombre de la lista</string>
-    <string name="channels_m3u_url">URL M3U</string>
-    <string name="channels_epg_optional">URL EPG (opcional)</string>
+    <string name="channels_m3u_url">URL de Playlist</string>
+    <string name="channels_epg_optional">URL de Guía (opcional)</string>
     <string name="channels_server_url">URL del servidor</string>
     <string name="channels_username">Usuario</string>
     <string name="channels_password">Contraseña</string>
@@ -431,11 +431,11 @@
     <string name="setup_i_agree">Acepto</string>
     <string name="setup_verify_connect">Verificar &amp; Conectar</string>
     <string name="setup_connect_trakt">Conectar con Trakt.tv</string>
-    <string name="setup_m3u">M3U</string>
+    <string name="setup_m3u">Playlist</string>
     <string name="setup_provider_login">Inicio de sesión del proveedor</string>
-    <string name="setup_channels_desc">Agrega una lista M3U o inicia sesión con tu proveedor para ver TV en vivo. Puedes agregar más después en la pestaña de canales.</string>
+    <string name="setup_channels_desc">Agrega una playlist o inicia sesión con tu proveedor para ver tus canales. Puedes agregar más después en la pestaña de canales.</string>
     <string name="setup_playlist_hint">p. ej. Mis canales</string>
-    <string name="setup_m3u_hint">https://example.com/playlist.m3u</string>
+    <string name="setup_m3u_hint">https://example.com/playlist</string>
     <string name="setup_server_hint">http://example.com:8080</string>
 
     <!-- Card Style -->
@@ -486,7 +486,7 @@
     <string name="setup_welcome_subtitle">Tu compañero de streaming todo en uno</string>
     <string name="setup_feature_stream">Transmite películas y series de múltiples fuentes</string>
     <string name="setup_feature_cloud">Integración de servicio en la nube para reproducción optimizada</string>
-    <string name="setup_feature_channels">Canales en vivo con soporte de listas M3U</string>
+    <string name="setup_feature_channels">Playlists de canales personales</string>
     <string name="setup_feature_download">Descarga contenido para ver sin conexión</string>
     <string name="setup_feature_trakt">Sigue tu lista con Trakt.tv</string>
     <string name="setup_lets_go">Configuremos todo en unos pocos pasos.</string>
@@ -766,7 +766,7 @@
     <string name="tv_addon_suggested">Addons sugeridos</string>
     <string name="tv_addon_installed">Instalados</string>
 
-    <!-- IPTV redesign -->
+    <!-- Channel redesign -->
     <string name="tv_iptv_all_channels">Todos los canales</string>
     <string name="tv_iptv_channels_count">%d canales</string>
     <string name="tv_iptv_now_playing">Reproduciendo</string>
@@ -781,19 +781,19 @@
     <string name="tv_nav_iptv">Canales</string>
 
     <!-- TV Hero -->
-    <string name="tv_hero_subtitle_iptv">Tus canales de TV en vivo</string>
+    <string name="tv_hero_subtitle_iptv">Tus canales</string>
 
     <!-- TV Player -->
     <string name="tv_player_preparing">Preparando reproducción</string>
     <string name="tv_settings_description">Usa esta pantalla para configurar el comportamiento de la TV e integraciones de cuenta desde el control remoto.</string>
     <string name="tv_settings_cast">Cast funciona en Android TV y se desactiva correctamente en Fire TV cuando Play Services no está disponible.</string>
 
-    <!-- TV IPTV -->
+    <!-- TV Channels -->
     <string name="tv_iptv_empty">No hay canales disponibles. Agrega una playlist en Ajustes.</string>
     <string name="tv_iptv_recently_viewed">Vistos recientemente</string>
     <string name="tv_iptv_favorites">Favoritos</string>
     <string name="tv_iptv_no_playlists_title">No hay canales configurados</string>
-    <string name="tv_iptv_no_playlists_subtitle">Agrega una playlist M3U en tu teléfono y sincroniza con la TV</string>
+    <string name="tv_iptv_no_playlists_subtitle">Agrega una playlist en tu teléfono y sincroniza con la TV</string>
 
     <!-- TV Settings: Customization -->
     <string name="tv_settings_section_customization">Personalización</string>
@@ -829,7 +829,7 @@
     <string name="tv_settings_playlist_name">Nombre de playlist</string>
     <string name="tv_settings_playlist_url">URL de playlist</string>
     <string name="tv_settings_playlist_save">Guardar playlist</string>
-    <string name="tv_settings_playlist_type_m3u">Playlist M3U</string>
+    <string name="tv_settings_playlist_type_m3u">Playlist URL</string>
     <string name="tv_settings_playlist_type_xtream">Login de proveedor</string>
     <string name="tv_settings_xtream_server">URL del servidor</string>
     <string name="tv_settings_xtream_username">Usuario</string>
@@ -942,7 +942,7 @@
     <string name="tv_home_layout_media_type">Tipo de medio</string>
 
     <!-- TV Live Player -->
-    <string name="tv_live_tv_guide">Guía de TV</string>
+    <string name="tv_live_tv_guide">Guía de programación</string>
     <string name="tv_live_history">Historial</string>
     <string name="tv_live_clear">Limpiar</string>
     <string name="tv_live_next_label">Siguiente:</string>

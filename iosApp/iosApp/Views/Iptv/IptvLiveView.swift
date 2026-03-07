@@ -2,16 +2,16 @@ import SwiftUI
 import shared
 
 struct IptvLiveView: View {
-    let categories: [IptvCategory]
+    let categories: [ChannelCategory]
     let expandedCategories: Set<String>
     let searchQuery: String
-    let searchResults: [IptvChannel]
+    let searchResults: [Channel]
     let isLoading: Bool
     let onToggleCategory: (String) -> Void
     let onSearchQueryChange: (String) -> Void
     let onClearSearch: () -> Void
-    let onChannelPlay: (IptvChannel) -> Void
-    let onChannelFavorite: (IptvChannel) -> Void
+    let onChannelPlay: (Channel) -> Void
+    let onChannelFavorite: (Channel) -> Void
 
     var body: some View {
         if isLoading {

@@ -2,6 +2,12 @@ package com.streamvault.presentation.detail
 
 import com.streamvault.data.addon.ParsedStream
 import com.streamvault.data.addon.StreamSelector
+import com.streamvault.data.kodi.KodiClient
+import com.streamvault.data.kodi.KodiHost
+import com.streamvault.data.simkl.SimklClient
+import com.streamvault.data.simkl.SimklIds
+import com.streamvault.data.simkl.SimklSyncBody
+import com.streamvault.data.simkl.SimklSyncItem
 import com.streamvault.data.trakt.api.TraktAuthorizedApi
 import com.streamvault.data.trakt.TraktHistoryBody
 import com.streamvault.data.trakt.TraktHistoryMovie
@@ -54,6 +60,8 @@ class DetailViewModel(
     private val streamSelector: StreamSelector,
     private val ratingsEnricher: RatingsEnricher,
     private val integrationSecretStore: IntegrationSecretStore,
+    private val kodiClient: KodiClient,
+    private val simklClient: SimklClient,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(DetailUiState())
@@ -508,8 +516,9 @@ class DetailViewModel(
         val item = _state.value.mediaItem ?: return
         scope.launch {
             _state.update { it.copy(isMarkedWatched = true) }
+            val tmdbId = item.tmdbId ?: return@launch
+            // Trakt
             try {
-                val tmdbId = item.tmdbId ?: return@launch
                 val ids = TraktIds(tmdb = tmdbId)
                 if (item.type == MediaType.MOVIE) {
                     traktApi.addToHistory(TraktHistoryBody(movies = listOf(TraktHistoryMovie(ids))))
@@ -517,8 +526,20 @@ class DetailViewModel(
                     traktApi.addToHistory(TraktHistoryBody(shows = listOf(TraktHistoryShow(ids))))
                 }
             } catch (_: Exception) {
-                val tmdbId = item.tmdbId ?: return@launch
                 traktSyncRepo.enqueueHistoryAdd(tmdbId, item.type, item.imdbId)
+            }
+            // Simkl
+            runCatching {
+                val token = integrationSecretStore.get(IntegrationSecretKey.SIMKL_ACCESS_TOKEN)
+                if (!token.isNullOrBlank()) {
+                    val simklIds = SimklIds(tmdb = tmdbId, imdb = item.imdbId)
+                    val body = if (item.type == MediaType.MOVIE) {
+                        SimklSyncBody(movies = listOf(SimklSyncItem(simklIds)))
+                    } else {
+                        SimklSyncBody(shows = listOf(SimklSyncItem(simklIds)))
+                    }
+                    simklClient.addToHistory(token, body)
+                }
             }
         }
     }
@@ -538,6 +559,16 @@ class DetailViewModel(
             } catch (_: Exception) {
                 val tmdbId = item.tmdbId ?: return@launch
                 traktSyncRepo.enqueueHistoryRemove(tmdbId, item.type, item.imdbId)
+            }
+        }
+    }
+
+    fun playOnKodi(host: KodiHost, url: String) {
+        scope.launch {
+            _state.update { it.copy(kodiSendResult = null) }
+            val success = kodiClient.playUrl(host, url)
+            _state.update {
+                it.copy(kodiSendResult = if (success) "Sent to ${host.name}" else "Failed to send to ${host.name}")
             }
         }
     }

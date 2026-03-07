@@ -679,7 +679,7 @@ class HomeViewModel(
                 if (dedupe) {
                     // 1. Seed global seen set from protected sources (keep their items intact)
                     val globalSeen = mutableSetOf<String>()
-                    continueWatching.forEach { wp ->
+                    mergedContinueWatching.forEach { wp ->
                         // WatchProgress items: track by mediaId
                         val key = wp.mediaId
                         if (key.isNotBlank()) globalSeen.add("id:$key")

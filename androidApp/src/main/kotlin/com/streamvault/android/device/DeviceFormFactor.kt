@@ -13,7 +13,18 @@ object DeviceFormFactor {
         }
 
         val packageManager = context.packageManager
-        return packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
-            packageManager.hasSystemFeature("android.hardware.type.television")
+        if (
+            packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
+            packageManager.hasSystemFeature("android.hardware.type.television") ||
+            packageManager.hasSystemFeature("amazon.hardware.fire_tv")
+        ) {
+            return true
+        }
+
+        // Some Android TV forks don't expose the standard TV feature flags.
+        val hasTouchscreen = packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
+        val hasTelephony = packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY)
+        val hasAnyCamera = packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)
+        return !hasTouchscreen && !hasTelephony && !hasAnyCamera
     }
 }

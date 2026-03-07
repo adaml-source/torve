@@ -169,8 +169,8 @@
     <string name="paywall_search_browse">Search &amp; Browse</string>
     <string name="paywall_stream_playback">Stream &amp; Play</string>
     <string name="paywall_downloads">Downloads</string>
-    <string name="paywall_channels">Live Channels</string>
-    <string name="paywall_multi_cloud">Debrid Cloud Services</string>
+    <string name="paywall_channels">Channels</string>
+    <string name="paywall_multi_cloud">Cloud Services</string>
     <string name="paywall_trakt_simkl">Trakt &amp; SIMKL Sync</string>
     <string name="paywall_ai_search">AI Search</string>
     <string name="paywall_rating_pills">Rating Pills</string>
@@ -211,12 +211,12 @@
 
     <!-- Channels Screen -->
     <string name="channels_no_playlists">No Playlists</string>
-    <string name="channels_add_playlist_prompt">Add an M3U playlist or provider login to get started</string>
+    <string name="channels_add_playlist_prompt">Add a playlist or provider login to get started</string>
     <string name="channels_add_playlist">Add Playlist</string>
     <string name="channels_add_title">Add Playlist</string>
     <string name="channels_playlist_name">Playlist Name</string>
-    <string name="channels_m3u_url">M3U URL</string>
-    <string name="channels_epg_optional">EPG URL (optional)</string>
+    <string name="channels_m3u_url">Playlist URL</string>
+    <string name="channels_epg_optional">Guide URL (optional)</string>
     <string name="channels_server_url">Server URL</string>
     <string name="channels_username">Username</string>
     <string name="channels_password">Password</string>
@@ -394,9 +394,9 @@
     <string name="home_customize_done">Done</string>
 
     <!-- Addon Catalog Screen -->
-    <string name="addon_catalog_title">Addon Catalog</string>
+    <string name="addon_catalog_title">Extensions</string>
     <string name="addon_catalog_installed_count">%1$d installed</string>
-    <string name="addon_catalog_search_hint">Search or paste addon URLâ€¦</string>
+    <string name="addon_catalog_search_hint">Search or paste extension URLâ€¦</string>
     <string name="addon_catalog_installed">Installed</string>
     <string name="addon_catalog_available">Available</string>
     <string name="addon_catalog_installing">Installingâ€¦</string>
@@ -459,11 +459,11 @@
     <string name="setup_i_agree">I Agree</string>
     <string name="setup_verify_connect">Verify &amp; Connect</string>
     <string name="setup_connect_trakt">Connect with Trakt.tv</string>
-    <string name="setup_m3u">M3U</string>
+    <string name="setup_m3u">Playlist</string>
     <string name="setup_provider_login">Provider Login</string>
-    <string name="setup_channels_desc">Add an M3U playlist or provider login to watch live TV channels. You can add more later in the Channels tab.</string>
+    <string name="setup_channels_desc">Add a playlist or provider login to access your channels. You can add more later in the Channels tab.</string>
     <string name="setup_playlist_hint">e.g. My Channels</string>
-    <string name="setup_m3u_hint">https://example.com/playlist.m3u</string>
+    <string name="setup_m3u_hint">https://example.com/playlist</string>
     <string name="setup_server_hint">http://example.com:8080</string>
 
     <!-- Card Style Settings -->
@@ -516,7 +516,7 @@
     <string name="setup_welcome_subtitle">Your all-in-one streaming companion</string>
     <string name="setup_feature_stream">Stream movies &amp; TV shows from multiple sources</string>
     <string name="setup_feature_cloud">Cloud service integration for optimized playback</string>
-    <string name="setup_feature_channels">Live channels with M3U playlist support</string>
+    <string name="setup_feature_channels">Personal channel playlists</string>
     <string name="setup_feature_download">Download content for offline viewing</string>
     <string name="setup_feature_trakt">Track your watchlist with Trakt.tv</string>
     <string name="setup_lets_go">Let\'s set things up in a few quick steps.</string>
@@ -718,7 +718,7 @@
     <string name="tv_hero_subtitle_home">Picked for your evening</string>
     <string name="tv_hero_subtitle_movies">Cinema highlights</string>
     <string name="tv_hero_subtitle_shows">Series worth binging</string>
-    <string name="tv_hero_subtitle_iptv">Your live TV channels</string>
+    <string name="tv_hero_subtitle_iptv">Your channels</string>
     <string name="tv_hero_subtitle_search">Find something to watch</string>
     <string name="tv_hero_subtitle_library">Your saved titles</string>
     <string name="tv_hero_subtitle_settings">Tune your experience</string>
@@ -770,6 +770,10 @@
     <string name="tv_settings_language">Language</string>
     <string name="tv_settings_playback_quality">Playback Quality</string>
     <string name="tv_settings_version">Version</string>
+    <string name="tv_settings_subscription">Subscription</string>
+    <string name="tv_settings_legal">Legal</string>
+    <string name="tv_settings_legal_subtitle">Privacy Policy &amp; Terms</string>
+    <string name="tv_settings_stats">Watch Stats</string>
     <string name="tv_settings_connected">Connected</string>
     <string name="tv_settings_not_connected">Not connected</string>
     <string name="tv_settings_paired">Paired</string>
@@ -778,18 +782,20 @@
     <string name="tv_settings_not_paired">Not paired</string>
     <string name="tv_settings_debug">Debug</string>
     <string name="tv_settings_sync_status">Sync Status</string>
+    <string name="tv_settings_sync_error">Sync Error</string>
+    <string name="tv_settings_language_restart">Language changed — restart may be needed for full effect</string>
 
     <!-- TV Voice -->
     <string name="tv_voice_listening">Listening…</string>
     <string name="tv_voice_processing">Processing voice input…</string>
     <string name="tv_voice_unavailable">Voice input is not available on this device</string>
 
-    <!-- TV IPTV -->
+    <!-- TV Channels -->
     <string name="tv_iptv_empty">No channels available. Add a playlist in Settings.</string>
     <string name="tv_iptv_recently_viewed">Recently Viewed</string>
     <string name="tv_iptv_favorites">Favorites</string>
     <string name="tv_iptv_no_playlists_title">No Channels Configured</string>
-    <string name="tv_iptv_no_playlists_subtitle">Add an M3U playlist on your phone, then sync to TV</string>
+    <string name="tv_iptv_no_playlists_subtitle">Add a playlist on your phone, then sync to TV</string>
     <string name="tv_iptv_all_channels">All Channels</string>
     <string name="tv_iptv_channels_count">%d channels</string>
     <string name="tv_iptv_now_playing">Now Playing</string>
@@ -833,7 +839,7 @@
     <string name="tv_settings_playlist_name">Playlist Name</string>
     <string name="tv_settings_playlist_url">Playlist URL</string>
     <string name="tv_settings_playlist_save">Save Playlist</string>
-    <string name="tv_settings_playlist_type_m3u">M3U Playlist</string>
+    <string name="tv_settings_playlist_type_m3u">URL Playlist</string>
     <string name="tv_settings_playlist_type_xtream">Provider Login</string>
     <string name="tv_settings_xtream_server">Server URL</string>
     <string name="tv_settings_xtream_username">Username</string>
@@ -946,7 +952,7 @@
     <string name="tv_home_layout_media_type">Media Type</string>
 
     <!-- TV Live Player -->
-    <string name="tv_live_tv_guide">TV Guide</string>
+    <string name="tv_live_tv_guide">Program Guide</string>
     <string name="tv_live_history">History</string>
     <string name="tv_live_clear">Clear</string>
     <string name="tv_live_next_label">Next:</string>
@@ -992,7 +998,7 @@
     <string name="tv_library_tab_watchlist">Watchlist</string>
     <string name="tv_library_tab_downloads">Downloads</string>
     <string name="tv_library_tab_recordings">Recordings</string>
-    <string name="tv_library_recordings_coming_soon">Live TV recordings — coming soon</string>
+    <string name="tv_library_recordings_coming_soon">Playlist recordings — coming soon</string>
     <string name="tv_library_no_downloads">No downloads yet</string>
 
     <!-- TV Downloads -->

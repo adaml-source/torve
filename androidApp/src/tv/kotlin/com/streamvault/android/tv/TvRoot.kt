@@ -7,6 +7,7 @@ import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -54,13 +55,22 @@ import com.streamvault.android.tv.screens.TvSettingsScreen
 import com.streamvault.android.tv.screens.TvShowsScreen
 import com.streamvault.android.ui.theme.AmberSubtle
 import com.streamvault.android.ui.theme.Charcoal
+import com.streamvault.android.ui.theme.Emerald
+import com.streamvault.android.ui.theme.Ruby
 import com.streamvault.android.ui.theme.Snow
 import com.streamvault.domain.model.MediaItem
 import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.repository.MetadataRepository
+import com.streamvault.domain.sync.SyncPayload
+import com.streamvault.domain.sync.SyncRepository
+import com.streamvault.presentation.settings.SettingsViewModel
 import com.streamvault.presentation.watchlist.WatchlistViewModel
+import android.util.Log
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 import org.koin.compose.koinInject
 
 /**
@@ -88,6 +98,8 @@ fun TvRoot() {
     val metadataRepo: MetadataRepository = koinInject()
     val watchlistViewModel: WatchlistViewModel = koinInject()
     val syncCoordinator: SyncCoordinator = koinInject()
+    val syncRepository: SyncRepository = koinInject()
+    val settingsViewModel: SettingsViewModel = koinInject()
     val syncState by syncCoordinator.state.collectAsState()
 
     /* ── Sub-route tracking (NavHost only handles details/player/see-all/sub-screens) ── */
@@ -111,63 +123,54 @@ fun TvRoot() {
     var isRailFocused by rememberSaveable { mutableStateOf(false) }
     var focusedMediaItem by remember { mutableStateOf<MediaItem?>(null) }
 
-    /* ── Sync state ────────────────────────────────────────────────────────────────────── */
+    /* ── Notification + sync state ─────────────────────────────────────────────────────── */
     var searchSeedQuery by rememberSaveable { mutableStateOf<String?>(null) }
-    var syncNotice by remember { mutableStateOf<String?>(null) }
+    var activeNotification by remember { mutableStateOf<TvNotification?>(null) }
 
     /* ── For focus restoration when returning from sub-routes ───────────────────────────── */
     var rootHasFocus by remember { mutableStateOf(false) }
-    var needsFocusRestore by remember { mutableStateOf(false) }
+    var focusRestoreTrigger by remember { mutableStateOf(0) }
 
     val heroRoutes = remember { setOf(TvRoutes.HOME, TvRoutes.MOVIES, TvRoutes.SHOWS, TvRoutes.LIBRARY) }
     val showRail = !isPlayerRoute &&
         !(selectedTopRoute == TvRoutes.IPTV && !isSubRouteActive && hideRailForIptv)
     val showHero = !isPlayerRoute && !isSubRouteActive && selectedTopRoute in heroRoutes
 
-    /* ── Intentional focus transitions (rail→content, tab switch, sub-route enter/exit) ── */
-    LaunchedEffect(needsFocusRestore) {
-        if (!needsFocusRestore) return@LaunchedEffect
-        delay(80) // let recomposition settle (removes focusProperties { enter = Cancel })
-        needsFocusRestore = false
-        val activeRoute = if (isSubRouteActive) TvRoutes.DETAILS else selectedTopRoute
-        val candidates = listOfNotNull(
-            lastFocusedContentByRoute[activeRoute],
-            firstContentFocusByRoute[activeRoute],
-            railFocusRequester,
-        )
-        for (candidate in candidates) {
-            if (runCatching { candidate.requestFocus() }.isSuccess) break
-        }
-    }
-
-    /* ── Focus watchdog — runs forever, heals focus whenever it is lost ─────────────── */
-    LaunchedEffect(Unit) {
-        var consecutiveLostFrames = 0
-        while (true) {
-            delay(150) // ~6x/sec — fast enough to feel instant, cheap enough to not matter
-
-            // Player owns its own focus system — skip
-            if (isPlayerRoute) { consecutiveLostFrames = 0; continue }
-
-            // Something has focus — all good
-            if (rootHasFocus) { consecutiveLostFrames = 0; continue }
-
-            // Nothing has focus — wait for 2 consecutive checks (~300ms) to avoid
-            // acting during legitimate transition frames where focus is briefly between nodes
-            consecutiveLostFrames++
-            if (consecutiveLostFrames < 2) continue
-            consecutiveLostFrames = 0
-
-            // Restore: try last known → first known → rail
+    /* ── Focus restore: try content first, rail is guaranteed fallback ─────────────── */
+    // Use a counter (not a boolean) so the effect key doesn't change inside its body,
+    // which would cancel the coroutine before delay() completes.
+    LaunchedEffect(focusRestoreTrigger) {
+        if (focusRestoreTrigger == 0) return@LaunchedEffect
+        // Try with increasing delays — newly visited tabs may need more time to compose
+        for (attempt in 0..2) {
+            delay(if (attempt == 0) 150L else 200L)
             val activeRoute = if (isSubRouteActive) TvRoutes.DETAILS else selectedTopRoute
             val candidates = listOfNotNull(
                 lastFocusedContentByRoute[activeRoute],
                 firstContentFocusByRoute[activeRoute],
-                railFocusRequester,
+                headerPrimaryActionRequester.takeIf { activeRoute in heroRoutes },
             )
             for (candidate in candidates) {
-                if (runCatching { candidate.requestFocus() }.isSuccess) break
+                try { candidate.requestFocus(); return@LaunchedEffect } catch (_: Throwable) { }
             }
+            // If we have no candidates at all yet, retry (tab still composing)
+            if (candidates.isEmpty() && attempt < 2) continue
+            break
+        }
+        // Rail is guaranteed fallback
+        try { railFocusRequester.requestFocus() } catch (_: Throwable) { }
+    }
+
+    /* ── Focus watchdog: if focus is truly lost, put it on the rail ─────────────────── */
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(250)
+            if (isPlayerRoute || rootHasFocus) continue
+            // Focus is lost — wait one more check to avoid false positives
+            delay(150)
+            if (rootHasFocus) continue
+            // Still lost — force focus to rail (always safe)
+            try { railFocusRequester.requestFocus() } catch (_: Throwable) { }
         }
     }
 
@@ -178,14 +181,18 @@ fun TvRoot() {
             firstContentFocusByRoute.remove(TvRoutes.DETAILS)
             lastFocusedContentByRoute.remove(TvRoutes.DETAILS)
         }
-        needsFocusRestore = true
+        focusRestoreTrigger++
     }
 
     /* ── Track visited tabs ────────────────────────────────────────────────────────────── */
     LaunchedEffect(selectedTopRoute) {
         visitedTabs = visitedTabs + selectedTopRoute
         focusedMediaItem = null
-        needsFocusRestore = true
+        // Only restore focus to content when NOT browsing the rail.
+        // Rail browsing changes tabs via onItemFocused; focus should stay on the rail item.
+        if (!isRailFocused) {
+            focusRestoreTrigger++
+        }
     }
 
     /* ── Back handler: non-HOME tab → go to HOME; on HOME → exit ───────────────────────── */
@@ -201,11 +208,11 @@ fun TvRoot() {
     }
 
     LaunchedEffect(Unit) {
-        syncCoordinator.inboundEvents.collectLatest { event ->
+        syncCoordinator.inboundEvents.collect { event ->
             when (event) {
                 is SyncInboundEvent.SearchPush -> {
                     searchSeedQuery = event.query
-                    syncNotice = stringResource_sync_search
+                    TvNotificationQueue.post(stringResource_sync_search)
                     selectedTopRoute = TvRoutes.SEARCH
                     if (isSubRouteActive) {
                         navController.popBackStack(TvRoutes.SUB_NAV_START, inclusive = false)
@@ -213,9 +220,9 @@ fun TvRoot() {
                 }
 
                 is SyncInboundEvent.PlaybackIntent -> {
-                    val detailId = event.contentId.toIntOrNull() ?: return@collectLatest
+                    val detailId = event.contentId.toIntOrNull() ?: return@collect
                     val detailType = if (event.mediaType == "tv") "tv" else "movie"
-                    syncNotice = stringResource_sync_playback
+                    TvNotificationQueue.post(stringResource_sync_playback)
                     navController.navigate(
                         TvRoutes.details(
                             type = detailType,
@@ -225,14 +232,82 @@ fun TvRoot() {
                         ),
                     ) { launchSingleTop = true }
                 }
+
+                is SyncInboundEvent.SettingsPush -> {
+                    val syncJson = Json { ignoreUnknownKeys = true }
+                    val payload = try {
+                        syncJson.decodeFromString<SyncPayload>(event.payloadJson)
+                    } catch (e: Exception) {
+                        Log.e("TvRoot", "Failed to decode settings payload", e)
+                        TvNotificationQueue.post("Invalid settings data: ${e.message}", NotificationType.ERROR)
+                        null
+                    }
+                    if (payload != null) {
+                        Log.d("TvRoot", "Settings payload: ${payload.addons.size} addons, ${payload.preferences.size} prefs, ${payload.channelPlaylists.size} playlists, ${payload.channelFavorites.size} favorites, ${payload.watchProgress.size} progress, ${payload.integrationSecrets.size} secrets")
+                        val result = try {
+                            withContext(Dispatchers.IO) {
+                                syncRepository.importSyncPayload(payload)
+                            }
+                        } catch (e: Exception) {
+                            Log.e("TvRoot", "Failed to import settings", e)
+                            TvNotificationQueue.post("Sync import failed: ${e.message}", NotificationType.ERROR)
+                            null
+                        }
+                        if (result != null) {
+                            Log.d("TvRoot", "Import result: $result")
+                            // Refresh SettingsViewModel so TV UI reflects synced integrations
+                            settingsViewModel.refreshSettings()
+                            val parts = buildList {
+                                if (result.addonsImported > 0) add("${result.addonsImported} addons")
+                                if (result.preferencesImported > 0) add("${result.preferencesImported} prefs")
+                                if (result.secretsImported > 0) add("${result.secretsImported} integrations")
+                                if (result.playlistsImported > 0) add("${result.playlistsImported} playlists")
+                                if (result.favoritesImported > 0) add("${result.favoritesImported} favorites")
+                                if (result.progressImported > 0) add("${result.progressImported} progress")
+                            }
+                            val summary = if (parts.isNotEmpty()) parts.joinToString(", ") else "no changes"
+                            TvNotificationQueue.post("Settings synced: $summary")
+                        }
+                    }
+                }
             }
         }
     }
 
-    LaunchedEffect(syncNotice) {
-        if (syncNotice != null) {
+    // Surface sync errors as notifications
+    LaunchedEffect(syncState.error) {
+        syncState.error?.let { err ->
+            TvNotificationQueue.post("Sync error: $err", NotificationType.ERROR)
+        }
+    }
+
+    // Download completion observer via WorkManager (poll every 5s)
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var lastCompletedCount by remember { mutableStateOf(-1) }
+    LaunchedEffect(Unit) {
+        val workManager = androidx.work.WorkManager.getInstance(context)
+        while (true) {
+            delay(5_000)
+            try {
+                val infos = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    workManager.getWorkInfosByTag("download_work").get()
+                }
+                val completed = infos.count { it.state == androidx.work.WorkInfo.State.SUCCEEDED }
+                if (lastCompletedCount >= 0 && completed > lastCompletedCount) {
+                    val newFinished = completed - lastCompletedCount
+                    TvNotificationQueue.post("$newFinished download(s) completed", NotificationType.SUCCESS)
+                }
+                lastCompletedCount = completed
+            } catch (_: Throwable) { /* ignore */ }
+        }
+    }
+
+    // Notification collector — show each notification for 2.4s then clear
+    LaunchedEffect(Unit) {
+        TvNotificationQueue.events.collectLatest { notification ->
+            activeNotification = notification
             delay(2400)
-            syncNotice = null
+            activeNotification = null
         }
     }
 
@@ -292,6 +367,16 @@ fun TvRoot() {
         }
     }
 
+    // First-run hint: show a welcome notification on first launch
+    LaunchedEffect(Unit) {
+        val tvPrefs = context.getSharedPreferences("tv_prefs", android.content.Context.MODE_PRIVATE)
+        val hasLaunched = tvPrefs.getBoolean("tv_has_launched", false)
+        if (!hasLaunched) {
+            tvPrefs.edit().putBoolean("tv_has_launched", true).apply()
+            TvNotificationQueue.post("Welcome to Torve TV! Use the left rail to navigate.", NotificationType.INFO)
+        }
+    }
+
     /* ── Scaffold ──────────────────────────────────────────────────────────────────────── */
     Box(
         modifier = Modifier
@@ -311,13 +396,15 @@ fun TvRoot() {
                         isRailFocused = hasFocus
                         isRailExpanded = hasFocus
                     },
-                    onMoveToContent = { needsFocusRestore = true },
+                    onMoveToContent = { focusRestoreTrigger++ },
                     onNavigate = { route ->
                         // Pop any active sub-route first
                         if (isSubRouteActive) {
                             navController.popBackStack(TvRoutes.SUB_NAV_START, inclusive = false)
                         }
-                        // Just update state — NO navController.navigate()
+                        // Add to visitedTabs synchronously so the tab renders
+                        // in the same frame as the route change (no blank frame).
+                        visitedTabs = visitedTabs + route
                         selectedTopRoute = route
                     },
                 )
@@ -346,11 +433,13 @@ fun TvRoot() {
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    // Active tab on top so focus system evaluates it first
                                     .zIndex(if (isActiveTab) 1f else 0f)
                                     .alpha(if (isActiveTab) 1f else 0f)
-                                    // Safety net: inactive keep-alive tabs must never consume d-pad actions.
+                                    // Move inactive tabs off-screen so focus search can't find them.
+                                    // Content stays composed (keep-alive) but invisible + unreachable.
+                                    .offset(x = if (isActiveTab) 0.dp else 10000.dp)
                                     .onPreviewKeyEvent { !isActiveTab }
+                                    // Block focus from entering inactive tabs during spatial search
                                     .focusProperties {
                                         if (!isActiveTab) {
                                             enter = { FocusRequester.Cancel }
@@ -519,11 +608,14 @@ fun TvRoot() {
                         railFocusRequester = railFocusRequester,
                         onVoiceSearchQuery = { query ->
                             searchSeedQuery = query
-                            syncNotice = "Search: $query"
+                            TvNotificationQueue.post("Search: $query")
                             selectedTopRoute = TvRoutes.SEARCH
                             navController.popBackStack(TvRoutes.SUB_NAV_START, inclusive = false)
                         },
-                        onSettingsClick = { selectedTopRoute = TvRoutes.SETTINGS },
+                        onSettingsClick = {
+                            navController.popBackStack(TvRoutes.SUB_NAV_START, inclusive = false)
+                            selectedTopRoute = TvRoutes.SETTINGS
+                        },
                         onFirstContentRequester = { req ->
                             firstContentFocusByRoute[TvRoutes.DETAILS] = req
                         },
@@ -533,22 +625,29 @@ fun TvRoot() {
                     )
                 }
 
-                /* ── Sync notice overlay ─────────────────────────────────────────── */
-                syncNotice?.let { notice ->
-                    Box(
-                        modifier = Modifier
-                            .padding(top = 18.dp, end = 20.dp)
-                            .align(Alignment.TopEnd)
-                            .background(Charcoal.copy(alpha = 0.85f), RoundedCornerShape(12.dp))
-                            .border(1.dp, AmberSubtle, RoundedCornerShape(12.dp))
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                    ) {
-                        Text(text = notice, color = Snow)
-                    }
-                }
             }
         },
     )
+
+    /* ── Notification overlay — above everything (hero, rail, content) ──────── */
+    activeNotification?.let { notification ->
+        val borderColor = when (notification.type) {
+            NotificationType.SUCCESS -> Emerald
+            NotificationType.ERROR -> Ruby
+            NotificationType.INFO -> AmberSubtle
+        }
+        Box(
+            modifier = Modifier
+                .zIndex(100f)
+                .padding(top = 18.dp, end = 20.dp)
+                .align(Alignment.TopEnd)
+                .background(Charcoal.copy(alpha = 0.85f), RoundedCornerShape(12.dp))
+                .border(1.dp, borderColor, RoundedCornerShape(12.dp))
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+        ) {
+            Text(text = notification.message, color = Snow)
+        }
+    }
     } // end rootHasFocus Box
 }
 

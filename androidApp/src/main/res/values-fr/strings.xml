@@ -97,7 +97,7 @@
     <string name="settings_simkl">SIMKL</string>
     <string name="settings_connect_simkl">Connecter SIMKL</string>
 
-    <string name="settings_live_tv">TV en direct</string>
+    <string name="settings_live_tv">Chaînes</string>
     <string name="settings_no_playlists">Aucune liste de lecture configurée</string>
     <string name="settings_channels_count">%1$d chaînes</string>
     <string name="settings_add_playlist">Ajouter une liste de lecture</string>
@@ -211,12 +211,12 @@
 
     <!-- Channels Screen -->
     <string name="channels_no_playlists">Aucune liste de lecture</string>
-    <string name="channels_add_playlist_prompt">Ajoutez une liste de lecture M3U ou identifiant fournisseur pour commencer</string>
+    <string name="channels_add_playlist_prompt">Ajoutez une playlist ou identifiant fournisseur pour commencer</string>
     <string name="channels_add_playlist">Ajouter une liste de lecture</string>
     <string name="channels_add_title">Ajouter une liste de lecture</string>
     <string name="channels_playlist_name">Nom de la liste de lecture</string>
-    <string name="channels_m3u_url">URL M3U</string>
-    <string name="channels_epg_optional">URL EPG (facultatif)</string>
+    <string name="channels_m3u_url">URL de Playlist</string>
+    <string name="channels_epg_optional">URL du guide (facultatif)</string>
     <string name="channels_server_url">URL du serveur</string>
     <string name="channels_username">Nom d\'utilisateur</string>
     <string name="channels_password">Mot de passe</string>
@@ -459,11 +459,11 @@
     <string name="setup_i_agree">J\'accepte</string>
     <string name="setup_verify_connect">Vérifier &amp; Connecter</string>
     <string name="setup_connect_trakt">Se connecter avec Trakt.tv</string>
-    <string name="setup_m3u">M3U</string>
+    <string name="setup_m3u">Playlist</string>
     <string name="setup_provider_login">Connexion fournisseur</string>
-    <string name="setup_channels_desc">Ajoutez une playlist M3U ou connectez-vous via un fournisseur pour regarder la TV en direct. Vous pourrez en ajouter d\'autres plus tard dans l\'onglet Chaînes.</string>
+    <string name="setup_channels_desc">Ajoutez une playlist ou connectez-vous via un fournisseur pour regarder vos chaînes. Vous pourrez en ajouter d\'autres plus tard dans l\'onglet Chaînes.</string>
     <string name="setup_playlist_hint">ex. Mes chaînes</string>
-    <string name="setup_m3u_hint">https://example.com/playlist.m3u</string>
+    <string name="setup_m3u_hint">https://example.com/playlist</string>
     <string name="setup_server_hint">http://example.com:8080</string>
 
     <!-- Card Style -->
@@ -514,7 +514,7 @@
     <string name="setup_welcome_subtitle">Votre compagnon de streaming tout-en-un</string>
     <string name="setup_feature_stream">Diffusez films et séries depuis plusieurs sources</string>
     <string name="setup_feature_cloud">Intégration de service cloud pour une lecture optimisée</string>
-    <string name="setup_feature_channels">Chaînes en direct avec support de listes M3U</string>
+    <string name="setup_feature_channels">Playlists de chaînes personnelles</string>
     <string name="setup_feature_download">Téléchargez du contenu pour le visionnage hors ligne</string>
     <string name="setup_feature_trakt">Suivez votre liste avec Trakt.tv</string>
     <string name="setup_lets_go">Configurons tout en quelques étapes rapides.</string>
@@ -794,7 +794,7 @@
     <string name="tv_addon_suggested">Addons suggérés</string>
     <string name="tv_addon_installed">Installés</string>
 
-    <!-- IPTV redesign -->
+    <!-- Channel redesign -->
     <string name="tv_iptv_all_channels">Toutes les chaînes</string>
     <string name="tv_iptv_channels_count">%d chaînes</string>
     <string name="tv_iptv_now_playing">En cours de lecture</string>
@@ -809,19 +809,19 @@
     <string name="tv_nav_iptv">Chaînes</string>
 
     <!-- TV Hero -->
-    <string name="tv_hero_subtitle_iptv">Vos chaînes TV en direct</string>
+    <string name="tv_hero_subtitle_iptv">Vos chaînes</string>
 
     <!-- TV Player -->
     <string name="tv_player_preparing">Préparation de la lecture</string>
     <string name="tv_settings_description">Utilisez cet écran pour configurer le comportement TV et les intégrations de compte depuis la télécommande.</string>
     <string name="tv_settings_cast">Cast fonctionne sur Android TV et se désactive correctement sur Fire TV lorsque Play Services n\'est pas disponible.</string>
 
-    <!-- TV IPTV -->
+    <!-- TV Channels -->
     <string name="tv_iptv_empty">Aucune chaîne disponible. Ajoutez une playlist dans les Paramètres.</string>
     <string name="tv_iptv_recently_viewed">Vues récemment</string>
     <string name="tv_iptv_favorites">Favoris</string>
     <string name="tv_iptv_no_playlists_title">Aucune chaîne configurée</string>
-    <string name="tv_iptv_no_playlists_subtitle">Ajoutez une playlist M3U sur votre téléphone, puis synchronisez avec la TV</string>
+    <string name="tv_iptv_no_playlists_subtitle">Ajoutez une playlist sur votre téléphone, puis synchronisez avec la TV</string>
 
     <!-- TV Settings: Customization -->
     <string name="tv_settings_section_customization">Personnalisation</string>
@@ -857,7 +857,7 @@
     <string name="tv_settings_playlist_name">Nom de la playlist</string>
     <string name="tv_settings_playlist_url">URL de la playlist</string>
     <string name="tv_settings_playlist_save">Enregistrer la playlist</string>
-    <string name="tv_settings_playlist_type_m3u">Playlist M3U</string>
+    <string name="tv_settings_playlist_type_m3u">Playlist URL</string>
     <string name="tv_settings_playlist_type_xtream">Connexion fournisseur</string>
     <string name="tv_settings_xtream_server">URL du serveur</string>
     <string name="tv_settings_xtream_username">Nom d\'utilisateur</string>
@@ -970,7 +970,7 @@
     <string name="tv_home_layout_media_type">Type de média</string>
 
     <!-- TV Live Player -->
-    <string name="tv_live_tv_guide">Guide TV</string>
+    <string name="tv_live_tv_guide">Guide des programmes</string>
     <string name="tv_live_history">Historique</string>
     <string name="tv_live_clear">Effacer</string>
     <string name="tv_live_next_label">Suivant :</string>

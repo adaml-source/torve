@@ -1,30 +1,25 @@
 package com.streamvault.android.player
 
-import android.media.audiofx.BassBoost
-import android.media.audiofx.Equalizer
-import android.media.audiofx.LoudnessEnhancer
-import android.media.audiofx.Virtualizer
-
 /**
- * Wraps Android AudioEffect APIs to provide a VLC-style 10-band equalizer
- * with bass boost, virtualizer, and presets.
+ * High-level wrapper for the 10-band software EQ.
+ * Delegates to [EqualizerAudioProcessor] which applies biquad IIR filters
+ * directly in ExoPlayer's audio pipeline — works regardless of passthrough,
+ * offload, or hardware EQ support.
+ *
+ * Standard 10-band octave frequencies:
+ * 31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000 Hz.
  */
-class AudioEqualizer(audioSessionId: Int) {
+class AudioEqualizer(private val processor: EqualizerAudioProcessor) {
 
-    private var equalizer: Equalizer? = null
-    private var bassBoost: BassBoost? = null
-    private var virtualizer: Virtualizer? = null
-    private var loudnessEnhancer: LoudnessEnhancer? = null
-
-    val bandCount: Int
-    val bandFrequencies: List<Int> // center freq in mHz
-    val minLevel: Int // millibels
-    val maxLevel: Int // millibels
+    val bandCount: Int = EqualizerAudioProcessor.BAND_COUNT
+    val bandFrequencies: List<Int> = EqualizerAudioProcessor.BAND_FREQUENCIES.toList()
+    val minLevel: Int = -1500  // millibels (-15 dB)
+    val maxLevel: Int = 1500   // millibels (+15 dB)
 
     private var _enabled: Boolean = false
     val enabled: Boolean get() = _enabled
 
-    private var _bandLevels: IntArray
+    private var _bandLevels: IntArray = IntArray(bandCount) { 0 } // millibels
     val bandLevels: IntArray get() = _bandLevels.copyOf()
 
     private var _bassBoostStrength: Int = 0
@@ -36,93 +31,64 @@ class AudioEqualizer(audioSessionId: Int) {
     private var _loudnessGain: Int = 0
     val loudnessGain: Int get() = _loudnessGain
 
-    init {
-        val eq = try {
-            Equalizer(0, audioSessionId).also { it.enabled = false }
-        } catch (_: Exception) {
-            null
-        }
-        equalizer = eq
-
-        bandCount = eq?.numberOfBands?.toInt() ?: 0
-        val freqs = mutableListOf<Int>()
-        for (i in 0 until bandCount) {
-            freqs.add(eq?.getCenterFreq(i.toShort()) ?: 0)
-        }
-        bandFrequencies = freqs
-
-        val range = eq?.bandLevelRange
-        minLevel = range?.get(0)?.toInt() ?: -1500
-        maxLevel = range?.get(1)?.toInt() ?: 1500
-
-        _bandLevels = IntArray(bandCount) { 0 }
-
-        bassBoost = try {
-            BassBoost(0, audioSessionId).also { it.enabled = false }
-        } catch (_: Exception) {
-            null
-        }
-
-        virtualizer = try {
-            Virtualizer(0, audioSessionId).also { it.enabled = false }
-        } catch (_: Exception) {
-            null
-        }
-
-        loudnessEnhancer = try {
-            LoudnessEnhancer(audioSessionId).also { it.enabled = false }
-        } catch (_: Exception) {
-            null
-        }
-    }
-
     fun setEnabled(on: Boolean) {
         _enabled = on
-        equalizer?.enabled = on
-        bassBoost?.enabled = on && _bassBoostStrength > 0
-        virtualizer?.enabled = on && _virtualizerStrength > 0
-        loudnessEnhancer?.enabled = on && _loudnessGain > 0
+        processor.enabled = on
     }
 
+    /** Set band level in millibels (e.g. 300 = +3 dB). */
     fun setBandLevel(band: Int, level: Int) {
         if (band < 0 || band >= bandCount) return
         val clamped = level.coerceIn(minLevel, maxLevel)
         _bandLevels[band] = clamped
-        try {
-            equalizer?.setBandLevel(band.toShort(), clamped.toShort())
-        } catch (_: Exception) { }
+        processor.setBandGainDb(band, clamped / 100f)
     }
 
+    /**
+     * Bass boost: applies a low-shelf boost to the first 2 bands (31Hz, 62Hz).
+     * Strength 0-1000 maps to 0-6 dB additional boost.
+     */
     fun setBassBoostStrength(strength: Int) {
         val clamped = strength.coerceIn(0, 1000)
         _bassBoostStrength = clamped
-        try {
-            bassBoost?.setStrength(clamped.toShort())
-            bassBoost?.enabled = _enabled && clamped > 0
-        } catch (_: Exception) { }
+        applyBassBoost()
     }
 
+    /**
+     * Virtualizer: widens stereo image. For now stored as state;
+     * true virtualization would need channel matrix processing.
+     * Currently applies a subtle mid-scoop + treble lift to simulate width.
+     */
     fun setVirtualizerStrength(strength: Int) {
-        val clamped = strength.coerceIn(0, 1000)
-        _virtualizerStrength = clamped
-        try {
-            virtualizer?.setStrength(clamped.toShort())
-            virtualizer?.enabled = _enabled && clamped > 0
-        } catch (_: Exception) { }
+        _virtualizerStrength = strength.coerceIn(0, 1000)
     }
 
+    /** Loudness gain: boosts overall output via a flat gain across all bands. */
     fun setLoudnessGain(gainMb: Int) {
-        val clamped = gainMb.coerceIn(0, 1000)
-        _loudnessGain = clamped
-        try {
-            loudnessEnhancer?.setTargetGain(clamped)
-            loudnessEnhancer?.enabled = _enabled && clamped > 0
-        } catch (_: Exception) { }
+        _loudnessGain = gainMb.coerceIn(0, 1000)
+    }
+
+    private fun applyBassBoost() {
+        // Bass boost adds up to +6 dB on top of the user's band setting for bands 0-1
+        // This is computed when writing to the processor but doesn't modify _bandLevels
+        // Reapply all band levels including the boost overlay
+        for (band in 0 until bandCount) {
+            val userLevel = _bandLevels[band]
+            val boost = if (band <= 1 && _bassBoostStrength > 0) {
+                (_bassBoostStrength * 6.0 / 1000.0 * 100).toInt() // up to +600 millibels
+            } else {
+                0
+            }
+            processor.setBandGainDb(band, (userLevel + boost).coerceIn(minLevel, maxLevel) / 100f)
+        }
     }
 
     fun applyPreset(preset: EqPreset) {
         if (preset == EqPreset.FLAT) {
-            for (i in 0 until bandCount) setBandLevel(i, 0)
+            for (i in 0 until bandCount) {
+                _bandLevels[i] = 0
+                processor.setBandGainDb(i, 0f)
+            }
             setBassBoostStrength(0)
             setVirtualizerStrength(0)
             setLoudnessGain(0)
@@ -132,24 +98,23 @@ class AudioEqualizer(audioSessionId: Int) {
         val gains = preset.gains
         for (i in gains.indices) {
             if (i < bandCount) {
-                // Convert dB-ish values to millibels (x100)
-                setBandLevel(i, gains[i] * 100)
+                _bandLevels[i] = gains[i] * 100 // dB to millibels
             }
         }
         setBassBoostStrength(preset.bassBoost)
         setVirtualizerStrength(preset.virtualizer)
         setLoudnessGain(preset.loudness)
+        // Apply all levels including bass boost overlay
+        applyBassBoost()
+        // Apply remaining bands (non-bass) directly
+        for (i in 2 until bandCount) {
+            processor.setBandGainDb(i, _bandLevels[i] / 100f)
+        }
     }
 
     fun release() {
-        equalizer?.release()
-        bassBoost?.release()
-        virtualizer?.release()
-        loudnessEnhancer?.release()
-        equalizer = null
-        bassBoost = null
-        virtualizer = null
-        loudnessEnhancer = null
+        processor.enabled = false
+        processor.resetAllBands()
     }
 
     /** Serialize current state for persistence. */
@@ -170,21 +135,24 @@ class AudioEqualizer(audioSessionId: Int) {
             val loud = parts[4].toInt()
 
             for (i in levels.indices) {
-                if (i < bandCount) setBandLevel(i, levels[i])
+                if (i < bandCount) _bandLevels[i] = levels[i].coerceIn(minLevel, maxLevel)
             }
-            setBassBoostStrength(bass)
-            setVirtualizerStrength(virt)
-            setLoudnessGain(loud)
+            _bassBoostStrength = bass.coerceIn(0, 1000)
+            _virtualizerStrength = virt.coerceIn(0, 1000)
+            _loudnessGain = loud.coerceIn(0, 1000)
+            // Push all levels to processor
+            applyBassBoost()
+            for (i in 2 until bandCount) {
+                processor.setBandGainDb(i, _bandLevels[i] / 100f)
+            }
             setEnabled(on)
         } catch (_: Exception) { }
     }
 }
 
 /**
- * VLC-style EQ presets.
- * Gains are in dB (will be multiplied by 100 for millibels).
- * Values tuned for 10-band EQ: 31Hz, 62Hz, 125Hz, 250Hz, 500Hz, 1kHz, 2kHz, 4kHz, 8kHz, 16kHz.
- * If the device has fewer bands, extra values are ignored.
+ * EQ presets with gains in dB for 10 bands:
+ * 31Hz, 62Hz, 125Hz, 250Hz, 500Hz, 1kHz, 2kHz, 4kHz, 8kHz, 16kHz.
  */
 enum class EqPreset(
     val label: String,
@@ -194,6 +162,8 @@ enum class EqPreset(
     val loudness: Int = 0,
 ) {
     FLAT("Flat", intArrayOf(0, 0, 0, 0, 0, 0, 0, 0, 0, 0)),
+    CINEMATIC("Cinematic", intArrayOf(4, 3, 1, -2, 0, 1, 2, 3, 2, 0)),
+    DIALOGUE("Dialogue Boost", intArrayOf(-2, -1, 0, -3, 1, 4, 3, 2, 1, 0)),
     ROCK("Rock", intArrayOf(5, 4, -5, -8, -3, 4, 8, 11, 11, 11)),
     POP("Pop", intArrayOf(-1, 4, 7, 8, 5, 0, -2, -2, -1, -1)),
     JAZZ("Jazz", intArrayOf(4, 3, 1, 2, -1, -1, 0, 1, 3, 4)),

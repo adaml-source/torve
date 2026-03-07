@@ -69,6 +69,11 @@ fun LiveSettingsOverlay(
     onSetXxxEnabled: (Boolean) -> Unit,
     onSetAudioPassthroughEnabled: (Boolean) -> Unit,
     onSetPreferSurroundCodecs: (Boolean) -> Unit,
+    audioTracks: List<com.streamvault.domain.player.TrackDescription> = emptyList(),
+    subtitleTracks: List<com.streamvault.domain.player.TrackDescription> = emptyList(),
+    onSelectAudioTrack: (Int) -> Unit = {},
+    onSelectSubtitleTrack: (Int) -> Unit = {},
+    onDisableSubtitles: () -> Unit = {},
 ) {
     val firstFocus = remember { FocusRequester() }
 
@@ -345,6 +350,112 @@ fun LiveSettingsOverlay(
                                 uncheckedTrackColor = Charcoal,
                             ),
                         )
+                    }
+                }
+            }
+
+            // ── Audio Track Picker ──
+            if (audioTracks.size > 1) {
+                item(key = "audio_track_header") {
+                    Spacer(Modifier.height(8.dp))
+                    SectionHeader("Audio Track")
+                }
+                items(audioTracks, key = { "atrack_${it.id}" }) { track ->
+                    val label = track.label.ifBlank { track.language ?: "Track ${track.id}" }
+                    Surface(
+                        onClick = { onSelectAudioTrack(track.id) },
+                        modifier = Modifier.fillMaxWidth().height(40.dp),
+                        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(8.dp)),
+                        colors = ClickableSurfaceDefaults.colors(
+                            containerColor = if (track.isSelected) Amber.copy(alpha = 0.2f) else Graphite,
+                            focusedContainerColor = Amber.copy(alpha = 0.3f),
+                        ),
+                        border = ClickableSurfaceDefaults.border(
+                            focusedBorder = androidx.tv.material3.Border(
+                                border = androidx.compose.foundation.BorderStroke(1.5.dp, Amber),
+                                shape = RoundedCornerShape(8.dp),
+                            ),
+                        ),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = label,
+                                color = if (track.isSelected) Amber else Snow,
+                                fontSize = 14.sp,
+                                fontWeight = if (track.isSelected) FontWeight.Bold else FontWeight.Normal,
+                            )
+                        }
+                    }
+                }
+            }
+
+            // ── Subtitle Track Picker ──
+            if (subtitleTracks.isNotEmpty()) {
+                item(key = "subtitle_track_header") {
+                    Spacer(Modifier.height(8.dp))
+                    SectionHeader("Subtitles")
+                }
+                item(key = "strack_off") {
+                    val noSubSelected = subtitleTracks.none { it.isSelected }
+                    Surface(
+                        onClick = { onDisableSubtitles() },
+                        modifier = Modifier.fillMaxWidth().height(40.dp),
+                        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(8.dp)),
+                        colors = ClickableSurfaceDefaults.colors(
+                            containerColor = if (noSubSelected) Amber.copy(alpha = 0.2f) else Graphite,
+                            focusedContainerColor = Amber.copy(alpha = 0.3f),
+                        ),
+                        border = ClickableSurfaceDefaults.border(
+                            focusedBorder = androidx.tv.material3.Border(
+                                border = androidx.compose.foundation.BorderStroke(1.5.dp, Amber),
+                                shape = RoundedCornerShape(8.dp),
+                            ),
+                        ),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "Off",
+                                color = if (noSubSelected) Amber else Snow,
+                                fontSize = 14.sp,
+                                fontWeight = if (noSubSelected) FontWeight.Bold else FontWeight.Normal,
+                            )
+                        }
+                    }
+                }
+                items(subtitleTracks, key = { "strack_${it.id}" }) { track ->
+                    val label = track.label.ifBlank { track.language ?: "Track ${track.id}" }
+                    Surface(
+                        onClick = { onSelectSubtitleTrack(track.id) },
+                        modifier = Modifier.fillMaxWidth().height(40.dp),
+                        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(8.dp)),
+                        colors = ClickableSurfaceDefaults.colors(
+                            containerColor = if (track.isSelected) Amber.copy(alpha = 0.2f) else Graphite,
+                            focusedContainerColor = Amber.copy(alpha = 0.3f),
+                        ),
+                        border = ClickableSurfaceDefaults.border(
+                            focusedBorder = androidx.tv.material3.Border(
+                                border = androidx.compose.foundation.BorderStroke(1.5.dp, Amber),
+                                shape = RoundedCornerShape(8.dp),
+                            ),
+                        ),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = label,
+                                color = if (track.isSelected) Amber else Snow,
+                                fontSize = 14.sp,
+                                fontWeight = if (track.isSelected) FontWeight.Bold else FontWeight.Normal,
+                            )
+                        }
                     }
                 }
             }

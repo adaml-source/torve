@@ -8,7 +8,7 @@
     <string name="nav_home">Startseite</string>
     <string name="nav_movies">Filme</string>
     <string name="nav_tv_shows">Serien</string>
-    <string name="nav_channels">Live-TV</string>
+    <string name="nav_channels">Kanäle</string>
     <string name="nav_watchlist">Merkliste</string>
     <string name="nav_settings">Einstellungen</string>
 
@@ -92,7 +92,7 @@
     <string name="settings_api_status">API: %1$s</string>
     <string name="settings_simkl">SIMKL</string>
     <string name="settings_connect_simkl">SIMKL verbinden</string>
-    <string name="settings_live_tv">Live-TV</string>
+    <string name="settings_live_tv">Kanäle</string>
     <string name="settings_no_playlists">Keine Playlists konfiguriert</string>
     <string name="settings_channels_count">%1$d Kanäle</string>
     <string name="settings_add_playlist">Playlist hinzufügen</string>
@@ -157,13 +157,13 @@
     <string name="paywall_redeem">Einlösen</string>
     <string name="paywall_redeem_success">Code eingelöst! Lebenslanger Zugang aktiviert.</string>
     <string name="paywall_unlock">Torve Pro freischalten</string>
-    <string name="paywall_subtitle">Streame, lade herunter und schaue Live-TV mit einem Pro-Abonnement</string>
+    <string name="paywall_subtitle">Streame, lade herunter und schaue TV mit einem Pro-Abonnement</string>
     <string name="paywall_free">Kostenlos</string>
     <string name="paywall_pro">Pro</string>
     <string name="paywall_search_browse">Suchen &amp; Stöbern</string>
     <string name="paywall_stream_playback">Stream-Wiedergabe</string>
     <string name="paywall_downloads">Downloads</string>
-    <string name="paywall_channels">Live-TV</string>
+    <string name="paywall_channels">Kanäle</string>
     <string name="paywall_multi_cloud">Multi-Cloud</string>
     <string name="paywall_trakt_simkl">Trakt &amp; SIMKL Sync</string>
     <string name="paywall_ai_search">KI-Suche</string>
@@ -198,12 +198,12 @@
 
     <!-- Channels -->
     <string name="channels_no_playlists">Keine Playlists</string>
-    <string name="channels_add_playlist_prompt">Füge eine M3U-Playlist oder Anbieter-Login hinzu, um zu beginnen</string>
+    <string name="channels_add_playlist_prompt">Füge eine Playlist oder Anbieter-Login hinzu, um zu beginnen</string>
     <string name="channels_add_playlist">Playlist hinzufügen</string>
     <string name="channels_add_title">Playlist hinzufügen</string>
     <string name="channels_playlist_name">Playlist-Name</string>
-    <string name="channels_m3u_url">M3U-URL</string>
-    <string name="channels_epg_optional">EPG-URL (optional)</string>
+    <string name="channels_m3u_url">Playlist-URL</string>
+    <string name="channels_epg_optional">Programmguide-URL (optional)</string>
     <string name="channels_server_url">Server-URL</string>
     <string name="channels_username">Benutzername</string>
     <string name="channels_password">Passwort</string>
@@ -446,11 +446,11 @@
     <string name="setup_i_agree">Ich stimme zu</string>
     <string name="setup_verify_connect">Überprüfen &amp; Verbinden</string>
     <string name="setup_connect_trakt">Mit Trakt.tv verbinden</string>
-    <string name="setup_m3u">M3U</string>
+    <string name="setup_m3u">Playlist</string>
     <string name="setup_provider_login">Anbieter-Login</string>
-    <string name="setup_channels_desc">Füge eine M3U-Playlist oder einen Anbieter-Login hinzu, um Live-TV zu schauen. Weitere kannst du später im Live-TV-Tab hinzufügen.</string>
+    <string name="setup_channels_desc">Füge eine Playlist oder einen Anbieter-Login hinzu, um Kanäle zu schauen. Weitere kannst du später im Kanäle-Tab hinzufügen.</string>
     <string name="setup_playlist_hint">z. B. Meine Sender</string>
-    <string name="setup_m3u_hint">https://example.com/playlist.m3u</string>
+    <string name="setup_m3u_hint">https://example.com/playlist</string>
     <string name="setup_server_hint">http://example.com:8080</string>
 
     <!-- Card Style -->
@@ -501,7 +501,7 @@
     <string name="setup_welcome_subtitle">Dein All-in-One Streaming-Begleiter</string>
     <string name="setup_feature_stream">Filme &amp; Serien aus mehreren Quellen streamen</string>
     <string name="setup_feature_cloud">Cloud-Service-Integration für optimierte Wiedergabe</string>
-    <string name="setup_feature_channels">Live-Kanäle mit M3U-Playlist-Unterstützung</string>
+    <string name="setup_feature_channels">Persönliche Kanal-Playlisten</string>
     <string name="setup_feature_download">Inhalte für Offline-Wiedergabe herunterladen</string>
     <string name="setup_feature_trakt">Merkliste mit Trakt.tv verfolgen</string>
     <string name="setup_lets_go">Lass uns alles in wenigen Schritten einrichten.</string>
@@ -764,7 +764,7 @@
     <string name="tv_library_tab_watchlist">Merkliste</string>
     <string name="tv_library_tab_downloads">Downloads</string>
     <string name="tv_library_tab_recordings">Aufnahmen</string>
-    <string name="tv_library_recordings_coming_soon">Live-TV-Aufnahmen — demnächst verfügbar</string>
+    <string name="tv_library_recordings_coming_soon">Playlist-Aufnahmen — demnächst verfügbar</string>
     <string name="tv_library_no_downloads">Noch keine Downloads</string>
 
     <!-- Download actions -->
@@ -781,7 +781,7 @@
     <string name="tv_addon_suggested">Vorgeschlagene Addons</string>
     <string name="tv_addon_installed">Installiert</string>
 
-    <!-- IPTV redesign -->
+    <!-- Channel redesign -->
     <string name="tv_iptv_all_channels">Alle Sender</string>
     <string name="tv_iptv_channels_count">%d Sender</string>
     <string name="tv_iptv_now_playing">Läuft gerade</string>
@@ -796,19 +796,19 @@
     <string name="tv_nav_iptv">Sender</string>
 
     <!-- TV Hero -->
-    <string name="tv_hero_subtitle_iptv">Deine Live-TV-Sender</string>
+    <string name="tv_hero_subtitle_iptv">Deine Sender</string>
 
     <!-- TV Player -->
     <string name="tv_player_preparing">Wiedergabe wird vorbereitet</string>
     <string name="tv_settings_description">Verwende diesen Bildschirm, um TV-Verhalten und Kontoeinstellungen per Fernbedienung zu konfigurieren.</string>
     <string name="tv_settings_cast">Cast funktioniert auf Android TV und wird auf Fire TV ordnungsgemäß deaktiviert, wenn Play Services nicht verfügbar sind.</string>
 
-    <!-- TV IPTV -->
+    <!-- TV Channels -->
     <string name="tv_iptv_empty">Keine Sender verfügbar. Füge eine Playlist in den Einstellungen hinzu.</string>
     <string name="tv_iptv_recently_viewed">Zuletzt angesehen</string>
     <string name="tv_iptv_favorites">Favoriten</string>
     <string name="tv_iptv_no_playlists_title">Keine Sender konfiguriert</string>
-    <string name="tv_iptv_no_playlists_subtitle">Füge eine M3U-Playlist auf deinem Handy hinzu und synchronisiere mit dem TV</string>
+    <string name="tv_iptv_no_playlists_subtitle">Füge eine Playlist auf deinem Handy hinzu und synchronisiere mit dem TV</string>
 
     <!-- TV Settings: Customization -->
     <string name="tv_settings_section_customization">Anpassung</string>
@@ -844,7 +844,7 @@
     <string name="tv_settings_playlist_name">Playlist-Name</string>
     <string name="tv_settings_playlist_url">Playlist-URL</string>
     <string name="tv_settings_playlist_save">Playlist speichern</string>
-    <string name="tv_settings_playlist_type_m3u">M3U-Playlist</string>
+    <string name="tv_settings_playlist_type_m3u">URL-Playlist</string>
     <string name="tv_settings_playlist_type_xtream">Anbieter-Login</string>
     <string name="tv_settings_xtream_server">Server-URL</string>
     <string name="tv_settings_xtream_username">Benutzername</string>
@@ -957,7 +957,7 @@
     <string name="tv_home_layout_media_type">Medientyp</string>
 
     <!-- TV Live Player -->
-    <string name="tv_live_tv_guide">TV-Guide</string>
+    <string name="tv_live_tv_guide">Programmguide</string>
     <string name="tv_live_history">Verlauf</string>
     <string name="tv_live_clear">Leeren</string>
     <string name="tv_live_next_label">Nächste:</string>

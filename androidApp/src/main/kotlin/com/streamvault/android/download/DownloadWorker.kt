@@ -37,6 +37,7 @@ class DownloadWorker(
         fun enqueue(context: Context, downloadId: String) {
             val request = OneTimeWorkRequestBuilder<DownloadWorker>()
                 .setInputData(workDataOf(KEY_DOWNLOAD_ID to downloadId))
+                .addTag("download_work")
                 .build()
             WorkManager.getInstance(context).enqueueUniqueWork(
                 "$WORK_NAME_PREFIX$downloadId",

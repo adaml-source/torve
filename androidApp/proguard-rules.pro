@@ -53,6 +53,10 @@
 # ── Domain models (used via reflection in serialization) ──
 -keep class com.streamvault.domain.model.** { *; }
 -keep class com.streamvault.data.debrid.** { *; }
+# Obfuscate field and method names in debrid package (keep class structure only for serialization)
+-keepclassmembernames class com.streamvault.data.debrid.** {
+    @kotlinx.serialization.SerialName *;
+}
 -keep class com.streamvault.data.trakt.** { *; }
 -keep class com.streamvault.data.addon.StremioModels** { *; }
 -keep class com.streamvault.data.metadata.TmdbModels** { *; }

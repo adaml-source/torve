@@ -15,6 +15,8 @@ import com.streamvault.android.tv.components.TvMediaRails
 import com.streamvault.android.tv.components.dedupeAcrossRails
 import com.streamvault.android.tv.components.rememberTvFocusMemory
 import com.streamvault.domain.model.MediaItem
+import com.streamvault.domain.model.ParentalFilter
+import com.streamvault.domain.model.ContentRating
 import com.streamvault.domain.repository.MetadataRepository
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -40,6 +42,7 @@ internal fun TvCatalogRailsScreen(
     onSeeAll: ((railKey: String, title: String) -> Unit)? = null,
     heroOverlay: (@Composable () -> Unit)? = null,
     shouldAutoFocus: Boolean = true,
+    maxContentRating: ContentRating? = null,
 ) {
     val metadataRepo: MetadataRepository = koinInject()
     val focusMemory = rememberTvFocusMemory()
@@ -141,9 +144,20 @@ internal fun TvCatalogRailsScreen(
         }
     }
 
+    val filteredRails = remember(uiState.rails, maxContentRating) {
+        if (maxContentRating == null) {
+            uiState.rails
+        } else {
+            uiState.rails.mapNotNull { rail ->
+                val filtered = ParentalFilter.filter(rail.items, maxContentRating)
+                if (filtered.isEmpty()) null else rail.copy(items = filtered)
+            }
+        }
+    }
+
     val emptyMessage = uiState.error ?: stringResource(R.string.tv_no_data)
     TvMediaRails(
-        rails = uiState.rails,
+        rails = filteredRails,
         railFocusRequester = railFocusRequester,
         headerFocusRequester = headerFocusRequester,
         onMediaClick = onMediaClick,

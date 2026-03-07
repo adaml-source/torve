@@ -2,11 +2,11 @@ import SwiftUI
 import shared
 
 struct IptvMovieView: View {
-    let categories: [IptvCategory]
+    let categories: [ChannelCategory]
     let expandedCategories: Set<String>
     let onToggleCategory: (String) -> Void
-    let onChannelPlay: (IptvChannel) -> Void
-    let onChannelFavorite: (IptvChannel) -> Void
+    let onChannelPlay: (Channel) -> Void
+    let onChannelFavorite: (Channel) -> Void
 
     var body: some View {
         if categories.isEmpty {

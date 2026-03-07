@@ -1,364 +1,294 @@
 import SwiftUI
 import shared
-import UniformTypeIdentifiers
 
 struct SettingsScreen: View {
-    @State private var showPaywall = false
-    @State private var showDownloads = false
+    @StateObject private var wrapper = SettingsViewModelWrapper()
 
-    var body: some View {
-        NavigationStack {
-            List {
-                Section("Account") {
-                    NavigationLink(destination: PaywallScreen()) {
-                        Label("Subscription", systemImage: "star.circle")
-                    }
-                    NavigationLink(destination: DownloadsScreen()) {
-                        Label("Downloads", systemImage: "arrow.down.circle")
-                    }
-                }
-
-                Section("Playback") {
-                    NavigationLink(destination: PlaybackSettingsView()) {
-                        Label("Stream Preferences", systemImage: "play.circle")
-                    }
-                }
-
-                Section("Services") {
-                    NavigationLink(destination: DebridSettingsView()) {
-                        Label("Cloud Service", systemImage: "server.rack")
-                    }
-                    NavigationLink(destination: TraktSettingsView()) {
-                        Label("Trakt.tv", systemImage: "list.bullet")
-                    }
-                    NavigationLink(destination: AddonSettingsView()) {
-                        Label("Content Sources", systemImage: "puzzlepiece.extension")
-                    }
-                }
-
-                Section("Backup & Sync") {
-                    NavigationLink(destination: BackupSyncView()) {
-                        Label("Backup & Restore", systemImage: "arrow.triangle.2.circlepath")
-                    }
-                }
-
-                Section("About") {
-                    HStack {
-                        Text("Version")
-                        Spacer()
-                        Text("0.1.0")
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
-            .navigationTitle("Settings")
-        }
-    }
-}
-
-struct BackupSyncView: View {
-    @State private var iCloudSyncEnabled = false
-    @State private var isExporting = false
-    @State private var isImporting = false
-    @State private var showExportSheet = false
-    @State private var showImportPicker = false
-    @State private var statusMessage: String? = nil
-    @State private var exportURL: URL? = nil
+    @State private var showClearCacheConfirmation = false
 
     var body: some View {
         List {
-            Section {
-                Toggle("iCloud Sync", isOn: $iCloudSyncEnabled)
-            } footer: {
-                Text("Automatically sync your addons, preferences, and watch progress across your Apple devices via iCloud.")
+            quickLinksSection
+            accountSection
+            contentSection
+            servicesSection
+            playbackSection
+            aiSection
+            appearanceSection
+            dataSection
+            storageSection
+            aboutSection
+        }
+        .navigationTitle("Settings")
+        .confirmationDialog("Clear Cache?", isPresented: $showClearCacheConfirmation) {
+            Button("Clear", role: .destructive) {
+                wrapper.viewModel.clearCache()
+            }
+        } message: {
+            Text("This will clear all cached images and metadata. Your saved data will not be affected.")
+        }
+    }
+
+    // MARK: - Quick Links
+
+    private var quickLinksSection: some View {
+        Section {
+            HStack(spacing: 12) {
+                NavigationLink(value: Route.profileTab) {
+                    quickLinkCard(icon: "person.crop.circle", title: "Profile")
+                }
+                .buttonStyle(.plain)
+
+                NavigationLink(value: Route.paywall) {
+                    quickLinkCard(icon: "star.circle", title: "Subscription")
+                }
+                .buttonStyle(.plain)
+            }
+            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
+            .listRowBackground(Color.clear)
+
+            HStack(spacing: 12) {
+                NavigationLink(value: Route.downloads) {
+                    quickLinkCard(icon: "arrow.down.circle", title: "Downloads")
+                }
+                .buttonStyle(.plain)
+
+                NavigationLink(value: Route.calendar) {
+                    quickLinkCard(icon: "calendar", title: "Calendar")
+                }
+                .buttonStyle(.plain)
+            }
+            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
+            .listRowBackground(Color.clear)
+        }
+    }
+
+    private func quickLinkCard(icon: String, title: String) -> some View {
+        HStack {
+            Image(systemName: icon)
+                .foregroundColor(SVColor.amber)
+            Text(title)
+                .font(.subheadline)
+                .fontWeight(.medium)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(Color(.tertiarySystemBackground))
+        .cornerRadius(10)
+    }
+
+    // MARK: - Account
+
+    private var accountSection: some View {
+        Section("Account") {
+            NavigationLink(value: Route.account) {
+                Label("Account & Sync", systemImage: "person.crop.circle")
+            }
+            NavigationLink(value: Route.devices) {
+                Label("Devices", systemImage: "laptopcomputer.and.iphone")
+            }
+        }
+    }
+
+    // MARK: - Content
+
+    private var contentSection: some View {
+        Section("Content") {
+            NavigationLink(value: Route.addonManager) {
+                Label("Content Sources", systemImage: "puzzlepiece.extension")
+            }
+            NavigationLink(value: Route.homeLayout) {
+                Label("Home Layout", systemImage: "square.grid.2x2")
+            }
+            NavigationLink(value: Route.streamingServices) {
+                Label("Streaming Services", systemImage: "play.tv")
+            }
+            NavigationLink(value: Route.customSectionEditor) {
+                Label("Custom Sections", systemImage: "rectangle.stack")
+            }
+            NavigationLink(value: Route.cardStyleSettings) {
+                Label("Card Style", systemImage: "rectangle.portrait")
+            }
+        }
+    }
+
+    // MARK: - Services
+
+    private var servicesSection: some View {
+        Section("Services") {
+            NavigationLink(value: Route.debridSettings) {
+                HStack {
+                    Label("Cloud Service", systemImage: "server.rack")
+                    Spacer()
+                    statusDot(wrapper.state.debridConnected)
+                }
+            }
+            NavigationLink(value: Route.traktSettings) {
+                HStack {
+                    Label("Trakt.tv", systemImage: "list.bullet")
+                    Spacer()
+                    statusDot(wrapper.state.traktConnected)
+                }
+            }
+            NavigationLink(value: Route.simklSettings) {
+                HStack {
+                    Label("SIMKL", systemImage: "chart.bar")
+                    Spacer()
+                    statusDot(wrapper.state.simklConnected)
+                }
+            }
+            NavigationLink(value: Route.integrations) {
+                Label("Integrations", systemImage: "link")
+            }
+            NavigationLink(value: Route.mdbListSettings) {
+                Label("MDBList", systemImage: "list.star")
+            }
+        }
+    }
+
+    // MARK: - Playback
+
+    private var playbackSection: some View {
+        Section("Playback") {
+            NavigationLink(value: Route.playbackSettings) {
+                Label("Playback", systemImage: "play.circle")
+            }
+            NavigationLink(value: Route.streamGroups) {
+                Label("Stream Groups", systemImage: "folder")
+            }
+            NavigationLink(value: Route.regexPatterns) {
+                Label("Regex Patterns", systemImage: "textformat.abc")
+            }
+            NavigationLink(value: Route.ratingSettings) {
+                Label("Ratings", systemImage: "star.leadinghalf.filled")
+            }
+        }
+    }
+
+    // MARK: - AI Features
+
+    private var aiSection: some View {
+        Section {
+            Picker("AI Provider", selection: Binding(
+                get: { wrapper.state.aiProvider.name },
+                set: { _ in }
+            )) {
+                Text("Claude").tag("CLAUDE")
+                Text("ChatGPT").tag("CHATGPT")
+                Text("Gemini").tag("GEMINI")
+                Text("Perplexity").tag("PERPLEXITY")
+                Text("DeepSeek").tag("DEEPSEEK")
             }
 
-            Section("Manual Backup") {
-                Button {
-                    exportBackup()
-                } label: {
-                    HStack {
-                        Label("Export Backup", systemImage: "square.and.arrow.up")
-                        Spacer()
-                        if isExporting {
-                            ProgressView()
-                        }
-                    }
-                }
-                .disabled(isExporting)
-
-                Button {
-                    showImportPicker = true
-                } label: {
-                    Label("Import Backup", systemImage: "square.and.arrow.down")
-                }
-                .disabled(isImporting)
-            } footer: {
-                Text("Export your addons, preferences, watch progress, and IPTV favorites to a file. API keys and tokens are never included.")
-            }
-
-            if let statusMessage = statusMessage {
-                Section {
-                    Text(statusMessage)
+            HStack {
+                Text("API Key")
+                Spacer()
+                if wrapper.state.activeAiApiKey.isEmpty {
+                    Text("Not configured")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                } else {
+                    Text("Configured")
+                        .font(.caption)
+                        .foregroundColor(SVColor.emerald)
                 }
             }
+        } header: {
+            Text("AI Features")
+        } footer: {
+            Text("AI powers smart search, mood matcher, and custom section creation. Configure your API key in the relevant provider's settings.")
         }
-        .navigationTitle("Backup & Sync")
-        .sheet(isPresented: $showExportSheet) {
-            if let url = exportURL {
-                ShareSheet(activityItems: [url])
+    }
+
+    // MARK: - Appearance
+
+    private var appearanceSection: some View {
+        Section("Appearance") {
+            Picker("Theme", selection: Binding(
+                get: { wrapper.state.themeMode },
+                set: { wrapper.viewModel.setThemeMode(mode: $0) }
+            )) {
+                Text("System").tag(ThemeMode.system)
+                Text("Light").tag(ThemeMode.light)
+                Text("Dark").tag(ThemeMode.dark)
+            }
+
+            Picker("Language", selection: Binding(
+                get: { wrapper.state.appLanguage },
+                set: { wrapper.viewModel.setAppLanguage(language: $0) }
+            )) {
+                Text("English").tag(AppLanguage.english)
+                Text("German").tag(AppLanguage.german)
+                Text("French").tag(AppLanguage.french)
+                Text("Spanish").tag(AppLanguage.spanish)
+                Text("Italian").tag(AppLanguage.italian)
+                Text("Portuguese").tag(AppLanguage.portuguese)
+                Text("Turkish").tag(AppLanguage.turkish)
             }
         }
-        .fileImporter(
-            isPresented: $showImportPicker,
-            allowedContentTypes: [UTType.json, UTType.data],
-            allowsMultipleSelection: false
-        ) { result in
-            switch result {
-            case .success(let urls):
-                guard let url = urls.first else { return }
-                importBackup(from: url)
-            case .failure:
-                statusMessage = "Failed to select file"
+    }
+
+    // MARK: - Data
+
+    private var dataSection: some View {
+        Section("Data") {
+            NavigationLink(value: Route.backupSync) {
+                Label("Backup & Sync", systemImage: "arrow.triangle.2.circlepath")
             }
         }
     }
 
-    private func exportBackup() {
-        isExporting = true
-        // Placeholder — in production this would call into KMP shared SyncRepository
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            let payload: [String: Any] = [
-                "version": 1,
-                "exportedAt": Int(Date().timeIntervalSince1970 * 1000),
-                "deviceName": UIDevice.current.name,
-                "addons": [],
-                "preferences": [],
-                "watchProgress": [],
-                "iptvPlaylists": [],
-                "iptvFavorites": []
-            ]
-            if let data = try? JSONSerialization.data(withJSONObject: payload, options: .prettyPrinted) {
-                let tempURL = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("streamvault_backup.json")
-                try? data.write(to: tempURL)
-                exportURL = tempURL
-                showExportSheet = true
-                statusMessage = "Backup exported successfully"
-            }
-            isExporting = false
-        }
-    }
+    // MARK: - Storage
 
-    private func importBackup(from url: URL) {
-        isImporting = true
-        guard url.startAccessingSecurityScopedResource() else {
-            statusMessage = "Cannot access file"
-            isImporting = false
-            return
-        }
-        defer { url.stopAccessingSecurityScopedResource() }
-
-        do {
-            let data = try Data(contentsOf: url)
-            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let version = json["version"] as? Int, version >= 1 {
-                // Placeholder — in production this would call into KMP shared SyncRepository
-                statusMessage = "Backup imported successfully"
-            } else {
-                statusMessage = "Invalid backup file"
-            }
-        } catch {
-            statusMessage = "Import failed: \(error.localizedDescription)"
-        }
-        isImporting = false
-    }
-}
-
-struct ShareSheet: UIViewControllerRepresentable {
-    let activityItems: [Any]
-
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
-    }
-
-    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
-}
-
-// Placeholder views for settings sub-screens
-struct DebridSettingsView: View {
-    var body: some View {
-        Text("Cloud Service Settings")
-            .navigationTitle("Cloud Service")
-    }
-}
-
-struct TraktSettingsView: View {
-    var body: some View {
-        Text("Trakt Settings")
-            .navigationTitle("Trakt.tv")
-    }
-}
-
-struct AddonSettingsView: View {
-    var body: some View {
-        Text("Content Source Settings")
-            .navigationTitle("Content Sources")
-    }
-}
-
-struct PaywallScreen: View {
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                Text("StreamVault Pro")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
-
-                Text("Stream, download, and watch IPTV with a Pro subscription")
-                    .font(.body)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-
-                // Feature comparison
-                VStack(spacing: 12) {
-                    FeatureRow(feature: "Search & Browse", free: true, pro: true)
-                    FeatureRow(feature: "Stream Playback", free: false, pro: true)
-                    FeatureRow(feature: "Downloads", free: false, pro: true)
-                    FeatureRow(feature: "IPTV / Live TV", free: false, pro: true)
-                    FeatureRow(feature: "Multi-Cloud", free: false, pro: true)
-                }
-                .padding()
-
-                // Pricing
-                VStack(spacing: 12) {
-                    PricingCard(title: "Monthly", price: "$4.99/mo", description: "Cancel anytime", highlighted: false)
-                    PricingCard(title: "Lifetime", price: "$29.99", description: "One-time payment", highlighted: true)
-                }
-
-                Button(action: {}) {
-                    Text("Subscribe Now")
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.blue)
-                        .foregroundColor(.white)
-                        .cornerRadius(12)
-                }
-
-                Button("Restore Purchase") {}
-                    .foregroundColor(.secondary)
-            }
-            .padding()
-        }
-        .navigationTitle("Pro")
-    }
-}
-
-struct FeatureRow: View {
-    let feature: String
-    let free: Bool
-    let pro: Bool
-
-    var body: some View {
-        HStack {
-            Text(feature)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Image(systemName: free ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .foregroundColor(free ? .green : .red)
-                .frame(width: 50)
-            Image(systemName: pro ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .foregroundColor(pro ? .green : .red)
-                .frame(width: 50)
-        }
-    }
-}
-
-struct PricingCard: View {
-    let title: String
-    let price: String
-    let description: String
-    let highlighted: Bool
-
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
+    private var storageSection: some View {
+        Section {
+            Button {
+                showClearCacheConfirmation = true
+            } label: {
                 HStack {
-                    Text(title).fontWeight(.bold)
-                    if highlighted {
-                        Text("BEST VALUE")
-                            .font(.caption2)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 2)
-                            .background(Color.blue)
-                            .foregroundColor(.white)
-                            .cornerRadius(4)
+                    Label("Clear Cache", systemImage: "trash")
+                    Spacer()
+                    if wrapper.state.cacheCleared {
+                        Text("Cleared")
+                            .font(.caption)
+                            .foregroundColor(SVColor.emerald)
                     }
                 }
-                Text(description)
-                    .font(.caption)
+            }
+        } header: {
+            Text("Storage")
+        } footer: {
+            Text("Clears cached images and metadata. Your saved data, downloads, and preferences are not affected.")
+        }
+    }
+
+    // MARK: - About
+
+    private var aboutSection: some View {
+        Section("About") {
+            NavigationLink(value: Route.diagnostics) {
+                Label("Diagnostics", systemImage: "stethoscope")
+            }
+            NavigationLink(value: Route.privacyPolicy) {
+                Label("Privacy Policy", systemImage: "hand.raised")
+            }
+            NavigationLink(value: Route.legal) {
+                Label("Legal", systemImage: "doc.text")
+            }
+            HStack {
+                Text("Version")
+                Spacer()
+                Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
                     .foregroundColor(.secondary)
             }
-            Spacer()
-            Text(price)
-                .font(.title2)
-                .fontWeight(.bold)
-                .foregroundColor(.blue)
         }
-        .padding()
-        .background(Color(.secondarySystemBackground))
-        .cornerRadius(12)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(highlighted ? Color.blue : Color.clear, lineWidth: 2)
-        )
     }
-}
 
-struct PlaybackSettingsView: View {
-    @State private var autoPlayEnabled = true
-    @State private var autoPlayNextEpisodeEnabled = true
-    @State private var codecPreference = 0  // 0=HEVC Preferred, 1=H.264 Only, 2=Any
-    @State private var hdrMode = 2          // 0=Prefer HDR, 1=SDR Only, 2=Auto
+    // MARK: - Helpers
 
-    private let codecOptions = ["HEVC Preferred", "H.264 Only", "Any"]
-    private let hdrOptions = ["Prefer HDR", "SDR Only", "Auto"]
-
-    var body: some View {
-        List {
-            Section {
-                Toggle("Auto-Play Best Stream", isOn: $autoPlayEnabled)
-                Toggle("Auto-Play Next Episode", isOn: $autoPlayNextEpisodeEnabled)
-            } footer: {
-                Text("Auto-play best stream picks the highest-scored stream. Auto-play next episode continues to the next episode when playback finishes.")
-            }
-
-            Section("Codec Preference") {
-                Picker("Codec", selection: $codecPreference) {
-                    ForEach(0..<codecOptions.count, id: \.self) { index in
-                        Text(codecOptions[index]).tag(index)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-
-            Section("HDR Mode") {
-                Picker("HDR", selection: $hdrMode) {
-                    ForEach(0..<hdrOptions.count, id: \.self) { index in
-                        Text(hdrOptions[index]).tag(index)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-        }
-        .navigationTitle("Playback")
-    }
-}
-
-struct DownloadsScreen: View {
-    var body: some View {
-        Text("Downloads")
-            .navigationTitle("Downloads")
+    private func statusDot(_ connected: Bool) -> some View {
+        Circle()
+            .fill(connected ? SVColor.emerald : Color.secondary.opacity(0.3))
+            .frame(width: 8, height: 8)
     }
 }

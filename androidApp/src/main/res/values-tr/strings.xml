@@ -97,7 +97,7 @@
     <string name="settings_simkl">SIMKL</string>
     <string name="settings_connect_simkl">SIMKL Bağla</string>
 
-    <string name="settings_live_tv">Canlı TV</string>
+    <string name="settings_live_tv">Kanallar</string>
     <string name="settings_no_playlists">Yapılandırılmış oynatma listesi yok</string>
     <string name="settings_channels_count">%1$d kanal</string>
     <string name="settings_add_playlist">Oynatma Listesi Ekle</string>
@@ -211,12 +211,12 @@
 
     <!-- Channels Screen -->
     <string name="channels_no_playlists">Oynatma Listesi Yok</string>
-    <string name="channels_add_playlist_prompt">Başlamak için bir M3U oynatma listesi veya sağlayıcı girişi ekleyin</string>
+    <string name="channels_add_playlist_prompt">Başlamak için bir playlist veya sağlayıcı girişi ekleyin</string>
     <string name="channels_add_playlist">Oynatma Listesi Ekle</string>
     <string name="channels_add_title">Oynatma Listesi Ekle</string>
     <string name="channels_playlist_name">Oynatma Listesi Adı</string>
-    <string name="channels_m3u_url">M3U URL</string>
-    <string name="channels_epg_optional">EPG URL (isteğe bağlı)</string>
+    <string name="channels_m3u_url">Playlist URL</string>
+    <string name="channels_epg_optional">Rehber URL (isteğe bağlı)</string>
     <string name="channels_server_url">Sunucu URL</string>
     <string name="channels_username">Kullanıcı Adı</string>
     <string name="channels_password">Şifre</string>
@@ -459,11 +459,11 @@
     <string name="setup_i_agree">Kabul Ediyorum</string>
     <string name="setup_verify_connect">Doğrula &amp; Bağlan</string>
     <string name="setup_connect_trakt">Trakt.tv ile Bağlan</string>
-    <string name="setup_m3u">M3U</string>
+    <string name="setup_m3u">Playlist</string>
     <string name="setup_provider_login">Sağlayıcı Girişi</string>
-    <string name="setup_channels_desc">Canlı TV izlemek için bir M3U oynatma listesi ekleyin veya sağlayıcı girişi yapın. Daha fazlasını daha sonra Kanallar sekmesinden ekleyebilirsiniz.</string>
+    <string name="setup_channels_desc">Kanallarınıza erişmek için bir playlist ekleyin veya sağlayıcı girişi yapın. Daha fazlasını daha sonra Kanallar sekmesinden ekleyebilirsiniz.</string>
     <string name="setup_playlist_hint">ör. Kanallarım</string>
-    <string name="setup_m3u_hint">https://example.com/playlist.m3u</string>
+    <string name="setup_m3u_hint">https://example.com/playlist</string>
     <string name="setup_server_hint">http://example.com:8080</string>
 
     <!-- Card Style -->
@@ -514,7 +514,7 @@
     <string name="setup_welcome_subtitle">Hepsi bir arada yayın arkadaşınız</string>
     <string name="setup_feature_stream">Birden fazla kaynaktan film ve dizi izleyin</string>
     <string name="setup_feature_cloud">Optimize oynatma için bulut hizmeti entegrasyonu</string>
-    <string name="setup_feature_channels">M3U çalma listesi desteğiyle canlı kanallar</string>
+    <string name="setup_feature_channels">Kişisel kanal playlistleri</string>
     <string name="setup_feature_download">Çevrimdışı izlemek için içerik indirin</string>
     <string name="setup_feature_trakt">İzleme listenizi Trakt.tv ile takip edin</string>
     <string name="setup_lets_go">Birkaç hızlı adımda her şeyi ayarlayalım.</string>
@@ -794,7 +794,7 @@
     <string name="tv_addon_suggested">Önerilen eklentiler</string>
     <string name="tv_addon_installed">Yüklü</string>
 
-    <!-- IPTV redesign -->
+    <!-- Channel redesign -->
     <string name="tv_iptv_all_channels">Tüm Kanallar</string>
     <string name="tv_iptv_channels_count">%d kanal</string>
     <string name="tv_iptv_now_playing">Oynatılıyor</string>
@@ -809,19 +809,19 @@
     <string name="tv_nav_iptv">Kanallar</string>
 
     <!-- TV Hero -->
-    <string name="tv_hero_subtitle_iptv">Canlı TV kanallarınız</string>
+    <string name="tv_hero_subtitle_iptv">Kanallarınız</string>
 
     <!-- TV Player -->
     <string name="tv_player_preparing">Oynatma hazırlanıyor</string>
     <string name="tv_settings_description">TV davranışını ve hesap entegrasyonlarını uzaktan kumandadan yapılandırmak için bu ekranı kullanın.</string>
     <string name="tv_settings_cast">Cast, Android TV\'de çalışır ve Play Services kullanılamadığında Fire TV\'de düzgün şekilde devre dışı kalır.</string>
 
-    <!-- TV IPTV -->
+    <!-- TV Channels -->
     <string name="tv_iptv_empty">Kanal mevcut değil. Ayarlar\'dan bir playlist ekleyin.</string>
     <string name="tv_iptv_recently_viewed">Son izlenenler</string>
     <string name="tv_iptv_favorites">Favoriler</string>
     <string name="tv_iptv_no_playlists_title">Kanal yapılandırılmamış</string>
-    <string name="tv_iptv_no_playlists_subtitle">Telefonunuzda bir M3U playlist ekleyin, ardından TV ile senkronize edin</string>
+    <string name="tv_iptv_no_playlists_subtitle">Telefonunuzda bir playlist ekleyin, ardından TV ile senkronize edin</string>
 
     <!-- TV Settings: Customization -->
     <string name="tv_settings_section_customization">Özelleştirme</string>
@@ -857,7 +857,7 @@
     <string name="tv_settings_playlist_name">Playlist adı</string>
     <string name="tv_settings_playlist_url">Playlist URL\'si</string>
     <string name="tv_settings_playlist_save">Playlist\'i kaydet</string>
-    <string name="tv_settings_playlist_type_m3u">M3U Playlist</string>
+    <string name="tv_settings_playlist_type_m3u">URL Playlist</string>
     <string name="tv_settings_playlist_type_xtream">Sağlayıcı girişi</string>
     <string name="tv_settings_xtream_server">Sunucu URL\'si</string>
     <string name="tv_settings_xtream_username">Kullanıcı adı</string>
@@ -970,7 +970,7 @@
     <string name="tv_home_layout_media_type">Medya türü</string>
 
     <!-- TV Live Player -->
-    <string name="tv_live_tv_guide">TV Rehberi</string>
+    <string name="tv_live_tv_guide">Program Rehberi</string>
     <string name="tv_live_history">Geçmiş</string>
     <string name="tv_live_clear">Temizle</string>
     <string name="tv_live_next_label">Sonraki:</string>

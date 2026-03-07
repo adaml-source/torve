@@ -87,7 +87,7 @@ val POPULAR_ADDONS = listOf(
     // ── Catalogs / Metadata ──
     PopularAddon(
         "Cinemeta",
-        "Official Stremio catalog — movie & series info from IMDB/TMDB",
+        "Movie & series info from IMDB/TMDB",
         "https://v3-cinemeta.strem.io/manifest.json",
         listOf(AddonCategory.CATALOGS),
         "https://v3-cinemeta.strem.io/images/cinemeta-logo.png",
@@ -119,35 +119,6 @@ val POPULAR_ADDONS = listOf(
         "https://1fe84bc728af-rpdb.baby-beamup.club/manifest.json",
         listOf(AddonCategory.CATALOGS),
         "https://ratingposterdb.com/assets/img/logo.svg",
-    ),
-    // ── Streams ──
-    PopularAddon(
-        "Torrentio",
-        "Streams from various sources — works great with debrid",
-        "https://torrentio.strem.fun/manifest.json",
-        listOf(AddonCategory.STREAMS),
-        "https://torrentio.strem.fun/images/torrentio-logo.png",
-    ),
-    PopularAddon(
-        "MediaFusion",
-        "Aggregated streams from multiple sources with debrid support",
-        "https://mediafusion.elfhosted.com/manifest.json",
-        listOf(AddonCategory.STREAMS),
-        "https://mediafusion.elfhosted.com/static/images/mediafusion_logo.png",
-    ),
-    PopularAddon(
-        "Comet",
-        "Fast debrid stream resolver with smart caching",
-        "https://comet.elfhosted.com/manifest.json",
-        listOf(AddonCategory.STREAMS),
-        "https://comet.elfhosted.com/static/images/comet.png",
-    ),
-    PopularAddon(
-        "AIOStreams",
-        "All-in-one — consolidates multiple addons & debrid services",
-        "https://aiostreams.elfhosted.com/manifest.json",
-        listOf(AddonCategory.STREAMS),
-        "https://aiostreams.elfhosted.com/static/images/aiostreams.png",
     ),
     // ── Subtitles ──
     PopularAddon(

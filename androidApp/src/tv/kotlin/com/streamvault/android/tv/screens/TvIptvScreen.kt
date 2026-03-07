@@ -359,7 +359,7 @@ fun TvIptvScreen(
             return@LaunchedEffect
         }
 
-        if (!wasActive) {
+        if (!wasActive && !isRailFocused) {
             delay(60)
             if (focusedZone == FocusZone.EPG_GRID && channelsInGroup.isNotEmpty()) {
                 gridFocusRequestToken += 1

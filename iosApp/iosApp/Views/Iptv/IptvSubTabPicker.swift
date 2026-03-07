@@ -2,20 +2,12 @@ import SwiftUI
 import shared
 
 struct IptvSubTabPicker: View {
-    @Binding var selectedTab: IptvSubTab
-
-    private let tabs: [(IptvSubTab, String)] = [
-        (.home, "HOME"),
-        (.live, "LIVE"),
-        (.movie, "MOVIE"),
-        (.series, "SERIES"),
-    ]
+    @Binding var selectedTab: ChannelsSubTab
 
     var body: some View {
         Picker("Tab", selection: $selectedTab) {
-            ForEach(tabs, id: \.0) { tab, label in
-                Text(label).tag(tab)
-            }
+            Text("LIVE").tag(ChannelsSubTab.live)
+            Text("FAVOURITES").tag(ChannelsSubTab.favourites)
         }
         .pickerStyle(.segmented)
         .padding(.horizontal)

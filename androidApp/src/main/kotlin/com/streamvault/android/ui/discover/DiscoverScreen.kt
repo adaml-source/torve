@@ -111,7 +111,7 @@ fun DiscoverScreen(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    "Live TV channels available in the Live TV tab",
+                    "Channels available in the Channels tab",
                     style = MaterialTheme.typography.bodyMedium,
                     color = StreamVault.colors.textSecondary,
                 )

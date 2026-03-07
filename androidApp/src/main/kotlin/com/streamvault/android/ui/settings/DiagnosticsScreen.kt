@@ -91,7 +91,7 @@ fun DiagnosticsScreen(
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Charcoal)) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(stringResource(R.string.diagnostics_service_health), color = Snow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
-                StatusRow("Debrid", state.debridConnected)
+                StatusRow("Cloud", state.debridConnected)
                 StatusRow("Trakt", state.traktConnected)
                 StatusRow("SIMKL", state.simklConnected)
                 StatusRow("Jellyfin", state.jellyfinApiKey.isNotBlank())
@@ -124,8 +124,8 @@ fun DiagnosticsScreen(
                 DiagRow("Kodi devices", "${state.kodiHosts.size}")
                 DiagRow("AI provider", state.aiProvider.name)
                 DiagRow("AI key configured", if (state.activeAiApiKey.isNotBlank()) "Yes" else "No")
-                DiagRow("Debrid provider", state.debridProvider.name)
-                DiagRow("Connected debrid services", "${state.connectedDebridProviders.size}")
+                DiagRow("Cloud provider", state.debridProvider.name)
+                DiagRow("Connected cloud services", "${state.connectedDebridProviders.size}")
             }
         }
         Spacer(Modifier.height(12.dp))

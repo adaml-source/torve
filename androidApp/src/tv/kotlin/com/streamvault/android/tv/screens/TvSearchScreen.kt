@@ -60,6 +60,7 @@ import com.streamvault.android.voice.VoiceInputPhase
 import com.streamvault.android.voice.rememberVoiceInputController
 import com.streamvault.data.ai.KeywordSearchService
 import com.streamvault.domain.model.MediaItem
+import com.streamvault.domain.model.MediaType
 import com.streamvault.domain.repository.MetadataRepository
 import com.streamvault.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.delay
@@ -86,6 +87,7 @@ fun TvSearchScreen(
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var searchMode by rememberSaveable { mutableStateOf(SearchMode.STANDARD) }
+    var filterType by rememberSaveable { mutableStateOf<String?>(null) } // "movie", "tv", or null (all)
     var aiResultTitle by remember { mutableStateOf<String?>(null) }
     var aiFallback by remember { mutableStateOf(false) }
     val inputFocusRequester = remember { FocusRequester() }
@@ -121,7 +123,7 @@ fun TvSearchScreen(
     }
 
     // Standard search
-    LaunchedEffect(query, searchMode) {
+    LaunchedEffect(query, searchMode, filterType) {
         if (searchMode != SearchMode.STANDARD) return@LaunchedEffect
         aiResultTitle = null
         aiFallback = false
@@ -135,7 +137,16 @@ fun TvSearchScreen(
         error = null
         try {
             delay(250)
-            results = metadataRepo.searchMulti(query, 1).take(60)
+            val raw = metadataRepo.searchMulti(query, 1).take(60)
+            results = if (filterType != null) {
+                raw.filter {
+                    when (filterType) {
+                        "movie" -> it.type == MediaType.MOVIE
+                        "tv" -> it.type == MediaType.SERIES
+                        else -> true
+                    }
+                }
+            } else raw
         } catch (t: Throwable) {
             results = emptyList()
             error = t.message ?: "Search failed"
@@ -304,6 +315,36 @@ fun TvSearchScreen(
                         onClick = { /* disabled — no API key */ },
                     )
                 }
+            }
+
+            // Type filter row
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                val allReq = remember { FocusRequester() }
+                TvSearchChip(
+                    text = "All",
+                    selected = filterType == null,
+                    modifier = Modifier.focusRequester(allReq).focusProperties { left = railFocusRequester },
+                    onFocused = { onContentFocused(allReq) },
+                    onClick = { filterType = null },
+                )
+                val movieReq = remember { FocusRequester() }
+                TvSearchChip(
+                    text = "Movies",
+                    selected = filterType == "movie",
+                    modifier = Modifier.focusRequester(movieReq),
+                    onFocused = { onContentFocused(movieReq) },
+                    onClick = { filterType = "movie" },
+                )
+                val tvReq = remember { FocusRequester() }
+                TvSearchChip(
+                    text = "TV Shows",
+                    selected = filterType == "tv",
+                    modifier = Modifier.focusRequester(tvReq),
+                    onFocused = { onContentFocused(tvReq) },
+                    onClick = { filterType = "tv" },
+                )
             }
 
             when (voiceController.uiState.value.phase) {

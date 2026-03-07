@@ -35,11 +35,9 @@ class CompositeLibraryOverlayService(
     }
 
     override suspend fun testConnection(serverUrl: String, apiKey: String): Boolean {
-        // Route based on URL: Plex default port is 32400
-        return if (serverUrl.contains(":32400") || serverUrl.lowercase().contains("plex")) {
-            plex.testConnection(serverUrl, apiKey)
-        } else {
-            jellyfin.testConnection(serverUrl, apiKey)
-        }
+        // Try both services — return true if either connects
+        val plexOk = runCatching { plex.testConnection(serverUrl, apiKey) }.getOrDefault(false)
+        if (plexOk) return true
+        return runCatching { jellyfin.testConnection(serverUrl, apiKey) }.getOrDefault(false)
     }
 }
