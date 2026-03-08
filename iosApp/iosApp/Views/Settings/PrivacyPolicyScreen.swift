@@ -36,8 +36,9 @@ struct PrivacyPolicyScreen: View {
                         body: """
                         - We do not track your viewing habits
                         - We do not sell or share your data with third parties
-                        - We do not use analytics or advertising SDKs
+                        - We do not use advertising SDKs
                         - We do not store your API keys on our servers
+                        - The iOS version of Torve does not include any analytics or crash reporting SDKs
                         """
                     )
 
@@ -69,7 +70,7 @@ struct PrivacyPolicyScreen: View {
 
                     sectionText(
                         title: "Contact",
-                        body: "If you have questions about this privacy policy, please contact us through the app's support channels."
+                        body: "For privacy-related questions or concerns, contact us at:\nprivacy@torve.app"
                     )
                 }
             }

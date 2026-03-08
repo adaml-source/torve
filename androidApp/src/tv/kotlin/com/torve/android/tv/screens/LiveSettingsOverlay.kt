@@ -20,6 +20,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -69,6 +71,8 @@ fun LiveSettingsOverlay(
     onSetXxxEnabled: (Boolean) -> Unit,
     onSetAudioPassthroughEnabled: (Boolean) -> Unit,
     onSetPreferSurroundCodecs: (Boolean) -> Unit,
+    audioDelayMs: Int = 0,
+    onSetAudioDelay: (Int) -> Unit = {},
     audioTracks: List<com.torve.domain.player.TrackDescription> = emptyList(),
     subtitleTracks: List<com.torve.domain.player.TrackDescription> = emptyList(),
     onSelectAudioTrack: (Int) -> Unit = {},
@@ -350,6 +354,73 @@ fun LiveSettingsOverlay(
                                 uncheckedTrackColor = Charcoal,
                             ),
                         )
+                    }
+                }
+            }
+
+            // ── Audio Delay ──
+            item(key = "audio_delay") {
+                Surface(
+                    onClick = { /* toggle handled by slider */ },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(8.dp)),
+                    colors = ClickableSurfaceDefaults.colors(
+                        containerColor = Graphite,
+                        focusedContainerColor = Amber.copy(alpha = 0.2f),
+                    ),
+                    border = ClickableSurfaceDefaults.border(
+                        focusedBorder = androidx.tv.material3.Border(
+                            border = androidx.compose.foundation.BorderStroke(1.5.dp, Amber),
+                            shape = RoundedCornerShape(8.dp),
+                        ),
+                    ),
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = stringResource(R.string.player_audio_delay),
+                                color = Snow,
+                                fontSize = 14.sp,
+                            )
+                            Text(
+                                text = stringResource(R.string.player_audio_delay_value, audioDelayMs),
+                                color = if (audioDelayMs != 0) Amber else Silver,
+                                fontSize = 13.sp,
+                                fontWeight = if (audioDelayMs != 0) FontWeight.Bold else FontWeight.Normal,
+                            )
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            CompactButton(label = "-100") { onSetAudioDelay((audioDelayMs - 100).coerceIn(-2000, 2000)) }
+                            Slider(
+                                value = audioDelayMs.toFloat(),
+                                onValueChange = { onSetAudioDelay(it.toInt()) },
+                                valueRange = -2000f..2000f,
+                                steps = 39,
+                                modifier = Modifier.weight(1f),
+                                colors = SliderDefaults.colors(
+                                    thumbColor = Amber,
+                                    activeTrackColor = Amber,
+                                    inactiveTrackColor = Charcoal,
+                                ),
+                            )
+                            CompactButton(label = "+100") { onSetAudioDelay((audioDelayMs + 100).coerceIn(-2000, 2000)) }
+                        }
+                        if (audioDelayMs != 0) {
+                            Spacer(Modifier.height(4.dp))
+                            CompactButton(label = "Reset") { onSetAudioDelay(0) }
+                        }
                     }
                 }
             }

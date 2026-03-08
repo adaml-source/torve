@@ -5,6 +5,7 @@ import shared
 struct PaywallScreen: View {
     @StateObject private var wrapper = SubscriptionViewModelWrapper()
     @StateObject private var store = StoreKitManager()
+    @Environment(AppRouter.self) private var router
 
     var body: some View {
         ScrollView {
@@ -35,6 +36,12 @@ struct PaywallScreen: View {
             .padding()
         }
         .navigationTitle("Torve Pro")
+        .onChange(of: wrapper.state.showDeviceLimitReached) { _, show in
+            if show {
+                wrapper.dismissDeviceLimitReached()
+                router.navigate(to: .deviceLimitReached)
+            }
+        }
     }
 
     // MARK: - Header
@@ -107,19 +114,11 @@ struct PaywallScreen: View {
     private var pricingSection: some View {
         VStack(spacing: 12) {
             if store.products.isEmpty {
-                // Fallback pricing display
-                PricingCard(
-                    title: "Monthly",
-                    price: "$4.99/mo",
-                    description: "Cancel anytime",
-                    highlighted: false,
-                    selected: false,
-                    onTap: {}
-                )
+                // Store metadata not yet loaded — show loading state, not a fake price
                 PricingCard(
                     title: "Lifetime",
-                    price: "$29.99",
-                    description: "One-time payment",
+                    price: "Loading…",
+                    description: "Fetching price from store…",
                     highlighted: true,
                     selected: false,
                     onTap: {}
@@ -135,9 +134,15 @@ struct PaywallScreen: View {
                         selected: false,
                         onTap: {
                             Task {
-                                let success = await store.purchase(product)
+                                let (success, jws) = await store.purchase(product)
                                 if success {
-                                    wrapper.purchase(token: product.id)
+                                    if let jws {
+                                        // Send JWS to backend for verification
+                                        wrapper.verifyApplePurchase(transactionJws: jws, productId: product.id)
+                                    } else {
+                                        // Fallback to local-only activation
+                                        wrapper.purchase(token: product.id)
+                                    }
                                 }
                             }
                         }
@@ -157,9 +162,13 @@ struct PaywallScreen: View {
                     guard let product = store.products.first(where: { $0.id == StoreKitManager.lifetimeId })
                             ?? store.products.first else { return }
                     Task {
-                        let success = await store.purchase(product)
+                        let (success, jws) = await store.purchase(product)
                         if success {
-                            wrapper.purchase(token: product.id)
+                            if let jws {
+                                wrapper.verifyApplePurchase(transactionJws: jws, productId: product.id)
+                            } else {
+                                wrapper.purchase(token: product.id)
+                            }
                         }
                     }
                 }) {
@@ -189,7 +198,14 @@ struct PaywallScreen: View {
             Task {
                 await store.restorePurchases()
                 if store.isPro {
-                    wrapper.restorePurchase(token: "restored")
+                    // Try to get JWS for the lifetime purchase to send to backend
+                    if let jws = await store.getLatestTransactionJWS(for: StoreKitManager.lifetimeId) {
+                        wrapper.verifyApplePurchase(transactionJws: jws, productId: StoreKitManager.lifetimeId)
+                    } else if let jws = await store.getLatestTransactionJWS(for: StoreKitManager.monthlyId) {
+                        wrapper.verifyApplePurchase(transactionJws: jws, productId: StoreKitManager.monthlyId)
+                    } else {
+                        wrapper.restorePurchase(token: "restored")
+                    }
                 }
             }
         }

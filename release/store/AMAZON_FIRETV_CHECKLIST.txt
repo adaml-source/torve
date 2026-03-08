@@ -1,0 +1,52 @@
+Amazon Appstore — Fire TV Checklist
+=====================================
+
+BUILD
+[x] applicationId: com.torve.app.amazon
+[x] No Google Play Services dependencies
+[x] No Firebase (excluded via googleImplementation scoping)
+[x] No Cast SDK (AmazonCastService no-op stub)
+[x] No Play Billing (AmazonBillingManager no-op stub)
+[x] Paywall/subscription button hidden (BuildConfig.HAS_BILLING=false)
+[x] Dummy google-services.json for amazon flavor
+[x] GMS permission removal in amazon manifest
+[x] Signing config wired
+[ ] Generate signed APK: ./gradlew :androidApp:assembleAmazonTvRelease
+[ ] Verify APK has no com.google.firebase classes (unzip + grep)
+
+MONETIZATION DECISION
+[ ] Option A (recommended for launch): Free app, all features unlocked
+    - No IAP implementation needed
+    - Simplest path to approval
+[ ] Option B (future): Amazon IAP SDK integration
+    - Replace AmazonBillingManager stub with Amazon IAP
+    - Add amazonImplementation("com.amazon.device:amazon-iap:3.0.4")
+    - Test with Amazon App Tester
+
+STORE LISTING
+[ ] App name: Torve
+[ ] Short description
+[ ] Long description
+[ ] App icon: 114x114 and 512x512 PNG
+[ ] Screenshots: 1920x1080 (3-10 images)
+[ ] Fire TV banner: 1920x1080
+[ ] Content rating: complete questionnaire
+[ ] Category: Entertainment
+
+FIRE TV REQUIREMENTS
+[ ] All UI navigable via Fire TV remote (D-pad + select + back + menu)
+[ ] No touchscreen-only interactions
+[ ] Media playback controls on remote buttons
+[ ] App handles Fire TV voice search intents
+[ ] Back button exits app from home screen
+
+PERMISSIONS
+[ ] INTERNET — required
+[ ] All other permissions justified in submission notes
+
+TESTING
+[ ] Test on Fire TV Stick (2nd gen+)
+[ ] Test on Fire TV Cube
+[ ] Test sideload: adb install -r app.apk
+[ ] Run: adb shell dumpsys package com.torve.app.amazon | grep gms
+    (should return nothing)

@@ -45,8 +45,8 @@
 
     <!-- Detail Screen -->
     <string name="detail_connect_cloud">Connect cloud service in Settings</string>
-    <string name="detail_finding_streams">Finding streamsâ€¦</string>
-    <string name="detail_resolving">Resolvingâ€¦</string>
+    <string name="detail_finding_streams">Finding streams…</string>
+    <string name="detail_resolving">Resolving…</string>
     <string name="detail_watchlist">Watchlist</string>
     <string name="detail_in_watchlist">In Watchlist</string>
     <string name="detail_watched">Watched</string>
@@ -81,7 +81,7 @@
     <string name="settings_premium_until">Premium until %1$s</string>
     <string name="settings_go_to">Go to:</string>
     <string name="settings_enter_code">Enter code:</string>
-    <string name="settings_waiting_auth">Waiting for authorizationâ€¦</string>
+    <string name="settings_waiting_auth">Waiting for authorization…</string>
     <string name="settings_api_key">API Key</string>
     <string name="settings_device_auth">Device Auth</string>
 
@@ -149,14 +149,14 @@
 
     <string name="settings_account">Account</string>
     <string name="settings_account_coming_soon">Cloud sync in development</string>
-    <string name="settings_account_desc">Once available, you\'ll be able to create an account to sync your settings, watchlist, watch progress, and card style presets across all your devices. No action needed â€” this feature will be enabled automatically in a future update.</string>
+    <string name="settings_account_desc">Once available, you\'ll be able to create an account to sync your settings, watchlist, watch progress, and card style presets across all your devices. No action needed — this feature will be enabled automatically in a future update.</string>
 
     <string name="settings_about">About</string>
     <string name="settings_privacy_policy">Privacy Policy</string>
     <string name="settings_terms">Terms &amp; Conditions</string>
     <string name="settings_help">Help &amp; Documentation</string>
     <string name="settings_share_app">Share App</string>
-    <string name="settings_share_text">Check out Torve â€” a beautiful media player and content organizer! https://torve.app</string>
+    <string name="settings_share_text">Check out Torve — a beautiful media player and content organizer! https://torve.app</string>
     <string name="settings_share_title">Share Torve</string>
     <string name="settings_version">Torve v%1$s</string>
 
@@ -177,7 +177,8 @@
     <string name="paywall_custom_home">Custom Home Layout</string>
     <string name="paywall_advanced_filters">Advanced Filters</string>
     <string name="paywall_lifetime">Lifetime</string>
-    <string name="paywall_price">â‚¬9.99</string>
+    <string name="paywall_price">Price unavailable</string>
+    <string name="paywall_price_loading">Loading…</string>
     <string name="paywall_best_value">BEST VALUE</string>
     <string name="paywall_one_time">One-time, forever</string>
     <string name="paywall_get_lifetime">Get Lifetime Access</string>
@@ -192,8 +193,8 @@
 
     <!-- Catalog Screen -->
     <string name="catalog_failed_to_load">Failed to load</string>
-    <string name="catalog_search_movies">Search moviesâ€¦</string>
-    <string name="catalog_search_tv">Search TV showsâ€¦</string>
+    <string name="catalog_search_movies">Search movies…</string>
+    <string name="catalog_search_tv">Search TV shows…</string>
     <string name="catalog_search_results">Search Results</string>
     <string name="catalog_no_results">No results found</string>
     <string name="catalog_all">All</string>
@@ -235,7 +236,7 @@
 
     <!-- Stream Actions -->
     <string name="action_play_in_torve">Play in Torve</string>
-    <string name="action_play_external">Play in External Playerâ€¦</string>
+    <string name="action_play_external">Play in External Player…</string>
     <string name="action_download">Download</string>
     <string name="action_download_queued">Download queued</string>
     <string name="action_copy_url">Copy URL</string>
@@ -301,8 +302,8 @@
     <string name="integrations_status_connected">Status: Connected</string>
     <string name="integrations_status_not_connected">Status: Not connected</string>
     <string name="integrations_last_sync">Last sync: %1$s</string>
-    <string name="integrations_connecting">Connectingâ€¦</string>
-    <string name="integrations_syncing">Syncingâ€¦</string>
+    <string name="integrations_connecting">Connecting…</string>
+    <string name="integrations_syncing">Syncing…</string>
     <string name="integrations_sync_complete">Sync complete</string>
     <string name="integrations_sync_now">Sync now</string>
     <string name="integrations_simkl_desc">Automatic anime and TV show tracking with device code authorization.</string>
@@ -315,7 +316,7 @@
     <string name="integrations_plex_url_hint">Server URL (e.g. http://192.168.1.100:32400)</string>
     <string name="integrations_access_token">Access Token</string>
     <string name="integrations_plex_token_hint">Find your token at plex.tv/claim or in Plex app settings.</string>
-    <string name="integrations_testing">Testingâ€¦</string>
+    <string name="integrations_testing">Testing…</string>
     <string name="integrations_your_code">Your code</string>
     <string name="integrations_code_copied">Code copied</string>
     <string name="integrations_open_browser">Open in Browser</string>
@@ -330,7 +331,7 @@
     <string name="mdblist_most_popular">Most Popular Lists</string>
     <string name="mdblist_load_popular">Load popular lists</string>
     <string name="mdblist_search_lists">Search Lists</string>
-    <string name="mdblist_search_placeholder">Search public listsâ€¦</string>
+    <string name="mdblist_search_placeholder">Search public lists…</string>
     <string name="mdblist_search_results">Search Results</string>
     <string name="mdblist_installed">Installed Lists</string>
     <string name="mdblist_no_lists">No lists added yet.</string>
@@ -396,10 +397,10 @@
     <!-- Addon Catalog Screen -->
     <string name="addon_catalog_title">Extensions</string>
     <string name="addon_catalog_installed_count">%1$d installed</string>
-    <string name="addon_catalog_search_hint">Search or paste extension URLâ€¦</string>
+    <string name="addon_catalog_search_hint">Search or paste extension URL…</string>
     <string name="addon_catalog_installed">Installed</string>
     <string name="addon_catalog_available">Available</string>
-    <string name="addon_catalog_installing">Installingâ€¦</string>
+    <string name="addon_catalog_installing">Installing…</string>
     <string name="addon_catalog_install">Install</string>
     <string name="addon_catalog_open_browser">Open in Browser</string>
     <string name="addon_catalog_copy_url">Copy URL</string>
@@ -436,7 +437,7 @@
     <string name="common_rename">Rename</string>
     <string name="common_duplicate">Duplicate</string>
     <string name="common_reset">Reset</string>
-    <string name="common_loading">Loadingâ€¦</string>
+    <string name="common_loading">Loading…</string>
     <string name="common_play_now">Play Now</string>
     <string name="common_sort_by">Sort By</string>
     <string name="common_view_details">View Details</string>
@@ -507,7 +508,7 @@
     <string name="player_audio_delay_value">Delay: %1$d ms</string>
 
     <!-- Integrations (extended) -->
-    <string name="integrations_sync_in_progress">Syncingâ€¦</string>
+    <string name="integrations_sync_in_progress">Syncing…</string>
 
     <!-- Privacy Policy -->
     <string name="privacy_last_updated">Last updated: February 2026</string>
@@ -531,7 +532,7 @@
     <string name="setup_logged_in_as">Logged in as %1$s</string>
     <string name="setup_go_to">Go to:</string>
     <string name="setup_enter_code">Enter this code:</string>
-    <string name="setup_waiting_auth">Waiting for authorizationâ€¦</string>
+    <string name="setup_waiting_auth">Waiting for authorization…</string>
     <string name="setup_trakt_hint">You\'ll be asked to visit trakt.tv/activate and enter a code to authorize.</string>
     <string name="setup_quality_title">Quality Preferences</string>
     <string name="setup_quality_desc">Set your preferred stream quality. You can change this later in Settings.</string>
@@ -540,7 +541,7 @@
     <string name="setup_done_desc">Torve is ready. You can adjust settings anytime from the Settings tab.</string>
 
     <!-- Search Screen -->
-    <string name="search_placeholder">Search movies &amp; TV showsâ€¦</string>
+    <string name="search_placeholder">Search movies &amp; TV shows…</string>
     <string name="search_clear">Clear search</string>
     <string name="search_no_results">No results found</string>
     <string name="search_try_different">Try a different search term or adjust filters</string>
@@ -596,7 +597,7 @@
     <string name="custom_min_rating">Min Rating</string>
     <string name="custom_year_from">Year From</string>
     <string name="custom_year_to">Year To</string>
-    <string name="custom_search_person">Search personâ€¦</string>
+    <string name="custom_search_person">Search person…</string>
     <string name="custom_media_type">Media Type</string>
     <string name="custom_genres">Genres</string>
     <string name="custom_keywords">Keywords</string>
@@ -657,8 +658,8 @@
     <string name="download_delete_after">Delete after: %1$d days</string>
     <string name="download_bulk_actions">Bulk Actions</string>
     <string name="download_items_count">%1$d items</string>
-    <string name="download_storage_counts">%1$d movies â€¢ %2$d shows (%3$d ep)</string>
-    <string name="download_storage_free_used">%1$s free â€¢ %2$d%% used by Torve</string>
+    <string name="download_storage_counts">%1$d movies • %2$d shows (%3$d ep)</string>
+    <string name="download_storage_free_used">%1$s free • %2$d%% used by Torve</string>
     <string name="download_active_downloads">Active Downloads (%1$d)</string>
     <string name="download_filter_genre">Genre</string>
     <string name="download_filter_quality">Quality</string>

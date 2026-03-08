@@ -164,7 +164,8 @@
     <string name="paywall_custom_home">Inicio personalizado</string>
     <string name="paywall_advanced_filters">Filtros avanzados</string>
     <string name="paywall_lifetime">De por vida</string>
-    <string name="paywall_price">€9,99</string>
+    <string name="paywall_price">Precio no disponible</string>
+    <string name="paywall_price_loading">Cargando…</string>
     <string name="paywall_one_time">Pago único, acceso para siempre</string>
     <string name="paywall_best_value">MEJOR VALOR</string>
     <string name="paywall_get_lifetime">Obtener acceso de por vida</string>

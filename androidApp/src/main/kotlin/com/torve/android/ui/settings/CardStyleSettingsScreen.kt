@@ -101,7 +101,7 @@ fun CardStyleSettingsScreen(
     val state by viewModel.state.collectAsState()
     val presets = state.cardStylePresets
     val defaultPresetId = state.globalDefaultPresetId
-    var selectedPresetId by remember(defaultPresetId, presets) {
+    var selectedPresetId by remember(defaultPresetId) {
         mutableStateOf(defaultPresetId ?: presets.firstOrNull()?.presetId)
     }
     val currentPreset = presets.firstOrNull { it.presetId == selectedPresetId } ?: presets.firstOrNull()

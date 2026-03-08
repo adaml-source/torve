@@ -1,0 +1,30 @@
+Google Play Store — Android TV Checklist
+=========================================
+
+BUILD
+[x] applicationId: com.torve.app (same as mobile — single listing)
+[x] LEANBACK_LAUNCHER intent filter present
+[x] android.hardware.touchscreen required=false
+[x] android.software.leanback required=false
+[x] TV banner drawable present
+[x] Signing config wired
+[ ] Generate signed AAB: ./gradlew :androidApp:bundleGoogleTvRelease
+[ ] Verify TV banner in manifest: 320x180 xhdpi
+
+TV-SPECIFIC REQUIREMENTS
+[ ] All UI navigable via D-pad (no touch-only interactions)
+[ ] Focus states visible on all interactive elements
+[ ] No landscape lock issues
+[ ] Settings screen fully D-pad navigable
+[ ] Player controls work with D-pad/remote
+[ ] Back button behavior correct on all screens
+
+STORE LISTING (shared with mobile)
+[ ] TV screenshots: min 3 (1920x1080 or 1280x720)
+[ ] TV banner: 1280x720
+
+TESTING
+[ ] Test on Android TV emulator (API 28+)
+[ ] Test on Fire TV Stick (sideload for sanity)
+[ ] Test D-pad navigation end-to-end
+[ ] Test voice search integration

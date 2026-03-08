@@ -1,7 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import BigInteger, DateTime, ForeignKey, String, Text, UniqueConstraint, Index
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import BigInteger, DateTime, ForeignKey, JSON, String, Text, UniqueConstraint, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
 
@@ -27,6 +26,7 @@ class Device(Base):
     __table_args__ = (
         UniqueConstraint("installation_id", name="uq_devices_installation_id"),
         Index("ix_devices_user_id", "user_id"),
+        Index("ix_devices_active", "user_id", "activated_at", "removed_at"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -35,12 +35,23 @@ class Device(Base):
     device_name: Mapped[str] = mapped_column(String(120), nullable=False)
     device_type: Mapped[str] = mapped_column(String(40), nullable=False)
     platform: Mapped[str] = mapped_column(String(40), nullable=False)
+    app_version: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    os_version: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    removal_reason: Mapped[str | None] = mapped_column(String(40), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
 
     user = relationship("User", back_populates="devices")
     sessions = relationship("Session", back_populates="device")
+
+    @property
+    def is_premium_active(self) -> bool:
+        return self.activated_at is not None and self.removed_at is None
 
 
 class PairingCode(Base):
@@ -91,9 +102,96 @@ class EventOutbox(Base):
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
     target_device_id: Mapped[str] = mapped_column(String(36), ForeignKey("devices.id"), nullable=False)
     type: Mapped[str] = mapped_column(String(80), nullable=False)
-    payload_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    payload_json: Mapped[dict] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class DeviceActivationEvent(Base):
+    __tablename__ = "device_activation_events"
+    __table_args__ = (
+        Index("ix_device_activation_events_user_id", "user_id"),
+        Index("ix_device_activation_events_device_id", "device_id"),
+        Index("ix_device_activation_events_user_type_created", "user_id", "event_type", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    device_id: Mapped[str] = mapped_column(String(36), ForeignKey("devices.id"), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    # event_type values: registered, activated, removed, auto_expired,
+    #                    reactivated, denied_cap_reached, denied_swap_limit
+    metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class Purchase(Base):
+    __tablename__ = "purchases"
+    __table_args__ = (
+        Index("ix_purchases_user_id", "user_id"),
+        Index("ix_purchases_store_transaction", "store", "transaction_id"),
+        UniqueConstraint("store", "original_transaction_id", name="uq_purchases_store_orig_txn"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    store: Mapped[str] = mapped_column(String(20), nullable=False)  # apple, google_play, amazon
+    platform: Mapped[str] = mapped_column(String(40), nullable=False)
+    product_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    purchase_type: Mapped[str] = mapped_column(String(20), nullable=False)  # lifetime, subscription
+    transaction_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    original_transaction_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    purchase_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    receipt_reference: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw_payload_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    price_amount: Mapped[int | None] = mapped_column(BigInteger, nullable=True)  # cents
+    purchased_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    verification_status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    revocation_reason: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+    user = relationship("User")
+    entitlements = relationship("Entitlement", back_populates="source_purchase")
+
+
+class Entitlement(Base):
+    __tablename__ = "entitlements"
+    __table_args__ = (
+        Index("ix_entitlements_user_id", "user_id"),
+        UniqueConstraint("user_id", "entitlement_key", "source_purchase_id", name="uq_entitlements_user_key_purchase"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    entitlement_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    source_store: Mapped[str] = mapped_column(String(20), nullable=False)
+    source_purchase_id: Mapped[str] = mapped_column(String(36), ForeignKey("purchases.id"), nullable=False)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+    user = relationship("User")
+    source_purchase = relationship("Purchase", back_populates="entitlements")
+
+
+class EntitlementEvent(Base):
+    __tablename__ = "entitlement_events"
+    __table_args__ = (
+        Index("ix_entitlement_events_user_id", "user_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    entitlement_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    source_purchase_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
 class WatchStateReport(Base):

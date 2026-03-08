@@ -149,17 +149,21 @@ class HomeViewModel(
                 val defaults = defaultSectionConfigs()
                 val bySection = decoded.associateBy { it.section }
                 val presetIds = loadCardStylePresetIds()
-                val sanitized = defaults.map { def ->
+                defaults.map { def ->
                     val resolved = bySection[def.section] ?: def
-                    when {
-                        resolved.presetId != null && resolved.presetId !in presetIds ->
-                            resolved.copy(presetId = "default")
-                        resolved.presetId == null ->
-                            resolved.copy(presetId = "default")
-                        else -> resolved
+                    // Only strip invalid preset IDs if presets are actually loaded.
+                    // When presetIds is empty, presets may not be persisted yet —
+                    // preserve whatever the user saved.
+                    if (presetIds.isNotEmpty() &&
+                        resolved.presetId != null &&
+                        resolved.presetId != "default" &&
+                        resolved.presetId !in presetIds
+                    ) {
+                        resolved.copy(presetId = null)
+                    } else {
+                        resolved
                     }
                 }
-                sanitized
             } catch (_: Exception) {
                 defaultSectionConfigs()
             }

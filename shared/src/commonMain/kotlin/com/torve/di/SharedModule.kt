@@ -13,6 +13,8 @@ import com.torve.data.addon.StremioAddonClient
 import com.torve.data.addon.SubtitleAggregator
 import com.torve.data.addon.StreamRepositoryImpl
 import com.torve.data.auth.AuthClient
+import com.torve.data.device.DeviceApi
+import com.torve.data.entitlement.EntitlementApi
 import com.torve.data.debrid.DebridClient
 import com.torve.data.download.BulkDownloadManager
 import com.torve.data.download.DownloadCatalogueBuilder
@@ -87,6 +89,7 @@ import com.torve.presentation.mdblist.MdbListViewModel
 import com.torve.presentation.mood.MoodMatcherViewModel
 import com.torve.presentation.seeall.SeeAllViewModel
 import com.torve.presentation.stats.StatsViewModel
+import com.torve.presentation.device.DeviceGovernanceViewModel
 import com.torve.presentation.subscription.SubscriptionViewModel
 import com.torve.presentation.watchlist.WatchlistViewModel
 import org.koin.core.module.dsl.factoryOf
@@ -145,8 +148,28 @@ val sharedModule = module {
     // Kodi
     single { KodiClient(get()) }
 
-    // Auth
-    single { AuthClient(get()) }
+    // Auth & Entitlements
+    single {
+        val baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL }
+        AuthClient(
+            prefsRepo = get(),
+            httpClient = get(),
+            baseUrlProvider = baseUrlProvider,
+            deviceRegistrationProvider = { get<com.torve.domain.device.DeviceIdProvider>().getDeviceRegistration() },
+        )
+    }
+    single {
+        EntitlementApi(
+            httpClient = get(),
+            baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
+        )
+    }
+    single {
+        DeviceApi(
+            httpClient = get(),
+            baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
+        )
+    }
 
     // Parsers
     single { M3uParser() }
@@ -195,7 +218,7 @@ val sharedModule = module {
 
     // Subscription
     single { RebateCodeApi(get()) }
-    single<SubscriptionRepository> { SubscriptionRepositoryImpl(get()) }
+    single<SubscriptionRepository> { SubscriptionRepositoryImpl(get(), get(), get(), get()) }
 
     // Watchlist Repository
     single<WatchlistRepository> { WatchlistRepositoryImpl(get(), get(), get(), get(), get(), get(), get()) }
@@ -223,6 +246,7 @@ val sharedModule = module {
     factory { DownloadCatalogueViewModel(get(), get(), get(), get()) }
     factoryOf(::ProfileViewModel)
     factoryOf(::SubscriptionViewModel)
+    factoryOf(::DeviceGovernanceViewModel)
     factory { SetupWizardViewModel(get(), get(), get(), get(), get()) }
     single { WatchlistViewModel(get(), get()) }
     factory { DiscoverViewModel() }

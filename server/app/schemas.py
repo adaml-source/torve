@@ -139,3 +139,152 @@ class WatchStateReportRequest(BaseModel):
 class WatchStateReportResponse(BaseModel):
     status: str
     reported_at: datetime
+
+
+# ── Purchase & Entitlement Schemas ──
+
+
+class AppleVerifyRequest(BaseModel):
+    transaction_jws: str = Field(min_length=10, description="StoreKit 2 JWS signed transaction")
+    product_id: str = Field(min_length=1, max_length=128)
+    platform: str = Field(default="ios", max_length=40)
+
+
+class GoogleVerifyRequest(BaseModel):
+    product_id: str = Field(min_length=1, max_length=128)
+    purchase_token: str = Field(min_length=1)
+    platform: str = Field(default="google_play_mobile", max_length=40)
+
+
+class AmazonVerifyRequest(BaseModel):
+    receipt_id: str = Field(min_length=1, max_length=512)
+    amazon_user_id: str = Field(min_length=1, max_length=256)
+    product_id: str = Field(min_length=1, max_length=128)
+    platform: str = Field(default="amazon_fire_tv", max_length=40)
+
+
+class RestorePurchasesRequest(BaseModel):
+    store: str = Field(pattern="^(apple|google_play|amazon)$")
+    platform: str = Field(max_length=40)
+    receipt_data: str | None = None
+    purchase_token: str | None = None
+    amazon_user_id: str | None = None
+
+
+class EntitlementResponse(BaseModel):
+    key: str
+    status: str
+    source_store: str
+    starts_at: datetime
+    ends_at: datetime | None = None
+
+
+class EntitlementStateResponse(BaseModel):
+    user: UserResponse
+    entitlements: list[EntitlementResponse]
+    premium_access: bool
+
+
+class PurchaseResponse(BaseModel):
+    id: str
+    store: str
+    product_id: str
+    purchase_type: str
+    verification_status: str
+    purchased_at: datetime | None = None
+    created_at: datetime
+
+
+class PurchaseVerifyResponse(BaseModel):
+    status: str
+    purchase: PurchaseResponse
+    entitlements: list[EntitlementResponse]
+    premium_access: bool
+
+
+class PasswordResetRequestPayload(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirmPayload(BaseModel):
+    token: str = Field(min_length=1)
+    new_password: str = Field(min_length=8, max_length=256)
+
+
+class MeResponse(BaseModel):
+    user: UserResponse
+    entitlements: list[EntitlementResponse]
+    premium_access: bool
+
+
+# ── Device Governance Schemas ──
+
+
+class ManagedDeviceResponse(BaseModel):
+    id: str
+    device_name: str
+    device_type: str
+    platform: str
+    is_current: bool = False
+    is_active: bool = False
+    last_seen_at: datetime
+    activated_at: datetime | None = None
+    removed_at: datetime | None = None
+    removal_reason: str | None = None
+    first_seen_at: datetime
+
+
+class PremiumStateResponse(BaseModel):
+    has_entitlement: bool
+    premium_access: bool
+    reason: str
+    entitlements: list[EntitlementResponse]
+
+
+class DeviceStateResponse(BaseModel):
+    id: str
+    name: str
+    is_active: bool
+    active_device_count: int
+    max_active_devices: int
+    platform: str
+    device_type: str
+
+
+class DeviceLimitResponse(BaseModel):
+    cap_reached: bool
+    swaps_remaining: int
+    stale_devices_pruned: int
+    active_devices: list[ManagedDeviceResponse] = []
+
+
+class AccessStateResponse(BaseModel):
+    user: UserResponse
+    premium: PremiumStateResponse
+    device: DeviceStateResponse
+    device_limit: DeviceLimitResponse
+
+
+class DeviceRemoveResponse(BaseModel):
+    removed: bool
+    reason: str
+    swaps_remaining: int
+
+
+class DeviceActivateResponse(BaseModel):
+    activated: bool
+    reason: str
+    active_device_count: int
+    stale_devices_pruned: int
+    swaps_remaining: int
+
+
+class DeviceRenameRequest(BaseModel):
+    device_name: str = Field(min_length=1, max_length=120)
+
+
+class DeviceListResponse(BaseModel):
+    devices: list[ManagedDeviceResponse]
+    active_count: int
+    max_active: int
+    swaps_remaining: int

@@ -39,7 +39,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -86,7 +86,7 @@ import com.torve.domain.model.resolvedAspectRatio
 import com.torve.domain.model.resolvedWidthDp
 import com.torve.domain.model.WatchState
 
-val LocalCardStyle = staticCompositionLocalOf { CardStyle() }
+val LocalCardStyle = compositionLocalOf { CardStyle() }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Poster Card — The primary content card used everywhere.

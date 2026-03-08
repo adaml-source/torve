@@ -92,4 +92,8 @@ enum KoinViewModelFactory {
     static func downloadCatalogueViewModel() -> DownloadCatalogueViewModel {
         resolve(DownloadCatalogueViewModel.self)
     }
+
+    static func deviceGovernanceViewModel() -> DeviceGovernanceViewModel {
+        resolve(DeviceGovernanceViewModel.self)
+    }
 }

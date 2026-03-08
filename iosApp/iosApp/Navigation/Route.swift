@@ -46,5 +46,7 @@ enum Route: Hashable {
     case login
     case account
     case devices
+    case manageDevices
+    case deviceLimitReached
     case legal
 }

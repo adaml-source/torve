@@ -8,6 +8,7 @@ data class SubscriptionUiState(
     val isPro: Boolean = false,
     val isLoading: Boolean = false,
     val isPurchasing: Boolean = false,
+    val isLoggedIn: Boolean = false,
     val error: String? = null,
     val showPaywall: Boolean = false,
     val paywallFeature: String? = null,
@@ -15,4 +16,8 @@ data class SubscriptionUiState(
     val isRedeeming: Boolean = false,
     val rebateSuccess: Boolean = false,
     val rebateCodesEnabled: Boolean = RebateCodeApi.ENABLED,
+    // Device governance
+    val hasEntitlement: Boolean = false,
+    val deviceCapReached: Boolean = false,
+    val showDeviceLimitReached: Boolean = false,
 )

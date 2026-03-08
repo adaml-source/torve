@@ -184,7 +184,8 @@
     <string name="paywall_custom_home">Accueil personnalisé</string>
     <string name="paywall_advanced_filters">Filtres avancés</string>
     <string name="paywall_lifetime">À vie</string>
-    <string name="paywall_price">€9.99</string>
+    <string name="paywall_price">Prix indisponible</string>
+    <string name="paywall_price_loading">Chargement…</string>
     <string name="paywall_one_time">Paiement unique, accès permanent</string>
     <string name="paywall_best_value">MEILLEURE OFFRE</string>
     <string name="paywall_get_lifetime">Obtenir l\'accès à vie</string>

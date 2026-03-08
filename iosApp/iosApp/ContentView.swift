@@ -175,6 +175,10 @@ struct ContentView: View {
             AccountScreen()
         case .devices:
             DevicesScreen()
+        case .manageDevices:
+            ManageDevicesScreen()
+        case .deviceLimitReached:
+            DeviceLimitReachedScreen()
         case .legal:
             LegalScreen()
         default:

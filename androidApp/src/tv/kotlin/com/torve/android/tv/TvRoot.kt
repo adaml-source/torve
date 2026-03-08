@@ -51,6 +51,7 @@ import com.torve.android.tv.screens.TvIptvRailState
 import com.torve.android.tv.screens.TvLibraryScreen
 import com.torve.android.tv.screens.TvMoviesScreen
 import com.torve.android.tv.screens.TvSearchScreen
+import com.torve.android.tv.screens.TvManageDevicesScreen
 import com.torve.android.tv.screens.TvSettingsScreen
 import com.torve.android.tv.screens.TvShowsScreen
 import com.torve.android.ui.theme.AmberSubtle
@@ -63,6 +64,7 @@ import com.torve.domain.model.MediaType
 import com.torve.domain.repository.MetadataRepository
 import com.torve.domain.sync.SyncPayload
 import com.torve.domain.sync.SyncRepository
+import com.torve.presentation.channels.ChannelsViewModel
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.watchlist.WatchlistViewModel
 import android.util.Log
@@ -72,6 +74,9 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import org.koin.compose.koinInject
+
+/** Sub-destinations within the Settings tab — single source of truth. */
+internal enum class TvSettingsDestination { MAIN, MANAGE_DEVICES }
 
 /**
  * Module-level in-memory cache so screen data survives recomposition
@@ -100,12 +105,14 @@ fun TvRoot() {
     val syncCoordinator: SyncCoordinator = koinInject()
     val syncRepository: SyncRepository = koinInject()
     val settingsViewModel: SettingsViewModel = koinInject()
+    val channelsViewModel: ChannelsViewModel = koinInject()
     val syncState by syncCoordinator.state.collectAsState()
 
     /* ── Sub-route tracking (NavHost only handles details/player/see-all/sub-screens) ── */
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentSubRoute = navBackStackEntry?.destination?.route
     val isSubRouteActive = currentSubRoute != null && currentSubRoute != TvRoutes.SUB_NAV_START
+    Log.d("TvRoot", "currentSubRoute=$currentSubRoute isSubRouteActive=$isSubRouteActive")
     val isPlayerRoute = currentSubRoute?.startsWith("tv_player") == true ||
         currentSubRoute?.startsWith("tv_live_player") == true
     val hideRailForIptv by TvIptvRailState.hideRail
@@ -113,6 +120,7 @@ fun TvRoot() {
     /* ── Tab state ─────────────────────────────────────────────────────────────────────── */
     var selectedTopRoute by rememberSaveable { mutableStateOf(TvRoutes.HOME) }
     var visitedTabs by remember { mutableStateOf(setOf(TvRoutes.HOME)) }
+    var settingsDestination by remember { mutableStateOf(TvSettingsDestination.MAIN) }
 
     /* ── Focus state ───────────────────────────────────────────────────────────────────── */
     val railFocusRequester = remember { FocusRequester() }
@@ -257,6 +265,11 @@ fun TvRoot() {
                             Log.d("TvRoot", "Import result: $result")
                             // Refresh SettingsViewModel so TV UI reflects synced integrations
                             settingsViewModel.refreshSettings()
+                            // Reload channel data so IPTV screen picks up synced playlists/favorites
+                            if (result.playlistsImported > 0 || result.favoritesImported > 0) {
+                                channelsViewModel.loadPlaylists()
+                                channelsViewModel.loadFavorites()
+                            }
                             val parts = buildList {
                                 if (result.addonsImported > 0) add("${result.addonsImported} addons")
                                 if (result.preferencesImported > 0) add("${result.preferencesImported} prefs")
@@ -405,6 +418,11 @@ fun TvRoot() {
                         // Add to visitedTabs synchronously so the tab renders
                         // in the same frame as the route change (no blank frame).
                         visitedTabs = visitedTabs + route
+                        // Reset settings sub-destination so selecting Settings
+                        // from the rail always shows the main settings screen.
+                        if (route == TvRoutes.SETTINGS) {
+                            settingsDestination = TvSettingsDestination.MAIN
+                        }
                         selectedTopRoute = route
                     },
                 )
@@ -575,14 +593,24 @@ fun TvRoot() {
                                         shouldAutoFocus = false,
                                     )
 
-                                    TvRoutes.SETTINGS -> TvSettingsScreen(
-                                        railFocusRequester = railFocusRequester,
-                                        onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.SETTINGS] = it },
-                                        onContentFocused = { lastFocusedContentByRoute[TvRoutes.SETTINGS] = it },
-                                        onNavigateToHomeLayout = { navController.navigate(TvRoutes.HOME_LAYOUT) },
-                                        onNavigateToRatings = { navController.navigate(TvRoutes.RATINGS_SETTINGS) },
-                                        isActive = isActiveTab,
-                                    )
+                                    TvRoutes.SETTINGS -> when (settingsDestination) {
+                                        TvSettingsDestination.MANAGE_DEVICES -> {
+                                            TvManageDevicesScreen(
+                                                onBack = { settingsDestination = TvSettingsDestination.MAIN },
+                                            )
+                                        }
+                                        TvSettingsDestination.MAIN -> {
+                                            TvSettingsScreen(
+                                                railFocusRequester = railFocusRequester,
+                                                onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.SETTINGS] = it },
+                                                onContentFocused = { lastFocusedContentByRoute[TvRoutes.SETTINGS] = it },
+                                                onNavigateToHomeLayout = { navController.navigate(TvRoutes.HOME_LAYOUT) },
+                                                onNavigateToRatings = { navController.navigate(TvRoutes.RATINGS_SETTINGS) },
+                                                onNavigateToManageDevices = { settingsDestination = TvSettingsDestination.MANAGE_DEVICES },
+                                                isActive = isActiveTab,
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -597,6 +625,7 @@ fun TvRoot() {
                         .fillMaxSize()
                         .zIndex(if (isSubRouteActive) 2f else -1f)
                         .alpha(if (isSubRouteActive) 1f else 0f)
+                        .offset(x = if (isSubRouteActive) 0.dp else 10000.dp)
                         .focusProperties {
                             if (!isSubRouteActive) {
                                 enter = { FocusRequester.Cancel }

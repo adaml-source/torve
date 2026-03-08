@@ -1,0 +1,55 @@
+iOS App Store — Submission Checklist
+=====================================
+
+BUILD
+[x] CFBundleDisplayName: Torve
+[x] CFBundleShortVersionString: 1.0.0
+[x] CFBundleVersion: 1
+[x] ATS: NSAllowsLocalNetworking=true (LAN media servers)
+[x] ATS: NSAllowsArbitraryLoads=false (all external HTTPS)
+[ ] Set PRODUCT_BUNDLE_IDENTIFIER in Xcode project
+[ ] Configure Apple Developer signing (Team + provisioning)
+[ ] Archive and upload via Xcode or xcodebuild
+
+PRIVACY — APP STORE CONNECT
+[ ] Privacy nutrition labels in App Store Connect:
+    - Data Not Collected (no analytics, no tracking, no crash SDKs in iOS build)
+    - Data Linked to You: None
+    - Data Used to Track You: None
+[ ] Privacy policy URL in App Store Connect
+
+PRIVACY POLICY
+[ ] Host at public URL
+[ ] iOS policy accurately states: no analytics or crash reporting SDKs
+[ ] Contact: privacy@torve.app
+
+IN-APP PURCHASES
+[ ] Configure StoreKit 2 product IDs in App Store Connect
+[ ] Test with StoreKit Testing in Xcode (sandbox)
+[ ] Verify restore purchases flow
+[ ] If no IAP at launch, remove paywall UI or mark as "Coming Soon"
+
+STORE LISTING
+[ ] App name: Torve
+[ ] Subtitle (30 chars max)
+[ ] Description
+[ ] Keywords (100 chars max)
+[ ] App icon: 1024x1024 (no alpha, no rounded corners)
+[ ] iPhone screenshots: 6.7" (1290x2796) — min 1, recommended 5
+[ ] iPhone screenshots: 5.5" (1242x2208)
+[ ] iPad screenshots: 12.9" (2048x2732) — if supporting iPad
+[ ] Category: Entertainment
+[ ] Content rating: complete questionnaire
+
+APP REVIEW NOTES
+[ ] Explain that the app connects to user-configured media servers
+[ ] Provide demo instructions if needed
+[ ] Note: "No account required — all data stored locally"
+
+TESTING
+[ ] Test on physical iPhone (iOS 16+)
+[ ] Test on iPad (if universal)
+[ ] Test AirPlay
+[ ] Test Picture-in-Picture
+[ ] Test background audio
+[ ] Test deep links / universal links if applicable

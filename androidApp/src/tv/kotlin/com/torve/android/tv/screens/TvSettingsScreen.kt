@@ -37,7 +37,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,11 +47,6 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.torve.android.ui.theme.*
@@ -80,6 +74,12 @@ import com.torve.presentation.stats.StatsViewModel
 import com.torve.presentation.subscription.SubscriptionViewModel
 import com.torve.android.tv.TvNotificationQueue
 import com.torve.android.tv.NotificationType
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
@@ -92,6 +92,7 @@ fun TvSettingsScreen(
     onContentFocused: (FocusRequester) -> Unit,
     onNavigateToHomeLayout: () -> Unit = {},
     onNavigateToRatings: () -> Unit = {},
+    onNavigateToManageDevices: () -> Unit = {},
     isActive: Boolean = true,
     syncCoordinator: SyncCoordinator = koinInject(),
     settingsViewModel: SettingsViewModel = koinInject(),
@@ -110,6 +111,21 @@ fun TvSettingsScreen(
     val hasPairedPhone = syncState.devices.any { it.deviceType == "mobile" && it.revokedAt == null }
     var aboutTapCount by remember { mutableIntStateOf(0) }
     var showDebugPanel by remember { mutableStateOf(false) }
+
+    // ── Auth state ──
+    val authClient: com.torve.data.auth.AuthClient = koinInject()
+    var authEmail by remember { mutableStateOf("") }
+    var authPassword by remember { mutableStateOf("") }
+    var authIsLoading by remember { mutableStateOf(false) }
+    var authError by remember { mutableStateOf<String?>(null) }
+    var authUser by remember { mutableStateOf<com.torve.data.auth.AuthUser?>(null) }
+    var authShowRegister by remember { mutableStateOf(false) }
+    val authScope = rememberCoroutineScope()
+
+    // Check if already logged in
+    LaunchedEffect(Unit) {
+        authUser = authClient.getCurrentUser()
+    }
 
     // Inline text-input expansion states
     var expandedInput by remember { mutableStateOf<String?>(null) }
@@ -363,6 +379,9 @@ fun TvSettingsScreen(
 
     // ── Main settings (mode selected) ──
     val wrapScope = rememberCoroutineScope()
+    var isFirstItemFocused by remember { mutableStateOf(false) }
+    var isLastItemFocused by remember { mutableStateOf(false) }
+    val lastItemRequester = remember { FocusRequester() }
     LazyColumn(
         state = settingsListState,
         modifier = Modifier
@@ -373,22 +392,21 @@ fun TvSettingsScreen(
                 if (totalItems == 0) return@onPreviewKeyEvent false
                 when (event.key) {
                     Key.DirectionUp -> {
-                        // If first visible item is index 0 and scrolled to top, wrap to bottom
-                        val first = settingsListState.firstVisibleItemIndex
-                        val offset = settingsListState.firstVisibleItemScrollOffset
-                        if (first == 0 && offset == 0) {
+                        if (isFirstItemFocused) {
                             wrapScope.launch {
                                 settingsListState.scrollToItem(totalItems - 1)
+                                kotlinx.coroutines.delay(50)
+                                try { lastItemRequester.requestFocus() } catch (_: Throwable) {}
                             }
                             true
                         } else false
                     }
                     Key.DirectionDown -> {
-                        // If the last visible item is the final item, wrap to top
-                        val lastVisible = settingsListState.layoutInfo.visibleItemsInfo.lastOrNull()
-                        if (lastVisible != null && lastVisible.index >= totalItems - 1) {
+                        if (isLastItemFocused) {
                             wrapScope.launch {
                                 settingsListState.scrollToItem(0)
+                                kotlinx.coroutines.delay(50)
+                                try { settingsContentRequester.requestFocus() } catch (_: Throwable) {}
                             }
                             true
                         } else false
@@ -407,19 +425,140 @@ fun TvSettingsScreen(
                 TvSetupMode.TV_ONLY -> stringResource(R.string.tv_settings_mode_tv_only)
                 null -> ""
             }
-            TvSettingCard(
-                title = stringResource(R.string.tv_settings_setup_mode),
-                subtitle = "$modeLabel — ${stringResource(R.string.tv_settings_tap_to_change)}",
-                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
-                focusRequester = settingsContentRequester,
-                onFocused = { onContentFocused(settingsContentRequester) },
-                onClick = { setupMode = null },
-            )
+            Box(Modifier.onFocusChanged { isFirstItemFocused = it.hasFocus }) {
+                TvSettingCard(
+                    title = stringResource(R.string.tv_settings_setup_mode),
+                    subtitle = "$modeLabel — ${stringResource(R.string.tv_settings_tap_to_change)}",
+                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                    focusRequester = settingsContentRequester,
+                    onFocused = { onContentFocused(settingsContentRequester) },
+                    onClick = { setupMode = null },
+                )
+            }
         }
 
         // Account section
         item(key = "section_account") {
             TvSectionHeader(text = accountSectionLabel)
+        }
+
+        // Torve account login/signup
+        if (authUser != null) {
+            // Logged in — show account info + logout
+            item(key = "auth_account") {
+                val requester = remember("auth_account") { FocusRequester() }
+                TvSettingCard(
+                    title = "Torve Account",
+                    subtitle = authUser!!.email,
+                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                    focusRequester = requester,
+                    onFocused = { onContentFocused(requester) },
+                    onClick = {},
+                )
+            }
+            item(key = "auth_logout") {
+                val requester = remember("auth_logout") { FocusRequester() }
+                TvSettingCard(
+                    title = "Log Out",
+                    subtitle = "Sign out of your Torve account",
+                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                    focusRequester = requester,
+                    onFocused = { onContentFocused(requester) },
+                    onClick = {
+                        authScope.launch {
+                            authClient.logout()
+                            authUser = null
+                            authEmail = ""
+                            authPassword = ""
+                            TvNotificationQueue.post("Logged out", NotificationType.INFO)
+                        }
+                    },
+                )
+            }
+        } else {
+            // Not logged in — show email/password fields + login/register
+            item(key = "auth_email") {
+                TvTextInputCard(
+                    key = "auth_email",
+                    title = "Email",
+                    value = authEmail,
+                    expandedInput = expandedInput,
+                    railFocusRequester = railFocusRequester,
+                    onContentFocused = onContentFocused,
+                    onExpandToggle = { expandedInput = if (expandedInput == it) null else it },
+                    onValueChange = { authEmail = it },
+                )
+            }
+            item(key = "auth_password") {
+                TvTextInputCard(
+                    key = "auth_password",
+                    title = "Password",
+                    value = authPassword,
+                    expandedInput = expandedInput,
+                    railFocusRequester = railFocusRequester,
+                    onContentFocused = onContentFocused,
+                    onExpandToggle = { expandedInput = if (expandedInput == it) null else it },
+                    onValueChange = { authPassword = it },
+                )
+            }
+            item(key = "auth_submit") {
+                val requester = remember("auth_submit") { FocusRequester() }
+                TvSettingCard(
+                    title = if (authShowRegister) "Create Account" else "Log In",
+                    subtitle = if (authIsLoading) "Please wait…"
+                              else if (authShowRegister) "Sign up with email and password"
+                              else "Sign in to your Torve account",
+                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                    focusRequester = requester,
+                    onFocused = { onContentFocused(requester) },
+                    onClick = {
+                        if (authIsLoading) return@TvSettingCard
+                        authError = null
+                        authIsLoading = true
+                        authScope.launch {
+                            val result = if (authShowRegister) {
+                                authClient.register(authEmail, authPassword, null)
+                            } else {
+                                authClient.login(authEmail, authPassword)
+                            }
+                            authIsLoading = false
+                            if (result.success) {
+                                authUser = result.user
+                                authPassword = ""
+                                val msg = if (authShowRegister) "Account created!" else "Logged in!"
+                                TvNotificationQueue.post(msg, NotificationType.SUCCESS)
+                            } else {
+                                authError = result.error
+                                TvNotificationQueue.post(result.error ?: "Failed", NotificationType.ERROR)
+                            }
+                        }
+                    },
+                )
+            }
+            item(key = "auth_toggle") {
+                val requester = remember("auth_toggle") { FocusRequester() }
+                TvSettingCard(
+                    title = if (authShowRegister) "Already have an account?" else "Don't have an account?",
+                    subtitle = if (authShowRegister) "Switch to Log In" else "Switch to Sign Up",
+                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                    focusRequester = requester,
+                    onFocused = { onContentFocused(requester) },
+                    onClick = {
+                        authShowRegister = !authShowRegister
+                        authError = null
+                    },
+                )
+            }
+            authError?.let { error ->
+                item(key = "auth_error") {
+                    Text(
+                        text = error,
+                        color = Ruby,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(horizontal = 4.dp),
+                    )
+                }
+            }
         }
 
         // Phone pairing (all modes)
@@ -448,6 +587,19 @@ fun TvSettingsScreen(
                     onClick = { syncCoordinator.clearError() },
                 )
             }
+        }
+
+        // Manage Devices
+        item(key = "manage_devices") {
+            val requester = remember("manage_devices") { FocusRequester() }
+            TvSettingCard(
+                title = "Manage Devices",
+                subtitle = "View and manage your active Torve Pro devices",
+                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                focusRequester = requester,
+                onFocused = { onContentFocused(requester) },
+                onClick = onNavigateToManageDevices,
+            )
         }
 
         // Subscription — Google Play billing only
@@ -482,8 +634,10 @@ fun TvSettingsScreen(
             val formattedPrice = billingManager.getFormattedPrice()
             val subLabel = if (subscriptionState.isPro) {
                 "Lifetime — Active"
+            } else if (formattedPrice != null) {
+                "Free — $formattedPrice for Lifetime"
             } else {
-                "Free — ${formattedPrice ?: "$4.99"} for Lifetime"
+                "Free — Upgrade to Lifetime"
             }
 
             Column {
@@ -1965,18 +2119,20 @@ fun TvSettingsScreen(
         }
 
         item(key = "about_stats") {
-            val requester = remember("about_stats") { FocusRequester() }
+            val requester = if (showDebugPanel) remember("about_stats") { FocusRequester() } else lastItemRequester
             val statsState by statsViewModel.state.collectAsState()
             LaunchedEffect(Unit) { statsViewModel.loadStats() }
             val hours = statsState.totalMinutes / 60
-            TvSettingCard(
-                title = stringResource(R.string.tv_settings_stats),
-                subtitle = "${statsState.totalMovies} movies · ${statsState.totalEpisodes} episodes · ${hours}h watched",
-                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
-                focusRequester = requester,
-                onFocused = { onContentFocused(requester) },
-                onClick = {},
-            )
+            Box(Modifier.onFocusChanged { if (!showDebugPanel) isLastItemFocused = it.hasFocus }) {
+                TvSettingCard(
+                    title = stringResource(R.string.tv_settings_stats),
+                    subtitle = "${statsState.totalMovies} movies · ${statsState.totalEpisodes} episodes · ${hours}h watched",
+                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                    focusRequester = requester,
+                    onFocused = { onContentFocused(requester) },
+                    onClick = {},
+                )
+            }
         }
 
         // Easter egg: debug panel
@@ -1986,15 +2142,16 @@ fun TvSettingsScreen(
             }
 
             item(key = "debug_sync") {
-                val requester = remember("debug_sync") { FocusRequester() }
-                TvSettingCard(
-                    title = stringResource(R.string.tv_settings_sync_status),
-                    subtitle = "Transport: ${syncState.wsStatus}",
-                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
-                    focusRequester = requester,
-                    onFocused = { onContentFocused(requester) },
-                    onClick = {},
-                )
+                Box(Modifier.onFocusChanged { isLastItemFocused = it.hasFocus }) {
+                    TvSettingCard(
+                        title = stringResource(R.string.tv_settings_sync_status),
+                        subtitle = "Transport: ${syncState.wsStatus}",
+                        modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                        focusRequester = lastItemRequester,
+                        onFocused = { onContentFocused(lastItemRequester) },
+                        onClick = {},
+                    )
+                }
             }
 
             if (syncState.recentEvents.isNotEmpty()) {
@@ -2021,6 +2178,7 @@ fun TvSettingsScreen(
                 }
             }
         }
+
     }
 
     // ── Picker overlays ──

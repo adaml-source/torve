@@ -158,6 +158,7 @@ fun TvLivePlayerScreen(
     val playerRootFocusRequester = remember { FocusRequester() }
     var selectedPictureFormatKey by rememberSaveable { mutableStateOf(LivePictureFormat.SOURCE.key) }
     val selectedPictureFormat = LivePictureFormat.fromKey(selectedPictureFormatKey)
+    var audioDelayMs by rememberSaveable { mutableStateOf(0) }
     var exoPlayerView by remember { mutableStateOf<PlayerView?>(null) }
 
     suspend fun requestPlayerRootFocus() {
@@ -241,6 +242,11 @@ fun TvLivePlayerScreen(
         } else {
             exoPlayerView?.resizeMode = selectedPictureFormat.exoResizeMode
         }
+    }
+
+    // ── Apply audio delay to engine ──
+    LaunchedEffect(audioDelayMs) {
+        engine.setAudioDelay(audioDelayMs)
     }
 
     // ── Update stream info from ExoPlayer format (poll every 2s) ──
@@ -693,6 +699,8 @@ fun TvLivePlayerScreen(
                 onSetXxxEnabled = { viewModel.setXxxEnabled(it) },
                 onSetAudioPassthroughEnabled = { viewModel.setAudioPassthroughEnabled(it) },
                 onSetPreferSurroundCodecs = { viewModel.setPreferSurroundCodecs(it) },
+                audioDelayMs = audioDelayMs,
+                onSetAudioDelay = { audioDelayMs = it },
                 audioTracks = audioTracks,
                 subtitleTracks = subtitleTracks,
                 onSelectAudioTrack = { engine.selectAudioTrack(it) },

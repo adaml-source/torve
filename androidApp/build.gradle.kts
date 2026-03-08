@@ -1,3 +1,6 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -10,6 +13,26 @@ plugins {
 android {
     namespace = "com.torve.android"
     compileSdk = 36
+
+    signingConfigs {
+        create("release") {
+            val props = rootProject.file("keystore.properties")
+            if (props.exists()) {
+                val keystoreProps = Properties()
+                FileInputStream(props).use { keystoreProps.load(it) }
+                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            } else {
+                // CI / env-var fallback
+                storeFile = file(System.getenv("TORVE_KEYSTORE_PATH") ?: "/dev/null")
+                storePassword = System.getenv("TORVE_KEYSTORE_PASSWORD") ?: ""
+                keyAlias = System.getenv("TORVE_KEY_ALIAS") ?: ""
+                keyPassword = System.getenv("TORVE_KEY_PASSWORD") ?: ""
+            }
+        }
+    }
 
     defaultConfig {
         applicationId = "com.torve.app"
@@ -28,11 +51,13 @@ android {
     productFlavors {
         create("google") {
             dimension = "store"
+            buildConfigField("Boolean", "HAS_BILLING", "true")
         }
         create("amazon") {
             dimension = "store"
             // Different applicationId so it can coexist with Google Play version
             applicationIdSuffix = ".amazon"
+            buildConfigField("Boolean", "HAS_BILLING", "true")
         }
         create("mobile") {
             dimension = "formFactor"
@@ -51,6 +76,7 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
@@ -145,8 +171,11 @@ dependencies {
     "googleImplementation"("com.google.firebase:firebase-crashlytics")
     "googleImplementation"("com.google.firebase:firebase-analytics")
 
-    // Google Play Billing — replaced by stub on Amazon
+    // Google Play Billing — Google flavor only
     "googleImplementation"("com.android.billingclient:billing-ktx:7.1.1")
+
+    // Amazon Appstore IAP — Amazon flavor only
+    "amazonImplementation"("com.amazon.device:amazon-appstore-sdk:3.0.5")
 
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)

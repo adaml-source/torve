@@ -1,14 +1,21 @@
 package com.torve.data.subscription
 
+import com.torve.data.auth.AuthClient
+import com.torve.data.device.DeviceApi
+import com.torve.data.entitlement.EntitlementApi
 import com.torve.db.TorveDatabase
 import com.torve.domain.model.PremiumFeature
 import com.torve.domain.model.Subscription
 import com.torve.domain.model.SubscriptionTier
+import com.torve.domain.repository.BackendPremiumResult
 import com.torve.domain.repository.SubscriptionRepository
 import kotlinx.datetime.Clock
 
 class SubscriptionRepositoryImpl(
     private val database: TorveDatabase,
+    private val authClient: AuthClient,
+    private val entitlementApi: EntitlementApi,
+    private val deviceApi: DeviceApi,
 ) : SubscriptionRepository {
 
     override suspend fun getActiveSubscription(): Subscription? {
@@ -26,8 +33,16 @@ class SubscriptionRepositoryImpl(
     }
 
     override suspend fun isPro(): Boolean {
+        // First check backend entitlements if logged in
+        if (authClient.isLoggedIn()) {
+            try {
+                return refreshFromBackend()
+            } catch (_: Exception) {
+                // Fall back to local
+            }
+        }
         val sub = getActiveSubscription() ?: return false
-        return sub.isActive && sub.tier == SubscriptionTier.LIFETIME
+        return sub.isPro
     }
 
     override suspend fun hasAccess(feature: PremiumFeature): Boolean {
@@ -67,5 +82,56 @@ class SubscriptionRepositoryImpl(
     override suspend fun restorePurchase(purchaseToken: String): Subscription? {
         activateSubscription(SubscriptionTier.LIFETIME, purchaseToken)
         return getActiveSubscription()
+    }
+
+    override suspend fun refreshFromBackend(): Boolean {
+        val token = authClient.getAccessToken() ?: return false
+        return try {
+            // Use device-aware access state instead of just entitlements
+            val accessState = deviceApi.getAccessState(token)
+            val devicePremium = accessState.premium.premium_access
+            if (devicePremium) {
+                onBackendEntitlementGranted(true)
+            }
+            devicePremium
+        } catch (_: Exception) {
+            // Fallback: try entitlement-only check
+            try {
+                val state = entitlementApi.getEntitlements(token)
+                state.premium_access
+            } catch (_: Exception) {
+                getActiveSubscription()?.isPro == true
+            }
+        }
+    }
+
+    override suspend fun refreshFromBackendDetailed(): BackendPremiumResult {
+        val token = authClient.getAccessToken()
+            ?: return BackendPremiumResult.Offline(getActiveSubscription()?.isPro == true)
+        return try {
+            val accessState = deviceApi.getAccessState(token)
+            val hasEntitlement = accessState.premium.has_entitlement
+            val devicePremium = accessState.premium.premium_access
+            val reason = accessState.premium.reason
+            when {
+                devicePremium -> {
+                    onBackendEntitlementGranted(true)
+                    BackendPremiumResult.Active
+                }
+                hasEntitlement -> BackendPremiumResult.DeviceBlocked(reason)
+                else -> BackendPremiumResult.NoEntitlement
+            }
+        } catch (_: Exception) {
+            BackendPremiumResult.Offline(getActiveSubscription()?.isPro == true)
+        }
+    }
+
+    override suspend fun onBackendEntitlementGranted(isPremium: Boolean) {
+        if (isPremium) {
+            val existing = getActiveSubscription()
+            if (existing == null || !existing.isPro) {
+                activateSubscription(SubscriptionTier.LIFETIME, "backend_entitlement")
+            }
+        }
     }
 }

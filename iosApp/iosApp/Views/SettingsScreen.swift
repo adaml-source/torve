@@ -87,6 +87,9 @@ struct SettingsScreen: View {
             NavigationLink(value: Route.devices) {
                 Label("Devices", systemImage: "laptopcomputer.and.iphone")
             }
+            NavigationLink(value: Route.manageDevices) {
+                Label("Manage Devices", systemImage: "desktopcomputer")
+            }
         }
     }
 

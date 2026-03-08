@@ -5,11 +5,13 @@ import kotlinx.serialization.Serializable
 @Serializable
 enum class SubscriptionTier {
     FREE,
+    MONTHLY,
     LIFETIME;
 
     val label: String
         get() = when (this) {
             FREE -> "Free"
+            MONTHLY -> "Monthly"
             LIFETIME -> "Lifetime"
         }
 }
@@ -25,7 +27,7 @@ data class Subscription(
     val purchasedAt: Long = 0,
 ) {
     val isPro: Boolean
-        get() = isActive && tier == SubscriptionTier.LIFETIME
+        get() = isActive && (tier == SubscriptionTier.LIFETIME || tier == SubscriptionTier.MONTHLY)
 }
 
 /**

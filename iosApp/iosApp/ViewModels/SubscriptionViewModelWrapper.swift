@@ -28,4 +28,11 @@ final class SubscriptionViewModelWrapper: ObservableObject {
     func dismissPaywall() { viewModel.dismissPaywall() }
     func updateRebateCode(_ code: String) { viewModel.updateRebateCode(code: code) }
     func redeemCode() { viewModel.redeemCode() }
+
+    /// Send Apple StoreKit JWS to the backend for verification
+    func verifyApplePurchase(transactionJws: String, productId: String) {
+        viewModel.verifyApplePurchase(transactionJws: transactionJws, productId: productId)
+    }
+
+    func dismissDeviceLimitReached() { viewModel.dismissDeviceLimitReached() }
 }

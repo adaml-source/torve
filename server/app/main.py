@@ -9,18 +9,34 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from .config import get_settings
 from .db import get_session
-from .models import Device, EventOutbox, PairingCode, Session, User, WatchStateReport, utcnow
+from .models import Device, DeviceActivationEvent, Entitlement, EventOutbox, PairingCode, Purchase, Session, User, WatchStateReport, utcnow
 from .realtime import ConnectionRegistry, deliver_pending_events, dispatch_event
 from .schemas import (
+    AccessStateResponse,
+    AmazonVerifyRequest,
+    AppleVerifyRequest,
     AuthLoginRequest,
     AuthLogoutRequest,
     AuthRefreshRequest,
     AuthRegisterRequest,
     AuthResponse,
+    DeviceActivateResponse,
+    DeviceLimitResponse,
+    DeviceListResponse,
     DeviceRegistration,
+    DeviceRemoveResponse,
+    DeviceRenameRequest,
     DeviceResponse,
+    DeviceStateResponse,
+    EntitlementResponse,
+    EntitlementStateResponse,
     EventDispatchResponse,
+    GoogleVerifyRequest,
     HealthResponse,
+    ManagedDeviceResponse,
+    MeResponse,
+    PasswordResetConfirmPayload,
+    PasswordResetRequestPayload,
     PlaybackIntentRequest,
     PairingClaimRequest,
     PairingClaimResponse,
@@ -28,6 +44,10 @@ from .schemas import (
     PairingCodeResponse,
     PairingStatusRequest,
     PairingStatusResponse,
+    PremiumStateResponse,
+    PurchaseResponse,
+    PurchaseVerifyResponse,
+    RestorePurchasesRequest,
     SearchPushRequest,
     TokensResponse,
     UserResponse,
@@ -41,6 +61,18 @@ from .security import (
     hash_password,
     hash_token,
     verify_password,
+)
+from .entitlements import get_user_entitlements, process_verified_purchase, resolve_premium_access
+from .store_verification import apple_verifier, google_verifier, amazon_verifier
+from .device_policy import (
+    MAX_ACTIVE_DEVICES,
+    count_active_devices,
+    count_recent_swaps,
+    get_active_devices,
+    prune_stale_devices,
+    remove_device as policy_remove_device,
+    rename_device as policy_rename_device,
+    try_activate_device,
 )
 
 
@@ -179,6 +211,100 @@ async def get_current_user(
     return user
 
 
+async def get_current_device(
+    session: AsyncSession,
+    token: str,
+    user_id: str,
+) -> Device | None:
+    """Extract the current device from the JWT access token."""
+    try:
+        payload = decode_token(token, expected_type="access")
+    except ValueError:
+        return None
+    device_id = payload.get("device_id")
+    if not device_id:
+        return None
+    result = await session.execute(
+        select(Device).where(Device.id == device_id, Device.user_id == user_id)
+    )
+    return result.scalar_one_or_none()
+
+
+def _access_reason(has_entitlement: bool, device_active: bool, reason_override: str | None = None) -> str:
+    if reason_override:
+        return reason_override
+    if not has_entitlement:
+        return "no_entitlement"
+    if device_active:
+        return "active_and_device_active"
+    return "device_cap_reached"
+
+
+def as_managed_device(device: Device, current_device_id: str | None = None) -> ManagedDeviceResponse:
+    return ManagedDeviceResponse(
+        id=device.id,
+        device_name=device.device_name,
+        device_type=device.device_type,
+        platform=device.platform,
+        is_current=(device.id == current_device_id) if current_device_id else False,
+        is_active=device.is_premium_active,
+        last_seen_at=device.last_seen_at,
+        activated_at=device.activated_at,
+        removed_at=device.removed_at,
+        removal_reason=device.removal_reason,
+        first_seen_at=device.first_seen_at,
+    )
+
+
+async def _build_access_state(
+    session: AsyncSession,
+    user: User,
+    device: Device,
+    token: str,
+) -> AccessStateResponse:
+    """Build the full device-aware access state response."""
+    entitlements = await get_user_entitlements(session, user.id)
+    has_entitlement = resolve_premium_access(entitlements)
+
+    activation = await try_activate_device(session, user.id, device, has_entitlement)
+    activated = activation["activated"]
+    reason = activation["reason"]
+    active_count = activation["active_device_count"]
+    pruned = activation["stale_devices_pruned"]
+    swaps_remaining = activation["swaps_remaining"]
+
+    # Include active device list for cap-reached screen
+    active_device_list = await get_active_devices(session, user.id)
+    active_device_responses = [
+        as_managed_device(d, current_device_id=device.id) for d in active_device_list
+    ]
+
+    return AccessStateResponse(
+        user=as_user_response(user),
+        premium=PremiumStateResponse(
+            has_entitlement=has_entitlement,
+            premium_access=activated,
+            reason=reason,
+            entitlements=[as_entitlement_response(e) for e in entitlements],
+        ),
+        device=DeviceStateResponse(
+            id=device.id,
+            name=device.device_name,
+            is_active=activated,
+            active_device_count=active_count,
+            max_active_devices=MAX_ACTIVE_DEVICES,
+            platform=device.platform,
+            device_type=device.device_type,
+        ),
+        device_limit=DeviceLimitResponse(
+            cap_reached=active_count >= MAX_ACTIVE_DEVICES and not activated,
+            swaps_remaining=swaps_remaining,
+            stale_devices_pruned=pruned,
+            active_devices=active_device_responses,
+        ),
+    )
+
+
 async def get_authorized_target_device(
     session: AsyncSession,
     user_id: str,
@@ -283,7 +409,10 @@ async def auth_refresh(
     refresh_row = refresh_row_result.scalar_one_or_none()
     if refresh_row is None or refresh_row.revoked_at is not None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token revoked")
-    if refresh_row.expires_at < utcnow():
+    expires_at = refresh_row.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at < utcnow():
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired")
 
     user_result = await session.execute(select(User).where(User.id == token_payload["sub"]))
@@ -623,11 +752,404 @@ async def report_watch_state(
     return WatchStateReportResponse(status="ok", reported_at=report_row.reported_at)
 
 
+# ── Entitlement helpers ──
+
+
+def as_entitlement_response(e: Entitlement) -> EntitlementResponse:
+    return EntitlementResponse(
+        key=e.entitlement_key,
+        status=e.status,
+        source_store=e.source_store,
+        starts_at=e.starts_at,
+        ends_at=e.ends_at,
+    )
+
+
+def as_purchase_response(p: Purchase) -> PurchaseResponse:
+    return PurchaseResponse(
+        id=p.id,
+        store=p.store,
+        product_id=p.product_id,
+        purchase_type=p.purchase_type,
+        verification_status=p.verification_status,
+        purchased_at=p.purchased_at,
+        created_at=p.created_at,
+    )
+
+
+# ── Account & Entitlement Endpoints ──
+
+
+@app.get("/me", response_model=MeResponse)
+async def get_me(
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    token: Annotated[str, Depends(oauth2_scheme)],
+) -> MeResponse:
+    entitlements = await get_user_entitlements(session, user.id)
+    has_entitlement = resolve_premium_access(entitlements)
+    # Device-aware: check if current device is activated
+    device = await get_current_device(session, token, user.id)
+    device_active = device is not None and device.is_premium_active if has_entitlement else False
+    return MeResponse(
+        user=as_user_response(user),
+        entitlements=[as_entitlement_response(e) for e in entitlements],
+        premium_access=has_entitlement and device_active,
+    )
+
+
+@app.get("/me/entitlements", response_model=EntitlementStateResponse)
+async def get_my_entitlements(
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    token: Annotated[str, Depends(oauth2_scheme)],
+) -> EntitlementStateResponse:
+    entitlements = await get_user_entitlements(session, user.id)
+    has_entitlement = resolve_premium_access(entitlements)
+    device = await get_current_device(session, token, user.id)
+    device_active = device is not None and device.is_premium_active if has_entitlement else False
+    return EntitlementStateResponse(
+        user=as_user_response(user),
+        entitlements=[as_entitlement_response(e) for e in entitlements],
+        premium_access=has_entitlement and device_active,
+    )
+
+
+@app.post("/devices/register", response_model=DeviceResponse)
+async def register_device(
+    payload: DeviceRegistration,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> DeviceResponse:
+    device = await get_or_create_device(session, payload, user.id)
+    await session.commit()
+    return as_device_response(device)
+
+
+@app.post("/purchases/apple/verify", response_model=PurchaseVerifyResponse)
+async def verify_apple_purchase(
+    payload: AppleVerifyRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    token: Annotated[str, Depends(oauth2_scheme)],
+) -> PurchaseVerifyResponse:
+    result = await apple_verifier.verify(
+        transaction_jws=payload.transaction_jws,
+        product_id=payload.product_id,
+    )
+    if not result.valid:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Apple verification failed: {result.error}")
+
+    try:
+        purchase, entitlements = await process_verified_purchase(
+            session=session,
+            user_id=user.id,
+            store="apple",
+            platform=payload.platform,
+            result=result,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+
+    # Attempt device activation after purchase
+    has_entitlement = resolve_premium_access(entitlements)
+    device = await get_current_device(session, token, user.id)
+    device_premium = False
+    if device and has_entitlement:
+        activation = await try_activate_device(session, user.id, device, has_entitlement)
+        device_premium = activation["activated"]
+
+    await session.commit()
+    return PurchaseVerifyResponse(
+        status="verified",
+        purchase=as_purchase_response(purchase),
+        entitlements=[as_entitlement_response(e) for e in entitlements],
+        premium_access=device_premium,
+    )
+
+
+@app.post("/purchases/google/verify", response_model=PurchaseVerifyResponse)
+async def verify_google_purchase(
+    payload: GoogleVerifyRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    token: Annotated[str, Depends(oauth2_scheme)],
+) -> PurchaseVerifyResponse:
+    result = await google_verifier.verify(
+        product_id=payload.product_id,
+        purchase_token=payload.purchase_token,
+    )
+    if not result.valid:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Google verification failed: {result.error}")
+
+    try:
+        purchase, entitlements = await process_verified_purchase(
+            session=session,
+            user_id=user.id,
+            store="google_play",
+            platform=payload.platform,
+            result=result,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+
+    has_entitlement = resolve_premium_access(entitlements)
+    device = await get_current_device(session, token, user.id)
+    device_premium = False
+    if device and has_entitlement:
+        activation = await try_activate_device(session, user.id, device, has_entitlement)
+        device_premium = activation["activated"]
+
+    await session.commit()
+    return PurchaseVerifyResponse(
+        status="verified",
+        purchase=as_purchase_response(purchase),
+        entitlements=[as_entitlement_response(e) for e in entitlements],
+        premium_access=device_premium,
+    )
+
+
+@app.post("/purchases/amazon/verify", response_model=PurchaseVerifyResponse)
+async def verify_amazon_purchase(
+    payload: AmazonVerifyRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    token: Annotated[str, Depends(oauth2_scheme)],
+) -> PurchaseVerifyResponse:
+    result = await amazon_verifier.verify(
+        receipt_id=payload.receipt_id,
+        amazon_user_id=payload.amazon_user_id,
+        product_id=payload.product_id,
+    )
+    if not result.valid:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Amazon verification failed: {result.error}")
+
+    try:
+        purchase, entitlements = await process_verified_purchase(
+            session=session,
+            user_id=user.id,
+            store="amazon",
+            platform=payload.platform,
+            result=result,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+
+    has_entitlement = resolve_premium_access(entitlements)
+    device = await get_current_device(session, token, user.id)
+    device_premium = False
+    if device and has_entitlement:
+        activation = await try_activate_device(session, user.id, device, has_entitlement)
+        device_premium = activation["activated"]
+
+    await session.commit()
+    return PurchaseVerifyResponse(
+        status="verified",
+        purchase=as_purchase_response(purchase),
+        entitlements=[as_entitlement_response(e) for e in entitlements],
+        premium_access=device_premium,
+    )
+
+
+@app.post("/purchases/restore", response_model=EntitlementStateResponse)
+async def restore_purchases(
+    payload: RestorePurchasesRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    token: Annotated[str, Depends(oauth2_scheme)],
+) -> EntitlementStateResponse:
+    """
+    Restore: looks up existing verified purchases for this user.
+    If none found, returns current entitlements (which may be empty).
+    Device-aware: attempts device activation if entitlement exists.
+    """
+    entitlements = await get_user_entitlements(session, user.id)
+    has_entitlement = resolve_premium_access(entitlements)
+
+    # Device-aware restore
+    device = await get_current_device(session, token, user.id)
+    device_premium = False
+    if device and has_entitlement:
+        activation = await try_activate_device(session, user.id, device, has_entitlement)
+        device_premium = activation["activated"]
+        await session.commit()
+    elif has_entitlement:
+        device_premium = has_entitlement  # No device context, fall back to entitlement-only
+
+    return EntitlementStateResponse(
+        user=as_user_response(user),
+        entitlements=[as_entitlement_response(e) for e in entitlements],
+        premium_access=device_premium,
+    )
+
+
+@app.get("/purchases/history", response_model=list[PurchaseResponse])
+async def purchase_history(
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> list[PurchaseResponse]:
+    result = await session.execute(
+        select(Purchase)
+        .where(Purchase.user_id == user.id)
+        .order_by(Purchase.created_at.desc())
+    )
+    return [as_purchase_response(p) for p in result.scalars().all()]
+
+
+@app.post("/auth/password-reset/request")
+async def password_reset_request(
+    payload: PasswordResetRequestPayload,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    """
+    Scaffold for password reset. In production, this sends an email with a reset token.
+    For v1, we log the intent and return success regardless (to not leak email existence).
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    normalized_email = payload.email.strip().lower()
+    result = await session.execute(select(User).where(User.email == normalized_email))
+    user = result.scalar_one_or_none()
+    if user:
+        # TODO: generate a time-limited reset token, store it, and email it
+        logger.info("Password reset requested for user %s", user.id)
+    return {"status": "ok", "message": "If that email exists, a reset link will be sent."}
+
+
+@app.post("/auth/password-reset/confirm")
+async def password_reset_confirm(
+    payload: PasswordResetConfirmPayload,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    """
+    Scaffold: validate the reset token and update the password.
+    Full implementation requires a password_reset_tokens table.
+    """
+    # TODO: look up reset token, verify it's not expired, find user, update password
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Password reset confirmation requires email service integration",
+    )
+
+
+# ── Device Governance Endpoints ──
+
+
+@app.get("/me/access-state", response_model=AccessStateResponse)
+async def get_access_state(
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    token: Annotated[str, Depends(oauth2_scheme)],
+) -> AccessStateResponse:
+    """Primary startup gating endpoint. Returns entitlement + device activation state."""
+    device = await get_current_device(session, token, user.id)
+    if device is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Device not found for current session")
+    result = await _build_access_state(session, user, device, token)
+    await session.commit()
+    return result
+
+
+@app.get("/me/devices", response_model=DeviceListResponse)
+async def get_my_devices(
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    token: Annotated[str, Depends(oauth2_scheme)],
+    include_removed: Annotated[bool, Query()] = False,
+) -> DeviceListResponse:
+    """Returns user's devices with activation state. Current device identifiable."""
+    current_device = await get_current_device(session, token, user.id)
+    current_device_id = current_device.id if current_device else None
+
+    if include_removed:
+        result = await session.execute(
+            select(Device).where(Device.user_id == user.id).order_by(Device.last_seen_at.desc())
+        )
+    else:
+        result = await session.execute(
+            select(Device).where(
+                Device.user_id == user.id,
+                Device.revoked_at.is_(None),
+            ).order_by(Device.last_seen_at.desc())
+        )
+    devices = list(result.scalars().all())
+
+    active_count = sum(1 for d in devices if d.is_premium_active)
+    swaps_used = await count_recent_swaps(session, user.id)
+
+    return DeviceListResponse(
+        devices=[as_managed_device(d, current_device_id) for d in devices],
+        active_count=active_count,
+        max_active=MAX_ACTIVE_DEVICES,
+        swaps_remaining=max(0, 3 - swaps_used),
+    )
+
+
+@app.post("/me/devices/activate-current", response_model=DeviceActivateResponse)
+async def activate_current_device(
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    token: Annotated[str, Depends(oauth2_scheme)],
+) -> DeviceActivateResponse:
+    """Attempt to activate the current device for premium access."""
+    device = await get_current_device(session, token, user.id)
+    if device is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Device not found for current session")
+
+    entitlements = await get_user_entitlements(session, user.id)
+    has_entitlement = resolve_premium_access(entitlements)
+    result = await try_activate_device(session, user.id, device, has_entitlement)
+    await session.commit()
+
+    return DeviceActivateResponse(
+        activated=result["activated"],
+        reason=result["reason"],
+        active_device_count=result["active_device_count"],
+        stale_devices_pruned=result["stale_devices_pruned"],
+        swaps_remaining=result["swaps_remaining"],
+    )
+
+
+@app.post("/me/devices/{device_id}/remove", response_model=DeviceRemoveResponse)
+async def remove_managed_device(
+    device_id: str,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> DeviceRemoveResponse:
+    """Remove a device, freeing its premium slot."""
+    result = await policy_remove_device(session, user.id, device_id)
+    await session.commit()
+
+    if result["reason"] == "not_found":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found")
+
+    return DeviceRemoveResponse(
+        removed=result["removed"],
+        reason=result["reason"],
+        swaps_remaining=result["swaps_remaining"],
+    )
+
+
+@app.patch("/me/devices/{device_id}", response_model=ManagedDeviceResponse)
+async def rename_managed_device(
+    device_id: str,
+    payload: DeviceRenameRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ManagedDeviceResponse:
+    """Rename a device."""
+    device = await policy_rename_device(session, user.id, device_id, payload.device_name)
+    if device is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found")
+    await session.commit()
+    return as_managed_device(device)
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(
     websocket: WebSocket,
     token: Annotated[str | None, Query()] = None,
-    session: Annotated[AsyncSession, Depends(get_session)] = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)] = None,
 ):
     if token is None:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)

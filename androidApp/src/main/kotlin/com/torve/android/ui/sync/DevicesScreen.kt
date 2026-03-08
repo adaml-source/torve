@@ -47,16 +47,16 @@ fun DevicesScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Pair TV", style = MaterialTheme.typography.headlineMedium)
+        Text("Pair Device", style = MaterialTheme.typography.headlineMedium)
         Text(
-            text = "Local Wi-Fi only. Pair TVs in your home network.",
+            text = "Local Wi-Fi only. Pair devices in your home network.",
             style = MaterialTheme.typography.bodyMedium,
         )
 
         OutlinedTextField(
             value = pairingCode,
             onValueChange = { pairingCode = it },
-            label = { Text("TV Pairing Code") },
+            label = { Text("Pairing Code") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -65,7 +65,7 @@ fun DevicesScreen(
                 onClick = { syncCoordinator.claimPairingCode(pairingCode) },
                 enabled = state.isAuthenticated,
             ) {
-                Text("Pair TV")
+                Text("Pair Device")
             }
             OutlinedButton(onClick = { syncCoordinator.refreshDevices() }) {
                 Text("Refresh")
@@ -91,6 +91,7 @@ fun DevicesScreen(
                 DeviceRow(
                     device = device,
                     onRevoke = { syncCoordinator.revokeDevice(device.id) },
+                    onRemove = { syncCoordinator.removeDevice(device.id) },
                 )
             }
         }
@@ -106,6 +107,7 @@ fun DevicesScreen(
 private fun DeviceRow(
     device: SyncDeviceDto,
     onRevoke: () -> Unit,
+    onRemove: () -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -114,9 +116,19 @@ private fun DeviceRow(
             Text(text = "Last seen: ${device.lastSeenAt}", style = MaterialTheme.typography.bodySmall)
             if (device.revokedAt != null) {
                 Text(text = "Revoked: ${device.revokedAt}", color = MaterialTheme.colorScheme.error)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onRemove) {
+                        Text("Remove")
+                    }
+                }
             } else {
-                OutlinedButton(onClick = onRevoke) {
-                    Text("Revoke")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onRevoke) {
+                        Text("Revoke")
+                    }
+                    OutlinedButton(onClick = onRemove) {
+                        Text("Remove")
+                    }
                 }
             }
         }

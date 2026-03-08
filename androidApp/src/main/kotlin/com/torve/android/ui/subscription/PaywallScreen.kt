@@ -42,6 +42,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.torve.android.BuildConfig
 import com.torve.android.R
 import com.torve.android.billing.BillingManager
 import com.torve.android.ui.theme.Amber
@@ -53,6 +54,7 @@ import org.koin.compose.koinInject
 @Composable
 fun PaywallScreen(
     onBack: () -> Unit,
+    onDeviceLimitReached: () -> Unit = {},
     viewModel: SubscriptionViewModel = koinInject(),
     billingManager: BillingManager = koinInject(),
 ) {
@@ -60,10 +62,24 @@ fun PaywallScreen(
     val purchaseResult by billingManager.purchaseResult.collectAsState()
     val activity = LocalContext.current as? Activity
 
+    val platform = if (BuildConfig.FLAVOR.contains("tv")) "google_play_tv" else "google_play_mobile"
+
+    // Navigate to Device Limit Reached screen when device cap is hit after purchase
+    LaunchedEffect(state.showDeviceLimitReached) {
+        if (state.showDeviceLimitReached) {
+            viewModel.dismissDeviceLimitReached()
+            onDeviceLimitReached()
+        }
+    }
+
     LaunchedEffect(purchaseResult) {
         when (val result = purchaseResult) {
             is BillingManager.PurchaseResult.Success -> {
-                viewModel.purchase(result.purchaseToken)
+                viewModel.verifyGooglePurchase(
+                    productId = "com.torve.pro.lifetime",
+                    purchaseToken = result.purchaseToken,
+                    platform = platform,
+                )
                 billingManager.clearPurchaseResult()
             }
             is BillingManager.PurchaseResult.AlreadyOwned -> {
@@ -93,9 +109,19 @@ fun PaywallScreen(
                 onRestore = { billingManager.queryExistingPurchases() },
             )
         } else {
+            val billingState by billingManager.billingState.collectAsState()
+            val formattedPrice = billingManager.getFormattedPrice()
+            val priceReady = formattedPrice != null
+            val priceText = when {
+                formattedPrice != null -> formattedPrice
+                billingState is BillingManager.BillingState.Ready -> stringResource(R.string.paywall_price)
+                billingState is BillingManager.BillingState.Error -> stringResource(R.string.paywall_price)
+                else -> stringResource(R.string.paywall_price_loading)
+            }
             FreeTierContent(
                 state = state,
-                formattedPrice = billingManager.getFormattedPrice(),
+                formattedPrice = priceText,
+                purchaseEnabled = priceReady,
                 onPurchase = { activity?.let { billingManager.launchPurchase(it) } },
                 onRestore = { billingManager.queryExistingPurchases() },
             )
@@ -191,6 +217,7 @@ private fun AllFeaturesChecked() {
 private fun FreeTierContent(
     state: com.torve.presentation.subscription.SubscriptionUiState,
     formattedPrice: String? = null,
+    purchaseEnabled: Boolean = true,
     onPurchase: () -> Unit,
     onRestore: () -> Unit,
 ) {
@@ -253,9 +280,9 @@ private fun FreeTierContent(
                 }
                 Text(
                     text = formattedPrice ?: stringResource(R.string.paywall_price),
-                    style = MaterialTheme.typography.headlineSmall,
+                    style = if (purchaseEnabled) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = if (purchaseEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
@@ -265,7 +292,7 @@ private fun FreeTierContent(
         Button(
             onClick = onPurchase,
             modifier = Modifier.fillMaxWidth().height(56.dp),
-            enabled = !state.isPurchasing,
+            enabled = purchaseEnabled && !state.isPurchasing,
             shape = RoundedCornerShape(16.dp),
         ) {
             if (state.isPurchasing) {

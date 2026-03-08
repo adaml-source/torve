@@ -8,6 +8,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.torve.android.tv.screens.TvDetailsScreen
+import com.torve.android.tv.screens.TvDeviceLimitReachedScreen
 import com.torve.android.tv.screens.TvHomeLayoutScreen
 import com.torve.android.tv.screens.TvLivePlayerScreen
 import com.torve.android.tv.screens.TvRatingsSettingsScreen
@@ -59,6 +60,13 @@ fun TvNavHost(
                 onBack = { navController.popBackStack() },
                 onFirstContentRequester = onFirstContentRequester,
                 onContentFocused = onContentFocused,
+            )
+        }
+
+        composable(TvRoutes.DEVICE_LIMIT_REACHED) {
+            TvDeviceLimitReachedScreen(
+                onBack = { navController.popBackStack() },
+                onActivated = { navController.popBackStack() },
             )
         }
 

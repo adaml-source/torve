@@ -215,6 +215,21 @@ class SyncCoordinator(
         _state.value = _state.value.copy(devices = updated, error = null)
     }
 
+    fun removeDevice(deviceId: String) {
+        val selfId = _state.value.deviceId
+        if (deviceId == selfId) {
+            _state.value = _state.value.copy(error = "Cannot remove the current device.")
+            return
+        }
+        val updated = _state.value.devices.filter { it.id != deviceId }
+        synchronized(peerLock) {
+            endpointByDeviceId.remove(deviceId)
+            serviceNameByDeviceId.remove(deviceId)
+        }
+        persistDevices(updated)
+        _state.value = _state.value.copy(devices = updated, error = null)
+    }
+
     fun targetDevices(includeSelf: Boolean = false): List<SyncDeviceDto> {
         val selfId = _state.value.deviceId
         val reachable = synchronized(peerLock) { endpointByDeviceId.keys.toSet() }

@@ -291,21 +291,25 @@ fun HomeScreen(
                             HomeSection.CONTINUE_WATCHING -> {
                                 if (filteredContinueWatching.isNotEmpty()) {
                                     item(key = "continue_watching") {
-                                        SectionHeader(
-                                            title = config.customTitle ?: stringResource(R.string.home_continue_watching),
-                                            action = stringResource(R.string.home_see_all),
-                                            onActionClick = { onSeeAllClick("continue_watching") },
-                                        )
-                                        LazyRow(
-                                            contentPadding = PaddingValues(horizontal = 16.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        androidx.compose.runtime.CompositionLocalProvider(
+                                            LocalCardStyle provides sectionStyle,
                                         ) {
-                                            items(filteredContinueWatching, key = { it.mediaId }) { progress ->
-                                                ContinueWatchingCard(
-                                                    progress = progress,
-                                                    onClick = { onContinueWatchingClick(progress) },
-                                                    ratings = state.continueWatchingRatings[progress.mediaId],
-                                                )
+                                            SectionHeader(
+                                                title = config.customTitle ?: stringResource(R.string.home_continue_watching),
+                                                action = stringResource(R.string.home_see_all),
+                                                onActionClick = { onSeeAllClick("continue_watching") },
+                                            )
+                                            LazyRow(
+                                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                            ) {
+                                                items(filteredContinueWatching, key = { it.mediaId }) { progress ->
+                                                    ContinueWatchingCard(
+                                                        progress = progress,
+                                                        onClick = { onContinueWatchingClick(progress) },
+                                                        ratings = state.continueWatchingRatings[progress.mediaId],
+                                                    )
+                                                }
                                             }
                                         }
                                     }
@@ -623,31 +627,49 @@ fun HomeScreen(
                                 val section = item.section
                                 val items = state.customShelves[section.id]
                                 if (!items.isNullOrEmpty()) {
+                                    val customStyle = resolveCardStyle(
+                                        presets = settingsState.cardStylePresets,
+                                        presetId = null,
+                                        globalDefaultPresetId = settingsState.globalDefaultPresetId,
+                                    )
                                     item(key = "custom_${section.id}") {
-                                        Spacer(Modifier.height(8.dp))
-                                        CatalogShelf(
-                                            title = section.title,
-                                            items = items,
-                                            onItemClick = onMediaClick,
-                                            onSeeAll = { onSeeAllClick("custom:${section.id}") },
-                                        )
+                                        androidx.compose.runtime.CompositionLocalProvider(
+                                            LocalCardStyle provides customStyle,
+                                        ) {
+                                            Spacer(Modifier.height(8.dp))
+                                            CatalogShelf(
+                                                title = section.title,
+                                                items = items,
+                                                onItemClick = onMediaClick,
+                                                onSeeAll = { onSeeAllClick("custom:${section.id}") },
+                                            )
+                                        }
                                     }
                                 }
                             }
                             is AddonShelfItem -> {
                                 val shelf = item.shelf
                                 if (shelf.items.isNotEmpty()) {
+                                    val addonStyle = resolveCardStyle(
+                                        presets = settingsState.cardStylePresets,
+                                        presetId = null,
+                                        globalDefaultPresetId = settingsState.globalDefaultPresetId,
+                                    )
                                     item(key = "addon_${shelf.id}") {
-                                        Spacer(Modifier.height(8.dp))
-                                        CatalogShelf(
-                                            title = shelf.title,
-                                            items = shelf.items,
-                                            onItemClick = onMediaClick,
-                                            onSeeAll = {
-                                                SeeAllViewModel.pendingItems[shelf.id] = shelf.title to shelf.items
-                                                onSeeAllClick("shelf:${shelf.id}")
-                                            },
-                                        )
+                                        androidx.compose.runtime.CompositionLocalProvider(
+                                            LocalCardStyle provides addonStyle,
+                                        ) {
+                                            Spacer(Modifier.height(8.dp))
+                                            CatalogShelf(
+                                                title = shelf.title,
+                                                items = shelf.items,
+                                                onItemClick = onMediaClick,
+                                                onSeeAll = {
+                                                    SeeAllViewModel.pendingItems[shelf.id] = shelf.title to shelf.items
+                                                    onSeeAllClick("shelf:${shelf.id}")
+                                                },
+                                            )
+                                        }
                                     }
                                 }
                             }

@@ -63,7 +63,6 @@ internal fun TvEpgPreviewPanel(
 
     val player = remember {
         ExoPlayer.Builder(context).build().apply {
-            volume = 0f
             playWhenReady = true
         }
     }

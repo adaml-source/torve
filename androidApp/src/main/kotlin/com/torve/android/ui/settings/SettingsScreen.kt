@@ -1,5 +1,6 @@
 package com.torve.android.ui.settings
 
+import com.torve.android.BuildConfig
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -114,6 +115,8 @@ fun SettingsScreen(
     onCalendarClick: () -> Unit = {},
     onAccountClick: () -> Unit = {},
     onDevicesClick: () -> Unit = {},
+    onManageDevicesClick: () -> Unit = {},
+    onLoginClick: () -> Unit = {},
     onPrivacyPolicyClick: () -> Unit = {},
     onTermsClick: () -> Unit = {},
     onHelpClick: () -> Unit = {},
@@ -130,10 +133,15 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = koinInject(),
     syncCoordinator: SyncCoordinator = koinInject(),
     syncRepository: SyncRepository = koinInject(),
+    authClient: AuthClient = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
     val syncState by syncCoordinator.state.collectAsState()
     var showSyncSheet by remember { mutableStateOf(false) }
+    var authUser by remember { mutableStateOf<AuthUser?>(null) }
+    LaunchedEffect(Unit) {
+        authUser = authClient.getCurrentUser()
+    }
     LaunchedEffect(Unit) {
         if (state.regionCode.isBlank() || state.regionCode == "US") {
             val country = Locale.getDefault().country.uppercase()
@@ -160,24 +168,85 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(16.dp))
 
+        // Account card (top of settings)
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Charcoal),
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                if (authUser != null) {
+                    Text(
+                        text = "Signed in as ${authUser?.email ?: ""}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Snow,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Button(
+                            onClick = onLoginClick,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Amber,
+                                contentColor = Obsidian,
+                            ),
+                        ) {
+                            Text("Account Settings")
+                        }
+                        OutlinedButton(
+                            onClick = onManageDevicesClick,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
+                        ) {
+                            Text("Manage Devices")
+                        }
+                    }
+                } else {
+                    Text(
+                        text = "Sign in to manage your subscription and devices.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Torve.colors.textSecondary,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Button(
+                        onClick = onLoginClick,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Amber,
+                            contentColor = Obsidian,
+                        ),
+                    ) {
+                        Text("Sign In / Create Account")
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
         // Quick links
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (BuildConfig.HAS_BILLING) {
+                OutlinedButton(
+                    onClick = onSubscriptionClick,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
+                ) {
+                    Text(stringResource(R.string.settings_subscription))
+                }
+            }
             OutlinedButton(
                 onClick = onProfilesClick,
                 modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
             ) {
                 Text(stringResource(R.string.settings_profiles))
-            }
-            OutlinedButton(
-                onClick = onSubscriptionClick,
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
-            ) {
-                Text(stringResource(R.string.settings_subscription))
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -198,26 +267,6 @@ fun SettingsScreen(
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
             ) {
                 Text(stringResource(R.string.settings_calendar))
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            OutlinedButton(
-                onClick = onAccountClick,
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
-            ) {
-                Text("Local Profile")
-            }
-            OutlinedButton(
-                onClick = onDevicesClick,
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
-            ) {
-                Text("Devices")
             }
         }
 
@@ -1352,10 +1401,11 @@ fun SettingsScreen(
         Spacer(Modifier.height(24.dp))
 
         // ── Account ──
-        // Account & Sync
-        SectionHeader(title = "Account & Sync")
+        // Local Sync & Pairing
+        SectionHeader(title = "Local Sync")
         Spacer(Modifier.height(8.dp))
 
+        // Local Sync
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = Charcoal),
@@ -1408,7 +1458,7 @@ fun SettingsScreen(
                         enabled = syncState.isAuthenticated,
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
                     ) {
-                        Text("Pair TV")
+                        Text("Pair Device")
                     }
                 }
                 val hasPairedTvs = syncState.isAuthenticated &&
@@ -1425,6 +1475,14 @@ fun SettingsScreen(
                     ) {
                         Text("Sync Settings to TV")
                     }
+                }
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = onManageDevicesClick,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
+                ) {
+                    Text("Manage Devices")
                 }
             }
         }

@@ -101,6 +101,8 @@ import com.torve.android.ui.settings.StreamingServicesSettingsScreen
 import com.torve.android.ui.stats.StatsScreen
 import com.torve.android.ui.watchlist.WatchlistScreen
 import com.torve.android.ui.setup.SetupWizardScreen
+import com.torve.android.ui.device.DeviceLimitReachedScreen
+import com.torve.android.ui.device.ManageDevicesScreen
 import com.torve.android.ui.subscription.PaywallScreen
 import com.torve.android.ui.tv.TvHomeScreen
 import com.torve.android.ui.theme.Amber
@@ -455,6 +457,8 @@ fun TorveNavGraph(
                     onCalendarClick = { navController.navigate("calendar") },
                     onAccountClick = { navController.navigate("sync_account") },
                     onDevicesClick = { navController.navigate("sync_devices") },
+                    onManageDevicesClick = { navController.navigate("manage_devices") },
+                    onLoginClick = { navController.navigate("login") },
                     onPrivacyPolicyClick = { navController.navigate("legal/privacy") },
                     onTermsClick = { navController.navigate("legal/terms") },
                     onHelpClick = { navController.navigate("legal/help") },
@@ -480,6 +484,8 @@ fun TorveNavGraph(
                     onCalendarClick = { navController.navigate("calendar") },
                     onAccountClick = { navController.navigate("sync_account") },
                     onDevicesClick = { navController.navigate("sync_devices") },
+                    onManageDevicesClick = { navController.navigate("manage_devices") },
+                    onLoginClick = { navController.navigate("login") },
                     onPrivacyPolicyClick = { navController.navigate("legal/privacy") },
                     onTermsClick = { navController.navigate("legal/terms") },
                     onHelpClick = { navController.navigate("legal/help") },
@@ -664,7 +670,21 @@ fun TorveNavGraph(
 
             // Paywall
             composable("paywall") {
-                PaywallScreen(onBack = { navController.popBackStack() })
+                PaywallScreen(
+                    onBack = { navController.popBackStack() },
+                    onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                )
+            }
+
+            // Device Governance
+            composable("manage_devices") {
+                ManageDevicesScreen(onBack = { navController.popBackStack() })
+            }
+            composable("device_limit_reached") {
+                DeviceLimitReachedScreen(
+                    onBack = { navController.popBackStack() },
+                    onActivated = { navController.popBackStack() },
+                )
             }
 
             // Login

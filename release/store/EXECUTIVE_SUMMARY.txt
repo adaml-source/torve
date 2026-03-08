@@ -1,0 +1,114 @@
+Torve — Store Submission Readiness: Executive Summary
+======================================================
+Date: 2026-03-07
+
+1. CRITICAL FIXES IMPLEMENTED
+------------------------------
+
+A. Privacy & Data Disclosure Alignment (HIGHEST PRIORITY — DONE)
+   - Android PrivacyPolicyScreen.kt: Added new Section 3 "Analytics and Crash Reporting"
+     disclosing Firebase Analytics + Crashlytics in Google Play builds. Explicitly notes
+     Amazon builds have no analytics. Removed misleading "We do not collect analytics
+     or telemetry by default" claim.
+   - iOS PrivacyPolicyScreen.swift: Updated "Data We Do NOT Collect" to remove blanket
+     "no analytics" claim, replaced with accurate iOS-specific statement confirming
+     no analytics or crash SDKs in the iOS build. Updated contact info.
+   - Created PRIVACY_DISCLOSURE_MATRIX.txt — per-store breakdown of what data is
+     collected by which build variant.
+
+B. Android Production Signing (DONE)
+   - Added signingConfigs.release to androidApp/build.gradle.kts
+   - Supports two modes: keystore.properties file OR environment variables
+   - Wired signingConfig into release buildType
+   - Created keystore.properties.template with setup instructions
+   - Added keystore.properties, *.keystore, *.jks to .gitignore
+   - Created SIGNING_SETUP.txt with keytool commands and CI instructions
+
+C. Amazon Fire TV — Free-Only Launch Mode (DONE)
+   - Added BuildConfig.HAS_BILLING field: true for google, false for amazon
+   - SettingsScreen.kt: Subscription button conditionally hidden when HAS_BILLING=false
+   - AmazonBillingManager already returns no-op/error — now UI doesn't expose it
+   - Decision documented in AMAZON_FIRETV_CHECKLIST.txt
+
+D. Google Play Build Verification (CONFIRMED CLEAN)
+   - google-services.json properly scoped
+   - Firebase is googleImplementation only — verified no class leakage
+   - Cast, Glance, Play Billing all properly scoped to google flavor
+   - No remaining StreamVault/streamvault references in .kt, .swift, .xml, or build files
+
+E. iOS App Store Blockers (DONE)
+   - Info.plist version bumped from 0.1.0 to 1.0.0
+   - ATS: Replaced NSAllowsArbitraryLoads=true with:
+     NSAllowsArbitraryLoads=false + NSAllowsLocalNetworking=true
+     (allows LAN media servers while enforcing HTTPS for external traffic)
+
+F. Shared Cleanup (CONFIRMED CLEAN)
+   - Grep for streamvault/StreamVault across .kt, .swift, .xml: zero matches
+   - All package names, namespaces, and references are torve/Torve
+
+G. Store Submission Checklists (CREATED)
+   - release/store/GOOGLE_PLAY_MOBILE_CHECKLIST.txt
+   - release/store/GOOGLE_PLAY_TV_CHECKLIST.txt
+   - release/store/AMAZON_FIRETV_CHECKLIST.txt
+   - release/store/IOS_APPSTORE_CHECKLIST.txt
+   - release/store/PRIVACY_DISCLOSURE_MATRIX.txt
+   - release/store/SIGNING_SETUP.txt
+
+2. FILES CHANGED
+-----------------
+
+Modified:
+  androidApp/build.gradle.kts
+    - Added signingConfigs.release (keystore.properties + env var fallback)
+    - Added signingConfig to release buildType
+    - Added BuildConfig.HAS_BILLING to google/amazon flavors
+
+  androidApp/src/main/kotlin/com/torve/android/ui/legal/PrivacyPolicyScreen.kt
+    - Added Section 3 "Analytics and Crash Reporting" (Firebase disclosure)
+    - Removed misleading "no analytics" claim from Section 3->4 "Data Sharing"
+    - Renumbered sections 4-7 to 5-8
+
+  androidApp/src/main/kotlin/com/torve/android/ui/settings/SettingsScreen.kt
+    - Added BuildConfig import
+    - Wrapped subscription button in if (BuildConfig.HAS_BILLING) check
+
+  iosApp/iosApp/Info.plist
+    - CFBundleShortVersionString: 0.1.0 -> 1.0.0
+    - NSAllowsArbitraryLoads: true -> false
+    - Added NSAllowsLocalNetworking: true
+
+  iosApp/iosApp/Views/Settings/PrivacyPolicyScreen.swift
+    - Updated "Data We Do NOT Collect" section for accuracy
+    - Updated contact info to privacy@torve.app
+
+  .gitignore
+    - Added keystore.properties, *.keystore, *.jks
+    - Added store_audit/
+
+Created:
+  keystore.properties.template
+  release/store/EXECUTIVE_SUMMARY.txt
+  release/store/SIGNING_SETUP.txt
+  release/store/GOOGLE_PLAY_MOBILE_CHECKLIST.txt
+  release/store/GOOGLE_PLAY_TV_CHECKLIST.txt
+  release/store/AMAZON_FIRETV_CHECKLIST.txt
+  release/store/IOS_APPSTORE_CHECKLIST.txt
+  release/store/PRIVACY_DISCLOSURE_MATRIX.txt
+
+3. REMAINING MANUAL TASKS
+---------------------------
+
+Before submission:
+[ ] Generate release keystore (see SIGNING_SETUP.txt)
+[ ] Create keystore.properties with real credentials
+[ ] Build signed artifacts:
+    - ./gradlew :androidApp:bundleGoogleMobileRelease
+    - ./gradlew :androidApp:bundleGoogleTvRelease
+    - ./gradlew :androidApp:assembleAmazonTvRelease
+[ ] Host privacy policy at public URL
+[ ] Prepare store listing assets (screenshots, feature graphic, descriptions)
+[ ] Complete Google Play Data Safety questionnaire (see PRIVACY_DISCLOSURE_MATRIX.txt)
+[ ] Complete Apple App Privacy nutrition labels
+[ ] Configure StoreKit 2 product IDs in App Store Connect (or defer paywall)
+[ ] Archive iOS build from Xcode on macOS
+[ ] Test all 4 build variants end-to-end

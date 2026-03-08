@@ -184,7 +184,8 @@
     <string name="paywall_custom_home">Tela Inicial Personalizada</string>
     <string name="paywall_advanced_filters">Filtros Avançados</string>
     <string name="paywall_lifetime">Vitalício</string>
-    <string name="paywall_price">€9,99</string>
+    <string name="paywall_price">Preço indisponível</string>
+    <string name="paywall_price_loading">Carregando…</string>
     <string name="paywall_one_time">Pagamento único, acesso para sempre</string>
     <string name="paywall_best_value">MELHOR VALOR</string>
     <string name="paywall_get_lifetime">Obter Acesso Vitalício</string>

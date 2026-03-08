@@ -77,34 +77,48 @@ fun PrivacyPolicyScreen(onBack: () -> Unit) {
                     "to retrieve library and playback data.",
             )
 
-            SectionTitle("3. Data Sharing")
+            SectionTitle("3. Analytics and Crash Reporting")
             BodyText(
-                "Torve does not sell, share, or transfer your personal data to advertisers " +
-                    "or data brokers. We do not collect analytics or telemetry by default.",
+                "The Google Play version of Torve includes Firebase Analytics and Firebase " +
+                    "Crashlytics, provided by Google. These services collect:\n\n" +
+                    "\u2022 Crash logs and stack traces to help us fix bugs\n" +
+                    "\u2022 Anonymous usage statistics (e.g., screen views, feature usage)\n" +
+                    "\u2022 Device information (model, OS version, app version)\n\n" +
+                    "This data is sent to Google's servers and is governed by Google's Privacy " +
+                    "Policy. No personally identifiable information (names, email addresses, " +
+                    "API keys, or content you watch) is included in analytics data.\n\n" +
+                    "The Amazon Appstore version of Torve does not include Firebase or any " +
+                    "analytics SDKs.",
             )
 
-            SectionTitle("4. Third-Party Services")
+            SectionTitle("4. Data Sharing")
+            BodyText(
+                "Torve does not sell, share, or transfer your personal data to advertisers " +
+                    "or data brokers.",
+            )
+
+            SectionTitle("5. Third-Party Services")
             BodyText(
                 "Third-party services you connect to Torve (Trakt, AI providers, cloud services, " +
                     "media servers) are governed by their own privacy policies. We encourage you " +
                     "to review those policies before connecting your accounts.",
             )
 
-            SectionTitle("5. Data Security")
+            SectionTitle("6. Data Security")
             BodyText(
                 "API keys and sensitive credentials are encrypted using the Android Keystore " +
                     "system. Other local data is stored in the app's private storage, which is " +
                     "protected by Android's sandboxing model.",
             )
 
-            SectionTitle("6. Data Deletion")
+            SectionTitle("7. Data Deletion")
             BodyText(
                 "You can delete all app data by clearing the app storage in Android Settings, " +
                     "or by uninstalling the app. Individual data (watch history, playlists, " +
                     "API keys) can be managed within the app settings.",
             )
 
-            SectionTitle("7. Contact")
+            SectionTitle("8. Contact")
             BodyText(
                 "For privacy-related questions or concerns, contact us at:\n" +
                     "privacy@torve.app",

@@ -30,6 +30,12 @@ analytics.settings
 
 # Sensitive
 androidApp/google-services.json
+keystore.properties
+*.keystore
+*.jks
+
+# Store audit bundles
+store_audit/
 
 # Asset exports
 extracted_banner.png

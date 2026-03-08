@@ -6,6 +6,7 @@ final class StoreKitManager: ObservableObject {
     @Published var products: [Product] = []
     @Published var purchasedProductIds: Set<String> = []
     @Published var isPurchasing = false
+    @Published var lastTransactionJWS: String? = nil
 
     static let monthlyId = "com.torve.pro.monthly"
     static let lifetimeId = "com.torve.pro.lifetime"
@@ -21,7 +22,7 @@ final class StoreKitManager: ObservableObject {
         } catch { print("Failed to load products: \(error)") }
     }
 
-    func purchase(_ product: Product) async -> Bool {
+    func purchase(_ product: Product) async -> (success: Bool, jwsRepresentation: String?) {
         isPurchasing = true
         defer { isPurchasing = false }
         do {
@@ -30,14 +31,25 @@ final class StoreKitManager: ObservableObject {
             case .success(let verification):
                 let transaction = try checkVerified(verification)
                 purchasedProductIds.insert(transaction.productID)
+
+                // Get the JWS representation for backend verification
+                let jws: String?
+                switch verification {
+                case .verified(_):
+                    jws = verification.jwsRepresentation
+                case .unverified(_, _):
+                    jws = nil
+                }
+
+                lastTransactionJWS = jws
                 await transaction.finish()
-                return true
+                return (true, jws)
             case .userCancelled, .pending:
-                return false
+                return (false, nil)
             @unknown default:
-                return false
+                return (false, nil)
             }
-        } catch { return false }
+        } catch { return (false, nil) }
     }
 
     func restorePurchases() async {
@@ -47,6 +59,12 @@ final class StoreKitManager: ObservableObject {
                 purchasedProductIds.insert(transaction.productID)
             }
         }
+    }
+
+    /// Get JWS for the most recent transaction of a given product, for backend verification
+    func getLatestTransactionJWS(for productId: String) async -> String? {
+        guard let result = await Transaction.latest(for: productId) else { return nil }
+        return result.jwsRepresentation
     }
 
     var isPro: Bool {

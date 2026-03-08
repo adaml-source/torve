@@ -1,0 +1,62 @@
+Google Play Store — Mobile Checklist
+=====================================
+
+BUILD
+[x] applicationId: com.torve.app
+[x] versionCode: 1, versionName: 1.0.0
+[x] targetSdk: 36
+[x] minSdk: 24
+[x] R8 minification enabled
+[x] Signing config wired to release build type
+[ ] Generate signed AAB: ./gradlew :androidApp:bundleGoogleMobileRelease
+[ ] Test install from AAB via bundletool
+
+DATA SAFETY
+[ ] Firebase Analytics: YES — disclose in Data Safety form
+    - Data type: App activity (app interactions, in-app search history)
+    - Data type: Device or other IDs
+    - Purpose: Analytics, App functionality
+    - Processing: Collected, not shared with third parties
+    - Encryption: Yes (in transit)
+    - Deletion: Users can request deletion
+[ ] Firebase Crashlytics: YES — disclose in Data Safety form
+    - Data type: Crash logs, diagnostics
+    - Purpose: App functionality (crash/bug reports)
+    - Processing: Collected automatically
+    - Encryption: Yes (in transit)
+[ ] TMDB API: NO personal data sent (search queries only)
+[ ] No ad SDKs, no advertising ID collection
+
+PRIVACY POLICY
+[ ] Host privacy policy at public URL (e.g. https://adaml-source.github.io/torve-privacy-policy/)
+[ ] Privacy policy must mention Firebase Analytics + Crashlytics
+[ ] Enter URL in Play Console > Policy > App content > Privacy policy
+
+STORE LISTING
+[ ] App name: Torve
+[ ] Short description (80 chars max)
+[ ] Full description (4000 chars max)
+[ ] Feature graphic: 1024x500
+[ ] App icon: 512x512
+[ ] Phone screenshots: min 2, recommended 8 (16:9 or 9:16)
+[ ] 7" tablet screenshots (if targeting tablets)
+[ ] 10" tablet screenshots (if targeting tablets)
+[ ] App category: Entertainment
+[ ] Content rating: complete questionnaire
+[ ] Target audience: not children (no COPPA concern)
+
+PERMISSIONS JUSTIFICATION
+[ ] INTERNET — required for media streaming and API calls
+[ ] ACCESS_NETWORK_STATE — detect connectivity for offline mode
+[ ] ACCESS_WIFI_STATE — LAN discovery for media servers
+[ ] CHANGE_WIFI_MULTICAST_STATE — Kodi/DLNA discovery
+[ ] FOREGROUND_SERVICE — background downloads
+[ ] FOREGROUND_SERVICE_DATA_SYNC — sync operations
+[ ] POST_NOTIFICATIONS — episode notifications
+
+TESTING
+[ ] Test on phone (API 24+)
+[ ] Test on tablet
+[ ] Test all navigation flows
+[ ] Test deep links
+[ ] Test Chromecast (google build)

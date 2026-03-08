@@ -184,7 +184,8 @@
     <string name="paywall_custom_home">Özel Ana Sayfa Düzeni</string>
     <string name="paywall_advanced_filters">Gelişmiş Filtreler</string>
     <string name="paywall_lifetime">Ömür Boyu</string>
-    <string name="paywall_price">€9,99</string>
+    <string name="paywall_price">Fiyat mevcut değil</string>
+    <string name="paywall_price_loading">Yükleniyor…</string>
     <string name="paywall_one_time">Tek seferlik ödeme, sınırsız erişim</string>
     <string name="paywall_best_value">EN İYİ DEĞER</string>
     <string name="paywall_get_lifetime">Ömür Boyu Erişim Al</string>
