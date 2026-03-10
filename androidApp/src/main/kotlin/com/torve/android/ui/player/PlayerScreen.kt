@@ -100,6 +100,7 @@ import androidx.media3.ui.PlayerView
 import com.torve.android.player.AudioEqualizer
 import com.torve.android.device.DeviceFormFactor
 import com.torve.android.cast.CastService
+import com.torve.android.player.DeviceCodecProbe
 import com.torve.android.player.ExoPlayerEngine
 import com.torve.android.player.MPVPlayerEngine
 import com.torve.android.player.MPVView
@@ -110,6 +111,9 @@ import com.torve.android.voice.PlayerVoiceCommandParser
 import com.torve.android.voice.VoiceInputPhase
 import com.torve.android.voice.rememberVoiceInputController
 import com.torve.android.ui.sync.SyncDevicePickerDialog
+import com.torve.data.addon.ParsedStream
+import com.torve.data.addon.StreamRuntimeTelemetry
+import com.torve.data.addon.StreamSelector
 import com.torve.data.simkl.SimklClient
 import com.torve.data.simkl.SimklIds
 import com.torve.data.simkl.SimklSyncBody
@@ -143,13 +147,16 @@ import com.torve.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import org.koin.compose.koinInject
+import kotlin.math.absoluteValue
 
 @OptIn(UnstableApi::class)
 @Composable
 fun PlayerScreen(
     url: String,
     fallbackUrl: String = "",
+    autoSourceSelection: Boolean = false,
     title: String = "",
     mediaId: String = "",
     mediaType: String = "movie",
@@ -165,6 +172,7 @@ fun PlayerScreen(
     watchProgressRepo: WatchProgressRepository = koinInject(),
     metadataRepo: MetadataRepository = koinInject(),
     streamRepo: StreamRepository = koinInject(),
+    streamSelector: StreamSelector = koinInject(),
     addonRepo: AddonRepository = koinInject(),
     channelsViewModel: ChannelsViewModel = koinInject(),
     settingsViewModel: SettingsViewModel = koinInject(),
@@ -233,6 +241,12 @@ fun PlayerScreen(
     var seekRepeatDirection by remember { mutableIntStateOf(0) }
     var seekRepeatCount by remember { mutableIntStateOf(0) }
     var seekRepeatLastAtMs by remember { mutableLongStateOf(0L) }
+    var seekRepeatTargetMs by remember { mutableLongStateOf(-1L) }
+    var tvSeekFeedbackVisible by remember { mutableStateOf(false) }
+    var tvSeekFeedbackDeltaMs by remember { mutableLongStateOf(0L) }
+    var tvSeekFeedbackTargetMs by remember { mutableLongStateOf(0L) }
+    var tvSeekFeedbackCurrentMs by remember { mutableLongStateOf(0L) }
+    var tvSeekFeedbackInteractionAtMs by remember { mutableLongStateOf(0L) }
     val resumePromptInitialPositionMs = remember(url, mediaId, startPositionMs) {
         startPositionMs.coerceAtLeast(0L)
     }
@@ -243,6 +257,7 @@ fun PlayerScreen(
     var initialStartPositionConsumed by remember(url, mediaId, startPositionMs) { mutableStateOf(false) }
     val playerRootFocusRequester = remember { FocusRequester() }
     val playButtonFocusRequester = remember { FocusRequester() }
+    val timelineFocusRequester = remember { FocusRequester() }
     val topMenuFocusRequester = remember { FocusRequester() }
     val topCastFocusRequester = remember { FocusRequester() }
     val topHandoffFocusRequester = remember { FocusRequester() }
@@ -258,6 +273,63 @@ fun PlayerScreen(
     var currentEpisodeNumber by remember { mutableStateOf(episodeNumber) }
     var currentUrl by remember { mutableStateOf(url) }
     var currentTitle by remember { mutableStateOf(title) }
+    var autoFallbackInProgress by remember { mutableStateOf(false) }
+    var currentStreamHostKey by remember { mutableStateOf(StreamRuntimeTelemetry.keyForUrl(url)) }
+    var healthWindowStartedAtMs by remember(currentUrl) { mutableLongStateOf(0L) }
+    var firstFrameAtMs by remember(currentUrl) { mutableLongStateOf(0L) }
+    var earlyRebufferCount by remember(currentUrl) { mutableIntStateOf(0) }
+    var earlyRebufferDurationMs by remember(currentUrl) { mutableLongStateOf(0L) }
+    var inBufferingWindow by remember(currentUrl) { mutableStateOf(false) }
+    var bufferStartedAtMs by remember(currentUrl) { mutableLongStateOf(0L) }
+    var bufferingAttributedToUserSeek by remember(currentUrl) { mutableStateOf(false) }
+    var earlyFallbackTriggered by remember(currentUrl) { mutableStateOf(false) }
+    var seekSuppressionUntilMs by remember { mutableLongStateOf(0L) }
+    var pendingAutoFallbackResumePositionMs by remember { mutableLongStateOf(-1L) }
+    var pendingAutoFallbackResumeDeadlineMs by remember { mutableLongStateOf(0L) }
+    var attemptedAutoStreamKeys by remember(mediaId, seasonNumber, episodeNumber, url) {
+        mutableStateOf<Set<String>>(emptySet())
+    }
+
+    val earlyHealthWindowMs = 35_000L
+    val earlyStartupTimeoutMs = 9_000L
+    val earlyRebufferCountThreshold = 2
+    val earlyRebufferDurationThresholdMs = 6_000L
+
+    fun streamKey(stream: ParsedStream): String {
+        return stream.infoHash ?: stream.directUrl ?: "${stream.addonName}:${stream.title}"
+    }
+
+    fun resetPlaybackHealthWindow() {
+        healthWindowStartedAtMs = SystemClock.elapsedRealtime()
+        firstFrameAtMs = 0L
+        earlyRebufferCount = 0
+        earlyRebufferDurationMs = 0L
+        inBufferingWindow = false
+        bufferStartedAtMs = 0L
+        bufferingAttributedToUserSeek = false
+        earlyFallbackTriggered = false
+        seekSuppressionUntilMs = 0L
+    }
+
+    fun seekSuppressionWindowFor(deltaMs: Long? = null): Long {
+        val absoluteDelta = deltaMs?.absoluteValue ?: 0L
+        return when {
+            absoluteDelta >= 10 * 60_000L -> 13_000L
+            absoluteDelta >= 5 * 60_000L -> 11_000L
+            absoluteDelta >= 60_000L -> 9_000L
+            else -> 7_000L
+        }
+    }
+
+    fun markUserSeekActivity(deltaMs: Long? = null) {
+        val nowMs = SystemClock.elapsedRealtime()
+        val extensionMs = seekSuppressionWindowFor(deltaMs)
+        seekSuppressionUntilMs = maxOf(seekSuppressionUntilMs, nowMs + extensionMs)
+    }
+
+    fun isSeekSuppressionActive(nowMs: Long = SystemClock.elapsedRealtime()): Boolean {
+        return nowMs <= seekSuppressionUntilMs
+    }
 
     // Season data for next-episode calculation
     var loadedSeasons by remember { mutableStateOf<List<Season>>(emptyList()) }
@@ -387,17 +459,122 @@ fun PlayerScreen(
         }
     }
 
+    fun performSeekTo(
+        targetMs: Long,
+        userInitiated: Boolean,
+        sourceDeltaMs: Long? = null,
+        showTvFeedback: Boolean = false,
+    ) {
+        val maxPosition = duration.takeIf { it > 0L } ?: Long.MAX_VALUE
+        val clampedTarget = targetMs.coerceIn(0L, maxPosition)
+        if (userInitiated) {
+            markUserSeekActivity(sourceDeltaMs)
+        }
+        engine.seekTo(clampedTarget)
+        if (showTvFeedback && isTv) {
+            val currentSnapshot = currentPosition.coerceAtLeast(0L)
+            tvSeekFeedbackCurrentMs = currentSnapshot
+            tvSeekFeedbackTargetMs = clampedTarget
+            tvSeekFeedbackDeltaMs = sourceDeltaMs ?: (clampedTarget - currentSnapshot)
+            tvSeekFeedbackVisible = true
+            tvSeekFeedbackInteractionAtMs = SystemClock.elapsedRealtime()
+        }
+    }
+
+    suspend fun trySwitchToStableSource(reason: String): Boolean {
+        if (!autoSourceSelection || autoFallbackInProgress) return false
+        val imdbId = showImdbId?.trim().takeIf { !it.isNullOrBlank() } ?: return false
+        android.util.Log.w("Player", "Auto stability fallback requested: $reason")
+
+        val provider = settingsViewModel.getDebridProvider()
+        val apiKey = settingsViewModel.getDebridApiKey()
+        if (apiKey.isBlank()) return false
+
+        autoFallbackInProgress = true
+        try {
+            val preferences = settingsViewModel.buildStreamPreferences()
+            val addons = try { addonRepo.getInstalledAddons() } catch (_: Exception) { emptyList() }
+            val debridAccounts = settingsViewModel.getDebridAccounts()
+            val deviceCaps = DeviceCodecProbe.probe()
+
+            val candidates = streamRepo.fetchStreams(
+                type = parsedMediaType,
+                imdbId = imdbId,
+                season = currentSeasonNumber,
+                episode = currentEpisodeNumber,
+                addons = addons,
+                debridAccounts = debridAccounts,
+                preferences = preferences,
+            )
+            val ranked = streamSelector.rankPlayableVariants(
+                streams = candidates,
+                preferences = preferences,
+                deviceCaps = deviceCaps,
+            )
+            if (ranked.isEmpty()) return false
+
+            for (candidate in ranked) {
+                val key = streamKey(candidate)
+                if (key in attemptedAutoStreamKeys) continue
+                attemptedAutoStreamKeys = attemptedAutoStreamKeys + key
+
+                val hostKey = StreamRuntimeTelemetry.keyForStream(candidate)
+                StreamRuntimeTelemetry.recordPlayAttempt(hostKey)
+
+                val resolved = withTimeoutOrNull(45_000L) {
+                    streamRepo.resolveStream(candidate, provider, apiKey)
+                }
+                if (resolved == null) {
+                    StreamRuntimeTelemetry.recordStartupTimeout(hostKey, 45_000L)
+                    continue
+                }
+
+                val nextUrl = resolved.transcodeUrls?.mp4
+                    ?: resolved.transcodeUrls?.hls
+                    ?: resolved.url
+                if (nextUrl.isBlank() || nextUrl == currentUrl) continue
+
+                val resumePositionMs = maxOf(engine.state.positionMs, currentPosition).coerceAtLeast(0L)
+                currentStreamHostKey = StreamRuntimeTelemetry.keyForUrl(nextUrl)
+                errorMessage = null
+                codecFallbackUsed = false
+                currentUrl = nextUrl
+                resetPlaybackHealthWindow()
+                if (resumePositionMs > 0L) {
+                    pendingAutoFallbackResumePositionMs = resumePositionMs
+                    pendingAutoFallbackResumeDeadlineMs = SystemClock.elapsedRealtime() + 30_000L
+                }
+                engine.stop()
+                engine.play(nextUrl)
+                Toast.makeText(context, "Switched to a more stable source", Toast.LENGTH_SHORT).show()
+                return true
+            }
+            return false
+        } catch (_: Exception) {
+            return false
+        } finally {
+            autoFallbackInProgress = false
+        }
+    }
+
     // Apply global audio output preferences for all playback (not only live TV).
-    LaunchedEffect(useMpv, channelsState.audioPassthroughEnabled, channelsState.preferSurroundCodecs) {
+    LaunchedEffect(
+        useMpv,
+        channelsState.audioPassthroughEnabled,
+        channelsState.preferSurroundCodecs,
+        channelsState.liveAudioOutputMode,
+    ) {
         if (useMpv) {
             (engine as? MPVPlayerEngine)?.setAudioOutputPreferences(
                 passthroughEnabled = channelsState.audioPassthroughEnabled,
                 preferSurround = channelsState.preferSurroundCodecs,
+                outputMode = channelsState.liveAudioOutputMode,
             )
         } else {
             (engine as? ExoPlayerEngine)?.setAudioOutputPreferences(
                 passthroughEnabled = channelsState.audioPassthroughEnabled,
                 preferSurround = channelsState.preferSurroundCodecs,
+                outputMode = channelsState.liveAudioOutputMode,
             )
         }
     }
@@ -452,25 +629,80 @@ fun PlayerScreen(
         showControls = true
     }
 
-    val seekBy: (Long) -> Unit = { deltaMs ->
-        engine.seekRelative(deltaMs)
-        showControls = true
+    fun seekBy(
+        deltaMs: Long,
+        userInitiated: Boolean = true,
+        showTvFeedback: Boolean = false,
+    ) {
+        val basePosition = engine.state.positionMs.coerceAtLeast(0L)
+        performSeekTo(
+            targetMs = basePosition + deltaMs,
+            userInitiated = userInitiated,
+            sourceDeltaMs = deltaMs,
+            showTvFeedback = showTvFeedback,
+        )
     }
 
     fun resetSeekAcceleration() {
         seekRepeatDirection = 0
         seekRepeatCount = 0
         seekRepeatLastAtMs = 0L
+        seekRepeatTargetMs = -1L
     }
 
     fun acceleratedSeekDelta(direction: Int): Long {
         val nowMs = SystemClock.uptimeMillis()
-        val isRepeatBurst = seekRepeatDirection == direction && (nowMs - seekRepeatLastAtMs) <= 360L
-        seekRepeatCount = if (isRepeatBurst) (seekRepeatCount + 1) else 0
+        val resetWindowMs = settingsState.tvSkipResetWindowMs.coerceIn(600, 4_000).toLong()
+        val nextStepIndex = if (settingsState.tvProgressiveSkipEnabled) {
+            PlayerNavigationMath.nextProgressiveSkipStepIndex(
+                previousDirection = seekRepeatDirection,
+                newDirection = direction,
+                previousStepIndex = seekRepeatCount,
+                previousPressAtMs = seekRepeatLastAtMs,
+                nowMs = nowMs,
+                resetWindowMs = resetWindowMs,
+            )
+        } else {
+            0
+        }
+        seekRepeatCount = nextStepIndex
         seekRepeatDirection = direction
         seekRepeatLastAtMs = nowMs
-        val multiplier = PlayerNavigationMath.seekAccelerationMultiplier(seekRepeatCount)
-        return direction * 10_000L * multiplier
+        val stepMs = PlayerNavigationMath.progressiveSkipStepMs(nextStepIndex)
+        return direction * stepMs
+    }
+
+    fun handleTvTransportSeek(direction: Int) {
+        if (!settingsState.tvTransportSkipEnabled) {
+            resetSeekAcceleration()
+            if (settingsState.tvExplicitTimelineScrubEnabled) {
+                showControls = true
+                topMenuFocusTick++
+            }
+            return
+        }
+
+        val nowMs = SystemClock.uptimeMillis()
+        val resetWindowMs = settingsState.tvSkipResetWindowMs.coerceIn(600, 4_000).toLong()
+        val inBurst = seekRepeatDirection == direction &&
+            seekRepeatDirection != 0 &&
+            (nowMs - seekRepeatLastAtMs).coerceAtLeast(0L) <= resetWindowMs
+        val basePosition = if (inBurst && seekRepeatTargetMs >= 0L) {
+            seekRepeatTargetMs
+        } else {
+            engine.state.positionMs.coerceAtLeast(0L)
+        }
+        val deltaMs = acceleratedSeekDelta(direction)
+        val maxPosition = duration.takeIf { it > 0L } ?: Long.MAX_VALUE
+        val targetPosition = (basePosition + deltaMs).coerceIn(0L, maxPosition)
+        seekRepeatTargetMs = targetPosition
+        showControls = false
+        performSeekTo(
+            targetMs = targetPosition,
+            userInitiated = true,
+            sourceDeltaMs = deltaMs,
+            showTvFeedback = true,
+        )
     }
 
     var voiceFeedbackMessage by remember { mutableStateOf<String?>(null) }
@@ -645,6 +877,11 @@ fun PlayerScreen(
 
     LaunchedEffect(currentUrl) {
         trackPrefsAppliedForUrl = false
+        currentStreamHostKey = StreamRuntimeTelemetry.keyForUrl(currentUrl)
+        currentStreamHostKey?.let { StreamRuntimeTelemetry.recordPlayAttempt(it) }
+        resetPlaybackHealthWindow()
+        resetSeekAcceleration()
+        tvSeekFeedbackVisible = false
     }
 
     LaunchedEffect(trackPrefsLoaded, trackPrefsAppliedForUrl, audioTracks, subtitleTracks, currentUrl) {
@@ -743,6 +980,7 @@ fun PlayerScreen(
             showImdbId = showImdbId,
             engine = engine,
             streamRepo = streamRepo,
+            streamSelector = streamSelector,
             addonRepo = addonRepo,
             settingsViewModel = settingsViewModel,
             watchProgressRepo = watchProgressRepo,
@@ -810,6 +1048,90 @@ fun PlayerScreen(
                         state.positionMs.toFloat() / state.durationMs
                     } else 0f
                 }
+
+                val nowMs = SystemClock.elapsedRealtime()
+                if (healthWindowStartedAtMs == 0L) {
+                    healthWindowStartedAtMs = nowMs
+                }
+
+                if (pendingAutoFallbackResumePositionMs > 0L) {
+                    val resumeExpired = pendingAutoFallbackResumeDeadlineMs > 0L &&
+                        nowMs > pendingAutoFallbackResumeDeadlineMs
+                    if (resumeExpired) {
+                        pendingAutoFallbackResumePositionMs = -1L
+                        pendingAutoFallbackResumeDeadlineMs = 0L
+                    } else if (!state.isBuffering && !state.isIdle) {
+                        val targetPosition = if (state.durationMs > 0L) {
+                            pendingAutoFallbackResumePositionMs
+                                .coerceIn(0L, (state.durationMs - 1_000L).coerceAtLeast(0L))
+                        } else {
+                            pendingAutoFallbackResumePositionMs.coerceAtLeast(0L)
+                        }
+                        if ((state.positionMs - targetPosition).absoluteValue > 2_500L) {
+                            performSeekTo(
+                                targetMs = targetPosition,
+                                userInitiated = false,
+                            )
+                        }
+                        pendingAutoFallbackResumePositionMs = -1L
+                        pendingAutoFallbackResumeDeadlineMs = 0L
+                    }
+                }
+
+                if (state.isBuffering && !inBufferingWindow) {
+                    inBufferingWindow = true
+                    bufferStartedAtMs = nowMs
+                    bufferingAttributedToUserSeek = isSeekSuppressionActive(nowMs)
+                } else if (!state.isBuffering && inBufferingWindow) {
+                    val bufferedMs = (nowMs - bufferStartedAtMs).coerceAtLeast(0L)
+                    val withinEarlyWindow = nowMs - healthWindowStartedAtMs <= earlyHealthWindowMs
+                    val ignoreAsUserSeek = bufferingAttributedToUserSeek || isSeekSuppressionActive(nowMs)
+                    if (withinEarlyWindow && firstFrameAtMs > 0L && !ignoreAsUserSeek) {
+                        earlyRebufferCount += 1
+                        earlyRebufferDurationMs += bufferedMs
+                        currentStreamHostKey?.let { host ->
+                            StreamRuntimeTelemetry.recordEarlyRebuffer(host, bufferedMs)
+                        }
+                    }
+                    inBufferingWindow = false
+                    bufferStartedAtMs = 0L
+                    bufferingAttributedToUserSeek = false
+                }
+
+                if (firstFrameAtMs == 0L && state.isPlaying && !state.isBuffering) {
+                    firstFrameAtMs = nowMs
+                    val startupMs = (firstFrameAtMs - healthWindowStartedAtMs).coerceAtLeast(0L)
+                    currentStreamHostKey?.let { host ->
+                        StreamRuntimeTelemetry.recordStartupSuccess(host, startupMs)
+                    }
+                }
+
+                if (autoSourceSelection && !earlyFallbackTriggered && !autoFallbackInProgress) {
+                    val elapsedMs = nowMs - healthWindowStartedAtMs
+                    val seekSuppressed = isSeekSuppressionActive(nowMs)
+                    if (elapsedMs <= earlyHealthWindowMs && !seekSuppressed) {
+                        val startupTimeout = firstFrameAtMs == 0L &&
+                            state.isBuffering &&
+                            elapsedMs >= earlyStartupTimeoutMs
+                        val unstableRebuffer = firstFrameAtMs > 0L && (
+                            earlyRebufferCount >= earlyRebufferCountThreshold ||
+                                earlyRebufferDurationMs >= earlyRebufferDurationThresholdMs
+                            )
+                        if (startupTimeout || unstableRebuffer) {
+                            earlyFallbackTriggered = true
+                            val reason = if (startupTimeout) "startup_timeout" else "early_rebuffer"
+                            scope.launch {
+                                val switched = trySwitchToStableSource(reason)
+                                if (!switched && startupTimeout) {
+                                    currentStreamHostKey?.let { host ->
+                                        StreamRuntimeTelemetry.recordStartupTimeout(host, elapsedMs)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Content ended while countdown was active — trigger immediately
                 if (state.isIdle && !state.isBuffering && completionDetected &&
                     showNextEpisodeOverlay && !isResolvingNextEpisode
@@ -820,6 +1142,7 @@ fun PlayerScreen(
                             showImdbId = showImdbId,
                             engine = engine,
                             streamRepo = streamRepo,
+                            streamSelector = streamSelector,
                             addonRepo = addonRepo,
                             settingsViewModel = settingsViewModel,
                             watchProgressRepo = watchProgressRepo,
@@ -867,6 +1190,23 @@ fun PlayerScreen(
 
             override fun onError(message: String) {
                 android.util.Log.e("Player", "Playback error for URL: $currentUrl — $message")
+                val seekSuppressed = isSeekSuppressionActive()
+                if (!seekSuppressed) {
+                    currentStreamHostKey?.let { StreamRuntimeTelemetry.recordFatalError(it) }
+                }
+                if (seekSuppressed) {
+                    android.util.Log.i("Player", "Ignoring transient playback error during seek suppression window")
+                    return
+                }
+                if (autoSourceSelection && !codecFallbackInProgress && !autoFallbackInProgress) {
+                    scope.launch {
+                        val switched = trySwitchToStableSource("playback_error")
+                        if (!switched && !codecFallbackInProgress) {
+                            errorMessage = message
+                        }
+                    }
+                    return
+                }
                 // Suppress error overlay while codec fallback is in progress
                 if (!codecFallbackInProgress) {
                     errorMessage = message
@@ -881,15 +1221,28 @@ fun PlayerScreen(
             // fallback URL (HLS transcode) or go back. Never show error to user.
             engine.onCodecError = { errorCode ->
                 android.util.Log.w("Player", "Codec error ($errorCode) — attempting silent fallback")
+                currentStreamHostKey?.let { StreamRuntimeTelemetry.recordFatalError(it) }
                 codecFallbackInProgress = true
                 scope.launch(kotlinx.coroutines.Dispatchers.Main) {
                     errorMessage = null // clear any error that snuck in
-                    if (fallbackUrl.isNotBlank() && !codecFallbackUsed) {
+                    val switched = if (fallbackUrl.isNotBlank() && !codecFallbackUsed) {
+                        val resumePositionMs = maxOf(engine.state.positionMs, currentPosition).coerceAtLeast(0L)
                         codecFallbackUsed = true
                         currentUrl = fallbackUrl
+                        resetPlaybackHealthWindow()
+                        if (resumePositionMs > 0L) {
+                            pendingAutoFallbackResumePositionMs = resumePositionMs
+                            pendingAutoFallbackResumeDeadlineMs = SystemClock.elapsedRealtime() + 30_000L
+                        }
                         engine.stop()
                         engine.play(fallbackUrl)
+                        true
+                    } else if (autoSourceSelection) {
+                        trySwitchToStableSource("codec_error")
                     } else {
+                        false
+                    }
+                    if (!switched) {
                         // No fallback available — silently go back
                         onBack()
                     }
@@ -900,6 +1253,7 @@ fun PlayerScreen(
             }
         }
 
+        resetPlaybackHealthWindow()
         engine.play(currentUrl)
         if (!initialStartPositionConsumed && !showResumePrompt && resumePromptInitialPositionMs > 0L) {
             pendingStartPositionMs = resumePromptInitialPositionMs
@@ -921,6 +1275,9 @@ fun PlayerScreen(
             val finalPosition = engine.state.positionMs
             val finalDuration = duration
             val finalContentId = mediaId.ifBlank { showTmdbId?.toString().orEmpty() }
+            if (finalDuration > 0 && finalPosition >= (finalDuration * 0.9f).toLong()) {
+                currentStreamHostKey?.let { StreamRuntimeTelemetry.recordCompletion(it) }
+            }
             if (mediaId.isNotBlank() && finalDuration > 0) {
                 scope.launch {
                     watchProgressRepo.saveProgress(
@@ -1109,7 +1466,10 @@ fun PlayerScreen(
         val seekTarget = pendingStartPositionMs
         if (seekTarget <= 0L || showResumePrompt) return@LaunchedEffect
         delay(450)
-        engine.seekTo(seekTarget)
+        performSeekTo(
+            targetMs = seekTarget,
+            userInitiated = false,
+        )
         pendingStartPositionMs = 0L
     }
 
@@ -1117,6 +1477,28 @@ fun PlayerScreen(
         if (voiceFeedbackMessage != null) {
             delay(2200)
             voiceFeedbackMessage = null
+        }
+    }
+
+    LaunchedEffect(
+        tvSeekFeedbackVisible,
+        tvSeekFeedbackInteractionAtMs,
+        showControls,
+        settingsState.tvSkipResetWindowMs,
+    ) {
+        if (!tvSeekFeedbackVisible) return@LaunchedEffect
+        if (showControls) {
+            tvSeekFeedbackVisible = false
+            return@LaunchedEffect
+        }
+        val timeoutMs = settingsState.tvSkipResetWindowMs.coerceIn(600, 4_000).toLong() + 650L
+        delay(timeoutMs)
+        val elapsed = SystemClock.elapsedRealtime() - tvSeekFeedbackInteractionAtMs
+        if (elapsed >= timeoutMs - 40L) {
+            tvSeekFeedbackVisible = false
+            if (elapsed >= settingsState.tvSkipResetWindowMs.coerceIn(600, 4_000).toLong()) {
+                resetSeekAcceleration()
+            }
         }
     }
 
@@ -1163,7 +1545,7 @@ fun PlayerScreen(
                 // Not yet attached
             }
         } else {
-            try {
+                try {
                 playerRootFocusRequester.requestFocus()
             } catch (_: IllegalStateException) { }
         }
@@ -1232,8 +1614,15 @@ fun PlayerScreen(
                             }
                         }
                         Key.DirectionLeft, Key.DirectionRight -> {
-                            controlsInteractionTick++
-                            false
+                            if (isTv && !settingsState.tvExplicitTimelineScrubEnabled) {
+                                val direction = if (keyEvent.key == Key.DirectionLeft) -1 else 1
+                                handleTvTransportSeek(direction)
+                                true
+                            } else {
+                                resetSeekAcceleration()
+                                controlsInteractionTick++
+                                false
+                            }
                         }
                         Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
                             resetSeekAcceleration()
@@ -1267,14 +1656,27 @@ fun PlayerScreen(
                         true
                     }
                     Key.DirectionLeft -> {
-                        seekBy(acceleratedSeekDelta(direction = -1))
+                        if (isTv) {
+                            handleTvTransportSeek(direction = -1)
+                        } else {
+                            seekBy(-10_000L)
+                        }
                         true
                     }
                     Key.DirectionRight -> {
-                        seekBy(acceleratedSeekDelta(direction = 1))
+                        if (isTv) {
+                            handleTvTransportSeek(direction = 1)
+                        } else {
+                            seekBy(10_000L)
+                        }
                         true
                     }
-                    Key.DirectionUp, Key.DirectionDown -> {
+                    Key.DirectionUp -> {
+                        resetSeekAcceleration()
+                        showControls = true
+                        true
+                    }
+                    Key.DirectionDown -> {
                         resetSeekAcceleration()
                         showControls = true
                         true
@@ -1569,7 +1971,13 @@ fun PlayerScreen(
         activeSkipSegment?.let { segment ->
             Button(
                 onClick = {
-                    engine.seekTo(segment.endMs)
+                    val deltaMs = segment.endMs - currentPosition
+                    performSeekTo(
+                        targetMs = segment.endMs,
+                        userInitiated = true,
+                        sourceDeltaMs = deltaMs,
+                        showTvFeedback = isTv && !showControls,
+                    )
                     dismissedSkipSegments = dismissedSkipSegments + segment.type.name
                     activeSkipSegment = null
                 },
@@ -1602,6 +2010,7 @@ fun PlayerScreen(
                             showImdbId = showImdbId,
                             engine = engine,
                             streamRepo = streamRepo,
+                            streamSelector = streamSelector,
                             addonRepo = addonRepo,
                             settingsViewModel = settingsViewModel,
                             watchProgressRepo = watchProgressRepo,
@@ -1713,6 +2122,15 @@ fun PlayerScreen(
                 showResumePrompt ||
                 showDevicePicker
             )
+
+        if (isTv && tvSeekFeedbackVisible && !showControls && !tvModalOverlayOpen) {
+            TvSeekFeedbackOverlay(
+                deltaMs = tvSeekFeedbackDeltaMs,
+                currentPositionMs = tvSeekFeedbackCurrentMs,
+                targetPositionMs = tvSeekFeedbackTargetMs,
+                durationMs = duration,
+            )
+        }
 
         // Controls overlay
         if (showControls && !tvModalOverlayOpen) {
@@ -2012,10 +2430,20 @@ fun PlayerScreen(
                             sliderPosition = it
                         },
                         onValueChangeFinished = {
-                            engine.seekTo((sliderPosition * duration).toLong())
+                            val target = (sliderPosition * duration).toLong()
+                            val delta = target - currentPosition
+                            performSeekTo(
+                                targetMs = target,
+                                userInitiated = true,
+                                sourceDeltaMs = delta,
+                                showTvFeedback = false,
+                            )
                             isSeeking = false
                         },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusRequester(timelineFocusRequester)
+                            .focusProperties { up = playButtonFocusRequester },
                     )
                     if (duration > 0L && skipSegments.isNotEmpty()) {
                         BoxWithConstraints(
@@ -2148,6 +2576,7 @@ private suspend fun resolveAndPlayNextEpisode(
     showImdbId: String?,
     engine: PlayerEngine,
     streamRepo: StreamRepository,
+    streamSelector: StreamSelector,
     addonRepo: AddonRepository,
     settingsViewModel: SettingsViewModel,
     watchProgressRepo: WatchProgressRepository,
@@ -2191,9 +2620,19 @@ private suspend fun resolveAndPlayNextEpisode(
             return
         }
 
+        val ranked = streamSelector.rankPlayableVariants(
+            streams = streams,
+            preferences = preferences,
+            deviceCaps = DeviceCodecProbe.probe(),
+        )
+        val selected = ranked.firstOrNull() ?: run {
+            onFailed()
+            return
+        }
+
         val provider = settingsViewModel.getDebridProvider()
         val apiKey = settingsViewModel.getDebridApiKey()
-        val resolved = streamRepo.resolveStream(streams.first(), provider, apiKey)
+        val resolved = streamRepo.resolveStream(selected, provider, apiKey)
         val playUrl = resolved.transcodeUrls?.mp4
             ?: resolved.transcodeUrls?.hls
             ?: resolved.url
@@ -2370,6 +2809,84 @@ private fun formatTime(ms: Long): String {
         "%d:%02d:%02d".format(hours, minutes, seconds)
     } else {
         "%d:%02d".format(minutes, seconds)
+    }
+}
+
+private fun formatSkipDeltaLabel(deltaMs: Long): String {
+    val sign = if (deltaMs >= 0L) "+" else "-"
+    val totalSeconds = (deltaMs.absoluteValue / 1000L).coerceAtLeast(1L)
+    val minutes = totalSeconds / 60L
+    val seconds = totalSeconds % 60L
+    return when {
+        minutes > 0L && seconds > 0L -> "$sign${minutes}m ${seconds}s"
+        minutes > 0L -> "$sign${minutes}m"
+        else -> "$sign${seconds}s"
+    }
+}
+
+@Composable
+private fun TvSeekFeedbackOverlay(
+    deltaMs: Long,
+    currentPositionMs: Long,
+    targetPositionMs: Long,
+    durationMs: Long,
+) {
+    val progressFraction = if (durationMs > 0L) {
+        (targetPositionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+    val totalDurationLabel = if (durationMs > 0L) formatTime(durationMs) else "--:--"
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.BottomCenter,
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(bottom = 46.dp)
+                .fillMaxWidth(0.68f)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color(0xD9161D2A))
+                .padding(horizontal = 18.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = formatSkipDeltaLabel(deltaMs),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = com.torve.android.ui.theme.Amber,
+                )
+                Text(
+                    text = "${formatTime(targetPositionMs)} / $totalDurationLabel",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(alpha = 0.9f),
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(7.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Color.White.copy(alpha = 0.22f)),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .fillMaxWidth(progressFraction)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(com.torve.android.ui.theme.Amber),
+                )
+            }
+            Text(
+                text = "${formatTime(currentPositionMs)} -> ${formatTime(targetPositionMs)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.White.copy(alpha = 0.75f),
+            )
+        }
     }
 }
 

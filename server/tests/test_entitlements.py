@@ -129,6 +129,50 @@ async def test_amazon_verify_success(client):
 
 
 @pytest.mark.asyncio
+async def test_amazon_verify_idempotent(client):
+    data = await register_user(client, email="amazon-idem@test.com")
+    token = data["tokens"]["access_token"]
+    payload = {
+        "receipt_id": "amazon-receipt-idem-001",
+        "amazon_user_id": "amzn-user-idem-001",
+        "product_id": "com.torve.pro.lifetime.amazon",
+        "platform": "amazon_fire_tv",
+    }
+    resp1 = await client.post("/purchases/amazon/verify", json=payload, headers={"Authorization": f"Bearer {token}"})
+    assert resp1.status_code == 200
+    resp2 = await client.post("/purchases/amazon/verify", json=payload, headers={"Authorization": f"Bearer {token}"})
+    assert resp2.status_code == 200
+    assert resp2.json()["premium_access"] is True
+
+
+@pytest.mark.asyncio
+async def test_amazon_restore_after_verify(client):
+    data = await register_user(client, email="amazon-restore@test.com")
+    token = data["tokens"]["access_token"]
+    verify_resp = await client.post(
+        "/purchases/amazon/verify",
+        json={
+            "receipt_id": "amazon-receipt-restore-001",
+            "amazon_user_id": "amzn-user-restore-001",
+            "product_id": "com.torve.pro.lifetime.amazon",
+            "platform": "amazon_fire_tv",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert verify_resp.status_code == 200
+
+    restore_resp = await client.post(
+        "/purchases/restore",
+        json={"store": "amazon", "platform": "amazon_fire_tv"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert restore_resp.status_code == 200
+    body = restore_resp.json()
+    assert body["premium_access"] is True
+    assert any(e["source_store"] == "amazon" for e in body["entitlements"])
+
+
+@pytest.mark.asyncio
 async def test_entitlements_after_purchase(client):
     data = await register_user(client)
     token = data["tokens"]["access_token"]

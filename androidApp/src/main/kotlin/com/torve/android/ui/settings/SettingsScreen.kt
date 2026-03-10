@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -79,6 +80,8 @@ import androidx.compose.ui.unit.dp
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
 import com.torve.android.R
+import com.torve.android.premium.PremiumAccess
+import com.torve.android.premium.PremiumFeature
 import com.torve.domain.model.DebridServiceType
 import com.torve.domain.model.StreamQuality
 import com.torve.data.auth.AuthClient
@@ -109,6 +112,8 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
+    isLifetimeUnlocked: Boolean = false,
+    onLockedFeatureClick: (PremiumFeature) -> Unit = {},
     onDownloadsClick: () -> Unit = {},
     onSubscriptionClick: () -> Unit = {},
     onProfilesClick: () -> Unit = {},
@@ -137,6 +142,34 @@ fun SettingsScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val syncState by syncCoordinator.state.collectAsState()
+    val accessTier = remember(isLifetimeUnlocked) { PremiumAccess.tierFrom(isLifetimeUnlocked) }
+    val isLocked: (PremiumFeature) -> Boolean = remember(accessTier) {
+        { feature -> PremiumAccess.isPremiumLocked(feature, accessTier) }
+    }
+    val onPremiumAction: (PremiumFeature, () -> Unit) -> Unit = remember(isLocked, onLockedFeatureClick) {
+        { feature, allowedAction ->
+            if (isLocked(feature)) {
+                onLockedFeatureClick(feature)
+            } else {
+                allowedAction()
+            }
+        }
+    }
+    val accountSetupLocked = isLocked(PremiumFeature.ACCOUNT_SETUP)
+    val accountSignInLocked = isLocked(PremiumFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD)
+    val deviceLinkingLocked = isLocked(PremiumFeature.DEVICE_LINKING)
+    val pairingLocked = isLocked(PremiumFeature.PHONE_PAIRING)
+    val cloudProviderLocked = isLocked(PremiumFeature.CLOUD_PROVIDER_SETUP)
+    val customSourcesLocked = isLocked(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT)
+    val addonLocked = isLocked(PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT)
+    val mdbListLocked = isLocked(PremiumFeature.MDBLIST_SETUP)
+    val traktLocked = isLocked(PremiumFeature.TRAKT_CONNECT)
+    val diagnosticsLocked = isLocked(PremiumFeature.DIAGNOSTICS)
+    val kodiLocked = isLocked(PremiumFeature.KODI_SETUP)
+    val aiProviderLocked = isLocked(PremiumFeature.AI_PROVIDER_SETUP)
+    val collectionsLocked = isLocked(PremiumFeature.PERSISTENT_COLLECTIONS)
+    val customLayoutLocked = isLocked(PremiumFeature.SYNC_CUSTOM_LAYOUTS)
+    val backupLocked = isLocked(PremiumFeature.CLOUD_BACKUP_RESTORE)
     var showSyncSheet by remember { mutableStateOf(false) }
     var authUser by remember { mutableStateOf<AuthUser?>(null) }
     LaunchedEffect(Unit) {
@@ -187,39 +220,73 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Button(
-                            onClick = onLoginClick,
+                            onClick = {
+                                onPremiumAction(PremiumFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD) { onLoginClick() }
+                            },
                             modifier = Modifier.weight(1f),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = Amber,
                                 contentColor = Obsidian,
                             ),
                         ) {
-                            Text("Account Settings")
+                            if (accountSignInLocked) {
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Spacer(Modifier.width(6.dp))
+                            }
+                            Text(if (accountSignInLocked) "Account Settings (Locked)" else "Account Settings")
                         }
                         OutlinedButton(
-                            onClick = onManageDevicesClick,
+                            onClick = {
+                                onPremiumAction(PremiumFeature.DEVICE_LINKING) { onManageDevicesClick() }
+                            },
                             modifier = Modifier.weight(1f),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
                         ) {
-                            Text("Manage Devices")
+                            if (deviceLinkingLocked) {
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Spacer(Modifier.width(6.dp))
+                            }
+                            Text(if (deviceLinkingLocked) "Manage Devices (Locked)" else "Manage Devices")
                         }
                     }
                 } else {
                     Text(
-                        text = "Sign in to manage your subscription and devices.",
+                        text = if (accountSignInLocked) {
+                            "Account tools are locked on Free. Unlock Lifetime Access to sign in and sync."
+                        } else {
+                            "Sign in to manage your subscription and devices."
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         color = Torve.colors.textSecondary,
                     )
                     Spacer(Modifier.height(12.dp))
                     Button(
-                        onClick = onLoginClick,
+                        onClick = {
+                            onPremiumAction(PremiumFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD) { onLoginClick() }
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Amber,
                             contentColor = Obsidian,
                         ),
                     ) {
-                        Text("Sign In / Create Account")
+                        if (accountSignInLocked) {
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                        }
+                        Text(if (accountSignInLocked) PremiumAccess.UNLOCK_WITH_LIFETIME_LABEL else "Sign In / Create Account")
                     }
                 }
             }
@@ -242,11 +309,27 @@ fun SettingsScreen(
                 }
             }
             OutlinedButton(
-                onClick = onProfilesClick,
+                onClick = {
+                    onPremiumAction(PremiumFeature.ACCOUNT_SETUP) { onProfilesClick() }
+                },
                 modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
             ) {
-                Text(stringResource(R.string.settings_profiles))
+                if (accountSetupLocked) {
+                    Icon(
+                        imageVector = Icons.Default.Lock,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                }
+                Text(
+                    if (accountSetupLocked) {
+                        "${stringResource(R.string.settings_profiles)} (${PremiumAccess.LOCKED_LABEL})"
+                    } else {
+                        stringResource(R.string.settings_profiles)
+                    },
+                )
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -255,11 +338,27 @@ fun SettingsScreen(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             OutlinedButton(
-                onClick = onDownloadsClick,
+                onClick = {
+                    onPremiumAction(PremiumFeature.DOWNLOADS) { onDownloadsClick() }
+                },
                 modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
             ) {
-                Text(stringResource(R.string.settings_downloads))
+                if (isLocked(PremiumFeature.DOWNLOADS)) {
+                    Icon(
+                        imageVector = Icons.Default.Lock,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                }
+                Text(
+                    if (isLocked(PremiumFeature.DOWNLOADS)) {
+                        "${stringResource(R.string.settings_downloads)} (${PremiumAccess.LOCKED_LABEL})"
+                    } else {
+                        stringResource(R.string.settings_downloads)
+                    },
+                )
             }
             OutlinedButton(
                 onClick = onCalendarClick,
@@ -276,11 +375,18 @@ fun SettingsScreen(
         SectionHeader(title = stringResource(R.string.settings_cloud_service))
         Spacer(Modifier.height(8.dp))
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Charcoal),
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+        if (cloudProviderLocked) {
+            LockedSettingsCard(
+                title = stringResource(R.string.settings_cloud_service),
+                description = "Connect cloud providers and debrid services with Lifetime Access.",
+                onUnlock = { onLockedFeatureClick(PremiumFeature.CLOUD_PROVIDER_SETUP) },
+            )
+        } else {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Charcoal),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
                 // Provider selector
                 var providerExpanded by remember { mutableStateOf(false) }
                 ExposedDropdownMenuBox(
@@ -420,13 +526,17 @@ fun SettingsScreen(
                 }
             }
         }
+        }
 
         // Trakt & SIMKL management moved to Integrations screen
 
         Spacer(Modifier.height(24.dp))
 
         // ── Channels Section ──
-        LiveTvSettingsSection()
+        LiveTvSettingsSection(
+            locked = collectionsLocked,
+            onLockedClick = { onLockedFeatureClick(PremiumFeature.PERSISTENT_COLLECTIONS) },
+        )
 
         Spacer(Modifier.height(24.dp))
 
@@ -822,7 +932,10 @@ fun SettingsScreen(
                 SettingsNavRow(
                     title = "Home Layout",
                     subtitle = "Section order & poster style",
-                    onClick = onHomeLayoutClick,
+                    locked = customLayoutLocked,
+                    onClick = {
+                        onPremiumAction(PremiumFeature.SYNC_CUSTOM_LAYOUTS) { onHomeLayoutClick() }
+                    },
                 )
                 HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
                 SettingsNavRow(
@@ -834,31 +947,46 @@ fun SettingsScreen(
                 SettingsNavRow(
                     title = "Addons & Content Sources",
                     subtitle = "${addonState.addons.size} installed · Browse & manage",
-                    onClick = onAddonCatalogClick,
+                    locked = addonLocked,
+                    onClick = {
+                        onPremiumAction(PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT) { onAddonCatalogClick() }
+                    },
                 )
                 HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
                 SettingsNavRow(
                     title = "Streaming Services",
                     subtitle = "Personalize home services",
-                    onClick = onStreamingServicesClick,
+                    locked = customSourcesLocked,
+                    onClick = {
+                        onPremiumAction(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT) { onStreamingServicesClick() }
+                    },
                 )
                 HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
                 SettingsNavRow(
                     title = "Stream Groups",
                     subtitle = "${state.streamGroups.size} groups",
-                    onClick = onStreamGroupsClick,
+                    locked = customSourcesLocked,
+                    onClick = {
+                        onPremiumAction(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT) { onStreamGroupsClick() }
+                    },
                 )
                 HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
                 SettingsNavRow(
                     title = "Regex Patterns",
                     subtitle = "${state.regexPatterns.size} patterns",
-                    onClick = onRegexPatternsClick,
+                    locked = customSourcesLocked,
+                    onClick = {
+                        onPremiumAction(PremiumFeature.ADVANCED_CONNECTION_CONFIGURATION) { onRegexPatternsClick() }
+                    },
                 )
                 HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
                 SettingsNavRow(
                     title = "MDBList",
                     subtitle = if (state.mdblistApiKey.isNotBlank()) "Connected" else "Curated community lists",
-                    onClick = onMdbListClick,
+                    locked = mdbListLocked,
+                    onClick = {
+                        onPremiumAction(PremiumFeature.MDBLIST_SETUP) { onMdbListClick() }
+                    },
                 )
                 HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
                 SettingsNavRow(
@@ -870,7 +998,10 @@ fun SettingsScreen(
                 SettingsNavRow(
                     title = "Integrations",
                     subtitle = "Trakt, SIMKL, Jellyfin, Plex",
-                    onClick = onIntegrationsClick,
+                    locked = traktLocked,
+                    onClick = {
+                        onPremiumAction(PremiumFeature.TRAKT_CONNECT) { onIntegrationsClick() }
+                    },
                 )
             }
         }
@@ -881,11 +1012,18 @@ fun SettingsScreen(
         SectionHeader(title = stringResource(R.string.settings_kodi_remote))
         Spacer(Modifier.height(8.dp))
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Charcoal),
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+        if (kodiLocked) {
+            LockedSettingsCard(
+                title = stringResource(R.string.settings_kodi_remote),
+                description = "Configure Kodi hosts and remote control integration with Lifetime Access.",
+                onUnlock = { onLockedFeatureClick(PremiumFeature.KODI_SETUP) },
+            )
+        } else {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Charcoal),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
                 if (state.kodiHosts.isEmpty()) {
                     Text(
                         stringResource(R.string.settings_no_kodi_hosts),
@@ -991,6 +1129,7 @@ fun SettingsScreen(
                 }
             }
         }
+        }
 
         Spacer(Modifier.height(24.dp))
 
@@ -998,11 +1137,18 @@ fun SettingsScreen(
         SectionHeader(title = "AI Features")
         Spacer(Modifier.height(8.dp))
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Charcoal),
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+        if (aiProviderLocked) {
+            LockedSettingsCard(
+                title = "AI Features",
+                description = "Connect AI providers and API keys with Lifetime Access.",
+                onUnlock = { onLockedFeatureClick(PremiumFeature.AI_PROVIDER_SETUP) },
+            )
+        } else {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Charcoal),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
                 Text(
                     "Choose your AI provider and add your API key to enable AI-powered search. Your provider account must have active billing or credits.",
                     style = MaterialTheme.typography.bodySmall,
@@ -1102,6 +1248,7 @@ fun SettingsScreen(
                     color = Torve.colors.textSecondary,
                 )
             }
+        }
         }
 
         Spacer(Modifier.height(24.dp))
@@ -1281,10 +1428,17 @@ fun SettingsScreen(
         SectionHeader(title = "Backup")
         Spacer(Modifier.height(8.dp))
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Charcoal),
-        ) {
+        if (backupLocked) {
+            LockedSettingsCard(
+                title = "Backup",
+                description = "Backup and restore personalized settings with Lifetime Access.",
+                onUnlock = { onLockedFeatureClick(PremiumFeature.CLOUD_BACKUP_RESTORE) },
+            )
+        } else {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Charcoal),
+            ) {
             val backupContext = LocalContext.current
 
             // File picker for import
@@ -1397,6 +1551,7 @@ fun SettingsScreen(
                 )
             }
         }
+        }
 
         Spacer(Modifier.height(24.dp))
 
@@ -1405,12 +1560,19 @@ fun SettingsScreen(
         SectionHeader(title = "Local Sync")
         Spacer(Modifier.height(8.dp))
 
-        // Local Sync
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Charcoal),
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+        if (pairingLocked || deviceLinkingLocked) {
+            LockedSettingsCard(
+                title = "Local Sync",
+                description = "Pair devices and sync settings across screens with Lifetime Access.",
+                onUnlock = { onLockedFeatureClick(PremiumFeature.DEVICE_SYNC) },
+            )
+        } else {
+            // Local Sync
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Charcoal),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
                 val syncStatusTitle = if (syncState.isAuthenticated) "Local Sync Ready" else "Local Mode"
                 val syncStatusSubtext = if (syncState.isAuthenticated) {
                     "Profile ${syncState.profileName ?: syncState.userEmail ?: "Unknown"} is ready for local Wi-Fi pairing."
@@ -1443,22 +1605,42 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Button(
-                        onClick = onAccountClick,
+                        onClick = {
+                            onPremiumAction(PremiumFeature.ACCOUNT_SETUP) { onAccountClick() }
+                        },
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Amber,
                             contentColor = Obsidian,
                         ),
                     ) {
-                        Text(if (syncState.isAuthenticated) "Manage Profile" else "Create Profile")
+                        Text(
+                            if (accountSetupLocked) {
+                                PremiumAccess.UNLOCK_WITH_LIFETIME_LABEL
+                            } else if (syncState.isAuthenticated) {
+                                "Manage Profile"
+                            } else {
+                                "Create Profile"
+                            },
+                        )
                     }
                     OutlinedButton(
-                        onClick = onDevicesClick,
+                        onClick = {
+                            onPremiumAction(PremiumFeature.PHONE_PAIRING) { onDevicesClick() }
+                        },
                         modifier = Modifier.weight(1f),
-                        enabled = syncState.isAuthenticated,
+                        enabled = syncState.isAuthenticated || pairingLocked,
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
                     ) {
-                        Text("Pair Device")
+                        if (pairingLocked) {
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                        }
+                        Text(if (pairingLocked) "Pair Device (Locked)" else "Pair Device")
                     }
                 }
                 val hasPairedTvs = syncState.isAuthenticated &&
@@ -1478,7 +1660,9 @@ fun SettingsScreen(
                 }
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(
-                    onClick = onManageDevicesClick,
+                    onClick = {
+                        onPremiumAction(PremiumFeature.DEVICE_LINKING) { onManageDevicesClick() }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
                 ) {
@@ -1486,8 +1670,9 @@ fun SettingsScreen(
                 }
             }
         }
+        }
 
-        if (showSyncSheet) {
+        if (showSyncSheet && !pairingLocked && !deviceLinkingLocked) {
             SyncToTvBottomSheet(
                 syncCoordinator = syncCoordinator,
                 syncRepository = syncRepository,
@@ -1539,7 +1724,10 @@ fun SettingsScreen(
                 HorizontalDivider(color = Steel.copy(alpha = 0.3f))
                 SettingsLinkItem(
                     title = "Diagnostics",
-                    onClick = onDiagnosticsClick,
+                    locked = diagnosticsLocked,
+                    onClick = {
+                        onPremiumAction(PremiumFeature.DIAGNOSTICS) { onDiagnosticsClick() }
+                    },
                 )
                 HorizontalDivider(color = Steel.copy(alpha = 0.3f))
                 SettingsLinkItem(
@@ -1641,8 +1829,52 @@ private fun SectionHeader(title: String) {
 }
 
 @Composable
+private fun LockedSettingsCard(
+    title: String,
+    description: String,
+    onUnlock: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Charcoal),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Lock,
+                    contentDescription = null,
+                    tint = Amber,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "$title · ${PremiumAccess.LOCKED_LABEL}",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = Snow,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = Torve.colors.textSecondary,
+            )
+            Spacer(Modifier.height(12.dp))
+            OutlinedButton(
+                onClick = onUnlock,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
+            ) {
+                Text(PremiumAccess.UNLOCK_WITH_LIFETIME_LABEL)
+            }
+        }
+    }
+}
+
+@Composable
 private fun SettingsLinkItem(
     title: String,
+    locked: Boolean = false,
     onClick: () -> Unit,
 ) {
     Row(
@@ -1652,12 +1884,25 @@ private fun SettingsLinkItem(
             .padding(vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.bodyMedium,
-            color = Torve.colors.textPrimary,
+        Row(
             modifier = Modifier.weight(1f),
-        )
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (locked) Amber else Torve.colors.textPrimary,
+            )
+            if (locked) {
+                Spacer(Modifier.width(6.dp))
+                Icon(
+                    imageVector = Icons.Default.Lock,
+                    contentDescription = null,
+                    tint = Amber,
+                    modifier = Modifier.size(14.dp),
+                )
+            }
+        }
         Text(
             text = ">",
             style = MaterialTheme.typography.bodyMedium,
@@ -1773,6 +2018,7 @@ private fun buildIssuePayload(
 private fun SettingsNavRow(
     title: String,
     subtitle: String,
+    locked: Boolean = false,
     onClick: () -> Unit,
 ) {
     Row(
@@ -1783,16 +2029,31 @@ private fun SettingsNavRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Snow,
+                    fontWeight = FontWeight.Medium,
+                )
+                if (locked) {
+                    Spacer(Modifier.width(6.dp))
+                    Icon(
+                        imageVector = Icons.Default.Lock,
+                        contentDescription = null,
+                        tint = Amber,
+                        modifier = Modifier.size(14.dp),
+                    )
+                }
+            }
             Text(
-                text = title,
-                style = MaterialTheme.typography.bodyMedium,
-                color = Snow,
-                fontWeight = FontWeight.Medium,
-            )
-            Text(
-                text = subtitle,
+                text = if (locked) {
+                    "$subtitle · ${PremiumAccess.LIFETIME_REQUIRED_LABEL}"
+                } else {
+                    subtitle
+                },
                 style = MaterialTheme.typography.bodySmall,
-                color = Torve.colors.textSecondary,
+                color = if (locked) Amber.copy(alpha = 0.9f) else Torve.colors.textSecondary,
             )
         }
         Text(">", style = MaterialTheme.typography.bodyMedium, color = Torve.colors.textTertiary)
@@ -1800,7 +2061,21 @@ private fun SettingsNavRow(
 }
 
 @Composable
-private fun LiveTvSettingsSection() {
+private fun LiveTvSettingsSection(
+    locked: Boolean = false,
+    onLockedClick: () -> Unit = {},
+) {
+    if (locked) {
+        SectionHeader(title = stringResource(R.string.settings_live_tv))
+        Spacer(Modifier.height(8.dp))
+        LockedSettingsCard(
+            title = stringResource(R.string.settings_live_tv),
+            description = "Manage channel playlists and persistent favorites with Lifetime Access.",
+            onUnlock = onLockedClick,
+        )
+        return
+    }
+
     val channelsViewModel: ChannelsViewModel = koinInject()
     val channelsState by channelsViewModel.state.collectAsState()
 

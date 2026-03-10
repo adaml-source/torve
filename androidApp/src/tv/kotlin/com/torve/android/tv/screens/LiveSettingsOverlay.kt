@@ -46,6 +46,7 @@ import com.torve.android.ui.theme.Graphite
 import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
+import com.torve.domain.player.LiveAudioOutputMode
 import com.torve.domain.model.Channel
 import com.torve.domain.model.ChannelPlaylist
 import com.torve.presentation.channels.ChannelsUiState
@@ -71,6 +72,7 @@ fun LiveSettingsOverlay(
     onSetXxxEnabled: (Boolean) -> Unit,
     onSetAudioPassthroughEnabled: (Boolean) -> Unit,
     onSetPreferSurroundCodecs: (Boolean) -> Unit,
+    onSetLiveAudioOutputMode: (LiveAudioOutputMode) -> Unit,
     audioDelayMs: Int = 0,
     onSetAudioDelay: (Int) -> Unit = {},
     audioTracks: List<com.torve.domain.player.TrackDescription> = emptyList(),
@@ -264,6 +266,43 @@ fun LiveSettingsOverlay(
             item(key = "audio_header") {
                 Spacer(Modifier.height(8.dp))
                 SectionHeader(stringResource(R.string.tv_live_audio_output))
+            }
+            item(key = "audio_mode") {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    val options = listOf(
+                        LiveAudioOutputMode.AUTO to stringResource(R.string.tv_live_audio_mode_auto),
+                        LiveAudioOutputMode.PREFER_COMPATIBLE to stringResource(R.string.tv_live_audio_mode_compatible),
+                        LiveAudioOutputMode.FORCE_STEREO_PCM to stringResource(R.string.tv_live_audio_mode_stereo),
+                    )
+                    options.forEach { (mode, label) ->
+                        val selected = state.liveAudioOutputMode == mode
+                        Surface(
+                            onClick = { onSetLiveAudioOutputMode(mode) },
+                            shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(8.dp)),
+                            colors = ClickableSurfaceDefaults.colors(
+                                containerColor = if (selected) AmberSubtle else Graphite,
+                                focusedContainerColor = Amber.copy(alpha = 0.3f),
+                            ),
+                            border = ClickableSurfaceDefaults.border(
+                                focusedBorder = androidx.tv.material3.Border(
+                                    border = androidx.compose.foundation.BorderStroke(1.5.dp, Amber),
+                                    shape = RoundedCornerShape(8.dp),
+                                ),
+                            ),
+                        ) {
+                            Text(
+                                text = label,
+                                color = if (selected) Amber else Snow,
+                                fontSize = 13.sp,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            )
+                        }
+                    }
+                }
             }
             item(key = "audio_passthrough") {
                 Surface(

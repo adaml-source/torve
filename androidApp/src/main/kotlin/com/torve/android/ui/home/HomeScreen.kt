@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.BookmarkBorder
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
@@ -59,6 +60,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.torve.android.R
+import com.torve.android.premium.PremiumAccess
+import com.torve.android.premium.PremiumFeature
 import com.torve.android.ui.components.CardSize
 import com.torve.android.ui.components.PosterCard
 import com.torve.android.ui.components.SectionHeader
@@ -106,6 +109,8 @@ fun HomeScreen(
     onSeeAllClick: (String) -> Unit = {},
     onProviderClick: (providerId: Int, providerName: String) -> Unit = { _, _ -> },
     onPersonClick: (Int) -> Unit = {},
+    isLifetimeUnlocked: Boolean = false,
+    onLockedFeatureClick: (PremiumFeature) -> Unit = {},
     mediaType: String = "all",
     viewModel: HomeViewModel = koinInject(),
     watchlistViewModel: WatchlistViewModel = koinInject(),
@@ -123,6 +128,10 @@ fun HomeScreen(
         ALL_STREAMING_SERVICES.filter { it.tmdbProviderId in enabledServiceIds }
     }
     val providerLogos by viewModel.providerLogos.collectAsState()
+    val accessTier = remember(isLifetimeUnlocked) { PremiumAccess.tierFrom(isLifetimeUnlocked) }
+    val watchlistLocked = remember(accessTier) {
+        PremiumAccess.isPremiumLocked(PremiumFeature.WATCHLIST_EDIT, accessTier)
+    }
 
     // Filter by media type for TV Shows / Movies tab reuse
     val filteredShelves = remember(state.shelves, mediaType) {
@@ -275,7 +284,14 @@ fun HomeScreen(
                                             items = heroItems,
                                             onItemClick = onMediaClick,
                                             watchlistIds = watchlistState.watchlistIds,
-                                            onWatchlistClick = { watchlistViewModel.toggleWatchlist(it) },
+                                            isWatchlistLocked = watchlistLocked,
+                                            onWatchlistClick = { media ->
+                                                if (watchlistLocked) {
+                                                    onLockedFeatureClick(PremiumFeature.WATCHLIST_EDIT)
+                                                } else {
+                                                    watchlistViewModel.toggleWatchlist(media)
+                                                }
+                                            },
                                         )
                                     } else {
                                         state.heroItem?.let { hero ->
@@ -695,6 +711,7 @@ private fun HeroPager(
     items: List<MediaItem>,
     onItemClick: (MediaItem) -> Unit,
     watchlistIds: Set<String> = emptySet(),
+    isWatchlistLocked: Boolean = false,
     onWatchlistClick: (MediaItem) -> Unit = {},
 ) {
     val pagerState = rememberPagerState(pageCount = { items.size })
@@ -718,6 +735,7 @@ private fun HeroPager(
                 item = item,
                 onClick = { onItemClick(item) },
                 isInWatchlist = watchlistIds.contains(item.id),
+                isWatchlistLocked = isWatchlistLocked,
                 onWatchlistClick = { onWatchlistClick(item) },
             )
         }
@@ -751,6 +769,7 @@ private fun HeroSlide(
     item: MediaItem,
     onClick: () -> Unit,
     isInWatchlist: Boolean = false,
+    isWatchlistLocked: Boolean = false,
     onWatchlistClick: () -> Unit = {},
 ) {
     val screenHeight = LocalConfiguration.current.screenHeightDp
@@ -864,19 +883,35 @@ private fun HeroSlide(
                     onClick = onWatchlistClick,
                     shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = if (isInWatchlist) Amber.copy(alpha = 0.25f) else Snow.copy(alpha = 0.15f),
-                        contentColor = if (isInWatchlist) Amber else Snow,
+                        containerColor = when {
+                            isWatchlistLocked -> Amber.copy(alpha = 0.22f)
+                            isInWatchlist -> Amber.copy(alpha = 0.25f)
+                            else -> Snow.copy(alpha = 0.15f)
+                        },
+                        contentColor = when {
+                            isWatchlistLocked -> Amber
+                            isInWatchlist -> Amber
+                            else -> Snow
+                        },
                     ),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                 ) {
                     Icon(
-                        if (isInWatchlist) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder,
+                        when {
+                            isWatchlistLocked -> Icons.Rounded.Lock
+                            isInWatchlist -> Icons.Rounded.Bookmark
+                            else -> Icons.Rounded.BookmarkBorder
+                        },
                         contentDescription = null,
                         modifier = Modifier.size(18.dp),
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        if (isInWatchlist) stringResource(R.string.home_in_watchlist) else stringResource(R.string.home_watchlist),
+                        when {
+                            isWatchlistLocked -> PremiumAccess.UNLOCK_WITH_LIFETIME_LABEL
+                            isInWatchlist -> stringResource(R.string.home_in_watchlist)
+                            else -> stringResource(R.string.home_watchlist)
+                        },
                         style = MaterialTheme.typography.labelLarge,
                     )
                 }

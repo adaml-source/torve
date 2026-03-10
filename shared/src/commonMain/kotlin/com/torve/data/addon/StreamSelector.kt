@@ -1,6 +1,6 @@
 package com.torve.data.addon
 
-import com.torve.domain.model.CodecPreference
+import com.torve.domain.model.AutoSourceMode
 import com.torve.domain.model.DeviceCodecCaps
 import com.torve.domain.model.StreamPreferences
 import com.torve.domain.model.StreamQuality
@@ -8,91 +8,77 @@ import com.torve.domain.model.StreamQuality
 /**
  * Single source of truth for playback stream selection.
  *
- * All playback paths (auto-play best stream, manual pick, resume, casting)
- * MUST use this class so that max-quality cap and device codec filtering
- * can never be bypassed.
- *
- * Player stack: ExoPlayer (Media3 1.5.1) with libmpv fallback.
- * This class is the authoritative gate before any URL reaches the player.
+ * Auto mode means "best playable" stream on TV:
+ * compatibility + stability + throughput + quality.
  */
 class StreamSelector(
     private val scorer: StreamScorer,
 ) {
 
-    /**
-     * Selects the best playable stream variant that satisfies BOTH:
-     *  1) User's max quality cap (never exceeded under any circumstance)
-     *  2) Device codec capabilities (never selects a codec the device can't decode)
-     *
-     * @param streams Already-scored list from StreamAggregator (highest score first).
-     * @param preferences User preferences including maxQuality.
-     * @param deviceCaps Codec support snapshot from DeviceCodecProbe.
-     * @param h264Only When true, restricts to H.264 streams only (used for fallback on codec error).
-     * @return The best playable stream, or null if none are compatible.
-     */
     fun selectBestPlayableVariant(
         streams: List<ParsedStream>,
         preferences: StreamPreferences,
         deviceCaps: DeviceCodecCaps,
         h264Only: Boolean = false,
     ): ParsedStream? {
-        val maxHeight = preferences.maxQuality.heightPx
+        return rankPlayableVariants(
+            streams = streams,
+            preferences = preferences,
+            deviceCaps = deviceCaps,
+            h264Only = h264Only,
+        ).firstOrNull()
+    }
 
-        // Apply all hard constraints: quality cap + codec + h264-only fallback
+    fun rankPlayableVariants(
+        streams: List<ParsedStream>,
+        preferences: StreamPreferences,
+        deviceCaps: DeviceCodecCaps,
+        h264Only: Boolean = false,
+    ): List<ParsedStream> {
+        if (streams.isEmpty()) return emptyList()
+
+        val maxHeight = effectiveMaxHeight(preferences)
         val eligible = streams.filter { stream ->
             passesQualityCap(stream, maxHeight) &&
                 passesCodecFilter(stream, deviceCaps) &&
                 passesH264OnlyFilter(stream, h264Only)
         }
 
-        if (eligible.isNotEmpty()) {
-            return eligible.first() // already sorted by score from StreamAggregator
-        }
+        if (eligible.isEmpty()) return emptyList()
 
-        // Fallback: if no eligible streams, try baseline (H.264 only, under cap)
-        if (!h264Only) {
-            val baselineFallback = streams.filter { stream ->
-                passesQualityCap(stream, maxHeight) &&
-                    passesH264OnlyFilter(stream, h264Only = true)
+        val stablePreferred = eligible.filterNot { stream ->
+            val hostKey = StreamRuntimeTelemetry.keyForStream(stream)
+            StreamRuntimeTelemetry.isHostUnstable(hostKey)
+        }
+        val pool = if (stablePreferred.isNotEmpty()) stablePreferred else eligible
+
+        return pool
+            .map { stream ->
+                val base = scorer.score(stream, preferences)
+                val qualityBias = modeQualityBias(stream, preferences)
+                val hostAdj = StreamRuntimeTelemetry.reliabilityAdjustment(StreamRuntimeTelemetry.keyForStream(stream)) / 2
+                val directPlayableBonus = if (stream.directUrl != null && stream.infoHash == null) 2 else 0
+                stream.copy(score = (base + qualityBias + hostAdj + directPlayableBonus).coerceIn(0, 100))
             }
-            if (baselineFallback.isNotEmpty()) return baselineFallback.first()
-        }
-
-        // Last resort: return the lowest-quality stream that the device can decode
-        // Still NEVER exceed max quality cap
-        val lastResort = streams
-            .filter { passesQualityCap(it, maxHeight) }
-            .sortedByDescending { StreamQuality.fromString(it.quality).rank } // lowest quality first
-            .firstOrNull { passesCodecFilter(it, deviceCaps) }
-
-        return lastResort
+            .sortedByDescending { it.score }
     }
 
     /**
-     * Filters a full stream list to only device-compatible, quality-capped streams.
-     * Used to present the manual stream picker with only playable options highlighted.
+     * Filters to currently playable streams while preserving rank order.
+     * Used by manual picker and auto fallback controller.
      */
     fun filterPlayableStreams(
         streams: List<ParsedStream>,
         preferences: StreamPreferences,
         deviceCaps: DeviceCodecCaps,
     ): List<ParsedStream> {
-        val maxHeight = preferences.maxQuality.heightPx
-        return streams.filter { stream ->
-            passesQualityCap(stream, maxHeight) && passesCodecFilter(stream, deviceCaps)
-        }
+        return rankPlayableVariants(
+            streams = streams,
+            preferences = preferences,
+            deviceCaps = deviceCaps,
+        )
     }
 
-    /**
-     * Selects a fallback stream after a codec error at runtime.
-     * Tries H.264-only first, then downgrades resolution within the cap.
-     *
-     * @param failedStream The stream that caused the codec error.
-     * @param allStreams Full stream list.
-     * @param preferences User preferences.
-     * @param deviceCaps Device codec caps.
-     * @param lowerCapTo Optionally force a lower max quality (e.g. 720p after repeated failures).
-     */
     fun selectFallbackAfterCodecError(
         failedStream: ParsedStream,
         allStreams: List<ParsedStream>,
@@ -100,72 +86,142 @@ class StreamSelector(
         deviceCaps: DeviceCodecCaps,
         lowerCapTo: StreamQuality? = null,
     ): ParsedStream? {
+        val failedHost = StreamRuntimeTelemetry.keyForStream(failedStream)
+        StreamRuntimeTelemetry.recordFatalError(failedHost)
+
+        val failedKey = streamKey(failedStream)
+        val remaining = allStreams.filter { streamKey(it) != failedKey }
+        if (remaining.isEmpty()) return null
+
         val effectivePrefs = if (lowerCapTo != null) {
             preferences.copy(maxQuality = lowerCapTo)
         } else {
             preferences
         }
 
-        // First try: H.264-only at current (or lowered) cap
+        // First: force H.264-safe variant.
         val h264Fallback = selectBestPlayableVariant(
-            streams = allStreams.filter { it != failedStream },
+            streams = remaining,
             preferences = effectivePrefs,
             deviceCaps = deviceCaps,
             h264Only = true,
         )
         if (h264Fallback != null) return h264Fallback
 
-        // Second try: any codec the device supports, one tier below failed stream
+        // Second: lower quality one tier when available.
         val failedQuality = StreamQuality.fromString(failedStream.quality)
         val lowerQuality = StreamQuality.entries
             .filter { it.rank > failedQuality.rank && it != StreamQuality.UNKNOWN }
             .minByOrNull { it.rank }
-            ?: return null
 
         return selectBestPlayableVariant(
-            streams = allStreams.filter { it != failedStream },
-            preferences = effectivePrefs.copy(maxQuality = lowerQuality),
+            streams = remaining,
+            preferences = if (lowerQuality != null) {
+                effectivePrefs.copy(maxQuality = lowerQuality)
+            } else {
+                effectivePrefs
+            },
             deviceCaps = deviceCaps,
         )
     }
 
-    // --- Private constraint checks ---
+    private fun streamKey(stream: ParsedStream): String {
+        return stream.infoHash
+            ?: stream.directUrl
+            ?: "${stream.addonName}:${stream.title}"
+    }
+
+    private fun effectiveMaxHeight(preferences: StreamPreferences): Int? {
+        val cappedByMode = when (preferences.autoSourceMode) {
+            AutoSourceMode.MAX_720P -> StreamQuality.HD_720P
+            AutoSourceMode.MAX_1080P -> StreamQuality.FHD_1080P
+            AutoSourceMode.BALANCED,
+            AutoSourceMode.STABILITY_FIRST,
+            AutoSourceMode.QUALITY_FIRST
+            -> if (preferences.allow4kAuto) preferences.maxQuality else {
+                minQuality(preferences.maxQuality, StreamQuality.FHD_1080P)
+            }
+        }
+        return cappedByMode.heightPx
+    }
+
+    private fun minQuality(a: StreamQuality, b: StreamQuality): StreamQuality {
+        return if (a.rank > b.rank) a else b
+    }
 
     private fun passesQualityCap(stream: ParsedStream, maxHeight: Int?): Boolean {
-        if (maxHeight == null) return true // no cap (UNKNOWN quality = no limit)
+        if (maxHeight == null) return true
         val quality = StreamQuality.fromString(stream.quality)
-        val streamHeight = quality.heightPx
-        if (streamHeight == null) {
-            // Unknown height: deprioritize but allow if quality is UNKNOWN
-            // (these are already scored low by StreamScorer)
-            return quality == StreamQuality.UNKNOWN
-        }
+        val streamHeight = quality.heightPx ?: return true
         return streamHeight <= maxHeight
     }
 
     private fun passesCodecFilter(stream: ParsedStream, deviceCaps: DeviceCodecCaps): Boolean {
-        val codec = stream.codec
-        // Detect 10-bit from title metadata (common in torrent names)
-        val bitDepth = if (stream.title.uppercase().let {
-                it.contains("10BIT") || it.contains("10-BIT") || it.contains("10 BIT") ||
-                    it.contains("MAIN10") || it.contains("MAIN 10")
-            }
-        ) "10" else null
-
-        return deviceCaps.canDecode(codec, bitDepth, stream.title)
+        val titleUpper = stream.title.uppercase()
+        val bitDepth = if (
+            titleUpper.contains("10BIT") ||
+            titleUpper.contains("10-BIT") ||
+            titleUpper.contains("10 BIT") ||
+            titleUpper.contains("MAIN10") ||
+            titleUpper.contains("MAIN 10")
+        ) {
+            "10"
+        } else {
+            null
+        }
+        return deviceCaps.canDecode(stream.codec, bitDepth, stream.title)
     }
 
     private fun passesH264OnlyFilter(stream: ParsedStream, h264Only: Boolean): Boolean {
         if (!h264Only) return true
-        val codec = stream.codec?.uppercase() ?: ""
-        // Allow H.264 or unknown codec (unknown = likely H.264 in practice)
+        val codec = stream.codec?.uppercase().orEmpty()
         return codec.isBlank() ||
             codec.contains("H.264") || codec.contains("H264") ||
             codec.contains("X264") || codec.contains("AVC")
     }
 
+    private fun modeQualityBias(stream: ParsedStream, preferences: StreamPreferences): Int {
+        val quality = StreamQuality.fromString(stream.quality)
+        return when (preferences.autoSourceMode) {
+            AutoSourceMode.STABILITY_FIRST -> when (quality) {
+                StreamQuality.HD_720P -> 8
+                StreamQuality.FHD_1080P -> 5
+                StreamQuality.SD_480P -> 2
+                StreamQuality.UHD_4K, StreamQuality.REMUX_4K -> -10
+                StreamQuality.UNKNOWN -> 0
+            }
+            AutoSourceMode.BALANCED -> when (quality) {
+                StreamQuality.FHD_1080P -> 6
+                StreamQuality.HD_720P -> 4
+                StreamQuality.SD_480P -> 1
+                StreamQuality.UHD_4K, StreamQuality.REMUX_4K -> if (preferences.allow4kAuto) 1 else -8
+                StreamQuality.UNKNOWN -> 0
+            }
+            AutoSourceMode.QUALITY_FIRST -> when (quality) {
+                StreamQuality.REMUX_4K, StreamQuality.UHD_4K -> if (preferences.allow4kAuto) 8 else -4
+                StreamQuality.FHD_1080P -> 5
+                StreamQuality.HD_720P -> 2
+                StreamQuality.SD_480P -> -2
+                StreamQuality.UNKNOWN -> 0
+            }
+            AutoSourceMode.MAX_1080P -> when (quality) {
+                StreamQuality.FHD_1080P -> 8
+                StreamQuality.HD_720P -> 4
+                StreamQuality.SD_480P -> 2
+                StreamQuality.UHD_4K, StreamQuality.REMUX_4K -> -10
+                StreamQuality.UNKNOWN -> 0
+            }
+            AutoSourceMode.MAX_720P -> when (quality) {
+                StreamQuality.HD_720P -> 8
+                StreamQuality.SD_480P -> 4
+                StreamQuality.FHD_1080P, StreamQuality.UHD_4K, StreamQuality.REMUX_4K -> -12
+                StreamQuality.UNKNOWN -> 0
+            }
+        }
+    }
+
     companion object {
-        /** Resolution step-down sequence for codec error recovery. */
+        /** Resolution step-down sequence for error recovery. */
         val FALLBACK_QUALITY_STEPS = listOf(
             StreamQuality.FHD_1080P,
             StreamQuality.HD_720P,

@@ -18,7 +18,14 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
     companion object {
         private const val TAG = "AmazonBilling"
         private const val PRODUCT_ID = "com.torve.pro.lifetime"
+        private const val PRODUCT_ID_AMAZON = "com.torve.pro.lifetime.amazon"
+        private val PRODUCT_IDS = setOf(PRODUCT_ID, PRODUCT_ID_AMAZON)
     }
+
+    private data class PendingAmazonPurchase(
+        val receiptId: String,
+        val productId: String,
+    )
 
     private val _billingState = MutableStateFlow<BillingManager.BillingState>(
         BillingManager.BillingState.Disconnected,
@@ -27,14 +34,42 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
 
     private val _purchaseResult = MutableStateFlow<BillingManager.PurchaseResult?>(null)
     override val purchaseResult: StateFlow<BillingManager.PurchaseResult?> = _purchaseResult.asStateFlow()
+    private var cachedAmazonUserId: String? = null
+    private var selectedProductId: String = PRODUCT_ID
+    private var pendingAmazonPurchase: PendingAmazonPurchase? = null
+
+    private fun emitAmazonSuccess(receiptId: String, productId: String, amazonUserId: String) {
+        _purchaseResult.value = BillingManager.PurchaseResult.Success(
+            purchaseToken = receiptId,
+            store = BillingManager.Store.AMAZON_APPSTORE,
+            productId = productId,
+            amazonUserId = amazonUserId,
+        )
+    }
+
+    private fun queuePendingAmazonPurchase(receiptId: String, productId: String) {
+        pendingAmazonPurchase = PendingAmazonPurchase(
+            receiptId = receiptId,
+            productId = productId,
+        )
+        Log.d(
+            TAG,
+            "Queued pending Amazon purchase receiptIdPrefix=${receiptId.take(8)}..., productId=$productId while waiting for user data",
+        )
+        PurchasingService.getUserData()
+        _purchaseResult.value = BillingManager.PurchaseResult.Pending(
+            "Purchase received. Waiting for Amazon account details to finish verification.",
+        )
+    }
 
     override fun initialize() {
         _billingState.value = BillingManager.BillingState.Connecting
         try {
             PurchasingService.registerListener(context, this)
+            PurchasingService.getUserData()
             // Query product data to get the store-formatted price
-            PurchasingService.getProductData(setOf(PRODUCT_ID))
-            Log.d(TAG, "Registered listener and requested product data for $PRODUCT_ID")
+            PurchasingService.getProductData(PRODUCT_IDS)
+            Log.d(TAG, "Registered listener and requested product data for SKUs=$PRODUCT_IDS")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize Amazon IAP", e)
             _billingState.value = BillingManager.BillingState.Error(
@@ -50,8 +85,9 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
             return
         }
         try {
-            PurchasingService.purchase(PRODUCT_ID)
-            Log.d(TAG, "Launched purchase for $PRODUCT_ID")
+            PurchasingService.getUserData()
+            PurchasingService.purchase(selectedProductId)
+            Log.d(TAG, "Launched purchase for $selectedProductId")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to launch purchase", e)
             _purchaseResult.value = BillingManager.PurchaseResult.Error(
@@ -62,6 +98,7 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
 
     override fun queryExistingPurchases() {
         try {
+            PurchasingService.getUserData()
             PurchasingService.getPurchaseUpdates(true)
             Log.d(TAG, "Querying existing purchases")
         } catch (e: Exception) {
@@ -81,19 +118,47 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
     // ── PurchasingListener callbacks ──
 
     override fun onUserDataResponse(response: UserDataResponse) {
-        Log.d(TAG, "onUserDataResponse: ${response.requestStatus}")
+        when (response.requestStatus) {
+            UserDataResponse.RequestStatus.SUCCESSFUL -> {
+                val userId = response.userData?.userId?.takeIf { it.isNotBlank() }
+                cachedAmazonUserId = userId
+                Log.d(TAG, "onUserDataResponse: SUCCESSFUL hasUserId=${!userId.isNullOrBlank()}")
+                val pending = pendingAmazonPurchase
+                if (pending != null && !userId.isNullOrBlank()) {
+                    pendingAmazonPurchase = null
+                    Log.d(
+                        TAG,
+                        "Resolved pending purchase after user data: receiptIdPrefix=${pending.receiptId.take(8)}..., productId=${pending.productId}",
+                    )
+                    emitAmazonSuccess(
+                        receiptId = pending.receiptId,
+                        productId = pending.productId,
+                        amazonUserId = userId,
+                    )
+                }
+            }
+            else -> {
+                Log.w(TAG, "onUserDataResponse: ${response.requestStatus}")
+            }
+        }
     }
 
     override fun onProductDataResponse(response: ProductDataResponse) {
         when (response.requestStatus) {
             ProductDataResponse.RequestStatus.SUCCESSFUL -> {
-                val product = response.productData[PRODUCT_ID]
+                val selectedSku = when {
+                    response.productData.containsKey(PRODUCT_ID_AMAZON) -> PRODUCT_ID_AMAZON
+                    response.productData.containsKey(PRODUCT_ID) -> PRODUCT_ID
+                    else -> null
+                }
+                val product = selectedSku?.let { response.productData[it] }
                 if (product != null) {
+                    selectedProductId = selectedSku ?: PRODUCT_ID
                     val price = product.price
-                    Log.d(TAG, "Product loaded: $PRODUCT_ID -> price=$price")
+                    Log.d(TAG, "Product loaded: $selectedProductId -> price=$price")
                     _billingState.value = BillingManager.BillingState.Ready(formattedPrice = price)
                 } else {
-                    Log.w(TAG, "Product $PRODUCT_ID not found in response. Available: ${response.productData.keys}")
+                    Log.w(TAG, "No supported SKU found. Available: ${response.productData.keys}")
                     _billingState.value = BillingManager.BillingState.Ready(formattedPrice = null)
                 }
             }
@@ -114,17 +179,39 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
         when (response.requestStatus) {
             PurchaseResponse.RequestStatus.SUCCESSFUL -> {
                 val receipt = response.receipt
-                Log.d(TAG, "Purchase successful: receiptId=${receipt.receiptId}")
+                val amazonUserId = response.userData?.userId
+                    ?.takeIf { it.isNotBlank() }
+                    ?: cachedAmazonUserId
+                val productId = receipt.sku?.takeIf { it.isNotBlank() } ?: PRODUCT_ID
+                Log.d(
+                    TAG,
+                    "Purchase successful: receiptIdPrefix=${receipt.receiptId.take(8)}..., productId=$productId, hasUserId=${!amazonUserId.isNullOrBlank()}",
+                )
                 PurchasingService.notifyFulfillment(
                     receipt.receiptId,
                     com.amazon.device.iap.model.FulfillmentResult.FULFILLED,
                 )
-                _purchaseResult.value = BillingManager.PurchaseResult.Success(
-                    purchaseToken = receipt.receiptId,
-                )
+                if (amazonUserId.isNullOrBlank()) {
+                    Log.w(
+                        TAG,
+                        "Purchase succeeded but user ID unavailable; pending verification receiptIdPrefix=${receipt.receiptId.take(8)}...",
+                    )
+                    queuePendingAmazonPurchase(
+                        receiptId = receipt.receiptId,
+                        productId = productId,
+                    )
+                } else {
+                    emitAmazonSuccess(
+                        receiptId = receipt.receiptId,
+                        productId = productId,
+                        amazonUserId = amazonUserId,
+                    )
+                }
             }
             PurchaseResponse.RequestStatus.ALREADY_PURCHASED -> {
                 Log.d(TAG, "Already purchased")
+                PurchasingService.getUserData()
+                PurchasingService.getPurchaseUpdates(true)
                 _purchaseResult.value = BillingManager.PurchaseResult.AlreadyOwned
             }
             PurchaseResponse.RequestStatus.FAILED -> {
@@ -147,12 +234,32 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
     override fun onPurchaseUpdatesResponse(response: PurchaseUpdatesResponse) {
         when (response.requestStatus) {
             PurchaseUpdatesResponse.RequestStatus.SUCCESSFUL -> {
+                val amazonUserId = response.userData?.userId
+                    ?.takeIf { it.isNotBlank() }
+                    ?: cachedAmazonUserId
                 val lifetimeReceipt = response.receipts.firstOrNull { receipt ->
-                    receipt.sku == PRODUCT_ID && !receipt.isCanceled
+                    (receipt.sku == PRODUCT_ID || receipt.sku == PRODUCT_ID_AMAZON) && !receipt.isCanceled
                 }
                 if (lifetimeReceipt != null) {
-                    Log.d(TAG, "Found existing purchase: ${lifetimeReceipt.receiptId}")
-                    _purchaseResult.value = BillingManager.PurchaseResult.AlreadyOwned
+                    Log.d(
+                        TAG,
+                        "Found existing purchase: receiptIdPrefix=${lifetimeReceipt.receiptId.take(8)}..., hasUserId=${!amazonUserId.isNullOrBlank()}",
+                    )
+                    if (amazonUserId.isNullOrBlank()) {
+                        queuePendingAmazonPurchase(
+                            receiptId = lifetimeReceipt.receiptId,
+                            productId = lifetimeReceipt.sku?.takeIf { it.isNotBlank() } ?: PRODUCT_ID,
+                        )
+                    } else {
+                        emitAmazonSuccess(
+                            receiptId = lifetimeReceipt.receiptId,
+                            productId = lifetimeReceipt.sku?.takeIf { it.isNotBlank() } ?: PRODUCT_ID,
+                            amazonUserId = amazonUserId,
+                        )
+                    }
+                }
+                if (lifetimeReceipt == null) {
+                    Log.d(TAG, "No active Amazon lifetime purchase found in purchase updates")
                 }
                 if (response.hasMore()) {
                     PurchasingService.getPurchaseUpdates(false)
@@ -169,3 +276,4 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
         }
     }
 }
+

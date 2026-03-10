@@ -58,7 +58,19 @@ data class StreamPreferences(
     val hdrMode: HdrMode = HdrMode.AUTO,
     val maxFallbackAttempts: Int = 3,
     val autoPlayNextEpisodeEnabled: Boolean = true,
+    val autoSourceMode: AutoSourceMode = AutoSourceMode.BALANCED,
+    val allow4kAuto: Boolean = false,
+    val preferCompatibleCodecs: Boolean = true,
 )
+
+@Serializable
+enum class AutoSourceMode(val label: String) {
+    BALANCED("Auto (Balanced)"),
+    STABILITY_FIRST("Stability First"),
+    QUALITY_FIRST("Quality First"),
+    MAX_1080P("Max 1080p"),
+    MAX_720P("Max 720p"),
+}
 
 @Serializable
 enum class CodecPreference(val label: String) {

@@ -262,15 +262,6 @@ fun TvMediaRails(
             val railStartPad = if (browseLayout == TvBrowseLayout.INFO_PANEL) 24.dp else 40.dp
             val rowItemSpacing = 12.dp
             val rowVerticalFocusInset = 10.dp
-            val focusScrollOffsetPx = with(LocalDensity.current) {
-                if (browseLayout == TvBrowseLayout.INFO_PANEL) {
-                    // Keep previous card + focus-scale spill fully outside the left viewport edge.
-                    (railStartPad - rowItemSpacing + 8.dp).coerceAtLeast(0.dp).roundToPx()
-                } else {
-                    0
-                }
-            }
-            val rowCoroutineScope = rememberCoroutineScope()
             LazyColumn(
                 modifier = modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 32.dp),
@@ -343,11 +334,6 @@ fun TvMediaRails(
                                     focusMemory.lastFocusedIndexByRow[row.key] = itemIndex
                                     onContentFocused(focusRequester)
                                     onMediaFocused?.invoke(item)
-                                    // Pivot-scroll: push focused item to a safe inset so no left sliver leaks.
-                                    rowCoroutineScope.launch {
-                                        val scrollOffset = if (itemIndex > 0) focusScrollOffsetPx else 0
-                                        rowListState.animateScrollToItem(itemIndex, scrollOffset)
-                                    }
                                 }
 
                                 when (row.cardStyle) {

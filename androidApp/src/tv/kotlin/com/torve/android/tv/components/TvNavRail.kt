@@ -26,6 +26,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,7 +74,8 @@ fun TvNavRail(
     isExpanded: Boolean,
     railFocusRequester: FocusRequester,
     onRailFocusChanged: (Boolean) -> Unit,
-    onMoveToContent: () -> Unit,
+    onMoveToContent: (String) -> Unit,
+    onConfirm: (String) -> Unit,
     onNavigate: (String) -> Unit,
     navigateOnFocus: Boolean = false,
     modifier: Modifier = Modifier,
@@ -95,6 +97,9 @@ fun TvNavRail(
         return orderedRoutes[neighborIndex]
     }
 
+    // Use rememberUpdatedState so focusProperties.enter always reads
+    // the latest selectedRoute — even if the lambda identity doesn't change.
+    val currentSelectedRoute by rememberUpdatedState(selectedRoute)
     var railHasFocus by remember { mutableStateOf(false) }
 
     Column(
@@ -127,7 +132,7 @@ fun TvNavRail(
                 onRailFocusChanged(it.hasFocus)
             }
             .focusProperties {
-                enter = { itemRequesters[selectedRoute] ?: FocusRequester.Default }
+                enter = { itemRequesters[currentSelectedRoute] ?: FocusRequester.Default }
             }
             .focusGroup()
             .padding(horizontal = 8.dp, vertical = 24.dp),
@@ -158,17 +163,18 @@ fun TvNavRail(
                         down = downRequester
                         left = currentRequester
                     },
-                onMoveToContent = {
-                    onNavigate(destination.route)
-                    onMoveToContent()
+                onConfirm = {
+                    onConfirm(destination.route)
                 },
                 // Always consume Right and use explicit focus restore.
                 // Natural spatial focus traversal causes drift (e.g. Settings scrolls 4 rows).
                 onMoveRight = {
-                    if (!isSelected) onNavigate(destination.route)
-                    onMoveToContent()
+                    onConfirm(destination.route)
+                    onMoveToContent(destination.route)
                 },
-                onClick = { onNavigate(destination.route) },
+                onClick = {
+                    onConfirm(destination.route)
+                },
                 onItemFocused = {
                     if (navigateOnFocus) {
                         onNavigate(destination.route)
@@ -183,7 +189,7 @@ fun TvNavRail(
     var prevRailHasFocus by remember { mutableStateOf(false) }
     LaunchedEffect(railHasFocus) {
         if (railHasFocus && !prevRailHasFocus) {
-            val preferred = itemRequesters[selectedRoute]
+            val preferred = itemRequesters[currentSelectedRoute]
             val fallback = orderedRoutes.firstOrNull()?.let { itemRequesters[it] }
             runCatching {
                 when {
@@ -201,7 +207,7 @@ private fun TvNavRailItem(
     destination: TvTopDestination,
     selected: Boolean,
     expanded: Boolean,
-    onMoveToContent: () -> Unit,
+    onConfirm: () -> Unit,
     onMoveRight: () -> Unit,
     onClick: () -> Unit,
     onItemFocused: () -> Unit,
@@ -261,11 +267,17 @@ private fun TvNavRailItem(
                             true
                         }
                         Key.Enter, Key.DirectionCenter -> {
-                            onMoveToContent()
+                            onConfirm()
                             true
                         }
                         else -> false
                     }
+                } else if (event.type == KeyEventType.KeyUp &&
+                    (event.key == Key.Enter || event.key == Key.DirectionCenter)
+                ) {
+                    // Consume KeyUp for Enter/Center to prevent .clickable
+                    // from firing onClick on a different item after focus bounces.
+                    true
                 } else {
                     false
                 }

@@ -5,6 +5,7 @@ import com.torve.domain.model.EpgProgramme
 import com.torve.domain.model.ChannelCategory
 import com.torve.domain.model.Channel
 import com.torve.domain.model.ChannelPlaylist
+import com.torve.domain.player.LiveAudioOutputMode
 
 enum class ChannelsSubTab { LIVE, FAVOURITES }
 
@@ -85,4 +86,5 @@ data class ChannelsUiState(
     // Audio output (TV live player)
     val audioPassthroughEnabled: Boolean = false,
     val preferSurroundCodecs: Boolean = true,
+    val liveAudioOutputMode: LiveAudioOutputMode = LiveAudioOutputMode.PREFER_COMPATIBLE,
 )

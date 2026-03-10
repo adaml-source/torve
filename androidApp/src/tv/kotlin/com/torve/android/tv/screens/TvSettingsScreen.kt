@@ -69,6 +69,7 @@ import com.torve.android.ui.settings.POPULAR_ADDONS
 import com.torve.data.ai.AiProvider
 import com.torve.domain.model.DebridServiceType
 import com.torve.domain.model.StreamQuality
+import com.torve.domain.player.LiveAudioOutputMode
 import com.torve.presentation.addon.AddonViewModel
 import com.torve.presentation.channels.ChannelsViewModel
 import com.torve.presentation.mdblist.MdbListTab
@@ -76,6 +77,8 @@ import com.torve.presentation.mdblist.MdbListViewModel
 import com.torve.presentation.settings.AppLanguage
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.stats.StatsViewModel
+import com.torve.presentation.subscription.PurchaseStatusTone
+import com.torve.presentation.subscription.PurchaseVerificationState
 import com.torve.presentation.subscription.SubscriptionViewModel
 import com.torve.android.tv.TvNotificationQueue
 import com.torve.android.tv.NotificationType
@@ -123,7 +126,8 @@ fun TvSettingsScreen(
     onContentFocused: (FocusRequester) -> Unit,
     onNavigateToHomeLayout: () -> Unit = {},
     onNavigateToRatings: () -> Unit = {},
-    onNavigateToManageDevices: () -> Unit = {},
+    onNavigateToPairedDevices: () -> Unit = {},
+    onNavigateToActivatedDevices: () -> Unit = {},
     onRequestLifetimeUnlock: (TvEntitledFeature) -> Unit = {},
     isActive: Boolean = true,
     syncCoordinator: SyncCoordinator = koinInject(),
@@ -160,6 +164,23 @@ fun TvSettingsScreen(
     // Check if already logged in
     LaunchedEffect(Unit) {
         authUser = authClient.getCurrentUser()
+    }
+
+    LaunchedEffect(subscriptionState.error) {
+        subscriptionState.error?.let { message ->
+            TvNotificationQueue.post(message, NotificationType.ERROR)
+        }
+    }
+
+    LaunchedEffect(subscriptionState.purchaseStatus?.kind, subscriptionState.purchaseStatus?.message) {
+        subscriptionState.purchaseStatus?.let { status ->
+            val notificationType = when (status.tone) {
+                PurchaseStatusTone.SUCCESS -> NotificationType.SUCCESS
+                PurchaseStatusTone.ERROR -> NotificationType.ERROR
+                PurchaseStatusTone.INFO -> NotificationType.INFO
+            }
+            TvNotificationQueue.post("${status.title}. ${status.message}", notificationType)
+        }
     }
 
     // Inline text-input expansion states
@@ -203,7 +224,11 @@ fun TvSettingsScreen(
     var reduceMotionEnabled by remember(context) { mutableStateOf(isTvReduceMotionEnabled(context)) }
     val prefs = remember { context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE) }
     var setupMode by remember {
-        mutableStateOf(prefs.getString("setup_mode", null)?.let { TvSetupMode.valueOf(it) })
+        mutableStateOf<TvSetupMode?>(
+            prefs.getString("setup_mode", TvSetupMode.TV_ONLY.name)
+                ?.let { raw -> runCatching { TvSetupMode.valueOf(raw) }.getOrDefault(TvSetupMode.TV_ONLY) }
+                ?: TvSetupMode.TV_ONLY,
+        )
     }
     var selectedCategory by remember { mutableStateOf(TvSettingsCategory.ACCOUNT) }
     val accessTier = remember(subscriptionState.isPro) {
@@ -231,11 +256,8 @@ fun TvSettingsScreen(
     }
 
     LaunchedEffect(setupMode) {
-        if (setupMode != null) {
-            prefs.edit().putString("setup_mode", setupMode!!.name).apply()
-        } else {
-            prefs.edit().remove("setup_mode").apply()
-        }
+        val modeName = setupMode?.name ?: TvSetupMode.TV_ONLY.name
+        prefs.edit().putString("setup_mode", modeName).apply()
     }
 
     // LazyColumn state — allows scrolling to make items visible before focusing
@@ -354,7 +376,6 @@ fun TvSettingsScreen(
     val cloudServiceLabel = stringResource(R.string.tv_settings_cloud_service)
     val traktLabel = stringResource(R.string.tv_settings_trakt)
     val simklLabel = stringResource(R.string.tv_settings_simkl)
-    val phonePairingLabel = stringResource(R.string.tv_settings_phone_pairing)
     val languageLabel = stringResource(R.string.tv_settings_language)
     val versionLabel = stringResource(R.string.tv_settings_version)
     val regionLabel = stringResource(R.string.tv_settings_region)
@@ -606,7 +627,7 @@ fun TvSettingsScreen(
                             if (authUser != null) connectedLabel else needsSetupLabel
                         }
                         category == TvSettingsCategory.CONNECTIONS -> {
-                            if (hasPairedPhone || settingsState.debridConnected || settingsState.traktConnected || settingsState.simklConnected) {
+                            if (settingsState.debridConnected || settingsState.traktConnected || settingsState.simklConnected) {
                                 connectedLabel
                             } else {
                                 needsSetupLabel
@@ -712,7 +733,7 @@ fun TvSettingsScreen(
             item(key = "connections_locked_header") {
                 TvSectionHeader(
                     text = "Connections",
-                    description = "Pair devices, sync data, and link cloud services with Lifetime Access.",
+                    description = "Link cloud and metadata providers with Lifetime Access.",
                 )
             }
             item(key = "connections_locked_card") {
@@ -771,39 +792,124 @@ fun TvSettingsScreen(
         }
 
         if (selectedCategory == TvSettingsCategory.ACCOUNT) {
+            val pairedDeviceCount = syncState.devices.count { it.revokedAt == null && it.id != syncState.deviceId }
             item(key = "section_account_setup") {
                 TvSectionHeader(
-                    text = "Setup",
-                    description = "How this TV signs in and syncs with your account.",
+                    text = "Pairing & Sync",
+                    description = "Pair devices, manage ownership, and keep sync status visible.",
                 )
             }
             item(key = "setup_mode") {
-            val modeLabel = when (setupMode) {
-                TvSetupMode.ANDROID_PHONE -> stringResource(R.string.tv_settings_mode_android)
-                TvSetupMode.IOS_PHONE -> stringResource(R.string.tv_settings_mode_ios)
-                TvSetupMode.TV_ONLY -> stringResource(R.string.tv_settings_mode_tv_only)
-                null -> ""
+                Box(Modifier.onFocusChanged { isFirstItemFocused = it.hasFocus }) {
+                    TvSettingCard(
+                        title = "Pair Device",
+                        subtitle = pairingSubtitle,
+                        modifier = Modifier.fillMaxWidth().focusProperties {
+                            left = railFocusRequester
+                            up = categoryRequesters.getValue(TvSettingsCategory.ACCOUNT)
+                        },
+                        focusRequester = settingsContentRequester,
+                        onFocused = { onContentFocused(settingsContentRequester) },
+                        onClick = {
+                            runPremiumAction(TvEntitledFeature.PHONE_PAIRING) {
+                                syncCoordinator.startTvPairingFlow()
+                            }
+                        },
+                        rowType = TvSettingRowType.ACTION,
+                        premiumLocked = isLockedFeature(TvEntitledFeature.PHONE_PAIRING),
+                    )
+                }
             }
-            Box(Modifier.onFocusChanged { isFirstItemFocused = it.hasFocus }) {
+            item(key = "account_paired_devices") {
+                val requester = remember("account_paired_devices") { FocusRequester() }
+                val subtitle = if (pairedDeviceCount > 0) {
+                    val suffix = if (pairedDeviceCount == 1) "" else "s"
+                    "$pairedDeviceCount paired device$suffix on this account"
+                } else {
+                    "No paired devices yet"
+                }
                 TvSettingCard(
-                    title = stringResource(R.string.tv_settings_setup_mode),
-                    subtitle = "$modeLabel — ${stringResource(R.string.tv_settings_tap_to_change)}",
-                    modifier = Modifier.fillMaxWidth().focusProperties {
-                        left = railFocusRequester
-                        up = categoryRequesters.getValue(TvSettingsCategory.ACCOUNT)
-                    },
-                    focusRequester = settingsContentRequester,
-                    onFocused = { onContentFocused(settingsContentRequester) },
+                    title = "Paired Devices",
+                    subtitle = subtitle,
+                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                    focusRequester = requester,
+                    onFocused = { onContentFocused(requester) },
                     onClick = {
-                        runPremiumAction(TvEntitledFeature.ACCOUNT_SETUP) {
-                            setupMode = null
+                        runPremiumAction(TvEntitledFeature.DEVICE_LINKING) {
+                            onNavigateToPairedDevices()
                         }
                     },
-                    rowType = TvSettingRowType.SELECTOR,
-                    premiumLocked = isLockedFeature(TvEntitledFeature.ACCOUNT_SETUP),
+                    rowType = TvSettingRowType.NAVIGATION,
+                    premiumLocked = isLockedFeature(TvEntitledFeature.DEVICE_LINKING),
                 )
             }
-        }
+            item(key = "account_activated_devices") {
+                val requester = remember("account_activated_devices") { FocusRequester() }
+                TvSettingCard(
+                    title = "Activated Devices",
+                    subtitle = "Revoke access or remove devices using Lifetime Access.",
+                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                    focusRequester = requester,
+                    onFocused = { onContentFocused(requester) },
+                    onClick = {
+                        runPremiumAction(TvEntitledFeature.DEVICE_LINKING) {
+                            onNavigateToActivatedDevices()
+                        }
+                    },
+                    rowType = TvSettingRowType.NAVIGATION,
+                    premiumLocked = isLockedFeature(TvEntitledFeature.DEVICE_LINKING),
+                )
+            }
+            item(key = "account_sync_status") {
+                val requester = remember("account_sync_status") { FocusRequester() }
+                val syncSubtitle = when {
+                    pairedDeviceCount > 0 -> {
+                        val suffix = if (pairedDeviceCount == 1) "" else "s"
+                        "Paired - $pairedDeviceCount device$suffix"
+                    }
+                    syncState.isLoading -> "Preparing pairing..."
+                    else -> "Not paired yet"
+                }
+                TvSettingCard(
+                    title = "Sync Status",
+                    subtitle = syncSubtitle,
+                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                    focusRequester = requester,
+                    onFocused = { onContentFocused(requester) },
+                    onClick = {
+                        runPremiumAction(TvEntitledFeature.CROSS_DEVICE_SYNC) {
+                            if (pairedDeviceCount > 0) {
+                                syncCoordinator.refreshDevices()
+                                TvNotificationQueue.post("Sync status refreshed for paired devices.")
+                            } else {
+                                syncCoordinator.startTvPairingFlow()
+                            }
+                        }
+                    },
+                    rowType = TvSettingRowType.ACTION,
+                    premiumLocked = isLockedFeature(TvEntitledFeature.CROSS_DEVICE_SYNC),
+                )
+            }
+            syncState.error?.let { syncError ->
+                item(key = "account_sync_error") {
+                    val requester = remember("account_sync_error") { FocusRequester() }
+                    TvSettingCard(
+                        title = stringResource(R.string.tv_settings_sync_error),
+                        subtitle = syncError,
+                        modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                        focusRequester = requester,
+                        onFocused = { onContentFocused(requester) },
+                        onClick = {
+                            runPremiumAction(TvEntitledFeature.DEVICE_SYNC) {
+                                syncCoordinator.clearError()
+                            }
+                        },
+                        rowType = TvSettingRowType.ACTION,
+                        emphasis = TvSettingEmphasis.SECONDARY,
+                        premiumLocked = isLockedFeature(TvEntitledFeature.DEVICE_SYNC),
+                    )
+                }
+            }
 
         // Account section
         item(key = "section_account") {
@@ -846,6 +952,7 @@ fun TvSettingsScreen(
                                     authEmail = ""
                                     authPassword = ""
                                     confirmSignOut = false
+                                    subscriptionViewModel.loadSubscription()
                                     TvNotificationQueue.post("Logged out", NotificationType.INFO)
                                 }
                             } else {
@@ -915,6 +1022,7 @@ fun TvSettingsScreen(
                                     if (result.success) {
                                         authUser = result.user
                                         authPassword = ""
+                                        subscriptionViewModel.loadSubscription()
                                         val msg = if (authShowRegister) "Account created!" else "Logged in!"
                                         TvNotificationQueue.post(msg, NotificationType.SUCCESS)
                                     } else {
@@ -959,80 +1067,9 @@ fun TvSettingsScreen(
             }
         }
 
-        // Phone pairing (all modes)
-        }
-
-        if (selectedCategory == TvSettingsCategory.CONNECTIONS && !connectionsLocked) {
-            item(key = "section_connections_quick") {
-                TvSectionHeader(
-                    text = "Quick Connections",
-                    description = "Pair devices and start account linking.",
-                )
-            }
-            item(key = "pairing") {
-            val requester = pairingCardRequester
-            TvSettingCard(
-                title = phonePairingLabel,
-                subtitle = pairingSubtitle,
-                modifier = Modifier.fillMaxWidth().focusProperties {
-                    left = railFocusRequester
-                    up = categoryRequesters.getValue(TvSettingsCategory.CONNECTIONS)
-                },
-                focusRequester = requester,
-                onFocused = { onContentFocused(requester) },
-                onClick = {
-                    runPremiumAction(TvEntitledFeature.PHONE_PAIRING) {
-                        syncCoordinator.startTvPairingFlow()
-                    }
-                },
-                rowType = TvSettingRowType.ACTION,
-                premiumLocked = isLockedFeature(TvEntitledFeature.PHONE_PAIRING),
-            )
-        }
-
-        // Sync error (if any)
-        syncState.error?.let { syncError ->
-            item(key = "sync_error") {
-                val requester = remember("sync_error") { FocusRequester() }
-                TvSettingCard(
-                    title = stringResource(R.string.tv_settings_sync_error),
-                    subtitle = syncError,
-                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
-                    focusRequester = requester,
-                    onFocused = { onContentFocused(requester) },
-                    onClick = {
-                        runPremiumAction(TvEntitledFeature.DEVICE_SYNC) {
-                            syncCoordinator.clearError()
-                        }
-                    },
-                    rowType = TvSettingRowType.ACTION,
-                    emphasis = TvSettingEmphasis.SECONDARY,
-                    premiumLocked = isLockedFeature(TvEntitledFeature.DEVICE_SYNC),
-                )
-            }
-        }
-
-        // Manage Devices
-        item(key = "manage_devices") {
-            val requester = remember("manage_devices") { FocusRequester() }
-            TvSettingCard(
-                title = "Manage Devices",
-                subtitle = "View and manage your active Torve Pro devices",
-                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
-                focusRequester = requester,
-                onFocused = { onContentFocused(requester) },
-                onClick = {
-                    runPremiumAction(TvEntitledFeature.DEVICE_LINKING) {
-                        onNavigateToManageDevices()
-                    }
-                },
-                rowType = TvSettingRowType.NAVIGATION,
-                premiumLocked = isLockedFeature(TvEntitledFeature.DEVICE_LINKING),
-            )
         }
 
         // Subscription and restore
-        }
 
         if (selectedCategory == TvSettingsCategory.ACCOUNT) {
             item(key = "section_account_subscription") {
@@ -1046,20 +1083,50 @@ fun TvSettingsScreen(
             val billingManager: com.torve.android.billing.BillingManager = koinInject()
             val purchaseResult by billingManager.purchaseResult.collectAsState()
             val activity = LocalContext.current as? android.app.Activity
+            val isAmazonBuild = com.torve.android.BuildConfig.FLAVOR.contains("amazon", ignoreCase = true)
+            val purchasePlatform = if (isAmazonBuild) "amazon_fire_tv" else "google_play_tv"
 
             LaunchedEffect(Unit) { billingManager.initialize() }
 
             LaunchedEffect(purchaseResult) {
                 when (val result = purchaseResult) {
                     is com.torve.android.billing.BillingManager.PurchaseResult.Success -> {
-                        subscriptionViewModel.purchase(result.purchaseToken)
+                        when (result.store) {
+                            com.torve.android.billing.BillingManager.Store.AMAZON_APPSTORE -> {
+                                subscriptionViewModel.verifyAmazonPurchase(
+                                    receiptId = result.purchaseToken,
+                                    amazonUserId = result.amazonUserId.orEmpty(),
+                                    productId = result.productId.ifBlank { "com.torve.pro.lifetime" },
+                                    platform = purchasePlatform,
+                                )
+                            }
+                            com.torve.android.billing.BillingManager.Store.GOOGLE_PLAY -> {
+                                subscriptionViewModel.verifyGooglePurchase(
+                                    productId = "com.torve.pro.lifetime",
+                                    purchaseToken = result.purchaseToken,
+                                    platform = purchasePlatform,
+                                )
+                            }
+                        }
                         billingManager.clearPurchaseResult()
-                        TvNotificationQueue.post("Torve Pro activated!", NotificationType.SUCCESS)
+                        TvNotificationQueue.post("Purchase received. Verifying Lifetime Access...", NotificationType.INFO)
                     }
                     is com.torve.android.billing.BillingManager.PurchaseResult.AlreadyOwned -> {
-                        subscriptionViewModel.purchase("restored_purchase")
+                        if (isAmazonBuild) {
+                            subscriptionViewModel.restoreAmazonPurchases(platform = purchasePlatform)
+                        } else {
+                            subscriptionViewModel.restorePurchase("restored_purchase")
+                        }
                         billingManager.clearPurchaseResult()
-                        TvNotificationQueue.post("Purchase restored!", NotificationType.SUCCESS)
+                        TvNotificationQueue.post("Restore started. Checking Lifetime Access...", NotificationType.INFO)
+                    }
+                    is com.torve.android.billing.BillingManager.PurchaseResult.Pending -> {
+                        subscriptionViewModel.markAmazonPurchasePending(result.message)
+                        billingManager.clearPurchaseResult()
+                    }
+                    is com.torve.android.billing.BillingManager.PurchaseResult.Cancelled -> {
+                        TvNotificationQueue.post("Purchase cancelled.", NotificationType.INFO)
+                        billingManager.clearPurchaseResult()
                     }
                     is com.torve.android.billing.BillingManager.PurchaseResult.Error -> {
                         TvNotificationQueue.post(result.message, NotificationType.ERROR)
@@ -1070,30 +1137,63 @@ fun TvSettingsScreen(
             }
 
             val formattedPrice = billingManager.getFormattedPrice()
-            val subLabel = if (subscriptionState.isPro) {
+            val purchaseBlocked = subscriptionState.purchaseVerificationState == PurchaseVerificationState.PENDING
+            val subLabel = when {
+                subscriptionState.isPro ->
                 "Lifetime — Active"
-            } else if (formattedPrice != null) {
+                subscriptionState.purchaseStatus != null -> subscriptionState.purchaseStatus!!.title
+                formattedPrice != null ->
                 "Free — $formattedPrice for Lifetime"
-            } else {
+                else ->
                 "Free — Upgrade to Lifetime"
             }
 
             Column {
                 TvSettingCard(
-                    title = stringResource(R.string.tv_settings_subscription),
+                    title = "Lifetime Access",
                     subtitle = subLabel,
                     modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                     focusRequester = requester,
                     onFocused = { onContentFocused(requester) },
                     onClick = {
                         if (!subscriptionState.isPro) {
-                            activity?.let { billingManager.launchPurchase(it) }
+                            if (purchaseBlocked) {
+                                TvNotificationQueue.post(
+                                    subscriptionState.purchaseStatus?.message
+                                        ?: "Verification is already pending. Choose Retry Verification or Restore Purchase.",
+                                    NotificationType.INFO,
+                                )
+                            } else {
+                                activity?.let { billingManager.launchPurchase(it) }
+                            }
                         }
                     },
                     rowType = TvSettingRowType.ACTION,
                 )
 
+                subscriptionState.purchaseStatus?.let { status ->
+                    TvStatusSummaryCard(
+                        title = status.title,
+                        message = status.message,
+                        tone = status.tone,
+                    )
+                }
+
                 if (!subscriptionState.isPro) {
+                    if (subscriptionState.purchaseStatus?.showRetryVerification == true) {
+                        val retryRequester = remember("subscription_retry") { FocusRequester() }
+                        TvSettingCard(
+                            title = "Retry Verification",
+                            subtitle = "Retry Lifetime Access activation with the saved Amazon purchase details",
+                            modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                            focusRequester = retryRequester,
+                            onFocused = { onContentFocused(retryRequester) },
+                            onClick = { subscriptionViewModel.retryPendingAmazonVerification() },
+                            rowType = TvSettingRowType.ACTION,
+                            emphasis = TvSettingEmphasis.SECONDARY,
+                        )
+                    }
+
                     val restoreRequester = remember("subscription_restore") { FocusRequester() }
                     TvSettingCard(
                         title = "Restore Purchase",
@@ -1101,7 +1201,14 @@ fun TvSettingsScreen(
                         modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                         focusRequester = restoreRequester,
                         onFocused = { onContentFocused(restoreRequester) },
-                        onClick = { billingManager.queryExistingPurchases() },
+                        onClick = {
+                            billingManager.queryExistingPurchases()
+                            if (isAmazonBuild) {
+                                subscriptionViewModel.restoreAmazonPurchases(platform = purchasePlatform)
+                            } else {
+                                subscriptionViewModel.restorePurchase("restored_purchase")
+                            }
+                        },
                         rowType = TvSettingRowType.ACTION,
                         emphasis = TvSettingEmphasis.SECONDARY,
                     )
@@ -1113,7 +1220,7 @@ fun TvSettingsScreen(
 
         when (setupMode) {
             TvSetupMode.ANDROID_PHONE, TvSetupMode.IOS_PHONE -> {
-                // Phone mode: read-only statuses + sync button
+                // Phone mode: read-only service status managed by paired phone
                 if (selectedCategory == TvSettingsCategory.CONNECTIONS && !connectionsLocked) {
                 item(key = "section_connections_services") {
                     TvSectionHeader(
@@ -1122,14 +1229,17 @@ fun TvSettingsScreen(
                     )
                 }
                 item(key = "cloud_service") {
-                    val requester = remember("cloud_service") { FocusRequester() }
+                    val requester = pairingCardRequester
                     val sub = if (settingsState.debridConnected) {
                         "${settingsState.debridProvider.label} — $connectedLabel"
                     } else notConnectedLabel
                     TvSettingCard(
                         title = cloudServiceLabel,
                         subtitle = sub,
-                        modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                        modifier = Modifier.fillMaxWidth().focusProperties {
+                            left = railFocusRequester
+                            up = categoryRequesters.getValue(TvSettingsCategory.CONNECTIONS)
+                        },
                         focusRequester = requester,
                         onFocused = { onContentFocused(requester) },
                         onClick = {
@@ -1237,43 +1347,6 @@ fun TvSettingsScreen(
                 }
                 }
 
-                if (selectedCategory == TvSettingsCategory.CONNECTIONS && !connectionsLocked) {
-                item(key = "section_connections_sync") {
-                    TvSectionHeader(text = "Sync")
-                }
-                item(key = "sync_from_phone") {
-                    val requester = remember("sync_from_phone") { FocusRequester() }
-                    TvSettingCard(
-                        title = stringResource(R.string.tv_settings_sync_from_phone),
-                        subtitle = if (hasPairedPhone) stringResource(R.string.tv_settings_sync_ready)
-                                   else stringResource(R.string.tv_settings_pair_first),
-                        modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
-                        focusRequester = requester,
-                        onFocused = { onContentFocused(requester) },
-                        onClick = {
-                            runPremiumAction(TvEntitledFeature.CROSS_DEVICE_SYNC) {
-                                if (hasPairedPhone) {
-                                    syncCoordinator.refreshDevices()
-                                    TvNotificationQueue.post("Waiting for sync\u2026 Open Torve on your phone and tap \"Sync Settings to TV\".")
-                                } else {
-                                    syncCoordinator.startTvPairingFlow()
-                                }
-                            }
-                        },
-                        rowType = TvSettingRowType.ACTION,
-                        premiumLocked = isLockedFeature(TvEntitledFeature.CROSS_DEVICE_SYNC),
-                    )
-                }
-
-                item(key = "sync_note") {
-                    Text(
-                        text = stringResource(R.string.tv_settings_sync_note),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Ash,
-                        modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
-                    )
-                }
-                }
             }
 
             TvSetupMode.TV_ONLY -> {
@@ -1288,7 +1361,7 @@ fun TvSettingsScreen(
                         )
                     }
                     item(key = "cloud_provider") {
-                    val requester = remember("cloud_provider") { FocusRequester() }
+                    val requester = pairingCardRequester
                     val providers = remember { DebridServiceType.entries.toList() }
                     val currentIdx = remember(settingsState.debridProvider) {
                         providers.indexOf(settingsState.debridProvider).coerceAtLeast(0)
@@ -1296,7 +1369,10 @@ fun TvSettingsScreen(
                     TvSettingCard(
                         title = stringResource(R.string.tv_settings_change_provider),
                         subtitle = settingsState.debridProvider.label,
-                        modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                        modifier = Modifier.fillMaxWidth().focusProperties {
+                            left = railFocusRequester
+                            up = categoryRequesters.getValue(TvSettingsCategory.CONNECTIONS)
+                        },
                         focusRequester = requester,
                         onFocused = { onContentFocused(requester) },
                         onClick = {
@@ -2572,6 +2648,31 @@ fun TvSettingsScreen(
             TvSectionHeader(text = "Playback Preferences")
         }
 
+        item(key = "playback_audio_mode") {
+            val requester = remember("playback_audio_mode") { FocusRequester() }
+            val modeLabel = when (channelsState.liveAudioOutputMode) {
+                LiveAudioOutputMode.AUTO -> stringResource(R.string.tv_live_audio_mode_auto)
+                LiveAudioOutputMode.PREFER_COMPATIBLE -> stringResource(R.string.tv_live_audio_mode_compatible)
+                LiveAudioOutputMode.FORCE_STEREO_PCM -> stringResource(R.string.tv_live_audio_mode_stereo)
+            }
+            TvSettingCard(
+                title = stringResource(R.string.tv_settings_live_audio_mode),
+                subtitle = modeLabel,
+                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                focusRequester = requester,
+                onFocused = { onContentFocused(requester) },
+                onClick = {
+                    val nextMode = when (channelsState.liveAudioOutputMode) {
+                        LiveAudioOutputMode.AUTO -> LiveAudioOutputMode.PREFER_COMPATIBLE
+                        LiveAudioOutputMode.PREFER_COMPATIBLE -> LiveAudioOutputMode.FORCE_STEREO_PCM
+                        LiveAudioOutputMode.FORCE_STEREO_PCM -> LiveAudioOutputMode.AUTO
+                    }
+                    channelsViewModel.setLiveAudioOutputMode(nextMode)
+                },
+                rowType = TvSettingRowType.SELECTOR,
+            )
+        }
+
         item(key = "playback_audio_passthrough") {
             val requester = remember("playback_audio_passthrough") { FocusRequester() }
             TvSettingCard(
@@ -3001,6 +3102,47 @@ fun TvSettingsScreen(
                 showMinQualityPicker = false
             },
             onDismiss = { showMinQualityPicker = false },
+        )
+    }
+}
+
+@Composable
+private fun TvStatusSummaryCard(
+    title: String,
+    message: String,
+    tone: PurchaseStatusTone,
+) {
+    val accent = when (tone) {
+        PurchaseStatusTone.INFO -> Amber
+        PurchaseStatusTone.SUCCESS -> Color(0xFF22C55E)
+        PurchaseStatusTone.ERROR -> Ruby
+    }
+    val background = when (tone) {
+        PurchaseStatusTone.INFO -> Graphite.copy(alpha = 0.45f)
+        PurchaseStatusTone.SUCCESS -> Color(0xFF153725).copy(alpha = 0.9f)
+        PurchaseStatusTone.ERROR -> Color(0xFF3C252B).copy(alpha = 0.9f)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 12.dp)
+            .border(2.dp, accent.copy(alpha = 0.55f), RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(16.dp))
+            .background(background)
+            .padding(horizontal = 22.dp, vertical = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            color = accent,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = Snow,
         )
     }
 }

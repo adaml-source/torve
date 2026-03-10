@@ -107,6 +107,7 @@ fun TvDetailsScreen(
         mediaItem: MediaItem,
         season: Int?,
         episode: Int?,
+        autoSourceSelection: Boolean,
     ) -> Unit,
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
@@ -247,6 +248,7 @@ fun TvDetailsScreen(
             media,
             state.streamContextSeason,
             state.streamContextEpisode,
+            state.autoPlayStream != null,
         )
         detailViewModel.clearResolvedStream()
     }

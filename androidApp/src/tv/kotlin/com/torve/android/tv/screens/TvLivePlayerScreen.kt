@@ -214,21 +214,30 @@ fun TvLivePlayerScreen(
     LaunchedEffect(currentChannel?.url) {
         currentChannel?.let { ch ->
             delay(ZAP_COALESCE_DELAY_MS)
+            (engine as? MPVPlayerEngine)?.setLivePlaybackContext(ch)
+            (engine as? ExoPlayerEngine)?.setLivePlaybackContext(ch)
             engine.play(ch.url)
             viewModel.recordChannelViewed(ch)
         }
     }
 
-    LaunchedEffect(useMpv, state.audioPassthroughEnabled, state.preferSurroundCodecs) {
+    LaunchedEffect(
+        useMpv,
+        state.audioPassthroughEnabled,
+        state.preferSurroundCodecs,
+        state.liveAudioOutputMode,
+    ) {
         if (useMpv) {
             (engine as? MPVPlayerEngine)?.setAudioOutputPreferences(
                 passthroughEnabled = state.audioPassthroughEnabled,
                 preferSurround = state.preferSurroundCodecs,
+                outputMode = state.liveAudioOutputMode,
             )
         } else {
             (engine as? ExoPlayerEngine)?.setAudioOutputPreferences(
                 passthroughEnabled = state.audioPassthroughEnabled,
                 preferSurround = state.preferSurroundCodecs,
+                outputMode = state.liveAudioOutputMode,
             )
         }
     }
@@ -699,6 +708,7 @@ fun TvLivePlayerScreen(
                 onSetXxxEnabled = { viewModel.setXxxEnabled(it) },
                 onSetAudioPassthroughEnabled = { viewModel.setAudioPassthroughEnabled(it) },
                 onSetPreferSurroundCodecs = { viewModel.setPreferSurroundCodecs(it) },
+                onSetLiveAudioOutputMode = { viewModel.setLiveAudioOutputMode(it) },
                 audioDelayMs = audioDelayMs,
                 onSetAudioDelay = { audioDelayMs = it },
                 audioTracks = audioTracks,

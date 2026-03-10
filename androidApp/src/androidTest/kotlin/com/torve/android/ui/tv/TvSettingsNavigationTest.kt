@@ -24,7 +24,7 @@ import org.junit.Test
  * Compose UI regression tests for the TV settings navigation bug.
  *
  * Validates that selecting the Settings rail item always shows Settings content,
- * and that the Manage Devices sub-destination never persists after rail re-selection.
+ * and that settings sub-destinations never persist after rail re-selection.
  *
  * Uses a minimal harness that mirrors the real TvRoot state architecture
  * (hoisted [TvSettingsDestination], reset on rail selection) without requiring
@@ -39,7 +39,7 @@ class TvSettingsNavigationTest {
      * Minimal harness that mirrors the real TvRoot settings navigation.
      * - [settingsDestination] is the single source of truth (hoisted).
      * - Selecting "Settings" from the simulated rail resets to MAIN.
-     * - Selecting "Manage Devices" inside settings changes to MANAGE_DEVICES.
+     * - Selecting a device-management row changes destination.
      */
     @Composable
     private fun SettingsNavHarness() {
@@ -67,13 +67,24 @@ class TvSettingsNavigationTest {
                             Column {
                                 Text("Settings Content")
                                 TextButton(onClick = {
-                                    settingsDestination = TvSettingsDestination.MANAGE_DEVICES
-                                }) { Text("Go to Manage Devices") }
+                                    settingsDestination = TvSettingsDestination.PAIRED_DEVICES
+                                }) { Text("Go to Paired Devices") }
+                                TextButton(onClick = {
+                                    settingsDestination = TvSettingsDestination.ACTIVATED_DEVICES
+                                }) { Text("Go to Activated Devices") }
                             }
                         }
-                        TvSettingsDestination.MANAGE_DEVICES -> {
+                        TvSettingsDestination.PAIRED_DEVICES -> {
                             Column {
-                                Text("Manage Devices Content")
+                                Text("Paired Devices Content")
+                                TextButton(onClick = {
+                                    settingsDestination = TvSettingsDestination.MAIN
+                                }) { Text("Back to Settings") }
+                            }
+                        }
+                        TvSettingsDestination.ACTIVATED_DEVICES -> {
+                            Column {
+                                Text("Activated Devices Content")
                                 TextButton(onClick = {
                                     settingsDestination = TvSettingsDestination.MAIN
                                 }) { Text("Back to Settings") }
@@ -92,34 +103,34 @@ class TvSettingsNavigationTest {
     }
 
     @Test
-    fun selectManageDevices_showsManageDevicesContent() {
+    fun selectPairedDevices_showsPairedDevicesContent() {
         composeRule.setContent { SettingsNavHarness() }
-        composeRule.onNodeWithText("Go to Manage Devices").performClick()
-        composeRule.onNodeWithText("Manage Devices Content").assertIsDisplayed()
+        composeRule.onNodeWithText("Go to Paired Devices").performClick()
+        composeRule.onNodeWithText("Paired Devices Content").assertIsDisplayed()
     }
 
     @Test
-    fun reselectSettingsRail_afterManageDevices_showsSettingsContent() {
+    fun reselectSettingsRail_afterPairedDevices_showsSettingsContent() {
         composeRule.setContent { SettingsNavHarness() }
 
-        // Navigate to Manage Devices
-        composeRule.onNodeWithText("Go to Manage Devices").performClick()
-        composeRule.onNodeWithText("Manage Devices Content").assertIsDisplayed()
+        // Navigate to Paired Devices
+        composeRule.onNodeWithText("Go to Paired Devices").performClick()
+        composeRule.onNodeWithText("Paired Devices Content").assertIsDisplayed()
 
         // Re-select Settings from rail (simulates Enter on Settings rail item)
         composeRule.onNodeWithText("Rail: Settings").performClick()
 
-        // Must show Settings content, NOT Manage Devices (the bug)
+        // Must show Settings content, NOT device sub-screen (the bug)
         composeRule.onNodeWithText("Settings Content").assertIsDisplayed()
     }
 
     @Test
-    fun switchToHome_thenBackToSettings_afterManageDevices_showsSettingsContent() {
+    fun switchToHome_thenBackToSettings_afterActivatedDevices_showsSettingsContent() {
         composeRule.setContent { SettingsNavHarness() }
 
-        // Navigate to Manage Devices
-        composeRule.onNodeWithText("Go to Manage Devices").performClick()
-        composeRule.onNodeWithText("Manage Devices Content").assertIsDisplayed()
+        // Navigate to Activated Devices
+        composeRule.onNodeWithText("Go to Activated Devices").performClick()
+        composeRule.onNodeWithText("Activated Devices Content").assertIsDisplayed()
 
         // Switch to Home tab
         composeRule.onNodeWithText("Rail: Home").performClick()
@@ -128,17 +139,17 @@ class TvSettingsNavigationTest {
         // Switch back to Settings from rail
         composeRule.onNodeWithText("Rail: Settings").performClick()
 
-        // Must show Settings content, NOT Manage Devices
+        // Must show Settings content, NOT device sub-screen
         composeRule.onNodeWithText("Settings Content").assertIsDisplayed()
     }
 
     @Test
-    fun backFromManageDevices_showsSettingsContent() {
+    fun backFromPairedDevices_showsSettingsContent() {
         composeRule.setContent { SettingsNavHarness() }
 
-        // Navigate to Manage Devices
-        composeRule.onNodeWithText("Go to Manage Devices").performClick()
-        composeRule.onNodeWithText("Manage Devices Content").assertIsDisplayed()
+        // Navigate to Paired Devices
+        composeRule.onNodeWithText("Go to Paired Devices").performClick()
+        composeRule.onNodeWithText("Paired Devices Content").assertIsDisplayed()
 
         // Press back within Manage Devices
         composeRule.onNodeWithText("Back to Settings").performClick()
@@ -152,9 +163,9 @@ class TvSettingsNavigationTest {
         composeRule.setContent { SettingsNavHarness() }
 
         repeat(3) {
-            // Go to Manage Devices
-            composeRule.onNodeWithText("Go to Manage Devices").performClick()
-            composeRule.onNodeWithText("Manage Devices Content").assertIsDisplayed()
+            // Go to Activated Devices
+            composeRule.onNodeWithText("Go to Activated Devices").performClick()
+            composeRule.onNodeWithText("Activated Devices Content").assertIsDisplayed()
 
             // Re-select Settings from rail
             composeRule.onNodeWithText("Rail: Settings").performClick()

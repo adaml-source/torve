@@ -119,7 +119,26 @@ val sharedModule = module {
     single { StremioAddonClient(get(), get()) }
 
     // Debrid
-    single { DebridClient(get(), get()) }
+    single {
+        val client = DebridClient(get(), get())
+        val secretStore: com.torve.domain.integrations.IntegrationSecretStore = get()
+        client.rdTokenRefresher = com.torve.data.debrid.RdTokenRefresher {
+            val refreshToken = secretStore.get(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN) ?: return@RdTokenRefresher null
+            val clientId = secretStore.get(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_RD_CLIENT_ID) ?: return@RdTokenRefresher null
+            val clientSecret = secretStore.get(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_RD_CLIENT_SECRET) ?: return@RdTokenRefresher null
+            try {
+                val tokens = client.rdRefreshAccessToken(refreshToken, clientId, clientSecret)
+                // Persist new tokens
+                secretStore.put(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID, tokens.accessToken)
+                secretStore.put(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN, tokens.refreshToken)
+                tokens.accessToken
+            } catch (e: Exception) {
+                println("TORVE_RD: token refresh failed: ${e.message}")
+                null
+            }
+        }
+        client
+    }
 
     // Library Overlay (Jellyfin + Plex → composite router)
     single { JellyfinLibraryOverlayService(get(), get(), get()) }

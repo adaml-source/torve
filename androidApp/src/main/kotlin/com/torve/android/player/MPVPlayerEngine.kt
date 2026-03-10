@@ -1,10 +1,14 @@
 package com.torve.android.player
 
 import android.content.Context
+import android.util.Log
+import com.torve.domain.model.Channel
+import com.torve.domain.player.LiveAudioOutputMode
 import com.torve.domain.player.PlayerEngine
 import com.torve.domain.player.PlayerListener
 import com.torve.domain.player.PlayerState
 import com.torve.domain.player.TrackDescription
+import java.util.Locale
 
 /**
  * PlayerEngine backed by libmpv via JNI.
@@ -21,6 +25,13 @@ class MPVPlayerEngine(
     private var initialized = false
     private var audioPassthroughEnabled = false
     private var preferSurroundCodecs = true
+    private var liveAudioOutputMode = LiveAudioOutputMode.PREFER_COMPATIBLE
+    private var userAudioPassthroughEnabled = false
+    private var userPreferSurroundCodecs = true
+    private var userLiveAudioOutputMode = LiveAudioOutputMode.PREFER_COMPATIBLE
+    private var currentPlaybackContext: LiveAudioPlaybackContext? = null
+    private var rememberedCompatibilityHint: LiveAudioCompatibilityHint? = null
+    private var rememberedTrackHintApplied = false
 
     fun initialize(): Boolean {
         if (!MPVLib.tryLoad()) return false
@@ -55,6 +66,8 @@ class MPVPlayerEngine(
 
     override fun play(url: String) {
         if (!initialized) return
+        rememberedTrackHintApplied = false
+        applyRememberedCompatibilityHintIfAvailable()
         _state = _state.copy(isIdle = false, isBuffering = true)
         notifyStateChanged()
         MPVLib.loadFile(url)
@@ -167,25 +180,66 @@ class MPVPlayerEngine(
     fun setAudioOutputPreferences(
         passthroughEnabled: Boolean,
         preferSurround: Boolean,
+        outputMode: LiveAudioOutputMode = userLiveAudioOutputMode,
     ) {
+        userAudioPassthroughEnabled = passthroughEnabled
+        userPreferSurroundCodecs = preferSurround
+        userLiveAudioOutputMode = outputMode
+        rememberedCompatibilityHint = null
+        rememberedTrackHintApplied = false
         audioPassthroughEnabled = passthroughEnabled
         preferSurroundCodecs = preferSurround
+        liveAudioOutputMode = outputMode
         applyAudioOutputPreferences()
+    }
+
+    fun setLivePlaybackContext(channel: Channel?) {
+        currentPlaybackContext = channel?.let(LiveAudioPlaybackContext::fromChannel)
+        rememberedCompatibilityHint = currentPlaybackContext?.let {
+            LiveAudioCompatibilityStore.resolveHint(context, it)
+        }
+        rememberedTrackHintApplied = false
     }
 
     private fun applyAudioOutputPreferences() {
         if (!initialized) return
-        if (audioPassthroughEnabled) {
-            MPVLib.setPropertyString("audio-spdif", "ac3,eac3,dts,dts-hd,truehd")
-            if (preferSurroundCodecs) {
-                MPVLib.setPropertyString("audio-channels", "auto-safe")
-            } else {
-                MPVLib.setPropertyString("audio-channels", "stereo")
-            }
-        } else {
-            MPVLib.setPropertyString("audio-spdif", "")
-            MPVLib.setPropertyString("audio-channels", if (preferSurroundCodecs) "auto-safe" else "stereo")
+        val forceStereo = liveAudioOutputMode == LiveAudioOutputMode.FORCE_STEREO_PCM
+        val preferCompatible = liveAudioOutputMode == LiveAudioOutputMode.PREFER_COMPATIBLE
+        val passthrough = audioPassthroughEnabled && !forceStereo
+        MPVLib.setPropertyString(
+            "audio-spdif",
+            if (passthrough) "ac3,eac3,dts,dts-hd,truehd" else "",
+        )
+
+        val channels = when {
+            forceStereo -> "stereo"
+            preferCompatible -> "stereo"
+            preferSurroundCodecs -> "auto-safe"
+            else -> "stereo"
         }
+        MPVLib.setPropertyString("audio-channels", channels)
+    }
+
+    private fun applyRememberedCompatibilityHintIfAvailable() {
+        rememberedCompatibilityHint = currentPlaybackContext?.let {
+            LiveAudioCompatibilityStore.resolveHint(context, it)
+        }
+        rememberedTrackHintApplied = false
+        val hint = rememberedCompatibilityHint
+        if (hint != null) {
+            Log.d(
+                TAG,
+                "Applying remembered live audio hint kind=${hint.recoveryKind} mode=${hint.outputMode} channel=${currentPlaybackContext?.displayName.orEmpty()}",
+            )
+            audioPassthroughEnabled = hint.passthroughEnabled
+            preferSurroundCodecs = hint.preferSurround
+            liveAudioOutputMode = hint.liveAudioOutputMode()
+        } else {
+            audioPassthroughEnabled = userAudioPassthroughEnabled
+            preferSurroundCodecs = userPreferSurroundCodecs
+            liveAudioOutputMode = userLiveAudioOutputMode
+        }
+        applyAudioOutputPreferences()
     }
 
     override fun release() {
@@ -228,6 +282,9 @@ class MPVPlayerEngine(
                 notifyStateChanged()
             }
             "track-list/count" -> {
+                val audioSignature = MPVLib.getTracks().buildAudioSignature()
+                invalidateRememberedHintIfTrackMetadataChanged(audioSignature)
+                applyRememberedCompatibleTrackIfNeeded()
                 notifyTracksChanged()
             }
         }
@@ -251,5 +308,83 @@ class MPVPlayerEngine(
         val audio = getAudioTracks()
         val subtitles = getSubtitleTracks()
         listeners.forEach { it.onTracksChanged(audio, subtitles) }
+    }
+
+    private fun invalidateRememberedHintIfTrackMetadataChanged(audioSignature: String) {
+        val playbackContext = currentPlaybackContext ?: return
+        val hint = rememberedCompatibilityHint ?: return
+        val storedSignature = hint.audioSignature ?: return
+        if (storedSignature == audioSignature) return
+
+        Log.i(TAG, "Invalidating remembered live audio hint for ${playbackContext.displayName} because mpv track metadata changed")
+        LiveAudioCompatibilityStore.invalidateHint(context, playbackContext)
+        rememberedCompatibilityHint = null
+        rememberedTrackHintApplied = false
+        audioPassthroughEnabled = userAudioPassthroughEnabled
+        preferSurroundCodecs = userPreferSurroundCodecs
+        liveAudioOutputMode = userLiveAudioOutputMode
+        applyAudioOutputPreferences()
+    }
+
+    private fun applyRememberedCompatibleTrackIfNeeded() {
+        val hint = rememberedCompatibilityHint ?: return
+        val preferredTrack = hint.preferredTrack ?: return
+        if (hint.recoveryKind != LiveAudioRecoveryKind.COMPATIBLE_TRACK || rememberedTrackHintApplied) {
+            return
+        }
+
+        val currentTracks = MPVLib.getTracks().filter { it.type == "audio" }
+        val selectedTrack = currentTracks.firstOrNull { it.isSelected }
+        if (selectedTrack != null && selectedTrack.matches(preferredTrack)) {
+            rememberedTrackHintApplied = true
+            return
+        }
+
+        val candidate = currentTracks.maxByOrNull { it.matchScore(preferredTrack) }
+            ?.takeIf { it.matchScore(preferredTrack) >= 3 }
+            ?: return
+
+        rememberedTrackHintApplied = true
+        Log.d(
+            TAG,
+            "Applying remembered compatible mpv audio track ${candidate.codec ?: "unknown"} for ${currentPlaybackContext?.displayName.orEmpty()}",
+        )
+        MPVLib.selectAudioTrack(candidate.id)
+    }
+
+    private fun List<MPVLib.Track>.buildAudioSignature(): String {
+        return filter { it.type == "audio" }
+            .map { track ->
+                listOf(
+                    track.codec.normalizeFormatKey().orEmpty(),
+                    track.language?.trim()?.lowercase(Locale.ROOT).orEmpty(),
+                    track.title?.trim()?.lowercase(Locale.ROOT).orEmpty(),
+                ).joinToString(separator = ":")
+            }
+            .sorted()
+            .joinToString(separator = "|")
+            .take(512)
+    }
+
+    private fun MPVLib.Track.matches(trackHint: LiveAudioTrackHint): Boolean {
+        return codec.normalizeFormatKey() == trackHint.formatKey &&
+            language.equals(trackHint.language, ignoreCase = true) &&
+            title.equals(trackHint.label, ignoreCase = true)
+    }
+
+    private fun MPVLib.Track.matchScore(trackHint: LiveAudioTrackHint): Int {
+        var score = 0
+        if (codec.normalizeFormatKey() == trackHint.formatKey) score += 6
+        if (language.equals(trackHint.language, ignoreCase = true)) score += 3
+        if (title.equals(trackHint.label, ignoreCase = true)) score += 2
+        return score
+    }
+
+    private fun String?.normalizeFormatKey(): String? {
+        return this?.trim()?.lowercase(Locale.ROOT)?.takeIf { it.isNotEmpty() }
+    }
+
+    private companion object {
+        private const val TAG = "MPVPlayerEngine"
     }
 }

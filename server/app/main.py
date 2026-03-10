@@ -1,4 +1,5 @@
 import secrets
+import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
@@ -79,6 +80,7 @@ from .device_policy import (
 settings = get_settings()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 registry = ConnectionRegistry()
+logger = logging.getLogger(__name__)
 
 
 class AppState:
@@ -916,12 +918,27 @@ async def verify_amazon_purchase(
     session: Annotated[AsyncSession, Depends(get_session)],
     token: Annotated[str, Depends(oauth2_scheme)],
 ) -> PurchaseVerifyResponse:
+    receipt_prefix = payload.receipt_id[:8]
+    logger.info(
+        "AMAZON_VERIFY: request user_id=%s platform=%s product_id=%s receipt_prefix=%s",
+        user.id,
+        payload.platform,
+        payload.product_id,
+        receipt_prefix,
+    )
     result = await amazon_verifier.verify(
         receipt_id=payload.receipt_id,
         amazon_user_id=payload.amazon_user_id,
         product_id=payload.product_id,
     )
     if not result.valid:
+        logger.warning(
+            "AMAZON_VERIFY: failed user_id=%s product_id=%s receipt_prefix=%s error=%s",
+            user.id,
+            payload.product_id,
+            receipt_prefix,
+            result.error,
+        )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Amazon verification failed: {result.error}")
 
     try:
@@ -933,6 +950,13 @@ async def verify_amazon_purchase(
             result=result,
         )
     except ValueError as e:
+        logger.warning(
+            "AMAZON_VERIFY: conflict user_id=%s product_id=%s receipt_prefix=%s detail=%s",
+            user.id,
+            payload.product_id,
+            receipt_prefix,
+            str(e),
+        )
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
 
     has_entitlement = resolve_premium_access(entitlements)
@@ -943,6 +967,13 @@ async def verify_amazon_purchase(
         device_premium = activation["activated"]
 
     await session.commit()
+    logger.info(
+        "AMAZON_VERIFY: success user_id=%s purchase_id=%s entitlement_count=%d premium_access=%s",
+        user.id,
+        purchase.id,
+        len(entitlements),
+        device_premium,
+    )
     return PurchaseVerifyResponse(
         status="verified",
         purchase=as_purchase_response(purchase),
@@ -963,6 +994,12 @@ async def restore_purchases(
     If none found, returns current entitlements (which may be empty).
     Device-aware: attempts device activation if entitlement exists.
     """
+    logger.info(
+        "PURCHASE_RESTORE: request user_id=%s store=%s platform=%s",
+        user.id,
+        payload.store,
+        payload.platform,
+    )
     entitlements = await get_user_entitlements(session, user.id)
     has_entitlement = resolve_premium_access(entitlements)
 
@@ -975,6 +1012,22 @@ async def restore_purchases(
         await session.commit()
     elif has_entitlement:
         device_premium = has_entitlement  # No device context, fall back to entitlement-only
+
+    if entitlements:
+        logger.info(
+            "PURCHASE_RESTORE: success user_id=%s store=%s entitlement_count=%d premium_access=%s",
+            user.id,
+            payload.store,
+            len(entitlements),
+            device_premium,
+        )
+    else:
+        logger.info(
+            "PURCHASE_RESTORE: empty user_id=%s store=%s platform=%s",
+            user.id,
+            payload.store,
+            payload.platform,
+        )
 
     return EntitlementStateResponse(
         user=as_user_response(user),
@@ -1005,8 +1058,6 @@ async def password_reset_request(
     Scaffold for password reset. In production, this sends an email with a reset token.
     For v1, we log the intent and return success regardless (to not leak email existence).
     """
-    import logging
-    logger = logging.getLogger(__name__)
     normalized_email = payload.email.strip().lower()
     result = await session.execute(select(User).where(User.email == normalized_email))
     user = result.scalar_one_or_none()

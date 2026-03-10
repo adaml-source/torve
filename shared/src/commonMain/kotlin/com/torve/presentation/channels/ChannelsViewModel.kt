@@ -8,6 +8,7 @@ import com.torve.domain.model.ChannelContentType
 import com.torve.domain.model.ChannelPlaylist
 import com.torve.domain.model.PlaylistType
 import com.torve.domain.model.canonicalEpgChannelKey
+import com.torve.domain.player.LiveAudioOutputMode
 import com.torve.data.channels.CatchupResolver
 import com.torve.domain.repository.ChannelRepository
 import com.torve.domain.repository.PreferencesRepository
@@ -28,6 +29,7 @@ import kotlinx.datetime.Clock
 
 private const val KEY_CHANNELS_AUDIO_PASSTHROUGH = "channels_audio_passthrough_enabled"
 private const val KEY_CHANNELS_PREFER_SURROUND = "channels_prefer_surround_codecs"
+private const val KEY_CHANNELS_AUDIO_OUTPUT_MODE = "channels_live_audio_output_mode"
 private const val EPG_DEBUG_LOG_ENABLED = false
 
 class ChannelsViewModel(
@@ -718,10 +720,14 @@ class ChannelsViewModel(
                 ?.toBooleanStrictOrNull() ?: false
             val preferSurround = prefsRepo.getString(KEY_CHANNELS_PREFER_SURROUND)
                 ?.toBooleanStrictOrNull() ?: true
+            val outputMode = LiveAudioOutputMode.fromStorage(
+                prefsRepo.getString(KEY_CHANNELS_AUDIO_OUTPUT_MODE),
+            )
             _state.update {
                 it.copy(
                     audioPassthroughEnabled = passthrough,
                     preferSurroundCodecs = preferSurround,
+                    liveAudioOutputMode = outputMode,
                 )
             }
         }
@@ -744,6 +750,11 @@ class ChannelsViewModel(
     fun setPreferSurroundCodecs(enabled: Boolean) {
         _state.update { it.copy(preferSurroundCodecs = enabled) }
         scope.launch { prefsRepo.setString(KEY_CHANNELS_PREFER_SURROUND, enabled.toString()) }
+    }
+
+    fun setLiveAudioOutputMode(mode: LiveAudioOutputMode) {
+        _state.update { it.copy(liveAudioOutputMode = mode) }
+        scope.launch { prefsRepo.setString(KEY_CHANNELS_AUDIO_OUTPUT_MODE, mode.storageValue) }
     }
 
     fun removePlaylist(playlistId: String) {

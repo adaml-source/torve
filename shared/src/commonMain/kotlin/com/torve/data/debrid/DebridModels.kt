@@ -90,11 +90,20 @@ data class RdAddMagnetResponse(
 )
 
 @Serializable
+data class RdTorrentFile(
+    val id: Int = 0,
+    val path: String = "",
+    val bytes: Long = 0,
+    val selected: Int = 0,
+)
+
+@Serializable
 data class RdTorrentInfoResponse(
     val id: String = "",
     val status: String = "",
     val links: List<String> = emptyList(),
     val filename: String = "",
+    val files: List<RdTorrentFile> = emptyList(),
 )
 
 @Serializable

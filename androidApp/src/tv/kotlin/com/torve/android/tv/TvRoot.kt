@@ -64,6 +64,7 @@ import com.torve.android.tv.screens.TvLibraryScreen
 import com.torve.android.tv.screens.TvMoviesScreen
 import com.torve.android.tv.screens.TvSearchScreen
 import com.torve.android.tv.screens.TvManageDevicesScreen
+import com.torve.android.tv.screens.TvPairedDevicesScreen
 import com.torve.android.tv.screens.TvSettingsScreen
 import com.torve.android.tv.screens.TvShowsScreen
 import com.torve.android.ui.theme.AmberSubtle
@@ -91,7 +92,11 @@ import kotlinx.serialization.json.Json
 import org.koin.compose.koinInject
 
 /** Sub-destinations within the Settings tab — single source of truth. */
-internal enum class TvSettingsDestination { MAIN, MANAGE_DEVICES }
+internal enum class TvSettingsDestination {
+    MAIN,
+    PAIRED_DEVICES,
+    ACTIVATED_DEVICES,
+}
 
 /**
  * Module-level in-memory cache so screen data survives recomposition
@@ -144,7 +149,13 @@ fun TvRoot() {
     val hideRailForIptv by TvIptvRailState.hideRail
 
     /* ── Tab state ─────────────────────────────────────────────────────────────────────── */
+    // Top-level destination state:
+    // - highlightedTopRoute: current rail hover/focus target
+    // - selectedTopRoute: previewed content shown in main pane
+    // - confirmedTopRoute: route explicitly confirmed by Center/Enter or Right
+    var highlightedTopRoute by rememberSaveable { mutableStateOf(TvRoutes.HOME) }
     var selectedTopRoute by rememberSaveable { mutableStateOf(TvRoutes.HOME) }
+    var confirmedTopRoute by rememberSaveable { mutableStateOf(TvRoutes.HOME) }
     var visitedTabs by remember { mutableStateOf(setOf(TvRoutes.HOME)) }
     var settingsDestination by remember { mutableStateOf(TvSettingsDestination.MAIN) }
     var pendingUnlockFeature by remember { mutableStateOf<TvEntitledFeature?>(null) }
@@ -252,6 +263,7 @@ fun TvRoot() {
     /* ── For focus restoration when returning from sub-routes ───────────────────────────── */
     var rootHasFocus by remember { mutableStateOf(false) }
     var focusRestoreTrigger by remember { mutableStateOf(0) }
+    var pendingContentEntryRoute by remember { mutableStateOf<String?>(null) }
 
     val heroRoutes = remember { setOf(TvRoutes.HOME, TvRoutes.MOVIES, TvRoutes.SHOWS, TvRoutes.LIBRARY) }
     val infoPanelRoutes = remember { setOf(TvRoutes.HOME, TvRoutes.MOVIES, TvRoutes.SHOWS) }
@@ -284,20 +296,32 @@ fun TvRoot() {
                     else -> 180L
                 },
             )
-            val activeRoute = if (isSubRouteActive) TvRoutes.DETAILS else selectedTopRoute
+            val activeRoute = pendingContentEntryRoute
+                ?: if (isSubRouteActive) {
+                    TvRoutes.DETAILS
+                } else if (!isRailFocused) {
+                    confirmedTopRoute
+                } else {
+                    selectedTopRoute
+                }
             val candidates = listOfNotNull(
                 lastFocusedContentByRoute[activeRoute],
                 firstContentFocusByRoute[activeRoute],
                 headerPrimaryActionRequester.takeIf { activeRoute in heroRoutes },
             )
             for (candidate in candidates) {
-                try { candidate.requestFocus(); return@LaunchedEffect } catch (_: Throwable) { }
+                try {
+                    candidate.requestFocus()
+                    pendingContentEntryRoute = null
+                    return@LaunchedEffect
+                } catch (_: Throwable) { }
             }
             // If we have no candidates at all yet, retry (tab still composing)
             if (candidates.isEmpty() && attempt < 2) continue
             break
         }
         // Rail is guaranteed fallback
+        pendingContentEntryRoute = null
         try { railFocusRequester.requestFocus() } catch (_: Throwable) { }
     }
 
@@ -328,6 +352,10 @@ fun TvRoot() {
     LaunchedEffect(selectedTopRoute) {
         visitedTabs = visitedTabs + selectedTopRoute
         focusedMediaItem = null
+        if (!isRailFocused) {
+            highlightedTopRoute = selectedTopRoute
+            confirmedTopRoute = selectedTopRoute
+        }
         // Only restore focus to content when NOT browsing the rail.
         // While rail has focus, selection changes should not force content focus.
         if (!isRailFocused) {
@@ -336,8 +364,16 @@ fun TvRoot() {
     }
 
     /* ── Back handler: non-HOME tab → go to HOME; on HOME → exit ───────────────────────── */
-    BackHandler(enabled = selectedTopRoute != TvRoutes.HOME && !isSubRouteActive && selectedTopRoute != TvRoutes.IPTV) {
+    BackHandler(
+        enabled = pendingUnlockFeature == null &&
+            selectedTopRoute != TvRoutes.HOME &&
+            !isSubRouteActive &&
+            selectedTopRoute != TvRoutes.IPTV,
+    ) {
         selectedTopRoute = TvRoutes.HOME
+        highlightedTopRoute = TvRoutes.HOME
+        confirmedTopRoute = TvRoutes.HOME
+        pendingContentEntryRoute = null
     }
 
     /* ── Sync listeners ────────────────────────────────────────────────────────────────── */
@@ -354,6 +390,9 @@ fun TvRoot() {
                     searchSeedQuery = event.query
                     TvNotificationQueue.post(stringResource_sync_search)
                     selectedTopRoute = TvRoutes.SEARCH
+                    highlightedTopRoute = TvRoutes.SEARCH
+                    confirmedTopRoute = TvRoutes.SEARCH
+                    pendingContentEntryRoute = null
                     if (isSubRouteActive) {
                         navController.popBackStack(TvRoutes.SUB_NAV_START, inclusive = false)
                     }
@@ -745,6 +784,9 @@ fun TvRoot() {
                             navController.popBackStack(TvRoutes.SUB_NAV_START, inclusive = false)
                         }
                         selectedTopRoute = TvRoutes.SEARCH
+                        highlightedTopRoute = TvRoutes.SEARCH
+                        confirmedTopRoute = TvRoutes.SEARCH
+                        pendingContentEntryRoute = null
                     }
 
                     TV_CONTEXT_ACTION_TRAILER -> {
@@ -795,20 +837,33 @@ fun TvRoot() {
             if (showRail) {
                 TvNavRail(
                     destinations = tvTopDestinations,
-                    selectedRoute = selectedTopRoute,
+                    selectedRoute = highlightedTopRoute,
                     isExpanded = isRailExpanded,
                     railFocusRequester = railFocusRequester,
-                    navigateOnFocus = false,
+                    navigateOnFocus = true,
                     onRailFocusChanged = { hasFocus ->
                         isRailFocused = hasFocus
                         isRailExpanded = hasFocus
+                        if (hasFocus) {
+                            highlightedTopRoute = selectedTopRoute
+                        }
                     },
-                    onMoveToContent = {
-                        val activeRoute = if (isSubRouteActive) TvRoutes.DETAILS else selectedTopRoute
+                    onMoveToContent = { route ->
+                        confirmedTopRoute = route
+                        highlightedTopRoute = route
+                        pendingContentEntryRoute = route
+                        if (selectedTopRoute != route) {
+                            selectedTopRoute = route
+                            visitedTabs = visitedTabs + route
+                        }
+                        // Only use per-route focus targets here. Do NOT use
+                        // headerPrimaryActionRequester — it's shared and may still
+                        // be attached to the *previous* tab's hero overlay (recomposition
+                        // hasn't happened yet). The focusRestoreTrigger LaunchedEffect
+                        // handles the delayed fallback after recomposition.
                         val candidates = listOfNotNull(
-                            lastFocusedContentByRoute[activeRoute],
-                            firstContentFocusByRoute[activeRoute],
-                            headerPrimaryActionRequester.takeIf { activeRoute in heroRoutes },
+                            lastFocusedContentByRoute[route],
+                            firstContentFocusByRoute[route],
                         )
                         val focusedNow = candidates.any { candidate ->
                             runCatching {
@@ -818,11 +873,28 @@ fun TvRoot() {
                         }
                         if (!focusedNow) {
                             focusRestoreTrigger++
+                        } else {
+                            pendingContentEntryRoute = null
                         }
                     },
-                    onNavigate = { route ->
-                        // Pop any active sub-route first
+                    onConfirm = { route ->
+                        confirmedTopRoute = route
+                        highlightedTopRoute = route
+                        pendingContentEntryRoute = null
                         if (isSubRouteActive) {
+                            navController.popBackStack(TvRoutes.SUB_NAV_START, inclusive = false)
+                        }
+                        visitedTabs = visitedTabs + route
+                        if (route == TvRoutes.SETTINGS) {
+                            settingsDestination = TvSettingsDestination.MAIN
+                        }
+                        selectedTopRoute = route
+                    },
+                    onNavigate = { route ->
+                        highlightedTopRoute = route
+                        pendingContentEntryRoute = null
+                        // Pop any active sub-route first
+                        if (isSubRouteActive && route != selectedTopRoute) {
                             navController.popBackStack(TvRoutes.SUB_NAV_START, inclusive = false)
                         }
                         // Add to visitedTabs synchronously so the tab renders
@@ -974,7 +1046,12 @@ fun TvRoot() {
                                                 launchSingleTop = true
                                             }
                                         },
-                                        onOpenEpgSettings = { selectedTopRoute = TvRoutes.SETTINGS },
+                                        onOpenEpgSettings = {
+                                            selectedTopRoute = TvRoutes.SETTINGS
+                                            highlightedTopRoute = TvRoutes.SETTINGS
+                                            confirmedTopRoute = TvRoutes.SETTINGS
+                                            pendingContentEntryRoute = null
+                                        },
                                         onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.IPTV] = it },
                                         onContentFocused = { lastFocusedContentByRoute[TvRoutes.IPTV] = it },
                                         shouldAutoFocus = false,
@@ -982,7 +1059,12 @@ fun TvRoot() {
                                         isRailFocused = isRailFocused,
                                         isRailExpanded = isRailExpanded,
                                         onCollapseRail = { isRailExpanded = false },
-                                        onNavigateUp = { selectedTopRoute = TvRoutes.HOME },
+                                        onNavigateUp = {
+                                            selectedTopRoute = TvRoutes.HOME
+                                            highlightedTopRoute = TvRoutes.HOME
+                                            confirmedTopRoute = TvRoutes.HOME
+                                            pendingContentEntryRoute = null
+                                        },
                                     )
 
                                     TvRoutes.SEARCH -> TvSearchScreen(
@@ -1012,7 +1094,12 @@ fun TvRoot() {
                                     )
 
                                     TvRoutes.SETTINGS -> when (settingsDestination) {
-                                        TvSettingsDestination.MANAGE_DEVICES -> {
+                                        TvSettingsDestination.PAIRED_DEVICES -> {
+                                            TvPairedDevicesScreen(
+                                                onBack = { settingsDestination = TvSettingsDestination.MAIN },
+                                            )
+                                        }
+                                        TvSettingsDestination.ACTIVATED_DEVICES -> {
                                             TvManageDevicesScreen(
                                                 onBack = { settingsDestination = TvSettingsDestination.MAIN },
                                             )
@@ -1024,7 +1111,12 @@ fun TvRoot() {
                                                 onContentFocused = { lastFocusedContentByRoute[TvRoutes.SETTINGS] = it },
                                                 onNavigateToHomeLayout = { navController.navigate(TvRoutes.HOME_LAYOUT) },
                                                 onNavigateToRatings = { navController.navigate(TvRoutes.RATINGS_SETTINGS) },
-                                                onNavigateToManageDevices = { settingsDestination = TvSettingsDestination.MANAGE_DEVICES },
+                                                onNavigateToPairedDevices = {
+                                                    settingsDestination = TvSettingsDestination.PAIRED_DEVICES
+                                                },
+                                                onNavigateToActivatedDevices = {
+                                                    settingsDestination = TvSettingsDestination.ACTIVATED_DEVICES
+                                                },
                                                 onRequestLifetimeUnlock = requestLifetimeUnlock,
                                                 isActive = isActiveTab,
                                             )
@@ -1058,11 +1150,17 @@ fun TvRoot() {
                             searchSeedQuery = query
                             TvNotificationQueue.post("Search: $query")
                             selectedTopRoute = TvRoutes.SEARCH
+                            highlightedTopRoute = TvRoutes.SEARCH
+                            confirmedTopRoute = TvRoutes.SEARCH
+                            pendingContentEntryRoute = null
                             navController.popBackStack(TvRoutes.SUB_NAV_START, inclusive = false)
                         },
                         onSettingsClick = {
                             navController.popBackStack(TvRoutes.SUB_NAV_START, inclusive = false)
                             selectedTopRoute = TvRoutes.SETTINGS
+                            highlightedTopRoute = TvRoutes.SETTINGS
+                            confirmedTopRoute = TvRoutes.SETTINGS
+                            pendingContentEntryRoute = null
                         },
                         onRequestLifetimeUnlock = requestLifetimeUnlock,
                         onFirstContentRequester = { req ->
@@ -1090,6 +1188,9 @@ fun TvRoot() {
                     navController.popBackStack(TvRoutes.SUB_NAV_START, inclusive = false)
                 }
                 selectedTopRoute = TvRoutes.SETTINGS
+                highlightedTopRoute = TvRoutes.SETTINGS
+                confirmedTopRoute = TvRoutes.SETTINGS
+                pendingContentEntryRoute = null
             },
             onDismiss = { pendingUnlockFeature = null },
         )

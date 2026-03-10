@@ -60,7 +60,7 @@ object TvRoutes {
             "&posterUrl={posterUrl}&backdropUrl={backdropUrl}" +
             "&seasonNumber={seasonNumber}&episodeNumber={episodeNumber}" +
             "&showTmdbId={showTmdbId}&showImdbId={showImdbId}&fallbackUrl={fallbackUrl}" +
-            "&startPositionMs={startPositionMs}"
+            "&startPositionMs={startPositionMs}&autoSourceSelection={autoSourceSelection}"
 
     fun player(
         url: String,
@@ -75,6 +75,7 @@ object TvRoutes {
         showTmdbId: Int? = null,
         showImdbId: String? = null,
         startPositionMs: Long = 0L,
+        autoSourceSelection: Boolean = false,
     ): String {
         return "tv_player?url=${Uri.encode(url)}" +
             "&title=${Uri.encode(title)}" +
@@ -87,7 +88,8 @@ object TvRoutes {
             "&showTmdbId=${showTmdbId ?: -1}" +
             "&showImdbId=${Uri.encode(showImdbId.orEmpty())}" +
             "&fallbackUrl=${Uri.encode(fallbackUrl)}" +
-            "&startPositionMs=$startPositionMs"
+            "&startPositionMs=$startPositionMs" +
+            "&autoSourceSelection=$autoSourceSelection"
     }
 }
 

@@ -18,9 +18,20 @@ import io.ktor.http.contentType
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 
+/**
+ * Callback to refresh an expired RD OAuth token.
+ * Returns the new access token, or null if refresh is not possible.
+ */
+class RdAuthException(message: String) : Exception(message)
+
+fun interface RdTokenRefresher {
+    suspend fun refresh(): String?
+}
+
 class DebridClient(
     private val httpClient: HttpClient,
     private val json: Json,
+    var rdTokenRefresher: RdTokenRefresher? = null,
 ) {
     companion object {
         const val RD_BASE = "https://api.real-debrid.com/rest/1.0"
@@ -118,12 +129,27 @@ class DebridClient(
         fileIdx: Int? = null,
     ): ResolvedStream {
         return when (provider) {
-            DebridServiceType.REAL_DEBRID -> rdResolveStream(apiKey, infoHash, fileIdx)
+            DebridServiceType.REAL_DEBRID -> {
+                try {
+                    rdResolveStream(apiKey, infoHash, fileIdx)
+                } catch (e: RdAuthException) {
+                    // Token expired — try refresh and retry once
+                    val newKey = rdTokenRefresher?.refresh()
+                    if (newKey != null) {
+                        println("TORVE_RD: token refreshed, retrying resolve")
+                        rdResolveStream(newKey, infoHash, fileIdx)
+                    } else {
+                        throw Exception("Real-Debrid token expired. Please re-authenticate in Settings.")
+                    }
+                }
+            }
             DebridServiceType.ALL_DEBRID -> adResolveStream(apiKey, infoHash, fileIdx)
             DebridServiceType.PREMIUMIZE -> pmResolveStream(apiKey, infoHash)
             DebridServiceType.TORBOX -> tbResolveStream(apiKey, infoHash, fileIdx)
         }
     }
+
+    /** Also wrap unrestrictUrl with the same refresh logic. */
 
     /**
      * Unrestrict a direct hoster URL.
@@ -301,12 +327,18 @@ class DebridClient(
     }
 
     private suspend fun rdAddMagnet(apiKey: String, magnet: String): String {
-        val resp: RdAddMagnetResponse = httpClient.submitForm(
+        val rawResp = httpClient.submitForm(
             url = "$RD_BASE/torrents/addMagnet",
             formParameters = Parameters.build { append("magnet", magnet) },
         ) {
             header("Authorization", "Bearer $apiKey")
-        }.body()
+        }
+        val bodyText = rawResp.bodyAsText()
+        println("TORVE_RD: addMagnet HTTP ${rawResp.status.value} body=$bodyText")
+        if (rawResp.status.value == 401) {
+            throw RdAuthException("Real-Debrid token expired (HTTP 401)")
+        }
+        val resp: RdAddMagnetResponse = json.decodeFromString(bodyText)
         return resp.id
     }
 
@@ -320,9 +352,14 @@ class DebridClient(
     }
 
     private suspend fun rdGetTorrentInfo(apiKey: String, torrentId: String): RdTorrentInfoResponse {
-        return httpClient.get("$RD_BASE/torrents/info/$torrentId") {
+        val rawResp = httpClient.get("$RD_BASE/torrents/info/$torrentId") {
             header("Authorization", "Bearer $apiKey")
-        }.body()
+        }
+        val bodyText = rawResp.bodyAsText()
+        if (torrentId.isBlank()) {
+            println("TORVE_RD: getTorrentInfo HTTP ${rawResp.status.value} (blank torrentId!) body=${bodyText.take(200)}")
+        }
+        return json.decodeFromString(bodyText)
     }
 
     private suspend fun rdUnrestrictLink(apiKey: String, link: String): UnrestrictedFile {
@@ -365,14 +402,36 @@ class DebridClient(
 
         // 1. Add magnet
         val torrentId = rdAddMagnet(apiKey, magnet)
+        println("TORVE_RD: addMagnet done torrentId=$torrentId fileIdx=$fileIdx")
 
-        // 2. Select files
-        rdSelectFiles(apiKey, torrentId, "all")
+        // 2. Get torrent info to find file IDs, then select the target file
+        val initialInfo = rdGetTorrentInfo(apiKey, torrentId)
+        println("TORVE_RD: initialInfo status=${initialInfo.status} files=${initialInfo.files.size} links=${initialInfo.links.size}")
+
+        // Select specific file if possible; fall back to "all" if no fileIdx
+        val filesToSelect = if (fileIdx != null && initialInfo.files.isNotEmpty()) {
+            // RD file IDs are 1-based; fileIdx from addons is typically 0-based
+            val rdFileId = initialInfo.files.getOrNull(fileIdx)?.id
+                ?: (fileIdx + 1) // Fallback: assume 1-based offset
+            rdFileId.toString()
+        } else if (initialInfo.files.isNotEmpty()) {
+            // No fileIdx — select the largest video file
+            val videoExts = setOf("mkv", "mp4", "avi", "mov", "wmv", "flv", "webm", "ts", "m4v")
+            val largestVideo = initialInfo.files
+                .filter { f -> videoExts.any { ext -> f.path.lowercase().endsWith(".$ext") } }
+                .maxByOrNull { it.bytes }
+            largestVideo?.id?.toString() ?: "all"
+        } else {
+            "all"
+        }
+        println("TORVE_RD: selectFiles=$filesToSelect")
+        rdSelectFiles(apiKey, torrentId, filesToSelect)
 
         // 3. Poll until ready
         var links: List<String> = emptyList()
         for (attempt in 0 until 30) {
             val info = rdGetTorrentInfo(apiKey, torrentId)
+            println("TORVE_RD: poll #$attempt status=${info.status} links=${info.links.size}")
             if (info.status == "downloaded" && info.links.isNotEmpty()) {
                 links = info.links
                 break
@@ -387,9 +446,9 @@ class DebridClient(
             throw Exception("Download timed out — no links available")
         }
 
-        // 4. Unrestrict the right link
-        val linkIndex = if (fileIdx != null && fileIdx < links.size) fileIdx else 0
-        val file = rdUnrestrictLink(apiKey, links[linkIndex])
+        // 4. Unrestrict the first link (we selected only the target file)
+        val file = rdUnrestrictLink(apiKey, links.first())
+        println("TORVE_RD: unrestricted filename=${file.filename} download=${file.download.take(80)}")
 
         // 5. Get transcode URLs
         val transcode = if (file.streamable) rdGetTranscodeUrls(apiKey, file.id) else null

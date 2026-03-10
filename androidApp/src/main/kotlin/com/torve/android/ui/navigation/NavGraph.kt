@@ -103,6 +103,8 @@ import com.torve.android.ui.watchlist.WatchlistScreen
 import com.torve.android.ui.setup.SetupWizardScreen
 import com.torve.android.ui.device.DeviceLimitReachedScreen
 import com.torve.android.ui.device.ManageDevicesScreen
+import com.torve.android.premium.PremiumAccess
+import com.torve.android.premium.PremiumFeature
 import com.torve.android.ui.subscription.PaywallScreen
 import com.torve.android.ui.tv.TvHomeScreen
 import com.torve.android.ui.theme.Amber
@@ -116,6 +118,7 @@ import com.torve.domain.repository.MetadataRepository
 import com.torve.presentation.catalog.CatalogViewModel
 import com.torve.presentation.setup.SetupWizardViewModel
 import com.torve.presentation.search.SearchViewModel
+import com.torve.presentation.subscription.SubscriptionViewModel
 import com.torve.presentation.watchlist.WatchlistViewModel
 import com.torve.presentation.home.HomeViewModel
 import org.koin.compose.koinInject
@@ -128,6 +131,10 @@ private fun NavHostController.navigateToDetail(item: com.torve.domain.model.Medi
     val id = item.tmdbId ?: item.id.toIntOrNull() ?: return
     val type = if (item.type == MediaType.SERIES) "tv" else "movie"
     navigate("detail/$type/$id")
+}
+
+private fun NavHostController.navigateToLifetimeUnlock(feature: PremiumFeature) {
+    navigate("paywall?feature=${Uri.encode(feature.name)}")
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -181,9 +188,20 @@ fun TorveNavGraph(
     val watchlistViewModel: WatchlistViewModel = koinInject()
     val homeViewModel: HomeViewModel = koinInject()
     val searchViewModel: SearchViewModel = koinInject()
+    val subscriptionViewModel: SubscriptionViewModel = koinInject()
     val watchlistState by watchlistViewModel.state.collectAsState()
+    val subscriptionState by subscriptionViewModel.state.collectAsState()
     var didInitialWatchlistSync by remember { mutableStateOf(false) }
     val dest = if (isTvMode) TV_HOME_ROUTE else MOBILE_HOME_ROUTE
+    val accessTier = remember(subscriptionState.isPro) {
+        PremiumAccess.tierFrom(subscriptionState.isPro)
+    }
+    val isLocked: (PremiumFeature) -> Boolean = remember(accessTier) {
+        { feature -> PremiumAccess.isPremiumLocked(feature, accessTier) }
+    }
+    val requestLifetimeUnlock: (PremiumFeature) -> Unit = remember(navController) {
+        { feature -> navController.navigateToLifetimeUnlock(feature) }
+    }
 
     // Hoist CatalogViewModels to NavGraph level so they survive detail navigation
     val metadataRepo: MetadataRepository = koinInject()
@@ -273,6 +291,8 @@ fun TorveNavGraph(
                     onPersonClick = { personId ->
                         navController.navigate("person/$personId")
                     },
+                    isLifetimeUnlocked = subscriptionState.isPro,
+                    onLockedFeatureClick = requestLifetimeUnlock,
                 )
             }
 
@@ -434,71 +454,251 @@ fun TorveNavGraph(
 
             // Watchlist tab — 3 sub-tabs: Watchlist, In Progress, History
             composable("watchlist_tab") {
-                WatchlistScreen(
-                    onMediaClick = { item -> navController.navigateToDetail(item) },
-                    onContinueWatchingClick = { progress ->
-                        val id = progress.mediaId.toIntOrNull() ?: return@WatchlistScreen
-                        val type = if (progress.mediaType == MediaType.SERIES) "tv" else "movie"
-                        navController.navigate("detail/$type/$id")
-                    },
-                    onHistoryItemClick = { entry ->
-                        val id = entry.mediaId.toIntOrNull() ?: return@WatchlistScreen
-                        navController.navigate("detail/${entry.mediaType}/$id")
-                    },
-                )
+                if (isLocked(PremiumFeature.WATCHLIST_EDIT)) {
+                    PaywallScreen(
+                        onBack = { navController.popBackStack() },
+                        onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        lockedFeature = PremiumFeature.WATCHLIST_EDIT,
+                    )
+                } else {
+                    WatchlistScreen(
+                        onMediaClick = { item -> navController.navigateToDetail(item) },
+                        onContinueWatchingClick = { progress ->
+                            val id = progress.mediaId.toIntOrNull() ?: return@WatchlistScreen
+                            val type = if (progress.mediaType == MediaType.SERIES) "tv" else "movie"
+                            navController.navigate("detail/$type/$id")
+                        },
+                        onHistoryItemClick = { entry ->
+                            val id = entry.mediaId.toIntOrNull() ?: return@WatchlistScreen
+                            navController.navigate("detail/${entry.mediaType}/$id")
+                        },
+                    )
+                }
             }
 
             // Profile tab — Settings screen with all navigation callbacks
             composable("profile_tab") {
                 SettingsScreen(
-                    onDownloadsClick = { navController.navigate("downloads") },
+                    isLifetimeUnlocked = subscriptionState.isPro,
+                    onLockedFeatureClick = requestLifetimeUnlock,
+                    onDownloadsClick = {
+                        if (isLocked(PremiumFeature.DOWNLOADS)) {
+                            requestLifetimeUnlock(PremiumFeature.DOWNLOADS)
+                        } else {
+                            navController.navigate("downloads")
+                        }
+                    },
                     onSubscriptionClick = { navController.navigate("paywall") },
-                    onProfilesClick = { navController.navigate("profiles") },
+                    onProfilesClick = {
+                        if (isLocked(PremiumFeature.ACCOUNT_SETUP)) {
+                            requestLifetimeUnlock(PremiumFeature.ACCOUNT_SETUP)
+                        } else {
+                            navController.navigate("profiles")
+                        }
+                    },
                     onCalendarClick = { navController.navigate("calendar") },
-                    onAccountClick = { navController.navigate("sync_account") },
-                    onDevicesClick = { navController.navigate("sync_devices") },
-                    onManageDevicesClick = { navController.navigate("manage_devices") },
-                    onLoginClick = { navController.navigate("login") },
+                    onAccountClick = {
+                        if (isLocked(PremiumFeature.ACCOUNT_SETUP)) {
+                            requestLifetimeUnlock(PremiumFeature.ACCOUNT_SETUP)
+                        } else {
+                            navController.navigate("sync_account")
+                        }
+                    },
+                    onDevicesClick = {
+                        if (isLocked(PremiumFeature.PHONE_PAIRING)) {
+                            requestLifetimeUnlock(PremiumFeature.PHONE_PAIRING)
+                        } else {
+                            navController.navigate("sync_devices")
+                        }
+                    },
+                    onManageDevicesClick = {
+                        if (isLocked(PremiumFeature.DEVICE_LINKING)) {
+                            requestLifetimeUnlock(PremiumFeature.DEVICE_LINKING)
+                        } else {
+                            navController.navigate("manage_devices")
+                        }
+                    },
+                    onLoginClick = {
+                        if (isLocked(PremiumFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD)) {
+                            requestLifetimeUnlock(PremiumFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD)
+                        } else {
+                            navController.navigate("login")
+                        }
+                    },
                     onPrivacyPolicyClick = { navController.navigate("legal/privacy") },
                     onTermsClick = { navController.navigate("legal/terms") },
                     onHelpClick = { navController.navigate("legal/help") },
-                    onStreamingServicesClick = { navController.navigate("streaming_services_settings") },
-                    onAddonCatalogClick = { navController.navigate("addon_catalog") },
-                    onRegexPatternsClick = { navController.navigate("regex_patterns") },
-                    onStreamGroupsClick = { navController.navigate("stream_groups") },
-                    onHomeLayoutClick = { navController.navigate("home_layout") },
-                    onMdbListClick = { navController.navigate("mdblist_settings") },
+                    onStreamingServicesClick = {
+                        if (isLocked(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT)) {
+                            requestLifetimeUnlock(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT)
+                        } else {
+                            navController.navigate("streaming_services_settings")
+                        }
+                    },
+                    onAddonCatalogClick = {
+                        if (isLocked(PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT)) {
+                            requestLifetimeUnlock(PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT)
+                        } else {
+                            navController.navigate("addon_catalog")
+                        }
+                    },
+                    onRegexPatternsClick = {
+                        if (isLocked(PremiumFeature.ADVANCED_CONNECTION_CONFIGURATION)) {
+                            requestLifetimeUnlock(PremiumFeature.ADVANCED_CONNECTION_CONFIGURATION)
+                        } else {
+                            navController.navigate("regex_patterns")
+                        }
+                    },
+                    onStreamGroupsClick = {
+                        if (isLocked(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT)) {
+                            requestLifetimeUnlock(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT)
+                        } else {
+                            navController.navigate("stream_groups")
+                        }
+                    },
+                    onHomeLayoutClick = {
+                        if (isLocked(PremiumFeature.SYNC_CUSTOM_LAYOUTS)) {
+                            requestLifetimeUnlock(PremiumFeature.SYNC_CUSTOM_LAYOUTS)
+                        } else {
+                            navController.navigate("home_layout")
+                        }
+                    },
+                    onMdbListClick = {
+                        if (isLocked(PremiumFeature.MDBLIST_SETUP)) {
+                            requestLifetimeUnlock(PremiumFeature.MDBLIST_SETUP)
+                        } else {
+                            navController.navigate("mdblist_settings")
+                        }
+                    },
                     onRatingSettingsClick = { navController.navigate("rating_settings") },
                     onCardStyleClick = { navController.navigate("card_style_settings") },
-                    onIntegrationsClick = { navController.navigate("integrations") },
-                    onDiagnosticsClick = { navController.navigate("diagnostics") },
+                    onIntegrationsClick = {
+                        if (isLocked(PremiumFeature.TRAKT_CONNECT)) {
+                            requestLifetimeUnlock(PremiumFeature.TRAKT_CONNECT)
+                        } else {
+                            navController.navigate("integrations")
+                        }
+                    },
+                    onDiagnosticsClick = {
+                        if (isLocked(PremiumFeature.DIAGNOSTICS)) {
+                            requestLifetimeUnlock(PremiumFeature.DIAGNOSTICS)
+                        } else {
+                            navController.navigate("diagnostics")
+                        }
+                    },
                 )
             }
 
             // Settings (accessible from Profile, not in bottom nav)
             composable("settings") {
                 SettingsScreen(
-                    onDownloadsClick = { navController.navigate("downloads") },
+                    isLifetimeUnlocked = subscriptionState.isPro,
+                    onLockedFeatureClick = requestLifetimeUnlock,
+                    onDownloadsClick = {
+                        if (isLocked(PremiumFeature.DOWNLOADS)) {
+                            requestLifetimeUnlock(PremiumFeature.DOWNLOADS)
+                        } else {
+                            navController.navigate("downloads")
+                        }
+                    },
                     onSubscriptionClick = { navController.navigate("paywall") },
-                    onProfilesClick = { navController.navigate("profiles") },
+                    onProfilesClick = {
+                        if (isLocked(PremiumFeature.ACCOUNT_SETUP)) {
+                            requestLifetimeUnlock(PremiumFeature.ACCOUNT_SETUP)
+                        } else {
+                            navController.navigate("profiles")
+                        }
+                    },
                     onCalendarClick = { navController.navigate("calendar") },
-                    onAccountClick = { navController.navigate("sync_account") },
-                    onDevicesClick = { navController.navigate("sync_devices") },
-                    onManageDevicesClick = { navController.navigate("manage_devices") },
-                    onLoginClick = { navController.navigate("login") },
+                    onAccountClick = {
+                        if (isLocked(PremiumFeature.ACCOUNT_SETUP)) {
+                            requestLifetimeUnlock(PremiumFeature.ACCOUNT_SETUP)
+                        } else {
+                            navController.navigate("sync_account")
+                        }
+                    },
+                    onDevicesClick = {
+                        if (isLocked(PremiumFeature.PHONE_PAIRING)) {
+                            requestLifetimeUnlock(PremiumFeature.PHONE_PAIRING)
+                        } else {
+                            navController.navigate("sync_devices")
+                        }
+                    },
+                    onManageDevicesClick = {
+                        if (isLocked(PremiumFeature.DEVICE_LINKING)) {
+                            requestLifetimeUnlock(PremiumFeature.DEVICE_LINKING)
+                        } else {
+                            navController.navigate("manage_devices")
+                        }
+                    },
+                    onLoginClick = {
+                        if (isLocked(PremiumFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD)) {
+                            requestLifetimeUnlock(PremiumFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD)
+                        } else {
+                            navController.navigate("login")
+                        }
+                    },
                     onPrivacyPolicyClick = { navController.navigate("legal/privacy") },
                     onTermsClick = { navController.navigate("legal/terms") },
                     onHelpClick = { navController.navigate("legal/help") },
-                    onStreamingServicesClick = { navController.navigate("streaming_services_settings") },
-                    onAddonCatalogClick = { navController.navigate("addon_catalog") },
-                    onRegexPatternsClick = { navController.navigate("regex_patterns") },
-                    onStreamGroupsClick = { navController.navigate("stream_groups") },
-                    onHomeLayoutClick = { navController.navigate("home_layout") },
-                    onMdbListClick = { navController.navigate("mdblist_settings") },
+                    onStreamingServicesClick = {
+                        if (isLocked(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT)) {
+                            requestLifetimeUnlock(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT)
+                        } else {
+                            navController.navigate("streaming_services_settings")
+                        }
+                    },
+                    onAddonCatalogClick = {
+                        if (isLocked(PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT)) {
+                            requestLifetimeUnlock(PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT)
+                        } else {
+                            navController.navigate("addon_catalog")
+                        }
+                    },
+                    onRegexPatternsClick = {
+                        if (isLocked(PremiumFeature.ADVANCED_CONNECTION_CONFIGURATION)) {
+                            requestLifetimeUnlock(PremiumFeature.ADVANCED_CONNECTION_CONFIGURATION)
+                        } else {
+                            navController.navigate("regex_patterns")
+                        }
+                    },
+                    onStreamGroupsClick = {
+                        if (isLocked(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT)) {
+                            requestLifetimeUnlock(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT)
+                        } else {
+                            navController.navigate("stream_groups")
+                        }
+                    },
+                    onHomeLayoutClick = {
+                        if (isLocked(PremiumFeature.SYNC_CUSTOM_LAYOUTS)) {
+                            requestLifetimeUnlock(PremiumFeature.SYNC_CUSTOM_LAYOUTS)
+                        } else {
+                            navController.navigate("home_layout")
+                        }
+                    },
+                    onMdbListClick = {
+                        if (isLocked(PremiumFeature.MDBLIST_SETUP)) {
+                            requestLifetimeUnlock(PremiumFeature.MDBLIST_SETUP)
+                        } else {
+                            navController.navigate("mdblist_settings")
+                        }
+                    },
                     onRatingSettingsClick = { navController.navigate("rating_settings") },
                     onCardStyleClick = { navController.navigate("card_style_settings") },
-                    onIntegrationsClick = { navController.navigate("integrations") },
-                    onDiagnosticsClick = { navController.navigate("diagnostics") },
+                    onIntegrationsClick = {
+                        if (isLocked(PremiumFeature.TRAKT_CONNECT)) {
+                            requestLifetimeUnlock(PremiumFeature.TRAKT_CONNECT)
+                        } else {
+                            navController.navigate("integrations")
+                        }
+                    },
+                    onDiagnosticsClick = {
+                        if (isLocked(PremiumFeature.DIAGNOSTICS)) {
+                            requestLifetimeUnlock(PremiumFeature.DIAGNOSTICS)
+                        } else {
+                            navController.navigate("diagnostics")
+                        }
+                    },
                 )
             }
 
@@ -515,6 +715,8 @@ fun TorveNavGraph(
                 DetailScreen(
                     type = detailType,
                     id = detailId,
+                    isLifetimeUnlocked = subscriptionState.isPro,
+                    onLockedFeatureClick = requestLifetimeUnlock,
                     onPlayClick = { url, fallbackUrl, season, episode, imdbId ->
                         navController.navigate(
                             "player?url=${Uri.encode(url)}" +
@@ -536,7 +738,11 @@ fun TorveNavGraph(
                         navController.navigate("person/$personId")
                     },
                     onSettingsClick = {
-                        navController.navigate("settings")
+                        if (isLocked(PremiumFeature.CLOUD_PROVIDER_SETUP)) {
+                            requestLifetimeUnlock(PremiumFeature.CLOUD_PROVIDER_SETUP)
+                        } else {
+                            navController.navigate("settings")
+                        }
                     },
                 )
             }
@@ -604,26 +810,34 @@ fun TorveNavGraph(
 
             // Downloads — Catalogue
             composable("downloads") {
-                DownloadCatalogueScreen(
-                    onBack = { navController.popBackStack() },
-                    onPlayOffline = { item ->
-                        navController.navigate(
-                            "player?url=${Uri.encode("file://${item.filePath}")}" +
-                                "&title=${Uri.encode(item.title)}" +
-                                "&mediaId=${item.mediaId}" +
-                                "&mediaType=${if (item.type == com.torve.domain.model.DownloadMediaType.MOVIE) "movie" else "series"}" +
-                                "&posterUrl=${Uri.encode(item.posterUrl ?: "")}" +
-                                "&backdropUrl=" +
-                                "&seasonNumber=${item.seasonNumber ?: -1}" +
-                                "&episodeNumber=${item.episodeNumber ?: -1}" +
-                                "&showTmdbId=-1" +
-                                "&showImdbId=",
-                        )
-                    },
-                    onShowDetail = { mediaId ->
-                        navController.navigate("download_show/$mediaId")
-                    },
-                )
+                if (isLocked(PremiumFeature.DOWNLOADS)) {
+                    PaywallScreen(
+                        onBack = { navController.popBackStack() },
+                        onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        lockedFeature = PremiumFeature.DOWNLOADS,
+                    )
+                } else {
+                    DownloadCatalogueScreen(
+                        onBack = { navController.popBackStack() },
+                        onPlayOffline = { item ->
+                            navController.navigate(
+                                "player?url=${Uri.encode("file://${item.filePath}")}" +
+                                    "&title=${Uri.encode(item.title)}" +
+                                    "&mediaId=${item.mediaId}" +
+                                    "&mediaType=${if (item.type == com.torve.domain.model.DownloadMediaType.MOVIE) "movie" else "series"}" +
+                                    "&posterUrl=${Uri.encode(item.posterUrl ?: "")}" +
+                                    "&backdropUrl=" +
+                                    "&seasonNumber=${item.seasonNumber ?: -1}" +
+                                    "&episodeNumber=${item.episodeNumber ?: -1}" +
+                                    "&showTmdbId=-1" +
+                                    "&showImdbId=",
+                            )
+                        },
+                        onShowDetail = { mediaId ->
+                            navController.navigate("download_show/$mediaId")
+                        },
+                    )
+                }
             }
 
             // Downloaded Show Detail
@@ -632,53 +846,107 @@ fun TorveNavGraph(
                 arguments = listOf(androidx.navigation.navArgument("mediaId") { type = androidx.navigation.NavType.StringType }),
             ) { backStackEntry ->
                 val mediaId = backStackEntry.arguments?.getString("mediaId") ?: return@composable
-                DownloadedShowDetailScreen(
-                    mediaId = mediaId,
-                    onBack = { navController.popBackStack() },
-                    onPlayEpisode = { item ->
-                        navController.navigate(
-                            "player?url=${Uri.encode("file://${item.filePath}")}" +
-                                "&title=${Uri.encode(item.title)}" +
-                                "&mediaId=${item.mediaId}" +
-                                "&mediaType=series" +
-                                "&posterUrl=${Uri.encode(item.posterUrl ?: "")}" +
-                                "&backdropUrl=" +
-                                "&seasonNumber=${item.seasonNumber ?: -1}" +
-                                "&episodeNumber=${item.episodeNumber ?: -1}" +
-                                "&showTmdbId=-1" +
-                                "&showImdbId=",
-                        )
-                    },
-                )
+                if (isLocked(PremiumFeature.DOWNLOADS)) {
+                    PaywallScreen(
+                        onBack = { navController.popBackStack() },
+                        onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        lockedFeature = PremiumFeature.DOWNLOADS,
+                    )
+                } else {
+                    DownloadedShowDetailScreen(
+                        mediaId = mediaId,
+                        onBack = { navController.popBackStack() },
+                        onPlayEpisode = { item ->
+                            navController.navigate(
+                                "player?url=${Uri.encode("file://${item.filePath}")}" +
+                                    "&title=${Uri.encode(item.title)}" +
+                                    "&mediaId=${item.mediaId}" +
+                                    "&mediaType=series" +
+                                    "&posterUrl=${Uri.encode(item.posterUrl ?: "")}" +
+                                    "&backdropUrl=" +
+                                    "&seasonNumber=${item.seasonNumber ?: -1}" +
+                                    "&episodeNumber=${item.episodeNumber ?: -1}" +
+                                    "&showTmdbId=-1" +
+                                    "&showImdbId=",
+                            )
+                        },
+                    )
+                }
             }
 
             // Profiles
             composable("profiles") {
-                ProfileScreen(onBack = { navController.popBackStack() })
+                if (isLocked(PremiumFeature.ACCOUNT_SETUP)) {
+                    PaywallScreen(
+                        onBack = { navController.popBackStack() },
+                        onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        lockedFeature = PremiumFeature.ACCOUNT_SETUP,
+                    )
+                } else {
+                    ProfileScreen(onBack = { navController.popBackStack() })
+                }
             }
 
             composable("sync_account") {
-                AccountScreen(
-                    onOpenDevices = { navController.navigate("sync_devices") },
-                    onBack = { navController.popBackStack() },
-                )
+                if (isLocked(PremiumFeature.ACCOUNT_SETUP)) {
+                    PaywallScreen(
+                        onBack = { navController.popBackStack() },
+                        onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        lockedFeature = PremiumFeature.ACCOUNT_SETUP,
+                    )
+                } else {
+                    AccountScreen(
+                        onOpenDevices = { navController.navigate("sync_devices") },
+                        onBack = { navController.popBackStack() },
+                    )
+                }
             }
 
             composable("sync_devices") {
-                DevicesScreen(onBack = { navController.popBackStack() })
+                if (isLocked(PremiumFeature.PHONE_PAIRING)) {
+                    PaywallScreen(
+                        onBack = { navController.popBackStack() },
+                        onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        lockedFeature = PremiumFeature.PHONE_PAIRING,
+                    )
+                } else {
+                    DevicesScreen(onBack = { navController.popBackStack() })
+                }
             }
 
             // Paywall
-            composable("paywall") {
+            composable(
+                route = "paywall?feature={feature}",
+                arguments = listOf(
+                    navArgument("feature") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    },
+                ),
+            ) { backStackEntry ->
+                val featureName = backStackEntry.arguments?.getString("feature")
+                val lockedFeature = featureName
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { runCatching { PremiumFeature.valueOf(it) }.getOrNull() }
                 PaywallScreen(
                     onBack = { navController.popBackStack() },
                     onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                    lockedFeature = lockedFeature,
                 )
             }
 
             // Device Governance
             composable("manage_devices") {
-                ManageDevicesScreen(onBack = { navController.popBackStack() })
+                if (isLocked(PremiumFeature.DEVICE_LINKING)) {
+                    PaywallScreen(
+                        onBack = { navController.popBackStack() },
+                        onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        lockedFeature = PremiumFeature.DEVICE_LINKING,
+                    )
+                } else {
+                    ManageDevicesScreen(onBack = { navController.popBackStack() })
+                }
             }
             composable("device_limit_reached") {
                 DeviceLimitReachedScreen(
@@ -689,10 +957,21 @@ fun TorveNavGraph(
 
             // Login
             composable("login") {
-                LoginScreen(
-                    onLoginSuccess = { navController.popBackStack() },
-                    onSkip = { navController.popBackStack() },
-                )
+                if (isLocked(PremiumFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD)) {
+                    PaywallScreen(
+                        onBack = { navController.popBackStack() },
+                        onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        lockedFeature = PremiumFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD,
+                    )
+                } else {
+                    LoginScreen(
+                        onLoginSuccess = {
+                            subscriptionViewModel.loadSubscription()
+                            navController.popBackStack()
+                        },
+                        onSkip = { navController.popBackStack() },
+                    )
+                }
             }
 
             // See All screen — paginated grid for any section
@@ -710,37 +989,77 @@ fun TorveNavGraph(
 
             // Streaming Services Settings
             composable("streaming_services_settings") {
-                StreamingServicesSettingsScreen(
-                    onBack = { navController.popBackStack() },
-                )
+                if (isLocked(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT)) {
+                    PaywallScreen(
+                        onBack = { navController.popBackStack() },
+                        onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        lockedFeature = PremiumFeature.CUSTOM_SOURCE_MANAGEMENT,
+                    )
+                } else {
+                    StreamingServicesSettingsScreen(
+                        onBack = { navController.popBackStack() },
+                    )
+                }
             }
 
             // Addon Catalog
             composable("addon_catalog") {
-                AddonCatalogScreen(
-                    onBack = { navController.popBackStack() },
-                )
+                if (isLocked(PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT)) {
+                    PaywallScreen(
+                        onBack = { navController.popBackStack() },
+                        onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        lockedFeature = PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT,
+                    )
+                } else {
+                    AddonCatalogScreen(
+                        onBack = { navController.popBackStack() },
+                    )
+                }
             }
 
             // Regex Patterns
             composable("regex_patterns") {
-                RegexPatternsScreen(
-                    onBack = { navController.popBackStack() },
-                )
+                if (isLocked(PremiumFeature.ADVANCED_CONNECTION_CONFIGURATION)) {
+                    PaywallScreen(
+                        onBack = { navController.popBackStack() },
+                        onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        lockedFeature = PremiumFeature.ADVANCED_CONNECTION_CONFIGURATION,
+                    )
+                } else {
+                    RegexPatternsScreen(
+                        onBack = { navController.popBackStack() },
+                    )
+                }
             }
 
             // Stream Groups
             composable("stream_groups") {
-                StreamGroupsScreen(
-                    onBack = { navController.popBackStack() },
-                )
+                if (isLocked(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT)) {
+                    PaywallScreen(
+                        onBack = { navController.popBackStack() },
+                        onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        lockedFeature = PremiumFeature.CUSTOM_SOURCE_MANAGEMENT,
+                    )
+                } else {
+                    StreamGroupsScreen(
+                        onBack = { navController.popBackStack() },
+                    )
+                }
             }
 
             // MDBList Settings
             composable("mdblist_settings") {
-                MdbListSettingsScreen(
-                    onBack = { navController.popBackStack() },
-                )
+                if (isLocked(PremiumFeature.MDBLIST_SETUP)) {
+                    PaywallScreen(
+                        onBack = { navController.popBackStack() },
+                        onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        lockedFeature = PremiumFeature.MDBLIST_SETUP,
+                    )
+                } else {
+                    MdbListSettingsScreen(
+                        onBack = { navController.popBackStack() },
+                    )
+                }
             }
 
             // Rating Settings
@@ -759,24 +1078,48 @@ fun TorveNavGraph(
 
             // Home Layout
             composable("home_layout") {
-                HomeLayoutScreen(
-                    onBack = { navController.popBackStack() },
-                    onAddCustomSection = { navController.navigate("custom_section_editor") },
-                    onEditCustomSection = { sectionId ->
-                        navController.navigate("custom_section_editor?sectionId=$sectionId")
-                    },
-                )
+                if (isLocked(PremiumFeature.SYNC_CUSTOM_LAYOUTS)) {
+                    PaywallScreen(
+                        onBack = { navController.popBackStack() },
+                        onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        lockedFeature = PremiumFeature.SYNC_CUSTOM_LAYOUTS,
+                    )
+                } else {
+                    HomeLayoutScreen(
+                        onBack = { navController.popBackStack() },
+                        onAddCustomSection = { navController.navigate("custom_section_editor") },
+                        onEditCustomSection = { sectionId ->
+                            navController.navigate("custom_section_editor?sectionId=$sectionId")
+                        },
+                    )
+                }
             }
 
             // Integrations
             composable("integrations") {
-                IntegrationsScreen(
-                    onBack = { navController.popBackStack() },
-                )
+                if (isLocked(PremiumFeature.TRAKT_CONNECT)) {
+                    PaywallScreen(
+                        onBack = { navController.popBackStack() },
+                        onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        lockedFeature = PremiumFeature.TRAKT_CONNECT,
+                    )
+                } else {
+                    IntegrationsScreen(
+                        onBack = { navController.popBackStack() },
+                    )
+                }
             }
 
             composable("diagnostics") {
-                DiagnosticsScreen(onBack = { navController.popBackStack() })
+                if (isLocked(PremiumFeature.DIAGNOSTICS)) {
+                    PaywallScreen(
+                        onBack = { navController.popBackStack() },
+                        onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        lockedFeature = PremiumFeature.DIAGNOSTICS,
+                    )
+                } else {
+                    DiagnosticsScreen(onBack = { navController.popBackStack() })
+                }
             }
 
             // Custom Section Editor
@@ -791,10 +1134,18 @@ fun TorveNavGraph(
                 ),
             ) { backStackEntry ->
                 val sectionId = backStackEntry.arguments?.getString("sectionId")
-                CustomSectionEditorScreen(
-                    sectionId = sectionId,
-                    onBack = { navController.popBackStack() },
-                )
+                if (isLocked(PremiumFeature.SYNC_CUSTOM_LAYOUTS)) {
+                    PaywallScreen(
+                        onBack = { navController.popBackStack() },
+                        onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        lockedFeature = PremiumFeature.SYNC_CUSTOM_LAYOUTS,
+                    )
+                } else {
+                    CustomSectionEditorScreen(
+                        sectionId = sectionId,
+                        onBack = { navController.popBackStack() },
+                    )
+                }
             }
 
             // Legal screens

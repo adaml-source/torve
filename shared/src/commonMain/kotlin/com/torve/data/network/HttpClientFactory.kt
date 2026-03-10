@@ -32,7 +32,7 @@ object HttpClientFactory {
         }
 
         install(Logging) {
-            level = LogLevel.NONE
+            level = LogLevel.HEADERS
         }
 
         defaultRequest {

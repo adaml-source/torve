@@ -284,13 +284,11 @@ class DetailViewModel(
                 }
 
                 if (preferences.autoPlayEnabled && !forceManualPick) {
-                    // Pre-filter streams by device codec caps to avoid codec errors.
-                    // On capable devices this is a no-op (HEVC/VP9/AV1 all pass).
-                    // On weak HEVC devices (emulators, low-end) this filters out
-                    // unsupported HEVC streams BEFORE they reach the player.
-                    val playable = streams.filter { s ->
-                        deviceCodecCaps.canDecode(s.codec, title = s.title)
-                    }
+                    val playable = streamSelector.rankPlayableVariants(
+                        streams = streams,
+                        preferences = preferences,
+                        deviceCaps = deviceCodecCaps,
+                    )
 
                     if (playable.isEmpty()) {
                         // No codec-compatible streams — show picker so user can choose
@@ -342,6 +340,8 @@ class DetailViewModel(
         }
 
         val stream = streams[attemptIndex]
+        val hostKey = com.torve.data.addon.StreamRuntimeTelemetry.keyForStream(stream)
+        com.torve.data.addon.StreamRuntimeTelemetry.recordPlayAttempt(hostKey)
         val settings = settingsProvider?.invoke()
         val provider = settings?.getDebridProvider() ?: DebridServiceType.REAL_DEBRID
         val apiKey = settings?.getDebridApiKey() ?: ""
@@ -368,20 +368,27 @@ class DetailViewModel(
         }
 
         try {
-            // Cached streams resolve in seconds; 30s is generous.
-            val resolved = withTimeoutOrNull(30_000L) {
+            println("TORVE_AUTORESOLVE: attempt=$attemptIndex hash=${stream.infoHash} provider=$provider keyLen=${apiKey.length}")
+            val resolved = withTimeoutOrNull(90_000L) {
                 streamRepo.resolveStream(stream, provider, apiKey)
             }
             if (resolved != null) {
+                println("TORVE_AUTORESOLVE: Success url=${resolved.url?.take(80)}")
+                com.torve.data.addon.StreamRuntimeTelemetry.recordStartupSuccess(hostKey, 0L)
                 _state.update {
                     it.copy(
                         resolvedStream = resolved,
                         isResolving = false,
                         showStreamPicker = false,
-                        autoPlayMessage = buildAutoPlayMessage(stream),
+                        autoPlayMessage = if (attemptIndex > 0) {
+                            "Switched to a more stable source"
+                        } else {
+                            buildAutoPlayMessage(stream)
+                        },
                     )
                 }
             } else {
+                com.torve.data.addon.StreamRuntimeTelemetry.recordStartupTimeout(hostKey, 90_000L)
                 _state.update {
                     it.copy(
                         autoPlayMessage = "Stream timed out, trying next...",
@@ -391,6 +398,7 @@ class DetailViewModel(
                 autoResolveStream(streams, attemptIndex + 1, preferences)
             }
         } catch (e: Exception) {
+            com.torve.data.addon.StreamRuntimeTelemetry.recordFatalError(hostKey)
             _state.update {
                 it.copy(
                     autoPlayMessage = "Stream failed, trying next...",
@@ -413,11 +421,13 @@ class DetailViewModel(
     fun resolveStream(stream: ParsedStream, provider: DebridServiceType, apiKey: String) {
         scope.launch {
             _state.update { it.copy(isResolving = true, resolveError = null) }
+            println("TORVE_RESOLVE: Starting resolve hash=${stream.infoHash} url=${stream.directUrl} provider=$provider keyLen=${apiKey.length}")
             try {
-                val resolved = withTimeoutOrNull(30_000L) {
+                val resolved = withTimeoutOrNull(90_000L) {
                     streamRepo.resolveStream(stream, provider, apiKey)
                 }
                 if (resolved != null) {
+                    println("TORVE_RESOLVE: Success url=${resolved.url?.take(80)}")
                     _state.update {
                         it.copy(
                             resolvedStream = resolved,
@@ -426,11 +436,13 @@ class DetailViewModel(
                         )
                     }
                 } else {
+                    println("TORVE_RESOLVE: Timed out after 90s")
                     _state.update {
                         it.copy(isResolving = false, resolveError = "Stream resolution timed out — try another stream")
                     }
                 }
             } catch (e: Exception) {
+                println("TORVE_RESOLVE: Exception ${e::class.simpleName}: ${e.message}")
                 _state.update {
                     it.copy(isResolving = false, resolveError = e.message ?: "Failed to resolve stream")
                 }
@@ -447,13 +459,19 @@ class DetailViewModel(
         val streams = _state.value.streams
         if (streams.isEmpty()) return null
 
-        // Find the next stream after the failed one in score order
-        val fallback = streams.firstOrNull { it != failedStream }
-            ?: return null
+        val preferences = settingsProvider?.invoke()?.buildStreamPreferences() ?: StreamPreferences()
+        val fallback = streamSelector.selectFallbackAfterCodecError(
+            failedStream = failedStream,
+            allStreams = streams,
+            preferences = preferences,
+            deviceCaps = deviceCodecCaps,
+        ) ?: return null
 
         val settings = settingsProvider?.invoke()
         val provider = settings?.getDebridProvider() ?: DebridServiceType.REAL_DEBRID
         val apiKey = settings?.getDebridApiKey() ?: ""
+        val hostKey = com.torve.data.addon.StreamRuntimeTelemetry.keyForStream(fallback)
+        com.torve.data.addon.StreamRuntimeTelemetry.recordPlayAttempt(hostKey)
 
         scope.launch {
             _state.update {
@@ -471,16 +489,18 @@ class DetailViewModel(
                         it.copy(
                             resolvedStream = resolved,
                             isResolving = false,
-                            autoPlayMessage = buildAutoPlayMessage(fallback),
+                            autoPlayMessage = "Switched to a more stable source",
                         )
                     }
                 } else {
+                    com.torve.data.addon.StreamRuntimeTelemetry.recordStartupTimeout(hostKey, 30_000L)
                     // Silently give up — show stream picker as last resort
                     _state.update {
                         it.copy(isResolving = false, showStreamPicker = true)
                     }
                 }
             } catch (_: Exception) {
+                com.torve.data.addon.StreamRuntimeTelemetry.recordFatalError(hostKey)
                 _state.update {
                     it.copy(isResolving = false, showStreamPicker = true)
                 }

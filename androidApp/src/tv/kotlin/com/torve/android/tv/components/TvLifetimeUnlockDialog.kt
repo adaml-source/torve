@@ -38,6 +38,8 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import com.torve.android.tv.premium.TvEntitledFeature
 import com.torve.android.tv.premium.TvPremiumAccess
 import com.torve.android.ui.theme.Amber
@@ -63,111 +65,121 @@ fun TvLifetimeUnlockDialog(
         runCatching { unlockRequester.requestFocus() }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Obsidian.copy(alpha = 0.9f))
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onDismiss,
-            ),
-        contentAlignment = Alignment.Center,
+    Popup(
+        alignment = Alignment.Center,
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(
+            focusable = true,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true,
+        ),
     ) {
-        Column(
+        Box(
             modifier = Modifier
-                .width(720.dp)
-                .clip(RoundedCornerShape(22.dp))
-                .background(Charcoal.copy(alpha = 0.98f))
-                .border(2.dp, Steel.copy(alpha = 0.5f), RoundedCornerShape(22.dp))
-                .padding(horizontal = 28.dp, vertical = 24.dp)
+                .fillMaxSize()
+                .background(Obsidian.copy(alpha = 0.9f))
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
-                    onClick = {},
+                    onClick = onDismiss,
                 ),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            contentAlignment = Alignment.Center,
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            Column(
+                modifier = Modifier
+                    .width(720.dp)
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(Charcoal.copy(alpha = 0.98f))
+                    .border(2.dp, Steel.copy(alpha = 0.5f), RoundedCornerShape(22.dp))
+                    .padding(horizontal = 28.dp, vertical = 24.dp)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {},
+                    ),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Box(
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(Amber.copy(alpha = 0.2f))
-                        .padding(8.dp),
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.Lock,
-                        contentDescription = null,
-                        tint = Amber,
-                    )
-                }
-                Text(
-                    text = TvPremiumAccess.UNLOCK_WITH_LIFETIME_LABEL,
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = Snow,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-
-            Text(
-                text = TvPremiumAccess.titleFor(feature),
-                style = MaterialTheme.typography.titleLarge,
-                color = Amber,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = TvPremiumAccess.unlockSummaryFor(feature),
-                style = MaterialTheme.typography.bodyLarge,
-                color = Silver,
-            )
-            Text(
-                text = TvPremiumAccess.LIFETIME_REQUIRED_LABEL,
-                style = MaterialTheme.typography.titleMedium,
-                color = Snow,
-                fontWeight = FontWeight.Medium,
-            )
-
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                TvPremiumAccess.lifetimeBenefits.forEach { benefit ->
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.Top,
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(Amber.copy(alpha = 0.2f))
+                            .padding(8.dp),
                     ) {
-                        Text(
-                            text = "-",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = Amber,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = benefit,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Silver,
+                        Icon(
+                            imageVector = Icons.Filled.Lock,
+                            contentDescription = null,
+                            tint = Amber,
                         )
                     }
+                    Text(
+                        text = TvPremiumAccess.UNLOCK_WITH_LIFETIME_LABEL,
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = Snow,
+                        fontWeight = FontWeight.SemiBold,
+                    )
                 }
-            }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                TvUnlockDialogButton(
-                    title = TvPremiumAccess.UNLOCK_WITH_LIFETIME_LABEL,
-                    modifier = Modifier
-                        .weight(1f)
-                        .focusRequester(unlockRequester),
-                    onClick = onUnlock,
+                Text(
+                    text = TvPremiumAccess.titleFor(feature),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = Amber,
+                    fontWeight = FontWeight.SemiBold,
                 )
-                TvUnlockDialogButton(
-                    title = "Not now",
-                    modifier = Modifier.weight(1f),
-                    secondary = true,
-                    onClick = onDismiss,
+                Text(
+                    text = TvPremiumAccess.unlockSummaryFor(feature),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Silver,
                 )
+                Text(
+                    text = TvPremiumAccess.LIFETIME_REQUIRED_LABEL,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Snow,
+                    fontWeight = FontWeight.Medium,
+                )
+
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TvPremiumAccess.lifetimeBenefits.forEach { benefit ->
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            Text(
+                                text = "-",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = Amber,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                text = benefit,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Silver,
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    TvUnlockDialogButton(
+                        title = TvPremiumAccess.UNLOCK_WITH_LIFETIME_LABEL,
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusRequester(unlockRequester),
+                        onClick = onUnlock,
+                    )
+                    TvUnlockDialogButton(
+                        title = "Not now",
+                        modifier = Modifier.weight(1f),
+                        secondary = true,
+                        onClick = onDismiss,
+                    )
+                }
             }
         }
     }

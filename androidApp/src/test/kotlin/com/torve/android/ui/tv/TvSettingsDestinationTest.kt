@@ -20,16 +20,15 @@ class TvSettingsDestinationTest {
     }
 
     @Test
-    fun `navigating to manage devices updates destination`() {
+    fun `navigating to paired devices updates destination`() {
         var destination = TvSettingsDestination.MAIN
-        // Simulate clicking "Manage Devices" inside TvSettingsScreen
-        destination = TvSettingsDestination.MANAGE_DEVICES
-        assertEquals(TvSettingsDestination.MANAGE_DEVICES, destination)
+        destination = TvSettingsDestination.PAIRED_DEVICES
+        assertEquals(TvSettingsDestination.PAIRED_DEVICES, destination)
     }
 
     @Test
-    fun `pressing back from manage devices returns to MAIN`() {
-        var destination = TvSettingsDestination.MANAGE_DEVICES
+    fun `pressing back from activated devices returns to MAIN`() {
+        var destination = TvSettingsDestination.ACTIVATED_DEVICES
         // Simulate onBack callback
         destination = TvSettingsDestination.MAIN
         assertEquals(TvSettingsDestination.MAIN, destination)
@@ -37,7 +36,7 @@ class TvSettingsDestinationTest {
 
     @Test
     fun `re-selecting settings from nav rail resets to MAIN`() {
-        var destination = TvSettingsDestination.MANAGE_DEVICES
+        var destination = TvSettingsDestination.PAIRED_DEVICES
         // Simulate what onNavigate does when route == SETTINGS:
         // settingsDestination = TvSettingsDestination.MAIN
         destination = TvSettingsDestination.MAIN
@@ -46,46 +45,47 @@ class TvSettingsDestinationTest {
 
     @Test
     fun `recomposition does not revert destination - state holds across reads`() {
-        var destination = TvSettingsDestination.MANAGE_DEVICES
+        var destination = TvSettingsDestination.ACTIVATED_DEVICES
         // Read the value multiple times (simulates recomposition reads)
         val read1 = destination
         val read2 = destination
         val read3 = destination
-        assertEquals(TvSettingsDestination.MANAGE_DEVICES, read1)
-        assertEquals(TvSettingsDestination.MANAGE_DEVICES, read2)
-        assertEquals(TvSettingsDestination.MANAGE_DEVICES, read3)
+        assertEquals(TvSettingsDestination.ACTIVATED_DEVICES, read1)
+        assertEquals(TvSettingsDestination.ACTIVATED_DEVICES, read2)
+        assertEquals(TvSettingsDestination.ACTIVATED_DEVICES, read3)
     }
 
     @Test
-    fun `full navigation cycle - settings to manage devices to rail reselect`() {
+    fun `full navigation cycle - settings to paired devices to rail reselect`() {
         // Start at MAIN
         var destination = TvSettingsDestination.MAIN
         assertEquals(TvSettingsDestination.MAIN, destination)
 
-        // Navigate to Manage Devices
-        destination = TvSettingsDestination.MANAGE_DEVICES
-        assertEquals(TvSettingsDestination.MANAGE_DEVICES, destination)
+        // Navigate to Paired Devices
+        destination = TvSettingsDestination.PAIRED_DEVICES
+        assertEquals(TvSettingsDestination.PAIRED_DEVICES, destination)
 
         // Simulate: user presses Left to rail, then focuses Settings rail item
-        // onNavigate(SETTINGS) fires → resets to MAIN
+        // onNavigate(SETTINGS) fires -> resets to MAIN
         destination = TvSettingsDestination.MAIN
         assertEquals(TvSettingsDestination.MAIN, destination)
 
-        // Navigate to Manage Devices again
-        destination = TvSettingsDestination.MANAGE_DEVICES
-        assertEquals(TvSettingsDestination.MANAGE_DEVICES, destination)
+        // Navigate to Activated Devices
+        destination = TvSettingsDestination.ACTIVATED_DEVICES
+        assertEquals(TvSettingsDestination.ACTIVATED_DEVICES, destination)
 
         // Simulate: user presses Enter on Settings rail item
-        // onMoveToContent → onNavigate(SETTINGS) → resets to MAIN
+        // onMoveToContent -> onNavigate(SETTINGS) -> resets to MAIN
         destination = TvSettingsDestination.MAIN
         assertEquals(TvSettingsDestination.MAIN, destination)
     }
 
     @Test
-    fun `enum values are exhaustive - only MAIN and MANAGE_DEVICES exist`() {
+    fun `enum values are exhaustive - MAIN plus paired and activated screens`() {
         val allValues = TvSettingsDestination.entries
-        assertEquals(2, allValues.size)
+        assertEquals(3, allValues.size)
         assertEquals(TvSettingsDestination.MAIN, allValues[0])
-        assertEquals(TvSettingsDestination.MANAGE_DEVICES, allValues[1])
+        assertEquals(TvSettingsDestination.PAIRED_DEVICES, allValues[1])
+        assertEquals(TvSettingsDestination.ACTIVATED_DEVICES, allValues[2])
     }
 }

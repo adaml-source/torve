@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -45,8 +46,13 @@ import androidx.compose.ui.unit.dp
 import com.torve.android.BuildConfig
 import com.torve.android.R
 import com.torve.android.billing.BillingManager
+import com.torve.android.premium.PremiumAccess
+import com.torve.android.premium.PremiumFeature
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Snow
+import com.torve.presentation.subscription.PurchaseStatusMessage
+import com.torve.presentation.subscription.PurchaseStatusTone
+import com.torve.presentation.subscription.PurchaseVerificationState
 import com.torve.presentation.subscription.SubscriptionViewModel
 import org.koin.compose.koinInject
 
@@ -55,6 +61,7 @@ import org.koin.compose.koinInject
 fun PaywallScreen(
     onBack: () -> Unit,
     onDeviceLimitReached: () -> Unit = {},
+    lockedFeature: PremiumFeature? = null,
     viewModel: SubscriptionViewModel = koinInject(),
     billingManager: BillingManager = koinInject(),
 ) {
@@ -62,7 +69,14 @@ fun PaywallScreen(
     val purchaseResult by billingManager.purchaseResult.collectAsState()
     val activity = LocalContext.current as? Activity
 
-    val platform = if (BuildConfig.FLAVOR.contains("tv")) "google_play_tv" else "google_play_mobile"
+    val isAmazonBuild = BuildConfig.FLAVOR.contains("amazon", ignoreCase = true)
+    val isTvBuild = BuildConfig.FLAVOR.contains("tv", ignoreCase = true)
+    val platform = when {
+        isAmazonBuild && isTvBuild -> "amazon_fire_tv"
+        isAmazonBuild -> "amazon_appstore_mobile"
+        isTvBuild -> "google_play_tv"
+        else -> "google_play_mobile"
+    }
 
     // Navigate to Device Limit Reached screen when device cap is hit after purchase
     LaunchedEffect(state.showDeviceLimitReached) {
@@ -75,18 +89,46 @@ fun PaywallScreen(
     LaunchedEffect(purchaseResult) {
         when (val result = purchaseResult) {
             is BillingManager.PurchaseResult.Success -> {
-                viewModel.verifyGooglePurchase(
-                    productId = "com.torve.pro.lifetime",
-                    purchaseToken = result.purchaseToken,
-                    platform = platform,
-                )
+                when (result.store) {
+                    BillingManager.Store.AMAZON_APPSTORE -> {
+                        viewModel.verifyAmazonPurchase(
+                            receiptId = result.purchaseToken,
+                            amazonUserId = result.amazonUserId.orEmpty(),
+                            productId = result.productId.ifBlank { "com.torve.pro.lifetime" },
+                            platform = if (isTvBuild) "amazon_fire_tv" else "amazon_appstore_mobile",
+                        )
+                    }
+                    BillingManager.Store.GOOGLE_PLAY -> {
+                        viewModel.verifyGooglePurchase(
+                            productId = "com.torve.pro.lifetime",
+                            purchaseToken = result.purchaseToken,
+                            platform = platform,
+                        )
+                    }
+                }
+                billingManager.clearPurchaseResult()
+            }
+            is BillingManager.PurchaseResult.Pending -> {
+                viewModel.markAmazonPurchasePending(result.message)
                 billingManager.clearPurchaseResult()
             }
             is BillingManager.PurchaseResult.AlreadyOwned -> {
-                viewModel.purchase("restored_purchase")
+                if (isAmazonBuild) {
+                    viewModel.restoreAmazonPurchases(platform = if (isTvBuild) "amazon_fire_tv" else "amazon_appstore_mobile")
+                } else {
+                    viewModel.restorePurchase("restored_purchase")
+                }
                 billingManager.clearPurchaseResult()
             }
-            else -> { /* Cancelled or Error — no action */ }
+            is BillingManager.PurchaseResult.Cancelled -> {
+                viewModel.setPurchaseError("Purchase cancelled.")
+                billingManager.clearPurchaseResult()
+            }
+            is BillingManager.PurchaseResult.Error -> {
+                viewModel.setPurchaseError(result.message)
+                billingManager.clearPurchaseResult()
+            }
+            null -> {}
         }
     }
 
@@ -106,7 +148,14 @@ fun PaywallScreen(
 
         if (state.isPro) {
             LifetimeActiveContent(
-                onRestore = { billingManager.queryExistingPurchases() },
+                onRestore = {
+                    billingManager.queryExistingPurchases()
+                    if (isAmazonBuild) {
+                        viewModel.restoreAmazonPurchases(
+                            platform = if (isTvBuild) "amazon_fire_tv" else "amazon_appstore_mobile",
+                        )
+                    }
+                },
             )
         } else {
             val billingState by billingManager.billingState.collectAsState()
@@ -120,10 +169,19 @@ fun PaywallScreen(
             }
             FreeTierContent(
                 state = state,
+                lockedFeature = lockedFeature,
                 formattedPrice = priceText,
                 purchaseEnabled = priceReady,
                 onPurchase = { activity?.let { billingManager.launchPurchase(it) } },
-                onRestore = { billingManager.queryExistingPurchases() },
+                onRetryVerification = { viewModel.retryPendingAmazonVerification() },
+                onRestore = {
+                    billingManager.queryExistingPurchases()
+                    if (isAmazonBuild) {
+                        viewModel.restoreAmazonPurchases(
+                            platform = if (isTvBuild) "amazon_fire_tv" else "amazon_appstore_mobile",
+                        )
+                    }
+                },
             )
         }
     }
@@ -216,11 +274,14 @@ private fun AllFeaturesChecked() {
 @Composable
 private fun FreeTierContent(
     state: com.torve.presentation.subscription.SubscriptionUiState,
+    lockedFeature: PremiumFeature? = null,
     formattedPrice: String? = null,
     purchaseEnabled: Boolean = true,
     onPurchase: () -> Unit,
+    onRetryVerification: () -> Unit,
     onRestore: () -> Unit,
 ) {
+    val purchaseBlocked = state.purchaseVerificationState == PurchaseVerificationState.PENDING
     Column(
         modifier = Modifier.padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -249,11 +310,56 @@ private fun FreeTierContent(
             textAlign = TextAlign.Center,
         )
 
+        lockedFeature?.let { feature ->
+            Spacer(Modifier.height(16.dp))
+            OutlinedCard(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Amber.copy(alpha = 0.5f)),
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = null,
+                            tint = Amber,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = PremiumAccess.LIFETIME_REQUIRED_LABEL,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Amber,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = PremiumAccess.titleFor(feature),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = Snow,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = PremiumAccess.unlockSummaryFor(feature),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
         Spacer(Modifier.height(24.dp))
 
         FeatureComparison()
 
         Spacer(Modifier.height(24.dp))
+
+        state.purchaseStatus?.let { status ->
+            PurchaseStatusCard(status = status)
+            Spacer(Modifier.height(16.dp))
+        }
 
         // Pricing card
         OutlinedCard(
@@ -292,7 +398,7 @@ private fun FreeTierContent(
         Button(
             onClick = onPurchase,
             modifier = Modifier.fillMaxWidth().height(56.dp),
-            enabled = purchaseEnabled && !state.isPurchasing,
+            enabled = purchaseEnabled && !state.isPurchasing && !purchaseBlocked,
             shape = RoundedCornerShape(16.dp),
         ) {
             if (state.isPurchasing) {
@@ -310,6 +416,12 @@ private fun FreeTierContent(
 
         Spacer(Modifier.height(12.dp))
 
+        if (state.purchaseStatus?.showRetryVerification == true) {
+            TextButton(onClick = onRetryVerification) {
+                Text("Retry Verification")
+            }
+        }
+
         TextButton(onClick = onRestore) {
             Text(stringResource(R.string.paywall_restore))
         }
@@ -324,6 +436,35 @@ private fun FreeTierContent(
         }
 
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun PurchaseStatusCard(status: PurchaseStatusMessage) {
+    val accent = when (status.tone) {
+        PurchaseStatusTone.INFO -> Amber
+        PurchaseStatusTone.SUCCESS -> Color(0xFF22C55E)
+        PurchaseStatusTone.ERROR -> MaterialTheme.colorScheme.error
+    }
+    OutlinedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.5f)),
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Text(
+                text = status.title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = accent,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = status.message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 

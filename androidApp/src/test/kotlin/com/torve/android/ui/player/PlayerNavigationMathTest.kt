@@ -20,4 +20,62 @@ class PlayerNavigationMathTest {
         assertEquals(4L, PlayerNavigationMath.seekAccelerationMultiplier(6))
         assertEquals(8L, PlayerNavigationMath.seekAccelerationMultiplier(10))
     }
+
+    @Test
+    fun progressiveSkipStepMs_matchesTvSequence() {
+        assertEquals(15_000L, PlayerNavigationMath.progressiveSkipStepMs(0))
+        assertEquals(30_000L, PlayerNavigationMath.progressiveSkipStepMs(1))
+        assertEquals(60_000L, PlayerNavigationMath.progressiveSkipStepMs(2))
+        assertEquals(5 * 60_000L, PlayerNavigationMath.progressiveSkipStepMs(3))
+        assertEquals(10 * 60_000L, PlayerNavigationMath.progressiveSkipStepMs(4))
+        assertEquals(10 * 60_000L, PlayerNavigationMath.progressiveSkipStepMs(99))
+    }
+
+    @Test
+    fun nextProgressiveSkipStepIndex_resetsAndAdvancesByBurst() {
+        assertEquals(
+            0,
+            PlayerNavigationMath.nextProgressiveSkipStepIndex(
+                previousDirection = 0,
+                newDirection = 1,
+                previousStepIndex = 0,
+                previousPressAtMs = 0L,
+                nowMs = 1_000L,
+                resetWindowMs = 1_500L,
+            ),
+        )
+        assertEquals(
+            1,
+            PlayerNavigationMath.nextProgressiveSkipStepIndex(
+                previousDirection = 1,
+                newDirection = 1,
+                previousStepIndex = 0,
+                previousPressAtMs = 1_000L,
+                nowMs = 2_000L,
+                resetWindowMs = 1_500L,
+            ),
+        )
+        assertEquals(
+            0,
+            PlayerNavigationMath.nextProgressiveSkipStepIndex(
+                previousDirection = 1,
+                newDirection = -1,
+                previousStepIndex = 2,
+                previousPressAtMs = 2_000L,
+                nowMs = 2_300L,
+                resetWindowMs = 1_500L,
+            ),
+        )
+        assertEquals(
+            0,
+            PlayerNavigationMath.nextProgressiveSkipStepIndex(
+                previousDirection = 1,
+                newDirection = 1,
+                previousStepIndex = 2,
+                previousPressAtMs = 2_000L,
+                nowMs = 5_000L,
+                resetWindowMs = 1_500L,
+            ),
+        )
+    }
 }

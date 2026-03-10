@@ -369,6 +369,7 @@
 
     <string name="tv_settings_enabled">Enabled</string>
     <string name="tv_settings_disabled">Disabled</string>
+    <string name="tv_settings_live_audio_mode">Live Audio Mode</string>
     <string name="tv_settings_live_audio_passthrough">Audio Passthrough</string>
     <string name="tv_settings_live_audio_surround">Prefer Surround Codecs</string>
 
@@ -381,6 +382,9 @@
     <string name="tv_live_no_channel_playing">No channel playing</string>
     <string name="tv_live_favorite_hint">Long press OK or press Menu to favorite</string>
     <string name="tv_live_audio_output">Audio Output</string>
+    <string name="tv_live_audio_mode_auto">Auto</string>
+    <string name="tv_live_audio_mode_compatible">Prefer Compatible Audio</string>
+    <string name="tv_live_audio_mode_stereo">Force Stereo / PCM</string>
     <string name="tv_live_audio_passthrough">Enable Passthrough</string>
     <string name="tv_live_audio_passthrough_desc">Send AC3/EAC3/DTS to AVR when supported</string>
     <string name="tv_live_audio_prefer_surround">Prefer Surround Tracks</string>

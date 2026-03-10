@@ -131,7 +131,7 @@ fun TvNavHost(
                         ),
                     )
                 },
-                onPlayResolved = { url, fallbackUrl, mediaItem, season, episode ->
+                onPlayResolved = { url, fallbackUrl, mediaItem, season, episode, autoSourceSelection ->
                     val mediaType = if (mediaItem.type == MediaType.SERIES) "tv" else "movie"
                     navController.navigate(
                         TvRoutes.player(
@@ -147,6 +147,7 @@ fun TvNavHost(
                             showTmdbId = if (mediaType == "tv") mediaItem.tmdbId else null,
                             showImdbId = mediaItem.imdbId,
                             startPositionMs = handoffPositionMs.coerceAtLeast(0L),
+                            autoSourceSelection = autoSourceSelection,
                         ),
                     )
                 },
@@ -184,11 +185,13 @@ fun TvNavHost(
                 navArgument("showImdbId") { type = NavType.StringType; defaultValue = "" },
                 navArgument("fallbackUrl") { type = NavType.StringType; defaultValue = "" },
                 navArgument("startPositionMs") { type = NavType.LongType; defaultValue = 0L },
+                navArgument("autoSourceSelection") { type = NavType.BoolType; defaultValue = false },
             ),
         ) { backStackEntry ->
             PlayerScreen(
                 url = backStackEntry.arguments?.getString("url") ?: "",
                 fallbackUrl = backStackEntry.arguments?.getString("fallbackUrl") ?: "",
+                autoSourceSelection = backStackEntry.arguments?.getBoolean("autoSourceSelection") ?: false,
                 title = backStackEntry.arguments?.getString("title") ?: "",
                 mediaId = backStackEntry.arguments?.getString("mediaId") ?: "",
                 mediaType = backStackEntry.arguments?.getString("mediaType") ?: "movie",

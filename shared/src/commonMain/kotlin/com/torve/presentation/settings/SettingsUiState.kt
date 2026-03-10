@@ -11,6 +11,7 @@ import com.torve.data.trakt.TraktUser
 import com.torve.domain.model.CodecPreference
 import com.torve.domain.model.DebridServiceType
 import com.torve.domain.model.HdrMode
+import com.torve.domain.model.AutoSourceMode
 import com.torve.data.ai.AiProvider
 import com.torve.domain.model.CardStylePreset
 import com.torve.domain.model.RatingDisplayPrefs
@@ -93,6 +94,13 @@ data class SettingsUiState(
     val codecPreference: CodecPreference = CodecPreference.HEVC_PREFERRED,
     val hdrMode: HdrMode = HdrMode.AUTO,
     val autoPlayNextEpisodeEnabled: Boolean = true,
+    val autoSourceMode: AutoSourceMode = AutoSourceMode.BALANCED,
+    val allow4kAuto: Boolean = false,
+    val preferCompatibleCodecs: Boolean = true,
+    val tvTransportSkipEnabled: Boolean = true,
+    val tvProgressiveSkipEnabled: Boolean = true,
+    val tvSkipResetWindowMs: Int = 1500,
+    val tvExplicitTimelineScrubEnabled: Boolean = true,
     // Kodi
     val kodiHosts: List<KodiHost> = emptyList(),
     val kodiTestResult: Map<String, Boolean?> = emptyMap(),

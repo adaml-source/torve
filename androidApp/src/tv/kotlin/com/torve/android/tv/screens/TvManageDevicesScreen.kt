@@ -48,6 +48,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.torve.android.sync.SyncCoordinator
+import com.torve.android.sync.model.SyncDeviceDto
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Snow
 import com.torve.data.device.ManagedDeviceDto
@@ -61,12 +63,19 @@ fun TvManageDevicesScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val backButtonRequester = remember { FocusRequester() }
+    val sortedDevices = remember(state.devices) {
+        state.devices.sortedWith(
+            compareByDescending<ManagedDeviceDto> { it.is_current }
+                .thenByDescending { it.is_active }
+                .thenByDescending { it.last_seen_at },
+        )
+    }
 
     BackHandler(onBack = onBack)
     LaunchedEffect(Unit) { viewModel.fetchDevices() }
     LaunchedEffect(Unit) {
         kotlinx.coroutines.delay(200)
-        try { backButtonRequester.requestFocus() } catch (_: Throwable) {}
+        runCatching { backButtonRequester.requestFocus() }
     }
 
     Column(
@@ -75,47 +84,27 @@ fun TvManageDevicesScreen(
             .background(Color(0xFF121212))
             .padding(48.dp),
     ) {
-        // Back button — always focusable for D-pad
-        var backFocused by remember { mutableStateOf(false) }
-        Box(
-            modifier = Modifier
-                .border(
-                    width = if (backFocused) 2.dp else 0.dp,
-                    color = if (backFocused) Amber else Color.Transparent,
-                    shape = RoundedCornerShape(8.dp),
-                )
-                .background(
-                    if (backFocused) Color(0xFF2A2A2A) else Color.Transparent,
-                    RoundedCornerShape(8.dp),
-                )
-                .onFocusChanged { backFocused = it.isFocused }
-                .focusRequester(backButtonRequester)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onBack,
-                )
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-        ) {
-            Text("← Back", color = if (backFocused) Amber else Color.Gray, style = MaterialTheme.typography.bodyLarge)
-        }
+        TvBackButton(
+            focusRequester = backButtonRequester,
+            onClick = onBack,
+        )
         Spacer(Modifier.height(16.dp))
 
         Text(
-            text = "Manage Devices",
+            text = "Activated Devices",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
             color = Snow,
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = "Your Torve Pro account can be active on up to ${state.maxActiveDevices} devices at a time.",
+            text = "Devices using Lifetime Access under this account.",
             style = MaterialTheme.typography.bodyLarge,
             color = Color.Gray,
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            text = "${state.activeDeviceCount} of ${state.maxActiveDevices} devices active",
+            text = "${state.activeDeviceCount} of ${state.maxActiveDevices} active",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
             color = Amber,
@@ -126,13 +115,20 @@ fun TvManageDevicesScreen(
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = Amber)
             }
+        } else if (sortedDevices.isEmpty()) {
+            Text(
+                text = "No activated devices found.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = Color.Gray,
+            )
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(state.devices, key = { it.id }) { device ->
-                    TvDeviceCard(
+                items(sortedDevices, key = { it.id }) { device ->
+                    TvActivatedDeviceCard(
                         device = device,
-                        onRemove = { viewModel.removeDevice(device.id) },
-                        isRemoving = state.isRemoving,
+                        isMutating = state.isRemoving,
+                        onRevokeAccess = { viewModel.removeDevice(device.id) },
+                        onRemoveDevice = { viewModel.removeDevice(device.id) },
                     )
                 }
             }
@@ -145,7 +141,88 @@ fun TvManageDevicesScreen(
 
         Spacer(Modifier.height(24.dp))
         Text(
-            text = "Removing a device frees a slot for another device. Inactive devices may stop counting automatically after extended inactivity.",
+            text = "Revoking removes Lifetime Access from that device. Removing clears the device record.",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.Gray,
+        )
+    }
+}
+
+@Composable
+fun TvPairedDevicesScreen(
+    onBack: () -> Unit,
+    syncCoordinator: SyncCoordinator = koinInject(),
+) {
+    val state by syncCoordinator.state.collectAsState()
+    val backButtonRequester = remember { FocusRequester() }
+    val sortedDevices = remember(state.devices, state.deviceId) {
+        state.devices.sortedWith(
+            compareByDescending<SyncDeviceDto> { it.id == state.deviceId }
+                .thenBy { it.revokedAt != null }
+                .thenByDescending { it.lastSeenAt },
+        )
+    }
+
+    BackHandler(onBack = onBack)
+    LaunchedEffect(Unit) { syncCoordinator.refreshDevices() }
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(200)
+        runCatching { backButtonRequester.requestFocus() }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF121212))
+            .padding(48.dp),
+    ) {
+        TvBackButton(
+            focusRequester = backButtonRequester,
+            onClick = onBack,
+        )
+        Spacer(Modifier.height(16.dp))
+
+        Text(
+            text = "Paired Devices",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+            color = Snow,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "Devices paired for sync and control with this TV/account.",
+            style = MaterialTheme.typography.bodyLarge,
+            color = Color.Gray,
+        )
+        Spacer(Modifier.height(24.dp))
+
+        if (sortedDevices.isEmpty()) {
+            Text(
+                text = "No paired devices found.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = Color.Gray,
+            )
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(sortedDevices, key = { it.id }) { device ->
+                    TvPairedDeviceCard(
+                        device = device,
+                        currentDeviceId = state.deviceId,
+                        onUnpair = { syncCoordinator.revokeDevice(device.id) },
+                        onDeletePairing = { syncCoordinator.removeDevice(device.id) },
+                    )
+                }
+            }
+        }
+
+        state.error?.let { error ->
+            Spacer(Modifier.height(16.dp))
+            Text(text = error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
+
+        Spacer(Modifier.height(24.dp))
+        Text(
+            text = "Unpair disconnects sync/control only. Delete pairing removes stale pairing records.",
             style = MaterialTheme.typography.bodySmall,
             color = Color.Gray,
         )
@@ -169,7 +246,7 @@ fun TvDeviceLimitReachedScreen(
     LaunchedEffect(state.isLoading) {
         if (!state.isLoading && state.devices.isNotEmpty()) {
             kotlinx.coroutines.delay(200)
-            try { firstCardRequester.requestFocus() } catch (_: Throwable) {}
+            runCatching { firstCardRequester.requestFocus() }
         }
     }
 
@@ -202,14 +279,18 @@ fun TvDeviceLimitReachedScreen(
                 CircularProgressIndicator(color = Amber)
             }
         } else {
+            val activeDevices = state.devices.filter { it.is_active }
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(state.devices.filter { it.is_active }, key = { it.id }) { device ->
-                    TvDeviceCard(
+                items(activeDevices, key = { it.id }) { device ->
+                    TvLimitDeviceCard(
                         device = device,
                         onRemove = { viewModel.removeDevice(device.id) },
                         isRemoving = state.isRemoving,
-                        modifier = if (device == state.devices.filter { it.is_active }.firstOrNull())
-                            Modifier.focusRequester(firstCardRequester) else Modifier,
+                        modifier = if (device == activeDevices.firstOrNull()) {
+                            Modifier.focusRequester(firstCardRequester)
+                        } else {
+                            Modifier
+                        },
                     )
                 }
             }
@@ -223,7 +304,246 @@ fun TvDeviceLimitReachedScreen(
 }
 
 @Composable
-private fun TvDeviceCard(
+private fun TvActivatedDeviceCard(
+    device: ManagedDeviceDto,
+    isMutating: Boolean,
+    onRevokeAccess: () -> Unit,
+    onRemoveDevice: () -> Unit,
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    var showConfirm by remember { mutableStateOf(false) }
+
+    val isCurrent = device.is_current
+    val actionLabel = when {
+        isCurrent -> null
+        device.is_active -> "Revoke Access"
+        else -> "Remove Device"
+    }
+    val confirmTitle = if (device.is_active) "Revoke Access" else "Remove Device"
+    val confirmText = if (device.is_active) {
+        "Revoking this device removes Lifetime Access from it and frees a device slot."
+    } else {
+        "Removing this device deletes it from your activated-device list."
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                width = if (isFocused) 2.dp else 0.dp,
+                color = if (isFocused) Amber else Color.Transparent,
+                shape = RoundedCornerShape(12.dp),
+            )
+            .background(
+                if (device.is_active) Color(0xFF1E1E1E) else Color(0xFF151515),
+                RoundedCornerShape(12.dp),
+            )
+            .onFocusChanged { isFocused = it.isFocused }
+            .focusable()
+            .clickable(
+                enabled = actionLabel != null && !isMutating,
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = { showConfirm = true },
+            )
+            .padding(16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = iconForDeviceType(device.device_type),
+                contentDescription = null,
+                tint = if (device.is_active) Amber else Color.Gray,
+                modifier = Modifier.size(28.dp),
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = device.device_name,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                        color = Snow,
+                    )
+                    if (device.is_current) {
+                        Spacer(Modifier.width(8.dp))
+                        Text("CURRENT DEVICE", style = MaterialTheme.typography.labelSmall, color = Amber, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Text(
+                    text = "${device.platform} - ${device.device_type}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray,
+                )
+                Text(
+                    text = "Last active: ${device.last_seen_at}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray,
+                )
+                Text(
+                    text = if (device.is_active) "Status: Active" else "Status: Not active",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (device.is_active) Amber else Color.Gray,
+                )
+            }
+            if (!actionLabel.isNullOrBlank()) {
+                Text(
+                    text = actionLabel,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = if (isFocused) Amber else Snow,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+    }
+
+    if (showConfirm && actionLabel != null) {
+        AlertDialog(
+            onDismissRequest = { showConfirm = false },
+            title = { Text(confirmTitle) },
+            text = { Text(confirmText) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showConfirm = false
+                        if (device.is_active) onRevokeAccess() else onRemoveDevice()
+                    },
+                    enabled = !isMutating,
+                ) {
+                    Text(actionLabel, color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConfirm = false }) { Text("Cancel") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun TvPairedDeviceCard(
+    device: SyncDeviceDto,
+    currentDeviceId: String?,
+    onUnpair: () -> Unit,
+    onDeletePairing: () -> Unit,
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    var showConfirm by remember { mutableStateOf(false) }
+
+    val isCurrent = device.id == currentDeviceId
+    val isPaired = device.revokedAt == null
+    val actionLabel = when {
+        isCurrent -> null
+        isPaired -> "Unpair"
+        else -> "Delete Pairing"
+    }
+    val confirmTitle = if (isPaired) "Unpair Device" else "Delete Pairing"
+    val confirmText = if (isPaired) {
+        "Unpairing disconnects sync/control with this device but does not revoke Lifetime Access."
+    } else {
+        "Deleting this stale pairing removes the device from paired-device records."
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                width = if (isFocused) 2.dp else 0.dp,
+                color = if (isFocused) Amber else Color.Transparent,
+                shape = RoundedCornerShape(12.dp),
+            )
+            .background(
+                if (isPaired) Color(0xFF1E1E1E) else Color(0xFF151515),
+                RoundedCornerShape(12.dp),
+            )
+            .onFocusChanged { isFocused = it.isFocused }
+            .focusable()
+            .clickable(
+                enabled = actionLabel != null,
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = { showConfirm = true },
+            )
+            .padding(16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = iconForDeviceType(device.deviceType),
+                contentDescription = null,
+                tint = if (isPaired) Amber else Color.Gray,
+                modifier = Modifier.size(28.dp),
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = device.deviceName,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                        color = Snow,
+                    )
+                    if (isCurrent) {
+                        Spacer(Modifier.width(8.dp))
+                        Text("THIS TV", style = MaterialTheme.typography.labelSmall, color = Amber, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Text(
+                    text = "${device.platform} - ${device.deviceType}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray,
+                )
+                Text(
+                    text = "Last seen: ${device.lastSeenAt}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray,
+                )
+                if (device.revokedAt != null) {
+                    Text(
+                        text = "Unpaired: ${device.revokedAt}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray,
+                    )
+                }
+                Text(
+                    text = if (isPaired) "State: Paired" else "State: Unpaired",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isPaired) Amber else Color.Gray,
+                )
+            }
+            if (!actionLabel.isNullOrBlank()) {
+                Text(
+                    text = actionLabel,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = if (isFocused) Amber else Snow,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+    }
+
+    if (showConfirm && actionLabel != null) {
+        AlertDialog(
+            onDismissRequest = { showConfirm = false },
+            title = { Text(confirmTitle) },
+            text = { Text(confirmText) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showConfirm = false
+                        if (isPaired) onUnpair() else onDeletePairing()
+                    },
+                ) {
+                    Text(actionLabel, color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConfirm = false }) { Text("Cancel") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun TvLimitDeviceCard(
     device: ManagedDeviceDto,
     onRemove: () -> Unit,
     isRemoving: Boolean,
@@ -231,12 +551,6 @@ private fun TvDeviceCard(
 ) {
     var isFocused by remember { mutableStateOf(false) }
     var showConfirm by remember { mutableStateOf(false) }
-
-    val icon: ImageVector = when (device.device_type) {
-        "tv" -> Icons.Default.Tv
-        "tablet" -> Icons.Default.Tablet
-        else -> Icons.Default.PhoneAndroid
-    }
 
     Box(
         modifier = modifier
@@ -255,7 +569,12 @@ private fun TvDeviceCard(
             .padding(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, contentDescription = null, tint = if (device.is_active) Amber else Color.Gray, modifier = Modifier.size(28.dp))
+            Icon(
+                imageVector = iconForDeviceType(device.device_type),
+                contentDescription = null,
+                tint = if (device.is_active) Amber else Color.Gray,
+                modifier = Modifier.size(28.dp),
+            )
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -265,7 +584,7 @@ private fun TvDeviceCard(
                         Text("THIS DEVICE", style = MaterialTheme.typography.labelSmall, color = Amber, fontWeight = FontWeight.Bold)
                     }
                 }
-                Text("${device.platform} · ${device.device_type}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                Text("${device.platform} - ${device.device_type}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
             }
 
             if (device.is_active && !device.is_current) {
@@ -293,5 +612,43 @@ private fun TvDeviceCard(
                 TextButton(onClick = { showConfirm = false }) { Text("Cancel") }
             },
         )
+    }
+}
+
+@Composable
+private fun TvBackButton(
+    focusRequester: FocusRequester,
+    onClick: () -> Unit,
+) {
+    var backFocused by remember { mutableStateOf(false) }
+    Box(
+        modifier = Modifier
+            .border(
+                width = if (backFocused) 2.dp else 0.dp,
+                color = if (backFocused) Amber else Color.Transparent,
+                shape = RoundedCornerShape(8.dp),
+            )
+            .background(
+                if (backFocused) Color(0xFF2A2A2A) else Color.Transparent,
+                RoundedCornerShape(8.dp),
+            )
+            .onFocusChanged { backFocused = it.isFocused }
+            .focusRequester(focusRequester)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            )
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        Text("< Back", color = if (backFocused) Amber else Color.Gray, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+private fun iconForDeviceType(deviceType: String): ImageVector {
+    return when (deviceType.lowercase()) {
+        "tv" -> Icons.Default.Tv
+        "tablet" -> Icons.Default.Tablet
+        else -> Icons.Default.PhoneAndroid
     }
 }

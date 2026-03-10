@@ -80,6 +80,22 @@ class SubscriptionRepositoryImpl(
     }
 
     override suspend fun restorePurchase(purchaseToken: String): Subscription? {
+        if (authClient.isLoggedIn()) {
+            when (refreshFromBackendDetailed()) {
+                BackendPremiumResult.Active -> return getActiveSubscription()
+                is BackendPremiumResult.DeviceBlocked -> return getActiveSubscription()
+                is BackendPremiumResult.Offline -> {
+                    if (getActiveSubscription()?.isPro == true) {
+                        return getActiveSubscription()
+                    }
+                }
+                BackendPremiumResult.NoEntitlement -> {
+                    // Fall through to local restore fallback.
+                }
+            }
+        }
+
+        // Fallback: allow local restore when backend entitlement cannot be resolved.
         activateSubscription(SubscriptionTier.LIFETIME, purchaseToken)
         return getActiveSubscription()
     }

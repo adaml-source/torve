@@ -18,6 +18,7 @@ import com.torve.domain.model.CardStyle
 import com.torve.domain.model.CardStylePreset
 import com.torve.domain.model.HomeSectionConfig
 import com.torve.domain.model.CodecPreference
+import com.torve.domain.model.AutoSourceMode
 import com.torve.domain.model.DEFAULT_STREAM_GROUPS
 import com.torve.domain.model.DebridServiceType
 import com.torve.domain.model.HdrMode
@@ -106,6 +107,13 @@ class SettingsViewModel(
         const val KEY_CODEC_PREFERENCE = "codec_preference"
         const val KEY_HDR_MODE = "hdr_mode"
         const val KEY_AUTO_PLAY_NEXT_EPISODE = "auto_play_next_episode"
+        const val KEY_AUTO_SOURCE_MODE = "auto_source_mode"
+        const val KEY_ALLOW_4K_AUTO = "allow_4k_auto"
+        const val KEY_PREFER_COMPATIBLE_CODECS = "prefer_compatible_codecs"
+        const val KEY_TV_TRANSPORT_SKIP_ENABLED = "tv_transport_skip_enabled"
+        const val KEY_TV_PROGRESSIVE_SKIP_ENABLED = "tv_progressive_skip_enabled"
+        const val KEY_TV_SKIP_RESET_WINDOW_MS = "tv_skip_reset_window_ms"
+        const val KEY_TV_EXPLICIT_TIMELINE_SCRUB_ENABLED = "tv_explicit_timeline_scrub_enabled"
         const val KEY_LAST_SYNC_TIME = "last_sync_time"
         const val KEY_REGEX_PATTERNS = "regex_patterns"
         const val KEY_STREAM_GROUPS = "stream_groups"
@@ -208,6 +216,21 @@ class SettingsViewModel(
 
             val autoPlayEnabled = prefsRepo.getString(KEY_AUTO_PLAY_ENABLED)?.toBooleanStrictOrNull() ?: true
             val autoPlayNextEpisodeEnabled = prefsRepo.getString(KEY_AUTO_PLAY_NEXT_EPISODE)?.toBooleanStrictOrNull() ?: true
+            val autoSourceMode = prefsRepo.getString(KEY_AUTO_SOURCE_MODE)?.let {
+                try { AutoSourceMode.valueOf(it) } catch (_: Exception) { null }
+            } ?: AutoSourceMode.BALANCED
+            val allow4kAuto = prefsRepo.getString(KEY_ALLOW_4K_AUTO)?.toBooleanStrictOrNull() ?: false
+            val preferCompatibleCodecs = prefsRepo.getString(KEY_PREFER_COMPATIBLE_CODECS)?.toBooleanStrictOrNull() ?: true
+            val tvTransportSkipEnabled =
+                prefsRepo.getString(KEY_TV_TRANSPORT_SKIP_ENABLED)?.toBooleanStrictOrNull() ?: true
+            val tvProgressiveSkipEnabled =
+                prefsRepo.getString(KEY_TV_PROGRESSIVE_SKIP_ENABLED)?.toBooleanStrictOrNull() ?: true
+            val tvSkipResetWindowMs = prefsRepo.getString(KEY_TV_SKIP_RESET_WINDOW_MS)
+                ?.toIntOrNull()
+                ?.coerceIn(600, 4_000)
+                ?: 1_500
+            val tvExplicitTimelineScrubEnabled =
+                prefsRepo.getString(KEY_TV_EXPLICIT_TIMELINE_SCRUB_ENABLED)?.toBooleanStrictOrNull() ?: true
             val lastSyncTime = prefsRepo.getString(KEY_LAST_SYNC_TIME)?.toLongOrNull()
             val traktLastSyncTime = prefsRepo.getString(KEY_TRAKT_LAST_SYNC_TIME)?.toLongOrNull()
             val availabilityLastSyncTime = prefsRepo.getString(KEY_AVAILABILITY_LAST_SYNC_TIME)?.toLongOrNull()
@@ -293,6 +316,13 @@ class SettingsViewModel(
                     appLanguage = appLanguage,
                     autoPlayEnabled = autoPlayEnabled,
                     autoPlayNextEpisodeEnabled = autoPlayNextEpisodeEnabled,
+                    autoSourceMode = autoSourceMode,
+                    allow4kAuto = allow4kAuto,
+                    preferCompatibleCodecs = preferCompatibleCodecs,
+                    tvTransportSkipEnabled = tvTransportSkipEnabled,
+                    tvProgressiveSkipEnabled = tvProgressiveSkipEnabled,
+                    tvSkipResetWindowMs = tvSkipResetWindowMs,
+                    tvExplicitTimelineScrubEnabled = tvExplicitTimelineScrubEnabled,
                     codecPreference = codecPreference,
                     hdrMode = hdrMode,
                     lastSyncTime = lastSyncTime,
@@ -1197,6 +1227,42 @@ class SettingsViewModel(
         scope.launch { prefsRepo.setString(KEY_AUTO_PLAY_NEXT_EPISODE, enabled.toString()) }
     }
 
+    fun setAutoSourceMode(mode: AutoSourceMode) {
+        _state.update { it.copy(autoSourceMode = mode) }
+        scope.launch { prefsRepo.setString(KEY_AUTO_SOURCE_MODE, mode.name) }
+    }
+
+    fun setAllow4kAuto(enabled: Boolean) {
+        _state.update { it.copy(allow4kAuto = enabled) }
+        scope.launch { prefsRepo.setString(KEY_ALLOW_4K_AUTO, enabled.toString()) }
+    }
+
+    fun setPreferCompatibleCodecs(enabled: Boolean) {
+        _state.update { it.copy(preferCompatibleCodecs = enabled) }
+        scope.launch { prefsRepo.setString(KEY_PREFER_COMPATIBLE_CODECS, enabled.toString()) }
+    }
+
+    fun setTvTransportSkipEnabled(enabled: Boolean) {
+        _state.update { it.copy(tvTransportSkipEnabled = enabled) }
+        scope.launch { prefsRepo.setString(KEY_TV_TRANSPORT_SKIP_ENABLED, enabled.toString()) }
+    }
+
+    fun setTvProgressiveSkipEnabled(enabled: Boolean) {
+        _state.update { it.copy(tvProgressiveSkipEnabled = enabled) }
+        scope.launch { prefsRepo.setString(KEY_TV_PROGRESSIVE_SKIP_ENABLED, enabled.toString()) }
+    }
+
+    fun setTvSkipResetWindowMs(windowMs: Int) {
+        val sanitized = windowMs.coerceIn(600, 4_000)
+        _state.update { it.copy(tvSkipResetWindowMs = sanitized) }
+        scope.launch { prefsRepo.setString(KEY_TV_SKIP_RESET_WINDOW_MS, sanitized.toString()) }
+    }
+
+    fun setTvExplicitTimelineScrubEnabled(enabled: Boolean) {
+        _state.update { it.copy(tvExplicitTimelineScrubEnabled = enabled) }
+        scope.launch { prefsRepo.setString(KEY_TV_EXPLICIT_TIMELINE_SCRUB_ENABLED, enabled.toString()) }
+    }
+
     fun buildStreamPreferences(): StreamPreferences {
         val s = _state.value
         // Network-aware: cap quality on cellular
@@ -1212,6 +1278,9 @@ class SettingsViewModel(
             autoPlayNextEpisodeEnabled = s.autoPlayNextEpisodeEnabled,
             codecPreference = s.codecPreference,
             hdrMode = s.hdrMode,
+            autoSourceMode = s.autoSourceMode,
+            allow4kAuto = s.allow4kAuto,
+            preferCompatibleCodecs = s.preferCompatibleCodecs,
         )
     }
 

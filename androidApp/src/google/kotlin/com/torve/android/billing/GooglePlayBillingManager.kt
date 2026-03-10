@@ -140,7 +140,11 @@ class GooglePlayBillingManager(context: Context) : BillingManager, PurchasesUpda
                         if (!purchase.isAcknowledged) {
                             acknowledgePurchase(purchase)
                         }
-                        _purchaseResult.value = BillingManager.PurchaseResult.Success(purchase.purchaseToken)
+                        _purchaseResult.value = BillingManager.PurchaseResult.Success(
+                            purchaseToken = purchase.purchaseToken,
+                            store = BillingManager.Store.GOOGLE_PLAY,
+                            productId = PRODUCT_ID,
+                        )
                     }
                 }
             }

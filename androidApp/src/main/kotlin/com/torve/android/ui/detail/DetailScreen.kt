@@ -5,9 +5,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -28,6 +30,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.BookmarkBorder
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
@@ -59,8 +62,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import com.torve.android.R
+import com.torve.android.premium.PremiumAccess
+import com.torve.android.premium.PremiumFeature
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -107,6 +113,8 @@ import org.koin.compose.koinInject
 fun DetailScreen(
     type: String,
     id: Int,
+    isLifetimeUnlocked: Boolean = false,
+    onLockedFeatureClick: (PremiumFeature) -> Unit = {},
     onPlayClick: (url: String, fallbackUrl: String, season: Int?, episode: Int?, imdbId: String?) -> Unit,
     onBack: () -> Unit,
     onMediaClick: (MediaItem) -> Unit,
@@ -123,6 +131,15 @@ fun DetailScreen(
     val state by viewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
     val watchlistState by watchlistViewModel.state.collectAsState()
+    val accessTier = remember(isLifetimeUnlocked) { PremiumAccess.tierFrom(isLifetimeUnlocked) }
+    val isLocked: (PremiumFeature) -> Boolean = remember(accessTier) {
+        { feature -> PremiumAccess.isPremiumLocked(feature, accessTier) }
+    }
+    val streamPlaybackLocked = isLocked(PremiumFeature.STREAM_PLAYBACK)
+    val watchlistEditLocked = isLocked(PremiumFeature.WATCHLIST_EDIT)
+    val watchedStatusLocked = isLocked(PremiumFeature.WATCHED_STATUS_EDIT)
+    val traktListLocked = isLocked(PremiumFeature.TRAKT_LIST_MANAGER)
+    val chooseSourceLocked = isLocked(PremiumFeature.CHOOSE_SOURCE_PREMIUM)
     var showActionSheet by remember { mutableStateOf(false) }
     var resolvedUrl by remember { mutableStateOf("") }
     var showTrailer by remember { mutableStateOf(false) }
@@ -346,7 +363,9 @@ fun DetailScreen(
                             // Play button — full width, amber, prominent
                             Button(
                                 onClick = {
-                                    if (settingsState.debridConnected) {
+                                    if (streamPlaybackLocked) {
+                                        onLockedFeatureClick(PremiumFeature.STREAM_PLAYBACK)
+                                    } else if (settingsState.debridConnected) {
                                         if (item.type == MediaType.SERIES) {
                                             viewModel.playNextEpisode()
                                         } else {
@@ -381,106 +400,124 @@ fun DetailScreen(
                                     )
                                 } else {
                                     Icon(
-                                        Icons.Default.PlayArrow,
+                                        if (streamPlaybackLocked) Icons.Rounded.Lock else Icons.Default.PlayArrow,
                                         contentDescription = null,
                                         modifier = Modifier.size(22.dp),
                                     )
                                     Spacer(Modifier.width(8.dp))
                                     Text(
-                                        if (settingsState.debridConnected) stringResource(R.string.common_play) else stringResource(R.string.detail_connect_cloud),
+                                        when {
+                                            streamPlaybackLocked -> PremiumAccess.UNLOCK_WITH_LIFETIME_LABEL
+                                            settingsState.debridConnected -> stringResource(R.string.common_play)
+                                            else -> stringResource(R.string.detail_connect_cloud)
+                                        },
                                         style = MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.Bold,
                                     )
                                 }
                             }
 
-                            // Secondary actions row
+                            // Secondary actions row (adaptive columns to avoid cramped labels on narrow phones)
                             Spacer(Modifier.height(10.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            ) {
-                                // Watchlist button
-                                val isInWatchlist = state.mediaItem?.let {
-                                    watchlistState.watchlistIds.contains(it.id)
-                                } ?: false
-                                FilledTonalButton(
-                                    onClick = { state.mediaItem?.let { watchlistViewModel.toggleWatchlist(it) } },
-                                    modifier = Modifier.weight(1f).height(44.dp),
-                                    shape = RoundedCornerShape(10.dp),
-                                    colors = ButtonDefaults.filledTonalButtonColors(
-                                        containerColor = if (isInWatchlist) Amber.copy(alpha = 0.2f) else Graphite,
-                                        contentColor = if (isInWatchlist) Amber else Snow,
-                                    ),
-                                ) {
-                                    Icon(
-                                        if (isInWatchlist) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp),
-                                    )
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        if (isInWatchlist) stringResource(R.string.detail_in_watchlist) else stringResource(R.string.detail_watchlist),
-                                        style = MaterialTheme.typography.labelLarge,
-                                    )
-                                }
-
-                                // Mark watched (only if Trakt connected)
-                                if (settingsState.traktConnected) {
-                                    FilledTonalButton(
-                                        onClick = {
-                                            if (state.isMarkedWatched) viewModel.markUnwatched()
-                                            else viewModel.markWatched()
+                            val isInWatchlist = state.mediaItem?.let {
+                                watchlistState.watchlistIds.contains(it.id)
+                            } ?: false
+                            val secondaryActions = buildList {
+                                add(
+                                    DetailSecondaryActionSpec(
+                                        label = when {
+                                            watchlistEditLocked -> PremiumAccess.UNLOCK_WITH_LIFETIME_LABEL
+                                            isInWatchlist -> stringResource(R.string.detail_in_watchlist)
+                                            else -> stringResource(R.string.detail_watchlist)
                                         },
-                                        modifier = Modifier.weight(1f).height(44.dp),
-                                        shape = RoundedCornerShape(10.dp),
-                                        colors = ButtonDefaults.filledTonalButtonColors(
-                                            containerColor = Graphite,
-                                            contentColor = Snow,
-                                        ),
-                                    ) {
-                                        Icon(
-                                            if (state.isMarkedWatched) Icons.Rounded.VisibilityOff
-                                            else Icons.Rounded.Visibility,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                        Spacer(Modifier.width(6.dp))
-                                        Text(
-                                            if (state.isMarkedWatched) stringResource(R.string.detail_unwatched) else stringResource(R.string.detail_watched),
-                                            style = MaterialTheme.typography.labelLarge,
-                                        )
-                                    }
-
-                                    FilledTonalButton(
+                                        icon = when {
+                                            watchlistEditLocked -> Icons.Rounded.Lock
+                                            isInWatchlist -> Icons.Rounded.Bookmark
+                                            else -> Icons.Rounded.BookmarkBorder
+                                        },
+                                        containerColor = when {
+                                            watchlistEditLocked -> Amber.copy(alpha = 0.2f)
+                                            isInWatchlist -> Amber.copy(alpha = 0.2f)
+                                            else -> Graphite
+                                        },
+                                        contentColor = when {
+                                            watchlistEditLocked -> Amber
+                                            isInWatchlist -> Amber
+                                            else -> Snow
+                                        },
                                         onClick = {
-                                            val next = when (val current = state.userRating) {
-                                                null -> 7
-                                                10 -> null
-                                                else -> current + 1
+                                            if (watchlistEditLocked) {
+                                                onLockedFeatureClick(PremiumFeature.WATCHLIST_EDIT)
+                                            } else {
+                                                state.mediaItem?.let { watchlistViewModel.toggleWatchlist(it) }
                                             }
-                                            viewModel.setUserRating(next)
                                         },
-                                        modifier = Modifier.weight(1f).height(44.dp),
-                                        shape = RoundedCornerShape(10.dp),
-                                        colors = ButtonDefaults.filledTonalButtonColors(
-                                            containerColor = if (state.userRating != null) Amber.copy(alpha = 0.2f) else Graphite,
-                                            contentColor = if (state.userRating != null) Amber else Snow,
+                                    ),
+                                )
+
+                                if (settingsState.traktConnected) {
+                                    add(
+                                        DetailSecondaryActionSpec(
+                                            label = when {
+                                                watchedStatusLocked -> PremiumAccess.UNLOCK_WITH_LIFETIME_LABEL
+                                                state.isMarkedWatched -> stringResource(R.string.detail_unwatched)
+                                                else -> stringResource(R.string.detail_watched)
+                                            },
+                                            icon = when {
+                                                watchedStatusLocked -> Icons.Rounded.Lock
+                                                state.isMarkedWatched -> Icons.Rounded.VisibilityOff
+                                                else -> Icons.Rounded.Visibility
+                                            },
+                                            containerColor = if (watchedStatusLocked) Amber.copy(alpha = 0.2f) else Graphite,
+                                            contentColor = if (watchedStatusLocked) Amber else Snow,
+                                            onClick = {
+                                                if (watchedStatusLocked) {
+                                                    onLockedFeatureClick(PremiumFeature.WATCHED_STATUS_EDIT)
+                                                } else {
+                                                    if (state.isMarkedWatched) viewModel.markUnwatched()
+                                                    else viewModel.markWatched()
+                                                }
+                                            },
                                         ),
-                                    ) {
-                                        Icon(
-                                            Icons.Rounded.Star,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                        Spacer(Modifier.width(6.dp))
-                                        Text(
-                                            text = state.userRating?.let { "Rated $it/10" } ?: "Rate",
-                                            style = MaterialTheme.typography.labelLarge,
-                                        )
-                                    }
+                                    )
+                                    add(
+                                        DetailSecondaryActionSpec(
+                                            label = if (traktListLocked) {
+                                                PremiumAccess.UNLOCK_WITH_LIFETIME_LABEL
+                                            } else {
+                                                state.userRating?.let { "Rated $it/10" } ?: "Rate"
+                                            },
+                                            icon = if (traktListLocked) Icons.Rounded.Lock else Icons.Rounded.Star,
+                                            containerColor = when {
+                                                traktListLocked -> Amber.copy(alpha = 0.2f)
+                                                state.userRating != null -> Amber.copy(alpha = 0.2f)
+                                                else -> Graphite
+                                            },
+                                            contentColor = when {
+                                                traktListLocked -> Amber
+                                                state.userRating != null -> Amber
+                                                else -> Snow
+                                            },
+                                            onClick = {
+                                                if (traktListLocked) {
+                                                    onLockedFeatureClick(PremiumFeature.TRAKT_LIST_MANAGER)
+                                                } else {
+                                                    val next = when (val current = state.userRating) {
+                                                        null -> 7
+                                                        10 -> null
+                                                        else -> current + 1
+                                                    }
+                                                    viewModel.setUserRating(next)
+                                                }
+                                            },
+                                        ),
+                                    )
                                 }
                             }
+                            DetailSecondaryActionsGrid(
+                                actions = secondaryActions,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
 
                             // Watch Trailer button
                             state.mediaItem?.trailerKey?.let {
@@ -662,7 +699,11 @@ fun DetailScreen(
                                     }
                                 },
                                 onMarkSeasonWatched = { season ->
-                                    viewModel.markSeasonWatched(season)
+                                    if (watchedStatusLocked) {
+                                        onLockedFeatureClick(PremiumFeature.WATCHED_STATUS_EDIT)
+                                    } else {
+                                        viewModel.markSeasonWatched(season)
+                                    }
                                 },
                             )
                         }
@@ -729,7 +770,15 @@ fun DetailScreen(
                             contentColor = Snow,
                             action = if (state.autoPlayFailed) {
                                 {
-                                    TextButton(onClick = { viewModel.showManualPicker() }) {
+                                    TextButton(
+                                        onClick = {
+                                            if (chooseSourceLocked) {
+                                                onLockedFeatureClick(PremiumFeature.CHOOSE_SOURCE_PREMIUM)
+                                            } else {
+                                                viewModel.showManualPicker()
+                                            }
+                                        },
+                                    ) {
                                         Text(stringResource(R.string.detail_select_manually), color = Amber)
                                     }
                                 }
@@ -904,6 +953,91 @@ private fun WhereToWatchSection(
                 }
             }
         }
+    }
+}
+
+private data class DetailSecondaryActionSpec(
+    val label: String,
+    val icon: ImageVector,
+    val containerColor: Color,
+    val contentColor: Color,
+    val onClick: () -> Unit,
+)
+
+@Composable
+private fun DetailSecondaryActionsGrid(
+    actions: List<DetailSecondaryActionSpec>,
+    modifier: Modifier = Modifier,
+) {
+    if (actions.isEmpty()) return
+    val spacing = 10.dp
+    BoxWithConstraints(modifier = modifier) {
+        val columns = when {
+            actions.size <= 1 -> 1
+            maxWidth < 400.dp -> 2
+            else -> minOf(3, actions.size)
+        }
+        val actionRows = actions.chunked(columns)
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(spacing),
+        ) {
+            actionRows.forEach { rowActions ->
+                val singleWideRow = rowActions.size == 1 && columns > 1
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(spacing),
+                ) {
+                    rowActions.forEach { action ->
+                        DetailSecondaryActionButton(
+                            action = action,
+                            modifier = if (singleWideRow) {
+                                Modifier.fillMaxWidth()
+                            } else {
+                                Modifier.weight(1f)
+                            },
+                        )
+                    }
+                    if (!singleWideRow && rowActions.size < columns) {
+                        repeat(columns - rowActions.size) {
+                            Spacer(Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailSecondaryActionButton(
+    action: DetailSecondaryActionSpec,
+    modifier: Modifier = Modifier,
+) {
+    FilledTonalButton(
+        onClick = action.onClick,
+        modifier = modifier.heightIn(min = 46.dp),
+        shape = RoundedCornerShape(10.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+        colors = ButtonDefaults.filledTonalButtonColors(
+            containerColor = action.containerColor,
+            contentColor = action.contentColor,
+        ),
+    ) {
+        Icon(
+            imageVector = action.icon,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = action.label,
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
