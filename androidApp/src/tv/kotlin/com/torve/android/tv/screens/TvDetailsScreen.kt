@@ -1,5 +1,6 @@
 package com.torve.android.tv.screens
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
@@ -67,6 +68,8 @@ import com.torve.android.player.DeviceCodecProbe
 import com.torve.android.tv.NotificationType
 import com.torve.android.tv.TvNotificationQueue
 import com.torve.android.tv.components.TvEpisodePicker
+import com.torve.android.tv.premium.TvEntitledFeature
+import com.torve.android.tv.premium.TvPremiumAccess
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material3.Icon
@@ -82,7 +85,6 @@ import com.torve.presentation.download.DownloadViewModel
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.subscription.SubscriptionViewModel
 import com.torve.presentation.watchlist.WatchlistViewModel
-import com.torve.domain.model.PremiumFeature
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
@@ -111,6 +113,7 @@ fun TvDetailsScreen(
     onMediaClick: (MediaItem) -> Unit = {},
     onCastClick: (castId: Int, castName: String) -> Unit = { _, _ -> },
     onSettingsClick: () -> Unit = {},
+    onRequestLifetimeUnlock: (TvEntitledFeature) -> Unit = {},
 ) {
     val detailViewModel: DetailViewModel = koinInject()
     val settingsViewModel: SettingsViewModel = koinInject()
@@ -121,8 +124,23 @@ fun TvDetailsScreen(
     val coroutineScope = rememberCoroutineScope()
     val watchlistState by watchlistViewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
+    val subscriptionState by subscriptionViewModel.state.collectAsState()
     val state by detailViewModel.state.collectAsState()
+    val accessTier = remember(subscriptionState.isPro) {
+        TvPremiumAccess.tierFrom(subscriptionState.isPro)
+    }
     val context = LocalContext.current
+
+    val isLockedFeature: (TvEntitledFeature) -> Boolean = { feature ->
+        TvPremiumAccess.isPremiumLocked(feature, accessTier)
+    }
+    val runPremiumAction: (TvEntitledFeature, () -> Unit) -> Unit = { feature, action ->
+        if (isLockedFeature(feature)) {
+            onRequestLifetimeUnlock(feature)
+        } else {
+            action()
+        }
+    }
 
     val playFocusRequester = remember { FocusRequester() }
     val watchlistFocusRequester = remember { FocusRequester() }
@@ -358,7 +376,9 @@ fun TvDetailsScreen(
 
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             // ── Play button with debrid check + loading phases ──
+                            val streamLocked = isLockedFeature(TvEntitledFeature.STREAM_PLAYBACK)
                             val playText = when {
+                                streamLocked -> TvPremiumAccess.UNLOCK_WITH_LIFETIME_LABEL
                                 state.isLoadingStreams -> stringResource(R.string.tv_detail_finding_streams)
                                 state.isResolving -> stringResource(R.string.tv_detail_resolving)
                                 !settingsState.debridConnected -> stringResource(R.string.tv_detail_connect_cloud)
@@ -373,35 +393,56 @@ fun TvDetailsScreen(
                                 enabled = !isBusy,
                                 onFocused = { onContentFocused(playFocusRequester) },
                                 onClick = {
-                                    if (!subscriptionViewModel.checkAccess(PremiumFeature.STREAM_PLAYBACK)) return@TvActionButton
                                     if (!settingsState.debridConnected) {
-                                        onSettingsClick()
-                                    } else if (item.type == MediaType.SERIES) {
-                                        detailViewModel.playNextEpisode()
-                                    } else {
-                                        detailViewModel.fetchStreams()
+                                        runPremiumAction(TvEntitledFeature.CLOUD_PROVIDER_SETUP) {
+                                            context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE)
+                                                .edit()
+                                                .putBoolean("tv_settings_open_connections_once", true)
+                                                .apply()
+                                            onSettingsClick()
+                                        }
+                                        return@TvActionButton
+                                    }
+
+                                    runPremiumAction(TvEntitledFeature.STREAM_PLAYBACK) {
+                                        if (item.type == MediaType.SERIES) {
+                                            detailViewModel.playNextEpisode()
+                                        } else {
+                                            detailViewModel.fetchStreams()
+                                        }
                                     }
                                 },
                             )
 
+                            val watchlistLocked = isLockedFeature(TvEntitledFeature.WATCHLIST_EDIT)
                             TvActionButton(
                                 text = if (isInWatchlist) {
-                                    stringResource(R.string.tv_action_remove_watchlist)
+                                    if (watchlistLocked) {
+                                        "${stringResource(R.string.tv_action_remove_watchlist)} (Locked)"
+                                    } else {
+                                        stringResource(R.string.tv_action_remove_watchlist)
+                                    }
                                 } else {
-                                    stringResource(R.string.tv_action_add_watchlist)
+                                    if (watchlistLocked) {
+                                        "${stringResource(R.string.tv_action_add_watchlist)} (Locked)"
+                                    } else {
+                                        stringResource(R.string.tv_action_add_watchlist)
+                                    }
                                 },
                                 modifier = Modifier.focusRequester(watchlistFocusRequester),
                                 onFocused = { onContentFocused(watchlistFocusRequester) },
                                 onClick = {
-                                    if (isInWatchlist) {
-                                        watchlistViewModel.toggleWatchlist(item)
-                                    } else {
-                                        val traktOn = settingsState.traktConnected
-                                        val simklOn = settingsState.simklConnected
-                                        if (!traktOn && !simklOn) {
+                                    runPremiumAction(TvEntitledFeature.WATCHLIST_EDIT) {
+                                        if (isInWatchlist) {
                                             watchlistViewModel.toggleWatchlist(item)
                                         } else {
-                                            showWatchlistPicker = true
+                                            val traktOn = settingsState.traktConnected
+                                            val simklOn = settingsState.simklConnected
+                                            if (!traktOn && !simklOn) {
+                                                watchlistViewModel.toggleWatchlist(item)
+                                            } else {
+                                                showWatchlistPicker = true
+                                            }
                                         }
                                     }
                                 },
@@ -418,10 +459,12 @@ fun TvDetailsScreen(
                                     modifier = Modifier.focusRequester(markWatchedFocusRequester),
                                     onFocused = { onContentFocused(markWatchedFocusRequester) },
                                     onClick = {
-                                        if (state.isMarkedWatched) {
-                                            detailViewModel.markUnwatched()
-                                        } else {
-                                            detailViewModel.markWatched()
+                                        runPremiumAction(TvEntitledFeature.WATCHED_STATUS_EDIT) {
+                                            if (state.isMarkedWatched) {
+                                                detailViewModel.markUnwatched()
+                                            } else {
+                                                detailViewModel.markWatched()
+                                            }
                                         }
                                     },
                                 )
@@ -434,14 +477,16 @@ fun TvDetailsScreen(
                                     modifier = Modifier.focusRequester(rateFocusRequester),
                                     onFocused = { onContentFocused(rateFocusRequester) },
                                     onClick = {
-                                        val next = when (state.userRating) {
-                                            null -> 7
-                                            7 -> 8
-                                            8 -> 9
-                                            9 -> 10
-                                            else -> null
+                                        runPremiumAction(TvEntitledFeature.TRAKT_CONNECT) {
+                                            val next = when (state.userRating) {
+                                                null -> 7
+                                                7 -> 8
+                                                8 -> 9
+                                                9 -> 10
+                                                else -> null
+                                            }
+                                            detailViewModel.setUserRating(next)
                                         }
-                                        detailViewModel.setUserRating(next)
                                     },
                                 )
                             }
@@ -469,9 +514,10 @@ fun TvDetailsScreen(
                                     enabled = !isBusy,
                                     onFocused = { onContentFocused(downloadMovieFocusRequester) },
                                     onClick = {
-                                        if (!subscriptionViewModel.checkAccess(PremiumFeature.DOWNLOAD)) return@TvActionButton
-                                        pendingDownloadAction = DownloadAction.Movie
-                                        detailViewModel.fetchStreams(forceManualPick = true)
+                                        runPremiumAction(TvEntitledFeature.DOWNLOADS) {
+                                            pendingDownloadAction = DownloadAction.Movie
+                                            detailViewModel.fetchStreams(forceManualPick = true)
+                                        }
                                     },
                                 )
                             }
@@ -482,22 +528,25 @@ fun TvDetailsScreen(
                                     enabled = !isBusy,
                                     onFocused = { onContentFocused(downloadAllFocusRequester) },
                                     onClick = {
-                                        if (!subscriptionViewModel.checkAccess(PremiumFeature.DOWNLOAD)) return@TvActionButton
-                                        val media = state.mediaItem ?: return@TvActionButton
-                                        coroutineScope.launch {
-                                            val episodes = bulkDownloadManager.buildAllSeasonsTargets(media)
-                                            val ids = bulkDownloadManager.enqueueBulk(
-                                                mediaItem = media,
-                                                episodes = episodes,
-                                                debridProvider = settingsViewModel.getDebridProvider(),
-                                                debridApiKey = settingsViewModel.getDebridApiKey(),
-                                                debridAccounts = settingsViewModel.getDebridAccounts(),
-                                                preferences = settingsViewModel.buildStreamPreferences(),
-                                                deviceCaps = DeviceCodecProbe.probe(),
-                                            )
-                                            ids.forEach { DownloadWorker.enqueue(context, it) }
-                                            downloadViewModel.loadDownloads()
-                                            TvNotificationQueue.post("Queued ${ids.size} episodes for download", NotificationType.SUCCESS)
+                                        runPremiumAction(TvEntitledFeature.DOWNLOADS) {
+                                            val media = state.mediaItem
+                                            if (media != null) {
+                                                coroutineScope.launch {
+                                                    val episodes = bulkDownloadManager.buildAllSeasonsTargets(media)
+                                                    val ids = bulkDownloadManager.enqueueBulk(
+                                                        mediaItem = media,
+                                                        episodes = episodes,
+                                                        debridProvider = settingsViewModel.getDebridProvider(),
+                                                        debridApiKey = settingsViewModel.getDebridApiKey(),
+                                                        debridAccounts = settingsViewModel.getDebridAccounts(),
+                                                        preferences = settingsViewModel.buildStreamPreferences(),
+                                                        deviceCaps = DeviceCodecProbe.probe(),
+                                                    )
+                                                    ids.forEach { DownloadWorker.enqueue(context, it) }
+                                                    downloadViewModel.loadDownloads()
+                                                    TvNotificationQueue.post("Queued ${ids.size} episodes for download", NotificationType.SUCCESS)
+                                                }
+                                            }
                                         }
                                     },
                                 )
@@ -553,10 +602,15 @@ fun TvDetailsScreen(
                             TvRatingChip(label = "IMDb", value = "%.1f".format(score), iconRes = R.drawable.ic_rating_imdb)
                         }
                         r.rottenTomatoesScore?.let { score ->
-                            TvRatingChip(label = "RT", value = "${score}%", iconRes = R.drawable.ic_rating_rt)
+                            val rtIcon = when {
+                                score >= 75 -> R.drawable.ic_rt_certified_fresh
+                                score >= 60 -> R.drawable.ic_rt_fresh
+                                else -> R.drawable.ic_rt_rotten
+                            }
+                            TvRatingChip(label = "RT", value = "${score}%", iconRes = rtIcon)
                         }
                         r.tmdbScore?.let { score ->
-                            TvRatingChip(label = "TMDB", value = "%.1f".format(score), iconRes = R.drawable.ic_rating_tmdb)
+                            TvRatingChip(label = "TMDB", value = "%.1f".format(score), iconRes = R.drawable.tmbd_logo)
                         }
                         r.metacriticScore?.let { score ->
                             TvRatingChip(label = "MC", value = "$score", iconRes = R.drawable.ic_rating_metacritic)
@@ -853,8 +907,10 @@ fun TvDetailsScreen(
                             .focusRequester(req)
                             .onFocusChanged { focused = it.isFocused; if (it.isFocused) onContentFocused(req) }
                             .clickable(remember { MutableInteractionSource() }, null) {
-                                watchlistViewModel.addToWatchlist(mediaItem, syncTrakt = false, syncSimkl = false)
-                                showWatchlistPicker = false
+                                runPremiumAction(TvEntitledFeature.WATCHLIST_EDIT) {
+                                    watchlistViewModel.addToWatchlist(mediaItem, syncTrakt = false, syncSimkl = false)
+                                    showWatchlistPicker = false
+                                }
                             }
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                     ) {
@@ -877,8 +933,10 @@ fun TvDetailsScreen(
                                 .focusRequester(req)
                                 .onFocusChanged { focused = it.isFocused; if (it.isFocused) onContentFocused(req) }
                                 .clickable(remember { MutableInteractionSource() }, null) {
-                                    watchlistViewModel.addToWatchlist(mediaItem, syncTrakt = true, syncSimkl = false)
-                                    showWatchlistPicker = false
+                                    runPremiumAction(TvEntitledFeature.WATCHLIST_EDIT) {
+                                        watchlistViewModel.addToWatchlist(mediaItem, syncTrakt = true, syncSimkl = false)
+                                        showWatchlistPicker = false
+                                    }
                                 }
                                 .padding(horizontal = 16.dp, vertical = 12.dp),
                         ) {
@@ -902,8 +960,10 @@ fun TvDetailsScreen(
                                 .focusRequester(req)
                                 .onFocusChanged { focused = it.isFocused; if (it.isFocused) onContentFocused(req) }
                                 .clickable(remember { MutableInteractionSource() }, null) {
-                                    watchlistViewModel.addToWatchlist(mediaItem, syncTrakt = false, syncSimkl = true)
-                                    showWatchlistPicker = false
+                                    runPremiumAction(TvEntitledFeature.WATCHLIST_EDIT) {
+                                        watchlistViewModel.addToWatchlist(mediaItem, syncTrakt = false, syncSimkl = true)
+                                        showWatchlistPicker = false
+                                    }
                                 }
                                 .padding(horizontal = 16.dp, vertical = 12.dp),
                         ) {
@@ -927,8 +987,10 @@ fun TvDetailsScreen(
                                 .focusRequester(req)
                                 .onFocusChanged { focused = it.isFocused; if (it.isFocused) onContentFocused(req) }
                                 .clickable(remember { MutableInteractionSource() }, null) {
-                                    watchlistViewModel.addToWatchlist(mediaItem, syncTrakt = true, syncSimkl = true)
-                                    showWatchlistPicker = false
+                                    runPremiumAction(TvEntitledFeature.WATCHLIST_EDIT) {
+                                        watchlistViewModel.addToWatchlist(mediaItem, syncTrakt = true, syncSimkl = true)
+                                        showWatchlistPicker = false
+                                    }
                                 }
                                 .padding(horizontal = 16.dp, vertical = 12.dp),
                         ) {

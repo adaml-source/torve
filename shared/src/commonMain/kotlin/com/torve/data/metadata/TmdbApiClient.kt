@@ -67,14 +67,23 @@ class TmdbApiClient(private val httpClient: HttpClient) {
     suspend fun getMovieDetail(id: Int): TmdbMovie {
         return httpClient.get("$BASE_URL/movie/$id") {
             parameter("api_key", API_KEY)
-            parameter("append_to_response", "credits,videos,similar,external_ids")
+            parameter("append_to_response", "credits,videos,similar,external_ids,images")
+            parameter("include_image_language", "en,null")
         }.body()
     }
 
     suspend fun getTvDetail(id: Int): TmdbTv {
         return httpClient.get("$BASE_URL/tv/$id") {
             parameter("api_key", API_KEY)
-            parameter("append_to_response", "credits,videos,similar,external_ids")
+            parameter("append_to_response", "credits,videos,similar,external_ids,images")
+            parameter("include_image_language", "en,null")
+        }.body()
+    }
+
+    suspend fun getImages(type: String, id: Int): TmdbImages {
+        return httpClient.get("$BASE_URL/$type/$id/images") {
+            parameter("api_key", API_KEY)
+            parameter("include_image_language", "en,null")
         }.body()
     }
 

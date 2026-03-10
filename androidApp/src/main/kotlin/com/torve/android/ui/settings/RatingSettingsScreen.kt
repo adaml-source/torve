@@ -497,7 +497,9 @@ fun RatingSettingsScreen(
                         Spacer(Modifier.width(6.dp))
 
                         // Source icon
-                        val iconRes = ratingSourceIconRes(source)
+                        // Use a "fresh" placeholder for settings display
+                        val settingsRatings = MediaRatings(rottenTomatoesScore = 75, rtAudienceScore = 75)
+                        val iconRes = ratingSourceIconRes(source, settingsRatings)
                         if (iconRes != null) {
                             Image(
                                 painter = painterResource(id = iconRes),

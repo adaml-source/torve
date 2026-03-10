@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import com.torve.android.R
 import com.torve.android.tv.TvScreenCache
 import com.torve.android.tv.components.TvContentRail
+import com.torve.android.tv.components.TvMediaContextMenuAction
 import com.torve.android.tv.components.TvMediaRails
 import com.torve.android.tv.components.rememberTvFocusMemory
 import com.torve.android.tv.toMediaItem
@@ -73,6 +74,8 @@ fun TvLibraryScreen(
     onSeeAll: ((railKey: String, title: String) -> Unit)? = null,
     heroOverlay: (@Composable () -> Unit)? = null,
     shouldAutoFocus: Boolean = true,
+    contextMenuActionsForItem: ((MediaItem, Float?) -> List<TvMediaContextMenuAction>)? = null,
+    onContextMenuAction: ((MediaItem, TvMediaContextMenuAction, Float?) -> Unit)? = null,
 ) {
     var selectedTab by rememberSaveable { mutableStateOf(LibraryTab.WATCHLIST.ordinal) }
     val currentTab = LibraryTab.entries[selectedTab]
@@ -122,6 +125,8 @@ fun TvLibraryScreen(
                 onSeeAll = onSeeAll,
                 heroOverlay = heroOverlay,
                 shouldAutoFocus = shouldAutoFocus,
+                contextMenuActionsForItem = contextMenuActionsForItem,
+                onContextMenuAction = onContextMenuAction,
             )
             LibraryTab.DOWNLOADS -> DownloadsContent(
                 railFocusRequester = railFocusRequester,
@@ -132,6 +137,8 @@ fun TvLibraryScreen(
                 onMediaFocused = onMediaFocused,
                 onSeeAll = onSeeAll,
                 shouldAutoFocus = shouldAutoFocus,
+                contextMenuActionsForItem = contextMenuActionsForItem,
+                onContextMenuAction = onContextMenuAction,
             )
             // Recordings tab removed
         }
@@ -149,6 +156,8 @@ private fun WatchlistContent(
     onSeeAll: ((railKey: String, title: String) -> Unit)?,
     heroOverlay: (@Composable () -> Unit)?,
     shouldAutoFocus: Boolean,
+    contextMenuActionsForItem: ((MediaItem, Float?) -> List<TvMediaContextMenuAction>)?,
+    onContextMenuAction: ((MediaItem, TvMediaContextMenuAction, Float?) -> Unit)?,
 ) {
     val watchlistRepo: WatchlistRepository = koinInject()
     val focusMemory = rememberTvFocusMemory()
@@ -207,6 +216,8 @@ private fun WatchlistContent(
         onSeeAll = onSeeAll,
         heroOverlay = heroOverlay,
         shouldAutoFocus = shouldAutoFocus,
+        contextMenuActionsForItem = contextMenuActionsForItem,
+        onContextMenuAction = onContextMenuAction,
     )
 }
 
@@ -220,6 +231,8 @@ private fun DownloadsContent(
     onMediaFocused: ((MediaItem) -> Unit)?,
     onSeeAll: ((railKey: String, title: String) -> Unit)?,
     shouldAutoFocus: Boolean,
+    contextMenuActionsForItem: ((MediaItem, Float?) -> List<TvMediaContextMenuAction>)?,
+    onContextMenuAction: ((MediaItem, TvMediaContextMenuAction, Float?) -> Unit)?,
 ) {
     val downloadCatalogueViewModel: DownloadCatalogueViewModel = koinInject()
     val catalogueState by downloadCatalogueViewModel.state.collectAsState()
@@ -285,6 +298,8 @@ private fun DownloadsContent(
         onMediaFocused = onMediaFocused,
         onSeeAll = null, // No See All for downloads — items are local, not from metadata API
         shouldAutoFocus = shouldAutoFocus,
+        contextMenuActionsForItem = contextMenuActionsForItem,
+        onContextMenuAction = onContextMenuAction,
     )
 }
 

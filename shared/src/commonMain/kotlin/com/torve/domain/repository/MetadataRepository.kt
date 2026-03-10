@@ -54,4 +54,5 @@ interface MetadataRepository {
     suspend fun getPopularPeople(page: Int = 1): List<PersonSummary>
     suspend fun searchPerson(query: String, page: Int = 1): List<PersonSummary>
     suspend fun getWatchProviderLogos(type: String = "movie", region: String = "US"): Map<Int, String>
+    suspend fun getLogoUrl(type: String, tmdbId: Int): String?
 }

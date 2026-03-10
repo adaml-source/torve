@@ -110,7 +110,7 @@ private fun RatingChip(
     ) {
         when (style) {
             RatingPillStyle.ICON -> {
-                val iconRes = ratingSourceIconRes(source)
+                val iconRes = ratingSourceIconRes(source, ratings)
                 if (iconRes != null) {
                     Image(
                         painter = painterResource(id = iconRes),
@@ -222,12 +222,25 @@ fun getRatingSourceColor(source: RatingSource): Color = when (source) {
  */
 /**
  * Map rating sources to their bundled icon drawables for ICON pill style.
+ * RT icons are score-aware:
+ *   Critics: ≥75% → Certified Fresh, ≥60% → Fresh, <60% → Rotten
+ *   Audience: ≥60% → Full Popcorn, <60% → Tipped Popcorn
  */
-fun ratingSourceIconRes(source: RatingSource): Int? = when (source) {
+fun ratingSourceIconRes(source: RatingSource, ratings: MediaRatings? = null): Int? = when (source) {
     RatingSource.IMDB -> R.drawable.ic_rating_imdb
-    RatingSource.ROTTEN_TOMATOES -> R.drawable.ic_rating_rt
-    RatingSource.RT_AUDIENCE -> R.drawable.ic_rating_rt
-    RatingSource.TMDB -> R.drawable.ic_rating_tmdb
+    RatingSource.ROTTEN_TOMATOES -> {
+        val pct = ratings?.rottenTomatoesScore ?: 0
+        when {
+            pct >= 75 -> R.drawable.ic_rt_certified_fresh
+            pct >= 60 -> R.drawable.ic_rt_fresh
+            else -> R.drawable.ic_rt_rotten
+        }
+    }
+    RatingSource.RT_AUDIENCE -> {
+        val pct = ratings?.rtAudienceScore ?: 0
+        if (pct >= 60) R.drawable.ic_rt_audience_fresh else R.drawable.ic_rt_audience_rotten
+    }
+    RatingSource.TMDB -> R.drawable.tmbd_logo
     RatingSource.METACRITIC -> R.drawable.ic_rating_metacritic
     RatingSource.LETTERBOXD -> R.drawable.ic_rating_letterboxd
     RatingSource.TRAKT -> R.drawable.ic_rating_trakt

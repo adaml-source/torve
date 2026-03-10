@@ -36,6 +36,11 @@ import androidx.compose.ui.zIndex
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -79,6 +84,7 @@ fun TvHomeLayoutScreen(
     var aiError by remember { mutableStateOf<String?>(null) }
     var pendingFilters by remember { mutableStateOf<CustomSectionFilters?>(null) }
     var pendingMediaType by remember { mutableStateOf("movie") }
+    var movingSectionKey by remember { mutableStateOf<String?>(null) }
     // Media type cycling
     val mediaTypes = remember { listOf("movie", "tv", "both") }
 
@@ -101,17 +107,34 @@ fun TvHomeLayoutScreen(
             )
         }
 
+        item(key = "reorder_hint") {
+            Text(
+                text = "Press OK to enable or disable. Press RIGHT to enter move mode, UP or DOWN to reorder, LEFT to finish.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Ash,
+                modifier = Modifier.padding(top = 2.dp, bottom = 6.dp, start = 4.dp),
+            )
+        }
+
         // Section rows
         itemsIndexed(
             sortedConfigs,
             key = { _, config -> "section_${config.section.name}" },
         ) { index, config ->
             val requester = remember("hl_${config.section.name}") { FocusRequester() }
+            val rowKey = config.section.name
             HomeSectionRow(
                 config = config,
                 railFocusRequester = railFocusRequester,
                 focusRequester = requester,
                 onContentFocused = onContentFocused,
+                isMoveMode = movingSectionKey == rowKey,
+                onToggleMoveMode = {
+                    movingSectionKey = if (movingSectionKey == rowKey) null else rowKey
+                },
+                onExitMoveMode = {
+                    if (movingSectionKey == rowKey) movingSectionKey = null
+                },
                 onToggle = {
                     homeViewModel.toggleSection(config.section, !config.enabled)
                 },
@@ -376,6 +399,9 @@ private fun HomeSectionRow(
     railFocusRequester: FocusRequester,
     focusRequester: FocusRequester,
     onContentFocused: (FocusRequester) -> Unit,
+    isMoveMode: Boolean,
+    onToggleMoveMode: () -> Unit,
+    onExitMoveMode: () -> Unit,
     onToggle: () -> Unit,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
@@ -383,7 +409,11 @@ private fun HomeSectionRow(
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(targetValue = if (focused) 1.02f else 1f, label = "sectionScale")
     val borderColor by animateColorAsState(
-        targetValue = if (focused) Amber else Color.Transparent,
+        targetValue = when {
+            isMoveMode && focused -> AmberLight
+            focused -> Amber
+            else -> Color.Transparent
+        },
         label = "sectionBorder",
     )
 
@@ -395,6 +425,55 @@ private fun HomeSectionRow(
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onContentFocused(focusRequester)
+            }
+            .onPreviewKeyEvent { event ->
+                if (!focused || event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                when (event.key) {
+                    Key.DirectionRight -> {
+                        if (!isMoveMode) {
+                            onToggleMoveMode()
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    Key.DirectionLeft -> {
+                        if (isMoveMode) {
+                            onExitMoveMode()
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    Key.DirectionUp -> {
+                        if (isMoveMode) {
+                            onMoveUp()
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    Key.DirectionDown -> {
+                        if (isMoveMode) {
+                            onMoveDown()
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    Key.DirectionCenter,
+                    Key.Enter,
+                    Key.NumPadEnter
+                    -> {
+                        if (isMoveMode) {
+                            onExitMoveMode()
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    else -> false
+                }
             }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -427,35 +506,29 @@ private fun HomeSectionRow(
             color = if (config.enabled) Amber else Ash,
             modifier = Modifier.padding(top = 4.dp),
         )
+        Text(
+            text = if (isMoveMode) {
+                "Move mode active: UP or DOWN reorders this section. Press LEFT to finish."
+            } else {
+                "Press RIGHT to move this section."
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = if (isMoveMode) Amber else Silver,
+            modifier = Modifier.padding(top = 6.dp),
+        )
         Row(
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             modifier = Modifier.padding(top = 8.dp),
         ) {
-            val upRequester = remember { FocusRequester() }
             Text(
                 text = stringResource(R.string.tv_home_layout_move_up),
                 style = MaterialTheme.typography.labelMedium,
-                color = Silver,
-                modifier = Modifier
-                    .focusRequester(upRequester)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = onMoveUp,
-                    ),
+                color = if (isMoveMode) Amber else Silver,
             )
-            val downRequester = remember { FocusRequester() }
             Text(
                 text = stringResource(R.string.tv_home_layout_move_down),
                 style = MaterialTheme.typography.labelMedium,
-                color = Silver,
-                modifier = Modifier
-                    .focusRequester(downRequester)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = onMoveDown,
-                    ),
+                color = if (isMoveMode) Amber else Silver,
             )
         }
     }

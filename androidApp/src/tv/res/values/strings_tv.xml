@@ -76,11 +76,13 @@
     <string name="tv_settings_version">Version</string>
     <string name="tv_settings_connected">Connected</string>
     <string name="tv_settings_not_connected">Not connected</string>
+    <string name="tv_settings_needs_setup">Needs setup</string>
     <string name="tv_settings_paired">Paired</string>
     <string name="tv_settings_pairing_code">Pairing code:</string>
     <string name="tv_settings_generating_code">Generating pairing code</string>
     <string name="tv_settings_not_paired">Not paired</string>
     <string name="tv_settings_debug">Debug</string>
+    <string name="tv_settings_diagnostics">Diagnostics</string>
     <string name="tv_settings_sync_status">Sync Status</string>
 
     <!-- Voice search -->

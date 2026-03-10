@@ -19,6 +19,22 @@ object TmdbMappers {
     fun profileUrl(path: String?, size: String = "w185"): String? =
         path?.let { "${TmdbApiClient.IMAGE_BASE}/$size$it" }
 
+    fun logoUrl(path: String?, size: String = "w500"): String? =
+        path?.let { "${TmdbApiClient.IMAGE_BASE}/$size$it" }
+
+    /** Pick the best English/null-language logo from a TMDB images response. */
+    fun bestLogoPath(images: TmdbImages?): String? {
+        if (images == null) return null
+        val logos = images.logos
+        if (logos.isEmpty()) return null
+        // Prefer English, then language-neutral, sorted by vote count desc
+        val best = logos
+            .sortedByDescending { it.voteAverage * it.voteCount }
+            .firstOrNull { it.iso6391 == "en" }
+            ?: logos.sortedByDescending { it.voteAverage * it.voteCount }.firstOrNull()
+        return best?.filePath
+    }
+
     fun movieToMediaItem(m: TmdbMovie): MediaItem {
         val trailer = m.videos?.results?.firstOrNull { v ->
             v.site == "YouTube" && v.type == "Trailer"
@@ -34,6 +50,7 @@ object TmdbMappers {
             overview = m.overview,
             posterUrl = posterUrl(m.posterPath),
             backdropUrl = backdropUrl(m.backdropPath),
+            logoUrl = logoUrl(bestLogoPath(m.images)),
             rating = m.voteAverage,
             voteCount = m.voteCount,
             runtime = m.runtime,
@@ -73,6 +90,7 @@ object TmdbMappers {
             overview = t.overview,
             posterUrl = posterUrl(t.posterPath),
             backdropUrl = backdropUrl(t.backdropPath),
+            logoUrl = logoUrl(bestLogoPath(t.images)),
             rating = t.voteAverage,
             voteCount = t.voteCount,
             genres = t.genres?.map { Genre(it.id, it.name) } ?: emptyList(),

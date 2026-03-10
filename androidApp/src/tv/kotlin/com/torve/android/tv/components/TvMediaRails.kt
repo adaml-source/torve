@@ -1,11 +1,13 @@
 package com.torve.android.tv.components
 
 import android.content.Context
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
@@ -24,8 +26,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,24 +41,39 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.zIndex
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import android.view.KeyEvent as NativeKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.torve.android.R
@@ -63,8 +85,19 @@ import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Steel
 import com.torve.domain.model.MediaItem
+import kotlinx.coroutines.launch
 
 enum class TvCardStyle { POSTER, BACKDROP }
+
+enum class TvBrowseLayout { POSTER_ONLY, INFO_PANEL }
+
+data class TvMediaContextMenuAction(
+    val id: String,
+    val label: String,
+    val isSecondary: Boolean = false,
+    val isDestructive: Boolean = false,
+    val isLocked: Boolean = false,
+)
 
 data class TvContentRail(
     val key: String,
@@ -72,6 +105,14 @@ data class TvContentRail(
     val items: List<MediaItem>,
     val cardStyle: TvCardStyle = TvCardStyle.POSTER,
     val progressByMediaId: Map<String, Float> = emptyMap(),
+)
+
+private data class TvMediaContextMenuState(
+    val item: MediaItem,
+    val progress: Float?,
+    val anchorBounds: Rect?,
+    val restoreFocusRequester: FocusRequester,
+    val actions: List<TvMediaContextMenuAction>,
 )
 
 /**
@@ -114,13 +155,48 @@ fun TvMediaRails(
     onSeeAll: ((railKey: String, title: String) -> Unit)? = null,
     heroOverlay: (@Composable () -> Unit)? = null,
     shouldAutoFocus: Boolean = true,
+    browseLayout: TvBrowseLayout = TvBrowseLayout.INFO_PANEL,
+    contextMenuActionsForItem: ((MediaItem, Float?) -> List<TvMediaContextMenuAction>)? = null,
+    onContextMenuAction: ((MediaItem, TvMediaContextMenuAction, Float?) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val tvPrefs = remember { context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE) }
-    val showTitles = tvPrefs.getBoolean("tv_show_poster_titles", true)
+    val showTitlesOnCards = tvPrefs.getBoolean("tv_show_poster_titles", true) &&
+        browseLayout == TvBrowseLayout.POSTER_ONLY
 
     val requesterMap = remember { mutableMapOf<String, FocusRequester>() }
     val signature = remember(rails) { rails.joinToString("|") { "${it.key}:${it.items.size}" } }
+    val menuScope = rememberCoroutineScope()
+    var contextMenuState by remember { mutableStateOf<TvMediaContextMenuState?>(null) }
+
+    fun openContextMenu(
+        item: MediaItem,
+        progress: Float?,
+        focusRequester: FocusRequester,
+        anchorBounds: Rect?,
+    ) {
+        val actionsProvider = contextMenuActionsForItem ?: return
+        val actions = actionsProvider(item, progress).filter { it.label.isNotBlank() }
+        if (actions.isEmpty()) return
+        contextMenuState = TvMediaContextMenuState(
+            item = item,
+            progress = progress,
+            anchorBounds = anchorBounds,
+            restoreFocusRequester = focusRequester,
+            actions = actions,
+        )
+    }
+
+    fun dismissContextMenu(restoreFocus: Boolean = true) {
+        val state = contextMenuState
+        contextMenuState = null
+        if (restoreFocus && state != null) {
+            menuScope.launch {
+                kotlinx.coroutines.delay(16)
+                runCatching { state.restoreFocusRequester.requestFocus() }
+            }
+        }
+    }
 
     // Prune stale entries when rails change so disposed FocusRequesters
     // don't accumulate and cause crashes on focus restore.
@@ -183,6 +259,18 @@ fun TvMediaRails(
         }
 
         else -> {
+            val railStartPad = if (browseLayout == TvBrowseLayout.INFO_PANEL) 24.dp else 40.dp
+            val rowItemSpacing = 12.dp
+            val rowVerticalFocusInset = 10.dp
+            val focusScrollOffsetPx = with(LocalDensity.current) {
+                if (browseLayout == TvBrowseLayout.INFO_PANEL) {
+                    // Keep previous card + focus-scale spill fully outside the left viewport edge.
+                    (railStartPad - rowItemSpacing + 8.dp).coerceAtLeast(0.dp).roundToPx()
+                } else {
+                    0
+                }
+            }
+            val rowCoroutineScope = rememberCoroutineScope()
             LazyColumn(
                 modifier = modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 32.dp),
@@ -196,6 +284,7 @@ fun TvMediaRails(
                 }
 
                 itemsIndexed(rails, key = { _, row -> row.key }) { rowIndex, row ->
+                    val rowListState = rememberLazyListState()
                     Column(
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
@@ -204,12 +293,19 @@ fun TvMediaRails(
                             style = MaterialTheme.typography.headlineSmall,
                             color = Snow,
                             fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(start = 40.dp),
+                            modifier = Modifier.padding(start = railStartPad),
                         )
 
                         LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            contentPadding = PaddingValues(start = 40.dp, end = 32.dp),
+                            state = rowListState,
+                            modifier = Modifier.clipToBounds(),
+                            horizontalArrangement = Arrangement.spacedBy(rowItemSpacing),
+                            contentPadding = PaddingValues(
+                                start = railStartPad,
+                                top = rowVerticalFocusInset,
+                                end = 32.dp,
+                                bottom = rowVerticalFocusInset,
+                            ),
                         ) {
                             itemsIndexed(
                                 items = row.items,
@@ -247,6 +343,11 @@ fun TvMediaRails(
                                     focusMemory.lastFocusedIndexByRow[row.key] = itemIndex
                                     onContentFocused(focusRequester)
                                     onMediaFocused?.invoke(item)
+                                    // Pivot-scroll: push focused item to a safe inset so no left sliver leaks.
+                                    rowCoroutineScope.launch {
+                                        val scrollOffset = if (itemIndex > 0) focusScrollOffsetPx else 0
+                                        rowListState.animateScrollToItem(itemIndex, scrollOffset)
+                                    }
                                 }
 
                                 when (row.cardStyle) {
@@ -274,7 +375,15 @@ fun TvMediaRails(
                                             onClick = { onMediaClick(item) },
                                             onFocused = onItemFocused,
                                             progress = progress,
-                                            showTitles = showTitles,
+                                            showTitles = showTitlesOnCards,
+                                            onContextMenuRequested = { anchorBounds ->
+                                                openContextMenu(
+                                                    item = item,
+                                                    progress = progress,
+                                                    focusRequester = focusRequester,
+                                                    anchorBounds = anchorBounds,
+                                                )
+                                            },
                                         )
                                     }
                                 }
@@ -304,10 +413,22 @@ fun TvMediaRails(
                     }
                 }
             }
+
+            contextMenuState?.let { menuState ->
+                TvMediaContextMenu(
+                    state = menuState,
+                    onDismiss = { dismissContextMenu(restoreFocus = true) },
+                    onAction = { action ->
+                        onContextMenuAction?.invoke(menuState.item, action, menuState.progress)
+                        dismissContextMenu(restoreFocus = true)
+                    },
+                )
+            }
         }
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun TvPosterCard(
     item: MediaItem,
@@ -316,8 +437,10 @@ private fun TvPosterCard(
     onFocused: () -> Unit,
     progress: Float? = null,
     showTitles: Boolean = true,
+    onContextMenuRequested: ((Rect?) -> Unit)? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
+    var anchorBounds by remember { mutableStateOf<Rect?>(null) }
     val scale by animateFloatAsState(targetValue = if (focused) 1.06f else 1f, label = "posterScale")
     val borderColor by animateColorAsState(
         targetValue = if (focused) AmberLight else Color.Transparent,
@@ -330,14 +453,34 @@ private fun TvPosterCard(
             .scale(scale)
             .border(2.dp, borderColor, RoundedCornerShape(14.dp))
             .clip(RoundedCornerShape(14.dp))
+            .onGloballyPositioned { coordinates ->
+                anchorBounds = coordinates.boundsInWindow()
+            }
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
             }
-            .clickable(
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                val isMenuKey = event.key == Key.Menu
+                val isCenterLongPress = (
+                    (event.key == Key.DirectionCenter || event.key == Key.Enter) &&
+                        (event.nativeKeyEvent as? NativeKeyEvent)?.repeatCount?.let { it > 0 } == true
+                    )
+                if (isMenuKey || isCenterLongPress) {
+                    onContextMenuRequested?.invoke(anchorBounds)
+                    true
+                } else {
+                    false
+                }
+            }
+            .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick,
+                onLongClick = {
+                    onContextMenuRequested?.invoke(anchorBounds)
+                },
             ),
     ) {
         AsyncImage(
@@ -386,7 +529,7 @@ private fun TvPosterCard(
                                 Spacer(modifier = Modifier.width(2.dp))
                             }
                             Image(
-                                painter = painterResource(id = R.drawable.ic_rating_tmdb),
+                                painter = painterResource(id = R.drawable.tmbd_logo),
                                 contentDescription = "TMDB",
                                 modifier = Modifier.size(16.dp),
                             )
@@ -419,6 +562,137 @@ private fun TvPosterCard(
                         .fillMaxWidth(fraction = progress.coerceIn(0f, 1f))
                         .height(3.dp)
                         .background(Amber),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TvMediaContextMenu(
+    state: TvMediaContextMenuState,
+    onDismiss: () -> Unit,
+    onAction: (TvMediaContextMenuAction) -> Unit,
+) {
+    val density = LocalDensity.current
+    val menuWidth = 320.dp
+    val menuOffsetPx = with(density) { 14.dp.roundToPx() }
+    val menuX = ((state.anchorBounds?.right ?: 120f).toInt() + menuOffsetPx).coerceAtLeast(menuOffsetPx)
+    val menuY = ((state.anchorBounds?.top ?: 100f).toInt()).coerceAtLeast(menuOffsetPx)
+    val firstActionRequester = remember(state.item.id, state.actions.size) { FocusRequester() }
+
+    BackHandler(onBack = onDismiss)
+
+    LaunchedEffect(state.item.id, state.actions.size) {
+        kotlinx.coroutines.delay(30)
+        runCatching { firstActionRequester.requestFocus() }
+    }
+
+    Popup(
+        alignment = Alignment.TopStart,
+        offset = IntOffset(menuX, menuY),
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(
+            focusable = true,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true,
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .width(menuWidth)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Charcoal.copy(alpha = 0.95f))
+                .border(2.dp, Steel.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+                .padding(horizontal = 10.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            state.actions.forEachIndexed { index, action ->
+                if (index > 0 && action.isSecondary && !state.actions[index - 1].isSecondary) {
+                    HorizontalDivider(
+                        color = Steel.copy(alpha = 0.35f),
+                        thickness = 1.dp,
+                        modifier = Modifier.padding(vertical = 4.dp),
+                    )
+                }
+                TvMediaContextMenuRow(
+                    action = action,
+                    modifier = if (index == 0) Modifier.focusRequester(firstActionRequester) else Modifier,
+                    onClick = { onAction(action) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TvMediaContextMenuRow(
+    action: TvMediaContextMenuAction,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val borderColor by animateColorAsState(
+        targetValue = when {
+            focused && action.isDestructive -> Color(0xFFEF6C6C)
+            focused && action.isLocked -> AmberLight
+            focused -> Amber
+            else -> Color.Transparent
+        },
+        label = "contextMenuRowBorder",
+    )
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(
+                when {
+                    focused && action.isDestructive -> Color(0xFF4A2727)
+                    focused && action.isLocked -> Color(0xFF3D3622)
+                    focused -> Obsidian.copy(alpha = 0.7f)
+                    action.isSecondary -> Obsidian.copy(alpha = 0.42f)
+                    else -> Obsidian.copy(alpha = 0.56f)
+                },
+            )
+            .border(
+                width = if (focused) 2.dp else 0.dp,
+                color = borderColor,
+                shape = RoundedCornerShape(12.dp),
+            )
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            )
+            .padding(horizontal = 12.dp, vertical = 11.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = action.label,
+                style = MaterialTheme.typography.titleMedium,
+                color = when {
+                    action.isDestructive -> Color(0xFFFFB4B4)
+                    action.isLocked -> if (focused) AmberLight else Silver
+                    focused -> Amber
+                    else -> Snow
+                },
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                fontWeight = if (focused) FontWeight.SemiBold else FontWeight.Medium,
+            )
+            if (action.isLocked) {
+                Icon(
+                    imageVector = Icons.Filled.Lock,
+                    contentDescription = null,
+                    tint = if (focused) AmberLight else Silver,
+                    modifier = Modifier.size(16.dp),
                 )
             }
         }

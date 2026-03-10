@@ -13,6 +13,7 @@ import com.torve.android.tv.screens.TvHomeLayoutScreen
 import com.torve.android.tv.screens.TvLivePlayerScreen
 import com.torve.android.tv.screens.TvRatingsSettingsScreen
 import com.torve.android.tv.screens.TvSeeAllScreen
+import com.torve.android.tv.premium.TvEntitledFeature
 import com.torve.android.ui.player.PlayerScreen
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
@@ -35,6 +36,7 @@ fun TvNavHost(
     railFocusRequester: FocusRequester,
     onVoiceSearchQuery: (String) -> Unit,
     onSettingsClick: () -> Unit = {},
+    onRequestLifetimeUnlock: (TvEntitledFeature) -> Unit = {},
     onFirstContentRequester: (FocusRequester) -> Unit = {},
     onContentFocused: (FocusRequester) -> Unit = {},
 ) {
@@ -119,6 +121,7 @@ fun TvNavHost(
                     navController.popBackStack()
                     onSettingsClick()
                 },
+                onRequestLifetimeUnlock = onRequestLifetimeUnlock,
                 onCastClick = { castId, castName ->
                     navController.navigate(
                         TvRoutes.seeAll(

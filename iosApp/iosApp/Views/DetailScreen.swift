@@ -134,7 +134,8 @@ struct DetailScreen: View {
                         MultiRatingPills(
                             imdb: ratings.imdbScore.map { Double($0.floatValue) },
                             tmdb: ratings.tmdbScore.map { Double($0.floatValue) },
-                            rt: ratings.rottenTomatoesScore.map { Int($0.int32Value) }
+                            rt: ratings.rottenTomatoesScore.map { Int($0.int32Value) },
+                            rtAudience: ratings.rtAudienceScore.map { Int($0.int32Value) }
                         )
                     }
 

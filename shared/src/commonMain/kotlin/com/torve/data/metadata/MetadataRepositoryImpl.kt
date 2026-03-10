@@ -303,6 +303,15 @@ class MetadataRepositoryImpl(
         }.toMap()
     }
 
+    override suspend fun getLogoUrl(type: String, tmdbId: Int): String? {
+        return try {
+            val images = api.getImages(type, tmdbId)
+            TmdbMappers.bestLogoPath(images)?.let { TmdbMappers.logoUrl(it) }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     override suspend fun getHomeShelves(): List<CatalogShelf> = coroutineScope {
         val trendingMovies = async { api.getTrending("movie") }
         val trendingTv = async { api.getTrendingTv() }

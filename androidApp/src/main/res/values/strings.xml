@@ -761,6 +761,22 @@
     <!-- TV See All -->
     <string name="tv_see_all">See All</string>
 
+    <!-- TV Settings Categories -->
+    <string name="tv_settings_cat_account">Account</string>
+    <string name="tv_settings_cat_account_sub">Sign in &amp; subscription</string>
+    <string name="tv_settings_cat_playback">Playback</string>
+    <string name="tv_settings_cat_playback_sub">Quality &amp; autoplay</string>
+    <string name="tv_settings_cat_appearance">Appearance</string>
+    <string name="tv_settings_cat_appearance_sub">Language &amp; layout</string>
+    <string name="tv_settings_cat_library">Library</string>
+    <string name="tv_settings_cat_library_sub">Channels &amp; lists</string>
+    <string name="tv_settings_cat_connections">Connections</string>
+    <string name="tv_settings_cat_connections_sub">Services &amp; devices</string>
+    <string name="tv_settings_cat_advanced">Advanced</string>
+    <string name="tv_settings_cat_advanced_sub">API keys &amp; addons</string>
+    <string name="tv_settings_cat_about">About</string>
+    <string name="tv_settings_cat_about_sub">Version &amp; legal</string>
+
     <!-- TV Settings -->
     <string name="tv_settings_section_account">Account</string>
     <string name="tv_settings_section_app">App</string>

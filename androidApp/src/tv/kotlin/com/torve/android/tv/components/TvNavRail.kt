@@ -75,6 +75,7 @@ fun TvNavRail(
     onRailFocusChanged: (Boolean) -> Unit,
     onMoveToContent: () -> Unit,
     onNavigate: (String) -> Unit,
+    navigateOnFocus: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val railWidth by animateDpAsState(
@@ -168,7 +169,11 @@ fun TvNavRail(
                     onMoveToContent()
                 },
                 onClick = { onNavigate(destination.route) },
-                onItemFocused = { onNavigate(destination.route) },
+                onItemFocused = {
+                    if (navigateOnFocus) {
+                        onNavigate(destination.route)
+                    }
+                },
             )
         }
     }

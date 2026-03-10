@@ -11,6 +11,7 @@ import androidx.compose.ui.platform.LocalContext
 
 private const val TV_UI_PREFS_NAME = "tv_ui_prefs"
 const val TV_REDUCE_MOTION_KEY = "tv_reduce_motion"
+const val TV_BROWSE_LAYOUT_KEY = "tv_browse_layout"
 
 fun isTvReduceMotionEnabled(context: Context): Boolean {
     return context

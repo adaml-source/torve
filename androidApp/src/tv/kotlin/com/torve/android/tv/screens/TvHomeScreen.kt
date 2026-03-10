@@ -12,7 +12,9 @@ import com.torve.android.R
 import com.torve.android.tv.TvScreenCache
 import com.torve.android.tv.toMediaItemOrNull
 import com.torve.android.tv.components.TvCardStyle
+import com.torve.android.tv.components.TvBrowseLayout
 import com.torve.android.tv.components.TvContentRail
+import com.torve.android.tv.components.TvMediaContextMenuAction
 import com.torve.android.tv.components.TvMediaRails
 import com.torve.android.tv.components.dedupeAcrossRails
 import com.torve.android.tv.components.rememberTvFocusMemory
@@ -40,6 +42,9 @@ fun TvHomeScreen(
     onSeeAll: ((railKey: String, title: String) -> Unit)? = null,
     heroOverlay: (@Composable () -> Unit)? = null,
     shouldAutoFocus: Boolean = true,
+    browseLayout: TvBrowseLayout = TvBrowseLayout.INFO_PANEL,
+    contextMenuActionsForItem: ((MediaItem, Float?) -> List<TvMediaContextMenuAction>)? = null,
+    onContextMenuAction: ((MediaItem, TvMediaContextMenuAction, Float?) -> Unit)? = null,
 ) {
     val metadataRepo: MetadataRepository = koinInject()
     val watchProgressRepo: WatchProgressRepository = koinInject()
@@ -143,5 +148,8 @@ fun TvHomeScreen(
         onSeeAll = onSeeAll,
         heroOverlay = heroOverlay,
         shouldAutoFocus = shouldAutoFocus,
+        browseLayout = browseLayout,
+        contextMenuActionsForItem = contextMenuActionsForItem,
+        onContextMenuAction = onContextMenuAction,
     )
 }

@@ -38,6 +38,7 @@ data class TmdbMovie(
     val videos: TmdbVideos? = null,
     val similar: TmdbResponse<TmdbMovie>? = null,
     @SerialName("external_ids") val externalIds: TmdbExternalIds? = null,
+    val images: TmdbImages? = null,
 )
 
 @Serializable
@@ -61,6 +62,7 @@ data class TmdbTv(
     val seasons: List<TmdbSeason>? = null,
     val similar: TmdbResponse<TmdbTv>? = null,
     @SerialName("external_ids") val externalIds: TmdbExternalIds? = null,
+    val images: TmdbImages? = null,
 )
 
 @Serializable
@@ -227,6 +229,22 @@ data class TmdbWatchProvider(
     @SerialName("provider_id") val providerId: Int,
     @SerialName("provider_name") val providerName: String = "",
     @SerialName("logo_path") val logoPath: String? = null,
+)
+
+@Serializable
+data class TmdbImageItem(
+    @SerialName("file_path") val filePath: String,
+    @SerialName("iso_639_1") val iso6391: String? = null,
+    @SerialName("aspect_ratio") val aspectRatio: Double = 0.0,
+    val width: Int = 0,
+    val height: Int = 0,
+    @SerialName("vote_average") val voteAverage: Double = 0.0,
+    @SerialName("vote_count") val voteCount: Int = 0,
+)
+
+@Serializable
+data class TmdbImages(
+    val logos: List<TmdbImageItem> = emptyList(),
 )
 
 @Serializable
