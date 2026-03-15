@@ -102,8 +102,12 @@ import com.torve.android.device.DeviceFormFactor
 import com.torve.android.cast.CastService
 import com.torve.android.player.DeviceCodecProbe
 import com.torve.android.player.ExoPlayerEngine
+import com.torve.android.player.LiveAudioClientSurface
+import com.torve.android.player.LiveAudioPathSnapshot
+import com.torve.android.player.LivePlayerEngineId
 import com.torve.android.player.MPVPlayerEngine
 import com.torve.android.player.MPVView
+import com.torve.android.player.buildLiveAudioPathLog
 import com.torve.android.sync.SyncCoordinator
 import com.torve.android.tv.settings.rememberTvReduceMotionPreference
 import com.torve.android.voice.PlayerVoiceCommand
@@ -185,6 +189,7 @@ fun PlayerScreen(
 ) {
     val context = LocalContext.current
     val isTv = remember(context) { DeviceFormFactor.isTv(context) }
+    val isLiveChannelPlayback = mediaType.equals("live", ignoreCase = true)
 
     // Google Cast (injected; no-op on Amazon builds)
     val castService: CastService = koinInject()
@@ -446,16 +451,31 @@ fun PlayerScreen(
         return false
     }
 
-    // Create the player engine once (not keyed on URL for in-place swaps)
+    // Create the player engine once (not keyed on URL for in-place swaps).
+    // On TV: always use ExoPlayer — MPV's vo_mediacodec_embed SIGABRTs when
+    // the Compose AndroidView hasn't attached a surface yet (WinID == 0).
     val engine = remember {
-        val mpvEngine = MPVPlayerEngine(context)
-        if (mpvEngine.initialize()) {
-            useMpv = true
-            mpvEngine as PlayerEngine
-        } else {
+        if (isTv) {
             val exoEngine = ExoPlayerEngine(context)
             exoEngine.initialize()
             exoEngine as PlayerEngine
+        } else {
+            try {
+                val mpvEngine = MPVPlayerEngine(context)
+                if (mpvEngine.initialize()) {
+                    useMpv = true
+                    mpvEngine as PlayerEngine
+                } else {
+                    val exoEngine = ExoPlayerEngine(context)
+                    exoEngine.initialize()
+                    exoEngine as PlayerEngine
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("Player", "MPV init failed, falling back to ExoPlayer", e)
+                val exoEngine = ExoPlayerEngine(context)
+                exoEngine.initialize()
+                exoEngine as PlayerEngine
+            }
         }
     }
 
@@ -577,6 +597,66 @@ fun PlayerScreen(
                 outputMode = channelsState.liveAudioOutputMode,
             )
         }
+    }
+
+    LaunchedEffect(
+        currentUrl,
+        useMpv,
+        isLiveChannelPlayback,
+        channelsState.audioPassthroughEnabled,
+        channelsState.preferSurroundCodecs,
+        channelsState.liveAudioOutputMode,
+    ) {
+        if (!isLiveChannelPlayback) return@LaunchedEffect
+        android.util.Log.i(
+            "Player",
+            buildLiveAudioPathLog(
+                LiveAudioPathSnapshot(
+                    surface = LiveAudioClientSurface.MOBILE,
+                    engineId = if (useMpv) LivePlayerEngineId.MPV else LivePlayerEngineId.EXOPLAYER,
+                    channelName = title.ifBlank { currentUrl },
+                    trackCount = audioTracks.size,
+                    selectedTrack = audioTracks.firstOrNull { it.isSelected },
+                    audioTracks = audioTracks,
+                    passthroughEnabled = channelsState.audioPassthroughEnabled,
+                    preferSurround = channelsState.preferSurroundCodecs,
+                    outputMode = channelsState.liveAudioOutputMode,
+                    rememberedHint = null,
+                    note = "play_start",
+                ),
+            ),
+        )
+    }
+
+    LaunchedEffect(
+        isLiveChannelPlayback,
+        currentUrl,
+        useMpv,
+        audioTracks,
+        isPlaying,
+        channelsState.audioPassthroughEnabled,
+        channelsState.preferSurroundCodecs,
+        channelsState.liveAudioOutputMode,
+    ) {
+        if (!isLiveChannelPlayback || !isPlaying) return@LaunchedEffect
+        android.util.Log.i(
+            "Player",
+            buildLiveAudioPathLog(
+                LiveAudioPathSnapshot(
+                    surface = LiveAudioClientSurface.MOBILE,
+                    engineId = if (useMpv) LivePlayerEngineId.MPV else LivePlayerEngineId.EXOPLAYER,
+                    channelName = title.ifBlank { currentUrl },
+                    trackCount = audioTracks.size,
+                    selectedTrack = audioTracks.firstOrNull { it.isSelected },
+                    audioTracks = audioTracks,
+                    passthroughEnabled = channelsState.audioPassthroughEnabled,
+                    preferSurround = channelsState.preferSurroundCodecs,
+                    outputMode = channelsState.liveAudioOutputMode,
+                    rememberedHint = null,
+                    note = "steady_state",
+                ),
+            ),
+        )
     }
 
     LaunchedEffect(useMpv, pictureFormat, exoPlayerView) {
@@ -1254,7 +1334,11 @@ fun PlayerScreen(
         }
 
         resetPlaybackHealthWindow()
-        engine.play(currentUrl)
+        if (currentUrl.isBlank()) {
+            errorMessage = "No playback URL available"
+        } else {
+            engine.play(currentUrl)
+        }
         if (!initialStartPositionConsumed && !showResumePrompt && resumePromptInitialPositionMs > 0L) {
             pendingStartPositionMs = resumePromptInitialPositionMs
             initialStartPositionConsumed = true

@@ -13,6 +13,9 @@ enum class LivePlayerOverlay {
     /** Bottom menu toolbar: stream info row + action buttons. */
     MENU_BAR,
 
+    /** Layered playback utility menu opened by the remote Menu key. */
+    PLAYBACK_MENU,
+
     /** Full-screen EPG programme grid. */
     EPG_GUIDE,
 

@@ -95,6 +95,7 @@ internal fun TvEpgGrid(
     isFocusEnabled: Boolean,
     onChannelFocused: (EnrichedChannel, EpgProgramme?) -> Unit,
     onGridCellFocused: (rowIndex: Int, colIndex: Int) -> Unit,
+    onMoveVertical: (delta: Int) -> Unit,
     onChannelPlay: (Channel) -> Unit,
     onTimeForward: () -> Unit,
     modifier: Modifier = Modifier,
@@ -114,6 +115,7 @@ internal fun TvEpgGrid(
 
     val targetRow = focusRowIndex.coerceIn(0, (channels.lastIndex).coerceAtLeast(0))
     val targetCol = focusColIndex.coerceAtLeast(0)
+    var lastVerticalMoveMs by remember { mutableLongStateOf(0L) }
 
     LaunchedEffect(focusRequestToken, targetRow, channels.size) {
         if (channels.isEmpty()) return@LaunchedEffect
@@ -125,6 +127,21 @@ internal fun TvEpgGrid(
             .clip(RoundedCornerShape(12.dp))
             .background(Graphite.copy(alpha = 0.55f))
             .border(1.dp, Steel.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+            .onPreviewKeyEvent { event ->
+                // Handle vertical navigation at the grid level so it stays stable
+                // even when LazyColumn cells are being composed/decomposed.
+                when (event.key) {
+                    Key.DirectionUp, Key.DirectionDown -> {
+                        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent true
+                        val now = System.currentTimeMillis()
+                        if (now - lastVerticalMoveMs < 50L) return@onPreviewKeyEvent true
+                        lastVerticalMoveMs = now
+                        onMoveVertical(if (event.key == Key.DirectionUp) -1 else 1)
+                        true
+                    }
+                    else -> false
+                }
+            }
             .focusGroup(),
     ) {
         EpgTimeHeader(
@@ -154,7 +171,7 @@ internal fun TvEpgGrid(
             ) {
                 itemsIndexed(
                     items = channels,
-                    key = { _, enriched -> enriched.channel.url },
+                    key = { index, enriched -> "${index}_${enriched.channel.url}" },
                 ) { rowIndex, enriched ->
                     val programmes = remember(enriched.channel, guideProgrammes) {
                         val key = canonicalEpgChannelKey(
@@ -383,6 +400,9 @@ private fun EpgProgrammeCell(
 
     LaunchedEffect(focusRequestToken, applyFocusTarget, isFocusEnabled) {
         if (!isFocusEnabled || !applyFocusTarget) return@LaunchedEffect
+        // Give LazyColumn time to compose/scroll the target row into view
+        // before requesting focus — yield() alone isn't always enough.
+        delay(60)
         runCatching { cellFocusRequester.requestFocus() }
     }
 

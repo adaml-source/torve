@@ -101,7 +101,7 @@ class SubscriptionRepositoryImpl(
     }
 
     override suspend fun refreshFromBackend(): Boolean {
-        val token = authClient.getAccessToken() ?: return false
+        val token = authClient.getValidAccessToken() ?: return false
         return try {
             // Use device-aware access state instead of just entitlements
             val accessState = deviceApi.getAccessState(token)
@@ -122,7 +122,7 @@ class SubscriptionRepositoryImpl(
     }
 
     override suspend fun refreshFromBackendDetailed(): BackendPremiumResult {
-        val token = authClient.getAccessToken()
+        val token = authClient.getValidAccessToken()
             ?: return BackendPremiumResult.Offline(getActiveSubscription()?.isPro == true)
         return try {
             val accessState = deviceApi.getAccessState(token)

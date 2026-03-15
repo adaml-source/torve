@@ -85,6 +85,9 @@ fun LiveEpgGuideOverlay(
 ) {
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var windowPageOffset by remember { mutableIntStateOf(0) }
+    // Throttle EPG page changes so rapid LEFT/RIGHT repeats don't cascade redraws.
+    var lastPageChangeMs by remember { mutableLongStateOf(0L) }
+    val pageThrottleMs = 250L // One page change per 250ms max
     LaunchedEffect(Unit) {
         while (true) {
             delay(30_000)
@@ -179,7 +182,7 @@ fun LiveEpgGuideOverlay(
                 ) {
                     itemsIndexed(
                         guideChannels,
-                        key = { _, ch -> ch.channel.url },
+                        key = { index, ch -> "${index}_${ch.channel.url}" },
                     ) { index, enrichedChannel ->
                         val isCurrentChannel = enrichedChannel.channel.url == currentChannelUrl
                         val channelProgs = remember(enrichedChannel.channel, guideProgrammes) {
@@ -208,12 +211,16 @@ fun LiveEpgGuideOverlay(
                             onTune = { onTuneChannel(enrichedChannel.channel) },
                             onFocused = { },
                             onTimeBackward = {
-                                if (windowPageOffset > 0) {
+                                val now = System.currentTimeMillis()
+                                if (windowPageOffset > 0 && now - lastPageChangeMs >= pageThrottleMs) {
+                                    lastPageChangeMs = now
                                     windowPageOffset -= 1
                                 }
                             },
                             onTimeForward = {
-                                if (windowPageOffset < EPG_MAX_PAGE_OFFSET) {
+                                val now = System.currentTimeMillis()
+                                if (windowPageOffset < EPG_MAX_PAGE_OFFSET && now - lastPageChangeMs >= pageThrottleMs) {
+                                    lastPageChangeMs = now
                                     windowPageOffset += 1
                                 }
                             },

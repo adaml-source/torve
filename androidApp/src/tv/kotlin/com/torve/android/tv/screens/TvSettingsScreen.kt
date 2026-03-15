@@ -55,6 +55,7 @@ import androidx.compose.ui.res.stringResource
 import com.torve.android.ui.theme.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 // LocaleListCompat removed — no longer applying locale inline
 import com.torve.android.R
@@ -89,6 +90,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import kotlinx.coroutines.launch
+import com.torve.android.premium.rememberEffectivePremiumAccessTier
 import org.koin.compose.koinInject
 
 enum class TvSetupMode { ANDROID_PHONE, IOS_PHONE, TV_ONLY }
@@ -129,6 +131,8 @@ fun TvSettingsScreen(
     onNavigateToPairedDevices: () -> Unit = {},
     onNavigateToActivatedDevices: () -> Unit = {},
     onRequestLifetimeUnlock: (TvEntitledFeature) -> Unit = {},
+    openToChannelsTab: Boolean = false,
+    onChannelsTabConsumed: () -> Unit = {},
     isActive: Boolean = true,
     syncCoordinator: SyncCoordinator = koinInject(),
     settingsViewModel: SettingsViewModel = koinInject(),
@@ -155,6 +159,7 @@ fun TvSettingsScreen(
     val authClient: com.torve.data.auth.AuthClient = koinInject()
     var authEmail by remember { mutableStateOf("") }
     var authPassword by remember { mutableStateOf("") }
+    var authConfirmPassword by remember { mutableStateOf("") }
     var authIsLoading by remember { mutableStateOf(false) }
     var authError by remember { mutableStateOf<String?>(null) }
     var authUser by remember { mutableStateOf<com.torve.data.auth.AuthUser?>(null) }
@@ -231,9 +236,14 @@ fun TvSettingsScreen(
         )
     }
     var selectedCategory by remember { mutableStateOf(TvSettingsCategory.ACCOUNT) }
-    val accessTier = remember(subscriptionState.isPro) {
-        TvPremiumAccess.tierFrom(subscriptionState.isPro)
+
+    LaunchedEffect(openToChannelsTab) {
+        if (openToChannelsTab) {
+            selectedCategory = TvSettingsCategory.LIBRARY
+            onChannelsTabConsumed()
+        }
     }
+    val accessTier = rememberEffectivePremiumAccessTier(subscriptionState.isPro)
     val isLockedFeature: (TvEntitledFeature) -> Boolean = { feature ->
         TvPremiumAccess.isPremiumLocked(feature, accessTier)
     }
@@ -366,8 +376,13 @@ fun TvSettingsScreen(
         languages.indexOf(settingsState.appLanguage).coerceAtLeast(0)
     }
 
-    LaunchedEffect(hasPairedPhone, syncState.pairingCode, syncState.isLoading) {
-        if (!hasPairedPhone && syncState.pairingCode == null && !syncState.isLoading) {
+    LaunchedEffect(hasPairedPhone, syncState.pairingCode, syncState.isLoading, accessTier) {
+        if (
+            !TvPremiumAccess.isPremiumLocked(TvEntitledFeature.PHONE_PAIRING, accessTier) &&
+            !hasPairedPhone &&
+            syncState.pairingCode == null &&
+            !syncState.isLoading
+        ) {
             syncCoordinator.startTvPairingFlow()
         }
     }
@@ -919,11 +934,48 @@ fun TvSettingsScreen(
             )
         }
 
+        // Account benefit notice
+        if (authUser == null) {
+            item(key = "auth_info_banner") {
+                androidx.compose.foundation.layout.Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            com.torve.android.ui.theme.Amber.copy(alpha = 0.10f),
+                            androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                        )
+                        .border(
+                            1.dp,
+                            com.torve.android.ui.theme.Amber.copy(alpha = 0.25f),
+                            androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                        )
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        text = "Sign in to share one purchase across up to 5 devices. " +
+                            "Without an account, each device requires its own purchase " +
+                            "through its app store.",
+                        color = com.torve.android.ui.theme.Silver,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                    )
+                }
+            }
+        }
+
         // Torve account login/signup
         if (authUser != null) {
             // Logged in — show account info + logout
             item(key = "auth_account") {
                 val requester = remember("auth_account") { FocusRequester() }
+                // After sign-in, the login fields disappear and focus is lost.
+                // Restore focus to the account card so navigation keeps working.
+                LaunchedEffect(authUser) {
+                    kotlinx.coroutines.delay(100)
+                    runCatching { requester.requestFocus() }
+                }
                 TvSettingCard(
                     title = "Torve Account",
                     subtitle = authUser!!.email,
@@ -968,10 +1020,17 @@ fun TvSettingsScreen(
         } else {
             // Not logged in — show email/password fields + login/register
             item(key = "auth_email") {
+                val emailRequester = remember("auth_email_focus") { FocusRequester() }
+                // After sign-out, restore focus to the email field.
+                LaunchedEffect(Unit) {
+                    kotlinx.coroutines.delay(100)
+                    runCatching { emailRequester.requestFocus() }
+                }
                 TvTextInputCard(
                     key = "auth_email",
                     title = "Email",
                     value = authEmail,
+                    focusRequester = emailRequester,
                     expandedInput = expandedInput,
                     railFocusRequester = railFocusRequester,
                     onContentFocused = onContentFocused,
@@ -992,10 +1051,29 @@ fun TvSettingsScreen(
                     onContentFocused = onContentFocused,
                     onExpandToggle = { expandedInput = if (expandedInput == it) null else it },
                     onValueChange = { authPassword = it },
+                    isPassword = true,
                     premiumFeature = TvEntitledFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD,
                     premiumLocked = isLockedFeature(TvEntitledFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD),
                     onLockedClick = { onRequestLifetimeUnlock(TvEntitledFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD) },
                 )
+            }
+            if (authShowRegister) {
+                item(key = "auth_confirm_password") {
+                    TvTextInputCard(
+                        key = "auth_confirm_password",
+                        title = "Confirm Password",
+                        value = authConfirmPassword,
+                        expandedInput = expandedInput,
+                        railFocusRequester = railFocusRequester,
+                        onContentFocused = onContentFocused,
+                        onExpandToggle = { expandedInput = if (expandedInput == it) null else it },
+                        onValueChange = { authConfirmPassword = it },
+                        isPassword = true,
+                        premiumFeature = TvEntitledFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD,
+                        premiumLocked = isLockedFeature(TvEntitledFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD),
+                        onLockedClick = { onRequestLifetimeUnlock(TvEntitledFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD) },
+                    )
+                }
             }
             item(key = "auth_submit") {
                 val requester = remember("auth_submit") { FocusRequester() }
@@ -1010,6 +1088,11 @@ fun TvSettingsScreen(
                     onClick = {
                         runPremiumAction(TvEntitledFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD) {
                             if (!authIsLoading) {
+                                if (authShowRegister && authPassword != authConfirmPassword) {
+                                    authError = "Passwords do not match"
+                                    TvNotificationQueue.post("Passwords do not match", NotificationType.ERROR)
+                                    return@runPremiumAction
+                                }
                                 authError = null
                                 authIsLoading = true
                                 authScope.launch {
@@ -1022,6 +1105,7 @@ fun TvSettingsScreen(
                                     if (result.success) {
                                         authUser = result.user
                                         authPassword = ""
+                                        authConfirmPassword = ""
                                         subscriptionViewModel.loadSubscription()
                                         val msg = if (authShowRegister) "Account created!" else "Logged in!"
                                         TvNotificationQueue.post(msg, NotificationType.SUCCESS)
@@ -1048,12 +1132,48 @@ fun TvSettingsScreen(
                     onClick = {
                         runPremiumAction(TvEntitledFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD) {
                             authShowRegister = !authShowRegister
+                            authConfirmPassword = ""
                             authError = null
                         }
                     },
                     rowType = TvSettingRowType.NAVIGATION,
                     premiumLocked = isLockedFeature(TvEntitledFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD),
                 )
+            }
+            if (!authShowRegister) {
+                item(key = "auth_forgot_password") {
+                    val requester = remember("auth_forgot_password") { FocusRequester() }
+                    TvSettingCard(
+                        title = "Forgot Password?",
+                        subtitle = "Send a password reset link to your email",
+                        modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                        focusRequester = requester,
+                        onFocused = { onContentFocused(requester) },
+                        onClick = {
+                            if (!authIsLoading && authEmail.isNotBlank()) {
+                                authError = null
+                                authIsLoading = true
+                                authScope.launch {
+                                    val result = authClient.requestPasswordReset(authEmail)
+                                    authIsLoading = false
+                                    if (result.success) {
+                                        TvNotificationQueue.post(
+                                            "If that email exists, a reset link will be sent.",
+                                            NotificationType.INFO,
+                                        )
+                                    } else {
+                                        authError = result.error
+                                        TvNotificationQueue.post(result.error ?: "Failed", NotificationType.ERROR)
+                                    }
+                                }
+                            } else if (authEmail.isBlank()) {
+                                authError = "Please enter your email first"
+                            }
+                        },
+                        rowType = TvSettingRowType.ACTION,
+                        premiumLocked = isLockedFeature(TvEntitledFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD),
+                    )
+                }
             }
             authError?.let { error ->
                 item(key = "auth_error") {
@@ -3394,6 +3514,7 @@ private fun TvTextInputCard(
     onValueChange: (String) -> Unit,
     focusRequester: FocusRequester? = null,
     upFocusRequester: FocusRequester? = null,
+    isPassword: Boolean = false,
     premiumFeature: TvEntitledFeature? = null,
     premiumLocked: Boolean = false,
     onLockedClick: (() -> Unit)? = null,
@@ -3403,6 +3524,7 @@ private fun TvTextInputCard(
     val requester = focusRequester ?: localRequester
     val locked = premiumFeature != null && premiumLocked
     val maskedValue = if (value.isBlank()) stringResource(R.string.tv_settings_not_set)
+                      else if (isPassword) "\u2022".repeat(value.length)
                       else "${value.take(4)}${"*".repeat((value.length - 4).coerceAtLeast(0))}"
 
     Column(
@@ -3440,6 +3562,11 @@ private fun TvTextInputCard(
                 onValueChange = onValueChange,
                 singleLine = true,
                 label = { Text(title) },
+                visualTransformation = if (isPassword) {
+                    androidx.compose.ui.text.input.PasswordVisualTransformation()
+                } else {
+                    androidx.compose.ui.text.input.VisualTransformation.None
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 8.dp),

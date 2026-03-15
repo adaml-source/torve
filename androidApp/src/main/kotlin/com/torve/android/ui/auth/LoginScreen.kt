@@ -44,10 +44,12 @@ fun LoginScreen(
 ) {
     val scope = rememberCoroutineScope()
     var isRegisterMode by remember { mutableStateOf(false) }
+    var isForgotPasswordMode by remember { mutableStateOf(false) }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var displayName by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    var successMessage by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
 
     Column(
@@ -68,14 +70,18 @@ fun LoginScreen(
         Spacer(Modifier.height(8.dp))
 
         Text(
-            text = if (isRegisterMode) "Create Account" else "Sign In",
+            text = when {
+                isForgotPasswordMode -> "Reset Password"
+                isRegisterMode -> "Create Account"
+                else -> "Sign In"
+            },
             style = MaterialTheme.typography.headlineSmall,
             color = MaterialTheme.colorScheme.onBackground,
         )
 
         Spacer(Modifier.height(32.dp))
 
-        if (isRegisterMode) {
+        if (isRegisterMode && !isForgotPasswordMode) {
             OutlinedTextField(
                 value = displayName,
                 onValueChange = { displayName = it },
@@ -88,24 +94,26 @@ fun LoginScreen(
 
         OutlinedTextField(
             value = email,
-            onValueChange = { email = it; error = null },
+            onValueChange = { email = it; error = null; successMessage = null },
             label = { Text(stringResource(R.string.login_email)) },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
         )
 
-        Spacer(Modifier.height(12.dp))
+        if (!isForgotPasswordMode) {
+            Spacer(Modifier.height(12.dp))
 
-        OutlinedTextField(
-            value = password,
-            onValueChange = { password = it; error = null },
-            label = { Text(stringResource(R.string.login_password)) },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-        )
+            OutlinedTextField(
+                value = password,
+                onValueChange = { password = it; error = null },
+                label = { Text(stringResource(R.string.login_password)) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            )
+        }
 
         error?.let {
             Spacer(Modifier.height(8.dp))
@@ -116,42 +124,92 @@ fun LoginScreen(
             )
         }
 
-        Spacer(Modifier.height(24.dp))
-
-        Button(
-            onClick = {
-                scope.launch {
-                    isLoading = true
-                    error = null
-                    val result = if (isRegisterMode) {
-                        authClient.register(email, password, displayName.takeIf { it.isNotBlank() })
-                    } else {
-                        authClient.login(email, password)
-                    }
-                    isLoading = false
-                    if (result.success) {
-                        onLoginSuccess()
-                    } else {
-                        error = result.error
-                    }
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = !isLoading && email.isNotBlank() && password.isNotBlank(),
-        ) {
-            if (isLoading) {
-                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-            } else {
-                Text(stringResource(if (isRegisterMode) R.string.login_create_account else R.string.login_sign_in))
-            }
+        successMessage?.let {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
         }
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(24.dp))
 
-        TextButton(onClick = { isRegisterMode = !isRegisterMode; error = null }) {
-            Text(
-                stringResource(if (isRegisterMode) R.string.login_switch_to_signin else R.string.login_switch_to_register),
-            )
+        if (isForgotPasswordMode) {
+            Button(
+                onClick = {
+                    scope.launch {
+                        isLoading = true
+                        error = null
+                        successMessage = null
+                        val result = authClient.requestPasswordReset(email)
+                        isLoading = false
+                        if (result.success) {
+                            successMessage = "If that email exists, a reset link will be sent."
+                        } else {
+                            error = result.error
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isLoading && email.isNotBlank(),
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                } else {
+                    Text("Send Reset Link")
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            TextButton(onClick = { isForgotPasswordMode = false; error = null; successMessage = null }) {
+                Text("Back to Sign In")
+            }
+        } else {
+            Button(
+                onClick = {
+                    scope.launch {
+                        isLoading = true
+                        error = null
+                        val result = if (isRegisterMode) {
+                            authClient.register(email, password, displayName.takeIf { it.isNotBlank() })
+                        } else {
+                            authClient.login(email, password)
+                        }
+                        isLoading = false
+                        if (result.success) {
+                            onLoginSuccess()
+                        } else {
+                            error = result.error
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isLoading && email.isNotBlank() && password.isNotBlank(),
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                } else {
+                    Text(stringResource(if (isRegisterMode) R.string.login_create_account else R.string.login_sign_in))
+                }
+            }
+
+            if (!isRegisterMode) {
+                Spacer(Modifier.height(4.dp))
+
+                TextButton(onClick = { isForgotPasswordMode = true; error = null; successMessage = null }) {
+                    Text("Forgot Password?")
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            TextButton(onClick = { isRegisterMode = !isRegisterMode; error = null }) {
+                Text(
+                    stringResource(if (isRegisterMode) R.string.login_switch_to_signin else R.string.login_switch_to_register),
+                )
+            }
         }
 
         Spacer(Modifier.height(16.dp))

@@ -1,6 +1,7 @@
 package com.torve.android.tv.nav
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.focus.FocusRequester
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -37,6 +38,7 @@ fun TvNavHost(
     onVoiceSearchQuery: (String) -> Unit,
     onSettingsClick: () -> Unit = {},
     onRequestLifetimeUnlock: (TvEntitledFeature) -> Unit = {},
+    isStreamPlaybackLocked: Boolean = false,
     onFirstContentRequester: (FocusRequester) -> Unit = {},
     onContentFocused: (FocusRequester) -> Unit = {},
 ) {
@@ -162,12 +164,19 @@ fun TvNavHost(
                 navArgument("groupName") { type = NavType.StringType; defaultValue = "" },
             ),
         ) { backStackEntry ->
-            TvLivePlayerScreen(
-                channelUrl = backStackEntry.arguments?.getString("channelUrl") ?: "",
-                channelName = backStackEntry.arguments?.getString("channelName") ?: "",
-                groupName = backStackEntry.arguments?.getString("groupName") ?: "",
-                onBack = { navController.popBackStack() },
-            )
+            if (isStreamPlaybackLocked) {
+                LaunchedEffect(Unit) {
+                    onRequestLifetimeUnlock(TvEntitledFeature.STREAM_PLAYBACK)
+                    navController.popBackStack()
+                }
+            } else {
+                TvLivePlayerScreen(
+                    channelUrl = backStackEntry.arguments?.getString("channelUrl") ?: "",
+                    channelName = backStackEntry.arguments?.getString("channelName") ?: "",
+                    groupName = backStackEntry.arguments?.getString("groupName") ?: "",
+                    onBack = { navController.popBackStack() },
+                )
+            }
         }
 
         composable(
@@ -188,28 +197,35 @@ fun TvNavHost(
                 navArgument("autoSourceSelection") { type = NavType.BoolType; defaultValue = false },
             ),
         ) { backStackEntry ->
-            PlayerScreen(
-                url = backStackEntry.arguments?.getString("url") ?: "",
-                fallbackUrl = backStackEntry.arguments?.getString("fallbackUrl") ?: "",
-                autoSourceSelection = backStackEntry.arguments?.getBoolean("autoSourceSelection") ?: false,
-                title = backStackEntry.arguments?.getString("title") ?: "",
-                mediaId = backStackEntry.arguments?.getString("mediaId") ?: "",
-                mediaType = backStackEntry.arguments?.getString("mediaType") ?: "movie",
-                posterUrl = backStackEntry.arguments?.getString("posterUrl") ?: "",
-                backdropUrl = backStackEntry.arguments?.getString("backdropUrl") ?: "",
-                seasonNumber = backStackEntry.arguments?.getInt("seasonNumber")?.takeIf { it > 0 },
-                episodeNumber = backStackEntry.arguments?.getInt("episodeNumber")?.takeIf { it > 0 },
-                showTmdbId = backStackEntry.arguments?.getInt("showTmdbId")?.takeIf { it > 0 },
-                showImdbId = backStackEntry.arguments?.getString("showImdbId")?.takeIf { it.isNotBlank() },
-                startPositionMs = backStackEntry.arguments?.getLong("startPositionMs") ?: 0L,
-                onVoiceSearchCommand = { query ->
-                    val normalized = query.trim()
-                    if (normalized.isNotBlank()) {
-                        onVoiceSearchQuery(normalized)
-                    }
-                },
-                onBack = { navController.popBackStack() },
-            )
+            if (isStreamPlaybackLocked) {
+                LaunchedEffect(Unit) {
+                    onRequestLifetimeUnlock(TvEntitledFeature.STREAM_PLAYBACK)
+                    navController.popBackStack()
+                }
+            } else {
+                PlayerScreen(
+                    url = backStackEntry.arguments?.getString("url") ?: "",
+                    fallbackUrl = backStackEntry.arguments?.getString("fallbackUrl") ?: "",
+                    autoSourceSelection = backStackEntry.arguments?.getBoolean("autoSourceSelection") ?: false,
+                    title = backStackEntry.arguments?.getString("title") ?: "",
+                    mediaId = backStackEntry.arguments?.getString("mediaId") ?: "",
+                    mediaType = backStackEntry.arguments?.getString("mediaType") ?: "movie",
+                    posterUrl = backStackEntry.arguments?.getString("posterUrl") ?: "",
+                    backdropUrl = backStackEntry.arguments?.getString("backdropUrl") ?: "",
+                    seasonNumber = backStackEntry.arguments?.getInt("seasonNumber")?.takeIf { it > 0 },
+                    episodeNumber = backStackEntry.arguments?.getInt("episodeNumber")?.takeIf { it > 0 },
+                    showTmdbId = backStackEntry.arguments?.getInt("showTmdbId")?.takeIf { it > 0 },
+                    showImdbId = backStackEntry.arguments?.getString("showImdbId")?.takeIf { it.isNotBlank() },
+                    startPositionMs = backStackEntry.arguments?.getLong("startPositionMs") ?: 0L,
+                    onVoiceSearchCommand = { query ->
+                        val normalized = query.trim()
+                        if (normalized.isNotBlank()) {
+                            onVoiceSearchQuery(normalized)
+                        }
+                    },
+                    onBack = { navController.popBackStack() },
+                )
+            }
         }
     }
 }

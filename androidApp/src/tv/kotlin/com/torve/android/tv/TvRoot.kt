@@ -26,6 +26,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,6 +44,7 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.torve.android.R
+import com.torve.android.premium.rememberEffectivePremiumAccessTier
 import com.torve.android.sync.SyncCoordinator
 import com.torve.android.sync.model.SyncInboundEvent
 import com.torve.android.tv.components.TvFocusDetailsPanel
@@ -119,22 +121,63 @@ private fun NavHostController.navigateToTvDetails(item: MediaItem, autoPlay: Boo
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun TvRoot() {
+    com.torve.android.debug.AnrDebugLogger.log("STARTUP TvRoot composable entered")
     val navController = rememberNavController()
     val context = LocalContext.current
     val rootScope = rememberCoroutineScope()
-    val metadataRepo: MetadataRepository = koinInject()
-    val watchlistViewModel: WatchlistViewModel = koinInject()
-    val watchProgressRepo: WatchProgressRepository = koinInject()
-    val syncCoordinator: SyncCoordinator = koinInject()
-    val syncRepository: SyncRepository = koinInject()
-    val settingsViewModel: SettingsViewModel = koinInject()
-    val channelsViewModel: ChannelsViewModel = koinInject()
-    val subscriptionViewModel: SubscriptionViewModel = koinInject()
+
+    // Resolve heavy singletons off the main thread so the first frame renders
+    // instantly.  The background pre-warm in TorveApp usually wins the race,
+    // but this guarantees the main thread never blocks on DB/VM creation.
+    data class RootDeps(
+        val metadataRepo: MetadataRepository,
+        val watchlistViewModel: WatchlistViewModel,
+        val watchProgressRepo: WatchProgressRepository,
+        val syncCoordinator: SyncCoordinator,
+        val syncRepository: SyncRepository,
+        val settingsViewModel: SettingsViewModel,
+        val channelsViewModel: ChannelsViewModel,
+        val subscriptionViewModel: SubscriptionViewModel,
+    )
+
+    val deps by produceState<RootDeps?>(initialValue = null) {
+        value = withContext(Dispatchers.IO) {
+            val koin = org.koin.java.KoinJavaComponent.getKoin()
+            RootDeps(
+                metadataRepo = koin.get(),
+                watchlistViewModel = koin.get(),
+                watchProgressRepo = koin.get(),
+                syncCoordinator = koin.get(),
+                syncRepository = koin.get(),
+                settingsViewModel = koin.get(),
+                channelsViewModel = koin.get(),
+                subscriptionViewModel = koin.get(),
+            )
+        }
+    }
+
+    // Show a lightweight shell while singletons initialize on the background thread.
+    if (deps == null) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(com.torve.android.ui.theme.Obsidian),
+        )
+        return
+    }
+
+    val metadataRepo = deps!!.metadataRepo
+    val watchlistViewModel = deps!!.watchlistViewModel
+    val watchProgressRepo = deps!!.watchProgressRepo
+    val syncCoordinator = deps!!.syncCoordinator
+    val syncRepository = deps!!.syncRepository
+    val settingsViewModel = deps!!.settingsViewModel
+    val channelsViewModel = deps!!.channelsViewModel
+    val subscriptionViewModel = deps!!.subscriptionViewModel
+
     val syncState by syncCoordinator.state.collectAsState()
     val subscriptionState by subscriptionViewModel.state.collectAsState()
-    val accessTier = remember(subscriptionState.isPro) {
-        TvPremiumAccess.tierFrom(subscriptionState.isPro)
-    }
+    val accessTier = rememberEffectivePremiumAccessTier(subscriptionState.isPro)
     val tvPrefs = remember(context) {
         context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE)
     }
@@ -158,12 +201,19 @@ fun TvRoot() {
     var confirmedTopRoute by rememberSaveable { mutableStateOf(TvRoutes.HOME) }
     var visitedTabs by remember { mutableStateOf(setOf(TvRoutes.HOME)) }
     var settingsDestination by remember { mutableStateOf(TvSettingsDestination.MAIN) }
+    var openSettingsToChannels by remember { mutableStateOf(false) }
     var pendingUnlockFeature by remember { mutableStateOf<TvEntitledFeature?>(null) }
     val requestLifetimeUnlock: (TvEntitledFeature) -> Unit = remember {
         { feature -> pendingUnlockFeature = feature }
     }
 
     /* ── Focus state ───────────────────────────────────────────────────────────────────── */
+    LaunchedEffect(syncState.blockedFeature) {
+        val blockedFeature = syncState.blockedFeature ?: return@LaunchedEffect
+        requestLifetimeUnlock(blockedFeature)
+        syncCoordinator.clearBlockedFeature()
+    }
+
     val railFocusRequester = remember { FocusRequester() }
     val headerPrimaryActionRequester = remember { FocusRequester() }
     val firstContentFocusByRoute = remember { mutableStateMapOf<String, FocusRequester>() }
@@ -250,8 +300,9 @@ fun TvRoot() {
 
     /* ── Notification + sync state ─────────────────────────────────────────────────────── */
     LaunchedEffect(Unit) {
-        val persistedProgress = runCatching { watchProgressRepo.getAllProgress() }
-            .getOrDefault(emptyList())
+        val persistedProgress = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { watchProgressRepo.getAllProgress() }.getOrDefault(emptyList())
+        }
         for (entry in persistedProgress) {
             progressByMediaId[entry.mediaId] = entry.progressPercent.coerceIn(0f, 1f)
         }
@@ -287,15 +338,9 @@ fun TvRoot() {
     // which would cancel the coroutine before delay() completes.
     LaunchedEffect(focusRestoreTrigger) {
         if (focusRestoreTrigger == 0) return@LaunchedEffect
-        // Try with increasing delays — newly visited tabs may need more time to compose
-        for (attempt in 0..2) {
-            delay(
-                when (attempt) {
-                    0 -> 40L
-                    1 -> 110L
-                    else -> 180L
-                },
-            )
+        // Two attempts with shorter delays — reduces focus search churn on Fire TV.
+        for (attempt in 0..1) {
+            delay(if (attempt == 0) 60L else 150L)
             val activeRoute = pendingContentEntryRoute
                 ?: if (isSubRouteActive) {
                     TvRoutes.DETAILS
@@ -316,24 +361,25 @@ fun TvRoot() {
                     return@LaunchedEffect
                 } catch (_: Throwable) { }
             }
-            // If we have no candidates at all yet, retry (tab still composing)
-            if (candidates.isEmpty() && attempt < 2) continue
+            if (candidates.isEmpty() && attempt < 1) continue
             break
         }
-        // Rail is guaranteed fallback
         pendingContentEntryRoute = null
         try { railFocusRequester.requestFocus() } catch (_: Throwable) { }
     }
 
     /* ── Focus watchdog: if focus is truly lost, put it on the rail ─────────────────── */
+    // Reduced polling frequency from 250+150ms to 1500+500ms to lower CPU overhead.
+    // Focus is typically restored by the focusRestoreTrigger LaunchedEffect above;
+    // this watchdog is only for edge cases where focus escapes entirely.
     LaunchedEffect(Unit) {
         while (true) {
-            delay(250)
+            delay(1500)
             if (isPlayerRoute || isSubRouteActive || rootHasFocus) continue
-            // Focus is lost — wait one more check to avoid false positives
-            delay(150)
+            delay(500)
             if (isSubRouteActive || rootHasFocus) continue
-            // Still lost — force focus to rail (always safe)
+            Log.d("TvRoot", "Focus watchdog: focus lost, restoring to rail")
+            com.torve.android.debug.AnrDebugLogger.log("FOCUS_WATCHDOG fired — restoring to rail")
             try { railFocusRequester.requestFocus() } catch (_: Throwable) { }
         }
     }
@@ -378,7 +424,11 @@ fun TvRoot() {
 
     /* ── Sync listeners ────────────────────────────────────────────────────────────────── */
     LaunchedEffect(syncState.isAuthenticated) {
-        if (syncState.isAuthenticated && syncState.devices.isEmpty()) {
+        if (
+            syncState.isAuthenticated &&
+            syncState.devices.isEmpty() &&
+            !TvPremiumAccess.isPremiumLocked(TvEntitledFeature.DEVICE_LINKING, accessTier)
+        ) {
             syncCoordinator.refreshDevices()
         }
     }
@@ -401,6 +451,10 @@ fun TvRoot() {
                 is SyncInboundEvent.PlaybackIntent -> {
                     val detailId = event.contentId.toIntOrNull() ?: return@collect
                     val detailType = if (event.mediaType == "tv") "tv" else "movie"
+                    if (TvPremiumAccess.isPremiumLocked(TvEntitledFeature.STREAM_PLAYBACK, accessTier)) {
+                        requestLifetimeUnlock(TvEntitledFeature.STREAM_PLAYBACK)
+                        return@collect
+                    }
                     TvNotificationQueue.post(stringResource_sync_playback)
                     navController.navigate(
                         TvRoutes.details(
@@ -880,7 +934,6 @@ fun TvRoot() {
                     onConfirm = { route ->
                         confirmedTopRoute = route
                         highlightedTopRoute = route
-                        pendingContentEntryRoute = null
                         if (isSubRouteActive) {
                             navController.popBackStack(TvRoutes.SUB_NAV_START, inclusive = false)
                         }
@@ -889,6 +942,25 @@ fun TvRoot() {
                             settingsDestination = TvSettingsDestination.MAIN
                         }
                         selectedTopRoute = route
+                        // Move focus into the content area — same as onMoveToContent.
+                        // Previously Enter/Center only selected the tab but left focus
+                        // on the rail, so the user couldn't enter content pages.
+                        pendingContentEntryRoute = route
+                        val candidates = listOfNotNull(
+                            lastFocusedContentByRoute[route],
+                            firstContentFocusByRoute[route],
+                        )
+                        val focusedNow = candidates.any { candidate ->
+                            runCatching {
+                                candidate.requestFocus()
+                                true
+                            }.getOrDefault(false)
+                        }
+                        if (!focusedNow) {
+                            focusRestoreTrigger++
+                        } else {
+                            pendingContentEntryRoute = null
+                        }
                     },
                     onNavigate = { route ->
                         highlightedTopRoute = route
@@ -918,35 +990,22 @@ fun TvRoot() {
         content = {
             Box(modifier = Modifier.fillMaxSize()) {
                 /* ── Layer 1: Keep-alive tab screens ───────────────────────── */
-                val topRoutes = remember {
-                    listOf(
-                        TvRoutes.HOME, TvRoutes.MOVIES, TvRoutes.SHOWS,
-                        TvRoutes.IPTV, TvRoutes.SEARCH, TvRoutes.LIBRARY, TvRoutes.SETTINGS,
-                    )
-                }
+                // SaveableStateHolder: Only the ACTIVE tab is composed at any given time.
+                // Inactive tabs' saveable state (scroll positions, text input, etc.) is
+                // preserved in memory but their composition trees are disposed — eliminating
+                // the recomposition amplification where all 7 tabs recompose on every VM
+                // state emission. This is the single largest ANR reduction.
+                val stateHolder = rememberSaveableStateHolder()
+                val activeTabRoute = if (!isSubRouteActive) selectedTopRoute else null
 
-                topRoutes.forEach { route ->
-                    if (route in visitedTabs) {
-                        val isActiveTab = route == selectedTopRoute && !isSubRouteActive
-
-                        key(route) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .zIndex(if (isActiveTab) 1f else 0f)
-                                    .alpha(if (isActiveTab) 1f else 0f)
-                                    // Move inactive tabs off-screen so focus search can't find them.
-                                    // Content stays composed (keep-alive) but invisible + unreachable.
-                                    .offset(x = if (isActiveTab) 0.dp else 10000.dp)
-                                    .onPreviewKeyEvent { !isActiveTab }
-                                    // Block focus from entering inactive tabs during spatial search
-                                    .focusProperties {
-                                        if (!isActiveTab) {
-                                            enter = { FocusRequester.Cancel }
-                                        }
-                                    }
-                                    .focusGroup(),
-                            ) {
+                activeTabRoute?.let { route ->
+                    stateHolder.SaveableStateProvider(route) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .focusGroup(),
+                        ) {
+                            val isActiveTab = true
                                 // Only the active tab gets the hero overlay (avoids shared FocusRequester conflicts)
                                 val tabHeroOverlay: (@Composable () -> Unit)? =
                                     if (isActiveTab && showHero && route in heroRoutes) {
@@ -1036,17 +1095,22 @@ fun TvRoot() {
                                     TvRoutes.IPTV -> TvIptvScreen(
                                         railFocusRequester = railFocusRequester,
                                         onChannelPlay = { channel ->
-                                            navController.navigate(
-                                                TvRoutes.livePlayer(
-                                                    channelUrl = channel.url,
-                                                    channelName = channel.name,
-                                                    groupName = channel.groupTitle.orEmpty(),
-                                                ),
-                                            ) {
-                                                launchSingleTop = true
+                                            if (TvPremiumAccess.isPremiumLocked(TvEntitledFeature.STREAM_PLAYBACK, accessTier)) {
+                                                requestLifetimeUnlock(TvEntitledFeature.STREAM_PLAYBACK)
+                                            } else {
+                                                navController.navigate(
+                                                    TvRoutes.livePlayer(
+                                                        channelUrl = channel.url,
+                                                        channelName = channel.name,
+                                                        groupName = channel.groupTitle.orEmpty(),
+                                                    ),
+                                                ) {
+                                                    launchSingleTop = true
+                                                }
                                             }
                                         },
                                         onOpenEpgSettings = {
+                                            openSettingsToChannels = true
                                             selectedTopRoute = TvRoutes.SETTINGS
                                             highlightedTopRoute = TvRoutes.SETTINGS
                                             confirmedTopRoute = TvRoutes.SETTINGS
@@ -1118,6 +1182,8 @@ fun TvRoot() {
                                                     settingsDestination = TvSettingsDestination.ACTIVATED_DEVICES
                                                 },
                                                 onRequestLifetimeUnlock = requestLifetimeUnlock,
+                                                openToChannelsTab = openSettingsToChannels,
+                                                onChannelsTabConsumed = { openSettingsToChannels = false },
                                                 isActive = isActiveTab,
                                             )
                                         }
@@ -1126,6 +1192,10 @@ fun TvRoot() {
                             }
                         }
                     }
+
+                // Mark route as visited for state preservation
+                LaunchedEffect(selectedTopRoute) {
+                    visitedTabs = visitedTabs + selectedTopRoute
                 }
 
                 /* ── Layer 2: Sub-route NavHost (details, player, see-all, sub-screens) ── */
@@ -1163,6 +1233,10 @@ fun TvRoot() {
                             pendingContentEntryRoute = null
                         },
                         onRequestLifetimeUnlock = requestLifetimeUnlock,
+                        isStreamPlaybackLocked = TvPremiumAccess.isPremiumLocked(
+                            TvEntitledFeature.STREAM_PLAYBACK,
+                            accessTier,
+                        ),
                         onFirstContentRequester = { req ->
                             firstContentFocusByRoute[TvRoutes.DETAILS] = req
                         },

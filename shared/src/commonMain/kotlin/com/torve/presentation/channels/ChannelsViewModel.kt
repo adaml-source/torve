@@ -1,13 +1,17 @@
 package com.torve.presentation.channels
 
 import com.torve.domain.model.EnrichedChannel
+import com.torve.domain.model.EpgData
 import com.torve.domain.model.EpgProgramme
 import com.torve.domain.model.ChannelCategory
 import com.torve.domain.model.Channel
 import com.torve.domain.model.ChannelContentType
 import com.torve.domain.model.ChannelPlaylist
 import com.torve.domain.model.PlaylistType
+import com.torve.domain.model.channelIdentityCandidates
+import com.torve.domain.model.channelMatchesIdentity
 import com.torve.domain.model.canonicalEpgChannelKey
+import com.torve.domain.model.stableChannelId
 import com.torve.domain.player.LiveAudioOutputMode
 import com.torve.data.channels.CatchupResolver
 import com.torve.domain.repository.ChannelRepository
@@ -23,6 +27,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
@@ -30,18 +35,26 @@ import kotlinx.datetime.Clock
 private const val KEY_CHANNELS_AUDIO_PASSTHROUGH = "channels_audio_passthrough_enabled"
 private const val KEY_CHANNELS_PREFER_SURROUND = "channels_prefer_surround_codecs"
 private const val KEY_CHANNELS_AUDIO_OUTPUT_MODE = "channels_live_audio_output_mode"
+private const val KEY_CHANNELS_SELECTED_PLAYLIST = "channels_selected_playlist"
+private const val KEY_CHANNELS_SELECTED_GROUP_PREFIX = "channels_selected_group_"
+private const val KEY_CHANNELS_SELECTED_CHANNEL_PREFIX = "channels_selected_channel_"
+private const val KEY_CHANNELS_LAST_WATCHED_CHANNEL_PREFIX = "channels_last_watched_channel_"
+private const val MAX_GUIDE_CHANNELS_IN_STATE = 160
 private const val EPG_DEBUG_LOG_ENABLED = false
 
 class ChannelsViewModel(
     private val channelRepo: ChannelRepository,
     private val prefsRepo: PreferencesRepository,
     private val catchupResolver: CatchupResolver = CatchupResolver(),
+    private val backgroundDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(ChannelsUiState())
     val state: StateFlow<ChannelsUiState> = _state.asStateFlow()
 
     private val searchQueryFlow = MutableStateFlow("")
+    private var guideJob: Job? = null
+    private var epgRefreshJob: Job? = null
 
     init {
         migrateOldPreferenceKeys()
@@ -74,8 +87,10 @@ class ChannelsViewModel(
 
     private fun loadSavedFilters() {
         scope.launch {
-            val countries = prefsRepo.getString("channels_country_filter")
-            val xxx = prefsRepo.getString("channels_xxx_enabled")
+            val (countries, xxx) = withContext(backgroundDispatcher) {
+                prefsRepo.getString("channels_country_filter") to
+                    prefsRepo.getString("channels_xxx_enabled")
+            }
             _state.update {
                 it.copy(
                     selectedCountries = countries?.split(",")?.filter { c -> c.isNotBlank() }?.toSet() ?: emptySet(),
@@ -89,11 +104,28 @@ class ChannelsViewModel(
         scope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
             try {
-                val playlists = channelRepo.getPlaylists()
-                _state.update { it.copy(playlists = playlists, isLoading = false) }
-                // Auto-select first playlist if none selected
-                if (_state.value.selectedPlaylistId == null && playlists.isNotEmpty()) {
-                    selectPlaylist(playlists.first().id)
+                val playlists = withContext(backgroundDispatcher) { channelRepo.getPlaylists() }
+                val selectedPlaylistId = resolvePreferredPlaylistId(playlists)
+                _state.update {
+                    it.copy(
+                        playlists = playlists,
+                        isLoading = false,
+                        selectedPlaylistId = selectedPlaylistId,
+                    )
+                }
+                if (selectedPlaylistId != null) {
+                    withContext(backgroundDispatcher) {
+                        prefsRepo.setString(KEY_CHANNELS_SELECTED_PLAYLIST, selectedPlaylistId)
+                    }
+                    // Yield to let the UI render the playlist-ready state before
+                    // starting the heavy 76K channel catalog load.
+                    kotlinx.coroutines.yield()
+                    loadPlaylistCatalog(
+                        playlistId = selectedPlaylistId,
+                        restoreSavedState = true,
+                        triggerBackgroundRefresh = true,
+                        showLoadingUntilRefresh = false,
+                    )
                 }
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = e.message) }
@@ -102,57 +134,19 @@ class ChannelsViewModel(
     }
 
     fun selectPlaylist(playlistId: String) {
-        _state.update { it.copy(selectedPlaylistId = playlistId, isLoadingChannels = true) }
-        scope.launch {
-            try {
-                val enriched = channelRepo.getEnrichedChannels(playlistId)
-                val grouped = enriched.groupBy { it.channel.groupTitle ?: "Ungrouped" }
-                // Extract available countries
-                val countries = enriched.mapNotNull { it.channel.tvgCountry }
-                    .flatMap { it.split(",", ";").map { c -> c.trim() } }
-                    .filter { it.isNotBlank() }
-                    .distinct()
-                    .sorted()
-                _state.update {
-                    it.copy(
-                        channels = enriched,
-                        groupedChannels = grouped,
-                        isLoadingChannels = false,
-                        selectedGroup = null,
-                        availableCountries = countries,
-                    )
-                }
-                // Build categories and guide data
-                buildLiveCategories()
-                buildGuideChannels()
-            } catch (oom: OutOfMemoryError) {
-                val fallbackChannels = runCatching { channelRepo.getChannels(playlistId) }.getOrDefault(emptyList())
-                val fallbackEnriched = fallbackChannels.map { EnrichedChannel(channel = it) }
-                val fallbackGrouped = fallbackEnriched.groupBy { it.channel.groupTitle ?: "Ungrouped" }
-                val countries = fallbackEnriched.mapNotNull { it.channel.tvgCountry }
-                    .flatMap { it.split(",", ";").map { c -> c.trim() } }
-                    .filter { it.isNotBlank() }
-                    .distinct()
-                    .sorted()
-                _state.update {
-                    it.copy(
-                        channels = fallbackEnriched,
-                        groupedChannels = fallbackGrouped,
-                        isLoadingChannels = false,
-                        selectedGroup = null,
-                        availableCountries = countries,
-                        guideError = "EPG is too large for device memory. Reduce provider EPG days and retry.",
-                        epgState = EpgState.Error("EPG is too large for device memory. Reduce provider EPG days and retry."),
-                    )
-                }
-            } catch (e: Exception) {
-                _state.update { it.copy(isLoadingChannels = false, error = e.message) }
-            }
-        }
+        scope.launch { prefsRepo.setString(KEY_CHANNELS_SELECTED_PLAYLIST, playlistId) }
+        loadPlaylistCatalog(
+            playlistId = playlistId,
+            restoreSavedState = true,
+            triggerBackgroundRefresh = true,
+            showLoadingUntilRefresh = false,
+        )
     }
 
     fun selectGroup(group: String?) {
         _state.update { it.copy(selectedGroup = group) }
+        val playlistId = _state.value.selectedPlaylistId ?: return
+        scope.launch { persistSelectedGroup(playlistId, group) }
     }
 
     fun getDisplayChannels(): List<EnrichedChannel> {
@@ -199,10 +193,9 @@ class ChannelsViewModel(
             ChannelsFilterType.FHD -> result = result.filter { matchesQuality(it.channel.name, "fhd") }
             ChannelsFilterType.UHD -> result = result.filter { matchesQuality(it.channel.name, "4k", "uhd") }
             ChannelsFilterType.FAVORITES -> {
-                val favIds = st.favorites.map { it.tvgId ?: "${it.playlistId}_${it.name}" }.toSet()
+                val favIds = st.favorites.flatMap(::channelIdentityCandidates).toSet()
                 result = result.filter { enriched ->
-                    val chId = enriched.channel.tvgId ?: "${enriched.channel.playlistId}_${enriched.channel.name}"
-                    chId in favIds
+                    channelIdentityCandidates(enriched.channel).any(favIds::contains)
                 }
             }
             ChannelsFilterType.ALL -> { /* no additional filter */ }
@@ -253,18 +246,25 @@ class ChannelsViewModel(
 
     private fun buildLiveCategories() {
         val st = _state.value
-        val filtered = applyFilters(st.channels).filter {
-            it.channel.contentType == ChannelContentType.LIVE || it.channel.contentType == ChannelContentType.UNKNOWN
-        }.filter {
-            // Filter out hidden channels
-            val chId = it.channel.tvgId ?: "${it.channel.playlistId}_${it.channel.name}"
-            chId !in st.hiddenChannels
+        // Run expensive filter/groupBy/sort chains on IO for 76K+ channels.
+        scope.launch {
+            val catStartMs = Clock.System.now().toEpochMilliseconds()
+            val (visibleCategories, allCategories) = withContext(backgroundDispatcher) {
+                val filtered = applyFilters(st.channels).filter {
+                    it.channel.contentType == ChannelContentType.LIVE || it.channel.contentType == ChannelContentType.UNKNOWN
+                }.filter {
+                    channelIdentityCandidates(it.channel).none(st.hiddenChannels::contains)
+                }
+                val grouped = filtered.groupBy { it.channel.groupTitle ?: "Ungrouped" }
+                val allCats = CategoryNameCleaner.processCategories(grouped)
+                val hiddenLower = st.hiddenCategories.map { it.lowercase() }.toSet()
+                val visibleCats = allCats.filter { it.name.lowercase() !in hiddenLower }
+                visibleCats to allCats
+            }
+            val catMs = Clock.System.now().toEpochMilliseconds() - catStartMs
+            println("STARTUP_METRIC: buildLiveCategories=${catMs}ms visible=${visibleCategories.size} all=${allCategories.size} channels=${st.channels.size}")
+            _state.update { it.copy(categories = visibleCategories, allCategories = allCategories) }
         }
-        val grouped = filtered.groupBy { it.channel.groupTitle ?: "Ungrouped" }
-        val allCategories = CategoryNameCleaner.processCategories(grouped)
-        val hiddenLower = st.hiddenCategories.map { it.lowercase() }.toSet()
-        val visibleCategories = allCategories.filter { it.name.lowercase() !in hiddenLower }
-        _state.update { it.copy(categories = visibleCategories, allCategories = allCategories) }
     }
 
     private fun buildGuideChannels(forceRefreshEpg: Boolean = false) {
@@ -275,9 +275,14 @@ class ChannelsViewModel(
         // Guide shows channels that have EPG data (current or next programme)
         val withEpg = st.channels.filter { it.currentProgramme != null || it.nextProgramme != null }
         // Fall back to all live channels if no current/next programme is cached.
-        val guide = if (withEpg.isNotEmpty()) withEpg else st.channels.filter {
+        val guideSource = if (withEpg.isNotEmpty()) withEpg else st.channels.filter {
             it.channel.contentType == ChannelContentType.LIVE || it.channel.contentType == ChannelContentType.UNKNOWN
         }
+        val guide = prioritizeGuideChannels(
+            channels = guideSource,
+            selectedGroup = st.selectedGroup,
+            groupedChannels = st.groupedChannels,
+        )
 
         val selectedPlaylist = st.playlists.firstOrNull { it.id == playlistId }
         val epgSourceUrl = selectedPlaylist.resolveEpgSourceUrl().orEmpty()
@@ -296,86 +301,93 @@ class ChannelsViewModel(
             return
         }
 
-        // Load full programme data for guide timeline
-        scope.launch {
-            _state.update {
-                it.copy(
-                    guideChannels = guide,
-                    isLoadingGuide = true,
-                    guideError = null,
-                    epgState = EpgState.Loading,
-                )
-            }
+        // Load programme data for guide timeline — local-first, never block on network.
+        // Cancel any previous guide build to avoid overlapping state updates.
+        guideJob?.cancel()
+        guideJob = scope.launch {
             val buildStartedAt = Clock.System.now().toEpochMilliseconds()
             try {
                 println(
                     "ChannelsEPG: load start playlistId=$playlistId source=$epgSourceUrl forceRefresh=$forceRefreshEpg",
                 )
 
+                // Force refresh requested (manual retry) — fetch from network first.
                 if (forceRefreshEpg) {
-                    withContext(Dispatchers.IO) { channelRepo.refreshEpg(playlistId) }
-                }
-
-                var epgData = withContext(Dispatchers.IO) { channelRepo.getEpg(playlistId) }
-                var epgLoadError = withContext(Dispatchers.IO) { channelRepo.getEpgLoadError(playlistId) }
-                if (epgData.programmesByChannelKey.isEmpty() && !forceRefreshEpg) {
-                    println("ChannelsEPG: cache empty for playlistId=$playlistId, refreshing epg only")
-                    try {
-                        withContext(Dispatchers.IO) { channelRepo.refreshEpg(playlistId) }
-                    } catch (e: Exception) {
-                        println("ChannelsEPG: refresh failed playlistId=$playlistId error=${e.message}")
-                    }
-                    epgData = withContext(Dispatchers.IO) { channelRepo.getEpg(playlistId) }
-                    epgLoadError = withContext(Dispatchers.IO) { channelRepo.getEpgLoadError(playlistId) }
-                }
-
-                if (epgData.programmesByChannelKey.isEmpty() && !epgLoadError.isNullOrBlank()) {
-                    throw IllegalStateException(epgLoadError)
-                }
-
-                println(
-                    "ChannelsEPG: source parsed playlistId=$playlistId generation=${epgData.generationId ?: -1} channels=${epgData.channels.size} programmes=${epgData.programmes.size} groupedKeys=${epgData.programmesByChannelKey.size}",
-                )
-
-                data class GuideBuildResult(
-                    val programmesByKey: Map<String, List<EpgProgramme>>,
-                    val matchedChannels: Int,
-                    val unmatchedChannels: Int,
-                )
-
-                val buildResult = withContext(Dispatchers.Default) {
-                    val programmesByKey = HashMap<String, List<EpgProgramme>>(guide.size)
-                    var matchedChannels = 0
-                    var unmatchedChannels = 0
-                    guide.forEach { enriched ->
-                        val key = canonicalEpgChannelKey(
-                            playlistId = playlistId,
-                            channel = enriched.channel,
+                    _state.update {
+                        it.copy(
+                            guideChannels = guide,
+                            isLoadingGuide = true,
+                            guideError = null,
+                            epgState = EpgState.Loading,
                         )
-                        if (key.isNullOrBlank()) {
-                            unmatchedChannels++
-                            return@forEach
-                        }
-                        val programmes = epgData.programmesByChannelKey[key].orEmpty()
-                        programmesByKey[key] = programmes
-                        if (programmes.isEmpty()) {
-                            unmatchedChannels++
-                        } else {
-                            matchedChannels++
-                        }
                     }
-                    GuideBuildResult(
-                        programmesByKey = programmesByKey,
-                        matchedChannels = matchedChannels,
-                        unmatchedChannels = unmatchedChannels,
+                    withContext(backgroundDispatcher) { channelRepo.refreshEpg(playlistId, _state.value.hiddenChannels) }
+                }
+
+                // Load EPG from local cache/DB — this is fast and never hits network.
+                val epgData = withContext(backgroundDispatcher) { channelRepo.getEpg(playlistId) }
+                val epgLoadError = withContext(backgroundDispatcher) { channelRepo.getEpgLoadError(playlistId) }
+
+                // If we have local EPG data, render it immediately — even if stale.
+                if (epgData.programmesByChannelKey.isNotEmpty()) {
+                    val buildResult = buildEpgGuideResult(guide, playlistId, epgData)
+                    println(
+                        "ChannelsEPG: local-first render playlistId=$playlistId generation=${epgData.generationId ?: -1} " +
+                            "guideChannels=${guide.size} matched=${buildResult.matchedChannels} " +
+                            "unmatched=${buildResult.unmatchedChannels} " +
+                            "buildMs=${Clock.System.now().toEpochMilliseconds() - buildStartedAt}",
+                    )
+                    _state.update {
+                        it.copy(
+                            guideChannels = guide,
+                            guideProgrammes = buildResult.programmesByKey,
+                            isLoadingGuide = false,
+                            guideError = null,
+                            epgState = EpgState.Loaded(
+                                sourceUrl = epgSourceUrl,
+                                sourceChannelCount = epgData.channels.size,
+                                sourceProgrammeCount = epgData.programmes.size,
+                                matchedChannelCount = buildResult.matchedChannels,
+                                unmatchedChannelCount = buildResult.unmatchedChannels,
+                            ),
+                        )
+                    }
+                    // Background refresh: update EPG without blocking UI.
+                    if (!forceRefreshEpg) {
+                        refreshEpgInBackground(playlistId, guide, epgSourceUrl)
+                    }
+                    return@launch
+                }
+
+                // No local EPG at all — show loading and fetch from network.
+                _state.update {
+                    it.copy(
+                        guideChannels = guide,
+                        isLoadingGuide = true,
+                        guideError = null,
+                        epgState = EpgState.Loading,
                     )
                 }
 
-                println(
-                    "ChannelsEPG: mapped playlistId=$playlistId generation=${epgData.generationId ?: -1} guideChannels=${guide.size} mappedKeys=${buildResult.programmesByKey.size} matchedChannels=${buildResult.matchedChannels} unmatchedChannels=${buildResult.unmatchedChannels}",
-                )
+                if (!forceRefreshEpg) {
+                    println("ChannelsEPG: no local EPG for playlistId=$playlistId, fetching from network")
+                    try {
+                        withContext(backgroundDispatcher) { channelRepo.refreshEpg(playlistId, _state.value.hiddenChannels) }
+                    } catch (e: Exception) {
+                        println("ChannelsEPG: refresh failed playlistId=$playlistId error=${e.message}")
+                    }
+                }
+
+                val freshEpgData = withContext(backgroundDispatcher) { channelRepo.getEpg(playlistId) }
+                val freshEpgLoadError = withContext(backgroundDispatcher) { channelRepo.getEpgLoadError(playlistId) }
+
+                if (freshEpgData.programmesByChannelKey.isEmpty() && !freshEpgLoadError.isNullOrBlank()) {
+                    throw IllegalStateException(freshEpgLoadError)
+                }
+
+                val buildResult = buildEpgGuideResult(guide, playlistId, freshEpgData)
                 debugLog(
-                    "ChannelsEPG: guide build complete playlistId=$playlistId generation=${epgData.generationId ?: -1} buildMs=${Clock.System.now().toEpochMilliseconds() - buildStartedAt} channels=${guide.size} programmeRows=${epgData.programmes.size} guideMapSize=${buildResult.programmesByKey.size}",
+                    "ChannelsEPG: guide build complete playlistId=$playlistId generation=${freshEpgData.generationId ?: -1} buildMs=${Clock.System.now().toEpochMilliseconds() - buildStartedAt} channels=${guide.size} programmeRows=${freshEpgData.programmes.size} guideMapSize=${buildResult.programmesByKey.size}",
                 )
 
                 _state.update {
@@ -386,8 +398,8 @@ class ChannelsViewModel(
                         guideError = null,
                         epgState = EpgState.Loaded(
                             sourceUrl = epgSourceUrl,
-                            sourceChannelCount = epgData.channels.size,
-                            sourceProgrammeCount = epgData.programmes.size,
+                            sourceChannelCount = freshEpgData.channels.size,
+                            sourceProgrammeCount = freshEpgData.programmes.size,
                             matchedChannelCount = buildResult.matchedChannels,
                             unmatchedChannelCount = buildResult.unmatchedChannels,
                         ),
@@ -421,6 +433,85 @@ class ChannelsViewModel(
         }
     }
 
+    private data class GuideBuildResult(
+        val programmesByKey: Map<String, List<EpgProgramme>>,
+        val matchedChannels: Int,
+        val unmatchedChannels: Int,
+    )
+
+    private suspend fun buildEpgGuideResult(
+        guide: List<EnrichedChannel>,
+        playlistId: String,
+        epgData: EpgData,
+    ): GuideBuildResult = withContext(backgroundDispatcher) {
+        val programmesByKey = HashMap<String, List<EpgProgramme>>(guide.size)
+        var matchedChannels = 0
+        var unmatchedChannels = 0
+        guide.forEach { enriched ->
+            val key = canonicalEpgChannelKey(
+                playlistId = playlistId,
+                channel = enriched.channel,
+            )
+            if (key.isNullOrBlank()) {
+                unmatchedChannels++
+                return@forEach
+            }
+            val programmes = epgData.programmesByChannelKey[key].orEmpty()
+            programmesByKey[key] = programmes
+            if (programmes.isEmpty()) {
+                unmatchedChannels++
+            } else {
+                matchedChannels++
+            }
+        }
+        GuideBuildResult(
+            programmesByKey = programmesByKey,
+            matchedChannels = matchedChannels,
+            unmatchedChannels = unmatchedChannels,
+        )
+    }
+
+    private fun refreshEpgInBackground(
+        playlistId: String,
+        guide: List<EnrichedChannel>,
+        epgSourceUrl: String,
+    ) {
+        // Only one EPG network refresh at a time — skip duplicates.
+        if (epgRefreshJob?.isActive == true) {
+            println("ChannelsEPG: background refresh already in progress, skipping duplicate")
+            return
+        }
+        epgRefreshJob = scope.launch {
+            try {
+                println("ChannelsEPG: background refresh start playlistId=$playlistId")
+                withContext(backgroundDispatcher) { channelRepo.refreshEpg(playlistId, _state.value.hiddenChannels) }
+                if (_state.value.selectedPlaylistId != playlistId) return@launch
+                val freshEpg = withContext(backgroundDispatcher) { channelRepo.getEpg(playlistId) }
+                if (freshEpg.programmesByChannelKey.isEmpty()) return@launch
+                val freshResult = buildEpgGuideResult(guide, playlistId, freshEpg)
+                println(
+                    "ChannelsEPG: background refresh complete playlistId=$playlistId " +
+                        "matched=${freshResult.matchedChannels} unmatched=${freshResult.unmatchedChannels}",
+                )
+                _state.update {
+                    it.copy(
+                        guideProgrammes = freshResult.programmesByKey,
+                        epgState = EpgState.Loaded(
+                            sourceUrl = epgSourceUrl,
+                            sourceChannelCount = freshEpg.channels.size,
+                            sourceProgrammeCount = freshEpg.programmes.size,
+                            matchedChannelCount = freshResult.matchedChannels,
+                            unmatchedChannelCount = freshResult.unmatchedChannels,
+                        ),
+                    )
+                }
+            } catch (e: Exception) {
+                println("ChannelsEPG: background refresh failed playlistId=$playlistId error=${e.message}")
+                // Don't overwrite visible EPG data — stale data is better than no data.
+            }
+        }
+    }
+
     fun retryGuideLoad() {
         buildGuideChannels(forceRefreshEpg = true)
     }
@@ -429,8 +520,10 @@ class ChannelsViewModel(
 
     private fun loadHiddenItems() {
         scope.launch {
-            val cats = prefsRepo.getString("channels_hidden_categories")
-            val chs = prefsRepo.getString("channels_hidden_channels")
+            val (cats, chs) = withContext(backgroundDispatcher) {
+                prefsRepo.getString("channels_hidden_categories") to
+                    prefsRepo.getString("channels_hidden_channels")
+            }
             _state.update {
                 it.copy(
                     hiddenCategories = cats?.split("|||")?.filter { c -> c.isNotBlank() }?.toSet() ?: emptySet(),
@@ -443,21 +536,42 @@ class ChannelsViewModel(
     fun toggleHiddenCategory(categoryName: String) {
         val current = _state.value.hiddenCategories
         val updated = if (categoryName in current) current - categoryName else current + categoryName
-        _state.update { it.copy(hiddenCategories = updated) }
+        // Single state emission: merge the hidden-set update + category rebuild
+        // into one _state.update to avoid double-recomposition.
+        val st = _state.value.copy(hiddenCategories = updated)
+        val filtered = applyFilters(st.channels).filter {
+            it.channel.contentType == ChannelContentType.LIVE || it.channel.contentType == ChannelContentType.UNKNOWN
+        }.filter {
+            channelIdentityCandidates(it.channel).none(st.hiddenChannels::contains)
+        }
+        val grouped = filtered.groupBy { it.channel.groupTitle ?: "Ungrouped" }
+        val allCategories = CategoryNameCleaner.processCategories(grouped)
+        val hiddenLower = st.hiddenCategories.map { it.lowercase() }.toSet()
+        val visibleCategories = allCategories.filter { it.name.lowercase() !in hiddenLower }
+        _state.update { it.copy(hiddenCategories = updated, categories = visibleCategories, allCategories = allCategories) }
         scope.launch {
             prefsRepo.setString("channels_hidden_categories", updated.joinToString("|||"))
         }
-        buildLiveCategories()
     }
 
     fun toggleHiddenChannel(channelId: String) {
         val current = _state.value.hiddenChannels
         val updated = if (channelId in current) current - channelId else current + channelId
-        _state.update { it.copy(hiddenChannels = updated) }
+        // Single state emission: merge the hidden-set update + category rebuild.
+        val st = _state.value.copy(hiddenChannels = updated)
+        val filtered = applyFilters(st.channels).filter {
+            it.channel.contentType == ChannelContentType.LIVE || it.channel.contentType == ChannelContentType.UNKNOWN
+        }.filter {
+            channelIdentityCandidates(it.channel).none(st.hiddenChannels::contains)
+        }
+        val grouped = filtered.groupBy { it.channel.groupTitle ?: "Ungrouped" }
+        val allCategories = CategoryNameCleaner.processCategories(grouped)
+        val hiddenLower = st.hiddenCategories.map { it.lowercase() }.toSet()
+        val visibleCategories = allCategories.filter { it.name.lowercase() !in hiddenLower }
+        _state.update { it.copy(hiddenChannels = updated, categories = visibleCategories, allCategories = allCategories) }
         scope.launch {
             prefsRepo.setString("channels_hidden_channels", updated.joinToString("|||"))
         }
-        buildLiveCategories()
     }
 
     fun getAllCategoryNames(): List<String> {
@@ -469,7 +583,16 @@ class ChannelsViewModel(
 
     fun hideAllCategories() {
         val allNames = _state.value.allCategories.map { it.name }.toSet()
-        _state.update { it.copy(hiddenCategories = allNames) }
+        // Single emission — inline buildLiveCategories logic to avoid double-recomposition.
+        val st = _state.value.copy(hiddenCategories = allNames)
+        val filtered = applyFilters(st.channels).filter {
+            it.channel.contentType == ChannelContentType.LIVE || it.channel.contentType == ChannelContentType.UNKNOWN
+        }.filter { channelIdentityCandidates(it.channel).none(st.hiddenChannels::contains) }
+        val grouped = filtered.groupBy { it.channel.groupTitle ?: "Ungrouped" }
+        val allCategories = CategoryNameCleaner.processCategories(grouped)
+        val hiddenLower = allNames.map { it.lowercase() }.toSet()
+        val visibleCategories = allCategories.filter { it.name.lowercase() !in hiddenLower }
+        _state.update { it.copy(hiddenCategories = allNames, categories = visibleCategories, allCategories = allCategories) }
         scope.launch {
             prefsRepo.setString("channels_hidden_categories", allNames.joinToString("|||"))
         }
@@ -477,11 +600,18 @@ class ChannelsViewModel(
     }
 
     fun showAllCategories() {
-        _state.update { it.copy(hiddenCategories = emptySet()) }
+        // Single emission.
+        val st = _state.value.copy(hiddenCategories = emptySet())
+        val filtered = applyFilters(st.channels).filter {
+            it.channel.contentType == ChannelContentType.LIVE || it.channel.contentType == ChannelContentType.UNKNOWN
+        }.filter { channelIdentityCandidates(it.channel).none(st.hiddenChannels::contains) }
+        val grouped = filtered.groupBy { it.channel.groupTitle ?: "Ungrouped" }
+        val allCategories = CategoryNameCleaner.processCategories(grouped)
+        val visibleCategories = allCategories // no hidden categories to filter
+        _state.update { it.copy(hiddenCategories = emptySet(), categories = visibleCategories, allCategories = allCategories) }
         scope.launch {
             prefsRepo.setString("channels_hidden_categories", "")
         }
-        buildLiveCategories()
     }
 
     fun hideCountryCategories(countryCode: String) {
@@ -516,6 +646,7 @@ class ChannelsViewModel(
         scope.launch {
             try {
                 channelRepo.recordChannelViewed(channel)
+                persistLastWatchedChannel(channel)
                 loadRecentlyViewed()
             } catch (_: Exception) { }
         }
@@ -524,7 +655,7 @@ class ChannelsViewModel(
     private fun loadRecentlyViewed() {
         scope.launch {
             try {
-                val recent = channelRepo.getRecentlyViewedChannels(20)
+                val recent = withContext(backgroundDispatcher) { channelRepo.getRecentlyViewedChannels(20) }
                 _state.update { it.copy(recentlyViewedChannels = recent) }
             } catch (_: Exception) { }
         }
@@ -533,11 +664,13 @@ class ChannelsViewModel(
     // --- Filter & sort ---
 
     fun setFilter(filter: ChannelsFilterType) {
+        // Merged: set filter + rebuild in one emission.
         _state.update { it.copy(activeFilter = filter) }
         buildLiveCategories()
     }
 
     fun setSort(sort: ChannelsSortType) {
+        // Merged: set sort + rebuild in one emission.
         _state.update { it.copy(activeSort = sort) }
         buildLiveCategories()
     }
@@ -716,13 +849,17 @@ class ChannelsViewModel(
 
     private fun loadAudioSettings() {
         scope.launch {
-            val passthrough = prefsRepo.getString(KEY_CHANNELS_AUDIO_PASSTHROUGH)
-                ?.toBooleanStrictOrNull() ?: false
-            val preferSurround = prefsRepo.getString(KEY_CHANNELS_PREFER_SURROUND)
-                ?.toBooleanStrictOrNull() ?: true
-            val outputMode = LiveAudioOutputMode.fromStorage(
-                prefsRepo.getString(KEY_CHANNELS_AUDIO_OUTPUT_MODE),
-            )
+            val (passthrough, preferSurround, outputMode) = withContext(backgroundDispatcher) {
+                Triple(
+                    prefsRepo.getString(KEY_CHANNELS_AUDIO_PASSTHROUGH)
+                        ?.toBooleanStrictOrNull() ?: false,
+                    prefsRepo.getString(KEY_CHANNELS_PREFER_SURROUND)
+                        ?.toBooleanStrictOrNull() ?: true,
+                    LiveAudioOutputMode.fromStorage(
+                        prefsRepo.getString(KEY_CHANNELS_AUDIO_OUTPUT_MODE),
+                    ),
+                )
+            }
             _state.update {
                 it.copy(
                     audioPassthroughEnabled = passthrough,
@@ -763,6 +900,7 @@ class ChannelsViewModel(
                 channelRepo.removePlaylist(playlistId)
                 if (_state.value.selectedPlaylistId == playlistId) {
                     _state.update { it.copy(selectedPlaylistId = null, channels = emptyList(), groupedChannels = emptyMap()) }
+                    prefsRepo.remove(KEY_CHANNELS_SELECTED_PLAYLIST)
                 }
                 loadPlaylists()
             } catch (e: Exception) {
@@ -777,7 +915,12 @@ class ChannelsViewModel(
             _state.update { it.copy(isLoadingChannels = true) }
             try {
                 channelRepo.refreshPlaylist(playlistId)
-                selectPlaylist(playlistId)
+                loadPlaylistCatalog(
+                    playlistId = playlistId,
+                    restoreSavedState = true,
+                    triggerBackgroundRefresh = false,
+                    showLoadingUntilRefresh = false,
+                )
             } catch (e: Exception) {
                 _state.update { it.copy(isLoadingChannels = false, error = e.message) }
             }
@@ -798,18 +941,19 @@ class ChannelsViewModel(
     fun loadFavorites() {
         scope.launch {
             try {
-                val favs = channelRepo.getFavorites()
+                val favs = withContext(backgroundDispatcher) { channelRepo.getFavorites() }
                 _state.update { it.copy(favorites = favs) }
             } catch (_: Exception) { }
         }
     }
 
     fun toggleFavorite(channel: Channel) {
-        val channelId = channel.tvgId ?: "${channel.playlistId}_${channel.name}"
+        val candidateIds = channelIdentityCandidates(channel)
         scope.launch {
             try {
-                if (channelRepo.isFavorite(channelId)) {
-                    channelRepo.removeFavorite(channelId)
+                val existingId = candidateIds.firstOrNull { channelRepo.isFavorite(it) }
+                if (existingId != null) {
+                    channelRepo.removeFavorite(existingId)
                 } else {
                     channelRepo.addFavorite(channel)
                 }
@@ -853,6 +997,7 @@ class ChannelsViewModel(
     fun selectChannel(channel: Channel) {
         _state.update { it.copy(selectedChannel = channel) }
         val selectedPlaylistId = _state.value.selectedPlaylistId ?: channel.playlistId
+        scope.launch { persistSelectedChannel(selectedPlaylistId, channel) }
         val epgId = canonicalEpgChannelKey(
             playlistId = selectedPlaylistId,
             channel = channel,
@@ -879,10 +1024,294 @@ class ChannelsViewModel(
         return catchupResolver.resolve(channel, programme)
     }
 
+    private fun loadPlaylistCatalog(
+        playlistId: String,
+        restoreSavedState: Boolean,
+        triggerBackgroundRefresh: Boolean,
+        showLoadingUntilRefresh: Boolean,
+    ) {
+        val previousPlaylistId = _state.value.selectedPlaylistId
+        _state.update { current ->
+            current.copy(
+                selectedPlaylistId = playlistId,
+                isLoadingChannels = true,
+                error = null,
+            )
+        }
+        scope.launch {
+            try {
+                println(
+                    "StartupRecovery: loading local playlist catalog playlistId=$playlistId " +
+                        "restoreSavedState=$restoreSavedState triggerBackgroundRefresh=$triggerBackgroundRefresh",
+                )
+                // CRITICAL: Load 76K+ channels on IO, NOT on Dispatchers.Main.
+                // This was the primary startup ANR cause — executeAsList() for the
+                // entire channel catalog plus enrichment ran on the main thread.
+                val catalogStartMs = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+                val enriched = withContext(backgroundDispatcher) {
+                    channelRepo.getEnrichedChannels(playlistId)
+                }
+                val catalogMs = kotlinx.datetime.Clock.System.now().toEpochMilliseconds() - catalogStartMs
+                println("StartupRecovery: channel DB load completed in ${catalogMs}ms rows=${enriched.size}")
+                applyLoadedPlaylist(
+                    playlistId = playlistId,
+                    previousPlaylistId = previousPlaylistId,
+                    enriched = enriched,
+                    restoreSavedState = restoreSavedState,
+                    keepLoading = showLoadingUntilRefresh && enriched.isEmpty(),
+                    guideErrorOverride = null,
+                    epgStateOverride = null,
+                )
+                if (triggerBackgroundRefresh) {
+                    refreshPlaylistInBackground(
+                        playlistId = playlistId,
+                        preserveVisibleCatalog = enriched.isNotEmpty(),
+                        restoreSavedState = true,
+                    )
+                }
+            } catch (oom: OutOfMemoryError) {
+                val fallbackChannels = withContext(backgroundDispatcher) {
+                    runCatching { channelRepo.getChannels(playlistId) }.getOrDefault(emptyList())
+                }
+                val fallbackEnriched = fallbackChannels.map { EnrichedChannel(channel = it) }
+                applyLoadedPlaylist(
+                    playlistId = playlistId,
+                    previousPlaylistId = previousPlaylistId,
+                    enriched = fallbackEnriched,
+                    restoreSavedState = restoreSavedState,
+                    keepLoading = false,
+                    guideErrorOverride = "EPG is too large for device memory. Reduce provider EPG days and retry.",
+                    epgStateOverride = EpgState.Error("EPG is too large for device memory. Reduce provider EPG days and retry."),
+                )
+            } catch (e: Exception) {
+                _state.update { current ->
+                    current.copy(
+                        isLoadingChannels = false,
+                        error = e.message,
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun applyLoadedPlaylist(
+        playlistId: String,
+        previousPlaylistId: String?,
+        enriched: List<EnrichedChannel>,
+        restoreSavedState: Boolean,
+        keepLoading: Boolean,
+        guideErrorOverride: String?,
+        epgStateOverride: EpgState?,
+        rebuildGuide: Boolean = true,
+    ) {
+        // Heavy list operations (groupBy, mapNotNull, flatMap, distinct, sort)
+        // over 76K+ items — run on IO to avoid main-thread starvation.
+        data class CatalogPrep(
+            val grouped: Map<String, List<EnrichedChannel>>,
+            val countries: List<String>,
+            val restoredGroup: String?,
+            val restoredChannel: Channel?,
+            val favoritesBound: Int,
+        )
+
+        val prepStartMs = Clock.System.now().toEpochMilliseconds()
+        val prep = withContext(backgroundDispatcher) {
+            val grouped = enriched.groupBy { it.channel.groupTitle ?: "Ungrouped" }
+            val countries = enriched.mapNotNull { it.channel.tvgCountry }
+                .flatMap { it.split(",", ";").map(String::trim) }
+                .filter { it.isNotBlank() }
+                .distinct()
+                .sorted()
+            val restoredGroup = resolveRestoredGroup(playlistId, previousPlaylistId, grouped.keys, restoreSavedState)
+            val restoredChannel = resolveRestoredChannel(playlistId, previousPlaylistId, enriched, restoreSavedState)
+            val favoritesBound = enriched.count { it.channel.isFavorite }
+            CatalogPrep(grouped, countries, restoredGroup, restoredChannel, favoritesBound)
+        }
+        val prepMs = Clock.System.now().toEpochMilliseconds() - prepStartMs
+        println("STARTUP_METRIC: catalogPrep=${prepMs}ms groups=${prep.grouped.size} countries=${prep.countries.size}")
+
+        println(
+            "StartupRecovery: first render playlistId=$playlistId channels=${enriched.size} groups=${prep.grouped.size} " +
+                "favoritesRebound=${prep.favoritesBound} restoredGroup=${prep.restoredGroup ?: "none"} " +
+                "restoredChannel=${prep.restoredChannel?.name ?: "none"} keepLoading=$keepLoading",
+        )
+
+        _state.update { current ->
+            current.copy(
+                selectedPlaylistId = playlistId,
+                channels = enriched,
+                groupedChannels = prep.grouped,
+                isLoadingChannels = keepLoading,
+                selectedGroup = prep.restoredGroup,
+                selectedChannel = prep.restoredChannel,
+                availableCountries = prep.countries,
+                guideError = guideErrorOverride ?: current.guideError,
+                epgState = epgStateOverride ?: current.epgState,
+            )
+        }
+
+        persistSelectedGroup(playlistId, prep.restoredGroup)
+        prep.restoredChannel?.let { persistSelectedChannel(playlistId, it) }
+
+        buildLiveCategories()
+        if (rebuildGuide) {
+            buildGuideChannels()
+        }
+    }
+
+    private fun refreshPlaylistInBackground(
+        playlistId: String,
+        preserveVisibleCatalog: Boolean,
+        restoreSavedState: Boolean,
+    ) {
+        scope.launch {
+            try {
+                println(
+                    "StartupRecovery: background refresh start playlistId=$playlistId preserveVisibleCatalog=$preserveVisibleCatalog",
+                )
+                withContext(backgroundDispatcher) { channelRepo.refreshPlaylist(playlistId) }
+                if (_state.value.selectedPlaylistId != playlistId) return@launch
+                val refreshed = withContext(backgroundDispatcher) { channelRepo.getEnrichedChannels(playlistId) }
+                // Update channels/categories but skip guide rebuild — the initial
+                // buildGuideChannels() already rendered EPG and kicked off a
+                // background refresh. Rebuilding here would cause a redundant EPG
+                // network fetch and heavy recomposition with the large guideProgrammes map.
+                applyLoadedPlaylist(
+                    playlistId = playlistId,
+                    previousPlaylistId = playlistId,
+                    enriched = refreshed,
+                    restoreSavedState = restoreSavedState,
+                    keepLoading = false,
+                    guideErrorOverride = null,
+                    epgStateOverride = null,
+                    rebuildGuide = false,
+                )
+                println(
+                    "StartupRecovery: background refresh complete playlistId=$playlistId refreshedChannels=${refreshed.size}",
+                )
+            } catch (e: Exception) {
+                println(
+                    "StartupRecovery: background refresh failed playlistId=$playlistId error=${e.message.orEmpty()}",
+                )
+                if (!preserveVisibleCatalog) {
+                    _state.update { current ->
+                        current.copy(
+                            isLoadingChannels = false,
+                            error = e.message,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun resolvePreferredPlaylistId(playlists: List<ChannelPlaylist>): String? {
+        if (playlists.isEmpty()) return null
+        val currentSelected = _state.value.selectedPlaylistId
+        if (currentSelected != null && playlists.any { it.id == currentSelected }) {
+            return currentSelected
+        }
+        val saved = prefsRepo.getString(KEY_CHANNELS_SELECTED_PLAYLIST)
+        if (saved != null && playlists.any { it.id == saved }) {
+            return saved
+        }
+        return playlists.first().id
+    }
+
+    private suspend fun resolveRestoredGroup(
+        playlistId: String,
+        previousPlaylistId: String?,
+        availableGroups: Set<String>,
+        restoreSavedState: Boolean,
+    ): String? {
+        val currentGroup = _state.value.selectedGroup
+        if (previousPlaylistId == playlistId && currentGroup in availableGroups) {
+            return currentGroup
+        }
+        if (!restoreSavedState) return null
+        val savedGroup = prefsRepo.getString(selectedGroupKey(playlistId))
+        return savedGroup?.takeIf { it in availableGroups }
+    }
+
+    private suspend fun resolveRestoredChannel(
+        playlistId: String,
+        previousPlaylistId: String?,
+        enriched: List<EnrichedChannel>,
+        restoreSavedState: Boolean,
+    ): Channel? {
+        val currentChannel = _state.value.selectedChannel
+        if (currentChannel != null &&
+            previousPlaylistId == playlistId &&
+            enriched.any { candidate -> channelMatchesIdentity(candidate.channel, stableChannelId(currentChannel)) }
+        ) {
+            return enriched.first { candidate -> channelMatchesIdentity(candidate.channel, stableChannelId(currentChannel)) }.channel
+        }
+        if (!restoreSavedState) return null
+
+        val savedChannelId = prefsRepo.getString(selectedChannelKey(playlistId))
+            ?: prefsRepo.getString(lastWatchedChannelKey(playlistId))
+            ?: return null
+        val restored = enriched.firstOrNull { channelMatchesIdentity(it.channel, savedChannelId) }?.channel
+        println(
+            "StartupRecovery: restored channel lookup playlistId=$playlistId savedId=$savedChannelId success=${restored != null}",
+        )
+        return restored
+    }
+
+    private suspend fun persistSelectedGroup(
+        playlistId: String,
+        group: String?,
+    ) {
+        if (group.isNullOrBlank()) {
+            prefsRepo.remove(selectedGroupKey(playlistId))
+        } else {
+            prefsRepo.setString(selectedGroupKey(playlistId), group)
+        }
+    }
+
+    private suspend fun persistSelectedChannel(
+        playlistId: String,
+        channel: Channel,
+    ) {
+        prefsRepo.setString(selectedChannelKey(playlistId), stableChannelId(channel))
+    }
+
+    private suspend fun persistLastWatchedChannel(channel: Channel) {
+        prefsRepo.setString(lastWatchedChannelKey(channel.playlistId), stableChannelId(channel))
+    }
+
+    private fun selectedGroupKey(playlistId: String): String = "$KEY_CHANNELS_SELECTED_GROUP_PREFIX$playlistId"
+
+    private fun selectedChannelKey(playlistId: String): String = "$KEY_CHANNELS_SELECTED_CHANNEL_PREFIX$playlistId"
+
+    private fun lastWatchedChannelKey(playlistId: String): String = "$KEY_CHANNELS_LAST_WATCHED_CHANNEL_PREFIX$playlistId"
+
     private fun debugLog(message: String) {
         if (EPG_DEBUG_LOG_ENABLED) {
             println(message)
         }
+    }
+
+    private fun prioritizeGuideChannels(
+        channels: List<EnrichedChannel>,
+        selectedGroup: String?,
+        groupedChannels: Map<String, List<EnrichedChannel>>,
+    ): List<EnrichedChannel> {
+        if (channels.size <= MAX_GUIDE_CHANNELS_IN_STATE) return channels
+        val prioritized = LinkedHashMap<String, EnrichedChannel>(MAX_GUIDE_CHANNELS_IN_STATE)
+        selectedGroup
+            ?.let(groupedChannels::get)
+            .orEmpty()
+            .forEach { enriched ->
+                prioritized[stableChannelId(enriched.channel)] = enriched
+            }
+        channels.forEach { enriched ->
+            prioritized.putIfAbsent(stableChannelId(enriched.channel), enriched)
+            if (prioritized.size >= MAX_GUIDE_CHANNELS_IN_STATE) {
+                return prioritized.values.toList()
+            }
+        }
+        return prioritized.values.toList()
     }
 
     private fun ChannelPlaylist?.resolveEpgSourceUrl(): String? {

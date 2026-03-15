@@ -2,6 +2,9 @@ package com.torve.android.player
 
 import android.content.Context
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -13,9 +16,17 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.MediaSource
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import com.torve.domain.model.Channel
 import com.torve.domain.player.LiveAudioOutputMode
+import com.torve.domain.player.LiveAudioRecoveryMode
+import com.torve.domain.player.LiveTuneState
 import com.torve.domain.player.PlayerEngine
 import com.torve.domain.player.PlayerListener
 import com.torve.domain.player.PlayerState
@@ -42,6 +53,7 @@ class ExoPlayerEngine(
 
     private val listeners = mutableListOf<PlayerListener>()
     private var exoPlayer: ExoPlayer? = null
+    private var trackSelector: DefaultTrackSelector? = null
 
     private var currentSubtitleTracks = listOf<TrackDescription>()
     private var currentAudioTracks = listOf<TrackDescription>()
@@ -52,17 +64,23 @@ class ExoPlayerEngine(
     /** Set by the player screen to enable codec-error fallback at the stream level. */
     var onCodecError: ((errorCode: Int) -> Unit)? = null
 
-    /** Prevents infinite loop if audio fallback also fails. */
-    private var audioFallbackAttempted = false
+    /**
+     * Gives the live TV screen one last chance to move playback to the alternate engine before
+     * ExoPlayer declares the channel audio-incompatible and disables audio.
+     */
+    internal var onLiveAudioCompatibilityFailure: ((LiveAudioCompatibilityFailureReport) -> Boolean)? = null
+    internal var testMediaSourceFactory: ((Context, String) -> MediaSource)? = null
+
     private var audioPassthroughEnabled = false
     private var preferSurroundCodecs = true
     private var liveAudioOutputMode = LiveAudioOutputMode.PREFER_COMPATIBLE
     private var userAudioPassthroughEnabled = false
     private var userPreferSurroundCodecs = true
     private var userLiveAudioOutputMode = LiveAudioOutputMode.PREFER_COMPATIBLE
-    private var ac3PassthroughFallbackAttempted = false
-    private var ac3TrackFallbackAttempted = false
-    private var ac3StereoFallbackAttempted = false
+    private var compatibleModeFallbackAttempted = false
+    private var alternateTrackFallbackAttempted = false
+    private var softwareAudioFallbackAttempted = false
+    private var stereoPcmFallbackAttempted = false
     private var liveAudioRecoveryAttempts = 0
     private var currentPlaybackContext: LiveAudioPlaybackContext? = null
     private var rememberedCompatibilityHint: LiveAudioCompatibilityHint? = null
@@ -70,6 +88,27 @@ class ExoPlayerEngine(
     private var currentAudioSignature: String? = null
     private var pendingSuccessfulRecoveryKind: LiveAudioRecoveryKind? = null
     private var sessionIncompatibleRecoverySkipped = false
+    private var persistedTerminalFailureHint: LiveAudioTerminalFailureHint? = null
+    private var pendingTrackRecoveryAfterReprepare: PendingTrackRecoveryAfterReprepare? = null
+    private val attemptedAudioRecoveryKeys = mutableSetOf<String>()
+    private var honorRememberedCompatibilityHint = true
+    private var videoDecoderName: String? = null
+    private var audioDecoderName: String? = null
+    private var currentUrl: String? = null
+    internal var liveBufferDurationMs: Int = DEFAULT_LIVE_BUFFER_MS
+    private var preferSoftwareAudioDecoding = false
+    private var currentRendererPrefersSoftwareAudio = false
+    private val liveTuneStateMachine = LiveTuneStateMachine(AUDIO_READINESS_TIMEOUT_MS)
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val audioReadinessTimeoutRunnable = Runnable {
+        handleAudioReadinessTimeout("bounded_readiness_timeout")
+    }
+
+    private enum class PendingTrackRecoveryAfterReprepare {
+        COMPATIBLE_MODE,
+        SOFTWARE_AUDIO,
+        STEREO_PCM,
+    }
 
     private data class SelectedAudioTrackSnapshot(
         val group: Tracks.Group,
@@ -85,6 +124,7 @@ class ExoPlayerEngine(
     private val exoListener = object : Player.Listener {
         override fun onIsPlayingChanged(playing: Boolean) {
             _state = _state.copy(isPlaying = playing)
+            maybeConfirmTune("is_playing_changed")
             notifyStateChanged()
         }
 
@@ -93,46 +133,105 @@ class ExoPlayerEngine(
                 isBuffering = playbackState == Player.STATE_BUFFERING,
                 isIdle = playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED,
             )
-            if (playbackState == Player.STATE_READY) {
-                _state = _state.copy(durationMs = exoPlayer?.duration ?: 0)
-                confirmSuccessfulRecoveryIfNeeded()
+            when (playbackState) {
+                Player.STATE_BUFFERING -> applyTuneSnapshot(
+                    liveTuneStateMachine.onPlaybackBuffering(SystemClock.elapsedRealtime()),
+                )
+                Player.STATE_READY -> {
+                    _state = _state.copy(durationMs = exoPlayer?.duration ?: 0)
+                    if (!_state.isEngineFallbackAllowed) {
+                        applyTuneSnapshot(
+                            liveTuneStateMachine.onPlaybackReady(SystemClock.elapsedRealtime()),
+                        )
+                    }
+                    maybeConfirmTune("playback_ready")
+                }
+                Player.STATE_IDLE,
+                Player.STATE_ENDED -> {
+                    cancelAudioReadinessTimeout()
+                    applyTuneSnapshot(liveTuneStateMachine.onFailure(fallbackAllowed = _state.isEngineFallbackAllowed))
+                }
             }
             notifyStateChanged()
         }
 
         override fun onPlayerError(error: PlaybackException) {
+            // When no compatibility failure handler is set (TV live playback),
+            // skip all custom audio recovery — let ExoPlayer + FFmpeg handle
+            // codec fallback automatically via setEnableDecoderFallback(true),
+            // exactly like TiviMate does.
+            if (onLiveAudioCompatibilityFailure == null) {
+                Log.w(TAG, "Player error (${error.errorCode}): ${error.message}")
+                if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW ||
+                    error.errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED
+                ) {
+                    // Re-sync to live edge on live window errors and audio
+                    // timestamp discontinuities (common in IPTV PTS resets).
+                    Log.i(TAG, "Re-syncing to live edge after error ${error.errorCode}")
+                    exoPlayer?.let { player ->
+                        player.seekToDefaultPosition()
+                        player.prepare()
+                    }
+                    return
+                }
+                if (error.errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED) {
+                    // AC3/EAC3 passthrough unsupported on this device.
+                    // Force software decoding to PCM — this avoids the
+                    // bypass render path that sends raw AC3 to AudioTrack.
+                    Log.w(TAG, "AudioTrack init failed — forcing software audio + stereo PCM")
+                    liveAudioOutputMode = LiveAudioOutputMode.FORCE_STEREO_PCM
+                    audioPassthroughEnabled = false
+                    preferSoftwareAudioDecoding = true
+                    rebuildPlayerForAudioProfile("audio_track_init_failed")
+                    // After rebuild, ensure the track selector respects the
+                    // channel cap even when no stereo track exists.
+                    trackSelector?.setParameters(
+                        trackSelector!!.parameters.buildUpon()
+                            .setExceedAudioConstraintsIfNecessary(false)
+                            .setMaxAudioChannelCount(2)
+                            .build(),
+                    )
+                    return
+                }
+                listeners.forEach { it.onError(error.message ?: "Playback error (${error.errorCode})") }
+                return
+            }
+
             val isCodecError = error.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
                 error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED
 
             if (isCodecError) {
                 val player = exoPlayer
                 val msg = error.message.orEmpty()
+                val causeChain = error.buildCauseChainSummary()
+                val selectedAudio = player?.selectedAudioTrackSnapshot()
                 val isAudioCodecError = msg.contains("AudioRenderer", ignoreCase = true) ||
-                    msg.contains("audio/eac3", ignoreCase = true) ||
-                    msg.contains("audio/ac3", ignoreCase = true) ||
-                    msg.contains("audio/dts", ignoreCase = true) ||
-                    msg.contains("audio/truehd", ignoreCase = true) ||
-                    msg.contains("audio/mlp", ignoreCase = true)
+                    msg.contains("AudioSink", ignoreCase = true) ||
+                    causeChain.contains("AudioRenderer", ignoreCase = true) ||
+                    causeChain.contains("AudioSink", ignoreCase = true) ||
+                    causeChain.contains("AudioTrack", ignoreCase = true) ||
+                    causeChain.contains("audio/eac3", ignoreCase = true) ||
+                    causeChain.contains("audio/ac3", ignoreCase = true) ||
+                    causeChain.contains("audio/aac", ignoreCase = true) ||
+                    causeChain.contains("audio/mp4a-latm", ignoreCase = true) ||
+                    causeChain.contains("audio/dts", ignoreCase = true) ||
+                    causeChain.contains("audio/truehd", ignoreCase = true) ||
+                    causeChain.contains("audio/mlp", ignoreCase = true) ||
+                    isAc3FamilyMime(selectedAudio?.mime)
 
                 if (isAudioCodecError) {
-                    val selectedAudio = player?.selectedAudioTrackSnapshot()
-                    if (player != null && isAc3RendererFailure(error, selectedAudio?.mime)) {
-                        if (attemptAc3Recovery(player, error, selectedAudio)) {
-                            return
-                        }
-                        disableAudioAfterCompatibilityFailure(player)
+                    if (player != null && attemptLiveAudioRecovery(player, error, selectedAudio, causeChain)) {
                         return
                     }
-
-                    if (!audioFallbackAttempted) {
-                        Log.w(TAG, "Audio codec error - attempting fallback")
-                        audioFallbackAttempted = true
-                        handleAudioCodecError()
-                    } else {
-                        val targetPlayer = player ?: return
-                        disableAudioAfterCompatibilityFailure(targetPlayer)
+                    if (player != null) {
+                        disableAudioAfterCompatibilityFailure(
+                            player = player,
+                            error = error,
+                            selectedAudio = selectedAudio,
+                            diagnostics = causeChain,
+                        )
+                        return
                     }
-                    return
                 }
 
                 Log.w(TAG, "Video codec error (${error.errorCode}): $msg")
@@ -178,6 +277,7 @@ class ExoPlayerEngine(
                                 label = label,
                                 language = format.language,
                                 isSelected = isSelected,
+                                formatHint = format.sampleMimeType,
                             ),
                         )
                         C.TRACK_TYPE_AUDIO -> audios.add(
@@ -186,6 +286,8 @@ class ExoPlayerEngine(
                                 label = label,
                                 language = format.language,
                                 isSelected = isSelected,
+                                formatHint = format.sampleMimeType,
+                                channelCount = format.channelCount.takeIf { it > 0 },
                             ),
                         )
                     }
@@ -196,68 +298,231 @@ class ExoPlayerEngine(
             currentSubtitleTracks = subs
             currentAudioTracks = audios
             currentAudioSignature = tracks.buildAudioSignature()
+            applyTuneSnapshot(
+                liveTuneStateMachine.onTracksDiscovered(
+                    audioTrackCount = audios.size,
+                    selectedAudioTrack = audios.any { it.isSelected },
+                    nowElapsedMs = SystemClock.elapsedRealtime(),
+                ),
+            )
+            logAudioInventory("tracks_changed", tracks)
             invalidateRememberedHintIfTrackMetadataChanged()
+            invalidateTerminalFailureIfTrackMetadataChanged()
             applyRememberedCompatibleTrackIfNeeded()
+            applyPendingTrackRecoveryIfNeeded()
+            ensureAudioTrackSelectedIfNeeded()
+            maybeConfirmTune("tracks_changed")
             listeners.forEach { it.onTracksChanged(audios, subs) }
         }
     }
 
+    private val analyticsListener = object : AnalyticsListener {
+        override fun onVideoDecoderInitialized(
+            eventTime: AnalyticsListener.EventTime,
+            decoderName: String,
+            initializedTimestampMs: Long,
+            initializationDurationMsMs: Long,
+        ) {
+            videoDecoderName = decoderName
+            applyTuneSnapshot(liveTuneStateMachine.onVideoReady(SystemClock.elapsedRealtime()))
+            maybeConfirmTune("video_decoder_initialized")
+            notifyStateChanged()
+        }
+
+        override fun onAudioDecoderInitialized(
+            eventTime: AnalyticsListener.EventTime,
+            decoderName: String,
+            initializedTimestampMs: Long,
+            initializationDurationMsMs: Long,
+        ) {
+            audioDecoderName = decoderName
+            maybeConfirmTune("audio_decoder_initialized")
+            notifyStateChanged()
+        }
+
+        override fun onAudioPositionAdvancing(
+            eventTime: AnalyticsListener.EventTime,
+            playoutStartSystemTimeMs: Long,
+        ) {
+            applyTuneSnapshot(liveTuneStateMachine.onAudioReady())
+            Log.d("AudioReady", "Audio playout advancing for ${currentPlaybackContext?.displayName.orEmpty()}")
+            maybeConfirmTune("audio_position_advancing")
+            notifyStateChanged()
+        }
+
+        override fun onAudioTrackInitialized(
+            eventTime: AnalyticsListener.EventTime,
+            audioTrackConfig: androidx.media3.exoplayer.audio.AudioSink.AudioTrackConfig,
+        ) {
+            applyTuneSnapshot(liveTuneStateMachine.onAudioReady())
+            Log.d("AudioReady", "AudioTrack initialized for ${currentPlaybackContext?.displayName.orEmpty()}")
+            maybeConfirmTune("audio_track_initialized")
+            notifyStateChanged()
+        }
+
+        override fun onAudioSessionIdChanged(
+            eventTime: AnalyticsListener.EventTime,
+            audioSessionId: Int,
+        ) {
+            if (audioSessionId == C.AUDIO_SESSION_ID_UNSET) return
+            applyTuneSnapshot(liveTuneStateMachine.onAudioReady())
+            Log.d(
+                "AudioReady",
+                "Audio session ready for ${currentPlaybackContext?.displayName.orEmpty()} id=$audioSessionId",
+            )
+            maybeConfirmTune("audio_session_id")
+            notifyStateChanged()
+        }
+
+        override fun onRenderedFirstFrame(
+            eventTime: AnalyticsListener.EventTime,
+            output: Any,
+            renderTimeMs: Long,
+        ) {
+            applyTuneSnapshot(liveTuneStateMachine.onVideoReady(SystemClock.elapsedRealtime()))
+            maybeConfirmTune("rendered_first_frame")
+            notifyStateChanged()
+        }
+    }
+
     fun initialize() {
-        val processors = arrayOf(equalizerProcessor, delayProcessor)
-        val renderersFactory = object : DefaultRenderersFactory(context) {
-            override fun buildAudioSink(
-                context: Context,
-                enableFloatOutput: Boolean,
-                enableAudioTrackPlaybackParams: Boolean,
-            ): DefaultAudioSink {
-                return DefaultAudioSink.Builder(context)
-                    .setAudioProcessors(processors)
-                    .setEnableFloatOutput(enableFloatOutput)
-                    .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
-                    .build()
-            }
-        }.setEnableDecoderFallback(true)
-
-        val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(30_000, 120_000, 2_500, 5_000)
-            .build()
-
-        exoPlayer = ExoPlayer.Builder(context, renderersFactory)
-            .setLoadControl(loadControl)
-            .build()
-            .also { it.addListener(exoListener) }
+        createPlayer(preferSoftwareAudioDecoding = false)
         setAudioOutputPreferences(audioPassthroughEnabled, preferSurroundCodecs, liveAudioOutputMode)
     }
 
-    fun setLivePlaybackContext(channel: Channel?) {
+    private fun createPlayer(preferSoftwareAudioDecoding: Boolean) {
+        // TiviMate-aligned: no custom audio processors for live TV — they add
+        // variable latency that causes A/V sync drift and microstutter.
+        val renderersFactory = DefaultRenderersFactory(context)
+            .setEnableDecoderFallback(true)
+            .setExtensionRendererMode(
+                if (preferSoftwareAudioDecoding) {
+                    DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
+                } else {
+                    DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
+                },
+            )
+
+        val selector = DefaultTrackSelector(context).also { defaultTrackSelector ->
+            defaultTrackSelector.setParameters(
+                defaultTrackSelector.parameters
+                    .buildUpon()
+                    .setExceedAudioConstraintsIfNecessary(true)
+                    .build(),
+            )
+        }
+        trackSelector = selector
+
+        // Buffer size is user-configurable via the live playback menu.
+        // Default is 50s (TiviMate baseline); lower values reduce live-edge
+        // drift at the cost of less network-jitter absorption.
+        // Floor at 2500ms — video decoders need at least one full GOP to render.
+        val bufMs = liveBufferDurationMs.coerceAtLeast(2_500)
+        val playbackStart = if (bufMs <= 5_000) bufMs else 1_000
+        val playbackAfterRebuffer = if (bufMs <= 5_000) bufMs else 2_000
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(bufMs, bufMs, playbackStart, playbackAfterRebuffer)
+            .build()
+        // TiviMate uses default extractor flags — no FLAG_ALLOW_NON_IDR_KEYFRAMES
+        // which can cause decoding artifacts and frame timing instability.
+        val extractorsFactory = DefaultExtractorsFactory()
+            .setTsExtractorFlags(
+                DefaultTsPayloadReaderFactory.FLAG_ENABLE_HDMV_DTS_AUDIO_STREAMS,
+            )
+        val mediaSourceFactory = DefaultMediaSourceFactory(context, extractorsFactory)
+
+        exoPlayer = ExoPlayer.Builder(context, renderersFactory)
+            .setTrackSelector(selector)
+            .setMediaSourceFactory(mediaSourceFactory)
+            .setLoadControl(loadControl)
+            .build()
+            .also {
+                it.addListener(exoListener)
+                it.addAnalyticsListener(analyticsListener)
+            }
+        trackSelector = selector
+        currentRendererPrefersSoftwareAudio = preferSoftwareAudioDecoding
+    }
+
+    private fun rebuildPlayerForAudioProfile(reason: String) {
+        val previousPlayer = exoPlayer
+        val mediaUri = currentUrl ?: previousPlayer?.currentMediaItem?.localConfiguration?.uri?.toString()
+        val resumePositionMs = previousPlayer?.currentPosition?.coerceAtLeast(0L) ?: 0L
+        val playWhenReady = previousPlayer?.playWhenReady ?: true
+
+        previousPlayer?.removeListener(exoListener)
+        previousPlayer?.removeAnalyticsListener(analyticsListener)
+        previousPlayer?.stop()
+        previousPlayer?.release()
+
+        createPlayer(preferSoftwareAudioDecoding = preferSoftwareAudioDecoding)
+        applyEffectiveAudioOutputPreferences(
+            passthroughEnabled = audioPassthroughEnabled,
+            preferSurround = preferSurroundCodecs,
+            outputMode = liveAudioOutputMode,
+        )
+        Log.i(
+            TAG,
+            "LiveTune rebuild: channel=${currentPlaybackContext?.displayName.orEmpty()} " +
+                "reason=$reason softwareAudio=$preferSoftwareAudioDecoding",
+        )
+        mediaUri?.let { uri ->
+            exoPlayer?.apply {
+                setPlaybackSource(uri)
+                prepare()
+                if (resumePositionMs > 0L) {
+                    runCatching {
+                        if (isCurrentMediaItemSeekable || !isCurrentMediaItemLive) {
+                            seekTo(resumePositionMs)
+                        } else {
+                            seekToDefaultPosition()
+                        }
+                    }
+                }
+                this.playWhenReady = playWhenReady
+            }
+        }
+    }
+
+    fun setLivePlaybackContext(channel: Channel?, honorRememberedHint: Boolean = true) {
+        honorRememberedCompatibilityHint = honorRememberedHint
         currentPlaybackContext = channel?.let(LiveAudioPlaybackContext::fromChannel)
-        rememberedCompatibilityHint = currentPlaybackContext?.let {
-            LiveAudioCompatibilityStore.resolveHint(context, it)
+        rememberedCompatibilityHint = if (honorRememberedHint) {
+            currentPlaybackContext?.let {
+                LiveAudioCompatibilityStore.resolveHint(context, it)
+            }
+        } else {
+            null
         }
         rememberedTrackHintApplied = false
         currentAudioSignature = null
+        persistedTerminalFailureHint = null
     }
 
     private fun currentPreferenceKey(): String {
-        return buildString {
-            append(userAudioPassthroughEnabled)
-            append('|')
-            append(userPreferSurroundCodecs)
-            append('|')
-            append(userLiveAudioOutputMode.storageValue)
-        }
+        return buildLiveAudioPreferencesKey(
+            passthroughEnabled = userAudioPassthroughEnabled,
+            preferSurround = userPreferSurroundCodecs,
+            outputMode = userLiveAudioOutputMode,
+        )
     }
 
     private fun applyRememberedCompatibilityHintIfAvailable() {
-        rememberedCompatibilityHint = currentPlaybackContext?.let {
-            LiveAudioCompatibilityStore.resolveHint(context, it)
+        rememberedCompatibilityHint = if (honorRememberedCompatibilityHint) {
+            currentPlaybackContext?.let {
+                LiveAudioCompatibilityStore.resolveHint(context, it)
+            }
+        } else {
+            null
         }
         rememberedTrackHintApplied = false
         val hint = rememberedCompatibilityHint
         if (hint != null) {
+            preferSoftwareAudioDecoding = hint.softwareAudioRequired
             Log.d(
                 TAG,
-                "Applying remembered live audio hint kind=${hint.recoveryKind} mode=${hint.outputMode} channel=${currentPlaybackContext?.displayName.orEmpty()}",
+                "Applying remembered live audio hint kind=${hint.recoveryKind} mode=${hint.outputMode} " +
+                    "softwareAudio=${hint.softwareAudioRequired} channel=${currentPlaybackContext?.displayName.orEmpty()}",
             )
             applyEffectiveAudioOutputPreferences(
                 passthroughEnabled = hint.passthroughEnabled,
@@ -265,6 +530,7 @@ class ExoPlayerEngine(
                 outputMode = hint.liveAudioOutputMode(),
             )
         } else {
+            preferSoftwareAudioDecoding = false
             applyEffectiveAudioOutputPreferences(
                 passthroughEnabled = userAudioPassthroughEnabled,
                 preferSurround = userPreferSurroundCodecs,
@@ -274,21 +540,57 @@ class ExoPlayerEngine(
     }
 
     override fun play(url: String) {
-        audioFallbackAttempted = false
-        ac3PassthroughFallbackAttempted = false
-        ac3TrackFallbackAttempted = false
-        ac3StereoFallbackAttempted = false
+        currentUrl = url
+        compatibleModeFallbackAttempted = false
+        alternateTrackFallbackAttempted = false
+        softwareAudioFallbackAttempted = false
+        stereoPcmFallbackAttempted = false
         liveAudioRecoveryAttempts = 0
         currentAudioSignature = null
         pendingSuccessfulRecoveryKind = null
+        pendingTrackRecoveryAfterReprepare = null
+        attemptedAudioRecoveryKeys.clear()
         sessionIncompatibleRecoverySkipped = currentPlaybackContext?.let {
             LiveAudioCompatibilityStore.isSessionIncompatible(it, currentPreferenceKey())
         } == true
+        persistedTerminalFailureHint = currentPlaybackContext?.let {
+            LiveAudioCompatibilityStore.resolveTerminalFailure(
+                context = context,
+                playbackContext = it,
+                preferencesKey = currentPreferenceKey(),
+            )
+        }
+        if (persistedTerminalFailureHint != null) {
+            sessionIncompatibleRecoverySkipped = true
+            Log.i(
+                TAG,
+                "Short-circuiting Exo live audio recovery for known terminal failure " +
+                    "channel=${currentPlaybackContext?.displayName.orEmpty()} " +
+                    "mime=${persistedTerminalFailureHint?.selectedMime ?: "unknown"} " +
+                    "recovery=${persistedTerminalFailureHint?.finalRecoveryMode ?: "unknown"}",
+            )
+        }
         applyRememberedCompatibilityHintIfAvailable()
+        if (currentRendererPrefersSoftwareAudio != preferSoftwareAudioDecoding) {
+            rebuildPlayerForAudioProfile("apply_playback_profile")
+        }
+        cancelAudioReadinessTimeout()
+        applyTuneSnapshot(liveTuneStateMachine.begin(SystemClock.elapsedRealtime()))
+        Log.i(
+            "LiveTune",
+            "Starting live tune engine=${LivePlayerEngineId.EXOPLAYER.storageValue} " +
+                "channel=${currentPlaybackContext?.displayName ?: "unknown"} " +
+                "streamKey=${currentPlaybackContext?.streamKey ?: "none"} " +
+                "passthrough=$audioPassthroughEnabled " +
+                "audioMode=${liveAudioOutputMode.storageValue} " +
+                "preferSurround=$preferSurroundCodecs " +
+                "softwareAudio=$preferSoftwareAudioDecoding " +
+                "sessionRecoverySkipped=$sessionIncompatibleRecoverySkipped",
+        )
         exoPlayer?.apply {
             stop()
             clearMediaItems()
-            setMediaItem(MediaItem.fromUri(url))
+            setPlaybackSource(url)
             prepare()
             playWhenReady = true
         }
@@ -305,7 +607,9 @@ class ExoPlayerEngine(
     }
 
     override fun stop() {
+        cancelAudioReadinessTimeout()
         exoPlayer?.stop()
+        persistedTerminalFailureHint = null
         _state = PlayerState()
         notifyStateChanged()
     }
@@ -329,26 +633,44 @@ class ExoPlayerEngine(
     override fun selectSubtitleTrack(id: Int) {
         val player = exoPlayer ?: return
         val textGroups = trackGroups.filter { it.type == C.TRACK_TYPE_TEXT }
-        selectTrackInGroup(player, textGroups, id)
+        selectTrackInGroup(player, textGroups, id, C.TRACK_TYPE_TEXT)
     }
 
     override fun selectAudioTrack(id: Int) {
         val player = exoPlayer ?: return
         val audioGroups = trackGroups.filter { it.type == C.TRACK_TYPE_AUDIO }
-        selectTrackInGroup(player, audioGroups, id)
+        selectTrackInGroup(
+            player = player,
+            groups = audioGroups,
+            trackIndex = id,
+            trackType = C.TRACK_TYPE_AUDIO,
+            restartPlayback = true,
+            exceedRendererCapabilitiesIfNecessary = true,
+        )
     }
 
-    private fun selectTrackInGroup(player: ExoPlayer, groups: List<Tracks.Group>, trackIndex: Int) {
+    private fun selectTrackInGroup(
+        player: ExoPlayer,
+        groups: List<Tracks.Group>,
+        trackIndex: Int,
+        trackType: Int,
+        restartPlayback: Boolean = false,
+        exceedRendererCapabilitiesIfNecessary: Boolean = false,
+    ) {
         var idx = 0
         for (group in groups) {
             for (i in 0 until group.length) {
                 if (idx == trackIndex) {
-                    player.trackSelectionParameters = player.trackSelectionParameters
-                        .buildUpon()
-                        .setOverrideForType(
-                            TrackSelectionOverride(group.mediaTrackGroup, i),
-                        )
-                        .build()
+                    applyTrackSelectionOverride(
+                        player = player,
+                        trackType = trackType,
+                        group = group,
+                        trackIndex = i,
+                        exceedRendererCapabilitiesIfNecessary = exceedRendererCapabilitiesIfNecessary,
+                    )
+                    if (restartPlayback) {
+                        restartPlaybackAfterAudioFallback(player, player.currentPosition)
+                    }
                     return
                 }
                 idx++
@@ -358,150 +680,266 @@ class ExoPlayerEngine(
 
     override fun disableSubtitles() {
         val player = exoPlayer ?: return
-        player.trackSelectionParameters = player.trackSelectionParameters
-            .buildUpon()
-            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-            .build()
-    }
-
-    /**
-     * Handles audio codec errors by trying to select a compatible audio track.
-     * Falls back to disabling audio entirely if no compatible track exists.
-     */
-    private fun handleAudioCodecError() {
-        val player = exoPlayer ?: return
-        if (liveAudioRecoveryAttempts >= MAX_LIVE_AUDIO_RECOVERY_ATTEMPTS) {
-            disableAudioAfterCompatibilityFailure(player)
-            return
-        }
-        val candidate = player.findCompatibleAudioCandidate()
-        if (candidate != null) {
-            liveAudioRecoveryAttempts += 1
-            Log.d(
-                TAG,
-                "Audio fallback: selecting ${candidate.mime ?: "unknown"} (${candidate.language ?: "?"})",
+        val selector = trackSelector
+        if (selector != null) {
+            selector.setParameters(
+                selector.parameters
+                    .buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                    .build(),
             )
+        } else {
             player.trackSelectionParameters = player.trackSelectionParameters
                 .buildUpon()
-                .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
-                .setOverrideForType(
-                            TrackSelectionOverride(candidate.group.mediaTrackGroup, candidate.trackIndex),
-                        )
-                        .build()
-            pendingSuccessfulRecoveryKind = LiveAudioRecoveryKind.COMPATIBLE_TRACK
-            restartPlaybackAfterAudioFallback(player, player.currentPosition)
-            return
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                .build()
         }
-
-        disableAudioAfterCompatibilityFailure(player)
     }
 
-    private fun isAc3RendererFailure(
-        error: PlaybackException,
-        selectedAudioMime: String?,
-    ): Boolean {
-        val chain = error.buildCauseChainSummary()
-        val rendererMentioned = chain.contains("MediaCodecAudioRenderer", ignoreCase = true) ||
-            chain.contains("AudioRenderer", ignoreCase = true)
-        val ac3Mentioned = chain.contains("audio/ac3", ignoreCase = true) ||
-            chain.contains("audio/eac3", ignoreCase = true) ||
-            isAc3FamilyMime(selectedAudioMime)
-        return rendererMentioned && ac3Mentioned
-    }
-
-    private fun attemptAc3Recovery(
+    private fun attemptLiveAudioRecovery(
         player: ExoPlayer,
         error: PlaybackException,
         selectedAudio: SelectedAudioTrackSnapshot?,
+        diagnostics: String,
     ): Boolean {
+        val bestCandidate = player.findBestAudioRecoveryCandidate()
         if (sessionIncompatibleRecoverySkipped || liveAudioRecoveryAttempts >= MAX_LIVE_AUDIO_RECOVERY_ATTEMPTS) {
+            logAudioFailureDiagnostics(
+                player = player,
+                error = error,
+                selectedAudio = selectedAudio,
+                diagnostics = diagnostics,
+                fallbackPath = "recovery_skipped",
+                alternateTrackExists = bestCandidate != null,
+                alternateTrack = bestCandidate,
+            )
             return false
         }
-        val compatibleCandidate = player.findCompatibleAudioCandidate()
-        val hasAlternateCompatibleTrack = compatibleCandidate != null
+
         val resumePositionMs = player.currentPosition.coerceAtLeast(0L)
-
-        if (audioPassthroughEnabled && !ac3PassthroughFallbackAttempted) {
-            ac3PassthroughFallbackAttempted = true
-            liveAudioRecoveryAttempts += 1
-            applyEffectiveAudioOutputPreferences(
-                passthroughEnabled = false,
-                preferSurround = false,
-                outputMode = LiveAudioOutputMode.PREFER_COMPATIBLE,
+        when (
+            AudioTrackRecoveryPlanner.nextAction(
+                AudioRecoveryPlanInput(
+                    alternateTrackAvailable = bestCandidate != null,
+                    alternateTrackAttempted = alternateTrackFallbackAttempted,
+                    compatibleModeAttempted = compatibleModeFallbackAttempted,
+                    softwareAudioAttempted = softwareAudioFallbackAttempted,
+                    stereoPcmAttempted = stereoPcmFallbackAttempted,
+                    passthroughEnabled = audioPassthroughEnabled,
+                    preferSurround = preferSurroundCodecs,
+                    outputMode = liveAudioOutputMode,
+                ),
             )
-            pendingSuccessfulRecoveryKind = LiveAudioRecoveryKind.COMPATIBLE_MODE
-            restartPlaybackAfterAudioFallback(player, resumePositionMs)
-            logAc3Diagnostics(
-                error = error,
-                selectedAudio = selectedAudio,
-                fallbackPath = "disable_passthrough",
-                alternateTrackExists = hasAlternateCompatibleTrack,
-            )
-            return true
-        }
-
-        if (!ac3TrackFallbackAttempted && compatibleCandidate != null) {
-            ac3TrackFallbackAttempted = true
-            liveAudioRecoveryAttempts += 1
-            player.trackSelectionParameters = player.trackSelectionParameters
-                .buildUpon()
-                .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
-                .setOverrideForType(
-                    TrackSelectionOverride(
-                        compatibleCandidate.group.mediaTrackGroup,
-                        compatibleCandidate.trackIndex,
+        ) {
+            ExoAudioRecoveryAction.SWITCH_TRACK -> {
+                val candidate = bestCandidate ?: return false
+                alternateTrackFallbackAttempted = true
+                liveAudioRecoveryAttempts += 1
+                pendingSuccessfulRecoveryKind = LiveAudioRecoveryKind.COMPATIBLE_TRACK
+                applyTuneSnapshot(
+                    liveTuneStateMachine.onRecoveryStarted(
+                        LiveAudioRecoveryMode.TRACK_RESELECT,
+                        SystemClock.elapsedRealtime(),
                     ),
                 )
-                .build()
-            pendingSuccessfulRecoveryKind = LiveAudioRecoveryKind.COMPATIBLE_TRACK
-            restartPlaybackAfterAudioFallback(player, resumePositionMs)
-            logAc3Diagnostics(
-                error = error,
-                selectedAudio = selectedAudio,
-                fallbackPath = "switch_track:${compatibleCandidate.mime ?: "unknown"}",
-                alternateTrackExists = true,
-            )
-            return true
+                selectAudioRecoveryCandidate(player, candidate)
+                restartPlaybackAfterAudioFallback(player, resumePositionMs)
+                logAudioFailureDiagnostics(
+                    player = player,
+                    error = error,
+                    selectedAudio = selectedAudio,
+                    diagnostics = diagnostics,
+                    fallbackPath = "switch_track:${candidate.mime ?: "unknown"}",
+                    alternateTrackExists = true,
+                    alternateTrack = candidate,
+                )
+                return true
+            }
+            ExoAudioRecoveryAction.DISABLE_PASSTHROUGH -> {
+                compatibleModeFallbackAttempted = true
+                liveAudioRecoveryAttempts += 1
+                pendingSuccessfulRecoveryKind = LiveAudioRecoveryKind.COMPATIBLE_MODE
+                pendingTrackRecoveryAfterReprepare = PendingTrackRecoveryAfterReprepare.COMPATIBLE_MODE
+                applyTuneSnapshot(
+                    liveTuneStateMachine.onRecoveryStarted(
+                        LiveAudioRecoveryMode.PASSTHROUGH_OFF,
+                        SystemClock.elapsedRealtime(),
+                    ),
+                )
+                applyEffectiveAudioOutputPreferences(
+                    passthroughEnabled = false,
+                    preferSurround = false,
+                    outputMode = LiveAudioOutputMode.PREFER_COMPATIBLE,
+                )
+                restartPlaybackAfterAudioFallback(player, resumePositionMs)
+                logAudioFailureDiagnostics(
+                    player = player,
+                    error = error,
+                    selectedAudio = selectedAudio,
+                    diagnostics = diagnostics,
+                    fallbackPath = "disable_passthrough_and_prefer_compatible",
+                    alternateTrackExists = bestCandidate != null,
+                    alternateTrack = bestCandidate,
+                )
+                return true
+            }
+            ExoAudioRecoveryAction.PREFER_SOFTWARE_AUDIO -> {
+                softwareAudioFallbackAttempted = true
+                liveAudioRecoveryAttempts += 1
+                pendingSuccessfulRecoveryKind = LiveAudioRecoveryKind.SOFTWARE_AUDIO
+                pendingTrackRecoveryAfterReprepare = PendingTrackRecoveryAfterReprepare.SOFTWARE_AUDIO
+                preferSoftwareAudioDecoding = true
+                applyTuneSnapshot(
+                    liveTuneStateMachine.onRecoveryStarted(
+                        LiveAudioRecoveryMode.SOFTWARE_AUDIO,
+                        SystemClock.elapsedRealtime(),
+                    ),
+                )
+                rebuildPlayerForAudioProfile("software_audio_recovery")
+                logAudioFailureDiagnostics(
+                    player = player,
+                    error = error,
+                    selectedAudio = selectedAudio,
+                    diagnostics = diagnostics,
+                    fallbackPath = "prefer_software_audio",
+                    alternateTrackExists = bestCandidate != null,
+                    alternateTrack = bestCandidate,
+                )
+                return true
+            }
+            ExoAudioRecoveryAction.FORCE_STEREO_PCM -> {
+                stereoPcmFallbackAttempted = true
+                liveAudioRecoveryAttempts += 1
+                pendingSuccessfulRecoveryKind = LiveAudioRecoveryKind.STEREO_PCM
+                pendingTrackRecoveryAfterReprepare = PendingTrackRecoveryAfterReprepare.STEREO_PCM
+                applyTuneSnapshot(
+                    liveTuneStateMachine.onRecoveryStarted(
+                        LiveAudioRecoveryMode.STEREO_PCM,
+                        SystemClock.elapsedRealtime(),
+                    ),
+                )
+                applyEffectiveAudioOutputPreferences(
+                    passthroughEnabled = false,
+                    preferSurround = false,
+                    outputMode = LiveAudioOutputMode.FORCE_STEREO_PCM,
+                )
+                restartPlaybackAfterAudioFallback(player, resumePositionMs)
+                logAudioFailureDiagnostics(
+                    player = player,
+                    error = error,
+                    selectedAudio = selectedAudio,
+                    diagnostics = diagnostics,
+                    fallbackPath = "force_stereo_pcm",
+                    alternateTrackExists = bestCandidate != null,
+                    alternateTrack = bestCandidate,
+                )
+                return true
+            }
+            ExoAudioRecoveryAction.MARK_FAILED -> Unit
         }
 
-        if (!ac3StereoFallbackAttempted && liveAudioOutputMode != LiveAudioOutputMode.FORCE_STEREO_PCM) {
-            ac3StereoFallbackAttempted = true
-            liveAudioRecoveryAttempts += 1
-            applyEffectiveAudioOutputPreferences(
-                passthroughEnabled = false,
-                preferSurround = false,
-                outputMode = LiveAudioOutputMode.FORCE_STEREO_PCM,
-            )
-            pendingSuccessfulRecoveryKind = LiveAudioRecoveryKind.STEREO_PCM
-            restartPlaybackAfterAudioFallback(player, resumePositionMs)
-            logAc3Diagnostics(
-                error = error,
-                selectedAudio = selectedAudio,
-                fallbackPath = "force_stereo_pcm",
-                alternateTrackExists = hasAlternateCompatibleTrack,
-            )
-            return true
-        }
-
-        logAc3Diagnostics(
+        logAudioFailureDiagnostics(
+            player = player,
             error = error,
             selectedAudio = selectedAudio,
-            fallbackPath = "none",
-            alternateTrackExists = hasAlternateCompatibleTrack,
+            diagnostics = diagnostics,
+            fallbackPath = "exhausted",
+            alternateTrackExists = bestCandidate != null,
+            alternateTrack = bestCandidate,
         )
         return false
     }
 
+    private fun shouldAttemptCompatibleModeFallback(): Boolean {
+        return audioPassthroughEnabled ||
+            preferSurroundCodecs ||
+            liveAudioOutputMode == LiveAudioOutputMode.AUTO
+    }
+
+    private fun applyPendingTrackRecoveryIfNeeded() {
+        val player = exoPlayer ?: return
+        val pending = pendingTrackRecoveryAfterReprepare ?: return
+        val candidate = player.findBestAudioRecoveryCandidate(includeCurrent = true)
+        pendingTrackRecoveryAfterReprepare = null
+        if (candidate == null) {
+            Log.d(
+                TAG,
+                "No post-reprepare audio candidate found for ${currentPlaybackContext?.displayName.orEmpty()} after $pending",
+            )
+            return
+        }
+
+        val selected = player.selectedAudioTrackSnapshot()
+        val candidateKey = candidate.recoveryKey()
+        if (selected != null && selected.recoveryKey() == candidateKey) {
+            return
+        }
+
+        selectAudioRecoveryCandidate(player, candidate)
+        Log.i(
+            TAG,
+            "Post-reprepare audio reselection picked ${candidate.mime ?: "unknown"} " +
+            "for ${currentPlaybackContext?.displayName.orEmpty()} after $pending",
+        )
+    }
+
+    private fun ensureAudioTrackSelectedIfNeeded() {
+        val player = exoPlayer ?: return
+        if (currentAudioTracks.isEmpty() || currentAudioTracks.any { it.isSelected }) {
+            return
+        }
+        val selectedSnapshot = player.selectedAudioTrackSnapshot()
+        val candidate = player.findBestAudioRecoveryCandidate(includeCurrent = true)
+            ?: player.findSoleAudioTrackFallback()
+            ?: return
+        if (candidate.recoveryKey() in attemptedAudioRecoveryKeys) {
+            return
+        }
+        pendingSuccessfulRecoveryKind = LiveAudioRecoveryKind.COMPATIBLE_TRACK
+        applyTuneSnapshot(
+            liveTuneStateMachine.onSelectingAudio(SystemClock.elapsedRealtime()),
+        )
+        selectAudioRecoveryCandidate(player, candidate)
+        restartPlaybackAfterAudioFallback(player, player.currentPosition)
+        Log.i(
+            "AudioSelect",
+            "Auto-selecting live audio track ${candidate.mime ?: "unknown"} for " +
+                "${currentPlaybackContext?.displayName.orEmpty()} current=${selectedSnapshot?.debugSummary() ?: "none"}",
+        )
+    }
+
+    /**
+     * When [findBestAudioRecoveryCandidate] rejects the only audio track (e.g. MPEG-L2
+     * on Fire TV where isTrackSupported returns false), force-select it anyway.
+     * ExoPlayer's decoder fallback (setEnableDecoderFallback=true) and its built-in
+     * software MP2 decoder can still play the track.
+     */
+    private fun ExoPlayer.findSoleAudioTrackFallback(): SelectedAudioTrackSnapshot? {
+        val snapshots = currentTracks.collectAudioSnapshots()
+        if (snapshots.size != 1) return null
+        val sole = snapshots.first()
+        val knownMime = normalizeFormatKey(sole.mime) in KNOWN_LIVE_AUDIO_MIMES
+        if (!knownMime) return null
+        Log.i(
+            TAG,
+            "Sole audio track fallback: ${sole.mime ?: "unknown"} " +
+                "for ${currentPlaybackContext?.displayName.orEmpty()} " +
+                "(track unsupported by platform but known mime)",
+        )
+        return sole
+    }
+
     private fun confirmSuccessfulRecoveryIfNeeded() {
+        if (_state.liveTuneState != LiveTuneState.PLAYING_CONFIRMED) {
+            return
+        }
+        if (_state.isAudioExpected && !_state.isAudioReady) {
+            return
+        }
         val recoveryKind = pendingSuccessfulRecoveryKind ?: return
         val playbackContext = currentPlaybackContext
+        val selectedTrackHint = exoPlayer?.selectedAudioTrackSnapshot()?.toTrackHint()
         if (playbackContext != null) {
-            val selectedTrackHint = when (recoveryKind) {
-                LiveAudioRecoveryKind.COMPATIBLE_TRACK -> {
-                    exoPlayer?.selectedAudioTrackSnapshot()?.toTrackHint()
-                }
-                else -> null
-            }
             rememberedCompatibilityHint = LiveAudioCompatibilityStore.rememberSuccessfulRecovery(
                 context = context,
                 playbackContext = playbackContext,
@@ -509,13 +947,17 @@ class ExoPlayerEngine(
                 preferSurround = preferSurroundCodecs,
                 outputMode = liveAudioOutputMode,
                 recoveryKind = recoveryKind,
+                engineId = LivePlayerEngineId.EXOPLAYER,
                 preferredTrack = selectedTrackHint,
                 audioSignature = currentAudioSignature,
+                softwareAudioRequired = preferSoftwareAudioDecoding,
             )
             LiveAudioCompatibilityStore.clearSessionIncompatible(playbackContext)
+            persistedTerminalFailureHint = null
         }
         pendingSuccessfulRecoveryKind = null
-        rememberedTrackHintApplied = recoveryKind == LiveAudioRecoveryKind.COMPATIBLE_TRACK
+        pendingTrackRecoveryAfterReprepare = null
+        rememberedTrackHintApplied = selectedTrackHint != null
         listeners.forEach { it.onError(recoveryMessageFor(recoveryKind)) }
     }
 
@@ -537,11 +979,33 @@ class ExoPlayerEngine(
         )
     }
 
+    private fun invalidateTerminalFailureIfTrackMetadataChanged() {
+        val playbackContext = currentPlaybackContext ?: return
+        val terminalFailure = persistedTerminalFailureHint ?: return
+        if (_state.liveTuneState == LiveTuneState.FALLBACK_ALLOWED) {
+            return
+        }
+        val signature = currentAudioSignature ?: return
+        val storedSignature = terminalFailure.audioSignature ?: return
+        if (storedSignature == signature) return
+
+        Log.i(
+            TAG,
+            "Clearing terminal live audio failure for ${playbackContext.displayName} because track metadata changed",
+        )
+        LiveAudioCompatibilityStore.clearTerminalFailure(context, playbackContext)
+        persistedTerminalFailureHint = null
+        sessionIncompatibleRecoverySkipped = LiveAudioCompatibilityStore.isSessionIncompatible(
+            playbackContext,
+            currentPreferenceKey(),
+        )
+    }
+
     private fun applyRememberedCompatibleTrackIfNeeded() {
         val player = exoPlayer ?: return
         val hint = rememberedCompatibilityHint ?: return
         val preferredTrack = hint.preferredTrack ?: return
-        if (hint.recoveryKind != LiveAudioRecoveryKind.COMPATIBLE_TRACK || rememberedTrackHintApplied) {
+        if (rememberedTrackHintApplied) {
             return
         }
 
@@ -553,22 +1017,45 @@ class ExoPlayerEngine(
 
         val candidate = player.findTrackMatchingHint(preferredTrack) ?: return
         rememberedTrackHintApplied = true
-        player.trackSelectionParameters = player.trackSelectionParameters
-            .buildUpon()
-            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
-            .setOverrideForType(
-                TrackSelectionOverride(candidate.group.mediaTrackGroup, candidate.trackIndex),
-            )
-            .build()
+        applyTuneSnapshot(liveTuneStateMachine.onSelectingAudio(SystemClock.elapsedRealtime()))
+        applyTrackSelectionOverride(
+            player = player,
+            trackType = C.TRACK_TYPE_AUDIO,
+            group = candidate.group,
+            trackIndex = candidate.trackIndex,
+            exceedRendererCapabilitiesIfNecessary = true,
+        )
         Log.d(
             TAG,
             "Applying remembered compatible audio track ${candidate.mime ?: "unknown"} for ${currentPlaybackContext?.displayName.orEmpty()}",
         )
     }
 
-    private fun disableAudioAfterCompatibilityFailure(player: ExoPlayer) {
+    private fun disableAudioAfterCompatibilityFailure(
+        player: ExoPlayer,
+        error: PlaybackException,
+        selectedAudio: SelectedAudioTrackSnapshot?,
+        diagnostics: String,
+    ) {
+        cancelAudioReadinessTimeout()
         pendingSuccessfulRecoveryKind = null
+        pendingTrackRecoveryAfterReprepare = null
         val playbackContext = currentPlaybackContext
+        val failureReport = LiveAudioCompatibilityFailureReport(
+            selectedEngine = LivePlayerEngineId.EXOPLAYER,
+            playbackContext = playbackContext,
+            selectedMime = selectedAudio?.mime,
+            trackCount = currentAudioTracks.size,
+            selectedTrack = selectedAudio?.toTrackHint(),
+            passthroughEnabled = audioPassthroughEnabled,
+            outputMode = liveAudioOutputMode,
+            preferSurround = preferSurroundCodecs,
+            recoveryAttempts = liveAudioRecoveryAttempts,
+            diagnostics = diagnostics,
+            fallbackAllowed = true,
+            recoveryMode = _state.audioRecoveryMode,
+            tuneState = _state.liveTuneState,
+        )
         if (playbackContext != null) {
             if (rememberedCompatibilityHint != null) {
                 LiveAudioCompatibilityStore.invalidateHint(context, playbackContext)
@@ -576,21 +1063,61 @@ class ExoPlayerEngine(
                 rememberedTrackHintApplied = false
             }
             LiveAudioCompatibilityStore.markSessionIncompatible(playbackContext, currentPreferenceKey())
+            LiveAudioCompatibilityStore.recordFailure(
+                context = context,
+                playbackContext = playbackContext,
+                reason = diagnostics,
+            )
+            persistedTerminalFailureHint = LiveAudioCompatibilityStore.rememberTerminalFailure(
+                context = context,
+                playbackContext = playbackContext,
+                preferencesKey = currentPreferenceKey(),
+                selectedMime = selectedAudio?.mime,
+                audioSignature = currentAudioSignature,
+                finalRecoveryMode = _state.audioRecoveryMode.name,
+                finalTuneState = _state.liveTuneState.name,
+                reason = diagnostics,
+            )
+            sessionIncompatibleRecoverySkipped = true
         }
+        applyTuneSnapshot(liveTuneStateMachine.onFailure(fallbackAllowed = true))
+        logAudioFailureDiagnostics(
+            player = player,
+            error = error,
+            selectedAudio = selectedAudio,
+            diagnostics = diagnostics,
+            fallbackPath = "disable_audio",
+            alternateTrackExists = player.findBestAudioRecoveryCandidate() != null,
+            alternateTrack = player.findBestAudioRecoveryCandidate(),
+        )
         Log.w(TAG, "Audio incompatible after recovery attempts - disabling audio for video continuity")
-        player.trackSelectionParameters = player.trackSelectionParameters
-            .buildUpon()
-            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
-            .build()
+        val selector = trackSelector
+        if (selector != null) {
+            selector.setParameters(
+                selector.parameters
+                    .buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+                    .build(),
+            )
+        } else {
+            player.trackSelectionParameters = player.trackSelectionParameters
+                .buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+                .build()
+        }
         restartPlaybackAfterAudioFallback(player, player.currentPosition)
+        onLiveAudioCompatibilityFailure?.invoke(failureReport)
         listeners.forEach { it.onError(INCOMPATIBLE_LIVE_AUDIO_MESSAGE) }
     }
 
     private fun recoveryMessageFor(kind: LiveAudioRecoveryKind): String {
         return when (kind) {
+            LiveAudioRecoveryKind.MOBILE_REFERENCE_FIRST_PASS -> "Audio confirmed with the mobile-reference playback path."
             LiveAudioRecoveryKind.COMPATIBLE_MODE,
             LiveAudioRecoveryKind.STEREO_PCM -> COMPATIBLE_AUDIO_MODE_MESSAGE
             LiveAudioRecoveryKind.COMPATIBLE_TRACK -> COMPATIBLE_AUDIO_TRACK_MESSAGE
+            LiveAudioRecoveryKind.SOFTWARE_AUDIO -> "Audio recovered with software decoding."
+            LiveAudioRecoveryKind.ENGINE_FALLBACK -> COMPATIBLE_AUDIO_ENGINE_MESSAGE
         }
     }
 
@@ -609,16 +1136,22 @@ class ExoPlayerEngine(
         player.playWhenReady = true
     }
 
-    private fun logAc3Diagnostics(
+    private fun logAudioFailureDiagnostics(
+        player: ExoPlayer,
         error: PlaybackException,
         selectedAudio: SelectedAudioTrackSnapshot?,
+        diagnostics: String,
         fallbackPath: String,
         alternateTrackExists: Boolean,
+        alternateTrack: SelectedAudioTrackSnapshot?,
     ) {
         val androidVersion = "${Build.VERSION.RELEASE ?: "?"} (SDK ${Build.VERSION.SDK_INT})"
         Log.w(
             TAG,
-            "AC3 fallback: channel=${currentPlaybackContext?.displayName ?: "unknown"} model=${Build.MODEL} android=$androidVersion " +
+            "Live audio recovery: engine=${LivePlayerEngineId.EXOPLAYER.storageValue} " +
+                "channel=${currentPlaybackContext?.displayName ?: "unknown"} " +
+                "model=${Build.MODEL} android=$androidVersion " +
+                "trackCount=${currentAudioTracks.size} " +
                 "selectedMime=${selectedAudio?.mime ?: "unknown"} " +
                 "selectedLanguage=${selectedAudio?.language ?: "und"} " +
                 "selectedChannels=${selectedAudio?.channelCount ?: -1} " +
@@ -629,8 +1162,22 @@ class ExoPlayerEngine(
                 "preferSurround=$preferSurroundCodecs " +
                 "recoveryAttempts=$liveAudioRecoveryAttempts " +
                 "alternateTrackExists=$alternateTrackExists " +
+                "alternateTrack=${alternateTrack?.debugSummary() ?: "none"} " +
+                "inventory=${player.audioInventorySummary()} " +
                 "fallbackPath=$fallbackPath " +
-                "causeChain=${error.buildCauseChainSummary()}",
+                "causeChain=$diagnostics " +
+                "errorCode=${error.errorCode}",
+        )
+    }
+
+    private fun logAudioInventory(event: String, tracks: Tracks) {
+        if (currentPlaybackContext == null) return
+        Log.d(
+            TAG,
+            "Live audio inventory: engine=${LivePlayerEngineId.EXOPLAYER.storageValue} " +
+                "event=$event channel=${currentPlaybackContext?.displayName.orEmpty()} " +
+                "passthrough=$audioPassthroughEnabled mode=${liveAudioOutputMode.storageValue} " +
+                "preferSurround=$preferSurroundCodecs inventory=${tracks.audioInventorySummary()}",
         )
     }
 
@@ -646,6 +1193,32 @@ class ExoPlayerEngine(
             depth++
         }
         return parts.joinToString(" <- ")
+    }
+
+    private fun ExoPlayer.setPlaybackSource(url: String) {
+        val overriddenMediaSource = testMediaSourceFactory?.invoke(context, url)
+        if (overriddenMediaSource != null) {
+            setMediaSource(overriddenMediaSource)
+        } else if (currentPlaybackContext != null) {
+            // Live IPTV: configure speed control so the player stays at the
+            // live edge instead of drifting behind and triggering periodic
+            // BEHIND_LIVE_WINDOW resyncs (visible as 5-second repeats).
+            val liveConfig = MediaItem.LiveConfiguration.Builder()
+                .setMaxPlaybackSpeed(1.04f)
+                .setMinPlaybackSpeed(0.96f)
+                .setTargetOffsetMs(5_000)
+                .setMinOffsetMs(2_000)
+                .setMaxOffsetMs(12_000)
+                .build()
+            setMediaItem(
+                MediaItem.Builder()
+                    .setUri(url)
+                    .setLiveConfiguration(liveConfig)
+                    .build(),
+            )
+        } else {
+            setMediaItem(MediaItem.fromUri(url))
+        }
     }
 
     private fun ExoPlayer.selectedAudioTrackSnapshot(): SelectedAudioTrackSnapshot? {
@@ -677,10 +1250,15 @@ class ExoPlayerEngine(
             language = language,
             formatKey = normalizeFormatKey(mime),
             channelCount = channelCount.takeIf { it > 0 },
+            groupIndex = groupIndex,
+            trackIndex = trackIndex,
         )
     }
 
     private fun SelectedAudioTrackSnapshot.matches(trackHint: LiveAudioTrackHint): Boolean {
+        if (trackHint.groupIndex != null && trackHint.trackIndex != null) {
+            return trackHint.groupIndex == groupIndex && trackHint.trackIndex == trackIndex
+        }
         val normalizedMime = normalizeFormatKey(mime)
         return normalizedMime == trackHint.formatKey &&
             language.equals(trackHint.language, ignoreCase = true) &&
@@ -688,33 +1266,106 @@ class ExoPlayerEngine(
             (trackHint.channelCount == null || trackHint.channelCount == channelCount)
     }
 
-    private fun ExoPlayer.findCompatibleAudioCandidate(): SelectedAudioTrackSnapshot? {
-        val selected = selectedAudioTrackSnapshot()
-        var audioGroupIndex = 0
-        currentTracks.groups.forEach { group ->
-            if (group.type != C.TRACK_TYPE_AUDIO) return@forEach
-            for (trackIndex in 0 until group.length) {
-                val format = group.getTrackFormat(trackIndex)
-                val mime = format.sampleMimeType ?: continue
-                if (!isCompatibleAudioMime(mime)) continue
-                val isCurrentSelection = selected != null &&
-                    selected.groupIndex == audioGroupIndex &&
-                    selected.trackIndex == trackIndex
-                if (isCurrentSelection) continue
-                return SelectedAudioTrackSnapshot(
-                    group = group,
-                    groupIndex = audioGroupIndex,
-                    trackIndex = trackIndex,
-                    mime = mime,
-                    language = format.language,
-                    channelCount = format.channelCount,
-                    bitrate = format.bitrate,
-                    label = format.label,
+    private fun SelectedAudioTrackSnapshot.recoveryKey(): String {
+        return listOf(
+            groupIndex.toString(),
+            trackIndex.toString(),
+            normalizeFormatKey(mime).orEmpty(),
+            audioPassthroughEnabled.toString(),
+            liveAudioOutputMode.storageValue,
+        ).joinToString(separator = ":")
+    }
+
+    private fun SelectedAudioTrackSnapshot.debugSummary(): String {
+        return listOf(
+            "mime=${mime ?: "unknown"}",
+            "lang=${language ?: "und"}",
+            "channels=$channelCount",
+            "bitrate=$bitrate",
+            "label=${label ?: "n/a"}",
+            "group=$groupIndex",
+            "track=$trackIndex",
+        ).joinToString(separator = ",")
+    }
+
+    private fun selectAudioRecoveryCandidate(
+        player: ExoPlayer,
+        candidate: SelectedAudioTrackSnapshot,
+    ) {
+        attemptedAudioRecoveryKeys += candidate.recoveryKey()
+        applyTrackSelectionOverride(
+            player = player,
+            trackType = C.TRACK_TYPE_AUDIO,
+            group = candidate.group,
+            trackIndex = candidate.trackIndex,
+            exceedRendererCapabilitiesIfNecessary = true,
+            preferredAudioMime = candidate.mime,
+            maxAudioChannelCount = candidate.channelCount.takeIf { it > 0 },
+        )
+    }
+
+    private fun applyTrackSelectionOverride(
+        player: ExoPlayer,
+        trackType: Int,
+        group: Tracks.Group,
+        trackIndex: Int,
+        exceedRendererCapabilitiesIfNecessary: Boolean = false,
+        preferredAudioMime: String? = null,
+        maxAudioChannelCount: Int? = null,
+    ) {
+        val selector = trackSelector
+        if (selector != null) {
+            val builder = selector.parameters
+                .buildUpon()
+                .setTrackTypeDisabled(trackType, false)
+                .setOverrideForType(
+                    TrackSelectionOverride(group.mediaTrackGroup, trackIndex),
                 )
+            if (exceedRendererCapabilitiesIfNecessary) {
+                builder.setExceedRendererCapabilitiesIfNecessary(true)
             }
-            audioGroupIndex++
+            if (trackType == C.TRACK_TYPE_AUDIO) {
+                builder.setExceedAudioConstraintsIfNecessary(true)
+                preferredAudioMime?.let { mime -> builder.setPreferredAudioMimeTypes(mime) }
+                maxAudioChannelCount?.let { channelCount -> builder.setMaxAudioChannelCount(channelCount) }
+            }
+            selector.setParameters(builder.build())
+            return
         }
-        return null
+
+        val builder = player.trackSelectionParameters
+            .buildUpon()
+            .setTrackTypeDisabled(trackType, false)
+            .setOverrideForType(
+                TrackSelectionOverride(group.mediaTrackGroup, trackIndex),
+            )
+        preferredAudioMime?.let { mime -> builder.setPreferredAudioMimeTypes(mime) }
+        maxAudioChannelCount?.let { channelCount -> builder.setMaxAudioChannelCount(channelCount) }
+        player.trackSelectionParameters = builder.build()
+    }
+
+    private fun ExoPlayer.findBestAudioRecoveryCandidate(
+        includeCurrent: Boolean = false,
+    ): SelectedAudioTrackSnapshot? {
+        val selected = selectedAudioTrackSnapshot()
+        val snapshots = currentTracks.collectAudioSnapshots()
+        val candidates = snapshots.map { snapshot -> snapshot.toSelectionCandidate() }
+        val excludedIds = if (includeCurrent) {
+            emptySet()
+        } else {
+            attemptedAudioRecoveryKeys.toSet()
+        }
+        val bestCandidate = LiveTrackSelectionPolicy.selectBestCandidate(
+            candidates = candidates,
+            cachedTrack = rememberedCompatibilityHint?.preferredTrack,
+            currentSelectionId = selected?.recoveryKey(),
+            passthroughEnabled = audioPassthroughEnabled,
+            preferSurround = preferSurroundCodecs,
+            outputMode = liveAudioOutputMode,
+            excludeIds = excludedIds,
+        ) ?: return null
+        return snapshots.firstOrNull { it.recoveryKey() == bestCandidate.id }
+            ?.takeIf { includeCurrent || it.recoveryKey() !in attemptedAudioRecoveryKeys }
     }
 
     private fun ExoPlayer.findTrackMatchingHint(trackHint: LiveAudioTrackHint): SelectedAudioTrackSnapshot? {
@@ -748,11 +1399,89 @@ class ExoPlayerEngine(
 
     private fun SelectedAudioTrackSnapshot.matchScore(trackHint: LiveAudioTrackHint): Int {
         var score = 0
+        if (trackHint.groupIndex == groupIndex && trackHint.trackIndex == trackIndex) score += 12
         if (normalizeFormatKey(mime) == trackHint.formatKey) score += 6
         if (language.equals(trackHint.language, ignoreCase = true)) score += 3
         if (label.equals(trackHint.label, ignoreCase = true)) score += 2
         if (trackHint.channelCount != null && channelCount == trackHint.channelCount) score += 1
         return score
+    }
+
+    private fun SelectedAudioTrackSnapshot.recoveryScore(
+        currentSelection: SelectedAudioTrackSnapshot?,
+    ): Int {
+        val normalizedMime = normalizeFormatKey(mime)
+        var score = 0
+        when {
+            group.isTrackSupported(trackIndex) -> score += 500
+            group.isTrackSupported(trackIndex, true) -> score += 320
+            else -> score -= 280
+        }
+        score += mimePreferenceScore(normalizedMime)
+
+        if (channelCount in 1..2) {
+            score += when (liveAudioOutputMode) {
+                LiveAudioOutputMode.FORCE_STEREO_PCM -> 90
+                LiveAudioOutputMode.PREFER_COMPATIBLE -> 45
+                LiveAudioOutputMode.AUTO -> if (audioPassthroughEnabled || preferSurroundCodecs) 6 else 28
+            }
+        } else if (channelCount > 2) {
+            score += when (liveAudioOutputMode) {
+                LiveAudioOutputMode.FORCE_STEREO_PCM -> -140
+                LiveAudioOutputMode.PREFER_COMPATIBLE -> -50
+                LiveAudioOutputMode.AUTO -> if (audioPassthroughEnabled || preferSurroundCodecs) 40 else -18
+            }
+        }
+
+        if (bitrate in 1..320_000) score += 8
+        if (bitrate > 640_000) score -= 8
+        if (label.isNullOrBlank()) score -= 2
+        if (language.isNullOrBlank()) score -= 1
+
+        val isCurrentSelection = currentSelection != null &&
+            currentSelection.groupIndex == groupIndex &&
+            currentSelection.trackIndex == trackIndex
+        if (isCurrentSelection) score -= 60
+
+        return score
+    }
+
+    private fun mimePreferenceScore(normalizedMime: String?): Int {
+        return when (normalizedMime) {
+            "audio/mp4a-latm",
+            "audio/aac" -> 180
+            "audio/opus" -> 170
+            "audio/mpeg-l2",
+            "audio/mp2",
+            "mp2",
+            "mpeg-l2" -> 167
+            "audio/mpeg" -> 165
+            "audio/raw" -> 160
+            "audio/flac" -> 150
+            "audio/vorbis" -> 145
+            "audio/ac4" -> if (audioPassthroughEnabled) 138 else 120
+            "audio/eac3",
+            "audio/eac3-joc" -> when (liveAudioOutputMode) {
+                LiveAudioOutputMode.FORCE_STEREO_PCM -> 26
+                LiveAudioOutputMode.PREFER_COMPATIBLE -> 72
+                LiveAudioOutputMode.AUTO -> if (audioPassthroughEnabled || preferSurroundCodecs) 156 else 92
+            }
+            "audio/ac3" -> when (liveAudioOutputMode) {
+                LiveAudioOutputMode.FORCE_STEREO_PCM -> 22
+                LiveAudioOutputMode.PREFER_COMPATIBLE -> 68
+                LiveAudioOutputMode.AUTO -> if (audioPassthroughEnabled || preferSurroundCodecs) 150 else 84
+            }
+            "audio/vnd.dts",
+            "audio/vnd.dts.hd",
+            "audio/true-hd",
+            "audio/mlp" -> when (liveAudioOutputMode) {
+                LiveAudioOutputMode.FORCE_STEREO_PCM -> -40
+                LiveAudioOutputMode.PREFER_COMPATIBLE -> 18
+                LiveAudioOutputMode.AUTO -> if (audioPassthroughEnabled || preferSurroundCodecs) 170 else 24
+            }
+            null -> -12
+            else -> if (isCompatibleAudioMime(normalizedMime)) 96 else 8
+        }
     }
 
     private fun Tracks.buildAudioSignature(): String {
@@ -772,6 +1501,57 @@ class ExoPlayerEngine(
         return signatures.sorted().joinToString(separator = "|").take(512)
     }
 
+    private fun Tracks.audioInventorySummary(): String {
+        return collectAudioSnapshots()
+            .joinToString(separator = " | ") { snapshot ->
+                val selectedMarker = if (snapshot.group.isTrackSelected(snapshot.trackIndex)) "*" else ""
+                "$selectedMarker${snapshot.debugSummary()}"
+            }
+            .take(1024)
+    }
+
+    private fun ExoPlayer.audioInventorySummary(): String = currentTracks.audioInventorySummary()
+
+    private fun Tracks.collectAudioSnapshots(): List<SelectedAudioTrackSnapshot> {
+        val snapshots = mutableListOf<SelectedAudioTrackSnapshot>()
+        var audioGroupIndex = 0
+        groups.forEach { group ->
+            if (group.type != C.TRACK_TYPE_AUDIO) return@forEach
+            for (trackIndex in 0 until group.length) {
+                val format = group.getTrackFormat(trackIndex)
+                snapshots += SelectedAudioTrackSnapshot(
+                    group = group,
+                    groupIndex = audioGroupIndex,
+                    trackIndex = trackIndex,
+                    mime = format.sampleMimeType,
+                    language = format.language,
+                    channelCount = format.channelCount,
+                    bitrate = format.bitrate,
+                    label = format.label,
+                )
+            }
+            audioGroupIndex++
+        }
+        return snapshots
+    }
+
+    private fun SelectedAudioTrackSnapshot.toSelectionCandidate(): LiveAudioTrackCandidate {
+        return LiveAudioTrackCandidate(
+            id = recoveryKey(),
+            language = language,
+            label = label,
+            formatKey = normalizeFormatKey(mime),
+            channelCount = channelCount.takeIf { it > 0 },
+            bitrate = bitrate.takeIf { it > 0 },
+            supported = group.isTrackSupported(trackIndex, true) ||
+                normalizeFormatKey(mime) in KNOWN_LIVE_AUDIO_MIMES,
+            selected = group.isTrackSelected(trackIndex),
+            isDefault = group.getTrackFormat(trackIndex).selectionFlags and C.SELECTION_FLAG_DEFAULT != 0,
+            groupIndex = groupIndex,
+            trackIndex = trackIndex,
+        )
+    }
+
     private fun normalizeFormatKey(value: String?): String? {
         return value?.trim()?.lowercase(Locale.ROOT)?.takeIf { it.isNotEmpty() }
     }
@@ -787,11 +1567,16 @@ class ExoPlayerEngine(
     }
 
     override fun release() {
+        cancelAudioReadinessTimeout()
         exoPlayer?.removeListener(exoListener)
+        exoPlayer?.removeAnalyticsListener(analyticsListener)
         exoPlayer?.stop()
         exoPlayer?.release()
         exoPlayer = null
+        trackSelector = null
         onCodecError = null
+        onLiveAudioCompatibilityFailure = null
+        persistedTerminalFailureHint = null
     }
 
     override fun addListener(listener: PlayerListener) {
@@ -821,6 +1606,9 @@ class ExoPlayerEngine(
         rememberedCompatibilityHint = null
         rememberedTrackHintApplied = false
         pendingSuccessfulRecoveryKind = null
+        pendingTrackRecoveryAfterReprepare = null
+        preferSoftwareAudioDecoding = false
+        persistedTerminalFailureHint = null
         currentPlaybackContext?.let { LiveAudioCompatibilityStore.clearSessionIncompatible(it) }
         applyEffectiveAudioOutputPreferences(
             passthroughEnabled = passthroughEnabled,
@@ -846,14 +1634,20 @@ class ExoPlayerEngine(
             "audio/eac3-joc",
             "audio/eac3",
             "audio/ac3",
+            "audio/ac4",
             "audio/mp4a-latm",
+            "audio/aac",
             "audio/opus",
+            "audio/mpeg-L2",
             "audio/mpeg",
         )
         val stereoFirstMimes = arrayOf(
             "audio/mp4a-latm",
+            "audio/aac",
             "audio/opus",
+            "audio/mpeg-L2",
             "audio/mpeg",
+            "audio/ac4",
             "audio/eac3",
             "audio/ac3",
             "audio/vnd.dts",
@@ -862,11 +1656,14 @@ class ExoPlayerEngine(
         )
         val compatibleFirstMimes = arrayOf(
             "audio/mp4a-latm",
+            "audio/aac",
             "audio/opus",
+            "audio/mpeg-L2",
             "audio/mpeg",
             "audio/raw",
             "audio/flac",
             "audio/vorbis",
+            "audio/ac4",
             "audio/eac3",
             "audio/ac3",
             "audio/vnd.dts",
@@ -876,7 +1673,9 @@ class ExoPlayerEngine(
 
         val forceStereoMimes = arrayOf(
             "audio/mp4a-latm",
+            "audio/aac",
             "audio/opus",
+            "audio/mpeg-L2",
             "audio/mpeg",
             "audio/raw",
             "audio/flac",
@@ -897,27 +1696,156 @@ class ExoPlayerEngine(
             .setPreferredAudioMimeTypes(
                 *preferredMimes,
             )
+            .setMaxAudioChannelCount(
+                when (outputMode) {
+                    LiveAudioOutputMode.AUTO -> if (passthroughEnabled || preferSurround) Int.MAX_VALUE else 2
+                    LiveAudioOutputMode.PREFER_COMPATIBLE -> 2
+                    LiveAudioOutputMode.FORCE_STEREO_PCM -> 2
+                },
+            )
             .build()
     }
 
     fun getExoPlayer(): ExoPlayer? = exoPlayer
+
+    internal fun getPlaybackRuntimeInfo(): PlaybackRuntimeInfo {
+        val player = exoPlayer
+        val videoFormat = player?.videoFormat
+        val audioFormat = player?.audioFormat
+        val selectedAudioTrack = currentAudioTracks.firstOrNull { it.isSelected }
+        val selectedSubtitleTrack = currentSubtitleTracks.firstOrNull { it.isSelected }
+        return PlaybackRuntimeInfo(
+            engineId = LivePlayerEngineId.EXOPLAYER,
+            videoCodec = normalizeFormatKey(videoFormat?.sampleMimeType) ?: videoFormat?.codecs,
+            audioCodec = normalizeFormatKey(audioFormat?.sampleMimeType) ?: audioFormat?.codecs,
+            videoDecoderName = videoDecoderName,
+            audioDecoderName = audioDecoderName,
+            videoDecoderKind = inferDecoderKind(videoDecoderName),
+            audioDecoderKind = inferDecoderKind(audioDecoderName),
+            resolutionLabel = videoFormat?.let { format ->
+                val width = format.width.takeIf { it > 0 } ?: return@let null
+                val height = format.height.takeIf { it > 0 } ?: return@let null
+                "${width}x${height}"
+            },
+            frameRate = videoFormat?.frameRate?.takeIf { it > 0f },
+            selectedAudioTrack = selectedAudioTrack,
+            selectedSubtitleTrack = selectedSubtitleTrack,
+            outputMode = liveAudioOutputMode,
+            passthroughEnabled = audioPassthroughEnabled,
+            preferSurround = preferSurroundCodecs,
+            liveTuneState = _state.liveTuneState,
+            audioRecoveryMode = _state.audioRecoveryMode,
+            engineFallbackAllowed = _state.isEngineFallbackAllowed,
+            fallbackFromHardwareDefault = liveAudioRecoveryAttempts > 0 ||
+                inferDecoderKind(videoDecoderName) == DecoderKind.SOFTWARE ||
+                inferDecoderKind(audioDecoderName) == DecoderKind.SOFTWARE,
+        )
+    }
 
     fun updatePosition() {
         val player = exoPlayer ?: return
         _state = _state.copy(positionMs = player.currentPosition)
     }
 
+    private fun applyTuneSnapshot(snapshot: LiveTuneSnapshot) {
+        _state = _state.copy(
+            liveTuneState = snapshot.state,
+            audioRecoveryMode = snapshot.recoveryMode,
+            isAudioExpected = snapshot.audioExpected,
+            isAudioReady = snapshot.audioReady,
+            isVideoReady = snapshot.videoReady,
+            isEngineFallbackAllowed = snapshot.fallbackAllowed,
+        )
+    }
+
+    private fun maybeConfirmTune(trigger: String) {
+        val player = exoPlayer ?: return
+        if (_state.isEngineFallbackAllowed) return
+        if (player.playbackState != Player.STATE_READY) return
+        val snapshot = liveTuneStateMachine.snapshot()
+        if (snapshot.videoReady && (!snapshot.audioExpected || snapshot.audioReady)) {
+            cancelAudioReadinessTimeout()
+            applyTuneSnapshot(liveTuneStateMachine.onPlaybackReady(SystemClock.elapsedRealtime()))
+            Log.d(
+                "LiveTune",
+                "Confirmed live tune channel=${currentPlaybackContext?.displayName.orEmpty()} " +
+                    "streamKey=${currentPlaybackContext?.streamKey ?: "none"} trigger=$trigger " +
+                    "audioExpected=${snapshot.audioExpected} audioReady=${snapshot.audioReady}",
+            )
+            confirmSuccessfulRecoveryIfNeeded()
+            return
+        }
+        if (snapshot.videoReady && snapshot.audioExpected && !snapshot.audioReady) {
+            scheduleAudioReadinessTimeout()
+        }
+    }
+
+    private fun scheduleAudioReadinessTimeout() {
+        cancelAudioReadinessTimeout()
+        mainHandler.postDelayed(audioReadinessTimeoutRunnable, AUDIO_READINESS_TIMEOUT_MS)
+    }
+
+    private fun cancelAudioReadinessTimeout() {
+        mainHandler.removeCallbacks(audioReadinessTimeoutRunnable)
+    }
+
+    private fun handleAudioReadinessTimeout(reason: String) {
+        val player = exoPlayer ?: return
+        val now = SystemClock.elapsedRealtime()
+        if (!liveTuneStateMachine.isAudioReadinessTimedOut(now)) return
+        val selectedAudio = player.selectedAudioTrackSnapshot()
+        val diagnostics = buildString {
+            append(reason)
+            append("|streamKey=")
+            append(currentPlaybackContext?.streamKey ?: "none")
+            append("|selected=")
+            append(selectedAudio?.debugSummary() ?: "none")
+        }
+        Log.w(
+            "AudioRecover",
+            "Bounded live audio readiness expired for ${currentPlaybackContext?.displayName.orEmpty()} diagnostics=$diagnostics",
+        )
+        val timeoutError = PlaybackException(
+            "Bounded live audio readiness timeout",
+            null,
+            PlaybackException.ERROR_CODE_DECODING_FAILED,
+        )
+        if (!attemptLiveAudioRecovery(player, timeoutError, selectedAudio, diagnostics)) {
+            disableAudioAfterCompatibilityFailure(
+                player = player,
+                error = timeoutError,
+                selectedAudio = selectedAudio,
+                diagnostics = diagnostics,
+            )
+        }
+    }
+
     private fun notifyStateChanged() {
         listeners.forEach { it.onStateChanged(_state) }
     }
 
+    /**
+     * Change the live buffer size.  The new value takes effect on the next
+     * channel tune — we intentionally do NOT rebuild the player mid-stream
+     * because that tears down the video surface and causes a visible glitch.
+     */
+    fun setLiveBufferSize(durationMs: Int) {
+        liveBufferDurationMs = durationMs
+        Log.i(TAG, "Buffer size updated to ${durationMs}ms — will apply on next tune")
+    }
+
     companion object {
+        internal const val DEFAULT_LIVE_BUFFER_MS = 50_000
         private const val TAG = "ExoPlayerEngine"
-        private const val MAX_LIVE_AUDIO_RECOVERY_ATTEMPTS = 3
+        private const val MAX_LIVE_AUDIO_RECOVERY_ATTEMPTS = 4
+        private const val AUDIO_READINESS_TIMEOUT_MS = 900L
+        private const val MIN_AUDIO_RECOVERY_SCORE = 40
         private const val COMPATIBLE_AUDIO_MODE_MESSAGE =
             "Audio recovered by changing the audio mode."
         private const val COMPATIBLE_AUDIO_TRACK_MESSAGE =
             "Switched to a compatible audio track."
+        private const val COMPATIBLE_AUDIO_ENGINE_MESSAGE =
+            "Audio recovered by changing the playback engine."
         private const val INCOMPATIBLE_LIVE_AUDIO_MESSAGE =
             "Audio unavailable on this device for this channel."
         private val AC3_FAMILY_MIMES = setOf(
@@ -927,15 +1855,35 @@ class ExoPlayerEngine(
         )
         private val COMPATIBLE_AUDIO_MIMES = setOf(
             "audio/mp4a-latm",
+            "audio/aac",
+            "audio/mpeg-l2",
+            "audio/mp2",
             "audio/mpeg",
             "audio/opus",
             "audio/vorbis",
             "audio/raw",
             "audio/flac",
+            "audio/ac4",
             "audio/amr-nb",
             "audio/amr-wb",
         )
+        private val KNOWN_LIVE_AUDIO_MIMES = COMPATIBLE_AUDIO_MIMES + AC3_FAMILY_MIMES + setOf(
+            "audio/vnd.dts",
+            "audio/vnd.dts.hd",
+            "audio/true-hd",
+            "audio/mlp",
+        )
+    }
+
+    private fun inferDecoderKind(decoderName: String?): DecoderKind {
+        val normalized = decoderName?.trim()?.lowercase(Locale.ROOT) ?: return DecoderKind.UNKNOWN
+        return when {
+            normalized.contains("omx.google") ||
+                normalized.contains("c2.android") ||
+                normalized.contains("ffmpeg") ||
+                normalized.contains("sw") ||
+                normalized.contains("software") -> DecoderKind.SOFTWARE
+            else -> DecoderKind.HARDWARE
+        }
     }
 }
-
-

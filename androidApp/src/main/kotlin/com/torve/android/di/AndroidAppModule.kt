@@ -3,6 +3,7 @@ package com.torve.android.di
 import com.torve.platform.DatabaseDriverFactory
 import com.torve.platform.NetworkMonitor
 import com.torve.android.device.AndroidDeviceIdProvider
+import com.torve.android.premium.PremiumActionGate
 import com.torve.android.security.AndroidKeystoreSecretStore
 import com.torve.android.sync.SyncCoordinator
 import com.torve.domain.device.DeviceIdProvider
@@ -18,5 +19,6 @@ val androidAppModule = module {
     single<IntegrationSecretStore> { get<AndroidKeystoreSecretStore>() }
     single<SecureStorage> { get<AndroidKeystoreSecretStore>() }
     single<DeviceIdProvider> { AndroidDeviceIdProvider(androidContext()) }
-    single { SyncCoordinator(androidContext()) }
+    single { PremiumActionGate(get(), get()) }
+    single { SyncCoordinator(androidContext(), get()) }
 }

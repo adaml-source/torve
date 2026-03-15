@@ -50,7 +50,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -122,12 +121,6 @@ fun SearchScreen(
     )
 
     CompositionLocalProvider(LocalCardStyle provides defaultCardStyle) {
-        LaunchedEffect(syncState.isAuthenticated) {
-            if (syncState.isAuthenticated && syncState.devices.isEmpty()) {
-                syncCoordinator.refreshDevices()
-            }
-        }
-
         val tvTargets = syncCoordinator.targetDevices()
             .filter { it.deviceType.contains("tv", ignoreCase = true) }
 

@@ -4,6 +4,9 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
+import com.torve.android.premium.PremiumAccessDeniedException
+import com.torve.android.premium.PremiumActionGate
+import com.torve.android.premium.PremiumFeature
 import com.torve.android.sync.lan.LanEventEnvelope
 import com.torve.android.sync.lan.LanPairClaimRequest
 import com.torve.android.sync.lan.LanPairClaimResponse
@@ -56,10 +59,12 @@ data class SyncAccountState(
     val wsStatus: String = "local-only",
     val recentEvents: List<String> = emptyList(),
     val error: String? = null,
+    val blockedFeature: PremiumFeature? = null,
 )
 
 class SyncCoordinator(
     private val context: Context,
+    private val premiumActionGate: PremiumActionGate,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val installationIdStore = InstallationIdStore(context)
@@ -88,14 +93,20 @@ class SyncCoordinator(
         onError = { message -> onLanError(message) },
     )
 
-    private val _state = MutableStateFlow(buildInitialState())
+    private val _state = MutableStateFlow(SyncAccountState(isLoading = true))
     val state = _state.asStateFlow()
     private val _inboundEvents = MutableSharedFlow<SyncInboundEvent>(extraBufferCapacity = 32)
     val inboundEvents: SharedFlow<SyncInboundEvent> = _inboundEvents.asSharedFlow()
 
     init {
+        // Defer heavy init (SharedPrefs, Keystore, JSON parsing) off the calling
+        // thread — SyncCoordinator is created by Koin on the main thread and the
+        // cumulative cost causes an ANR on Fire TV.
+        scope.launch {
+            _state.value = buildInitialState()
+            loadDevices()
+        }
         startLanTransport()
-        scope.launch { loadDevices() }
     }
 
     fun installationId(): String = installationIdStore.getOrCreateInstallationId()
@@ -129,6 +140,7 @@ class SyncCoordinator(
             devices = updatedDevices,
             wsStatus = onlineTransportStatus(),
             error = null,
+            blockedFeature = null,
             pairingStatus = "Local profile ready. Pair TVs on this Wi-Fi network.",
         )
     }
@@ -157,6 +169,7 @@ class SyncCoordinator(
             pairingStatus = "Local mode active.",
             wsStatus = onlineTransportStatus(),
             error = null,
+            blockedFeature = null,
         )
     }
 
@@ -184,50 +197,72 @@ class SyncCoordinator(
             deviceId = selfDeviceId,
             wsStatus = onlineTransportStatus(),
             error = null,
+            blockedFeature = null,
         )
     }
 
     fun refreshDevices() {
         scope.launch {
+            val access = premiumActionGate.evaluate(PremiumFeature.DEVICE_LINKING)
+            if (!access.allowed) {
+                markPremiumBlocked(access.feature, access.message)
+                return@launch
+            }
             loadDevices()
             refreshKnownPeers()
         }
     }
 
     fun revokeDevice(deviceId: String) {
-        val selfId = _state.value.deviceId
-        if (deviceId == selfId) {
-            _state.value = _state.value.copy(error = "This device cannot revoke itself.")
-            return
-        }
-        val updated = _state.value.devices.map { device ->
-            if (device.id == deviceId) {
-                device.copy(revokedAt = utcNow(), lastSeenAt = utcNow())
-            } else {
-                device
+        scope.launch {
+            val access = premiumActionGate.evaluate(PremiumFeature.DEVICE_LINKING)
+            if (!access.allowed) {
+                markPremiumBlocked(access.feature, access.message)
+                return@launch
             }
+
+            val selfId = _state.value.deviceId
+            if (deviceId == selfId) {
+                _state.value = _state.value.copy(error = "This device cannot revoke itself.", blockedFeature = null)
+                return@launch
+            }
+            val updated = _state.value.devices.map { device ->
+                if (device.id == deviceId) {
+                    device.copy(revokedAt = utcNow(), lastSeenAt = utcNow())
+                } else {
+                    device
+                }
+            }
+            synchronized(peerLock) {
+                endpointByDeviceId.remove(deviceId)
+                serviceNameByDeviceId.remove(deviceId)
+            }
+            persistDevices(updated)
+            _state.value = _state.value.copy(devices = updated, error = null, blockedFeature = null)
         }
-        synchronized(peerLock) {
-            endpointByDeviceId.remove(deviceId)
-            serviceNameByDeviceId.remove(deviceId)
-        }
-        persistDevices(updated)
-        _state.value = _state.value.copy(devices = updated, error = null)
     }
 
     fun removeDevice(deviceId: String) {
-        val selfId = _state.value.deviceId
-        if (deviceId == selfId) {
-            _state.value = _state.value.copy(error = "Cannot remove the current device.")
-            return
+        scope.launch {
+            val access = premiumActionGate.evaluate(PremiumFeature.DEVICE_LINKING)
+            if (!access.allowed) {
+                markPremiumBlocked(access.feature, access.message)
+                return@launch
+            }
+
+            val selfId = _state.value.deviceId
+            if (deviceId == selfId) {
+                _state.value = _state.value.copy(error = "Cannot remove the current device.", blockedFeature = null)
+                return@launch
+            }
+            val updated = _state.value.devices.filter { it.id != deviceId }
+            synchronized(peerLock) {
+                endpointByDeviceId.remove(deviceId)
+                serviceNameByDeviceId.remove(deviceId)
+            }
+            persistDevices(updated)
+            _state.value = _state.value.copy(devices = updated, error = null, blockedFeature = null)
         }
-        val updated = _state.value.devices.filter { it.id != deviceId }
-        synchronized(peerLock) {
-            endpointByDeviceId.remove(deviceId)
-            serviceNameByDeviceId.remove(deviceId)
-        }
-        persistDevices(updated)
-        _state.value = _state.value.copy(devices = updated, error = null)
     }
 
     fun targetDevices(includeSelf: Boolean = false): List<SyncDeviceDto> {
@@ -248,6 +283,11 @@ class SyncCoordinator(
     ): Result<String> {
         if (query.isBlank()) return Result.failure(IllegalArgumentException("Query is blank"))
         if (!_state.value.isAuthenticated) return Result.failure(IllegalStateException("Create a local profile first."))
+        val access = premiumActionGate.evaluate(PremiumFeature.TV_PHONE_CONTINUATION)
+        if (!access.allowed) {
+            markPremiumBlocked(access.feature, access.message)
+            return Result.failure(PremiumAccessDeniedException(access.feature, access.message))
+        }
         val target = _state.value.devices.firstOrNull { it.id == targetDeviceId && it.revokedAt == null }
             ?: return Result.failure(IllegalStateException("Target device is not paired."))
         val eventId = UUID.randomUUID().toString()
@@ -296,6 +336,11 @@ class SyncCoordinator(
     ): Result<String> {
         if (contentId.isBlank()) return Result.failure(IllegalArgumentException("Content id is blank"))
         if (!_state.value.isAuthenticated) return Result.failure(IllegalStateException("Create a local profile first."))
+        val access = premiumActionGate.evaluate(PremiumFeature.TV_PHONE_CONTINUATION)
+        if (!access.allowed) {
+            markPremiumBlocked(access.feature, access.message)
+            return Result.failure(PremiumAccessDeniedException(access.feature, access.message))
+        }
         val target = _state.value.devices.firstOrNull { it.id == targetDeviceId && it.revokedAt == null }
             ?: return Result.failure(IllegalStateException("Target device is not paired."))
         val eventId = UUID.randomUUID().toString()
@@ -348,6 +393,11 @@ class SyncCoordinator(
     ): Result<String> {
         if (categories.isEmpty()) return Result.failure(IllegalArgumentException("No categories selected"))
         if (!_state.value.isAuthenticated) return Result.failure(IllegalStateException("Create a local profile first."))
+        val access = premiumActionGate.evaluate(PremiumFeature.DEVICE_SYNC)
+        if (!access.allowed) {
+            markPremiumBlocked(access.feature, access.message)
+            return Result.failure(PremiumAccessDeniedException(access.feature, access.message))
+        }
         val target = _state.value.devices.firstOrNull { it.id == targetDeviceId && it.revokedAt == null }
             ?: return Result.failure(IllegalStateException("Target device is not paired."))
         val eventId = UUID.randomUUID().toString()
@@ -392,6 +442,11 @@ class SyncCoordinator(
     ): Result<Unit> {
         if (contentId.isBlank()) return Result.failure(IllegalArgumentException("Content id is blank"))
         if (!_state.value.isAuthenticated) return Result.failure(IllegalStateException("Create a local profile first."))
+        val access = premiumActionGate.evaluate(PremiumFeature.DEVICE_SYNC)
+        if (!access.allowed) {
+            markPremiumBlocked(access.feature, access.message)
+            return Result.failure(PremiumAccessDeniedException(access.feature, access.message))
+        }
         appendRecentEvent("watch_state:${contentId.trim()}:${provider}:${positionMs.coerceAtLeast(0L)}")
         return Result.success(Unit)
     }
@@ -407,6 +462,11 @@ class SyncCoordinator(
             return
         }
         scope.launch {
+            val access = premiumActionGate.evaluate(PremiumFeature.PHONE_PAIRING)
+            if (!access.allowed) {
+                markPremiumBlocked(access.feature, access.message)
+                return@launch
+            }
             _state.value = _state.value.copy(isLoading = true, error = null)
             val discovered = synchronized(peerLock) { serviceByName.values.toList() }
             if (discovered.isEmpty()) {
@@ -448,6 +508,7 @@ class SyncCoordinator(
                 isLoading = false,
                 devices = updated,
                 error = null,
+                blockedFeature = null,
                 pairingStatus = "Paired ${pairedDevice.deviceName} on local Wi-Fi.",
                 wsStatus = onlineTransportStatus(),
             )
@@ -459,20 +520,33 @@ class SyncCoordinator(
         _state.value = _state.value.copy(error = null)
     }
 
+    fun clearBlockedFeature() {
+        _state.value = _state.value.copy(blockedFeature = null)
+    }
+
     fun startTvPairingFlow() {
-        _state.value = _state.value.copy(isLoading = true, error = null)
-        val code = generatePairingCode()
-        val expiresAt = utcAt(System.currentTimeMillis() + 10 * 60 * 1_000L)
-        prefs.edit()
-            .putString(KEY_PENDING_PAIR_CODE, code)
-            .putString(KEY_PENDING_PAIR_EXPIRES_AT, expiresAt)
-            .apply()
-        _state.value = _state.value.copy(
-            isLoading = false,
-            pairingCode = SyncPairingCodeResponse(code = code, expiresAt = expiresAt),
-            pairingStatus = "Open Torve on your phone and enter this code to pair over local Wi-Fi.",
-            wsStatus = onlineTransportStatus(),
-        )
+        scope.launch {
+            val access = premiumActionGate.evaluate(PremiumFeature.PHONE_PAIRING)
+            if (!access.allowed) {
+                markPremiumBlocked(access.feature, access.message)
+                return@launch
+            }
+
+            _state.value = _state.value.copy(isLoading = true, error = null, blockedFeature = null)
+            val code = generatePairingCode()
+            val expiresAt = utcAt(System.currentTimeMillis() + 10 * 60 * 1_000L)
+            prefs.edit()
+                .putString(KEY_PENDING_PAIR_CODE, code)
+                .putString(KEY_PENDING_PAIR_EXPIRES_AT, expiresAt)
+                .apply()
+            _state.value = _state.value.copy(
+                isLoading = false,
+                pairingCode = SyncPairingCodeResponse(code = code, expiresAt = expiresAt),
+                pairingStatus = "Open Torve on your phone and enter this code to pair over local Wi-Fi.",
+                wsStatus = onlineTransportStatus(),
+                blockedFeature = null,
+            )
+        }
     }
 
     private fun startLanTransport() {
@@ -481,7 +555,7 @@ class SyncCoordinator(
                 lanServer.startIfNeeded()
                 lanDiscovery.start(lanServer.port)
                 lanReady = true
-                _state.value = _state.value.copy(wsStatus = onlineTransportStatus(), error = null)
+                _state.value = _state.value.copy(wsStatus = onlineTransportStatus(), error = null, blockedFeature = null)
             }.onFailure { error ->
                 lanReady = false
                 _state.value = _state.value.copy(
@@ -569,6 +643,18 @@ class SyncCoordinator(
     }
 
     private fun handleInboundPairClaim(request: LanPairClaimRequest): LanPairClaimResponse {
+        val premiumDecision = runCatching {
+            kotlinx.coroutines.runBlocking { premiumActionGate.evaluate(PremiumFeature.PHONE_PAIRING) }
+        }.getOrElse {
+            return LanPairClaimResponse(status = "error", message = it.message ?: "Failed to validate premium access.")
+        }
+        if (!premiumDecision.allowed) {
+            markPremiumBlocked(premiumDecision.feature, premiumDecision.message)
+            return LanPairClaimResponse(
+                status = "premium_required",
+                message = premiumDecision.message,
+            )
+        }
         val active = _state.value.pairingCode ?: return LanPairClaimResponse(
             status = "invalid_code",
             message = "No active pairing code.",
@@ -602,6 +688,7 @@ class SyncCoordinator(
             pairingStatus = "Paired with ${source.deviceName}.",
             wsStatus = onlineTransportStatus(),
             error = null,
+            blockedFeature = null,
         )
         appendRecentEvent("pair_accepted:${source.deviceName}")
         return LanPairClaimResponse(
@@ -615,6 +702,23 @@ class SyncCoordinator(
         val selfId = _state.value.deviceId ?: getOrCreateSelfDeviceId()
         if (event.targetDeviceId != selfId) {
             return LanStatusResponse(status = "ignored", message = "Not target device.")
+        }
+        val gatedFeature = when (event.eventType) {
+            EVENT_SEARCH_PUSH -> PremiumFeature.TV_PHONE_CONTINUATION
+            EVENT_PLAYBACK_INTENT -> PremiumFeature.TV_PHONE_CONTINUATION
+            EVENT_SETTINGS_PUSH -> PremiumFeature.DEVICE_SYNC
+            else -> null
+        }
+        if (gatedFeature != null) {
+            val premiumDecision = runCatching {
+                kotlinx.coroutines.runBlocking { premiumActionGate.evaluate(gatedFeature) }
+            }.getOrElse { error ->
+                return LanStatusResponse(status = "error", message = error.message ?: "Failed to validate premium access.")
+            }
+            if (!premiumDecision.allowed) {
+                markPremiumBlocked(premiumDecision.feature, premiumDecision.message)
+                return LanStatusResponse(status = "premium_required", message = premiumDecision.message)
+            }
         }
         return runCatching {
             when (event.eventType) {
@@ -697,12 +801,13 @@ class SyncCoordinator(
             deviceId = selfDeviceId,
             devices = devices,
             pairingCode = pendingPairing,
-            pairingStatus = when {
-                pendingPairing != null -> "Pairing code ${pendingPairing.code}"
-                authenticated -> null
-                else -> "Local mode active."
-            },
-            wsStatus = onlineTransportStatus(),
+                    pairingStatus = when {
+                        pendingPairing != null -> "Pairing code ${pendingPairing.code}"
+                        authenticated -> null
+                        else -> "Local mode active."
+                    },
+                    wsStatus = onlineTransportStatus(),
+                    blockedFeature = null,
         )
     }
 
@@ -786,6 +891,18 @@ class SyncCoordinator(
         _state.value = _state.value.copy(
             recentEvents = history,
             error = null,
+            blockedFeature = null,
+            wsStatus = onlineTransportStatus(),
+        )
+    }
+
+    private fun markPremiumBlocked(feature: PremiumFeature, message: String) {
+        val history = listOf("${utcNow()}:premium_blocked:${feature.name}") + _state.value.recentEvents.take(19)
+        _state.value = _state.value.copy(
+            isLoading = false,
+            error = message,
+            blockedFeature = feature,
+            recentEvents = history,
             wsStatus = onlineTransportStatus(),
         )
     }

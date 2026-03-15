@@ -1,6 +1,8 @@
 package com.torve.android.player
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import com.torve.domain.model.Channel
 import com.torve.domain.player.LiveAudioOutputMode
@@ -32,22 +34,64 @@ class MPVPlayerEngine(
     private var currentPlaybackContext: LiveAudioPlaybackContext? = null
     private var rememberedCompatibilityHint: LiveAudioCompatibilityHint? = null
     private var rememberedTrackHintApplied = false
+    private var pendingSuccessfulRecoveryKind: LiveAudioRecoveryKind? = null
+    private var pendingRecoveryTrackId: Int? = null
+    private var currentAudioSignature: String? = null
+    private var autoCompatibleTrackSelectionAttempted = false
+    private var honorRememberedCompatibilityHint = true
+    private var aggressiveAutoTrackSelectionEnabled = true
+    private var currentChannel: Channel? = null
+    private var activePlaybackProfile: LiveTvPlaybackProfile? = null
+    private var activePlaybackPhase = LiveTvPlaybackPhase.ZAP
+    private var channelProfileRemembered = false
+    private var livePlaybackToken = 0
+    private var interlaceDetected = false
+    private var estimatedFrameRate: Float? = null
+    private var displayFrameRate: Float? = null
+    private var mistimedFrameCount: Int? = null
+    private var droppedFrameCount: Int? = null
+    private var delayedFrameCount: Int? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val promoteSteadyStateRunnable = Runnable {
+        applyActivePlaybackProfile(
+            phase = LiveTvPlaybackPhase.STEADY,
+            reason = "steady_state_promote",
+            expectedToken = livePlaybackToken,
+        )
+    }
 
     fun initialize(): Boolean {
         if (!MPVLib.tryLoad()) return false
         MPVLib.create(context)
+        val liveVideoSyncMode = MPVRuntimeOverrides.liveVideoSyncModeOverride ?: LIVE_VIDEO_SYNC_MODE
 
-        // Configure mpv options before init
-        MPVLib.setPropertyString("vo", "gpu")
-        MPVLib.setPropertyString("gpu-context", "android")
-        MPVLib.setPropertyString("hwdec", "mediacodec-copy")
-        MPVLib.setPropertyString("ao", "audiotrack")
-        MPVLib.setPropertyBoolean("input-default-bindings", true)
+        // Match a common IPTV tuning baseline before applying Torve-specific live options.
+        MPVLib.setOptionString("profile", "fast")
 
-        // Buffer settings
-        MPVLib.setPropertyString("demuxer-max-bytes", "150MiB")
-        MPVLib.setPropertyString("demuxer-max-back-bytes", "50MiB")
-        MPVLib.setPropertyInt("cache-secs", 120)
+        // Keep hardware decode preferred, but let the embedded mpv-android player choose
+        // the Android video output path that matches attachSurface().
+        MPVLib.setOptionString("gpu-api", "opengl")
+        MPVLib.setOptionString("hwdec", "auto-safe")
+        MPVLib.setOptionString("ao", "audiotrack")
+        MPVLib.setOptionString("input-default-bindings", "yes")
+        MPVLib.setOptionString("video-sync", liveVideoSyncMode)
+        MPVLib.setOptionString("cache", "yes")
+        MPVLib.setOptionString("cache-on-disk", "no")
+        MPVLib.setOptionString("cache-pause", "no")
+        MPVLib.setOptionString("demuxer-readahead-secs", "8")
+        MPVLib.setOptionString("demuxer-lavf-probesize", "2097152")
+        MPVLib.setOptionString("demuxer-lavf-analyzeduration", "2500000")
+        MPVLib.setOptionString("demuxer-lavf-linearize-timestamps", "yes")
+        MPVLib.setOptionString("stream-buffer-size", "1024KiB")
+        MPVLib.setOptionString("deinterlace", "no")
+        MPVLib.setOptionString("interpolation", "no")
+        MPVLib.setOptionString("tscale", "oversample")
+        MPVLib.setOptionString("vd-lavc-dr", "yes")
+
+        // Keep enough live buffer for jitter absorption without huge cache swings.
+        MPVLib.setOptionString("demuxer-max-bytes", "64MiB")
+        MPVLib.setOptionString("demuxer-max-back-bytes", "24MiB")
+        MPVLib.setOptionString("cache-secs", "18")
 
         MPVLib.init()
         MPVLib.addObserver(this)
@@ -58,19 +102,56 @@ class MPVPlayerEngine(
         MPVLib.observeProperty("duration", MPVLib.MPV_FORMAT_DOUBLE)
         MPVLib.observeProperty("paused-for-cache", MPVLib.MPV_FORMAT_FLAG)
         MPVLib.observeProperty("track-list/count", MPVLib.MPV_FORMAT_INT64)
+        MPVLib.observeProperty("aid", MPVLib.MPV_FORMAT_INT64)
+        MPVLib.observeProperty("video-params/interlace-detected", MPVLib.MPV_FORMAT_FLAG)
+        MPVLib.observeProperty("estimated-vf-fps", MPVLib.MPV_FORMAT_DOUBLE)
+        MPVLib.observeProperty("display-fps", MPVLib.MPV_FORMAT_DOUBLE)
+        MPVLib.observeProperty("mistimed-frame-count", MPVLib.MPV_FORMAT_INT64)
+        MPVLib.observeProperty("vo-drop-frame-count", MPVLib.MPV_FORMAT_INT64)
+        MPVLib.observeProperty("vo-delayed-frame-count", MPVLib.MPV_FORMAT_INT64)
 
         initialized = true
         applyAudioOutputPreferences()
+        Log.i(TAG, "Initialized mpv live config videoSync=$liveVideoSyncMode gpuApi=opengl hwdec=auto-safe ao=audiotrack")
         return true
     }
 
     override fun play(url: String) {
         if (!initialized) return
         rememberedTrackHintApplied = false
+        autoCompatibleTrackSelectionAttempted = false
+        pendingSuccessfulRecoveryKind = null
+        pendingRecoveryTrackId = null
+        currentAudioSignature = null
+        channelProfileRemembered = false
+        interlaceDetected = false
+        estimatedFrameRate = null
+        displayFrameRate = null
+        mistimedFrameCount = null
+        droppedFrameCount = null
+        delayedFrameCount = null
+        livePlaybackToken += 1
+        mainHandler.removeCallbacks(promoteSteadyStateRunnable)
         applyRememberedCompatibilityHintIfAvailable()
+        resolvePlaybackProfileIfNeeded()
+        applyActivePlaybackProfile(
+            phase = LiveTvPlaybackPhase.ZAP,
+            reason = "play_start",
+            expectedToken = livePlaybackToken,
+        )
         _state = _state.copy(isIdle = false, isBuffering = true)
         notifyStateChanged()
+        Log.i(
+            TAG,
+            "Starting live audio session engine=${LivePlayerEngineId.MPV.storageValue} " +
+                "channel=${currentPlaybackContext?.displayName ?: "unknown"} " +
+                "passthrough=$audioPassthroughEnabled " +
+                "audioMode=${liveAudioOutputMode.storageValue} " +
+                "preferSurround=$preferSurroundCodecs " +
+                "sync=${activePlaybackProfile?.videoSyncMode ?: (MPVRuntimeOverrides.liveVideoSyncModeOverride ?: LIVE_VIDEO_SYNC_MODE)}",
+        )
         MPVLib.loadFile(url)
+        mainHandler.postDelayed(promoteSteadyStateRunnable, STEADY_STATE_PROMOTION_DELAY_MS)
     }
 
     override fun pause() {
@@ -85,6 +166,7 @@ class MPVPlayerEngine(
 
     override fun stop() {
         if (!initialized) return
+        mainHandler.removeCallbacks(promoteSteadyStateRunnable)
         MPVLib.stop()
         _state = PlayerState()
         notifyStateChanged()
@@ -115,6 +197,7 @@ class MPVPlayerEngine(
                     label = track.title ?: track.language ?: "Subtitle ${track.id}",
                     language = track.language,
                     isSelected = track.isSelected,
+                    formatHint = track.codec,
                 )
             }
     }
@@ -129,6 +212,7 @@ class MPVPlayerEngine(
                     label = track.title ?: track.language ?: "Audio ${track.id}",
                     language = track.language,
                     isSelected = track.isSelected,
+                    formatHint = track.codec,
                 )
             }
     }
@@ -151,7 +235,8 @@ class MPVPlayerEngine(
     override fun setAudioDelay(delayMs: Int) {
         if (!initialized) return
         val seconds = delayMs / 1000.0
-        MPVLib.setPropertyDouble("audio-delay", seconds)
+        if (delayMs == 0) return
+        MPVLib.setPropertyString("audio-delay", seconds.toString())
     }
 
     override fun getAudioDelay(): Int {
@@ -163,17 +248,52 @@ class MPVPlayerEngine(
         }
     }
 
+    internal fun getPlaybackRuntimeInfo(): PlaybackRuntimeInfo {
+        val videoCodec = runCatching { MPVLib.getPropertyString("video-codec") }.getOrNull()
+        val audioCodec = runCatching { MPVLib.getPropertyString("audio-codec-name") }.getOrNull()
+            ?: runCatching { MPVLib.getPropertyString("audio-codec") }.getOrNull()
+        val videoWidth = runCatching { MPVLib.getPropertyInt("video-params/w") }.getOrNull()?.takeIf { it > 0 }
+        val videoHeight = runCatching { MPVLib.getPropertyInt("video-params/h") }.getOrNull()?.takeIf { it > 0 }
+        val decoderName = runCatching { MPVLib.getPropertyString("hwdec-current") }.getOrNull()
+        val frameRate = runCatching { MPVLib.getPropertyDouble("estimated-vf-fps").toFloat() }.getOrNull()
+            ?.takeIf { it > 0f }
+        val selectedAudioTrack = getAudioTracks().firstOrNull { it.isSelected }
+        val selectedSubtitleTrack = getSubtitleTracks().firstOrNull { it.isSelected }
+        val videoDecoderKind = when {
+            decoderName.isNullOrBlank() || decoderName == "no" -> DecoderKind.UNKNOWN
+            else -> DecoderKind.HARDWARE
+        }
+        return PlaybackRuntimeInfo(
+            engineId = LivePlayerEngineId.MPV,
+            videoCodec = videoCodec?.normalizeFormatKey(),
+            audioCodec = audioCodec?.normalizeFormatKey(),
+            videoDecoderName = decoderName,
+            audioDecoderName = "system",
+            videoDecoderKind = videoDecoderKind,
+            audioDecoderKind = DecoderKind.UNKNOWN,
+            resolutionLabel = if (videoWidth != null && videoHeight != null) "${videoWidth}x${videoHeight}" else null,
+            frameRate = frameRate,
+            selectedAudioTrack = selectedAudioTrack,
+            selectedSubtitleTrack = selectedSubtitleTrack,
+            outputMode = liveAudioOutputMode,
+            passthroughEnabled = audioPassthroughEnabled,
+            preferSurround = preferSurroundCodecs,
+            fallbackFromHardwareDefault = videoDecoderKind != DecoderKind.HARDWARE,
+        )
+    }
+
     fun setPictureFormat(aspectRatio: Float?, fill: Boolean) {
         if (!initialized) return
         if (fill) {
-            MPVLib.setPropertyDouble("video-aspect-override", -1.0)
-            MPVLib.setPropertyDouble("panscan", 1.0)
+            MPVLib.setPropertyString("video-aspect-override", "-1")
+            MPVLib.setPropertyString("panscan", "1.0")
         } else if (aspectRatio != null) {
-            MPVLib.setPropertyDouble("video-aspect-override", aspectRatio.toDouble())
-            MPVLib.setPropertyDouble("panscan", 0.0)
+            MPVLib.setPropertyString("video-aspect-override", aspectRatio.toString())
+            MPVLib.setPropertyString("panscan", "0.0")
         } else {
-            MPVLib.setPropertyDouble("video-aspect-override", -1.0)
-            MPVLib.setPropertyDouble("panscan", 0.0)
+            // Leave the default mpv output geometry alone on first startup.
+            MPVLib.setPropertyString("video-aspect-override", "-1")
+            MPVLib.setPropertyString("panscan", "0.0")
         }
     }
 
@@ -187,18 +307,35 @@ class MPVPlayerEngine(
         userLiveAudioOutputMode = outputMode
         rememberedCompatibilityHint = null
         rememberedTrackHintApplied = false
+        autoCompatibleTrackSelectionAttempted = false
+        pendingSuccessfulRecoveryKind = null
+        pendingRecoveryTrackId = null
         audioPassthroughEnabled = passthroughEnabled
         preferSurroundCodecs = preferSurround
         liveAudioOutputMode = outputMode
         applyAudioOutputPreferences()
     }
 
-    fun setLivePlaybackContext(channel: Channel?) {
+    fun setLivePlaybackContext(channel: Channel?, honorRememberedHint: Boolean = true) {
+        honorRememberedCompatibilityHint = honorRememberedHint
+        currentChannel = channel
         currentPlaybackContext = channel?.let(LiveAudioPlaybackContext::fromChannel)
-        rememberedCompatibilityHint = currentPlaybackContext?.let {
-            LiveAudioCompatibilityStore.resolveHint(context, it)
+        rememberedCompatibilityHint = if (honorRememberedHint) {
+            currentPlaybackContext?.let {
+                LiveAudioCompatibilityStore.resolveHint(context, it)
+            }
+        } else {
+            null
         }
         rememberedTrackHintApplied = false
+        pendingRecoveryTrackId = null
+        currentAudioSignature = null
+        channelProfileRemembered = false
+        resolvePlaybackProfileIfNeeded()
+    }
+
+    fun setAggressiveAutoTrackSelectionEnabled(enabled: Boolean) {
+        aggressiveAutoTrackSelectionEnabled = enabled
     }
 
     private fun applyAudioOutputPreferences() {
@@ -221,8 +358,12 @@ class MPVPlayerEngine(
     }
 
     private fun applyRememberedCompatibilityHintIfAvailable() {
-        rememberedCompatibilityHint = currentPlaybackContext?.let {
-            LiveAudioCompatibilityStore.resolveHint(context, it)
+        rememberedCompatibilityHint = if (honorRememberedCompatibilityHint) {
+            currentPlaybackContext?.let {
+                LiveAudioCompatibilityStore.resolveHint(context, it)
+            }
+        } else {
+            null
         }
         rememberedTrackHintApplied = false
         val hint = rememberedCompatibilityHint
@@ -242,8 +383,137 @@ class MPVPlayerEngine(
         applyAudioOutputPreferences()
     }
 
+    internal fun recordLiveTvIssue(reason: String) {
+        val channel = currentChannel ?: return
+        val playbackContext = currentPlaybackContext ?: return
+        val profile = activePlaybackProfile ?: return
+        activePlaybackProfile = LiveTvPlaybackProfileStore.recordPlaybackIssue(
+            context = context,
+            channel = channel,
+            playbackContext = playbackContext,
+            profile = profile,
+            reason = reason,
+            observation = buildRuntimeObservation(),
+        )
+        channelProfileRemembered = false
+    }
+
+    private fun resolvePlaybackProfileIfNeeded() {
+        val channel = currentChannel ?: return
+        val playbackContext = currentPlaybackContext ?: return
+        activePlaybackProfile = LiveTvPlaybackProfileStore.resolve(
+            context = context,
+            channel = channel,
+            playbackContext = playbackContext,
+        )
+    }
+
+    private fun applyActivePlaybackProfile(
+        phase: LiveTvPlaybackPhase,
+        reason: String,
+        expectedToken: Int,
+    ) {
+        if (!initialized || expectedToken != livePlaybackToken) return
+        val profile = activePlaybackProfile ?: return
+        activePlaybackPhase = phase
+
+        setStringPropertySafely(
+            "video-sync",
+            MPVRuntimeOverrides.liveVideoSyncModeOverride ?: profile.videoSyncMode().storageValue,
+        )
+        setStringPropertySafely("hwdec", profile.hardwareDecodeMode)
+        setBooleanPropertySafely(
+            "deinterlace",
+            when (profile.deinterlaceMode()) {
+                LiveTvDeinterlaceMode.FORCE -> true
+                LiveTvDeinterlaceMode.OFF -> false
+                LiveTvDeinterlaceMode.AUTO -> profile.interlacedSeen || interlaceDetected
+            },
+        )
+        setBooleanPropertySafely("interpolation", profile.interpolationEnabled)
+        setStringPropertySafely("tscale", profile.tscaleMode)
+        setStringPropertySafely("cache", "yes")
+        setStringPropertySafely("cache-on-disk", if (profile.diskCacheEnabled) "yes" else "no")
+        setStringPropertySafely("cache-pause", "no")
+        setStringPropertySafely("demuxer-readahead-secs", profile.readaheadSecs(phase).toString())
+        setStringPropertySafely("cache-secs", profile.cacheSecs(phase).toString())
+        setStringPropertySafely("demuxer-max-bytes", "${profile.maxBytesMiB(phase)}MiB")
+        setStringPropertySafely("demuxer-max-back-bytes", "${profile.backBufferMiB}MiB")
+        setStringPropertySafely("stream-buffer-size", "${profile.streamBufferKiB}KiB")
+        setStringPropertySafely("demuxer-lavf-probesize", profile.demuxerProbeBytes.toString())
+        setStringPropertySafely("demuxer-lavf-analyzeduration", profile.demuxerAnalyzeDurationUs.toString())
+        setStringPropertySafely(
+            "demuxer-lavf-linearize-timestamps",
+            if (profile.linearizeTimestamps) "yes" else "no",
+        )
+        setStringPropertySafely("force-seekable", if (profile.forceSeekable) "yes" else "no")
+        setStringPropertySafely("vd-lavc-dr", if (phase == LiveTvPlaybackPhase.STEADY) "yes" else "no")
+        Log.i(
+            TAG,
+            "Applied live TV profile channel=${currentPlaybackContext?.displayName.orEmpty()} " +
+                "phase=${phase.name.lowercase(Locale.ROOT)} reason=$reason " +
+                "sync=${profile.videoSyncMode} deinterlace=${profile.deinterlaceMode} " +
+                "cache=${profile.cacheSecs(phase)}s readAhead=${profile.readaheadSecs(phase)}s " +
+                "maxBytes=${profile.maxBytesMiB(phase)}MiB back=${profile.backBufferMiB}MiB",
+        )
+    }
+
+    private fun applyDynamicVideoAdjustments(reason: String) {
+        val profile = activePlaybackProfile ?: return
+        if (profile.deinterlaceMode() != LiveTvDeinterlaceMode.AUTO) return
+        setBooleanPropertySafely("deinterlace", interlaceDetected)
+        Log.d(
+            TAG,
+            "Updated dynamic live TV video flags channel=${currentPlaybackContext?.displayName.orEmpty()} " +
+                "reason=$reason interlaced=$interlaceDetected phase=${activePlaybackPhase.name.lowercase(Locale.ROOT)}",
+        )
+    }
+
+    private fun rememberSuccessfulLiveProfileIfNeeded(trigger: String) {
+        if (channelProfileRemembered) return
+        val channel = currentChannel ?: return
+        val playbackContext = currentPlaybackContext ?: return
+        val profile = activePlaybackProfile ?: return
+        activePlaybackProfile = LiveTvPlaybackProfileStore.rememberSuccessfulPlayback(
+            context = context,
+            channel = channel,
+            playbackContext = playbackContext,
+            profile = profile,
+            observation = buildRuntimeObservation(),
+        )
+        channelProfileRemembered = true
+        Log.i(
+            TAG,
+            "Remembered live TV playback profile channel=${playbackContext.displayName} " +
+                "trigger=$trigger sync=${activePlaybackProfile?.videoSyncMode ?: "unknown"} " +
+                "interlaced=${activePlaybackProfile?.interlacedSeen ?: false}",
+        )
+    }
+
+    private fun buildRuntimeObservation(): LiveTvRuntimeObservation {
+        return LiveTvRuntimeObservation(
+            interlacedDetected = interlaceDetected,
+            estimatedFrameRate = estimatedFrameRate,
+            displayFrameRate = displayFrameRate,
+            mistimedFrameCount = mistimedFrameCount,
+            droppedFrameCount = droppedFrameCount,
+            delayedFrameCount = delayedFrameCount,
+        )
+    }
+
+    private fun setStringPropertySafely(name: String, value: String) {
+        runCatching { MPVLib.setPropertyString(name, value) }
+            .onFailure { Log.w(TAG, "Unable to set mpv property $name=$value", it) }
+    }
+
+    private fun setBooleanPropertySafely(name: String, value: Boolean) {
+        runCatching { MPVLib.setPropertyBoolean(name, value) }
+            .onFailure { Log.w(TAG, "Unable to set mpv property $name=$value", it) }
+    }
+
     override fun release() {
         if (!initialized) return
+        mainHandler.removeCallbacks(promoteSteadyStateRunnable)
         MPVLib.removeObserver(this)
         MPVLib.destroy()
         initialized = false
@@ -264,11 +534,20 @@ class MPVPlayerEngine(
             "pause" -> {
                 val paused = value as? Boolean ?: return
                 _state = _state.copy(isPlaying = !paused, isIdle = false)
+                if (!paused) {
+                    confirmSuccessfulRecoveryIfNeeded()
+                }
                 notifyStateChanged()
             }
             "time-pos" -> {
                 val seconds = (value as? Double) ?: return
                 _state = _state.copy(positionMs = (seconds * 1000).toLong())
+                if (seconds > 0.5) {
+                    confirmSuccessfulRecoveryIfNeeded()
+                }
+                if (seconds >= 1.0) {
+                    rememberSuccessfulLiveProfileIfNeeded(trigger = "time_pos")
+                }
                 notifyStateChanged()
             }
             "duration" -> {
@@ -282,10 +561,37 @@ class MPVPlayerEngine(
                 notifyStateChanged()
             }
             "track-list/count" -> {
-                val audioSignature = MPVLib.getTracks().buildAudioSignature()
-                invalidateRememberedHintIfTrackMetadataChanged(audioSignature)
+                val tracks = MPVLib.getTracks()
+                currentAudioSignature = tracks.buildAudioSignature()
+                logAudioInventory("track_list_updated", tracks)
+                invalidateRememberedHintIfTrackMetadataChanged(currentAudioSignature.orEmpty())
                 applyRememberedCompatibleTrackIfNeeded()
+                applyAutoCompatibleTrackIfNeeded(tracks)
                 notifyTracksChanged()
+            }
+            "aid" -> {
+                val tracks = MPVLib.getTracks()
+                logAudioInventory("selected_audio_track_changed", tracks)
+                notifyTracksChanged()
+            }
+            "video-params/interlace-detected" -> {
+                interlaceDetected = (value as? Boolean) == true
+                applyDynamicVideoAdjustments("interlace_detected")
+            }
+            "estimated-vf-fps" -> {
+                estimatedFrameRate = (value as? Double)?.toFloat()?.takeIf { it > 0f }
+            }
+            "display-fps" -> {
+                displayFrameRate = (value as? Double)?.toFloat()?.takeIf { it > 0f }
+            }
+            "mistimed-frame-count" -> {
+                mistimedFrameCount = value.asIntOrNull()
+            }
+            "vo-drop-frame-count" -> {
+                droppedFrameCount = value.asIntOrNull()
+            }
+            "vo-delayed-frame-count" -> {
+                delayedFrameCount = value.asIntOrNull()
             }
         }
     }
@@ -294,6 +600,9 @@ class MPVPlayerEngine(
         // MPV event IDs: 7 = end-file, etc.
         when (eventId) {
             7 -> { // MPV_EVENT_END_FILE
+                if (!channelProfileRemembered && _state.positionMs in 1L until EARLY_END_FILE_THRESHOLD_MS) {
+                    recordLiveTvIssue("end_file_before_stable_playback")
+                }
                 _state = _state.copy(isPlaying = false, isIdle = true)
                 notifyStateChanged()
             }
@@ -308,6 +617,59 @@ class MPVPlayerEngine(
         val audio = getAudioTracks()
         val subtitles = getSubtitleTracks()
         listeners.forEach { it.onTracksChanged(audio, subtitles) }
+    }
+
+    private fun confirmSuccessfulRecoveryIfNeeded() {
+        val recoveryKind = pendingSuccessfulRecoveryKind ?: return
+        val playbackContext = currentPlaybackContext
+        val selectedTrack = MPVLib.getTracks()
+            .firstOrNull { it.type == "audio" && it.isSelected }
+        if (pendingRecoveryTrackId != null && selectedTrack?.id != pendingRecoveryTrackId) {
+            return
+        }
+        val selectedTrackHint = selectedTrack
+            ?.toTrackHint()
+        if (playbackContext != null) {
+            rememberedCompatibilityHint = LiveAudioCompatibilityStore.rememberSuccessfulRecovery(
+                context = context,
+                playbackContext = playbackContext,
+                passthroughEnabled = audioPassthroughEnabled,
+                preferSurround = preferSurroundCodecs,
+                outputMode = liveAudioOutputMode,
+                recoveryKind = recoveryKind,
+                engineId = LivePlayerEngineId.MPV,
+                preferredTrack = selectedTrackHint,
+                audioSignature = currentAudioSignature,
+            )
+            LiveAudioCompatibilityStore.clearSessionIncompatible(playbackContext)
+        }
+        pendingSuccessfulRecoveryKind = null
+        pendingRecoveryTrackId = null
+        rememberedTrackHintApplied = selectedTrackHint != null
+        rememberSuccessfulLiveProfileIfNeeded(trigger = "recovery_${recoveryKind.name.lowercase(Locale.ROOT)}")
+        listeners.forEach { it.onError(recoveryMessageFor(recoveryKind)) }
+    }
+
+    private fun recoveryMessageFor(kind: LiveAudioRecoveryKind): String {
+        return when (kind) {
+            LiveAudioRecoveryKind.MOBILE_REFERENCE_FIRST_PASS -> "Audio confirmed with the mobile-reference playback path."
+            LiveAudioRecoveryKind.COMPATIBLE_MODE,
+            LiveAudioRecoveryKind.STEREO_PCM -> "Audio recovered by changing the audio mode."
+            LiveAudioRecoveryKind.COMPATIBLE_TRACK -> "Switched to a compatible audio track."
+            LiveAudioRecoveryKind.SOFTWARE_AUDIO -> "Audio recovered with software decoding."
+            LiveAudioRecoveryKind.ENGINE_FALLBACK -> "Audio recovered by changing the playback engine."
+        }
+    }
+
+    private fun logAudioInventory(event: String, tracks: List<MPVLib.Track>) {
+        if (currentPlaybackContext == null) return
+        Log.d(
+            TAG,
+            "Live audio inventory: engine=${LivePlayerEngineId.MPV.storageValue} " +
+                "event=$event channel=${currentPlaybackContext?.displayName.orEmpty()} " +
+                "passthrough=$audioPassthroughEnabled mode=${liveAudioOutputMode.storageValue} " +
+                "preferSurround=$preferSurroundCodecs inventory=${tracks.audioInventorySummary()}",
+        )
     }
 
     private fun invalidateRememberedHintIfTrackMetadataChanged(audioSignature: String) {
@@ -329,7 +691,7 @@ class MPVPlayerEngine(
     private fun applyRememberedCompatibleTrackIfNeeded() {
         val hint = rememberedCompatibilityHint ?: return
         val preferredTrack = hint.preferredTrack ?: return
-        if (hint.recoveryKind != LiveAudioRecoveryKind.COMPATIBLE_TRACK || rememberedTrackHintApplied) {
+        if (rememberedTrackHintApplied) {
             return
         }
 
@@ -352,6 +714,32 @@ class MPVPlayerEngine(
         MPVLib.selectAudioTrack(candidate.id)
     }
 
+    private fun applyAutoCompatibleTrackIfNeeded(tracks: List<MPVLib.Track>) {
+        if (autoCompatibleTrackSelectionAttempted) return
+        val audioTracks = tracks.filter { it.type == "audio" }
+        if (audioTracks.size < 2) return
+
+        val selectedTrack = audioTracks.firstOrNull { it.isSelected }
+        if (!aggressiveAutoTrackSelectionEnabled && selectedTrack != null) return
+        val bestCandidate = audioTracks.maxByOrNull { track -> track.compatibilityScore(selectedTrack) } ?: return
+        val selectedScore = selectedTrack?.compatibilityScore(selectedTrack) ?: Int.MIN_VALUE
+        val bestScore = bestCandidate.compatibilityScore(selectedTrack)
+        val shouldSwitch = selectedTrack == null ||
+            (bestCandidate.id != selectedTrack.id && bestScore >= selectedScore + MIN_AUTO_TRACK_SWITCH_DELTA)
+        if (!shouldSwitch) return
+
+        autoCompatibleTrackSelectionAttempted = true
+        pendingSuccessfulRecoveryKind = LiveAudioRecoveryKind.COMPATIBLE_TRACK
+        pendingRecoveryTrackId = bestCandidate.id
+        Log.i(
+            TAG,
+            "Auto-selecting mpv audio track ${bestCandidate.codec ?: "unknown"} " +
+                "for ${currentPlaybackContext?.displayName.orEmpty()} selected=${selectedTrack?.codec ?: "none"} " +
+                "bestScore=$bestScore selectedScore=$selectedScore inventory=${audioTracks.audioInventorySummary()}",
+        )
+        MPVLib.selectAudioTrack(bestCandidate.id)
+    }
+
     private fun List<MPVLib.Track>.buildAudioSignature(): String {
         return filter { it.type == "audio" }
             .map { track ->
@@ -364,6 +752,34 @@ class MPVPlayerEngine(
             .sorted()
             .joinToString(separator = "|")
             .take(512)
+    }
+
+    private fun List<MPVLib.Track>.audioInventorySummary(): String {
+        return filter { it.type == "audio" }
+            .joinToString(separator = " | ") { track ->
+                val selectedMarker = if (track.isSelected) "*" else ""
+                "$selectedMarker${track.debugSummary()}"
+            }
+            .take(1024)
+    }
+
+    private fun MPVLib.Track.debugSummary(): String {
+        return listOf(
+            "id=$id",
+            "codec=${codec ?: "unknown"}",
+            "lang=${language ?: "und"}",
+            "title=${title ?: "n/a"}",
+            "default=$isDefault",
+            "selected=$isSelected",
+        ).joinToString(separator = ",")
+    }
+
+    private fun MPVLib.Track.toTrackHint(): LiveAudioTrackHint {
+        return LiveAudioTrackHint(
+            label = title,
+            language = language,
+            formatKey = codec.normalizeFormatKey(),
+        )
     }
 
     private fun MPVLib.Track.matches(trackHint: LiveAudioTrackHint): Boolean {
@@ -380,11 +796,92 @@ class MPVPlayerEngine(
         return score
     }
 
+    private fun MPVLib.Track.compatibilityScore(selectedTrack: MPVLib.Track?): Int {
+        var score = codecPreferenceScore(codec.normalizeFormatKey())
+        if (isDefault) score += 10
+        if (title.isNullOrBlank()) score -= 2
+        if (language.isNullOrBlank()) score -= 1
+        if (selectedTrack?.id == id) score -= 40
+        return score
+    }
+
+    private fun codecPreferenceScore(normalizedCodec: String?): Int {
+        return when (normalizedCodec) {
+            "aac",
+            "mp4a",
+            "audio/aac",
+            "audio/mp4a-latm" -> 190
+            "opus",
+            "audio/opus" -> 175
+            "mp3",
+            "mp2",
+            "mpeg-l2",
+            "audio/mp2",
+            "audio/mpeg-l2",
+            "mpeg",
+            "audio/mpeg" -> 168
+            "pcm",
+            "audio/raw" -> 160
+            "flac",
+            "audio/flac" -> 150
+            "vorbis",
+            "audio/vorbis" -> 145
+            "ac4",
+            "audio/ac4" -> if (audioPassthroughEnabled) 138 else 120
+            "eac3",
+            "ec-3",
+            "audio/eac3",
+            "audio/eac3-joc" -> when (liveAudioOutputMode) {
+                LiveAudioOutputMode.FORCE_STEREO_PCM -> 26
+                LiveAudioOutputMode.PREFER_COMPATIBLE -> 72
+                LiveAudioOutputMode.AUTO -> if (audioPassthroughEnabled || preferSurroundCodecs) 152 else 90
+            }
+            "ac3",
+            "audio/ac3" -> when (liveAudioOutputMode) {
+                LiveAudioOutputMode.FORCE_STEREO_PCM -> 22
+                LiveAudioOutputMode.PREFER_COMPATIBLE -> 68
+                LiveAudioOutputMode.AUTO -> if (audioPassthroughEnabled || preferSurroundCodecs) 146 else 82
+            }
+            "dts",
+            "audio/vnd.dts",
+            "audio/vnd.dts.hd",
+            "truehd",
+            "mlp",
+            "audio/true-hd" -> when (liveAudioOutputMode) {
+                LiveAudioOutputMode.FORCE_STEREO_PCM -> -40
+                LiveAudioOutputMode.PREFER_COMPATIBLE -> 20
+                LiveAudioOutputMode.AUTO -> if (audioPassthroughEnabled || preferSurroundCodecs) 170 else 24
+            }
+            null -> -12
+            else -> 32
+        }
+    }
+
     private fun String?.normalizeFormatKey(): String? {
         return this?.trim()?.lowercase(Locale.ROOT)?.takeIf { it.isNotEmpty() }
     }
 
+    private fun Any?.asIntOrNull(): Int? {
+        return when (this) {
+            is Int -> this
+            is Long -> this.toInt()
+            is Double -> this.toInt()
+            is Float -> this.toInt()
+            is String -> this.toIntOrNull()
+            else -> null
+        }
+    }
+
     private companion object {
         private const val TAG = "MPVPlayerEngine"
+        private const val MIN_AUTO_TRACK_SWITCH_DELTA = 35
+        private const val LIVE_VIDEO_SYNC_MODE = "display-resample"
+        private const val STEADY_STATE_PROMOTION_DELAY_MS = 2_500L
+        private const val EARLY_END_FILE_THRESHOLD_MS = 5_000L
     }
+}
+
+internal object MPVRuntimeOverrides {
+    @Volatile
+    var liveVideoSyncModeOverride: String? = null
 }

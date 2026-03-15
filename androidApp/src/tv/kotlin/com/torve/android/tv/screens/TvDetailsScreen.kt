@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.torve.android.R
+import com.torve.android.premium.rememberEffectivePremiumAccessTier
 import com.torve.android.ui.theme.*
 import com.torve.android.player.DeviceCodecProbe
 import com.torve.android.tv.NotificationType
@@ -127,9 +128,7 @@ fun TvDetailsScreen(
     val settingsState by settingsViewModel.state.collectAsState()
     val subscriptionState by subscriptionViewModel.state.collectAsState()
     val state by detailViewModel.state.collectAsState()
-    val accessTier = remember(subscriptionState.isPro) {
-        TvPremiumAccess.tierFrom(subscriptionState.isPro)
-    }
+    val accessTier = rememberEffectivePremiumAccessTier(subscriptionState.isPro)
     val context = LocalContext.current
 
     val isLockedFeature: (TvEntitledFeature) -> Boolean = { feature ->

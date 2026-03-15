@@ -286,12 +286,12 @@ fun LiveChannelInfoOverlay(
             }
 
             // Recent channel thumbnails
-            items(recentChannels.take(8), key = { "recent_${it.url}" }) { ch ->
+            items(recentChannels.take(8)) { ch ->
                 ChannelThumbCard(channel = ch, onClick = { onTuneChannel(ch) })
             }
 
             // Favourite channel thumbnails
-            items(favoriteChannels.take(8), key = { "fav_${it.url}" }) { ch ->
+            items(favoriteChannels.take(8)) { ch ->
                 ChannelThumbCard(
                     channel = ch,
                     isFavorite = true,

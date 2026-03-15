@@ -42,9 +42,15 @@ android {
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
+        // Only bundle ARM native libs — Fire TV and most Android devices are ARM.
+        // Removes x86/x86_64 FFmpeg .so files that bloat APK and cause GC pressure.
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+        }
+
         buildConfigField("String", "BUILD_TIMESTAMP", "\"${System.currentTimeMillis()}\"")
-        buildConfigField("String", "SYNC_BASE_URL", "\"http://10.0.2.2:8080\"")
-        buildConfigField("String", "SYNC_WS_URL", "\"ws://10.0.2.2:8080/ws\"")
+        buildConfigField("String", "SYNC_BASE_URL", "\"https://api.torve.app\"")
+        buildConfigField("String", "SYNC_WS_URL", "\"wss://api.torve.app/ws\"")
     }
 
     flavorDimensions += listOf("store", "formFactor")
@@ -73,10 +79,14 @@ android {
     }
 
     buildTypes {
+        debug {
+            buildConfigField("Boolean", "ALLOW_DEBUG_PREMIUM_BYPASS", "true")
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             signingConfig = signingConfigs.getByName("release")
+            buildConfigField("Boolean", "ALLOW_DEBUG_PREMIUM_BYPASS", "false")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
@@ -144,6 +154,10 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:1.5.1")
     implementation("androidx.media3:media3-exoplayer-dash:1.5.1")
     implementation("androidx.media3:media3-session:1.5.1")
+    // FFmpeg extension — software audio decoding for codecs missing on device (e.g. MPEG-L2 on Fire TV)
+    // Prebuilt by Jellyfin from upstream media3 source with all audio codecs enabled.
+    // Bundles libffmpegJNI.so with statically-linked FFmpeg audio decoders.
+    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.5.0+1")
 
     // WorkManager — background tasks (notifications)
     implementation("androidx.work:work-runtime-ktx:2.10.0")

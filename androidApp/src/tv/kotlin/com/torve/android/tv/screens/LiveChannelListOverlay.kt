@@ -351,7 +351,7 @@ fun LiveChannelListOverlay(
                     ) {
                         itemsIndexed(
                             channelsInGroup,
-                            key = { _, ch -> ch.channel.url },
+                            key = { index, ch -> "${index}_${ch.channel.url}" },
                         ) { index, enrichedChannel ->
                             val ch = enrichedChannel.channel
                             val isPlaying = ch.url == currentChannelUrl

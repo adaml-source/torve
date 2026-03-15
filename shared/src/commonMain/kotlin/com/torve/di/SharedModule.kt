@@ -172,6 +172,7 @@ val sharedModule = module {
         val baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL }
         AuthClient(
             prefsRepo = get(),
+            secureStorage = get(),
             httpClient = get(),
             baseUrlProvider = baseUrlProvider,
             deviceRegistrationProvider = { get<com.torve.domain.device.DeviceIdProvider>().getDeviceRegistration() },
@@ -252,7 +253,9 @@ val sharedModule = module {
     factory { GetRecommendationsUseCase(get(), get()) }
     factory { MoodMatcher(get()) }
 
-    // ViewModels
+    // ViewModels — singletons share state across screens (e.g. TvRoot ↔ TvIptvScreen).
+    // The database is pre-warmed on a background thread in TorveApp.onCreate so the
+    // first koinInject() doesn't block the main thread with schema DDL.
     single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     single { SearchViewModel(get(), get()) }
     factory { DetailViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }

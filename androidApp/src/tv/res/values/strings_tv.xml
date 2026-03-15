@@ -355,6 +355,7 @@
     <string name="tv_iptv_search_query">Search: %s</string>
     <string name="tv_iptv_preview_idle">No channel selected</string>
     <string name="tv_iptv_lists_title">List Filters</string>
+    <string name="tv_iptv_manage_channels">Manage Channels</string>
     <string name="tv_iptv_countries_all">Countries: All</string>
     <string name="tv_iptv_countries_selected">Countries: %d selected</string>
     <string name="tv_iptv_country_filter_title">Country Filter</string>

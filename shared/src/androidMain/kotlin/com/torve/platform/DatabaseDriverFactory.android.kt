@@ -15,9 +15,19 @@ actual class DatabaseDriverFactory(private val context: Context) {
             callback = object : AndroidSqliteDriver.Callback(TorveDatabase.Schema) {
                 override fun onOpen(db: SupportSQLiteDatabase) {
                     super.onOpen(db)
-                    // Ensure ALL tables exist for databases created before later sprints.
-                    // CREATE TABLE IF NOT EXISTS is a no-op when the table already exists.
-                    ensureAllTables(db)
+                    // Only run the expensive ensureAllTables() migration on
+                    // databases that pre-date the current schema version.
+                    // Check for a table added in a later sprint; if it exists
+                    // the schema is already up to date and we skip 44+ DDL
+                    // statements that block the main thread on Fire TV.
+                    val cur = db.query(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='rating_cache'",
+                    )
+                    val alreadyDone = cur.moveToFirst()
+                    cur.close()
+                    if (!alreadyDone) {
+                        ensureAllTables(db)
+                    }
                 }
             },
         )
@@ -92,6 +102,42 @@ actual class DatabaseDriverFactory(private val context: Context) {
                 username TEXT,
                 password TEXT
             )""",
+        )
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS iptv_channel (
+                playlist_id TEXT NOT NULL,
+                generation_id INTEGER NOT NULL,
+                stable_id TEXT NOT NULL,
+                sort_index INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                stream_url TEXT NOT NULL,
+                tvg_id TEXT,
+                tvg_name TEXT,
+                logo_url TEXT,
+                group_title TEXT,
+                tvg_language TEXT,
+                tvg_country TEXT,
+                tvg_shift INTEGER,
+                channel_number INTEGER,
+                duration INTEGER NOT NULL DEFAULT -1,
+                catchup_type TEXT,
+                catchup_days INTEGER,
+                catchup_source TEXT,
+                user_agent TEXT,
+                vlc_options TEXT NOT NULL DEFAULT '',
+                kodi_props TEXT NOT NULL DEFAULT '',
+                content_type TEXT NOT NULL DEFAULT 'UNKNOWN',
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (playlist_id, generation_id, stable_id)
+            )""",
+        )
+        db.execSQL(
+            """CREATE INDEX IF NOT EXISTS idx_iptv_channel_playlist_generation_sort
+               ON iptv_channel(playlist_id, generation_id, sort_index)""",
+        )
+        db.execSQL(
+            """CREATE INDEX IF NOT EXISTS idx_iptv_channel_playlist_generation_group
+               ON iptv_channel(playlist_id, generation_id, group_title)""",
         )
         db.execSQL(
             """CREATE TABLE IF NOT EXISTS iptv_favorite (

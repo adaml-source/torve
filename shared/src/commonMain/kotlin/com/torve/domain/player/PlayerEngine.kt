@@ -37,12 +37,39 @@ interface PlayerEngine {
     fun removeListener(listener: PlayerListener)
 }
 
+enum class LiveTuneState {
+    IDLE,
+    OPENING_MEDIA,
+    ANALYZING_TRACKS,
+    SELECTING_AUDIO,
+    BUFFERING_AV,
+    PLAYING_CONFIRMED,
+    AUDIO_RECOVERY_RETRY,
+    FAILED_EXOPLAYER,
+    FALLBACK_ALLOWED,
+}
+
+enum class LiveAudioRecoveryMode {
+    NONE,
+    TRACK_RESELECT,
+    PASSTHROUGH_OFF,
+    SOFTWARE_AUDIO,
+    STEREO_PCM,
+    EXOPLAYER_REBUILD,
+}
+
 data class PlayerState(
     val isPlaying: Boolean = false,
     val positionMs: Long = 0,
     val durationMs: Long = 0,
     val isBuffering: Boolean = false,
     val isIdle: Boolean = true,
+    val liveTuneState: LiveTuneState = LiveTuneState.IDLE,
+    val audioRecoveryMode: LiveAudioRecoveryMode = LiveAudioRecoveryMode.NONE,
+    val isAudioExpected: Boolean = false,
+    val isAudioReady: Boolean = false,
+    val isVideoReady: Boolean = false,
+    val isEngineFallbackAllowed: Boolean = false,
 )
 
 data class TrackDescription(
@@ -50,6 +77,8 @@ data class TrackDescription(
     val label: String,
     val language: String? = null,
     val isSelected: Boolean = false,
+    val formatHint: String? = null,
+    val channelCount: Int? = null,
 )
 
 interface PlayerListener {

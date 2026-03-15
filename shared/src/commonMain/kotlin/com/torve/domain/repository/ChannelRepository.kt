@@ -14,7 +14,7 @@ interface ChannelRepository {
     suspend fun updatePlaylistEpgUrl(playlistId: String, epgUrl: String?)
     suspend fun getPlaylists(): List<ChannelPlaylist>
     suspend fun refreshPlaylist(playlistId: String)
-    suspend fun refreshEpg(playlistId: String)
+    suspend fun refreshEpg(playlistId: String, hiddenChannelIds: Set<String> = emptySet())
     suspend fun getChannels(playlistId: String): List<Channel>
     suspend fun getChannelsByGroup(playlistId: String): Map<String, List<Channel>>
     suspend fun getEnrichedChannels(playlistId: String): List<EnrichedChannel>

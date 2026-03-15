@@ -401,7 +401,7 @@ class SubscriptionViewModel(
                 )
             }
             try {
-                val accessToken = authClient.getAccessToken()
+                val accessToken = authClient.getValidAccessToken()
                 if (accessToken != null) {
                     println("SUBSCRIPTION: Sending Google verify request")
                     val result = entitlementApi.verifyGooglePurchase(
@@ -471,7 +471,7 @@ class SubscriptionViewModel(
                 )
             }
             try {
-                val accessToken = authClient.getAccessToken()
+                val accessToken = authClient.getValidAccessToken()
                 if (accessToken != null) {
                     val result = entitlementApi.verifyApplePurchase(
                         accessToken = accessToken,
@@ -574,7 +574,7 @@ class SubscriptionViewModel(
 
             val previousPending = _state.value.pendingAmazonVerification
                 ?.takeIf { it.receiptId == sanitizedReceipt }
-            val accessToken = authClient.getAccessToken()
+            val accessToken = authClient.getValidAccessToken()
 
             if (accessToken.isNullOrBlank()) {
                 val pending = buildPendingAmazonVerification(
@@ -718,7 +718,7 @@ class SubscriptionViewModel(
                 )
             }
 
-            val accessToken = authClient.getAccessToken()
+            val accessToken = authClient.getValidAccessToken()
             if (accessToken.isNullOrBlank()) {
                 val status = existingPending?.toPurchaseStatusMessage(isLoggedIn = false)
                     ?: buildRestoreSignInRequiredStatus()

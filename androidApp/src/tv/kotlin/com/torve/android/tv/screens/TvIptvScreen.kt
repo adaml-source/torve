@@ -25,6 +25,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -47,6 +48,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.torve.android.R
+import com.torve.android.tv.TvScreenCache
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Charcoal
 import com.torve.android.ui.theme.Graphite
@@ -57,6 +59,7 @@ import com.torve.domain.model.ChannelCategory
 import com.torve.domain.model.EnrichedChannel
 import com.torve.domain.model.EpgProgramme
 import com.torve.domain.model.canonicalEpgChannelKey
+import com.torve.domain.model.stableChannelId
 import com.torve.presentation.channels.EpgState
 import com.torve.presentation.channels.ChannelsViewModel
 import kotlinx.coroutines.delay
@@ -69,11 +72,23 @@ private const val GRID_WEIGHT = 0.65f
 private const val MAX_FORWARD_HOURS = 12
 private const val PAGE_DURATION_MS = IPTV_EPG_WINDOW_HOURS * 60L * 60L * 1000L
 private const val MAX_PAGE_OFFSET = MAX_FORWARD_HOURS / IPTV_EPG_WINDOW_HOURS
+private const val IPTV_SCREEN_CACHE_KEY = "tv_iptv_screen_state"
+private const val IPTV_STARTUP_LOG_TAG = "TvStartupRecovery"
 
 private enum class FocusZone {
     CHANNEL_LIST,
     EPG_GRID,
 }
+
+private data class TvIptvScreenCacheState(
+    val focusedChannelId: String? = null,
+    val selectedChannelId: String? = null,
+    val focusedZone: String = FocusZone.CHANNEL_LIST.name,
+    val focusedChannelIndex: Int = 0,
+    val lastGridRowIndex: Int = 0,
+    val lastGridColIndex: Int = 0,
+    val windowPageOffset: Int = 0,
+)
 
 @Composable
 fun TvIptvScreen(
@@ -93,17 +108,26 @@ fun TvIptvScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val scope = rememberCoroutineScope()
+    val cachedScreenState = remember {
+        TvScreenCache.get<TvIptvScreenCacheState>(IPTV_SCREEN_CACHE_KEY) ?: TvIptvScreenCacheState()
+    }
 
-    var focusedChannelId by rememberSaveable { mutableStateOf<String?>(null) }
-    var selectedChannelId by rememberSaveable { mutableStateOf<String?>(null) }
+    var focusedChannelId by rememberSaveable { mutableStateOf(cachedScreenState.focusedChannelId) }
+    var selectedChannelId by rememberSaveable { mutableStateOf(cachedScreenState.selectedChannelId) }
     var focusedChannel by remember { mutableStateOf<EnrichedChannel?>(null) }
     var focusedProgramme by remember { mutableStateOf<EpgProgramme?>(null) }
-    var windowPageOffset by rememberSaveable { mutableIntStateOf(0) }
-    var focusedZone by rememberSaveable { mutableStateOf(FocusZone.CHANNEL_LIST) }
-    var focusedChannelIndex by rememberSaveable { mutableIntStateOf(0) }
-    var lastGridRowIndex by rememberSaveable { mutableIntStateOf(0) }
-    var lastGridColIndex by rememberSaveable { mutableIntStateOf(0) }
+    var windowPageOffset by rememberSaveable { mutableIntStateOf(cachedScreenState.windowPageOffset) }
+    var focusedZone by rememberSaveable {
+        mutableStateOf(
+            runCatching { FocusZone.valueOf(cachedScreenState.focusedZone) }
+                .getOrDefault(FocusZone.CHANNEL_LIST),
+        )
+    }
+    var focusedChannelIndex by rememberSaveable { mutableIntStateOf(cachedScreenState.focusedChannelIndex) }
+    var lastGridRowIndex by rememberSaveable { mutableIntStateOf(cachedScreenState.lastGridRowIndex) }
+    var lastGridColIndex by rememberSaveable { mutableIntStateOf(cachedScreenState.lastGridColIndex) }
     var gridFocusRequestToken by rememberSaveable { mutableIntStateOf(0) }
+    var lastPageChangeMs by remember { mutableLongStateOf(0L) }
     var wasActive by remember { mutableStateOf(false) }
 
     val sidebarFocusRequester = remember { FocusRequester() }
@@ -115,6 +139,28 @@ fun TvIptvScreen(
     LaunchedEffect(isActive, focusedZone) {
         TvIptvRailState.hideRail.value = isActive && focusedZone == FocusZone.EPG_GRID
     }
+    LaunchedEffect(
+        focusedChannelId,
+        selectedChannelId,
+        focusedZone,
+        focusedChannelIndex,
+        lastGridRowIndex,
+        lastGridColIndex,
+        windowPageOffset,
+    ) {
+        TvScreenCache.put(
+            IPTV_SCREEN_CACHE_KEY,
+            TvIptvScreenCacheState(
+                focusedChannelId = focusedChannelId,
+                selectedChannelId = selectedChannelId,
+                focusedZone = focusedZone.name,
+                focusedChannelIndex = focusedChannelIndex,
+                lastGridRowIndex = lastGridRowIndex,
+                lastGridColIndex = lastGridColIndex,
+                windowPageOffset = windowPageOffset,
+            ),
+        )
+    }
     DisposableEffect(isActive) {
         onDispose {
             if (isActive) {
@@ -125,7 +171,6 @@ fun TvIptvScreen(
 
     BackHandler(enabled = isActive) {
         when {
-            state.showCountryFilter -> viewModel.setCountryFilterVisible(false)
             state.showFilterSheet -> viewModel.toggleFilterSheet()
             state.showCategoryManager -> viewModel.toggleCategoryManager()
             else -> onNavigateUp()
@@ -163,7 +208,12 @@ fun TvIptvScreen(
         return
     }
 
-    if (state.isLoading || state.isLoadingChannels) {
+    val hasRenderableCatalog = state.channels.isNotEmpty() ||
+        state.categories.isNotEmpty() ||
+        state.favorites.isNotEmpty() ||
+        state.recentlyViewedChannels.isNotEmpty()
+
+    if ((state.isLoading || state.isLoadingChannels) && !hasRenderableCatalog) {
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center,
@@ -229,6 +279,18 @@ fun TvIptvScreen(
         }
     }
 
+    LaunchedEffect(hasRenderableCatalog, state.isLoading, state.isLoadingChannels, state.selectedPlaylistId) {
+        if (hasRenderableCatalog) {
+            android.util.Log.d(
+                IPTV_STARTUP_LOG_TAG,
+                "Rendered local-first IPTV catalog playlist=${state.selectedPlaylistId.orEmpty()} " +
+                    "channels=${state.channels.size} categories=${displayCategories.size} " +
+                    "favorites=${state.favorites.size} recents=${state.recentlyViewedChannels.size} " +
+                    "loading=${state.isLoading} loadingChannels=${state.isLoadingChannels}",
+            )
+        }
+    }
+
     val maxCategoryIndex = (displayCategories.lastIndex).coerceAtLeast(0)
 
     LaunchedEffect(displayCategories) {
@@ -240,12 +302,24 @@ fun TvIptvScreen(
         }
         focusedChannelIndex = focusedChannelIndex.coerceIn(0, maxCategoryIndex)
         val focusedCurrent = focusedChannelId
+        val persistedGroupName = state.selectedGroup
+            ?.let { persisted -> displayCategories.firstOrNull { it.name.equals(persisted, ignoreCase = true) }?.name }
         if (focusedCurrent == null || displayCategories.none { it.name == focusedCurrent }) {
-            focusedChannelId = displayCategories[focusedChannelIndex].name
+            focusedChannelId = persistedGroupName ?: displayCategories[focusedChannelIndex].name
         }
         val current = selectedChannelId
         if (current == null || displayCategories.none { it.name == current }) {
-            selectedChannelId = focusedChannelId
+            selectedChannelId = persistedGroupName ?: focusedChannelId
+        }
+        persistedGroupName?.let { restoredGroup ->
+            val restoredIndex = displayCategories.indexOfFirst { it.name == restoredGroup }
+            if (restoredIndex >= 0) {
+                focusedChannelIndex = restoredIndex
+                android.util.Log.d(
+                    IPTV_STARTUP_LOG_TAG,
+                    "Restored persisted TV group selection group=$restoredGroup index=$restoredIndex",
+                )
+            }
         }
     }
 
@@ -269,7 +343,15 @@ fun TvIptvScreen(
 
     val focusedCategory = displayCategories.getOrNull(focusedGroupIndex)
     val channelsInGroup = focusedCategory?.channels.orEmpty()
-    val windowAnchorMs = remember { alignedHalfHour(System.currentTimeMillis()) }
+    // Recompute the anchor every 30 s so the EPG timeline tracks real time.
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(30_000)
+            nowMs = System.currentTimeMillis()
+        }
+    }
+    val windowAnchorMs = remember(nowMs) { alignedHalfHour(nowMs) }
     val windowStartMs = windowAnchorMs + (windowPageOffset * PAGE_DURATION_MS)
     val windowEndMs = windowStartMs + PAGE_DURATION_MS
 
@@ -323,7 +405,18 @@ fun TvIptvScreen(
         lastGridRowIndex = lastGridRowIndex.coerceIn(0, channelsInGroup.lastIndex)
         val currentFocused = focusedChannel?.channel?.url
         val stillVisible = channelsInGroup.firstOrNull { it.channel.url == currentFocused }
-        val nextFocused = stillVisible ?: channelsInGroup[lastGridRowIndex]
+        val persistedSelectedChannel = state.selectedChannel
+        val restoredFocused = persistedSelectedChannel?.let { persisted ->
+            channelsInGroup.firstOrNull { stableChannelId(it.channel) == stableChannelId(persisted) }
+        }
+        val nextFocused = stillVisible ?: restoredFocused ?: channelsInGroup[lastGridRowIndex]
+        restoredFocused?.let { restored ->
+            lastGridRowIndex = channelsInGroup.indexOf(restored).coerceAtLeast(0)
+            android.util.Log.d(
+                IPTV_STARTUP_LOG_TAG,
+                "Restored persisted TV channel selection channel=${restored.channel.name} group=${focusedChannelId.orEmpty()} row=$lastGridRowIndex",
+            )
+        }
         focusedChannel = nextFocused
         val key = canonicalEpgChannelKey(
             playlistId = nextFocused.channel.playlistId,
@@ -353,8 +446,8 @@ fun TvIptvScreen(
             ?: ch.currentProgramme
     }
 
-    LaunchedEffect(isActive, state.showCountryFilter) {
-        if (!isActive || state.showCountryFilter) {
+    LaunchedEffect(isActive) {
+        if (!isActive) {
             wasActive = isActive
             return@LaunchedEffect
         }
@@ -369,30 +462,6 @@ fun TvIptvScreen(
             }
         }
         wasActive = true
-    }
-
-    var wasCountryFilterOpen by remember { mutableStateOf(false) }
-    LaunchedEffect(state.showCountryFilter, isActive) {
-        if (!isActive) {
-            wasCountryFilterOpen = state.showCountryFilter
-            return@LaunchedEffect
-        }
-        if (!state.showCountryFilter && wasCountryFilterOpen) {
-            delay(80)
-            if (focusedZone == FocusZone.EPG_GRID && channelsInGroup.isNotEmpty()) {
-                gridFocusRequestToken += 1
-            } else {
-                focusedZone = FocusZone.CHANNEL_LIST
-                requestListFocus()
-            }
-        }
-        wasCountryFilterOpen = state.showCountryFilter
-    }
-
-    val countryFilterLabel = if (state.selectedCountries.isEmpty()) {
-        stringResource(R.string.tv_iptv_countries_all)
-    } else {
-        stringResource(R.string.tv_iptv_countries_selected, state.selectedCountries.size)
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -434,40 +503,13 @@ fun TvIptvScreen(
                     .padding(vertical = 8.dp),
             ) {
                 item(key = "list_controls") {
-                    Column(
+                    TvIptvControlChip(
+                        label = stringResource(R.string.tv_iptv_manage_channels),
+                        onClick = onOpenEpgSettings,
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 8.dp, vertical = 6.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text(
-                            text = stringResource(R.string.tv_iptv_lists_title),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = Silver,
-                            modifier = Modifier.padding(horizontal = 6.dp),
-                        )
-                        TvIptvControlChip(
-                            label = stringResource(
-                                R.string.tv_iptv_filter_chip,
-                                filterLabel(state.activeFilter),
-                            ),
-                            onClick = { viewModel.setFilter(nextFilter(state.activeFilter)) },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        TvIptvControlChip(
-                            label = stringResource(
-                                R.string.tv_iptv_sort_chip,
-                                sortLabel(state.activeSort),
-                            ),
-                            onClick = { viewModel.setSort(nextSort(state.activeSort)) },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        TvIptvControlChip(
-                            label = countryFilterLabel,
-                            onClick = { viewModel.setCountryFilterVisible(true) },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
+                    )
                 }
 
                 itemsIndexed(
@@ -554,8 +596,18 @@ fun TvIptvScreen(
                             when (event.key) {
                                 Key.DirectionLeft -> {
                                     if (focusedZone != FocusZone.EPG_GRID) return@onPreviewKeyEvent false
-                                    if (lastGridColIndex > 0) return@onPreviewKeyEvent false
+                                    // Throttle: grid already has 50ms vertical throttle;
+                                    // use the same token-increment pattern (one move per event,
+                                    // coalesced via gridFocusRequestToken LaunchedEffect + 60ms delay).
+                                    if (lastGridColIndex > 0) {
+                                        lastGridColIndex -= 1
+                                        gridFocusRequestToken += 1
+                                        return@onPreviewKeyEvent true
+                                    }
                                     if (windowPageOffset > 0) {
+                                        val now = System.currentTimeMillis()
+                                        if (now - lastPageChangeMs < 250L) return@onPreviewKeyEvent true
+                                        lastPageChangeMs = now
                                         windowPageOffset -= 1
                                         lastGridColIndex = -1
                                         gridFocusRequestToken += 1
@@ -589,12 +641,23 @@ fun TvIptvScreen(
                             lastGridColIndex = colIndex
                             focusedZone = FocusZone.EPG_GRID
                         },
+                        onMoveVertical = { delta ->
+                            val targetRow = (lastGridRowIndex + delta)
+                                .coerceIn(0, (channelsInGroup.lastIndex).coerceAtLeast(0))
+                            if (targetRow != lastGridRowIndex) {
+                                lastGridRowIndex = targetRow
+                                gridFocusRequestToken += 1
+                            }
+                            focusedZone = FocusZone.EPG_GRID
+                        },
                         onChannelPlay = { channel ->
                             viewModel.recordChannelViewed(channel)
                             onChannelPlay(channel)
                         },
                         onTimeForward = {
-                            if (windowPageOffset < MAX_PAGE_OFFSET) {
+                            val now = System.currentTimeMillis()
+                            if (windowPageOffset < MAX_PAGE_OFFSET && now - lastPageChangeMs >= 250L) {
+                                lastPageChangeMs = now
                                 windowPageOffset += 1
                                 lastGridColIndex = -1
                                 gridFocusRequestToken += 1
@@ -669,18 +732,6 @@ fun TvIptvScreen(
                     }
                 }
             }
-        }
-
-        if (state.showCountryFilter) {
-            TvCountryFilterOverlay(
-                availableCountries = state.availableCountries,
-                selectedCountries = state.selectedCountries,
-                onToggleCountry = { viewModel.toggleCountry(it) },
-                onSelectAll = { viewModel.setCountryFilter(state.availableCountries.toSet()) },
-                onSetCountries = { viewModel.setCountryFilter(it) },
-                onClearAll = { viewModel.clearCountryFilter() },
-                onDismiss = { viewModel.setCountryFilterVisible(false) },
-            )
         }
 
         heroOverlay?.invoke()

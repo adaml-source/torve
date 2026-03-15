@@ -105,6 +105,8 @@ import com.torve.android.ui.device.DeviceLimitReachedScreen
 import com.torve.android.ui.device.ManageDevicesScreen
 import com.torve.android.premium.PremiumAccess
 import com.torve.android.premium.PremiumFeature
+import com.torve.android.premium.rememberEffectivePremiumAccessTier
+import com.torve.android.sync.SyncCoordinator
 import com.torve.android.ui.subscription.PaywallScreen
 import com.torve.android.ui.tv.TvHomeScreen
 import com.torve.android.ui.theme.Amber
@@ -189,18 +191,26 @@ fun TorveNavGraph(
     val homeViewModel: HomeViewModel = koinInject()
     val searchViewModel: SearchViewModel = koinInject()
     val subscriptionViewModel: SubscriptionViewModel = koinInject()
+    val syncCoordinator: SyncCoordinator = koinInject()
     val watchlistState by watchlistViewModel.state.collectAsState()
     val subscriptionState by subscriptionViewModel.state.collectAsState()
+    val syncState by syncCoordinator.state.collectAsState()
     var didInitialWatchlistSync by remember { mutableStateOf(false) }
     val dest = if (isTvMode) TV_HOME_ROUTE else MOBILE_HOME_ROUTE
-    val accessTier = remember(subscriptionState.isPro) {
-        PremiumAccess.tierFrom(subscriptionState.isPro)
-    }
+    val accessTier = rememberEffectivePremiumAccessTier(subscriptionState.isPro)
     val isLocked: (PremiumFeature) -> Boolean = remember(accessTier) {
         { feature -> PremiumAccess.isPremiumLocked(feature, accessTier) }
     }
     val requestLifetimeUnlock: (PremiumFeature) -> Unit = remember(navController) {
         { feature -> navController.navigateToLifetimeUnlock(feature) }
+    }
+
+    LaunchedEffect(syncState.blockedFeature, currentRoute) {
+        val blockedFeature = syncState.blockedFeature ?: return@LaunchedEffect
+        if (currentRoute?.startsWith("paywall") != true) {
+            requestLifetimeUnlock(blockedFeature)
+        }
+        syncCoordinator.clearBlockedFeature()
     }
 
     // Hoist CatalogViewModels to NavGraph level so they survive detail navigation
@@ -318,14 +328,18 @@ fun TorveNavGraph(
             composable("live_tv") {
                 ChannelsScreen(
                     onChannelPlay = { channel ->
-                        navController.navigate(
-                            "player?url=${Uri.encode(channel.url)}" +
-                                "&title=${Uri.encode(channel.name)}" +
-                                "&mediaId=" +
-                                "&mediaType=live" +
-                                "&posterUrl=${Uri.encode(channel.tvgLogo ?: "")}" +
-                                "&backdropUrl=",
-                        )
+                        if (isLocked(PremiumFeature.STREAM_PLAYBACK)) {
+                            requestLifetimeUnlock(PremiumFeature.STREAM_PLAYBACK)
+                        } else {
+                            navController.navigate(
+                                "player?url=${Uri.encode(channel.url)}" +
+                                    "&title=${Uri.encode(channel.name)}" +
+                                    "&mediaId=" +
+                                    "&mediaType=live" +
+                                    "&posterUrl=${Uri.encode(channel.tvgLogo ?: "")}" +
+                                    "&backdropUrl=",
+                            )
+                        }
                     },
                 )
             }
@@ -334,14 +348,18 @@ fun TorveNavGraph(
             composable("channels") {
                 ChannelsScreen(
                     onChannelPlay = { channel ->
-                        navController.navigate(
-                            "player?url=${Uri.encode(channel.url)}" +
-                                "&title=${Uri.encode(channel.name)}" +
-                                "&mediaId=" +
-                                "&mediaType=live" +
-                                "&posterUrl=${Uri.encode(channel.tvgLogo ?: "")}" +
-                                "&backdropUrl=",
-                        )
+                        if (isLocked(PremiumFeature.STREAM_PLAYBACK)) {
+                            requestLifetimeUnlock(PremiumFeature.STREAM_PLAYBACK)
+                        } else {
+                            navController.navigate(
+                                "player?url=${Uri.encode(channel.url)}" +
+                                    "&title=${Uri.encode(channel.name)}" +
+                                    "&mediaId=" +
+                                    "&mediaType=live" +
+                                    "&posterUrl=${Uri.encode(channel.tvgLogo ?: "")}" +
+                                    "&backdropUrl=",
+                            )
+                        }
                     },
                 )
             }
@@ -783,29 +801,37 @@ fun TorveNavGraph(
                     navArgument("fallbackUrl") { type = NavType.StringType; defaultValue = "" },
                 ),
             ) { backStackEntry ->
-                PlayerScreen(
-                    url = backStackEntry.arguments?.getString("url") ?: "",
-                    fallbackUrl = backStackEntry.arguments?.getString("fallbackUrl") ?: "",
-                    title = backStackEntry.arguments?.getString("title") ?: "",
-                    mediaId = backStackEntry.arguments?.getString("mediaId") ?: "",
-                    mediaType = backStackEntry.arguments?.getString("mediaType") ?: "movie",
-                    posterUrl = backStackEntry.arguments?.getString("posterUrl") ?: "",
-                    backdropUrl = backStackEntry.arguments?.getString("backdropUrl") ?: "",
-                    seasonNumber = backStackEntry.arguments?.getInt("seasonNumber")?.takeIf { it > 0 },
-                    episodeNumber = backStackEntry.arguments?.getInt("episodeNumber")?.takeIf { it > 0 },
-                    showTmdbId = backStackEntry.arguments?.getInt("showTmdbId")?.takeIf { it > 0 },
-                    showImdbId = backStackEntry.arguments?.getString("showImdbId")?.takeIf { it.isNotBlank() },
-                    onVoiceSearchCommand = { query ->
-                        val normalized = query.trim()
-                        if (normalized.isNotBlank()) {
-                            searchViewModel.updateQuery(normalized)
-                            navController.navigate("search") {
-                                launchSingleTop = true
+                if (isLocked(PremiumFeature.STREAM_PLAYBACK)) {
+                    PaywallScreen(
+                        onBack = { navController.popBackStack() },
+                        onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        lockedFeature = PremiumFeature.STREAM_PLAYBACK,
+                    )
+                } else {
+                    PlayerScreen(
+                        url = backStackEntry.arguments?.getString("url") ?: "",
+                        fallbackUrl = backStackEntry.arguments?.getString("fallbackUrl") ?: "",
+                        title = backStackEntry.arguments?.getString("title") ?: "",
+                        mediaId = backStackEntry.arguments?.getString("mediaId") ?: "",
+                        mediaType = backStackEntry.arguments?.getString("mediaType") ?: "movie",
+                        posterUrl = backStackEntry.arguments?.getString("posterUrl") ?: "",
+                        backdropUrl = backStackEntry.arguments?.getString("backdropUrl") ?: "",
+                        seasonNumber = backStackEntry.arguments?.getInt("seasonNumber")?.takeIf { it > 0 },
+                        episodeNumber = backStackEntry.arguments?.getInt("episodeNumber")?.takeIf { it > 0 },
+                        showTmdbId = backStackEntry.arguments?.getInt("showTmdbId")?.takeIf { it > 0 },
+                        showImdbId = backStackEntry.arguments?.getString("showImdbId")?.takeIf { it.isNotBlank() },
+                        onVoiceSearchCommand = { query ->
+                            val normalized = query.trim()
+                            if (normalized.isNotBlank()) {
+                                searchViewModel.updateQuery(normalized)
+                                navController.navigate("search") {
+                                    launchSingleTop = true
+                                }
                             }
-                        }
-                    },
-                    onBack = { navController.popBackStack() },
-                )
+                        },
+                        onBack = { navController.popBackStack() },
+                    )
+                }
             }
 
             // Downloads — Catalogue

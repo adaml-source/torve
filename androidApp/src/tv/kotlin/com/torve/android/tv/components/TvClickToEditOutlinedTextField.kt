@@ -36,6 +36,8 @@ fun TvClickToEditOutlinedTextField(
     label: @Composable (() -> Unit),
     singleLine: Boolean,
     modifier: Modifier = Modifier,
+    visualTransformation: androidx.compose.ui.text.input.VisualTransformation =
+        androidx.compose.ui.text.input.VisualTransformation.None,
 ) {
     val context = LocalContext.current
     val view = LocalView.current
@@ -118,6 +120,7 @@ fun TvClickToEditOutlinedTextField(
             readOnly = !editMode,
             singleLine = singleLine,
             label = label,
+            visualTransformation = visualTransformation,
             colors = OutlinedTextFieldDefaults.colors(
                 unfocusedBorderColor = borderColor,
             ),

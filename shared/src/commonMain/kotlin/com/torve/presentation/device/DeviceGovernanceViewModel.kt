@@ -64,7 +64,7 @@ class DeviceGovernanceViewModel(
         scope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
             try {
-                val token = authClient.getAccessToken() ?: run {
+                val token = authClient.getValidAccessToken() ?: run {
                     _state.update { it.copy(isLoading = false, reason = "not_logged_in") }
                     return@launch
                 }
@@ -83,7 +83,7 @@ class DeviceGovernanceViewModel(
         scope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
             try {
-                val token = authClient.getAccessToken() ?: run {
+                val token = authClient.getValidAccessToken() ?: run {
                     _state.update { it.copy(isLoading = false, error = "Not logged in") }
                     return@launch
                 }
@@ -110,7 +110,7 @@ class DeviceGovernanceViewModel(
         scope.launch {
             _state.update { it.copy(isRemoving = true, error = null, removeSuccess = false) }
             try {
-                val token = authClient.getAccessToken() ?: return@launch
+                val token = authClient.getValidAccessToken() ?: return@launch
                 val result = deviceApi.removeDevice(token, deviceId)
 
                 if (result.removed) {
@@ -145,7 +145,7 @@ class DeviceGovernanceViewModel(
         scope.launch {
             _state.update { it.copy(isActivating = true, error = null, activateSuccess = false) }
             try {
-                val token = authClient.getAccessToken() ?: return@launch
+                val token = authClient.getValidAccessToken() ?: return@launch
                 val result = deviceApi.activateCurrent(token)
                 _state.update {
                     it.copy(
@@ -172,7 +172,7 @@ class DeviceGovernanceViewModel(
     fun renameDevice(deviceId: String, newName: String) {
         scope.launch {
             try {
-                val token = authClient.getAccessToken() ?: return@launch
+                val token = authClient.getValidAccessToken() ?: return@launch
                 deviceApi.renameDevice(token, deviceId, newName)
                 fetchDevices()
             } catch (e: Exception) {

@@ -85,10 +85,17 @@ internal fun TvEpgPreviewPanel(
             player.pause()
             return@LaunchedEffect
         }
-        delay(350)
-        if (!isActive || channel?.url != url) return@LaunchedEffect
+        // Stop current playback immediately so rapid scrolling doesn't keep
+        // stale streams running while we wait for the debounce.
         val currentUrl = player.currentMediaItem?.localConfiguration?.uri?.toString()
         if (currentUrl != url) {
+            player.stop()
+        }
+        // Wait 500ms before starting new stream — skip loading when user
+        // scrolls through channels quickly.
+        delay(500)
+        if (!isActive || channel?.url != url) return@LaunchedEffect
+        if (player.currentMediaItem?.localConfiguration?.uri?.toString() != url) {
             player.setMediaItem(MediaItem.fromUri(url))
             player.prepare()
         }

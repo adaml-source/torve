@@ -154,6 +154,87 @@ WHERE id = ?;
 deletePlaylist:
 DELETE FROM iptv_playlist WHERE id = ?;
 
+-- Persisted IPTV channel catalog snapshots
+CREATE TABLE iptv_channel (
+    playlist_id TEXT NOT NULL,
+    generation_id INTEGER NOT NULL,
+    stable_id TEXT NOT NULL,
+    sort_index INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    stream_url TEXT NOT NULL,
+    tvg_id TEXT,
+    tvg_name TEXT,
+    logo_url TEXT,
+    group_title TEXT,
+    tvg_language TEXT,
+    tvg_country TEXT,
+    tvg_shift INTEGER,
+    channel_number INTEGER,
+    duration INTEGER NOT NULL DEFAULT -1,
+    catchup_type TEXT,
+    catchup_days INTEGER,
+    catchup_source TEXT,
+    user_agent TEXT,
+    vlc_options TEXT NOT NULL DEFAULT '',
+    kodi_props TEXT NOT NULL DEFAULT '',
+    content_type TEXT NOT NULL DEFAULT 'UNKNOWN',
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (playlist_id, generation_id, stable_id)
+);
+
+CREATE INDEX idx_iptv_channel_playlist_generation_sort
+    ON iptv_channel(playlist_id, generation_id, sort_index);
+
+CREATE INDEX idx_iptv_channel_playlist_generation_group
+    ON iptv_channel(playlist_id, generation_id, group_title);
+
+getChannelsForPlaylistGeneration:
+SELECT *
+FROM iptv_channel
+WHERE playlist_id = ? AND generation_id = ?
+ORDER BY sort_index ASC;
+
+getChannelForPlaylistGeneration:
+SELECT *
+FROM iptv_channel
+WHERE playlist_id = ? AND generation_id = ? AND stable_id = ?;
+
+insertChannel:
+INSERT OR REPLACE INTO iptv_channel (
+    playlist_id,
+    generation_id,
+    stable_id,
+    sort_index,
+    name,
+    stream_url,
+    tvg_id,
+    tvg_name,
+    logo_url,
+    group_title,
+    tvg_language,
+    tvg_country,
+    tvg_shift,
+    channel_number,
+    duration,
+    catchup_type,
+    catchup_days,
+    catchup_source,
+    user_agent,
+    vlc_options,
+    kodi_props,
+    content_type,
+    updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+clearChannelsForPlaylistGeneration:
+DELETE FROM iptv_channel WHERE playlist_id = ? AND generation_id = ?;
+
+deleteChannelsOlderGenerations:
+DELETE FROM iptv_channel WHERE playlist_id = ? AND generation_id != ?;
+
+deleteChannelsForPlaylist:
+DELETE FROM iptv_channel WHERE playlist_id = ?;
+
 -- IPTV favorite channels
 CREATE TABLE iptv_favorite (
     channel_id TEXT NOT NULL PRIMARY KEY,
@@ -280,6 +361,27 @@ WHERE playlist_id = ?
   AND end_time > ?
   AND start_time < ?
 ORDER BY epg_channel_key ASC, start_time ASC;
+
+getEpgProgrammesForPlaylistWindowLimited:
+SELECT epg_channel_key, xmltv_channel_id, start_time, end_time, title
+FROM iptv_epg_programme
+WHERE playlist_id = ?
+  AND generation_id = ?
+  AND end_time > ?
+  AND start_time < ?
+ORDER BY epg_channel_key ASC, start_time ASC
+LIMIT ?;
+
+getEpgProgrammesForChannelWindowLimited:
+SELECT epg_channel_key, xmltv_channel_id, start_time, end_time, title
+FROM iptv_epg_programme
+WHERE playlist_id = ?
+  AND generation_id = ?
+  AND epg_channel_key = ?
+  AND end_time > ?
+  AND start_time < ?
+ORDER BY start_time ASC
+LIMIT ?;
 
 insertEpgProgramme:
 INSERT INTO iptv_epg_programme (

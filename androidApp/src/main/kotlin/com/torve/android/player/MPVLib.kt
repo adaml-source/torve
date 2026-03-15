@@ -2,6 +2,7 @@ package com.torve.android.player
 
 import android.content.Context
 import android.view.Surface
+import `is`.xyz.mpv.MPVLib as UpstreamMPVLib
 
 /**
  * JNI bridge to libmpv. Native methods map to mpv's client API.
@@ -10,6 +11,7 @@ import android.view.Surface
 object MPVLib {
 
     private var isLoaded = false
+    private var isInitialized = false
 
     /**
      * Try to load native libraries. Returns true if successful.
@@ -17,7 +19,16 @@ object MPVLib {
     fun tryLoad(): Boolean {
         if (isLoaded) return true
         return try {
+            System.loadLibrary("c++_shared")
+            System.loadLibrary("avutil")
+            System.loadLibrary("swresample")
+            System.loadLibrary("swscale")
+            System.loadLibrary("avcodec")
+            System.loadLibrary("avformat")
+            System.loadLibrary("avfilter")
+            System.loadLibrary("avdevice")
             System.loadLibrary("mpv")
+            System.loadLibrary("player")
             isLoaded = true
             true
         } catch (_: UnsatisfiedLinkError) {
@@ -26,21 +37,39 @@ object MPVLib {
     }
 
     fun isAvailable(): Boolean = isLoaded
+    fun isInitialized(): Boolean = isLoaded && isInitialized
 
     // --- Initialization ---
 
-    external fun create(context: Context)
-    external fun init()
-    external fun destroy()
+    fun create(context: Context) = UpstreamMPVLib.create(context)
+    fun init() {
+        UpstreamMPVLib.init()
+        isInitialized = true
+    }
+
+    fun destroy() {
+        if (!isInitialized()) return
+        UpstreamMPVLib.destroy()
+        isInitialized = false
+    }
+
+    fun setOptionString(name: String, value: String): Int = UpstreamMPVLib.setOptionString(name, value)
 
     // --- Surface ---
 
-    external fun attachSurface(surface: Surface)
-    external fun detachSurface()
+    fun attachSurface(surface: Surface) {
+        if (!isInitialized()) return
+        UpstreamMPVLib.attachSurface(surface)
+    }
+
+    fun detachSurface() {
+        if (!isInitialized()) return
+        UpstreamMPVLib.detachSurface()
+    }
 
     // --- Playback control ---
 
-    external fun command(cmd: Array<String>)
+    fun command(cmd: Array<String>) = UpstreamMPVLib.command(cmd)
 
     fun loadFile(url: String) {
         command(arrayOf("loadfile", url))
@@ -68,19 +97,19 @@ object MPVLib {
 
     // --- Properties ---
 
-    external fun setPropertyBoolean(name: String, value: Boolean)
-    external fun setPropertyInt(name: String, value: Int)
-    external fun setPropertyDouble(name: String, value: Double)
-    external fun setPropertyString(name: String, value: String)
+    fun setPropertyBoolean(name: String, value: Boolean) = UpstreamMPVLib.setPropertyBoolean(name, value)
+    fun setPropertyInt(name: String, value: Int) = UpstreamMPVLib.setPropertyInt(name, value)
+    fun setPropertyDouble(name: String, value: Double) = UpstreamMPVLib.setPropertyDouble(name, value)
+    fun setPropertyString(name: String, value: String) = UpstreamMPVLib.setPropertyString(name, value)
 
-    external fun getPropertyBoolean(name: String): Boolean
-    external fun getPropertyInt(name: String): Int
-    external fun getPropertyDouble(name: String): Double
-    external fun getPropertyString(name: String): String?
+    fun getPropertyBoolean(name: String): Boolean = UpstreamMPVLib.getPropertyBoolean(name)
+    fun getPropertyInt(name: String): Int = UpstreamMPVLib.getPropertyInt(name)
+    fun getPropertyDouble(name: String): Double = UpstreamMPVLib.getPropertyDouble(name)
+    fun getPropertyString(name: String): String? = UpstreamMPVLib.getPropertyString(name)
 
     // --- Observe properties (callbacks dispatched to EventThread) ---
 
-    external fun observeProperty(name: String, format: Int)
+    fun observeProperty(name: String, format: Int) = UpstreamMPVLib.observeProperty(name, format)
 
     // MPV property format constants
     const val MPV_FORMAT_NONE = 0
@@ -104,19 +133,26 @@ object MPVLib {
     fun getTracks(): List<Track> {
         if (!isLoaded) return emptyList()
         val count = try { getPropertyInt("track-list/count") } catch (_: Exception) { 0 }
+        val selectedAudioTrackId = try {
+            getPropertyInt("aid")
+        } catch (_: Exception) {
+            getPropertyString("aid")?.toIntOrNull() ?: -1
+        }
         val tracks = mutableListOf<Track>()
         for (i in 0 until count) {
             try {
                 val type = getPropertyString("track-list/$i/type") ?: continue
+                val trackId = getPropertyInt("track-list/$i/id")
+                val selectedByTrackList = try { getPropertyBoolean("track-list/$i/selected") } catch (_: Exception) { false }
                 tracks.add(
                     Track(
-                        id = getPropertyInt("track-list/$i/id"),
+                        id = trackId,
                         type = type,
                         title = getPropertyString("track-list/$i/title"),
                         language = getPropertyString("track-list/$i/lang"),
                         codec = getPropertyString("track-list/$i/codec"),
                         isDefault = try { getPropertyBoolean("track-list/$i/default") } catch (_: Exception) { false },
-                        isSelected = try { getPropertyBoolean("track-list/$i/selected") } catch (_: Exception) { false },
+                        isSelected = selectedByTrackList || (type == "audio" && trackId == selectedAudioTrackId),
                     ),
                 )
             } catch (_: Exception) {
@@ -127,11 +163,11 @@ object MPVLib {
     }
 
     fun selectAudioTrack(trackId: Int) {
-        setPropertyInt("aid", trackId)
+        setPropertyString("aid", trackId.toString())
     }
 
     fun selectSubtitleTrack(trackId: Int) {
-        setPropertyInt("sid", trackId)
+        setPropertyString("sid", trackId.toString())
     }
 
     fun disableSubtitles() {
@@ -157,13 +193,12 @@ object MPVLib {
 
     // Called from JNI
     @JvmStatic
-    fun eventProperty(property: String, value: Any?) {
+    fun dispatchEventProperty(property: String, value: Any?) {
         observers.forEach { it.onPropertyChange(property, value) }
     }
 
-    // Called from JNI
     @JvmStatic
-    fun event(eventId: Int) {
+    fun dispatchEvent(eventId: Int) {
         observers.forEach { it.onEvent(eventId) }
     }
 }
