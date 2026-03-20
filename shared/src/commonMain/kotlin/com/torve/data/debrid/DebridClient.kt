@@ -139,7 +139,7 @@ class DebridClient(
                         println("TORVE_RD: token refreshed, retrying resolve")
                         rdResolveStream(newKey, infoHash, fileIdx)
                     } else {
-                        throw Exception("Real-Debrid token expired. Please re-authenticate in Settings.")
+                        throw Exception("Session expired. Please re-authenticate in Settings.")
                     }
                 }
             }
@@ -177,7 +177,7 @@ class DebridClient(
                     parameter("apikey", apiKey)
                     parameter("link", url)
                 }.body()
-                val data = resp.data ?: throw Exception("AllDebrid unlock failed")
+                val data = resp.data ?: throw Exception("Service unlock failed")
                 ResolvedStream(
                     url = data.link,
                     service = provider,
@@ -193,7 +193,7 @@ class DebridClient(
                     },
                 ).body()
                 if (resp.status != "success" || resp.content.isEmpty()) {
-                    throw Exception("Premiumize failed to unrestrict link")
+                    throw Exception("Failed to unrestrict link")
                 }
                 val file = resp.content.maxByOrNull { it.size } ?: resp.content.first()
                 ResolvedStream(
@@ -209,14 +209,14 @@ class DebridClient(
                     contentType(ContentType.Application.Json)
                     setBody("""{"url":"$url"}""")
                 }.body()
-                val downloadId = createResp.data?.id ?: throw Exception("TorBox webdl failed")
+                val downloadId = createResp.data?.id ?: throw Exception("Download creation failed")
                 // Get the download link
                 val linkResp: TbResponse<TbDownloadLinkData> =
                     httpClient.get("$TB_BASE/webdl/requestdl") {
                         header("Authorization", "Bearer $apiKey")
                         parameter("web_id", downloadId)
                     }.body()
-                val downloadUrl = linkResp.data?.data ?: throw Exception("TorBox: no download link")
+                val downloadUrl = linkResp.data?.data ?: throw Exception("No download link available")
                 ResolvedStream(
                     url = downloadUrl,
                     service = provider,
@@ -336,7 +336,7 @@ class DebridClient(
         val bodyText = rawResp.bodyAsText()
         println("TORVE_RD: addMagnet HTTP ${rawResp.status.value} body=$bodyText")
         if (rawResp.status.value == 401) {
-            throw RdAuthException("Real-Debrid token expired (HTTP 401)")
+            throw RdAuthException("Session token expired (HTTP 401)")
         }
         val resp: RdAddMagnetResponse = json.decodeFromString(bodyText)
         return resp.id
@@ -437,7 +437,7 @@ class DebridClient(
                 break
             }
             if (info.status in listOf("error", "dead", "magnet_error")) {
-                throw Exception("Real-Debrid download failed: ${info.status}")
+                throw Exception("Download failed: ${info.status}")
             }
             delay(2000)
         }
@@ -497,7 +497,7 @@ class DebridClient(
         val resp: AdResponse<AdPinGetData> = httpClient.get("$AD_BASE/pin/get") {
             parameter("agent", AD_AGENT)
         }.body()
-        val data = resp.data ?: throw Exception("AllDebrid device code failed")
+        val data = resp.data ?: throw Exception("Device code request failed")
         return DeviceCodeInfo(
             deviceCode = data.check,
             userCode = data.pin,
@@ -537,7 +537,7 @@ class DebridClient(
         }.body()
 
         val magnetId = uploadResp.data?.magnets?.firstOrNull()?.id
-            ?: throw Exception("AllDebrid magnet upload failed")
+            ?: throw Exception("Upload failed")
 
         // 2. Poll status
         var links: List<AdLinkInfo> = emptyList()
@@ -557,7 +557,7 @@ class DebridClient(
             delay(2000)
         }
 
-        if (links.isEmpty()) throw Exception("AllDebrid download timed out")
+        if (links.isEmpty()) throw Exception("Download timed out")
 
         // 3. Unlock the link
         val targetLink = if (fileIdx != null && fileIdx < links.size) links[fileIdx] else links[0]
@@ -567,7 +567,7 @@ class DebridClient(
             parameter("link", targetLink.link)
         }.body()
 
-        val data = unlockResp.data ?: throw Exception("AllDebrid unlock failed")
+        val data = unlockResp.data ?: throw Exception("Service unlock failed")
         return ResolvedStream(
             url = data.link,
             service = DebridServiceType.ALL_DEBRID,
@@ -621,14 +621,14 @@ class DebridClient(
         ).body()
 
         if (resp.status != "success" || resp.content.isEmpty()) {
-            throw Exception("Premiumize failed to resolve stream")
+            throw Exception("Failed to resolve stream")
         }
 
         // Pick the largest video file
         val videoFile = resp.content
             .filter { it.link.isNotBlank() }
             .maxByOrNull { it.size }
-            ?: throw Exception("Premiumize: no downloadable files")
+            ?: throw Exception("No downloadable files found")
 
         return ResolvedStream(
             url = videoFile.streamLink ?: videoFile.link,
@@ -682,7 +682,7 @@ class DebridClient(
             header("Authorization", "Bearer $apiKey")
         }.body()
 
-        val torrentId = createResp.data?.id ?: throw Exception("TorBox create download failed")
+        val torrentId = createResp.data?.id ?: throw Exception("Create download failed")
 
         // 2. Poll until ready
         for (attempt in 0 until 30) {
@@ -709,7 +709,7 @@ class DebridClient(
                     }.body()
 
                 val downloadUrl = linkResp.data?.data
-                    ?: throw Exception("TorBox: no download link")
+                    ?: throw Exception("No download link available")
 
                 return ResolvedStream(
                     url = downloadUrl,
@@ -721,7 +721,7 @@ class DebridClient(
             delay(2000)
         }
 
-        throw Exception("TorBox download timed out")
+        throw Exception("Download timed out")
     }
 
     // -------------------------------------------------------------------------
@@ -827,9 +827,9 @@ class DebridClient(
     private fun extractError(e: Exception, provider: String): String {
         val message = e.message ?: "Unknown error"
         return when {
-            "401" in message || "403" in message -> "Invalid $provider API key"
-            "timeout" in message.lowercase() -> "Cannot reach $provider — check your connection"
-            else -> "$provider error: $message"
+            "401" in message || "403" in message -> "Invalid API key — please check your credentials"
+            "timeout" in message.lowercase() -> "Cannot reach streaming service — check your connection"
+            else -> "Streaming service error: $message"
         }
     }
 
