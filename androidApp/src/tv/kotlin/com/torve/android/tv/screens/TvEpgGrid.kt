@@ -477,7 +477,7 @@ private fun EpgProgrammeCell(
         scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
     ) {
         Text(
-            text = programme?.title ?: "No EPG for this channel",
+            text = programme?.title ?: "No guide data",
             color = if (isFocused || isNow) Snow else Silver,
             fontSize = 11.sp,
             maxLines = 1,

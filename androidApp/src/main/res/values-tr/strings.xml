@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- App -->
     <string name="app_name">Torve</string>
@@ -44,8 +44,6 @@
     <string name="home_watchlist">İzleme Listesi</string>
 
     <!-- Detail Screen -->
-    <string name="detail_connect_cloud">Ayarlar\'dan bulut hizmetini bağlayın</string>
-    <string name="detail_finding_streams">Yayınlar aranıyor…</string>
     <string name="detail_resolving">Çözümleniyor…</string>
     <string name="detail_watchlist">İzleme Listesi</string>
     <string name="detail_in_watchlist">İzleme Listesinde</string>
@@ -75,7 +73,6 @@
     <string name="settings_downloads">İndirmeler</string>
     <string name="settings_calendar">Takvim</string>
 
-    <string name="settings_cloud_service">Bulut Hizmeti</string>
     <string name="settings_provider">Sağlayıcı</string>
     <string name="settings_connected">Bağlı</string>
     <string name="settings_premium_until">%1$s tarihine kadar Premium</string>
@@ -98,9 +95,7 @@
     <string name="settings_connect_simkl">SIMKL Bağla</string>
 
     <string name="settings_live_tv">Kanallar</string>
-    <string name="settings_no_playlists">Yapılandırılmış oynatma listesi yok</string>
     <string name="settings_channels_count">%1$d kanal</string>
-    <string name="settings_add_playlist">Oynatma Listesi Ekle</string>
 
     <string name="settings_stream_quality">Yayın Kalitesi</string>
     <string name="settings_max_quality">Maks. Kalite</string>
@@ -145,7 +140,6 @@
     <string name="settings_last_backup">Son yedekleme: %1$s</string>
     <string name="settings_export_backup">Yedeği Dışa Aktar</string>
     <string name="settings_import_backup">Yedeği İçe Aktar</string>
-    <string name="settings_backup_desc">Eklentilerinizi, tercihlerinizi, izleme ilerlemenizi ve kanal favorilerinizi bir dosyaya aktarın. API anahtarları ve tokenler asla dahil edilmez.</string>
 
     <string name="settings_account">Hesap</string>
     <string name="settings_account_coming_soon">Hesap senkronizasyonu yakında</string>
@@ -174,10 +168,7 @@
     <string name="paywall_free">Ücretsiz</string>
     <string name="paywall_pro">Pro</string>
     <string name="paywall_search_browse">Ara &amp; Gözat</string>
-    <string name="paywall_stream_playback">Yayın Oynatma</string>
-    <string name="paywall_downloads">İndirmeler</string>
     <string name="paywall_channels">Canlı TV</string>
-    <string name="paywall_multi_cloud">Çoklu Bulut</string>
     <string name="paywall_trakt_simkl">Trakt &amp; SIMKL Senkronizasyonu</string>
     <string name="paywall_ai_search">Yapay Zeka Araması</string>
     <string name="paywall_rating_pills">Puan Göstergeleri</string>
@@ -211,13 +202,6 @@
     <string name="catalog_classic">Klasik</string>
 
     <!-- Channels Screen -->
-    <string name="channels_no_playlists">Oynatma Listesi Yok</string>
-    <string name="channels_add_playlist_prompt">Başlamak için bir playlist veya sağlayıcı girişi ekleyin</string>
-    <string name="channels_add_playlist">Oynatma Listesi Ekle</string>
-    <string name="channels_add_title">Oynatma Listesi Ekle</string>
-    <string name="channels_playlist_name">Oynatma Listesi Adı</string>
-    <string name="channels_m3u_url">Playlist URL</string>
-    <string name="channels_epg_optional">Rehber URL (isteğe bağlı)</string>
     <string name="channels_server_url">Sunucu URL</string>
     <string name="channels_username">Kullanıcı Adı</string>
     <string name="channels_password">Şifre</string>
@@ -384,7 +368,6 @@
     <string name="home_layout_reset">Sıfırla</string>
     <string name="home_layout_hint">Sıralamak için basılı tutup sürükleyin. Kart stilini özelleştirmek için bir bölüme dokunun.</string>
     <string name="home_layout_add_custom">Özel Bölüm Ekle</string>
-    <string name="home_layout_addon">Eklenti</string>
     <string name="home_layout_collapse">Daralt</string>
     <string name="home_layout_customize">Özelleştir</string>
     <string name="home_layout_card_style">Kart Stili</string>
@@ -395,7 +378,6 @@
     <string name="home_customize_done">Tamam</string>
 
     <!-- Addon Catalog Screen -->
-    <string name="addon_catalog_title">Eklenti Kataloğu</string>
     <string name="addon_catalog_installed_count">%1$d yüklü</string>
     <string name="addon_catalog_search_hint">Arayın veya eklenti URL\'si yapıştırın…</string>
     <string name="addon_catalog_installed">Yüklü</string>
@@ -406,7 +388,6 @@
     <string name="addon_catalog_copy_url">URL Kopyala</string>
     <string name="addon_catalog_manifest_hint">Sayfa bir JSON bildirimi gösteriyorsa, URL\'sini kopyalayıp tekrar deneyin.</string>
     <string name="addon_category_all">Tümü</string>
-    <string name="addon_category_streams">Yayınlar</string>
     <string name="addon_category_catalogs">Kataloglar</string>
     <string name="addon_category_subtitles">Altyazılar</string>
 
@@ -460,11 +441,7 @@
     <string name="setup_i_agree">Kabul Ediyorum</string>
     <string name="setup_verify_connect">Doğrula &amp; Bağlan</string>
     <string name="setup_connect_trakt">Trakt.tv ile Bağlan</string>
-    <string name="setup_m3u">Playlist</string>
-    <string name="setup_provider_login">Sağlayıcı Girişi</string>
-    <string name="setup_channels_desc">Kanallarınıza erişmek için bir playlist ekleyin veya sağlayıcı girişi yapın. Daha fazlasını daha sonra Kanallar sekmesinden ekleyebilirsiniz.</string>
     <string name="setup_playlist_hint">ör. Kanallarım</string>
-    <string name="setup_m3u_hint">https://example.com/playlist</string>
     <string name="setup_server_hint">http://example.com:8080</string>
 
     <!-- Card Style -->
@@ -512,18 +489,12 @@
     <string name="privacy_last_updated">Son güncelleme: Şubat 2026</string>
 
     <!-- Setup Wizard (extended) -->
-    <string name="setup_welcome_subtitle">Hepsi bir arada yayın arkadaşınız</string>
-    <string name="setup_feature_stream">Birden fazla kaynaktan film ve dizi izleyin</string>
-    <string name="setup_feature_cloud">Optimize oynatma için bulut hizmeti entegrasyonu</string>
-    <string name="setup_feature_channels">Kişisel kanal playlistleri</string>
-    <string name="setup_feature_download">Çevrimdışı izlemek için içerik indirin</string>
     <string name="setup_feature_trakt">İzleme listenizi Trakt.tv ile takip edin</string>
     <string name="setup_lets_go">Birkaç hızlı adımda her şeyi ayarlayalım.</string>
     <string name="setup_terms_title">Kullanım koşulları</string>
     <string name="setup_terms_text">Torve bir medya düzenleyici ve oynatıcıdır. Yapılandırdığınız üçüncü taraf kaynaklar aracılığıyla içeriğe erişim hakkınız olduğundan emin olmak sizin sorumluluğunuzdadır. Torve hiçbir medya içeriğini barındırmaz, sağlamaz veya kontrol etmez.</string>
     <string name="setup_tmdb_text">Bu ürün TMDB API\'sini kullanır ancak TMDB tarafından onaylanmış veya sertifikalandırılmış değildir.</string>
     <string name="setup_accept_terms">Bu koşulları anlıyor ve kabul ediyorum</string>
-    <string name="setup_cloud_desc">Optimize yayın ve daha hızlı oynatma için premium bulut depolama hizmetinizi bağlayın.</string>
     <string name="setup_connected_success">Başarıyla bağlandı!</string>
     <string name="setup_trakt_desc">İzleme listenizi senkronize etmek, ilerlemeyi takip etmek ve kişiselleştirilmiş öneriler almak için Trakt\'ı bağlayın.</string>
     <string name="setup_trakt_connected">Trakt\'a bağlandı!</string>
@@ -567,8 +538,6 @@
     <string name="home_move_down">Aşağı taşı</string>
 
     <!-- Addon Manager -->
-    <string name="addon_content_sources">İçerik kaynakları</string>
-    <string name="addon_no_sources">Kurulu içerik kaynağı yok. Aşağıdan birini ekleyin.</string>
     <string name="addon_extension_url">Eklenti URL\'si</string>
 
     <!-- Stream Groups -->
@@ -739,7 +708,6 @@
     <string name="tv_settings_section_account">Hesap</string>
     <string name="tv_settings_section_app">Uygulama</string>
     <string name="tv_settings_section_about">Hakkında</string>
-    <string name="tv_settings_cloud_service">Bulut hizmeti</string>
     <string name="tv_settings_trakt">Trakt</string>
     <string name="tv_settings_phone_pairing">Telefon eşleştirme</string>
     <string name="tv_settings_language">Dil</string>
@@ -759,9 +727,27 @@
     <string name="tv_sync_search_received">Telefondan arama alındı</string>
     <string name="tv_sync_playback_received">Oynatma aktarıldı</string>
 
+    <string name="tv_settings_category_account">Hesap</string>
+    <string name="tv_settings_category_playback">Oynatma</string>
+    <string name="tv_settings_category_appearance">Görünüm</string>
+    <string name="tv_settings_category_channels">Kanallar</string>
+    <string name="tv_settings_category_connections">Bağlantılar</string>
+    <string name="tv_settings_category_advanced">Gelişmiş</string>
+    <string name="tv_settings_category_about">Hakkında</string>
+    <string name="tv_settings_paired_devices">Eşleştirilmiş cihazlar</string>
+    <string name="tv_settings_activated_devices">Etkin cihazlar</string>
+    <string name="tv_settings_activated_devices_subtitle">Lifetime Access kullanan cihazların erişimini kaldırın veya cihazı silin.</string>
+    <string name="tv_settings_section_quality">Kalite</string>
+    <string name="tv_settings_section_quality_desc">Minimum ve maksimum akış kalitesini seçin.</string>
+    <string name="tv_settings_section_playback_behavior">Oynatma davranışı</string>
+    <string name="tv_settings_section_playback_preferences">Oynatma tercihleri</string>
+    <string name="tv_settings_section_display">Ekran</string>
+    <string name="tv_settings_section_language_region">Dil ve bölge</string>
+    <string name="tv_settings_section_home_experience">Ana ekran deneyimi</string>
+    <string name="tv_settings_section_home_experience_desc">İçeriğin Ana ekranda nasıl gösterileceğini kontrol edin.</string>
+    <string name="tv_settings_section_metadata_ratings">Meta veriler ve puanlar</string>
     <!-- Settings reorganization -->
     <string name="tv_settings_section_stream_quality">Yayın kalitesi ve oynatma</string>
-    <string name="tv_settings_section_language_region">Dil ve bölge</string>
     <string name="tv_settings_section_content">İçerik yönetimi</string>
     <string name="tv_settings_autoplay">En iyi yayını otomatik oynat</string>
     <string name="tv_settings_autoplay_on">Etkin — en iyi yayını otomatik oynatır</string>
@@ -778,7 +764,6 @@
     <string name="tv_library_tab_watchlist">İzleme listesi</string>
     <string name="tv_library_tab_downloads">İndirmeler</string>
     <string name="tv_library_tab_recordings">Kayıtlar</string>
-    <string name="tv_library_recordings_coming_soon">Canlı TV kayıtları — yakında</string>
     <string name="tv_library_no_downloads">Henüz indirme yok</string>
 
     <!-- Download actions -->
@@ -789,10 +774,8 @@
 
     <!-- Addon catalog -->
     <string name="tv_addon_category_all">Tümü</string>
-    <string name="tv_addon_category_streams">Yayınlar</string>
     <string name="tv_addon_category_catalogs">Kataloglar</string>
     <string name="tv_addon_category_subtitles">Altyazılar</string>
-    <string name="tv_addon_suggested">Önerilen eklentiler</string>
     <string name="tv_addon_installed">Yüklü</string>
 
     <!-- Channel redesign -->
@@ -818,11 +801,9 @@
     <string name="tv_settings_cast">Cast, Android TV\'de çalışır ve Play Services kullanılamadığında Fire TV\'de düzgün şekilde devre dışı kalır.</string>
 
     <!-- TV Channels -->
-    <string name="tv_iptv_empty">Kanal mevcut değil. Ayarlar\'dan bir playlist ekleyin.</string>
     <string name="tv_iptv_recently_viewed">Son izlenenler</string>
     <string name="tv_iptv_favorites">Favoriler</string>
     <string name="tv_iptv_no_playlists_title">Kanal yapılandırılmamış</string>
-    <string name="tv_iptv_no_playlists_subtitle">Telefonunuzda bir playlist ekleyin, ardından TV ile senkronize edin</string>
 
     <!-- TV Settings: Customization -->
     <string name="tv_settings_section_customization">Özelleştirme</string>
@@ -844,7 +825,6 @@
     <string name="tv_settings_mode_tv_only">Sadece TV — mobil uygulama yok</string>
     <string name="tv_settings_mode_tv_only_desc">Her şeyi doğrudan TV\'nizde kurun</string>
     <string name="tv_settings_simkl">SIMKL</string>
-    <string name="tv_settings_change_provider">Bulut sağlayıcısı</string>
     <string name="tv_settings_sync_note">Ana sayfa düzenini, kart stillerini ve değerlendirme kaynaklarını özelleştirmek için — uygulamada yapılandırın ve Senkronize Et\'e dokunun.</string>
 
     <!-- TV Detail -->
@@ -854,18 +834,11 @@
 
     <!-- TV Settings: Channels -->
     <string name="tv_settings_section_channels">Kanallar</string>
-    <string name="tv_settings_add_playlist">Playlist ekle</string>
-    <string name="tv_settings_playlist_name">Playlist adı</string>
-    <string name="tv_settings_playlist_url">Playlist URL\'si</string>
-    <string name="tv_settings_playlist_save">Playlist\'i kaydet</string>
-    <string name="tv_settings_playlist_type_m3u">URL Playlist</string>
-    <string name="tv_settings_playlist_type_xtream">Sağlayıcı girişi</string>
     <string name="tv_settings_xtream_server">Sunucu URL\'si</string>
     <string name="tv_settings_xtream_username">Kullanıcı adı</string>
     <string name="tv_settings_xtream_password">Şifre</string>
     <string name="tv_settings_playlist_remove">Kaldır</string>
     <string name="tv_settings_playlist_confirm_remove">Onaylamak için tekrar dokunun</string>
-    <string name="tv_settings_no_playlists">Playlist yapılandırılmamış</string>
     <string name="tv_settings_channels_count">%d kanal</string>
 
     <!-- TV Settings: Integrations -->
@@ -935,10 +908,6 @@
     <string name="tv_ratings_reset_subtitle">Varsayılan değerlendirme kaynaklarını ve görünümü geri yükle</string>
 
     <!-- TV Settings: Addons -->
-    <string name="tv_settings_section_addons">Eklentiler</string>
-    <string name="tv_settings_no_addons">Yüklü eklenti yok</string>
-    <string name="tv_settings_addon_install_url">Eklenti manifest URL\'si</string>
-    <string name="tv_settings_addon_install">Eklenti yükle</string>
     <string name="tv_settings_addon_installing">Yükleniyor…</string>
     <string name="tv_settings_addon_enabled">Etkin</string>
     <string name="tv_settings_addon_disabled">Devre dışı</string>
@@ -984,7 +953,6 @@
     <string name="tv_live_coming_soon">Yakında</string>
     <string name="tv_live_no_programme_data">Program verisi yok</string>
     <string name="tv_live_settings">Ayarlar</string>
-    <string name="tv_live_playlists">Playlistler</string>
     <string name="tv_live_countries">Ülkeler</string>
     <string name="tv_live_select_all">Tümünü seç</string>
     <string name="tv_live_clear_all">Tümünü temizle</string>
@@ -1004,4 +972,347 @@
     <string name="tv_search_ai_configure">Ayarlar\'dan yapılandır</string>
     <string name="tv_search_ai_label">YZ: %s</string>
     <string name="tv_search_ai_fallback">Yapay Zeka kullanılamıyor, standart sonuçlar gösteriliyor</string>
+    <string name="common_on">Açık</string>
+    <string name="tv_settings_reduce_motion">Hareketi azalt</string>
+    <string name="tv_settings_section_stream_handling">Yayın yönetimi</string>
+    <string name="tv_settings_section_pairing_sync">Eşleme ve senkronizasyon</string>
+    <string name="tv_settings_section_profile_signin">Profil ve oturum açma</string>
+
+    <!-- Missing keys (Part 1) -->
+    <string name="watchlist_jellyfin">Jellyfin</string>
+    <string name="jellyfin_library_empty">Jellyfin sunucunuzda öğe bulunamadı</string>
+    <string name="jellyfin_not_connected">Jellyfin sunucunuzu Ayarlar → Entegrasyonlar bölümünden bağlayın</string>
+    <string name="tv_settings_cat_account">Hesap</string>
+    <string name="tv_settings_cat_account_sub">Giriş &amp; abonelik</string>
+    <string name="tv_settings_cat_playback">Oynatma</string>
+    <string name="tv_settings_cat_playback_sub">Kalite &amp; otomatik oynatma</string>
+    <string name="tv_settings_cat_appearance">Görünüm</string>
+    <string name="tv_settings_cat_appearance_sub">Dil &amp; düzen</string>
+    <string name="tv_settings_cat_library">Kütüphane</string>
+    <string name="tv_settings_cat_library_sub">Kanallar &amp; listeler</string>
+    <string name="tv_settings_cat_connections">Bağlantılar</string>
+    <string name="tv_settings_cat_connections_sub">Hizmetler &amp; cihazlar</string>
+    <string name="tv_settings_cat_advanced">Gelişmiş</string>
+    <string name="tv_settings_cat_about">Hakkında</string>
+    <string name="tv_settings_cat_about_sub">Sürüm &amp; yasal bilgiler</string>
+    <string name="tv_settings_subscription">Abonelik</string>
+    <string name="tv_settings_legal">Yasal bilgiler</string>
+    <string name="tv_settings_legal_subtitle">Gizlilik politikası &amp; koşullar</string>
+    <string name="tv_settings_stats">İzleme İstatistikleri</string>
+    <string name="tv_settings_sync_error">Senkronizasyon Hatası</string>
+    <string name="tv_settings_language_restart">Dil değiştirildi — tam etkisi için yeniden başlatma gerekebilir</string>
+
+    <!-- Account Screen -->
+    <string name="account_title">Hesap</string>
+    <string name="account_not_signed_in">Giriş yapılmadı</string>
+    <string name="account_this_device">Bu cihaz: %s</string>
+    <string name="account_settings_sync_ok">Ayarlar hesabınız üzerinden senkronize edilir.</string>
+    <string name="account_settings_sync_error">Senkronizasyon hatası: %s</string>
+    <string name="account_pairings">Eşleştirmeler</string>
+    <string name="account_no_pairings">Henüz eşleştirilmiş TV veya kontrol cihazı yok.</string>
+    <string name="account_pairings_count_one">Bu hesaba bağlı %d aktif eşleştirme.</string>
+    <string name="account_pairings_count_other">Bu hesaba bağlı %d aktif eşleştirme.</string>
+    <string name="account_pairing_note">Eşleştirme yalnızca uzaktan kontrol ve oynatma aktarımı içindir. Ayarlar hesap üzerinden senkronize edilir.</string>
+    <string name="account_manage_pairings">Eşleştirmeleri Yönet</string>
+    <string name="account_devices">Cihazlar</string>
+    <string name="account_devices_note">Oturum açılmış cihazlar ayrı yönetilir ve 5 cihaz limitine dahildir.</string>
+    <string name="account_manage_signed_in">Oturum Açılmış Cihazları Yönet</string>
+    <string name="devices_paired_title">Eşleştirilmiş Cihazlar</string>
+    <string name="devices_paired_desc">Uzaktan kontrol ve oynatma aktarımı için TV\'leri veya kontrol cihazlarını eşleştirin. Ayarlar hesap girişi ile senkronize edilir.</string>
+    <string name="devices_pairing_code">Eşleştirme Kodu</string>
+    <string name="devices_add_pairing">Eşleştirme Ekle</string>
+    <string name="devices_refresh">Yenile</string>
+    <string name="devices_sign_in_first">Ek cihaz eşleştirmeden önce giriş yapın.</string>
+    <string name="devices_pairing_unavailable">Kod tabanlı eşleştirme şu anda bu sunucuda kullanılamıyor.</string>
+    <string name="devices_no_paired">Bu hesaba bağlı eşleştirilmiş cihaz yok.</string>
+    <string name="devices_last_seen">Son görülme: %s</string>
+    <string name="devices_state_label">Durum: %s</string>
+    <string name="devices_state_revoked">iptal edildi</string>
+    <string name="devices_revoked_at">İptal edildi: %s</string>
+    <string name="devices_unpair">Eşleştirmeyi Kaldır</string>
+    <string name="manage_devices_title">Cihazları Yönet</string>
+    <string name="manage_devices_limit_info">Torve Pro hesabınız aynı anda en fazla %d cihazda aktif olabilir.</string>
+    <string name="manage_devices_count">%1$d / %2$d cihaz aktif</string>
+    <string name="manage_devices_remove_info">Bir cihazı kaldırmak başka bir cihaz için yer açar.</string>
+    <string name="manage_devices_inactive_info">Aktif olmayan cihazlar uzun süreli inaktivite sonrasında otomatik olarak sayılmayı durdurabilir.</string>
+    <string name="manage_devices_this_device">BU CİHAZ</string>
+    <string name="manage_devices_active">Aktif</string>
+    <string name="manage_devices_removed">Kaldırıldı</string>
+    <string name="manage_devices_remove_cd">Cihazı kaldır</string>
+    <string name="manage_devices_remove_title">Cihazı Kaldır</string>
+    <string name="manage_devices_remove_confirm">«%s» Torve Pro hesabınızdan kaldırılsın mı? Bu bir cihaz yeri açacaktır.</string>
+    <string name="device_limit_title">Cihaz Limiti Doldu</string>
+    <string name="device_limit_message">Torve Pro hesabınız zaten %d cihazda aktif. Bu cihazda Torve Pro\'yu etkinleştirmek için bir cihazı kaldırın.</string>
+    <string name="device_limit_active_devices">Aktif Cihazlar</string>
+    <string name="device_limit_activate_hint">Bu cihazı etkinleştirmek için hesabınızdan birini kaldırın.</string>
+    <string name="device_limit_remove_confirm">«%s» kaldırılsın mı? Bu bir yer açacak ve Torve Pro mevcut cihazınızda etkinleştirilecektir.</string>
+    <string name="device_limit_remove_activate">Kaldır ve Etkinleştir</string>
+    <string name="stats_top_genres">En Çok İzlenen Türler</string>
+    <string name="stats_watched_count">%d izlendi</string>
+    <string name="stats_most_active_days">En Aktif Günler</string>
+    <string name="stats_no_data_desc">İstatistiklerinizi görmek için izlemeye başlayın</string>
+    <string name="profile_torve_user">Torve Kullanıcısı</string>
+    <string name="profile_trakt_connected">Trakt bağlı</string>
+    <string name="profile_quick_access">Hızlı Erişim</string>
+    <string name="profile_calendar">Takvim</string>
+    <string name="profile_calendar_sub">Yaklaşan bölümler &amp; çıkışlar</string>
+    <string name="profile_downloads">İndirmeler</string>
+    <string name="profile_downloads_sub">Çevrimdışı içeriği yönet</string>
+    <string name="profile_stats">İstatistikler</string>
+    <string name="profile_stats_sub">İzleme aktiviteniz</string>
+    <string name="profile_channels">Kanallar</string>
+    <string name="profile_subscription">Abonelik</string>
+    <string name="profile_subscription_sub">Planınızı yönetin</string>
+    <string name="profile_profiles">Profiller</string>
+    <string name="profile_profiles_sub">Profil değiştir veya yönet</string>
+    <string name="profile_settings">Ayarlar</string>
+    <string name="profile_settings_sub">Hesaplar, kalite, görünüm</string>
+    <string name="settings_sign_in_manage">Aboneliğinizi ve cihazlarınızı yönetmek için giriş yapın.</string>
+    <string name="settings_sign_in_create">Giriş Yap / Hesap Oluştur</string>
+    <string name="settings_content_management">İçerik Yönetimi</string>
+    <string name="settings_home_layout">Ana Sayfa Düzeni</string>
+    <string name="settings_home_layout_sub">Bölüm sırası &amp; poster stili</string>
+    <string name="settings_card_style">Kart Stili</string>
+    <string name="settings_card_style_sub">Boyut, yakınlaştırma, izlendi göstergeleri, görünüm</string>
+    <string name="settings_addons_sub">%d yüklü · Göz at &amp; yönet</string>
+    <string name="settings_streaming_services">Yayın Hizmetleri</string>
+    <string name="settings_streaming_services_sub">Ana sayfa hizmetlerini özelleştir</string>
+    <string name="settings_stream_groups">Stream Grupları</string>
+    <string name="settings_stream_groups_sub">%d grup</string>
+    <string name="settings_regex_patterns">Regex Kalıpları</string>
+    <string name="settings_regex_patterns_sub">%d kalıp</string>
+    <string name="settings_ratings">Puanlamalar</string>
+    <string name="settings_ratings_sub">Çoklu kaynak puanlama göstergeleri</string>
+    <string name="settings_integrations">Entegrasyonlar</string>
+    <string name="settings_integrations_sub">Trakt, SIMKL, Jellyfin, Plex</string>
+    <string name="settings_kodi_desc">Lifetime Access ile Kodi ana bilgisayarlarını ve uzaktan kumanda entegrasyonunu yapılandırın.</string>
+    <string name="settings_ai_features">Yapay Zeka Özellikleri</string>
+    <string name="settings_backup">Yedekleme</string>
+    <string name="settings_account_sync">Hesap Senkronizasyonu</string>
+    <string name="settings_account_sync_desc">Lifetime Access ile eşleştirmeleri ve cihazları yönetin. Ayarlar hesabınız üzerinden senkronize edilir.</string>
+    <string name="settings_manage_devices">Cihazları Yönet</string>
+    <string name="settings_diagnostics">Tanılama</string>
+    <string name="settings_report_issue">Sorun Bildir</string>
+    <string name="settings_danger_zone">Tehlikeli Bölge</string>
+    <string name="settings_region">Bölge</string>
+    <string name="sync_no_targets">Eşleştirilmiş hedef cihaz bulunamadı.</string>
+    <string name="sync_device_info">%1$s - %2$s</string>
+    <string name="search_create_profile_first">TV\'ye arama göndermek için yerel profil oluşturun</string>
+    <string name="search_no_paired_tv">Eşleştirilmiş TV bulunamadı</string>
+    <string name="search_send_to_device_cd">Aramayı cihaza gönder</string>
+    <string name="search_listening">Dinleniyor</string>
+    <string name="search_processing_voice">Ses girişi işleniyor</string>
+    <string name="search_send_to_device_title">Aramayı Cihaza Gönder</string>
+    <string name="search_enter_query_first">Önce bir arama sorgusu girin</string>
+    <string name="search_sent_to">Arama %s cihazına gönderildi</string>
+    <string name="player_switched_source">Daha kararlı bir kaynağa geçildi</string>
+    <string name="player_resume_title">Oynatmayı Sürdür</string>
+    <string name="player_resume_message">%s konumundan devam mı, baştan mı?</string>
+    <string name="player_resume">Sürdür</string>
+    <string name="player_start_over">Baştan Başla</string>
+    <string name="player_cast_cd">Yayınla</string>
+    <string name="player_create_profile_first">Oynatmayı aktarmak için yerel profil oluşturun</string>
+    <string name="player_no_paired_tv">Eşleştirilmiş TV bulunamadı</string>
+    <string name="player_play_on_device_cd">Cihazda oynat</string>
+    <string name="player_voice_cd">Sesli komut</string>
+    <string name="player_audio_delay_cd">Ses gecikmesi</string>
+    <string name="player_equalizer_cd">Ekolayzır</string>
+    <string name="player_play_on_device_title">Cihazda Oynat</string>
+    <string name="player_cannot_handoff">Bu başlık aktarılamaz</string>
+    <string name="player_sent_to">Oynatma %s cihazına gönderildi</string>
+    <string name="player_picture_format">Görüntü Formatı</string>
+    <string name="player_enter_applies">Enter anında uygular. Geri kapatır.</string>
+    <string name="detail_in_library">Kütüphanede</string>
+    <string name="detail_where_to_watch">Nereden İzlenir</string>
+    <string name="channels_no_content">Henüz içerik yok</string>
+    <string name="channels_recently_viewed">Son İzlenenler</string>
+    <string name="channels_favorites">Favoriler</string>
+    <string name="channels_no_movies">Film bulunamadı</string>
+    <string name="channels_no_series">Dizi bulunamadı</string>
+    <string name="channels_no_favourites">Henüz favori yok</string>
+    <string name="channels_tap_heart">Herhangi bir kanalda kalp simgesine dokunarak buraya ekleyin.</string>
+    <string name="channels_no_programme">Program bilgisi yok</string>
+    <string name="channels_filter">Filtre</string>
+    <string name="channels_sort">Sırala</string>
+    <string name="channels_select_countries">Görmek istediğiniz ülkeleri ve kategorileri seçin</string>
+    <string name="channels_toggle_view_cd">Görünümü değiştir</string>
+    <string name="channels_filter_sort_cd">Filtrele ve Sırala</string>
+    <string name="channels_favorite_cd">Favori</string>
+    <string name="mood_what_to_watch">Ne izlemeliyim?</string>
+    <string name="mood_pick_mood">Ruh halinizi seçin</string>
+    <string name="mood_love_these">Bunları seveceğinizi düşünüyoruz</string>
+    <string name="common_back_cd">Geri</string>
+    <string name="common_close_cd">Kapat</string>
+    <string name="common_edit_cd">Düzenle</string>
+    <string name="common_customize_cd">Özelleştir</string>
+    <string name="common_voice_search_cd">Sesli arama</string>
+    <string name="downloaded_cd">İndirildi</string>
+    <string name="watched_cd">İzlendi</string>
+    <string name="drag_to_reorder_cd">Yeniden sıralamak için sürükle</string>
+    <string name="discover_title">Keşfet</string>
+    <string name="next_format">Sonraki: %s</string>
+
+    <!-- Notifications -->
+    <string name="notif_channel_downloads">İndirmeler</string>
+    <string name="notif_channel_downloads_desc">İndirme ilerleme bildirimleri</string>
+    <string name="notif_download_starting">İndirme başlatılıyor…</string>
+    <string name="notif_download_progress">%d %% indirildi</string>
+    <string name="notif_download_complete">İndirme tamamlandı</string>
+    <string name="notif_channel_episodes">Bölüm bildirimleri</string>
+    <string name="notif_channel_episodes_desc">Yeni dizi bölümleri için bildirimler</string>
+    <string name="notif_new_episodes">Yeni bölümler mevcut</string>
+    <string name="notif_episodes_and_more">%1$s ve %2$d daha</string>
+    <!-- Premium -->
+    <string name="premium_locked">Kilitli</string>
+    <string name="premium_requires_lifetime">Lifetime Access gerektirir</string>
+    <string name="premium_unlock_with_lifetime">Lifetime Access ile kilidi aç</string>
+    <string name="premium_benefit_watchlist">İzleme listesi ve favoriler</string>
+    <string name="premium_benefit_integrations">Trakt, Simkl, Jellyfin, Plex ve Kodi entegrasyonları</string>
+    <string name="premium_benefit_pairing">Telefon eşleştirme ve cihazlar arası senkronizasyon</string>
+    <string name="premium_benefit_personalization">Gelişmiş kişiselleştirme ve kütüphane yönetimi</string>
+    <string name="premium_benefit_tools">Sağlayıcı kurulumu, tanılama ve gelişmiş araçlar</string>
+    <string name="premium_browse_home">Ana sayfayı keşfet</string>
+    <string name="premium_browse_movies">Filmleri keşfet</string>
+    <string name="premium_browse_tv_shows">Dizileri keşfet</string>
+    <string name="premium_browse_posters">Posterleri keşfet</string>
+    <string name="premium_focused_info">Odaklanmış bilgi paneli</string>
+    <string name="premium_title_artwork">Başlık görseli</string>
+    <string name="premium_metadata_ratings">Meta veriler ve puanlar</string>
+    <string name="premium_view_details">Detayları gör</string>
+    <string name="premium_basic_search">Temel arama</string>
+    <string name="premium_about_legal">Hakkında ve yasal</string>
+    <string name="premium_purchase_screen">Satın alma ekranı</string>
+    <string name="premium_app_preview">Uygulama önizlemesi</string>
+    <string name="premium_trailer_playback">Fragman oynatma</string>
+    <string name="premium_account_setup">Hesap kurulumu</string>
+    <string name="premium_cloud_sign_in">Bulut oturum açma</string>
+    <string name="premium_synced_history">Senkronize izleme geçmişi</string>
+    <string name="premium_synced_watchlist">Senkronize izleme listesi</string>
+    <string name="premium_synced_favorites">Senkronize favoriler</string>
+    <string name="premium_custom_layout_sync">Özel düzen senkronizasyonu</string>
+    <string name="premium_cross_device_sync">Cihazlar arası senkronizasyon</string>
+    <string name="premium_cloud_backup">Bulut yedekleme</string>
+    <string name="premium_phone_pairing">Telefon eşleştirme</string>
+    <string name="premium_device_linking">Cihaz bağlama</string>
+    <string name="premium_device_sync">Cihaz senkronizasyonu</string>
+    <string name="premium_tv_phone_continuation">TV-Telefon devamı</string>
+    <string name="premium_qr_pairing">QR eşleştirme</string>
+    <string name="premium_watchlist_editing">İzleme listesi düzenleme</string>
+    <string name="premium_favorites_editing">Favori düzenleme</string>
+    <string name="premium_watched_state">İzlendi durumu</string>
+    <string name="premium_trakt_lists">Trakt listeleri</string>
+    <string name="premium_favorites_manager">Favori yöneticisi</string>
+    <string name="premium_persistent_collections">Kalıcı koleksiyonlar</string>
+    <string name="premium_trakt_connect">Trakt bağla</string>
+    <string name="premium_simkl_connect">Simkl bağla</string>
+    <string name="premium_jellyfin_setup">Jellyfin kurulumu</string>
+    <string name="premium_plex_setup">Plex kurulumu</string>
+    <string name="premium_kodi_setup">Kodi kurulumu</string>
+    <string name="premium_omdb_setup">OMDb kurulumu</string>
+    <string name="premium_mdblist_setup">MDBList kurulumu</string>
+    <string name="premium_ai_provider_setup">Yapay Zeka sağlayıcı kurulumu</string>
+    <string name="premium_cloud_provider_setup">Bulut sağlayıcı kurulumu</string>
+    <string name="premium_diagnostics">Tanılama</string>
+    <string name="premium_debug_tools">Hata ayıklama araçları</string>
+    <string name="premium_provider_tests">Sağlayıcı testleri</string>
+    <string name="premium_metadata_rebuild">Meta veri yeniden oluşturma</string>
+    <string name="premium_provider_rematch">Sağlayıcı yeniden eşleme</string>
+    <string name="premium_custom_sources">Özel kaynaklar</string>
+    <string name="premium_advanced_connections">Gelişmiş bağlantılar</string>
+    <string name="premium_developer_logs">Geliştirici olay günlükleri</string>
+    <string name="premium_ai_search">Yapay Zeka araması</string>
+    <string name="premium_advanced_recommendations">Gelişmiş öneriler</string>
+    <string name="premium_more_like_this">Benzer başlıklar</string>
+    <string name="premium_choose_source">Kaynak seç</string>
+    <string name="premium_stream_playback">Yayın oynatma</string>
+    <string name="premium_downloads">İndirmeler</string>
+    <!-- TV Settings additional -->
+    <string name="tv_settings_channels_locked_title">Kanallar</string>
+    <string name="tv_settings_premium_channels">Premium kanal yönetimi</string>
+    <string name="tv_settings_connections_locked_title">Bağlantılar</string>
+    <string name="tv_settings_connections_locked_desc">Lifetime Access ile bulut ve meta veri sağlayıcılarını bağlayın.</string>
+    <string name="tv_settings_premium_connections">Premium bağlantılar</string>
+    <string name="tv_settings_advanced_locked_title">Gelişmiş</string>
+    <string name="tv_settings_advanced_locked_desc">Meta veri sağlayıcıları, entegrasyonlar ve tanılama Lifetime Access ile açılır.</string>
+    <string name="tv_settings_premium_advanced">Premium gelişmiş araçlar</string>
+    <string name="tv_settings_pairing_desc">Kontrol/oturum bağlantısı için cihazları eşleştirin ve bu hesaptaki oturum açılmış cihazları yönetin.</string>
+    <string name="tv_settings_pair_device">Cihaz eşleştir</string>
+    <string name="tv_settings_paired_count_one">Bu hesapta %d eşleştirilmiş cihaz</string>
+    <string name="tv_settings_paired_count_other">Bu hesapta %d eşleştirilmiş cihaz</string>
+    <string name="tv_settings_no_paired_yet">Henüz eşleştirilmiş cihaz yok</string>
+    <string name="tv_manage_activated_title">Etkin cihazlar</string>
+    <string name="tv_manage_activated_desc">Bu hesap altında Lifetime Access kullanan cihazlar.</string>
+    <string name="tv_manage_active_count">%1$d / %2$d aktif</string>
+    <string name="tv_manage_no_activated">Etkin cihaz bulunamadı.</string>
+    <string name="tv_manage_revoke_info">İptal etmek o cihazdan Lifetime Access\'i kaldırır. Kaldırmak cihaz kaydını siler.</string>
+    <string name="tv_manage_paired_title">Eşleştirilmiş cihazlar</string>
+    <string name="tv_manage_paired_desc">Bu TV/hesap ile kontrol ve oynatma aktarımı için eşleştirilmiş cihazlar.</string>
+    <string name="tv_manage_no_paired">Eşleştirilmiş cihaz bulunamadı.</string>
+    <string name="tv_manage_unpair_info">Eşleştirmeyi kaldırmak yalnızca kontrol ve oynatma aktarımını keser. Paylaşılan ayarlar hesap girişi ile senkronize edilir.</string>
+    <string name="tv_manage_device_limit_title">Cihaz limiti doldu</string>
+    <string name="tv_manage_device_limit_desc">Torve Pro hesabınız zaten %d cihazda aktif. Bu cihazda Torve Pro\'yu etkinleştirmek için bir cihazı kaldırın.</string>
+    <string name="tv_manage_current_device">MEVCUT CİHAZ</string>
+    <string name="tv_manage_this_tv">BU TV</string>
+    <string name="tv_manage_this_device">BU CİHAZ</string>
+    <string name="tv_manage_last_active">Son etkinlik: %s</string>
+    <string name="tv_manage_last_seen">Son görülme: %s</string>
+    <string name="tv_manage_unpaired">Eşleştirme kaldırıldı: %s</string>
+    <string name="tv_manage_remove_title">Cihazı kaldır</string>
+    <string name="tv_manage_remove_confirm">«%s» kaldırılsın mı?</string>
+    <string name="tv_manage_back">&#8249; Geri</string>
+    <string name="tv_settings_account_sync_status">Hesap senkronizasyon durumu</string>
+    <string name="tv_settings_account_manage_desc">Bu TV\'de Torve hesabınızı yönetin.</string>
+    <string name="tv_settings_torve_account">Torve hesabı</string>
+    <string name="tv_settings_email_not_verified">Email doğrulanmadı</string>
+    <string name="tv_settings_resend_verification">Doğrulama emailini tekrar göndermek için dokunun</string>
+    <string name="tv_settings_log_out">Çıkış yap</string>
+    <string name="tv_settings_email">Email</string>
+    <string name="tv_settings_password">Şifre</string>
+    <string name="tv_settings_confirm_password">Şifreyi onayla</string>
+    <string name="tv_settings_forgot_password">Şifrenizi mi unuttunuz?</string>
+    <string name="tv_settings_forgot_password_desc">Emailinize şifre sıfırlama bağlantısı gönderin</string>
+    <string name="tv_settings_subscription_title">Abonelik</string>
+    <string name="tv_settings_subscription_desc">Bu cihazda Torve Pro erişimini yönetin.</string>
+    <string name="tv_settings_lifetime_access">Lifetime Access</string>
+    <string name="tv_settings_retry_verification">Doğrulamayı tekrar dene</string>
+    <string name="tv_settings_retry_verification_desc">Kayıtlı Amazon satın alma bilgileriyle Lifetime Access etkinleştirmesini tekrar dene</string>
+    <string name="tv_settings_restore_purchase">Satın almayı geri yükle</string>
+    <string name="tv_settings_restore_purchase_desc">Bu mağaza hesabındaki mevcut bir satın almayı kurtarın</string>
+    <string name="tv_settings_linked_services">Bağlı hizmetler</string>
+    <string name="tv_settings_linked_services_desc">Eşleştirilmiş telefonunuzdaki mevcut hesap bağlantı durumu.</string>
+    <string name="tv_settings_metadata_providers">Meta veri sağlayıcıları</string>
+    <string name="tv_settings_metadata_read_only">Telefon senkronizasyonu tarafından yönetilirken salt okunur.</string>
+    <string name="tv_settings_streaming_accounts">Yayın hesapları</string>
+    <string name="tv_settings_streaming_accounts_desc">Bulut ve izleme hizmetlerinizi doğrudan TV\'de bağlayın.</string>
+    <string name="tv_settings_metadata_keys_desc">Meta veri hizmetleri için anahtarlar ve doğrulama.</string>
+    <string name="tv_settings_integrations_title">Entegrasyonlar</string>
+    <string name="tv_settings_integrations_desc">Medya sunucuları ve harici hizmet bağlantıları.</string>
+    <string name="tv_settings_ai_discovery">Yapay Zeka ve keşif</string>
+    <string name="tv_settings_ai_discovery_desc">Yapay Zeka destekli arama için sağlayıcı ve anahtar kurulumu.</string>
+    <string name="tv_settings_metadata_collections">Meta veri koleksiyonları</string>
+    <string name="tv_settings_metadata_collections_desc">MDBList koleksiyonlarına göz atın ve yönetin.</string>
+    <string name="tv_settings_content_sources">İçerik kaynakları</string>
+    <string name="tv_settings_channel_visibility">Kanal görünürlüğü</string>
+    <string name="tv_settings_diagnostics_dev">Tanılama / Geliştirici</string>
+    <string name="tv_settings_diagnostics_dev_desc">Geliştirici araçları ve sorun giderme ayrıntıları.</string>
+    <string name="tv_settings_app_info">Uygulama bilgisi</string>
+    <string name="tv_settings_app_info_desc">Sürüm ve kullanım bilgileri.</string>
+    <string name="tv_settings_tv_version">Torve TV v%s</string>
+    <string name="tv_settings_build_number">Yapı numarası</string>
+    <string name="tv_settings_legal_support">Yasal &amp; destek</string>
+    <string name="tv_settings_support">Destek</string>
+    <string name="tv_settings_support_desc">Yardım ve sorun giderme</string>
+    <string name="tv_settings_terms">Koşullar</string>
+    <string name="tv_settings_terms_desc">Hizmet koşullarını inceleyin</string>
+    <string name="tv_settings_not_now">Şimdi değil</string>
+    <string name="tv_search_all">Tümü</string>
+    <string name="tv_search_movies">Filmler</string>
+    <string name="tv_search_tv_shows">Diziler</string>
+    <string name="tv_library_downloading">İndiriliyor</string>
+    <string name="tv_library_downloaded_movies">İndirilen filmler</string>
+    <string name="tv_library_downloaded_shows">İndirilen diziler</string>
+    <string name="tv_iptv_open_settings">Ayarları Aç</string>
+    <string name="tv_home_layout_instructions">Etkinleştirmek/devre dışı bırakmak için OK. Taşımak için SAĞ, sıralamak için YUKARI/AŞAĞI, bitirmek için SOL.</string>
+    <string name="tv_settings_sign_in_share">Bir satın almayı 5 cihaza kadar paylaşmak için giriş yapın.</string>
 </resources>
+

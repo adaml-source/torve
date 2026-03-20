@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Torve</string>
     <string name="widget_description">Zeigt deine Weiterschauen-Liste</string>
@@ -43,8 +43,6 @@
     <string name="home_watchlist">Merkliste</string>
 
     <!-- Detail -->
-    <string name="detail_connect_cloud">Cloud-Dienst in den Einstellungen verbinden</string>
-    <string name="detail_finding_streams">Streams werden gesucht…</string>
     <string name="detail_resolving">Wird aufgelöst…</string>
     <string name="detail_watchlist">Merkliste</string>
     <string name="detail_in_watchlist">In Merkliste</string>
@@ -73,7 +71,6 @@
     <string name="settings_subscription">Kaufen</string>
     <string name="settings_downloads">Downloads</string>
     <string name="settings_calendar">Kalender</string>
-    <string name="settings_cloud_service">Cloud-Dienst</string>
     <string name="settings_provider">Anbieter</string>
     <string name="settings_connected">Verbunden</string>
     <string name="settings_premium_until">Premium bis %1$s</string>
@@ -93,9 +90,7 @@
     <string name="settings_simkl">SIMKL</string>
     <string name="settings_connect_simkl">SIMKL verbinden</string>
     <string name="settings_live_tv">Kanäle</string>
-    <string name="settings_no_playlists">Keine Playlists konfiguriert</string>
     <string name="settings_channels_count">%1$d Kanäle</string>
-    <string name="settings_add_playlist">Playlist hinzufügen</string>
     <string name="settings_stream_quality">Streamqualität</string>
     <string name="settings_max_quality">Max. Qualität</string>
     <string name="settings_min_quality">Min. Qualität</string>
@@ -134,7 +129,6 @@
     <string name="settings_last_backup">Letzte Sicherung: %1$s</string>
     <string name="settings_export_backup">Sicherung exportieren</string>
     <string name="settings_import_backup">Sicherung importieren</string>
-    <string name="settings_backup_desc">Exportiere deine Addons, Einstellungen, Wiedergabefortschritt und Kanal-Favoriten. API-Schlüssel und Tokens werden nie einbezogen.</string>
     <string name="settings_account">Konto</string>
     <string name="settings_account_coming_soon">Kontosynchronisierung kommt bald</string>
     <string name="settings_account_desc">Erstelle ein Konto, um deine Einstellungen geräteübergreifend zu synchronisieren.</string>
@@ -161,10 +155,7 @@
     <string name="paywall_free">Kostenlos</string>
     <string name="paywall_pro">Pro</string>
     <string name="paywall_search_browse">Suchen &amp; Stöbern</string>
-    <string name="paywall_stream_playback">Stream-Wiedergabe</string>
-    <string name="paywall_downloads">Downloads</string>
     <string name="paywall_channels">Kanäle</string>
-    <string name="paywall_multi_cloud">Multi-Cloud</string>
     <string name="paywall_trakt_simkl">Trakt &amp; SIMKL Sync</string>
     <string name="paywall_ai_search">KI-Suche</string>
     <string name="paywall_rating_pills">Bewertungsindikatoren</string>
@@ -198,13 +189,6 @@
     <string name="catalog_classic">Klassiker</string>
 
     <!-- Channels -->
-    <string name="channels_no_playlists">Keine Playlists</string>
-    <string name="channels_add_playlist_prompt">Füge eine Playlist oder Anbieter-Login hinzu, um zu beginnen</string>
-    <string name="channels_add_playlist">Playlist hinzufügen</string>
-    <string name="channels_add_title">Playlist hinzufügen</string>
-    <string name="channels_playlist_name">Playlist-Name</string>
-    <string name="channels_m3u_url">Playlist-URL</string>
-    <string name="channels_epg_optional">Programmguide-URL (optional)</string>
     <string name="channels_server_url">Server-URL</string>
     <string name="channels_username">Benutzername</string>
     <string name="channels_password">Passwort</string>
@@ -371,7 +355,6 @@
     <string name="home_layout_reset">Zurücksetzen</string>
     <string name="home_layout_hint">Halten und ziehen zum Sortieren. Tippe auf einen Bereich, um den Kartenstil anzupassen.</string>
     <string name="home_layout_add_custom">Eigenen Bereich hinzufügen</string>
-    <string name="home_layout_addon">Addon</string>
     <string name="home_layout_collapse">Einklappen</string>
     <string name="home_layout_customize">Anpassen</string>
     <string name="home_layout_card_style">Kartenstil</string>
@@ -382,9 +365,7 @@
     <string name="home_customize_done">Fertig</string>
 
     <!-- Addon Catalog Screen -->
-    <string name="addon_catalog_title">Addon-Katalog</string>
     <string name="addon_catalog_installed_count">%1$d installiert</string>
-    <string name="addon_catalog_search_hint">Suchen oder Addon-URL einfügen…</string>
     <string name="addon_catalog_installed">Installiert</string>
     <string name="addon_catalog_available">Verfügbar</string>
     <string name="addon_catalog_installing">Installiere…</string>
@@ -393,7 +374,6 @@
     <string name="addon_catalog_copy_url">URL kopieren</string>
     <string name="addon_catalog_manifest_hint">Wenn die Seite ein JSON-Manifest zeigt, kopiere die URL und versuche es erneut.</string>
     <string name="addon_category_all">Alle</string>
-    <string name="addon_category_streams">Streams</string>
     <string name="addon_category_catalogs">Kataloge</string>
     <string name="addon_category_subtitles">Untertitel</string>
 
@@ -447,11 +427,7 @@
     <string name="setup_i_agree">Ich stimme zu</string>
     <string name="setup_verify_connect">Überprüfen &amp; Verbinden</string>
     <string name="setup_connect_trakt">Mit Trakt.tv verbinden</string>
-    <string name="setup_m3u">Playlist</string>
-    <string name="setup_provider_login">Anbieter-Login</string>
-    <string name="setup_channels_desc">Füge eine Playlist oder einen Anbieter-Login hinzu, um Kanäle zu schauen. Weitere kannst du später im Kanäle-Tab hinzufügen.</string>
     <string name="setup_playlist_hint">z. B. Meine Sender</string>
-    <string name="setup_m3u_hint">https://example.com/playlist</string>
     <string name="setup_server_hint">http://example.com:8080</string>
 
     <!-- Card Style -->
@@ -499,18 +475,12 @@
     <string name="privacy_last_updated">Zuletzt aktualisiert: Februar 2026</string>
 
     <!-- Setup Wizard (extended) -->
-    <string name="setup_welcome_subtitle">Dein All-in-One Streaming-Begleiter</string>
-    <string name="setup_feature_stream">Filme &amp; Serien aus mehreren Quellen streamen</string>
-    <string name="setup_feature_cloud">Cloud-Service-Integration für optimierte Wiedergabe</string>
-    <string name="setup_feature_channels">Persönliche Kanal-Playlisten</string>
-    <string name="setup_feature_download">Inhalte für Offline-Wiedergabe herunterladen</string>
     <string name="setup_feature_trakt">Merkliste mit Trakt.tv verfolgen</string>
     <string name="setup_lets_go">Lass uns alles in wenigen Schritten einrichten.</string>
     <string name="setup_terms_title">Nutzungsbedingungen</string>
     <string name="setup_terms_text">Torve ist ein Medien-Organizer und -Player. Du bist dafür verantwortlich, sicherzustellen, dass du das Recht hast, auf Inhalte über Drittanbieter-Quellen zuzugreifen, die du konfigurierst. Torve hostet, stellt keine Medieninhalte bereit und kontrolliert diese nicht.</string>
     <string name="setup_tmdb_text">Dieses Produkt verwendet die TMDB-API, ist aber nicht von TMDB unterstützt oder zertifiziert.</string>
     <string name="setup_accept_terms">Ich verstehe und akzeptiere diese Bedingungen</string>
-    <string name="setup_cloud_desc">Verbinde deinen Premium-Cloud-Speicherdienst für optimiertes Streaming und schnellere Wiedergabe.</string>
     <string name="setup_connected_success">Erfolgreich verbunden!</string>
     <string name="setup_trakt_desc">Verbinde Trakt, um deine Merkliste zu synchronisieren, Fortschritt zu verfolgen und personalisierte Empfehlungen zu erhalten.</string>
     <string name="setup_trakt_connected">Mit Trakt verbunden!</string>
@@ -554,8 +524,6 @@
     <string name="home_move_down">Nach unten</string>
 
     <!-- Addon Manager -->
-    <string name="addon_content_sources">Inhaltsquellen</string>
-    <string name="addon_no_sources">Keine Inhaltsquellen installiert. Füge unten eine hinzu.</string>
     <string name="addon_extension_url">Erweiterungs-URL</string>
 
     <!-- Stream Groups -->
@@ -726,7 +694,6 @@
     <string name="tv_settings_section_account">Konto</string>
     <string name="tv_settings_section_app">App</string>
     <string name="tv_settings_section_about">Über</string>
-    <string name="tv_settings_cloud_service">Cloud-Dienst</string>
     <string name="tv_settings_trakt">Trakt</string>
     <string name="tv_settings_phone_pairing">Handy-Kopplung</string>
     <string name="tv_settings_language">Sprache</string>
@@ -746,9 +713,27 @@
     <string name="tv_sync_search_received">Suche vom Handy empfangen</string>
     <string name="tv_sync_playback_received">Wiedergabe-Übergabe empfangen</string>
 
+    <string name="tv_settings_category_account">Konto</string>
+    <string name="tv_settings_category_playback">Wiedergabe</string>
+    <string name="tv_settings_category_appearance">Darstellung</string>
+    <string name="tv_settings_category_channels">Sender</string>
+    <string name="tv_settings_category_connections">Verbindungen</string>
+    <string name="tv_settings_category_advanced">Erweitert</string>
+    <string name="tv_settings_category_about">Info</string>
+    <string name="tv_settings_paired_devices">Gekoppelte Geräte</string>
+    <string name="tv_settings_activated_devices">Aktivierte Geräte</string>
+    <string name="tv_settings_activated_devices_subtitle">Zugriff widerrufen oder Geräte mit Lifetime Access entfernen.</string>
+    <string name="tv_settings_section_quality">Qualität</string>
+    <string name="tv_settings_section_quality_desc">Mindest- und Höchstqualität für Streams wählen.</string>
+    <string name="tv_settings_section_playback_behavior">Wiedergabeverhalten</string>
+    <string name="tv_settings_section_playback_preferences">Wiedergabeeinstellungen</string>
+    <string name="tv_settings_section_display">Anzeige</string>
+    <string name="tv_settings_section_language_region">Sprache &amp; Region</string>
+    <string name="tv_settings_section_home_experience">Startseite</string>
+    <string name="tv_settings_section_home_experience_desc">Steuert, wie Inhalte auf der Startseite dargestellt werden.</string>
+    <string name="tv_settings_section_metadata_ratings">Metadaten &amp; Bewertungen</string>
     <!-- Settings reorganization -->
     <string name="tv_settings_section_stream_quality">Streamqualität &amp; Wiedergabe</string>
-    <string name="tv_settings_section_language_region">Sprache &amp; Region</string>
     <string name="tv_settings_section_content">Inhaltsverwaltung</string>
     <string name="tv_settings_autoplay">Besten Stream automatisch abspielen</string>
     <string name="tv_settings_autoplay_on">Aktiviert — spielt besten Stream automatisch</string>
@@ -765,7 +750,6 @@
     <string name="tv_library_tab_watchlist">Merkliste</string>
     <string name="tv_library_tab_downloads">Downloads</string>
     <string name="tv_library_tab_recordings">Aufnahmen</string>
-    <string name="tv_library_recordings_coming_soon">Playlist-Aufnahmen — demnächst verfügbar</string>
     <string name="tv_library_no_downloads">Noch keine Downloads</string>
 
     <!-- Download actions -->
@@ -776,10 +760,8 @@
 
     <!-- Addon catalog -->
     <string name="tv_addon_category_all">Alle</string>
-    <string name="tv_addon_category_streams">Streams</string>
     <string name="tv_addon_category_catalogs">Kataloge</string>
     <string name="tv_addon_category_subtitles">Untertitel</string>
-    <string name="tv_addon_suggested">Vorgeschlagene Addons</string>
     <string name="tv_addon_installed">Installiert</string>
 
     <!-- Channel redesign -->
@@ -805,11 +787,9 @@
     <string name="tv_settings_cast">Cast funktioniert auf Android TV und wird auf Fire TV ordnungsgemäß deaktiviert, wenn Play Services nicht verfügbar sind.</string>
 
     <!-- TV Channels -->
-    <string name="tv_iptv_empty">Keine Sender verfügbar. Füge eine Playlist in den Einstellungen hinzu.</string>
     <string name="tv_iptv_recently_viewed">Zuletzt angesehen</string>
     <string name="tv_iptv_favorites">Favoriten</string>
     <string name="tv_iptv_no_playlists_title">Keine Sender konfiguriert</string>
-    <string name="tv_iptv_no_playlists_subtitle">Füge eine Playlist auf deinem Handy hinzu und synchronisiere mit dem TV</string>
 
     <!-- TV Settings: Customization -->
     <string name="tv_settings_section_customization">Anpassung</string>
@@ -831,7 +811,6 @@
     <string name="tv_settings_mode_tv_only">Nur TV — keine Handy-App</string>
     <string name="tv_settings_mode_tv_only_desc">Alles direkt auf deinem TV einrichten</string>
     <string name="tv_settings_simkl">SIMKL</string>
-    <string name="tv_settings_change_provider">Cloud-Anbieter</string>
     <string name="tv_settings_sync_note">Um das Home-Layout, Kartenstile und Bewertungsquellen anzupassen — konfiguriere in der App und tippe auf Sync.</string>
 
     <!-- TV Detail -->
@@ -841,18 +820,11 @@
 
     <!-- TV Settings: Channels -->
     <string name="tv_settings_section_channels">Sender</string>
-    <string name="tv_settings_add_playlist">Playlist hinzufügen</string>
-    <string name="tv_settings_playlist_name">Playlist-Name</string>
-    <string name="tv_settings_playlist_url">Playlist-URL</string>
-    <string name="tv_settings_playlist_save">Playlist speichern</string>
-    <string name="tv_settings_playlist_type_m3u">URL-Playlist</string>
-    <string name="tv_settings_playlist_type_xtream">Anbieter-Login</string>
     <string name="tv_settings_xtream_server">Server-URL</string>
     <string name="tv_settings_xtream_username">Benutzername</string>
     <string name="tv_settings_xtream_password">Passwort</string>
     <string name="tv_settings_playlist_remove">Entfernen</string>
     <string name="tv_settings_playlist_confirm_remove">Erneut tippen zum Bestätigen</string>
-    <string name="tv_settings_no_playlists">Keine Playlists konfiguriert</string>
     <string name="tv_settings_channels_count">%d Sender</string>
 
     <!-- TV Settings: Integrations -->
@@ -922,10 +894,6 @@
     <string name="tv_ratings_reset_subtitle">Standard-Bewertungsquellen und -anzeige wiederherstellen</string>
 
     <!-- TV Settings: Addons -->
-    <string name="tv_settings_section_addons">Addons</string>
-    <string name="tv_settings_no_addons">Keine Addons installiert</string>
-    <string name="tv_settings_addon_install_url">Addon-Manifest-URL</string>
-    <string name="tv_settings_addon_install">Addon installieren</string>
     <string name="tv_settings_addon_installing">Wird installiert…</string>
     <string name="tv_settings_addon_enabled">Aktiviert</string>
     <string name="tv_settings_addon_disabled">Deaktiviert</string>
@@ -971,7 +939,6 @@
     <string name="tv_live_coming_soon">Demnächst</string>
     <string name="tv_live_no_programme_data">Keine Programmdaten</string>
     <string name="tv_live_settings">Einstellungen</string>
-    <string name="tv_live_playlists">Playlists</string>
     <string name="tv_live_countries">Länder</string>
     <string name="tv_live_select_all">Alle auswählen</string>
     <string name="tv_live_clear_all">Alle löschen</string>
@@ -991,4 +958,360 @@
     <string name="tv_search_ai_configure">In Einstellungen konfigurieren</string>
     <string name="tv_search_ai_label">KI: %s</string>
     <string name="tv_search_ai_fallback">KI nicht verfügbar, zeige Standardergebnisse</string>
+    <string name="common_on">Ein</string>
+    <string name="tv_settings_reduce_motion">Bewegungen reduzieren</string>
+    <string name="tv_settings_section_stream_handling">Stream-Verwaltung</string>
+    <string name="tv_settings_section_pairing_sync">Kopplung &amp; Synchronisierung</string>
+    <string name="tv_settings_section_profile_signin">Profil &amp; Anmeldung</string>
+
+    <!-- Missing keys (Part 1) -->
+    <string name="watchlist_jellyfin">Jellyfin</string>
+    <string name="jellyfin_library_empty">Keine Einträge auf deinem Jellyfin-Server gefunden</string>
+    <string name="jellyfin_not_connected">Verbinde deinen Jellyfin-Server unter Einstellungen → Integrationen</string>
+    <string name="tv_settings_cat_account">Konto</string>
+    <string name="tv_settings_cat_account_sub">Anmeldung &amp; Abonnement</string>
+    <string name="tv_settings_cat_playback">Wiedergabe</string>
+    <string name="tv_settings_cat_playback_sub">Qualität &amp; Autoplay</string>
+    <string name="tv_settings_cat_appearance">Darstellung</string>
+    <string name="tv_settings_cat_appearance_sub">Sprache &amp; Layout</string>
+    <string name="tv_settings_cat_library">Bibliothek</string>
+    <string name="tv_settings_cat_library_sub">Kanäle &amp; Listen</string>
+    <string name="tv_settings_cat_connections">Verbindungen</string>
+    <string name="tv_settings_cat_connections_sub">Dienste &amp; Geräte</string>
+    <string name="tv_settings_cat_advanced">Erweitert</string>
+    <string name="tv_settings_cat_about">Über</string>
+    <string name="tv_settings_cat_about_sub">Version &amp; Rechtliches</string>
+    <string name="tv_settings_subscription">Abonnement</string>
+    <string name="tv_settings_legal">Rechtliches</string>
+    <string name="tv_settings_legal_subtitle">Datenschutz &amp; Nutzungsbedingungen</string>
+    <string name="tv_settings_stats">Statistiken</string>
+    <string name="tv_settings_sync_error">Synchronisierungsfehler</string>
+    <string name="tv_settings_language_restart">Sprache geändert — ein Neustart kann für die vollständige Übernahme nötig sein</string>
+
+    <!-- Account Screen -->
+    <string name="account_title">Konto</string>
+    <string name="account_not_signed_in">Nicht angemeldet</string>
+    <string name="account_this_device">Dieses Gerät: %s</string>
+    <string name="account_settings_sync_ok">Einstellungen werden über dein Konto synchronisiert.</string>
+    <string name="account_settings_sync_error">Synchronisierungsfehler: %s</string>
+    <string name="account_pairings">Kopplungen</string>
+    <string name="account_no_pairings">Noch keine gekoppelten TVs oder Steuerungsgeräte.</string>
+    <string name="account_pairings_count_one">%d aktive Kopplung mit diesem Konto verknüpft.</string>
+    <string name="account_pairings_count_other">%d aktive Kopplungen mit diesem Konto verknüpft.</string>
+    <string name="account_pairing_note">Kopplung dient nur der Fernsteuerung und Wiedergabeübergabe. Einstellungen werden über das Konto synchronisiert.</string>
+    <string name="account_manage_pairings">Kopplungen verwalten</string>
+    <string name="account_devices">Geräte</string>
+    <string name="account_devices_note">Angemeldete Geräte werden separat verwaltet und zählen zum 5-Geräte-Limit.</string>
+    <string name="account_manage_signed_in">Angemeldete Geräte verwalten</string>
+    <!-- Devices Screen -->
+    <string name="devices_paired_title">Gekoppelte Geräte</string>
+    <string name="devices_paired_desc">Kopple TVs oder Steuerungsgeräte für Fernsteuerung und Wiedergabeübergabe. Einstellungen werden über die Kontoanmeldung synchronisiert.</string>
+    <string name="devices_pairing_code">Kopplungscode</string>
+    <string name="devices_add_pairing">Kopplung hinzufügen</string>
+    <string name="devices_refresh">Aktualisieren</string>
+    <string name="devices_sign_in_first">Melde dich an, bevor du weitere Geräte koppelst.</string>
+    <string name="devices_pairing_unavailable">Code-basierte Kopplung ist auf diesem Server derzeit nicht verfügbar.</string>
+    <string name="devices_no_paired">Noch keine gekoppelten Geräte mit diesem Konto verknüpft.</string>
+    <string name="devices_last_seen">Zuletzt gesehen: %s</string>
+    <string name="devices_state_label">Status: %s</string>
+    <string name="devices_state_revoked">widerrufen</string>
+    <string name="devices_revoked_at">Widerrufen: %s</string>
+    <string name="devices_unpair">Entkoppeln</string>
+    <!-- Manage Devices -->
+    <string name="manage_devices_title">Geräte verwalten</string>
+    <string name="manage_devices_limit_info">Dein Torve Pro-Konto kann auf bis zu %d Geräten gleichzeitig aktiv sein.</string>
+    <string name="manage_devices_count">%1$d von %2$d Geräten aktiv</string>
+    <string name="manage_devices_remove_info">Das Entfernen eines Geräts gibt einen Platz für ein anderes Gerät frei.</string>
+    <string name="manage_devices_inactive_info">Inaktive Geräte werden nach längerer Inaktivität möglicherweise automatisch entfernt.</string>
+    <string name="manage_devices_this_device">DIESES GERÄT</string>
+    <string name="manage_devices_active">Aktiv</string>
+    <string name="manage_devices_removed">Entfernt</string>
+    <string name="manage_devices_remove_cd">Gerät entfernen</string>
+    <string name="manage_devices_remove_title">Gerät entfernen</string>
+    <string name="manage_devices_remove_confirm">„%s" aus deinem Torve Pro-Konto entfernen? Dies gibt einen Geräteplatz frei.</string>
+    <!-- Device Limit -->
+    <string name="device_limit_title">Gerätelimit erreicht</string>
+    <string name="device_limit_message">Dein Torve Pro-Konto ist bereits auf %d Geräten aktiv. Entferne ein Gerät, um Torve Pro auf diesem Gerät zu aktivieren.</string>
+    <string name="device_limit_active_devices">Aktive Geräte</string>
+    <string name="device_limit_activate_hint">Um dieses Gerät zu aktivieren, entferne eines von deinem Konto.</string>
+    <string name="device_limit_remove_confirm">„%s" entfernen? Dies gibt einen Platz frei und Torve Pro wird auf deinem aktuellen Gerät aktiviert.</string>
+    <string name="device_limit_remove_activate">Entfernen &amp; Aktivieren</string>
+    <!-- Stats -->
+    <string name="stats_top_genres">Top-Genres</string>
+    <string name="stats_watched_count">%d angesehen</string>
+    <string name="stats_most_active_days">Aktivste Tage</string>
+    <string name="stats_no_data_desc">Schaue etwas, um deine Statistiken zu sehen</string>
+    <!-- Profile -->
+    <string name="profile_torve_user">Torve-Nutzer</string>
+    <string name="profile_trakt_connected">Trakt verbunden</string>
+    <string name="profile_quick_access">Schnellzugriff</string>
+    <string name="profile_calendar">Kalender</string>
+    <string name="profile_calendar_sub">Kommende Episoden &amp; Veröffentlichungen</string>
+    <string name="profile_downloads">Downloads</string>
+    <string name="profile_downloads_sub">Offline-Inhalte verwalten</string>
+    <string name="profile_stats">Statistiken</string>
+    <string name="profile_stats_sub">Deine Wiedergabeaktivität</string>
+    <string name="profile_channels">Kanäle</string>
+    <string name="profile_subscription">Abonnement</string>
+    <string name="profile_subscription_sub">Deinen Plan verwalten</string>
+    <string name="profile_profiles">Profile</string>
+    <string name="profile_profiles_sub">Profile wechseln oder verwalten</string>
+    <string name="profile_settings">Einstellungen</string>
+    <string name="profile_settings_sub">Konten, Qualität, Darstellung</string>
+    <!-- Settings Sections -->
+    <string name="settings_sign_in_manage">Melde dich an, um dein Abonnement und deine Geräte zu verwalten.</string>
+    <string name="settings_sign_in_create">Anmelden / Konto erstellen</string>
+    <string name="settings_content_management">Inhaltsverwaltung</string>
+    <string name="settings_home_layout">Startseiten-Layout</string>
+    <string name="settings_home_layout_sub">Bereichsreihenfolge &amp; Posterstil</string>
+    <string name="settings_card_style">Kartenstil</string>
+    <string name="settings_card_style_sub">Größe, Hover-Zoom, Gesehen-Anzeigen, Darstellung</string>
+    <string name="settings_addons_sub">%d installiert · Durchsuchen &amp; verwalten</string>
+    <string name="settings_streaming_services">Streaming-Dienste</string>
+    <string name="settings_streaming_services_sub">Startseiten-Dienste personalisieren</string>
+    <string name="settings_stream_groups">Stream-Gruppen</string>
+    <string name="settings_stream_groups_sub">%d Gruppen</string>
+    <string name="settings_regex_patterns">Regex-Muster</string>
+    <string name="settings_regex_patterns_sub">%d Muster</string>
+    <string name="settings_ratings">Bewertungen</string>
+    <string name="settings_ratings_sub">Bewertungspillen aus mehreren Quellen</string>
+    <string name="settings_integrations">Integrationen</string>
+    <string name="settings_integrations_sub">Trakt, SIMKL, Jellyfin, Plex</string>
+    <string name="settings_kodi_desc">Kodi-Hosts und Fernsteuerungsintegration mit Lifetime Access konfigurieren.</string>
+    <string name="settings_ai_features">KI-Funktionen</string>
+    <string name="settings_backup">Sicherung</string>
+    <string name="settings_account_sync">Kontosynchronisierung</string>
+    <string name="settings_account_sync_desc">Kopplungen und angemeldete Geräte mit Lifetime Access verwalten. Einstellungen werden über dein Konto synchronisiert.</string>
+    <string name="settings_manage_devices">Geräte verwalten</string>
+    <string name="settings_diagnostics">Diagnose</string>
+    <string name="settings_report_issue">Problem melden</string>
+    <string name="settings_danger_zone">Gefahrenzone</string>
+    <string name="settings_region">Region</string>
+    <!-- Sync Dialog -->
+    <string name="sync_no_targets">Keine gekoppelten Zielgeräte gefunden.</string>
+    <string name="sync_device_info">%1$s - %2$s</string>
+    <!-- Search -->
+    <string name="search_create_profile_first">Erstelle ein lokales Profil, um Suchen an einen TV zu senden</string>
+    <string name="search_no_paired_tv">Keine gekoppelten TV-Geräte gefunden</string>
+    <string name="search_send_to_device_cd">Suche an Gerät senden</string>
+    <string name="search_listening">Zuhören</string>
+    <string name="search_processing_voice">Spracheingabe wird verarbeitet</string>
+    <string name="search_send_to_device_title">Suche an Gerät senden</string>
+    <string name="search_enter_query_first">Gib zuerst einen Suchbegriff ein</string>
+    <string name="search_sent_to">Suche an %s gesendet</string>
+    <!-- Player -->
+    <string name="player_switched_source">Zu einer stabileren Quelle gewechselt</string>
+    <string name="player_resume_title">Wiedergabe fortsetzen</string>
+    <string name="player_resume_message">Ab %s fortsetzen oder von vorne beginnen?</string>
+    <string name="player_resume">Fortsetzen</string>
+    <string name="player_start_over">Von vorne</string>
+    <string name="player_cast_cd">Übertragen</string>
+    <string name="player_create_profile_first">Erstelle ein lokales Profil, um die Wiedergabe zu übertragen</string>
+    <string name="player_no_paired_tv">Keine gekoppelten TV-Geräte gefunden</string>
+    <string name="player_play_on_device_cd">Auf Gerät abspielen</string>
+    <string name="player_voice_cd">Sprachbefehl</string>
+    <string name="player_audio_delay_cd">Audioverzögerung</string>
+    <string name="player_equalizer_cd">Equalizer</string>
+    <string name="player_play_on_device_title">Auf Gerät abspielen</string>
+    <string name="player_cannot_handoff">Dieser Titel kann nicht übergeben werden</string>
+    <string name="player_sent_to">Wiedergabe an %s gesendet</string>
+    <string name="player_picture_format">Bildformat</string>
+    <string name="player_enter_applies">Enter übernimmt sofort. Zurück schließt.</string>
+    <!-- Detail -->
+    <string name="detail_in_library">In Bibliothek</string>
+    <string name="detail_where_to_watch">Wo ansehen</string>
+    <!-- Channels -->
+    <string name="channels_no_content">Noch keine Inhalte</string>
+    <string name="channels_recently_viewed">Zuletzt angesehen</string>
+    <string name="channels_favorites">Favoriten</string>
+    <string name="channels_no_movies">Keine Filme verfügbar</string>
+    <string name="channels_no_series">Keine Serien verfügbar</string>
+    <string name="channels_no_favourites">Noch keine Favoriten</string>
+    <string name="channels_tap_heart">Tippe auf das Herz bei einem Sender, um ihn hier hinzuzufügen.</string>
+    <string name="channels_no_programme">Keine Programminformationen</string>
+    <string name="channels_filter">Filter</string>
+    <string name="channels_sort">Sortierung</string>
+    <string name="channels_select_countries">Wähle Länder und Kategorien, die du sehen möchtest</string>
+    <string name="channels_toggle_view_cd">Ansicht wechseln</string>
+    <string name="channels_filter_sort_cd">Filtern &amp; Sortieren</string>
+    <string name="channels_favorite_cd">Favorit</string>
+    <!-- Mood Matcher -->
+    <string name="mood_what_to_watch">Was soll ich schauen?</string>
+    <string name="mood_pick_mood">Wähle deine Stimmung</string>
+    <string name="mood_love_these">Wir denken, du wirst diese lieben</string>
+    <!-- Misc -->
+    <string name="common_back_cd">Zurück</string>
+    <string name="common_close_cd">Schließen</string>
+    <string name="common_edit_cd">Bearbeiten</string>
+    <string name="common_customize_cd">Anpassen</string>
+    <string name="common_voice_search_cd">Sprachsuche</string>
+    <string name="downloaded_cd">Heruntergeladen</string>
+    <string name="watched_cd">Gesehen</string>
+    <string name="drag_to_reorder_cd">Zum Neuanordnen ziehen</string>
+    <string name="discover_title">Entdecken</string>
+    <string name="next_format">Nächste: %s</string>
+
+    <!-- Notifications -->
+    <string name="notif_channel_downloads">Downloads</string>
+    <string name="notif_channel_downloads_desc">Benachrichtigungen zum Download-Fortschritt</string>
+    <string name="notif_download_starting">Download wird gestartet…</string>
+    <string name="notif_download_progress">%d %% heruntergeladen</string>
+    <string name="notif_download_complete">Download abgeschlossen</string>
+    <string name="notif_channel_episodes">Episoden-Benachrichtigungen</string>
+    <string name="notif_channel_episodes_desc">Benachrichtigungen über neue Serienepisoden</string>
+    <string name="notif_new_episodes">Neue Episoden verfügbar</string>
+    <string name="notif_episodes_and_more">%1$s und %2$d weitere</string>
+    <!-- Premium -->
+    <string name="premium_locked">Gesperrt</string>
+    <string name="premium_requires_lifetime">Erfordert Lifetime Access</string>
+    <string name="premium_unlock_with_lifetime">Mit Lifetime Access freischalten</string>
+    <string name="premium_benefit_watchlist">Merkliste und Favoriten</string>
+    <string name="premium_benefit_integrations">Trakt-, Simkl-, Jellyfin-, Plex- und Kodi-Integrationen</string>
+    <string name="premium_benefit_pairing">Telefon-Kopplung und geräteübergreifende Synchronisierung</string>
+    <string name="premium_benefit_personalization">Erweiterte Personalisierung und Bibliotheksverwaltung</string>
+    <string name="premium_benefit_tools">Anbieter-Einrichtung, Diagnose und erweiterte Tools</string>
+    <string name="premium_browse_home">Startseite durchsuchen</string>
+    <string name="premium_browse_movies">Filme durchsuchen</string>
+    <string name="premium_browse_tv_shows">Serien durchsuchen</string>
+    <string name="premium_browse_posters">Poster durchsuchen</string>
+    <string name="premium_focused_info">Info-Panel im Fokus</string>
+    <string name="premium_title_artwork">Titelgrafik</string>
+    <string name="premium_metadata_ratings">Metadaten und Bewertungen</string>
+    <string name="premium_view_details">Details ansehen</string>
+    <string name="premium_basic_search">Einfache Suche</string>
+    <string name="premium_about_legal">Über und Rechtliches</string>
+    <string name="premium_purchase_screen">Kaufbildschirm</string>
+    <string name="premium_app_preview">App-Vorschau</string>
+    <string name="premium_trailer_playback">Trailer abspielen</string>
+    <string name="premium_account_setup">Kontoeinrichtung</string>
+    <string name="premium_cloud_sign_in">Cloud-Anmeldung</string>
+    <string name="premium_synced_history">Synchronisierter Wiedergabeverlauf</string>
+    <string name="premium_synced_watchlist">Synchronisierte Merkliste</string>
+    <string name="premium_synced_favorites">Synchronisierte Favoriten</string>
+    <string name="premium_custom_layout_sync">Benutzerdefinierte Layout-Synchronisierung</string>
+    <string name="premium_cross_device_sync">Geräteübergreifende Synchronisierung</string>
+    <string name="premium_cloud_backup">Cloud-Sicherung</string>
+    <string name="premium_phone_pairing">Telefon-Kopplung</string>
+    <string name="premium_device_linking">Geräteverknüpfung</string>
+    <string name="premium_device_sync">Geräte-Synchronisierung</string>
+    <string name="premium_tv_phone_continuation">TV-Telefon-Fortsetzung</string>
+    <string name="premium_qr_pairing">QR-Kopplung</string>
+    <string name="premium_watchlist_editing">Merkliste bearbeiten</string>
+    <string name="premium_favorites_editing">Favoriten bearbeiten</string>
+    <string name="premium_watched_state">Gesehen-Status</string>
+    <string name="premium_trakt_lists">Trakt-Listen</string>
+    <string name="premium_favorites_manager">Favoriten-Verwaltung</string>
+    <string name="premium_persistent_collections">Dauerhafte Sammlungen</string>
+    <string name="premium_trakt_connect">Trakt verbinden</string>
+    <string name="premium_simkl_connect">Simkl verbinden</string>
+    <string name="premium_jellyfin_setup">Jellyfin-Einrichtung</string>
+    <string name="premium_plex_setup">Plex-Einrichtung</string>
+    <string name="premium_kodi_setup">Kodi-Einrichtung</string>
+    <string name="premium_omdb_setup">OMDb-Einrichtung</string>
+    <string name="premium_mdblist_setup">MDBList-Einrichtung</string>
+    <string name="premium_ai_provider_setup">KI-Anbieter-Einrichtung</string>
+    <string name="premium_cloud_provider_setup">Cloud-Anbieter-Einrichtung</string>
+    <string name="premium_diagnostics">Diagnose</string>
+    <string name="premium_debug_tools">Debug-Tools</string>
+    <string name="premium_provider_tests">Anbieter-Tests</string>
+    <string name="premium_metadata_rebuild">Metadaten-Neuaufbau</string>
+    <string name="premium_provider_rematch">Anbieter-Neuzuordnung</string>
+    <string name="premium_custom_sources">Benutzerdefinierte Quellen</string>
+    <string name="premium_advanced_connections">Erweiterte Verbindungen</string>
+    <string name="premium_developer_logs">Entwickler-Ereignisprotokolle</string>
+    <string name="premium_ai_search">KI-Suche</string>
+    <string name="premium_advanced_recommendations">Erweiterte Empfehlungen</string>
+    <string name="premium_more_like_this">Ähnliche Titel</string>
+    <string name="premium_choose_source">Quelle wählen</string>
+    <string name="premium_stream_playback">Stream-Wiedergabe</string>
+    <string name="premium_downloads">Downloads</string>
+    <!-- TV Settings additional -->
+    <string name="tv_settings_channels_locked_title">Kanäle</string>
+    <string name="tv_settings_premium_channels">Premium-Kanalverwaltung</string>
+    <string name="tv_settings_connections_locked_title">Verbindungen</string>
+    <string name="tv_settings_connections_locked_desc">Cloud- und Metadatenanbieter mit Lifetime Access verknüpfen.</string>
+    <string name="tv_settings_premium_connections">Premium-Verbindungen</string>
+    <string name="tv_settings_advanced_locked_title">Erweitert</string>
+    <string name="tv_settings_advanced_locked_desc">Metadatenanbieter, Integrationen und Diagnose mit Lifetime Access freischalten.</string>
+    <string name="tv_settings_premium_advanced">Premium erweiterte Tools</string>
+    <string name="tv_settings_pairing_desc">Geräte für Steuerung/Sitzungsverknüpfung koppeln und angemeldete Geräte verwalten.</string>
+    <string name="tv_settings_pair_device">Gerät koppeln</string>
+    <string name="tv_settings_paired_count_one">%d gekoppeltes Gerät in diesem Konto</string>
+    <string name="tv_settings_paired_count_other">%d gekoppelte Geräte in diesem Konto</string>
+    <string name="tv_settings_no_paired_yet">Noch keine gekoppelten Geräte</string>
+    <string name="tv_manage_activated_title">Aktivierte Geräte</string>
+    <string name="tv_manage_activated_desc">Geräte mit Lifetime Access unter diesem Konto.</string>
+    <string name="tv_manage_active_count">%1$d von %2$d aktiv</string>
+    <string name="tv_manage_no_activated">Keine aktivierten Geräte gefunden.</string>
+    <string name="tv_manage_revoke_info">Widerrufen entfernt Lifetime Access von diesem Gerät. Entfernen löscht den Geräteeintrag.</string>
+    <string name="tv_manage_paired_title">Gekoppelte Geräte</string>
+    <string name="tv_manage_paired_desc">Geräte, die für Steuerung und Wiedergabeübergabe mit diesem TV/Konto gekoppelt sind.</string>
+    <string name="tv_manage_no_paired">Keine gekoppelten Geräte gefunden.</string>
+    <string name="tv_manage_unpair_info">Entkoppeln trennt nur Steuerung und Wiedergabeübergabe. Einstellungen werden über die Kontoanmeldung synchronisiert.</string>
+    <string name="tv_manage_device_limit_title">Gerätelimit erreicht</string>
+    <string name="tv_manage_device_limit_desc">Dein Torve Pro-Konto ist bereits auf %d Geräten aktiv. Entferne ein Gerät, um Torve Pro auf diesem Gerät zu aktivieren.</string>
+    <string name="tv_manage_current_device">AKTUELLES GERÄT</string>
+    <string name="tv_manage_this_tv">DIESER TV</string>
+    <string name="tv_manage_this_device">DIESES GERÄT</string>
+    <string name="tv_manage_last_active">Zuletzt aktiv: %s</string>
+    <string name="tv_manage_last_seen">Zuletzt gesehen: %s</string>
+    <string name="tv_manage_unpaired">Entkoppelt: %s</string>
+    <string name="tv_manage_remove_title">Gerät entfernen</string>
+    <string name="tv_manage_remove_confirm">„%s" entfernen?</string>
+    <string name="tv_manage_back">&#8249; Zurück</string>
+    <string name="tv_settings_account_sync_status">Kontosynchronisierungsstatus</string>
+    <string name="tv_settings_account_manage_desc">Verwalte dein Torve-Konto auf diesem TV.</string>
+    <string name="tv_settings_torve_account">Torve-Konto</string>
+    <string name="tv_settings_email_not_verified">E-Mail nicht bestätigt</string>
+    <string name="tv_settings_resend_verification">Tippen, um Bestätigungsmail erneut zu senden</string>
+    <string name="tv_settings_log_out">Abmelden</string>
+    <string name="tv_settings_email">E-Mail</string>
+    <string name="tv_settings_password">Passwort</string>
+    <string name="tv_settings_confirm_password">Passwort bestätigen</string>
+    <string name="tv_settings_forgot_password">Passwort vergessen?</string>
+    <string name="tv_settings_forgot_password_desc">Link zum Zurücksetzen des Passworts an deine E-Mail senden</string>
+    <string name="tv_settings_subscription_title">Abonnement</string>
+    <string name="tv_settings_subscription_desc">Torve Pro-Zugang auf diesem Gerät verwalten.</string>
+    <string name="tv_settings_lifetime_access">Lifetime Access</string>
+    <string name="tv_settings_retry_verification">Verifizierung wiederholen</string>
+    <string name="tv_settings_retry_verification_desc">Lifetime Access-Aktivierung mit gespeicherten Amazon-Kaufdetails wiederholen</string>
+    <string name="tv_settings_restore_purchase">Kauf wiederherstellen</string>
+    <string name="tv_settings_restore_purchase_desc">Einen bestehenden Kauf in diesem Store-Konto wiederherstellen</string>
+    <string name="tv_settings_linked_services">Verknüpfte Dienste</string>
+    <string name="tv_settings_linked_services_desc">Aktueller Kontoverknüpfungsstatus deines gekoppelten Telefons.</string>
+    <string name="tv_settings_metadata_providers">Metadatenanbieter</string>
+    <string name="tv_settings_metadata_read_only">Schreibgeschützt während der Telefonsynchronisierung.</string>
+    <string name="tv_settings_streaming_accounts">Streaming-Konten</string>
+    <string name="tv_settings_streaming_accounts_desc">Cloud- und Tracking-Dienste direkt am TV verbinden.</string>
+    <string name="tv_settings_metadata_keys_desc">Schlüssel und Validierung für Metadatendienste.</string>
+    <string name="tv_settings_integrations_title">Integrationen</string>
+    <string name="tv_settings_integrations_desc">Medienserver und externe Dienstverbindungen.</string>
+    <string name="tv_settings_ai_discovery">KI &amp; Entdecken</string>
+    <string name="tv_settings_ai_discovery_desc">Anbieter- und Schlüssel-Einrichtung für KI-gestützte Suche.</string>
+    <string name="tv_settings_metadata_collections">Metadaten-Sammlungen</string>
+    <string name="tv_settings_metadata_collections_desc">MDBList-Sammlungen durchsuchen und verwalten.</string>
+    <string name="tv_settings_content_sources">Inhaltsquellen</string>
+    <string name="tv_settings_channel_visibility">Kanalsichtbarkeit</string>
+    <string name="tv_settings_diagnostics_dev">Diagnose / Entwickler</string>
+    <string name="tv_settings_diagnostics_dev_desc">Entwicklertools und Details zur Fehlerbehebung.</string>
+    <string name="tv_settings_app_info">App-Info</string>
+    <string name="tv_settings_app_info_desc">Versions- und Nutzungsinformationen.</string>
+    <string name="tv_settings_tv_version">Torve TV v%s</string>
+    <string name="tv_settings_build_number">Build-Nummer</string>
+    <string name="tv_settings_legal_support">Rechtliches &amp; Support</string>
+    <string name="tv_settings_support">Support</string>
+    <string name="tv_settings_support_desc">Hilfe und Fehlerbehebung</string>
+    <string name="tv_settings_terms">Nutzungsbedingungen</string>
+    <string name="tv_settings_terms_desc">Nutzungsbedingungen einsehen</string>
+    <string name="tv_settings_not_now">Nicht jetzt</string>
+    <string name="tv_search_all">Alle</string>
+    <string name="tv_search_movies">Filme</string>
+    <string name="tv_search_tv_shows">Serien</string>
+    <string name="tv_library_downloading">Wird heruntergeladen</string>
+    <string name="tv_library_downloaded_movies">Heruntergeladene Filme</string>
+    <string name="tv_library_downloaded_shows">Heruntergeladene Serien</string>
+    <string name="tv_iptv_open_settings">Einstellungen öffnen</string>
+    <string name="tv_home_layout_instructions">OK zum Aktivieren/Deaktivieren. RECHTS zum Verschieben, HOCH/RUNTER zum Sortieren, LINKS zum Beenden.</string>
+    <string name="tv_settings_sign_in_share">Melde dich an, um einen Kauf auf bis zu 5 Geräten zu teilen.</string>
 </resources>
+

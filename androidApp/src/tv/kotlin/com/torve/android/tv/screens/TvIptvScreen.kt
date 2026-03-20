@@ -634,7 +634,7 @@ fun TvIptvScreen(
                         .background(Graphite.copy(alpha = 0.45f), MaterialTheme.shapes.small)
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                 ) {
-                    val noChannelProgrammeText = "No EPG for this channel"
+                    val noChannelProgrammeText = "No guide data"
                     Text(
                         text = focusedProgramme?.title
                             ?: if (state.epgState is EpgState.Loaded) {
