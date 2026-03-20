@@ -71,7 +71,7 @@ fun PrivacyPolicyScreen(onBack: () -> Unit) {
                     "\u2022 AI Providers: If you configure an AI search provider (e.g., Claude, " +
                     "ChatGPT, Gemini), your search queries are sent to that provider's API. " +
                     "No other personal data is included.\n" +
-                    "\u2022 Cloud Services: If you configure a cloud cache service, content identifiers " +
+                    "\u2022 Streaming Services: If you configure a streaming optimization service, content identifiers " +
                     "are sent to check availability. Your API key is sent for authentication.\n" +
                     "\u2022 Jellyfin/Plex: If configured, Torve communicates with your media server " +
                     "to retrieve library and playback data.",

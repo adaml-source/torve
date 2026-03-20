@@ -102,8 +102,21 @@ internal fun TvEpgPreviewPanel(
         player.play()
     }
 
-    DisposableEffect(Unit) {
-        onDispose { player.release() }
+    // Stop playback when Activity goes to background (Home button).
+    // Resume when Activity returns to foreground.
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> player.stop()
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            player.release()
+        }
     }
 
     val progress = focusedProgramme?.let { programme ->

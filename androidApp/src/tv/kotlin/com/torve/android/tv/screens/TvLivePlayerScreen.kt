@@ -1113,13 +1113,25 @@ fun TvLivePlayerScreen(
         exitPlayback()
     }
 
-    // ── Keep screen on ──
-    DisposableEffect(Unit) {
+    // ── Keep screen on + lifecycle stop ──
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
         val window = (context as? android.app.Activity)?.window
         window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // Stop playback when Activity goes to background (Home button).
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
+                    Log.w("TvLivePlayer", "ON_STOP: stopping engine (Home pressed or app backgrounded)")
+                    engineSession?.engine?.stop()
+                }
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
             window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            // Safety net: release if not already stopped by exitPlayback.
             engineSession?.engine?.release()
         }
     }
