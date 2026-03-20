@@ -1088,6 +1088,17 @@ fun TvLivePlayerScreen(
         }
     }
 
+    // Explicit playback exit: stop audio immediately, then navigate.
+    // This prevents double-audio when the user re-enters playback
+    // before Compose disposes the old composable.
+    fun exitPlayback() {
+        Log.w("TvLivePlayer", "exitPlayback: stopping engine before nav pop session=${engineSession?.id}")
+        engineSession?.engine?.stop()
+        engineSession?.engine?.release()
+        engineSession = null
+        onBack()
+    }
+
     LaunchedEffect(sleepTimerTargetElapsedMs, currentChannel?.url) {
         val targetElapsedMs = sleepTimerTargetElapsedMs
         if (targetElapsedMs <= 0L) return@LaunchedEffect
@@ -1097,10 +1108,9 @@ fun TvLivePlayerScreen(
         }
         if (sleepTimerTargetElapsedMs != targetElapsedMs || currentChannel == null) return@LaunchedEffect
         errorBannerMessage = "Sleep timer elapsed. Stopping playback."
-        engine?.stop()
         sleepTimerTargetElapsedMs = 0L
         sleepTimerMinutes = null
-        onBack()
+        exitPlayback()
     }
 
     // ── Keep screen on ──
@@ -1109,14 +1119,17 @@ fun TvLivePlayerScreen(
         window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         onDispose {
             window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            // Safety net: release if not already stopped by exitPlayback.
             engineSession?.engine?.release()
         }
     }
 
     // ── Back handler ──
     BackHandler(enabled = true) {
-        if (!closeOverlayOrReturnToPrevious()) {
-            onBack()
+        val closed = closeOverlayOrReturnToPrevious()
+        Log.w("TvLivePlayer", "BackHandler: overlayClosed=$closed activeOverlay=$activeOverlay")
+        if (!closed) {
+            exitPlayback()
         }
     }
 

@@ -69,6 +69,9 @@ import com.torve.android.player.DeviceCodecProbe
 import com.torve.android.tv.NotificationType
 import com.torve.android.tv.TvNotificationQueue
 import com.torve.android.tv.components.TvEpisodePicker
+import com.torve.android.tv.focus.TvFocusTargetId
+import com.torve.android.tv.focus.rememberRegisteredTvFocusRequester
+import com.torve.android.tv.focus.rememberTvModalFocusRestoreController
 import com.torve.android.tv.premium.TvEntitledFeature
 import com.torve.android.tv.premium.TvPremiumAccess
 import androidx.compose.material.icons.Icons
@@ -154,9 +157,31 @@ fun TvDetailsScreen(
     var didAutoPlay by rememberSaveable(type, id) { mutableStateOf(false) }
     var pendingDownloadAction by remember { mutableStateOf<DownloadAction>(DownloadAction.None) }
     var showWatchlistPicker by remember { mutableStateOf(false) }
+    val watchlistModalRestoreController = rememberTvModalFocusRestoreController(
+        key = "details_watchlist_${type}_$id",
+    )
+    val watchlistTarget = remember(type, id) {
+        TvFocusTargetId(
+            screenId = "details:$type:$id",
+            rowKey = "hero_actions",
+            itemKey = "watchlist_button",
+            rowIndex = 0,
+            itemIndex = 1,
+            targetType = "button",
+        )
+    }
+    val registeredWatchlistFocusRequester = rememberRegisteredTvFocusRequester(
+        controller = watchlistModalRestoreController,
+        target = watchlistTarget,
+        externalRequester = watchlistFocusRequester,
+    )
     // downloadToastMessage replaced by TvNotificationQueue
 
     BackHandler(onBack = onBack)
+    BackHandler(enabled = showWatchlistPicker) {
+        showWatchlistPicker = false
+        watchlistModalRestoreController.requestRestore()
+    }
 
     // Wire download callbacks to trigger WorkManager
     LaunchedEffect(downloadViewModel) {
@@ -223,6 +248,14 @@ fun TvDetailsScreen(
             kotlinx.coroutines.delay(50)
             runCatching { firstStreamFocusRequester.requestFocus() }
         }
+    }
+
+    LaunchedEffect(showWatchlistPicker, watchlistModalRestoreController.pendingRestore?.restoreToken) {
+        if (showWatchlistPicker) return@LaunchedEffect
+        watchlistModalRestoreController.restorePendingFocus(
+            screenId = "details:$type:$id",
+            outerListState = listState,
+        )
     }
 
     LaunchedEffect(state.resolvedStream, state.mediaItem, pendingDownloadAction) {
@@ -299,7 +332,7 @@ fun TvDetailsScreen(
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 40.dp, top = 20.dp, end = 34.dp, bottom = 24.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 20.dp, end = 16.dp, bottom = 24.dp),
     ) {
         mediaItem?.let { item ->
             // ── Hero backdrop + title + buttons ──
@@ -430,8 +463,11 @@ fun TvDetailsScreen(
                                         stringResource(R.string.tv_action_add_watchlist)
                                     }
                                 },
-                                modifier = Modifier.focusRequester(watchlistFocusRequester),
-                                onFocused = { onContentFocused(watchlistFocusRequester) },
+                                modifier = Modifier.focusRequester(registeredWatchlistFocusRequester),
+                                onFocused = {
+                                    watchlistModalRestoreController.markFocused(watchlistTarget)
+                                    onContentFocused(registeredWatchlistFocusRequester)
+                                },
                                 onClick = {
                                     runPremiumAction(TvEntitledFeature.WATCHLIST_EDIT) {
                                         if (isInWatchlist) {
@@ -442,6 +478,10 @@ fun TvDetailsScreen(
                                             if (!traktOn && !simklOn) {
                                                 watchlistViewModel.toggleWatchlist(item)
                                             } else {
+                                                watchlistModalRestoreController.captureOrigin(
+                                                    target = watchlistTarget,
+                                                    outerListState = listState,
+                                                )
                                                 showWatchlistPicker = true
                                             }
                                         }
@@ -507,51 +547,7 @@ fun TvDetailsScreen(
                                 )
                             }
 
-                            // Download buttons
-                            if (item.type == MediaType.MOVIE) {
-                                TvActionButton(
-                                    text = stringResource(R.string.tv_action_download),
-                                    modifier = Modifier.focusRequester(downloadMovieFocusRequester),
-                                    enabled = !isBusy,
-                                    onFocused = { onContentFocused(downloadMovieFocusRequester) },
-                                    onClick = {
-                                        runPremiumAction(TvEntitledFeature.DOWNLOADS) {
-                                            pendingDownloadAction = DownloadAction.Movie
-                                            detailViewModel.fetchStreams(forceManualPick = true)
-                                        }
-                                    },
-                                )
-                            }
-                            if (item.type == MediaType.SERIES) {
-                                TvActionButton(
-                                    text = stringResource(R.string.tv_action_download_all),
-                                    modifier = Modifier.focusRequester(downloadAllFocusRequester),
-                                    enabled = !isBusy,
-                                    onFocused = { onContentFocused(downloadAllFocusRequester) },
-                                    onClick = {
-                                        runPremiumAction(TvEntitledFeature.DOWNLOADS) {
-                                            val media = state.mediaItem
-                                            if (media != null) {
-                                                coroutineScope.launch {
-                                                    val episodes = bulkDownloadManager.buildAllSeasonsTargets(media)
-                                                    val ids = bulkDownloadManager.enqueueBulk(
-                                                        mediaItem = media,
-                                                        episodes = episodes,
-                                                        debridProvider = settingsViewModel.getDebridProvider(),
-                                                        debridApiKey = settingsViewModel.getDebridApiKey(),
-                                                        debridAccounts = settingsViewModel.getDebridAccounts(),
-                                                        preferences = settingsViewModel.buildStreamPreferences(),
-                                                        deviceCaps = DeviceCodecProbe.probe(),
-                                                    )
-                                                    ids.forEach { DownloadWorker.enqueue(context, it) }
-                                                    downloadViewModel.loadDownloads()
-                                                    TvNotificationQueue.post("Queued ${ids.size} episodes for download", NotificationType.SUCCESS)
-                                                }
-                                            }
-                                        }
-                                    },
-                                )
-                            }
+                            // Download buttons removed — TV is stream-only
                         }
                     }
                 }
@@ -798,7 +794,7 @@ fun TvDetailsScreen(
                     )
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        contentPadding = PaddingValues(end = 16.dp),
+                        contentPadding = PaddingValues(start = 8.dp, end = 16.dp),
                         modifier = Modifier.padding(bottom = 16.dp),
                     ) {
                         items(item.cast.take(12), key = { it.id }) { member ->
@@ -832,26 +828,7 @@ fun TvDetailsScreen(
                         onEpisodeSelected = { season, episode ->
                             detailViewModel.fetchStreams(season = season, episode = episode)
                         },
-                        onSeasonDownload = { season ->
-                            val media = state.mediaItem ?: return@TvEpisodePicker
-                            val seasonObj = media.seasons.find { it.seasonNumber == season }
-                            val epCount = seasonObj?.episodeCount ?: return@TvEpisodePicker
-                            coroutineScope.launch {
-                                val episodes = bulkDownloadManager.buildSeasonTargets(season, epCount)
-                                val ids = bulkDownloadManager.enqueueBulk(
-                                    mediaItem = media,
-                                    episodes = episodes,
-                                    debridProvider = settingsViewModel.getDebridProvider(),
-                                    debridApiKey = settingsViewModel.getDebridApiKey(),
-                                    debridAccounts = settingsViewModel.getDebridAccounts(),
-                                    preferences = settingsViewModel.buildStreamPreferences(),
-                                    deviceCaps = DeviceCodecProbe.probe(),
-                                )
-                                ids.forEach { DownloadWorker.enqueue(context, it) }
-                                downloadViewModel.loadDownloads()
-                                TvNotificationQueue.post("Queued ${ids.size} episodes for download", NotificationType.SUCCESS)
-                            }
-                        },
+                        onSeasonDownload = { },
                         onFirstContentRequester = onFirstContentRequester,
                         onContentFocused = onContentFocused,
                     )
@@ -869,7 +846,7 @@ fun TvDetailsScreen(
                     )
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        contentPadding = PaddingValues(end = 16.dp),
+                        contentPadding = PaddingValues(start = 8.dp, end = 16.dp),
                         modifier = Modifier.padding(bottom = 16.dp),
                     ) {
                         items(state.similar.take(10), key = { it.id }) { similar ->
@@ -907,12 +884,13 @@ fun TvDetailsScreen(
                             .background(if (focused) Amber.copy(alpha = 0.2f) else Graphite)
                             .focusRequester(req)
                             .onFocusChanged { focused = it.isFocused; if (it.isFocused) onContentFocused(req) }
-                            .clickable(remember { MutableInteractionSource() }, null) {
-                                runPremiumAction(TvEntitledFeature.WATCHLIST_EDIT) {
-                                    watchlistViewModel.addToWatchlist(mediaItem, syncTrakt = false, syncSimkl = false)
-                                    showWatchlistPicker = false
+                                .clickable(remember { MutableInteractionSource() }, null) {
+                                    runPremiumAction(TvEntitledFeature.WATCHLIST_EDIT) {
+                                        watchlistViewModel.addToWatchlist(mediaItem, syncTrakt = false, syncSimkl = false)
+                                        showWatchlistPicker = false
+                                        watchlistModalRestoreController.requestRestore()
+                                    }
                                 }
-                            }
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                     ) {
                         Text(stringResource(R.string.tv_watchlist_local_only), color = Snow, style = MaterialTheme.typography.bodyLarge)
@@ -937,6 +915,7 @@ fun TvDetailsScreen(
                                     runPremiumAction(TvEntitledFeature.WATCHLIST_EDIT) {
                                         watchlistViewModel.addToWatchlist(mediaItem, syncTrakt = true, syncSimkl = false)
                                         showWatchlistPicker = false
+                                        watchlistModalRestoreController.requestRestore()
                                     }
                                 }
                                 .padding(horizontal = 16.dp, vertical = 12.dp),
@@ -964,6 +943,7 @@ fun TvDetailsScreen(
                                     runPremiumAction(TvEntitledFeature.WATCHLIST_EDIT) {
                                         watchlistViewModel.addToWatchlist(mediaItem, syncTrakt = false, syncSimkl = true)
                                         showWatchlistPicker = false
+                                        watchlistModalRestoreController.requestRestore()
                                     }
                                 }
                                 .padding(horizontal = 16.dp, vertical = 12.dp),
@@ -991,6 +971,7 @@ fun TvDetailsScreen(
                                     runPremiumAction(TvEntitledFeature.WATCHLIST_EDIT) {
                                         watchlistViewModel.addToWatchlist(mediaItem, syncTrakt = true, syncSimkl = true)
                                         showWatchlistPicker = false
+                                        watchlistModalRestoreController.requestRestore()
                                     }
                                 }
                                 .padding(horizontal = 16.dp, vertical = 12.dp),

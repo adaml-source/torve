@@ -1,5 +1,6 @@
 package com.torve.android.tv.screens
 
+import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
@@ -64,6 +65,7 @@ import com.torve.presentation.channels.EpgState
 import com.torve.presentation.channels.ChannelsViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.koin.compose.koinInject
 
 private const val SIDEBAR_WEIGHT = 0.30f
@@ -101,6 +103,7 @@ fun TvIptvScreen(
     viewModel: ChannelsViewModel = koinInject(),
     shouldAutoFocus: Boolean = true,
     isActive: Boolean = true,
+    isSubRouteActive: Boolean = false,
     isRailFocused: Boolean = false,
     isRailExpanded: Boolean = false,
     onCollapseRail: () -> Unit = {},
@@ -234,7 +237,7 @@ fun TvIptvScreen(
         state.selectedCountries,
     ) {
         val actualCategories = state.categories
-            .filter { it.channels.isNotEmpty() }
+            .filter { it.channels.isNotEmpty() || it.channelCount > 0 }
             .sortedWith(compareBy<ChannelCategory>({ (it.countryCode ?: "ZZZ").uppercase() }, { it.name.lowercase() }))
 
         val filteredFavorites = state.favorites.filter {
@@ -245,13 +248,13 @@ fun TvIptvScreen(
         }
 
         buildList {
-            val allChannels = actualCategories.flatMap { it.channels }
-            if (allChannels.isNotEmpty()) {
+            val totalChannelCount = actualCategories.sumOf { if (it.channels.isNotEmpty()) it.channels.size else it.channelCount }
+            if (totalChannelCount > 0) {
                 add(
                     ChannelCategory(
                         name = allChannelsLabel,
-                        channelCount = allChannels.size,
-                        channels = allChannels,
+                        channelCount = totalChannelCount,
+                        channels = emptyList(), // loaded on demand when selected
                     ),
                 )
             }
@@ -342,7 +345,51 @@ fun TvIptvScreen(
     }
 
     val focusedCategory = displayCategories.getOrNull(focusedGroupIndex)
-    val channelsInGroup = focusedCategory?.channels.orEmpty()
+
+    // On-demand channel + EPG loading: when cached categories have empty channels,
+    // load channels and their EPG programmes from DB for the focused category.
+    var onDemandCategoryName by remember { mutableStateOf<String?>(null) }
+    var onDemandChannels by remember { mutableStateOf<List<EnrichedChannel>>(emptyList()) }
+    var onDemandProgrammes by remember { mutableStateOf<Map<String, List<EpgProgramme>>>(emptyMap()) }
+
+    LaunchedEffect(focusedCategory?.name, state.selectedPlaylistId) {
+        val cat = focusedCategory ?: return@LaunchedEffect
+        if (cat.channels.isEmpty() && cat.channelCount > 0 && cat.name != allChannelsLabel) {
+            val playlistId = state.selectedPlaylistId ?: return@LaunchedEffect
+            Log.d("TvIptv", "On-demand load: category=${cat.name} count=${cat.channelCount}")
+            val (loaded, programmes) = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val channels = viewModel.getChannelsForCategoryDirect(playlistId, cat.name)
+                // Load EPG programmes for these channels from local DB
+                val progs = viewModel.getProgrammesForChannelsDirect(playlistId, channels)
+                channels to progs
+            }
+            onDemandCategoryName = cat.name
+            onDemandChannels = loaded
+            onDemandProgrammes = programmes
+            Log.d("TvIptv", "On-demand loaded: ${loaded.size} channels, ${programmes.size} EPG keys for ${cat.name}")
+        }
+    }
+
+    val channelsInGroup = remember(
+        focusedCategory,
+        state.categories,
+        onDemandCategoryName,
+        onDemandChannels,
+        state.selectedCountries,
+    ) {
+        val cat = focusedCategory ?: return@remember emptyList()
+        if (cat.channels.isNotEmpty()) {
+            cat.channels
+        } else if (cat.name == allChannelsLabel && cat.channelCount > 0) {
+            state.categories
+                .filter { it.channels.isNotEmpty() }
+                .flatMap { it.channels }
+        } else if (onDemandCategoryName == cat.name && onDemandChannels.isNotEmpty()) {
+            onDemandChannels
+        } else {
+            emptyList()
+        }
+    }
     // Recompute the anchor every 30 s so the EPG timeline tracks real time.
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
@@ -385,10 +432,10 @@ fun TvIptvScreen(
             windowPageOffset = 0
             lastGridRowIndex = 0
             lastGridColIndex = -1
-        } else if (targetCategory.channels.isNotEmpty()) {
-            lastGridRowIndex = lastGridRowIndex.coerceIn(0, targetCategory.channels.lastIndex)
+        } else if (targetCategory.channelCount > 0) {
+            lastGridRowIndex = lastGridRowIndex.coerceIn(0, targetCategory.channelCount - 1)
         }
-        if (targetCategory.channels.isEmpty()) return
+        if (targetCategory.channelCount == 0) return
         focusedZone = FocusZone.EPG_GRID
         onContentFocused(focusedCategoryFocusRequester)
         gridFocusRequestToken += 1
@@ -462,6 +509,24 @@ fun TvIptvScreen(
             }
         }
         wasActive = true
+    }
+
+    // Restore focus to the correct zone when returning from player sub-route.
+    // TvRoot's generic focus restore always lands on the sidebar requester;
+    // this overrides it by redirecting to the saved focusedZone.
+    var wasSubRouteActive by remember { mutableStateOf(isSubRouteActive) }
+    LaunchedEffect(isSubRouteActive) {
+        if (wasSubRouteActive && !isSubRouteActive && isActive) {
+            // Returning from player — restore focus to the correct browse zone
+            delay(120) // let TvRoot's generic restore settle first, then override
+            Log.d("TvIptv", "Sub-route exit: restoring focus to zone=$focusedZone")
+            if (focusedZone == FocusZone.EPG_GRID && channelsInGroup.isNotEmpty()) {
+                gridFocusRequestToken += 1
+            } else {
+                requestListFocus()
+            }
+        }
+        wasSubRouteActive = isSubRouteActive
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -557,7 +622,7 @@ fun TvIptvScreen(
                 TvEpgPreviewPanel(
                     focusedChannel = focusedChannel,
                     focusedProgramme = focusedProgramme,
-                    isActive = isActive,
+                    isActive = isActive && !isSubRouteActive,
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(PREVIEW_WEIGHT),
@@ -621,9 +686,15 @@ fun TvIptvScreen(
                             }
                         },
                 ) {
+                    // Merge on-demand EPG programmes with any existing guide data
+                    val effectiveProgrammes = if (onDemandProgrammes.isNotEmpty()) {
+                        state.guideProgrammes + onDemandProgrammes
+                    } else {
+                        state.guideProgrammes
+                    }
                     TvEpgGrid(
                         channels = channelsInGroup,
-                        guideProgrammes = state.guideProgrammes,
+                        guideProgrammes = effectiveProgrammes,
                         windowStartMs = windowStartMs,
                         windowEndMs = windowEndMs,
                         canPageBackward = windowPageOffset > 0,
@@ -678,7 +749,7 @@ fun TvIptvScreen(
                             ) {
                                 CircularProgressIndicator(color = Amber)
                                 Spacer(modifier = Modifier.height(12.dp))
-                                Text(text = "Loading EPG..", color = Silver)
+                                Text(text = stringResource(R.string.tv_iptv_loading_epg), color = Silver)
                             }
                         }
 
@@ -693,12 +764,12 @@ fun TvIptvScreen(
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
                                 Text(
-                                    text = "EPG not configured. Open Settings > Channels to add XMLTV URL.",
+                                    text = stringResource(R.string.tv_iptv_epg_not_configured),
                                     color = Silver,
                                     textAlign = TextAlign.Center,
                                 )
                                 TvIptvControlChip(
-                                    label = "Open Settings",
+                                    label = stringResource(R.string.tv_iptv_open_settings),
                                     onClick = onOpenEpgSettings,
                                 )
                             }

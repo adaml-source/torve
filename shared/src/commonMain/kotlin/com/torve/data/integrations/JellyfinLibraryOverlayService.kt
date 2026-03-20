@@ -26,16 +26,34 @@ class JellyfinLibraryOverlayService(
         if (!stored.isNullOrBlank()) return stored
         val server = prefsRepo.getString(KEY_SERVER_URL)?.trimEnd('/') ?: return null
         val apiKey = secretStore.get(IntegrationSecretKey.JELLYFIN_API_KEY) ?: return null
-        return runCatching {
+        // Try /Users/Me first (works with user access tokens)
+        val meId = runCatching {
             httpClient.get("$server/Users/Me") {
                 header("X-Emby-Token", apiKey)
             }.body<JellyfinUser>()
         }.getOrNull()?.id
+        if (meId != null) return meId
+        // Fall back to first user from /Users (works with server API keys)
+        val firstUser = runCatching {
+            httpClient.get("$server/Users") {
+                header("X-Emby-Token", apiKey)
+            }.body<List<JellyfinUserFull>>()
+        }.getOrNull()?.firstOrNull()?.id
+        if (firstUser != null) {
+            prefsRepo.setString(KEY_SELECTED_USER_ID, firstUser)
+        }
+        return firstUser
+    }
+
+    private suspend fun serverAndKey(): Pair<String, String>? {
+        val server = prefsRepo.getString(KEY_SERVER_URL)?.trimEnd('/') ?: return null
+        val apiKey = secretStore.get(IntegrationSecretKey.JELLYFIN_API_KEY) ?: return null
+        if (server.isBlank() || apiKey.isBlank()) return null
+        return server to apiKey
     }
 
     override suspend fun isInLibrary(tmdbId: Int, mediaType: MediaType): Boolean {
-        val server = prefsRepo.getString(KEY_SERVER_URL)?.trimEnd('/') ?: return false
-        val apiKey = secretStore.get(IntegrationSecretKey.JELLYFIN_API_KEY) ?: return false
+        val (server, apiKey) = serverAndKey() ?: return false
         val userId = resolveUserId() ?: return false
         val includeType = if (mediaType == MediaType.MOVIE) "Movie" else "Series"
         return runCatching {
@@ -51,8 +69,7 @@ class JellyfinLibraryOverlayService(
     }
 
     override suspend fun getContinueWatching(limit: Int): List<WatchProgress> {
-        val server = prefsRepo.getString(KEY_SERVER_URL)?.trimEnd('/') ?: return emptyList()
-        val apiKey = secretStore.get(IntegrationSecretKey.JELLYFIN_API_KEY) ?: return emptyList()
+        val (server, apiKey) = serverAndKey() ?: return emptyList()
         val userId = resolveUserId() ?: return emptyList()
         val response = runCatching {
             httpClient.get("$server/Users/$userId/Items/Resume") {
@@ -82,8 +99,7 @@ class JellyfinLibraryOverlayService(
     }
 
     suspend fun getUserProfiles(): List<JellyfinProfile> {
-        val server = prefsRepo.getString(KEY_SERVER_URL)?.trimEnd('/') ?: return emptyList()
-        val apiKey = secretStore.get(IntegrationSecretKey.JELLYFIN_API_KEY) ?: return emptyList()
+        val (server, apiKey) = serverAndKey() ?: return emptyList()
         return runCatching {
             httpClient.get("$server/Users") {
                 header("X-Emby-Token", apiKey)
@@ -118,6 +134,72 @@ class JellyfinLibraryOverlayService(
         }.getOrDefault(false)
     }
 
+    // ── Library browsing ──
+
+    suspend fun isConnected(): Boolean = serverAndKey() != null
+
+    /**
+     * Returns library sections, or throws with a diagnostic message on failure.
+     */
+    suspend fun getLibrarySectionsOrThrow(): List<JellyfinLibrarySection> {
+        val (server, apiKey) = serverAndKey()
+            ?: error("Server URL or API key not configured")
+        var userId = resolveUserId()
+        if (userId == null) {
+            // resolveUserId failed — try getUserProfiles as last resort
+            val profiles = getUserProfiles()
+            if (profiles.isEmpty()) {
+                error("Could not resolve Jellyfin user. /Users/Me and /Users both failed. Check your API key permissions.")
+            }
+            userId = profiles.first().id
+            prefsRepo.setString(KEY_SELECTED_USER_ID, userId)
+        }
+        val response = httpClient.get("$server/Users/$userId/Views") {
+            header("X-Emby-Token", apiKey)
+        }.body<JellyfinViewsResponse>()
+        // Only exclude pure audio/book libraries — show everything else
+        val filtered = response.items.filter { section ->
+            section.collectionType !in listOf("music", "playlists", "books")
+        }
+        println("JELLYFIN: getLibrarySections total=${response.items.size} filtered=${filtered.size} sections=${filtered.map { "${it.name}(${it.collectionType})" }}")
+        return filtered
+    }
+
+    suspend fun getLibraryItems(
+        parentId: String,
+        startIndex: Int = 0,
+        limit: Int = 50,
+    ): Pair<List<JellyfinBrowseItem>, Int> {
+        val (server, apiKey) = serverAndKey() ?: return emptyList<JellyfinBrowseItem>() to 0
+        val userId = resolveUserId() ?: return emptyList<JellyfinBrowseItem>() to 0
+        return runCatching {
+            val resp: JellyfinBrowseItemsResponse = httpClient.get("$server/Users/$userId/Items") {
+                header("X-Emby-Token", apiKey)
+                parameter("ParentId", parentId)
+                parameter("Recursive", "true")
+                parameter("IncludeItemTypes", "Movie,Series,Video,Episode,MusicVideo")
+                parameter("SortBy", "SortName")
+                parameter("SortOrder", "Ascending")
+                parameter("Fields", "Overview,PrimaryImageTag,ProductionYear,Path")
+                parameter("Limit", limit)
+                parameter("StartIndex", startIndex)
+            }.body()
+            println("JELLYFIN: getLibraryItems parentId=$parentId returned=${resp.items.size} total=${resp.totalRecordCount}")
+            resp.items to resp.totalRecordCount
+        }.getOrDefault(emptyList<JellyfinBrowseItem>() to 0)
+    }
+
+    suspend fun buildImageUrl(itemId: String, maxHeight: Int = 400): String? {
+        val (server, _) = serverAndKey() ?: return null
+        return "$server/Items/$itemId/Images/Primary?maxHeight=$maxHeight&quality=90"
+    }
+
+    suspend fun buildStreamUrl(itemId: String): String? {
+        val (server, apiKey) = serverAndKey() ?: return null
+        // Direct stream — static=true bypasses transcoding entirely
+        return "$server/Videos/$itemId/stream?static=true&api_key=$apiKey"
+    }
+
     companion object {
         private const val KEY_SERVER_URL = "jellyfin_server_url"
         private const val KEY_SELECTED_USER_ID = "jellyfin_selected_user_id"
@@ -125,11 +207,32 @@ class JellyfinLibraryOverlayService(
     }
 }
 
+// ── Public models ──
+
 data class JellyfinProfile(
     val id: String,
     val name: String,
     val isAdmin: Boolean = false,
 )
+
+@Serializable
+data class JellyfinLibrarySection(
+    @SerialName("Id") val id: String,
+    @SerialName("Name") val name: String,
+    @SerialName("CollectionType") val collectionType: String? = null,
+)
+
+@Serializable
+data class JellyfinBrowseItem(
+    @SerialName("Id") val id: String,
+    @SerialName("Name") val name: String,
+    @SerialName("Type") val type: String = "",
+    @SerialName("Overview") val overview: String? = null,
+    @SerialName("ProductionYear") val productionYear: Int? = null,
+    @SerialName("PrimaryImageTag") val primaryImageTag: String? = null,
+)
+
+// ── Private DTOs ──
 
 @Serializable
 private data class JellyfinPublicInfo(
@@ -151,6 +254,17 @@ private data class JellyfinUserFull(
 @Serializable
 private data class JellyfinUserPolicy(
     @SerialName("IsAdministrator") val isAdministrator: Boolean = false,
+)
+
+@Serializable
+private data class JellyfinViewsResponse(
+    @SerialName("Items") val items: List<JellyfinLibrarySection> = emptyList(),
+)
+
+@Serializable
+private data class JellyfinBrowseItemsResponse(
+    @SerialName("Items") val items: List<JellyfinBrowseItem> = emptyList(),
+    @SerialName("TotalRecordCount") val totalRecordCount: Int = 0,
 )
 
 @Serializable
@@ -176,4 +290,3 @@ private data class JellyfinProviderIds(
 private data class JellyfinUserData(
     @SerialName("PlaybackPositionTicks") val playbackPositionTicks: Long? = null,
 )
-

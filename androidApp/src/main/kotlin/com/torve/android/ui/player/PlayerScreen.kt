@@ -97,6 +97,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaSession
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import com.torve.android.BuildConfig
 import com.torve.android.player.AudioEqualizer
 import com.torve.android.device.DeviceFormFactor
 import com.torve.android.cast.CastService
@@ -189,6 +190,7 @@ fun PlayerScreen(
 ) {
     val context = LocalContext.current
     val isTv = remember(context) { DeviceFormFactor.isTv(context) }
+    val forceExoPlayerOnMobileDebug = BuildConfig.DEBUG && !isTv
     val isLiveChannelPlayback = mediaType.equals("live", ignoreCase = true)
 
     // Google Cast (injected; no-op on Amazon builds)
@@ -231,6 +233,7 @@ fun PlayerScreen(
     var subtitleTracks by remember { mutableStateOf<List<TrackDescription>>(emptyList()) }
     var audioTracks by remember { mutableStateOf<List<TrackDescription>>(emptyList()) }
     var useMpv by remember { mutableStateOf(false) }
+    var mpvSurfaceReady by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var codecFallbackUsed by remember { mutableStateOf(false) }
     var codecFallbackInProgress by remember { mutableStateOf(false) }
@@ -260,18 +263,11 @@ fun PlayerScreen(
         mutableStateOf(resumePromptInitialPositionMs >= 20_000L)
     }
     var initialStartPositionConsumed by remember(url, mediaId, startPositionMs) { mutableStateOf(false) }
+    // Focus coordinator: state-driven focus management for TV playback.
+    // Each region owns its own FocusRequesters; the coordinator mediates
+    // inter-region navigation so no cross-tree requester references exist.
+    val focusCoordinator = rememberPlaybackFocusCoordinator()
     val playerRootFocusRequester = remember { FocusRequester() }
-    val playButtonFocusRequester = remember { FocusRequester() }
-    val timelineFocusRequester = remember { FocusRequester() }
-    val topMenuFocusRequester = remember { FocusRequester() }
-    val topCastFocusRequester = remember { FocusRequester() }
-    val topHandoffFocusRequester = remember { FocusRequester() }
-    val topVoiceFocusRequester = remember { FocusRequester() }
-    val topTracksFocusRequester = remember { FocusRequester() }
-    val topAudioDelayFocusRequester = remember { FocusRequester() }
-    val topEqualizerFocusRequester = remember { FocusRequester() }
-    val topPictureFormatFocusRequester = remember { FocusRequester() }
-    val topSpeedFocusRequester = remember { FocusRequester() }
 
     // Mutable episode state — updated when swapping to next episode
     var currentSeasonNumber by remember { mutableStateOf(seasonNumber) }
@@ -389,20 +385,6 @@ fun PlayerScreen(
     // Helper to check if scrobbling should fire
     val canScrobble = traktScrobbleEnabled && traktAccessToken.isNotBlank() && tmdbId > 0
 
-    fun focusRequesterForTopTarget(target: TopMenuFocusTarget): FocusRequester {
-        return when (target) {
-            TopMenuFocusTarget.BACK -> topMenuFocusRequester
-            TopMenuFocusTarget.CAST -> topCastFocusRequester
-            TopMenuFocusTarget.HANDOFF -> topHandoffFocusRequester
-            TopMenuFocusTarget.VOICE -> topVoiceFocusRequester
-            TopMenuFocusTarget.TRACKS -> topTracksFocusRequester
-            TopMenuFocusTarget.AUDIO_DELAY -> topAudioDelayFocusRequester
-            TopMenuFocusTarget.EQUALIZER -> topEqualizerFocusRequester
-            TopMenuFocusTarget.PICTURE_FORMAT -> topPictureFormatFocusRequester
-            TopMenuFocusTarget.SPEED -> topSpeedFocusRequester
-        }
-    }
-
     val visibleTopMenuTargets = buildList {
         add(TopMenuFocusTarget.BACK)
         if (castAvailable) add(TopMenuFocusTarget.CAST)
@@ -423,39 +405,11 @@ fun PlayerScreen(
         return visibleTopMenuTargets[neighborIndex]
     }
 
-    fun topMenuItemModifier(target: TopMenuFocusTarget): Modifier {
-        return Modifier
-            .focusRequester(focusRequesterForTopTarget(target))
-            .focusProperties {
-                left = focusRequesterForTopTarget(topMenuNeighbor(target, -1))
-                right = focusRequesterForTopTarget(topMenuNeighbor(target, 1))
-                down = playButtonFocusRequester
-            }
-    }
-
-    fun requestTopMenuFocus(preferred: TopMenuFocusTarget? = null): Boolean {
-        val targets = (
-            listOfNotNull(preferred, lastTopMenuFocusTarget, TopMenuFocusTarget.BACK) +
-                visibleTopMenuTargets
-            ).distinct()
-        for (target in targets) {
-            val requested = runCatching {
-                focusRequesterForTopTarget(target).requestFocus()
-                true
-            }.getOrDefault(false)
-            if (requested) {
-                lastTopMenuFocusTarget = target
-                return true
-            }
-        }
-        return false
-    }
-
     // Create the player engine once (not keyed on URL for in-place swaps).
     // On TV: always use ExoPlayer — MPV's vo_mediacodec_embed SIGABRTs when
     // the Compose AndroidView hasn't attached a surface yet (WinID == 0).
-    val engine = remember {
-        if (isTv) {
+    val engine = remember(forceExoPlayerOnMobileDebug) {
+        if (isTv || forceExoPlayerOnMobileDebug) {
             val exoEngine = ExoPlayerEngine(context)
             exoEngine.initialize()
             exoEngine as PlayerEngine
@@ -566,7 +520,7 @@ fun PlayerScreen(
                 }
                 engine.stop()
                 engine.play(nextUrl)
-                Toast.makeText(context, "Switched to a more stable source", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.player_switched_source), Toast.LENGTH_SHORT).show()
                 return true
             }
             return false
@@ -1269,6 +1223,10 @@ fun PlayerScreen(
             }
 
             override fun onError(message: String) {
+                if (message.isNonFatalRecoveryMessage()) {
+                    android.util.Log.i("Player", "Ignoring non-fatal playback recovery notice for URL: $currentUrl - $message")
+                    return
+                }
                 android.util.Log.e("Player", "Playback error for URL: $currentUrl — $message")
                 val seekSuppressed = isSeekSuppressionActive()
                 if (!seekSuppressed) {
@@ -1336,9 +1294,10 @@ fun PlayerScreen(
         resetPlaybackHealthWindow()
         if (currentUrl.isBlank()) {
             errorMessage = "No playback URL available"
-        } else {
+        } else if (!useMpv) {
             engine.play(currentUrl)
         }
+        // mpv playback is started by the LaunchedEffect(mpvSurfaceReady) below
         if (!initialStartPositionConsumed && !showResumePrompt && resumePromptInitialPositionMs > 0L) {
             pendingStartPositionMs = resumePromptInitialPositionMs
             initialStartPositionConsumed = true
@@ -1403,6 +1362,13 @@ fun PlayerScreen(
             engine.removeListener(listener)
             audioEqualizer?.release()
             engine.release()
+        }
+    }
+
+    // Start mpv playback only after its surface is attached
+    LaunchedEffect(mpvSurfaceReady) {
+        if (useMpv && mpvSurfaceReady && currentUrl.isNotBlank()) {
+            engine.play(currentUrl)
         }
     }
 
@@ -1590,54 +1556,69 @@ fun PlayerScreen(
         playerRootFocusRequester.requestFocus()
     }
 
-    // Restore top-menu focus on TV so opening/closing overlays never leaves focus lost.
-    LaunchedEffect(
-        showControls,
-        topMenuFocusTick,
-        isTv,
-        showTrackDialog,
-        showAudioDelayDialog,
-        showPictureFormatPicker,
-        showEqualizerSheet,
-        showDevicePicker,
-        showResumePrompt,
-    ) {
-        if (showControls) {
-            if (showTrackDialog || showAudioDelayDialog || showPictureFormatPicker || showEqualizerSheet || showDevicePicker || showResumePrompt) {
-                return@LaunchedEffect
+    // Derive the coordinator uiMode from existing boolean state.
+    // This is the single source of truth for focus topology.
+    val derivedUiMode = when {
+        showResumePrompt -> PlaybackUiMode.ResumePrompt
+        showTrackDialog -> PlaybackUiMode.TrackSelection
+        showAudioDelayDialog -> PlaybackUiMode.AudioDelay
+        showPictureFormatPicker -> PlaybackUiMode.PictureFormat
+        showEqualizerSheet -> PlaybackUiMode.Equalizer
+        showDevicePicker -> PlaybackUiMode.DevicePicker
+        showNextEpisodeOverlay -> PlaybackUiMode.NextEpisode
+        showControls -> PlaybackUiMode.ControlsVisible
+        else -> PlaybackUiMode.ChromeHidden
+    }
+    LaunchedEffect(derivedUiMode) {
+        focusCoordinator.uiMode = derivedUiMode
+    }
+
+    // State-driven focus restoration: when uiMode changes, restore focus
+    // through the coordinator. Only targets currently-registered active regions.
+    LaunchedEffect(derivedUiMode, topMenuFocusTick) {
+        // Let composition settle so new regions register before we request focus
+        delay(60)
+        when (derivedUiMode) {
+            is PlaybackUiMode.ChromeHidden -> {
+                runCatching { playerRootFocusRequester.requestFocus() }
             }
-            delay(50)
-            try {
+            is PlaybackUiMode.ControlsVisible -> {
                 if (isTv) {
+                    // Try coordinator-mediated focus restoration with retries
                     var focused = false
                     for (attempt in 0 until 6) {
-                        if (requestTopMenuFocus(lastTopMenuFocusTarget)) {
+                        if (focusCoordinator.restoreFocusForCurrentMode()) {
                             focused = true
                             break
                         }
-                        if (attempt < 5) {
-                            delay(40)
-                        }
+                        if (attempt < 5) delay(40)
                     }
                     if (!focused) {
-                        requestTopMenuFocus(TopMenuFocusTarget.BACK)
+                        runCatching { playerRootFocusRequester.requestFocus() }
                     }
                 } else {
-                    playButtonFocusRequester.requestFocus()
+                    focusCoordinator.restoreFocusForCurrentMode()
                 }
-            } catch (_: IllegalStateException) {
-                // Not yet attached
             }
-        } else {
-                try {
-                playerRootFocusRequester.requestFocus()
-            } catch (_: IllegalStateException) { }
+            // Modal overlays handle their own initial focus internally
+            else -> {
+                focusCoordinator.restoreFocusForCurrentMode()
+            }
         }
     }
 
     val handoffTargets = syncCoordinator.targetDevices()
         .filter { it.deviceType.contains("tv", ignoreCase = true) }
     val handoffContentId = mediaId.ifBlank { showTmdbId?.toString().orEmpty() }
+
+    // PlayerSurface region: always in composition (the root video surface)
+    RegisterFocusRegion(
+        coordinator = focusCoordinator,
+        region = PlaybackFocusRegion.PlayerSurface,
+        requestFocus = {
+            runCatching { playerRootFocusRequester.requestFocus(); true }.getOrDefault(false)
+        },
+    )
 
     Box(
         modifier = Modifier
@@ -1672,9 +1653,10 @@ fun PlayerScreen(
                             resetSeekAcceleration()
                             controlsInteractionTick++
                             if (isTv) {
-                                val focused = requestTopMenuFocus(lastTopMenuFocusTarget)
-                                if (!focused) {
-                                    runCatching { playButtonFocusRequester.requestFocus() }
+                                // Coordinator resolves Up to the correct active region
+                                val target = focusCoordinator.resolveDirectionalMove(FocusDirection.Up)
+                                if (target != null) {
+                                    focusCoordinator.requestFocusToRegion(target)
                                 }
                                 true
                             } else {
@@ -1685,12 +1667,9 @@ fun PlayerScreen(
                             resetSeekAcceleration()
                             controlsInteractionTick++
                             if (isTv) {
-                                val focused = runCatching {
-                                    playButtonFocusRequester.requestFocus()
-                                    true
-                                }.getOrDefault(false)
-                                if (!focused) {
-                                    requestTopMenuFocus(lastTopMenuFocusTarget)
+                                val target = focusCoordinator.resolveDirectionalMove(FocusDirection.Down)
+                                if (target != null) {
+                                    focusCoordinator.requestFocusToRegion(target)
                                 }
                                 true
                             } else {
@@ -1787,7 +1766,11 @@ fun PlayerScreen(
     ) {
         // Video surface
         if (useMpv) {
-            // MPV SurfaceView
+            // MPV SurfaceView — surface must be attached before mpv can render.
+            // The update block sets the pending binding token; surfaceCreated()
+            // will do the actual attach. onSurfaceAttachedStateChanged signals
+            // mpvSurfaceReady so the DisposableEffect can start playback.
+            val mpvBindingToken = remember { System.identityHashCode(engine) }
             AndroidView(
                 factory = { ctx ->
                     MPVView(ctx).apply {
@@ -1795,7 +1778,17 @@ fun PlayerScreen(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT,
                         )
+                        onSurfaceAttachedStateChanged = { attached ->
+                            mpvSurfaceReady = attached
+                        }
                     }
+                },
+                update = { view ->
+                    view.bindSurface(mpvBindingToken, "mobile_compose_update")
+                },
+                onRelease = { view ->
+                    mpvSurfaceReady = false
+                    view.releaseSurface("mobile_compose_release")
                 },
                 modifier = Modifier.fillMaxSize(),
             )
@@ -1914,6 +1907,8 @@ fun PlayerScreen(
         // Track selection dialog
         if (showTrackDialog) {
             if (isTv) {
+                // Region registration: unregisters when overlay leaves composition
+                RegisterFocusRegion(focusCoordinator, PlaybackFocusRegion.TrackSelectionOverlay) { true }
                 TvTrackSelectionOverlay(
                     subtitleTracks = subtitleTracks,
                     audioTracks = audioTracks,
@@ -1969,6 +1964,7 @@ fun PlayerScreen(
 
         if (showAudioDelayDialog) {
             if (isTv) {
+                RegisterFocusRegion(focusCoordinator, PlaybackFocusRegion.AudioDelayOverlay) { true }
                 TvAudioDelayOverlay(
                     currentDelayMs = audioDelayMs,
                     onSave = { newDelay ->
@@ -2003,6 +1999,7 @@ fun PlayerScreen(
         }
 
         if (showPictureFormatPicker && isTv) {
+            RegisterFocusRegion(focusCoordinator, PlaybackFocusRegion.PictureFormatOverlay) { true }
             TvPictureFormatOverlay(
                 currentFormat = pictureFormat,
                 onSelect = { selected ->
@@ -2021,6 +2018,7 @@ fun PlayerScreen(
         // Equalizer sheet
         if (showEqualizerSheet) {
             if (isTv) {
+                RegisterFocusRegion(focusCoordinator, PlaybackFocusRegion.EqualizerOverlay) { true }
                 audioEqualizer?.let { eq ->
                     TvEqualizerOverlay(
                         equalizer = eq,
@@ -2083,6 +2081,7 @@ fun PlayerScreen(
 
         // Next Episode overlay
         if (showNextEpisodeOverlay && nextEpisodeInfo != null) {
+            RegisterFocusRegion(focusCoordinator, PlaybackFocusRegion.NextEpisodeOverlay) { true }
             NextEpisodeOverlay(
                 nextEpisodeInfo = nextEpisodeInfo!!,
                 countdown = nextEpisodeCountdown,
@@ -2141,6 +2140,7 @@ fun PlayerScreen(
         }
 
         if (showResumePrompt) {
+            RegisterFocusRegion(focusCoordinator, PlaybackFocusRegion.ResumePromptOverlay) { true }
             val resumeTarget = if (duration > 0L) {
                 resumePromptInitialPositionMs.coerceAtMost(duration)
             } else {
@@ -2148,7 +2148,7 @@ fun PlayerScreen(
             }
             if (isTv) {
                 TvResumePlaybackOverlay(
-                    title = currentTitle.ifBlank { "Resume Playback" },
+                    title = currentTitle.ifBlank { stringResource(R.string.player_resume_title) },
                     resumeFromMs = resumeTarget,
                     onResume = {
                         pendingStartPositionMs = resumeTarget
@@ -2170,8 +2170,8 @@ fun PlayerScreen(
                         initialStartPositionConsumed = true
                         showResumePrompt = false
                     },
-                    title = { Text("Resume Playback") },
-                    text = { Text("Continue from ${formatTime(resumeTarget)} or start over?") },
+                    title = { Text(stringResource(R.string.player_resume_title)) },
+                    text = { Text(stringResource(R.string.player_resume_message, formatTime(resumeTarget))) },
                     confirmButton = {
                         TextButton(
                             onClick = {
@@ -2180,7 +2180,7 @@ fun PlayerScreen(
                                 showResumePrompt = false
                             },
                         ) {
-                            Text("Resume")
+                            Text(stringResource(R.string.player_resume))
                         }
                     },
                     dismissButton = {
@@ -2191,7 +2191,7 @@ fun PlayerScreen(
                                 showResumePrompt = false
                             },
                         ) {
-                            Text("Start Over")
+                            Text(stringResource(R.string.player_start_over))
                         }
                     },
                 )
@@ -2218,6 +2218,74 @@ fun PlayerScreen(
 
         // Controls overlay
         if (showControls && !tvModalOverlayOpen) {
+            // Region-local requesters — scoped to this conditional block.
+            // They live and die with the controls overlay; no cross-tree references.
+            val topMenuRequesters = remember(visibleTopMenuTargets) {
+                visibleTopMenuTargets.associateWith { FocusRequester() }
+            }
+            val playButtonFocusRequester = remember { FocusRequester() }
+            val timelineFocusRequester = remember { FocusRequester() }
+
+            // Build region-local modifier for top menu items: left/right cycle
+            // within the region, no cross-region focusProperties references.
+            fun topMenuItemModifier(target: TopMenuFocusTarget): Modifier {
+                val requester = topMenuRequesters[target] ?: return Modifier
+                val leftTarget = topMenuNeighbor(target, -1)
+                val rightTarget = topMenuNeighbor(target, 1)
+                val leftRequester = topMenuRequesters[leftTarget]
+                val rightRequester = topMenuRequesters[rightTarget]
+                return Modifier
+                    .focusRequester(requester)
+                    .focusProperties {
+                        if (leftRequester != null) left = leftRequester
+                        if (rightRequester != null) right = rightRequester
+                        // down navigates to transport controls via coordinator, not a raw requester
+                        down = playButtonFocusRequester
+                    }
+            }
+
+            // Register TopActions region with the coordinator
+            RegisterFocusRegion(
+                coordinator = focusCoordinator,
+                region = PlaybackFocusRegion.TopActions,
+                requestFocus = { preferredItemKey ->
+                    val preferredTarget = preferredItemKey?.let {
+                        runCatching { TopMenuFocusTarget.valueOf(it) }.getOrNull()
+                    }
+                    val targets = (
+                        listOfNotNull(preferredTarget, lastTopMenuFocusTarget, TopMenuFocusTarget.BACK) +
+                            visibleTopMenuTargets
+                        ).distinct()
+                    for (target in targets) {
+                        val requester = topMenuRequesters[target] ?: continue
+                        val ok = runCatching { requester.requestFocus(); true }.getOrDefault(false)
+                        if (ok) {
+                            lastTopMenuFocusTarget = target
+                            return@RegisterFocusRegion true
+                        }
+                    }
+                    false
+                },
+            )
+
+            // Register TransportControls region
+            RegisterFocusRegion(
+                coordinator = focusCoordinator,
+                region = PlaybackFocusRegion.TransportControls,
+                requestFocus = {
+                    runCatching { playButtonFocusRequester.requestFocus(); true }.getOrDefault(false)
+                },
+            )
+
+            // Register Timeline region
+            RegisterFocusRegion(
+                coordinator = focusCoordinator,
+                region = PlaybackFocusRegion.Timeline,
+                requestFocus = {
+                    runCatching { timelineFocusRequester.requestFocus(); true }.getOrDefault(false)
+                },
+            )
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -2234,7 +2302,10 @@ fun PlayerScreen(
                     FocusableIconButton(
                         onClick = onBack,
                         modifier = topMenuItemModifier(TopMenuFocusTarget.BACK),
-                        onFocused = { lastTopMenuFocusTarget = TopMenuFocusTarget.BACK },
+                        onFocused = {
+                            lastTopMenuFocusTarget = TopMenuFocusTarget.BACK
+                            focusCoordinator.reportFocusedRegion(PlaybackFocusRegion.TopActions, TopMenuFocusTarget.BACK.name)
+                        },
                     ) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
@@ -2269,78 +2340,97 @@ fun PlayerScreen(
                                 castService.showCastDialog()
                             },
                             modifier = topMenuItemModifier(TopMenuFocusTarget.CAST),
-                            onFocused = { lastTopMenuFocusTarget = TopMenuFocusTarget.CAST },
+                            onFocused = {
+                                lastTopMenuFocusTarget = TopMenuFocusTarget.CAST
+                                focusCoordinator.reportFocusedRegion(PlaybackFocusRegion.TopActions, TopMenuFocusTarget.CAST.name)
+                            },
                         ) {
                             Icon(
                                 if (castService.isCasting) Icons.Default.CastConnected else Icons.Default.Cast,
-                                contentDescription = "Cast",
+                                contentDescription = stringResource(R.string.player_cast_cd),
                                 tint = if (castService.isCasting) com.torve.android.ui.theme.Amber else Color.White,
                                 modifier = Modifier.size(24.dp),
                             )
                         }
                     }
 
-                    FocusableIconButton(
-                        onClick = {
-                            when {
-                                !syncState.isAuthenticated -> {
-                                    Toast.makeText(context, "Create a local profile to transfer playback", Toast.LENGTH_SHORT).show()
-                                }
-                                handoffTargets.isEmpty() -> {
-                                    syncCoordinator.refreshDevices()
-                                    Toast.makeText(context, "No paired TV devices found", Toast.LENGTH_SHORT).show()
-                                }
-                                else -> showDevicePicker = true
-                            }
-                        },
-                        modifier = topMenuItemModifier(TopMenuFocusTarget.HANDOFF),
-                        onFocused = { lastTopMenuFocusTarget = TopMenuFocusTarget.HANDOFF },
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Tv,
-                            contentDescription = "Play on device",
-                            tint = if (syncState.isAuthenticated) com.torve.android.ui.theme.Amber else Color.White,
-                            modifier = Modifier.size(24.dp),
-                        )
+                    // Hide handoff (TV icon) and mic buttons on TV — not useful on leanback devices.
+                    val isTvDevice = remember {
+                        context.packageManager.hasSystemFeature("android.software.leanback")
                     }
-
-                    FocusableIconButton(
-                        onClick = {
-                            if (
-                                voiceController.uiState.value.phase == VoiceInputPhase.Error ||
-                                voiceController.uiState.value.phase == VoiceInputPhase.Unsupported
-                            ) {
-                                voiceController.clearState()
-                            }
-                            voiceController.launch()
-                        },
-                        modifier = topMenuItemModifier(TopMenuFocusTarget.VOICE),
-                        onFocused = { lastTopMenuFocusTarget = TopMenuFocusTarget.VOICE },
-                    ) {
-                        val voiceTint = when (voiceController.uiState.value.phase) {
-                            VoiceInputPhase.Listening,
-                            VoiceInputPhase.Processing,
-                            -> com.torve.android.ui.theme.Amber
-
-                            VoiceInputPhase.Error,
-                            VoiceInputPhase.Unsupported,
-                            -> Color(0xFFFFB8B8)
-
-                            VoiceInputPhase.Idle -> Color.White
+                    if (!isTvDevice) {
+                        FocusableIconButton(
+                            onClick = {
+                                when {
+                                    !syncState.isAuthenticated -> {
+                                        Toast.makeText(context, context.getString(R.string.player_create_profile_first), Toast.LENGTH_SHORT).show()
+                                    }
+                                    handoffTargets.isEmpty() -> {
+                                        syncCoordinator.refreshDevices()
+                                        Toast.makeText(context, context.getString(R.string.player_no_paired_tv), Toast.LENGTH_SHORT).show()
+                                    }
+                                    else -> showDevicePicker = true
+                                }
+                            },
+                            modifier = topMenuItemModifier(TopMenuFocusTarget.HANDOFF),
+                            onFocused = {
+                                lastTopMenuFocusTarget = TopMenuFocusTarget.HANDOFF
+                                focusCoordinator.reportFocusedRegion(PlaybackFocusRegion.TopActions, TopMenuFocusTarget.HANDOFF.name)
+                            },
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Tv,
+                                contentDescription = stringResource(R.string.player_play_on_device_cd),
+                                tint = if (syncState.isAuthenticated) com.torve.android.ui.theme.Amber else Color.White,
+                                modifier = Modifier.size(24.dp),
+                            )
                         }
-                        Icon(
-                            imageVector = Icons.Default.Mic,
-                            contentDescription = "Voice command",
-                            tint = voiceTint,
-                            modifier = Modifier.size(24.dp),
-                        )
+                    }
+                    if (!isTvDevice) {
+                        FocusableIconButton(
+                            onClick = {
+                                if (
+                                    voiceController.uiState.value.phase == VoiceInputPhase.Error ||
+                                    voiceController.uiState.value.phase == VoiceInputPhase.Unsupported
+                                ) {
+                                    voiceController.clearState()
+                                }
+                                voiceController.launch()
+                            },
+                            modifier = topMenuItemModifier(TopMenuFocusTarget.VOICE),
+                            onFocused = {
+                                lastTopMenuFocusTarget = TopMenuFocusTarget.VOICE
+                                focusCoordinator.reportFocusedRegion(PlaybackFocusRegion.TopActions, TopMenuFocusTarget.VOICE.name)
+                            },
+                        ) {
+                            val voiceTint = when (voiceController.uiState.value.phase) {
+                                VoiceInputPhase.Listening,
+                                VoiceInputPhase.Processing,
+                                -> com.torve.android.ui.theme.Amber
+
+                                VoiceInputPhase.Error,
+                                VoiceInputPhase.Unsupported,
+                                -> Color(0xFFFFB8B8)
+
+                                VoiceInputPhase.Idle -> Color.White
+                            }
+                            Icon(
+                                imageVector = Icons.Default.Mic,
+                                contentDescription = stringResource(R.string.player_voice_cd),
+                                tint = voiceTint,
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
                     }
 
                     if (subtitleTracks.isNotEmpty() || audioTracks.isNotEmpty()) {
                         FocusableIconButton(
                             onClick = { showTrackDialog = true },
                             modifier = topMenuItemModifier(TopMenuFocusTarget.TRACKS),
-                            onFocused = { lastTopMenuFocusTarget = TopMenuFocusTarget.TRACKS },
+                            onFocused = {
+                                lastTopMenuFocusTarget = TopMenuFocusTarget.TRACKS
+                                focusCoordinator.reportFocusedRegion(PlaybackFocusRegion.TopActions, TopMenuFocusTarget.TRACKS.name)
+                            },
                         ) {
                             Icon(
                                 Icons.Default.Settings,
@@ -2354,11 +2444,14 @@ fun PlayerScreen(
                     FocusableIconButton(
                         onClick = { showAudioDelayDialog = true },
                         modifier = topMenuItemModifier(TopMenuFocusTarget.AUDIO_DELAY),
-                        onFocused = { lastTopMenuFocusTarget = TopMenuFocusTarget.AUDIO_DELAY },
+                        onFocused = {
+                            lastTopMenuFocusTarget = TopMenuFocusTarget.AUDIO_DELAY
+                            focusCoordinator.reportFocusedRegion(PlaybackFocusRegion.TopActions, TopMenuFocusTarget.AUDIO_DELAY.name)
+                        },
                     ) {
                         Icon(
                             Icons.Default.Tune,
-                            contentDescription = "Audio delay",
+                            contentDescription = stringResource(R.string.player_audio_delay_cd),
                             tint = if (audioDelayMs != 0) com.torve.android.ui.theme.Amber else Color.White,
                             modifier = Modifier.size(24.dp),
                         )
@@ -2371,11 +2464,14 @@ fun PlayerScreen(
                                 showControls = true
                             },
                             modifier = topMenuItemModifier(TopMenuFocusTarget.EQUALIZER),
-                            onFocused = { lastTopMenuFocusTarget = TopMenuFocusTarget.EQUALIZER },
+                            onFocused = {
+                                lastTopMenuFocusTarget = TopMenuFocusTarget.EQUALIZER
+                                focusCoordinator.reportFocusedRegion(PlaybackFocusRegion.TopActions, TopMenuFocusTarget.EQUALIZER.name)
+                            },
                         ) {
                             Icon(
                                 Icons.Default.Equalizer,
-                                contentDescription = "Equalizer",
+                                contentDescription = stringResource(R.string.player_equalizer_cd),
                                 tint = if (audioEqualizer?.enabled == true) com.torve.android.ui.theme.Amber else Color.White,
                                 modifier = Modifier.size(24.dp),
                             )
@@ -2389,7 +2485,10 @@ fun PlayerScreen(
                                 showControls = true
                             },
                             modifier = topMenuItemModifier(TopMenuFocusTarget.PICTURE_FORMAT),
-                            onFocused = { lastTopMenuFocusTarget = TopMenuFocusTarget.PICTURE_FORMAT },
+                            onFocused = {
+                                lastTopMenuFocusTarget = TopMenuFocusTarget.PICTURE_FORMAT
+                                focusCoordinator.reportFocusedRegion(PlaybackFocusRegion.TopActions, TopMenuFocusTarget.PICTURE_FORMAT.name)
+                            },
                         ) {
                             Text(
                                 text = pictureFormat.shortLabel,
@@ -2411,7 +2510,10 @@ fun PlayerScreen(
                             showControls = true
                         },
                         modifier = topMenuItemModifier(TopMenuFocusTarget.SPEED),
-                        onFocused = { lastTopMenuFocusTarget = TopMenuFocusTarget.SPEED },
+                        onFocused = {
+                            lastTopMenuFocusTarget = TopMenuFocusTarget.SPEED
+                            focusCoordinator.reportFocusedRegion(PlaybackFocusRegion.TopActions, TopMenuFocusTarget.SPEED.name)
+                        },
                     ) {
                         Text(
                             text = "${playbackSpeed}x",
@@ -2469,8 +2571,8 @@ fun PlayerScreen(
                         onClick = togglePlayback,
                         modifier = Modifier
                             .focusRequester(playButtonFocusRequester)
-                            .focusProperties {
-                                up = focusRequesterForTopTarget(lastTopMenuFocusTarget)
+                            .onFocusChanged {
+                                if (it.isFocused) focusCoordinator.reportFocusedRegion(PlaybackFocusRegion.TransportControls)
                             },
                     ) {
                         Icon(
@@ -2527,7 +2629,10 @@ fun PlayerScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .focusRequester(timelineFocusRequester)
-                            .focusProperties { up = playButtonFocusRequester },
+                            .focusProperties { up = playButtonFocusRequester }
+                            .onFocusChanged {
+                                if (it.isFocused) focusCoordinator.reportFocusedRegion(PlaybackFocusRegion.Timeline)
+                            },
                     )
                     if (duration > 0L && skipSegments.isNotEmpty()) {
                         BoxWithConstraints(
@@ -2577,14 +2682,15 @@ fun PlayerScreen(
     }
 
     if (showDevicePicker) {
+        RegisterFocusRegion(focusCoordinator, PlaybackFocusRegion.DevicePickerOverlay) { true }
         SyncDevicePickerDialog(
-            title = "Play On Device",
+            title = stringResource(R.string.player_play_on_device_title),
             devices = handoffTargets,
             onSelectDevice = { device ->
                 showDevicePicker = false
                 topMenuFocusTick++
                 if (handoffContentId.isBlank()) {
-                    Toast.makeText(context, "This title cannot be handed off", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.player_cannot_handoff), Toast.LENGTH_SHORT).show()
                     return@SyncDevicePickerDialog
                 }
                 scope.launch {
@@ -2596,7 +2702,7 @@ fun PlayerScreen(
                         mediaType = mediaType,
                     )
                     if (result.isSuccess) {
-                        Toast.makeText(context, "Playback sent to ${device.deviceName}", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.player_sent_to, device.deviceName), Toast.LENGTH_SHORT).show()
                     } else {
                         Toast.makeText(
                             context,
@@ -2908,6 +3014,14 @@ private fun formatSkipDeltaLabel(deltaMs: Long): String {
     }
 }
 
+private fun String.isNonFatalRecoveryMessage(): Boolean {
+    return this == "Audio recovered by changing the audio mode." ||
+        this == "Switched to a compatible audio track." ||
+        this == "Audio recovered by changing the playback engine." ||
+        this == "Audio recovered with software decoding." ||
+        this == "Audio confirmed with the mobile-reference playback path."
+}
+
 @Composable
 private fun TvSeekFeedbackOverlay(
     deltaMs: Long,
@@ -3009,12 +3123,12 @@ private fun TvPictureFormatOverlay(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
-                text = "Picture Format",
+                text = stringResource(R.string.player_picture_format),
                 style = MaterialTheme.typography.headlineSmall,
                 color = Color.White,
             )
             Text(
-                text = "Enter applies instantly. Back closes.",
+                text = stringResource(R.string.player_enter_applies),
                 style = MaterialTheme.typography.bodySmall,
                 color = Color.White.copy(alpha = 0.7f),
             )
@@ -3301,7 +3415,7 @@ private fun TvResumePlaybackOverlay(
                 maxLines = 1,
             )
             Text(
-                text = "Continue from ${formatTime(resumeFromMs)} or start over?",
+                text = stringResource(R.string.player_resume_message, formatTime(resumeFromMs)),
                 style = MaterialTheme.typography.bodyMedium,
                 color = Color.White.copy(alpha = 0.84f),
             )
@@ -3313,7 +3427,7 @@ private fun TvResumePlaybackOverlay(
                         .focusRequester(resumeRequester),
                 ) {
                     Text(
-                        text = "Resume",
+                        text = stringResource(R.string.player_resume),
                         color = Color.White,
                         style = MaterialTheme.typography.labelLarge,
                     )
@@ -3323,7 +3437,7 @@ private fun TvResumePlaybackOverlay(
                     modifier = Modifier.weight(1f),
                 ) {
                     Text(
-                        text = "Start Over",
+                        text = stringResource(R.string.player_start_over),
                         color = Color.White,
                         style = MaterialTheme.typography.labelLarge,
                     )

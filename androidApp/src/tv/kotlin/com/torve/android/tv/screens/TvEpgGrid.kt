@@ -75,6 +75,13 @@ private const val EPG_ROW_HEIGHT_DP = 52
 private val epgTimeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
 private val epgDateFormat = SimpleDateFormat("EEE, MMM d", Locale.getDefault())
 
+// Navigation tuning
+private const val VERTICAL_DEBOUNCE_MS = 120L
+private const val FOCUS_SETTLE_MS = 40L
+// Vertical safe band: don't scroll if the target row is within this
+// many rows of the viewport edges. Only scroll when it would leave view.
+private const val VERTICAL_SAFE_MARGIN_ROWS = 1
+
 private data class EpgWindowCell(
     val startMs: Long,
     val endMs: Long,
@@ -117,9 +124,29 @@ internal fun TvEpgGrid(
     val targetCol = focusColIndex.coerceAtLeast(0)
     var lastVerticalMoveMs by remember { mutableLongStateOf(0L) }
 
+    // Gentle scroll: only scroll when the target row is outside the visible
+    // viewport with a small margin. Never snap the target to the top.
     LaunchedEffect(focusRequestToken, targetRow, channels.size) {
         if (channels.isEmpty()) return@LaunchedEffect
-        runCatching { listState.scrollToItem(targetRow) }
+        val firstVisible = listState.firstVisibleItemIndex
+        val visibleCount = listState.layoutInfo.visibleItemsInfo.size
+        val lastVisible = firstVisible + visibleCount - 1
+        val safeTop = firstVisible + VERTICAL_SAFE_MARGIN_ROWS
+        val safeBottom = lastVisible - VERTICAL_SAFE_MARGIN_ROWS
+        when {
+            // Target is above the safe band — scroll up just enough
+            targetRow < safeTop -> {
+                val scrollTo = (targetRow - VERTICAL_SAFE_MARGIN_ROWS).coerceAtLeast(0)
+                runCatching { listState.animateScrollToItem(scrollTo) }
+            }
+            // Target is below the safe band — scroll down just enough
+            targetRow > safeBottom -> {
+                val scrollTo = (targetRow - visibleCount + VERTICAL_SAFE_MARGIN_ROWS + 1)
+                    .coerceIn(0, (channels.size - visibleCount).coerceAtLeast(0))
+                runCatching { listState.animateScrollToItem(scrollTo) }
+            }
+            // Target is within safe band — no scroll needed
+        }
     }
 
     Column(
@@ -128,13 +155,13 @@ internal fun TvEpgGrid(
             .background(Graphite.copy(alpha = 0.55f))
             .border(1.dp, Steel.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
             .onPreviewKeyEvent { event ->
-                // Handle vertical navigation at the grid level so it stays stable
-                // even when LazyColumn cells are being composed/decomposed.
+                // Serialize vertical navigation at the grid level.
+                // Debounce prevents stacked DPAD events from causing double-jumps.
                 when (event.key) {
                     Key.DirectionUp, Key.DirectionDown -> {
                         if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent true
                         val now = System.currentTimeMillis()
-                        if (now - lastVerticalMoveMs < 50L) return@onPreviewKeyEvent true
+                        if (now - lastVerticalMoveMs < VERTICAL_DEBOUNCE_MS) return@onPreviewKeyEvent true
                         lastVerticalMoveMs = now
                         onMoveVertical(if (event.key == Key.DirectionUp) -1 else 1)
                         true
@@ -171,7 +198,7 @@ internal fun TvEpgGrid(
             ) {
                 itemsIndexed(
                     items = channels,
-                    key = { index, enriched -> "${index}_${enriched.channel.url}" },
+                    key = { index, enriched -> "${enriched.channel.url}#$index" },
                 ) { rowIndex, enriched ->
                     val programmes = remember(enriched.channel, guideProgrammes) {
                         val key = canonicalEpgChannelKey(
@@ -398,11 +425,12 @@ private fun EpgProgrammeCell(
     val cellFocusRequester = remember { FocusRequester() }
     var isFocused by remember { mutableStateOf(false) }
 
-    LaunchedEffect(focusRequestToken, applyFocusTarget, isFocusEnabled) {
+    // Single focus request per cell: only fires when this cell becomes the
+    // explicit target. The short settle delay lets the LazyColumn compose
+    // the target row before we request focus.
+    LaunchedEffect(focusRequestToken, applyFocusTarget) {
         if (!isFocusEnabled || !applyFocusTarget) return@LaunchedEffect
-        // Give LazyColumn time to compose/scroll the target row into view
-        // before requesting focus — yield() alone isn't always enough.
-        delay(60)
+        delay(FOCUS_SETTLE_MS)
         runCatching { cellFocusRequester.requestFocus() }
     }
 
@@ -472,8 +500,6 @@ private fun buildWindowCells(
     var cursor = windowStartMs
     var hadVisibleProgramme = false
 
-    // Programmes are already windowed and ordered by repository query:
-    // ORDER BY epg_channel_key, start_time.
     programmes.forEach { programme ->
         if (programme.endTime <= windowStartMs) return@forEach
         if (programme.startTime >= windowEndMs) return@forEach

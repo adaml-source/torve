@@ -81,8 +81,7 @@ internal fun TvEpgPreviewPanel(
             return@LaunchedEffect
         }
         if (!isActive) {
-            player.playWhenReady = false
-            player.pause()
+            player.stop()
             return@LaunchedEffect
         }
         // Stop current playback immediately so rapid scrolling doesn't keep
