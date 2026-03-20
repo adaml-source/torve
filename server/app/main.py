@@ -6,13 +6,15 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 from fastapi.security import OAuth2PasswordBearer
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from .config import get_settings
 from .db import get_session
-from .models import Device, DeviceActivationEvent, Entitlement, EventOutbox, PairingCode, Purchase, Session, User, WatchStateReport, utcnow
+from .models import AccountSettings, Device, DeviceActivationEvent, Entitlement, EventOutbox, PairingCode, Purchase, Session, User, WatchStateReport, utcnow
 from .realtime import ConnectionRegistry, deliver_pending_events, dispatch_event
 from .schemas import (
+    AccountSettingsPatchRequest,
+    AccountSettingsResponse,
     AccessStateResponse,
     AmazonVerifyRequest,
     AppleVerifyRequest,
@@ -65,6 +67,7 @@ from .security import (
 )
 from .entitlements import get_user_entitlements, process_verified_purchase, resolve_premium_access
 from .store_verification import apple_verifier, google_verifier, amazon_verifier
+from .account_settings_policy import is_forbidden_key, strip_forbidden_keys, scrub_stored_settings
 from .device_policy import (
     MAX_ACTIVE_DEVICES,
     count_active_devices,
@@ -362,6 +365,7 @@ async def auth_register(
     await session.flush()
 
     device = await get_or_create_device(session, payload.device, user.id)
+    await try_activate_device(session, user.id, device, has_entitlement=True)
     tokens = await issue_tokens_for_device(session, user, device)
     await session.commit()
 
@@ -384,6 +388,7 @@ async def auth_login(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     device = await get_or_create_device(session, payload.device, user.id)
+    await try_activate_device(session, user.id, device, has_entitlement=True)
     tokens = await issue_tokens_for_device(session, user, device)
     await session.commit()
 
@@ -481,6 +486,39 @@ async def auth_logout(
     return {"status": "ok", "revoked_sessions": revoked_count}
 
 
+@app.delete("/auth/account")
+async def auth_delete_account(
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    """Permanently delete the authenticated user's account and all associated data."""
+    # Revoke all sessions
+    sessions_result = await session.execute(
+        select(Session).where(Session.user_id == user.id, Session.revoked_at.is_(None)),
+    )
+    for row in sessions_result.scalars().all():
+        row.revoked_at = utcnow()
+
+    # Remove devices
+    await session.execute(
+        delete(Device).where(Device.user_id == user.id),
+    )
+    # Remove activation events
+    await session.execute(
+        delete(DeviceActivationEvent).where(DeviceActivationEvent.user_id == user.id),
+    )
+    # Remove sessions
+    await session.execute(
+        delete(Session).where(Session.user_id == user.id),
+    )
+    # Remove the user
+    await session.execute(
+        delete(User).where(User.id == user.id),
+    )
+    await session.commit()
+    return {"status": "ok"}
+
+
 @app.post("/pairing/code", response_model=PairingCodeResponse)
 async def pairing_code(
     payload: PairingCodeRequest,
@@ -523,7 +561,10 @@ async def pairing_claim(
         select(PairingCode).where(PairingCode.code == code),
     )
     code_row = code_result.scalar_one_or_none()
-    if code_row is None or code_row.expires_at < utcnow():
+    if code_row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pairing code is invalid or expired")
+    expires = code_row.expires_at.replace(tzinfo=timezone.utc) if code_row.expires_at.tzinfo is None else code_row.expires_at
+    if expires < utcnow():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pairing code is invalid or expired")
     if code_row.claimed_at is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Pairing code already claimed")
@@ -566,7 +607,8 @@ async def pairing_status(
     if code_row is None or code_row.device_installation_id != payload.installation_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pairing code not found")
 
-    if code_row.expires_at < utcnow():
+    expires = code_row.expires_at.replace(tzinfo=timezone.utc) if code_row.expires_at.tzinfo is None else code_row.expires_at
+    if expires < utcnow():
         return PairingStatusResponse(status="expired")
 
     if code_row.claimed_at is None:
@@ -601,6 +643,82 @@ async def pairing_status(
         user=as_user_response(user),
         tokens=None,
     )
+
+
+@app.get("/me/pairings")
+async def list_pairings(
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    token: Annotated[str, Depends(oauth2_scheme)],
+):
+    """List paired devices for the current user."""
+    current_device_id = None
+    try:
+        payload = decode_token(token, expected_type="access")
+        current_device_id = payload.get("device_id")
+    except ValueError:
+        pass
+
+    result = await session.execute(
+        select(Device)
+        .where(Device.user_id == user.id)
+        .order_by(Device.last_seen_at.desc())
+    )
+    devices = list(result.scalars().all())
+
+    pairings = []
+    for d in devices:
+        if d.id == current_device_id:
+            continue
+        pairings.append({
+            "pairing_id": d.id,
+            "device_id": d.id,
+            "installation_id": d.installation_id,
+            "device_name": d.device_name,
+            "device_type": d.device_type,
+            "platform": d.platform,
+            "last_seen_at": d.last_seen_at.isoformat() if d.last_seen_at else None,
+            "pairing_state": "revoked" if d.revoked_at else "paired",
+            "revoked_at": d.revoked_at.isoformat() if d.revoked_at else None,
+        })
+
+    return {"pairings": pairings}
+
+
+@app.post("/me/pairings/{pairing_id}/revoke")
+async def revoke_pairing(
+    pairing_id: str,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    """Revoke a device pairing."""
+    result = await session.execute(
+        select(Device).where(
+            Device.id == pairing_id,
+            Device.user_id == user.id,
+        )
+    )
+    device = result.scalar_one_or_none()
+    if device is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pairing not found")
+
+    if device.revoked_at is not None:
+        return {"status": "already_revoked"}
+
+    device.revoked_at = utcnow()
+
+    # Revoke all sessions for this device
+    session_result = await session.execute(
+        select(Session).where(
+            Session.device_id == device.id,
+            Session.revoked_at.is_(None),
+        )
+    )
+    for s in session_result.scalars().all():
+        s.revoked_at = utcnow()
+
+    await session.commit()
+    return {"status": "ok"}
 
 
 @app.get("/devices", response_model=list[DeviceResponse])
@@ -824,6 +942,7 @@ async def register_device(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> DeviceResponse:
     device = await get_or_create_device(session, payload, user.id)
+    await try_activate_device(session, user.id, device, has_entitlement=True)
     await session.commit()
     return as_device_response(device)
 
@@ -1120,6 +1239,8 @@ async def get_my_devices(
         result = await session.execute(
             select(Device).where(
                 Device.user_id == user.id,
+                Device.activated_at.is_not(None),
+                Device.removed_at.is_(None),
                 Device.revoked_at.is_(None),
             ).order_by(Device.last_seen_at.desc())
         )
@@ -1194,6 +1315,84 @@ async def rename_managed_device(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found")
     await session.commit()
     return as_managed_device(device)
+
+
+# ── Account settings sync ──
+
+
+@app.get("/me/account-settings", response_model=AccountSettingsResponse)
+async def get_account_settings(
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AccountSettingsResponse:
+    """Get shared account settings for the current user."""
+    result = await session.execute(
+        select(AccountSettings).where(AccountSettings.user_id == user.id)
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        return AccountSettingsResponse(settings={}, updated_at=None)
+    # Defense in depth: strip forbidden keys from response even if legacy data contains them.
+    safe = {k: v for k, v in row.settings_json.items() if v is not None and not is_forbidden_key(k)}
+    return AccountSettingsResponse(
+        settings=safe,
+        updated_at=row.updated_at.isoformat() if row.updated_at else None,
+        updated_by_device_id=row.updated_by_device_id,
+    )
+
+
+@app.patch("/me/account-settings", response_model=AccountSettingsResponse)
+async def patch_account_settings(
+    payload: AccountSettingsPatchRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    token: Annotated[str, Depends(oauth2_scheme)],
+) -> AccountSettingsResponse:
+    """Merge-patch shared account settings. Forbidden secret keys are silently stripped."""
+    device_id = None
+    try:
+        token_payload = decode_token(token, expected_type="access")
+        device_id = token_payload.get("device_id")
+    except ValueError:
+        pass
+
+    # Write-time enforcement: strip forbidden keys before persistence.
+    safe_settings = strip_forbidden_keys(payload.settings)
+
+    result = await session.execute(
+        select(AccountSettings).where(AccountSettings.user_id == user.id)
+    )
+    row = result.scalar_one_or_none()
+
+    if row is None:
+        current = {k: v for k, v in safe_settings.items() if v is not None}
+        row = AccountSettings(
+            user_id=user.id,
+            settings_json=current,
+            updated_by_device_id=device_id,
+        )
+        session.add(row)
+    else:
+        current = dict(row.settings_json) if row.settings_json else {}
+        # Also scrub any forbidden keys already in the stored blob (opportunistic cleanup).
+        current = {k: v for k, v in current.items() if not is_forbidden_key(k)}
+        for key, value in safe_settings.items():
+            if value is None:
+                current.pop(key, None)
+            else:
+                current[key] = value
+        row.settings_json = {k: v for k, v in current.items() if v is not None}
+        row.updated_at = utcnow()
+        row.updated_by_device_id = device_id
+    await session.commit()
+    await session.refresh(row)
+    # Response also strips forbidden keys for defense in depth.
+    safe_response = {k: str(v) for k, v in (row.settings_json or {}).items() if v is not None and not is_forbidden_key(k)}
+    return AccountSettingsResponse(
+        settings=safe_response,
+        updated_at=row.updated_at.isoformat() if row.updated_at else None,
+        updated_by_device_id=row.updated_by_device_id,
+    )
 
 
 @app.websocket("/ws")

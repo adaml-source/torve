@@ -27,6 +27,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -42,12 +44,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -62,13 +60,18 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
@@ -86,6 +89,7 @@ import com.torve.domain.model.DebridServiceType
 import com.torve.domain.model.StreamQuality
 import com.torve.data.auth.AuthClient
 import com.torve.data.auth.AuthUser
+import com.torve.android.ui.auth.VerificationBanner
 import com.torve.domain.model.CodecPreference
 import com.torve.domain.model.HdrMode
 import com.torve.android.ui.theme.Amber
@@ -98,13 +102,14 @@ import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Steel
 import com.torve.android.ui.theme.Torve
+import com.torve.data.account.AccountSettingsRepository
 import com.torve.android.sync.SyncCoordinator
-import com.torve.domain.sync.SyncRepository
 import com.torve.presentation.addon.AddonViewModel
 import com.torve.presentation.channels.ChannelsViewModel
 import com.torve.presentation.settings.AppLanguage
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.settings.ThemeMode
+import com.torve.presentation.session.AccountSessionCoordinator
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import java.util.Locale
@@ -137,11 +142,13 @@ fun SettingsScreen(
     onDiagnosticsClick: () -> Unit = {},
     viewModel: SettingsViewModel = koinInject(),
     syncCoordinator: SyncCoordinator = koinInject(),
-    syncRepository: SyncRepository = koinInject(),
     authClient: AuthClient = koinInject(),
+    accountSettingsRepository: AccountSettingsRepository = koinInject(),
+    accountSessionCoordinator: AccountSessionCoordinator = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
     val syncState by syncCoordinator.state.collectAsState()
+    val accountSettingsState by accountSettingsRepository.state.collectAsState()
     val accessTier = remember(isLifetimeUnlocked) { PremiumAccess.tierFrom(isLifetimeUnlocked) }
     val isLocked: (PremiumFeature) -> Boolean = remember(accessTier) {
         { feature -> PremiumAccess.isPremiumLocked(feature, accessTier) }
@@ -170,10 +177,23 @@ fun SettingsScreen(
     val collectionsLocked = isLocked(PremiumFeature.PERSISTENT_COLLECTIONS)
     val customLayoutLocked = isLocked(PremiumFeature.SYNC_CUSTOM_LAYOUTS)
     val backupLocked = isLocked(PremiumFeature.CLOUD_BACKUP_RESTORE)
-    var showSyncSheet by remember { mutableStateOf(false) }
     var authUser by remember { mutableStateOf<AuthUser?>(null) }
-    LaunchedEffect(Unit) {
-        authUser = authClient.getCurrentUser()
+    var authRefreshKey by remember { mutableIntStateOf(0) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) { authRefreshKey++ }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(authRefreshKey) {
+        authUser = authClient.getAuthenticatedUser()
+    }
+    LaunchedEffect(authUser?.id) {
+        if (authUser != null) {
+            accountSessionCoordinator.onSettingsOpened()
+        }
     }
     LaunchedEffect(Unit) {
         if (state.regionCode.isBlank() || state.regionCode == "US") {
@@ -184,6 +204,7 @@ fun SettingsScreen(
         }
     }
 
+    val scope = rememberCoroutineScope()
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -201,7 +222,7 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(16.dp))
 
-        // Account card (top of settings)
+        // Account & Sync card (top of settings)
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = Charcoal),
@@ -214,22 +235,33 @@ fun SettingsScreen(
                         color = Snow,
                         fontWeight = FontWeight.SemiBold,
                     )
+                    if (authUser?.isVerified == false) {
+                        Spacer(Modifier.height(8.dp))
+                        VerificationBanner(
+                            email = authUser?.email ?: "",
+                            authClient = authClient,
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    val pairedDeviceCount = syncState.devices.count { it.revokedAt == null }
+                    Text(
+                        text = "$pairedDeviceCount paired device${if (pairedDeviceCount == 1) "" else "s"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Torve.colors.textSecondary,
+                    )
                     Spacer(Modifier.height(12.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Button(
+                        OutlinedButton(
                             onClick = {
-                                onPremiumAction(PremiumFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD) { onLoginClick() }
+                                onPremiumAction(PremiumFeature.PHONE_PAIRING) { onDevicesClick() }
                             },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Amber,
-                                contentColor = Obsidian,
-                            ),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
                         ) {
-                            if (accountSignInLocked) {
+                            if (pairingLocked) {
                                 Icon(
                                     imageVector = Icons.Default.Lock,
                                     contentDescription = null,
@@ -237,7 +269,7 @@ fun SettingsScreen(
                                 )
                                 Spacer(Modifier.width(6.dp))
                             }
-                            Text(if (accountSignInLocked) "Account Settings (Locked)" else "Account Settings")
+                            Text(if (pairingLocked) "Manage Pairings (Locked)" else "Manage Pairings")
                         }
                         OutlinedButton(
                             onClick = {
@@ -257,36 +289,100 @@ fun SettingsScreen(
                             Text(if (deviceLinkingLocked) "Manage Devices (Locked)" else "Manage Devices")
                         }
                     }
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                authClient.logout()
+                                authUser = null
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Torve.colors.textSecondary),
+                    ) {
+                        Text("Sign Out")
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    var showDeleteConfirm by remember { mutableStateOf(false) }
+                    var isDeletingAccount by remember { mutableStateOf(false) }
+                    OutlinedButton(
+                        onClick = { showDeleteConfirm = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Ruby),
+                        enabled = !isDeletingAccount,
+                    ) {
+                        Text(
+                            if (isDeletingAccount) stringResource(R.string.settings_delete_account_deleting)
+                            else stringResource(R.string.settings_delete_account),
+                        )
+                    }
+                    Text(
+                        text = stringResource(R.string.settings_delete_account_subtitle),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Torve.colors.textSecondary,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                    if (showDeleteConfirm) {
+                        AlertDialog(
+                            onDismissRequest = { if (!isDeletingAccount) showDeleteConfirm = false },
+                            containerColor = Charcoal,
+                            title = { Text(stringResource(R.string.settings_delete_account_title), color = Snow) },
+                            text = { Text(stringResource(R.string.settings_delete_account_body), color = Silver) },
+                            confirmButton = {
+                                Button(
+                                    onClick = {
+                                        isDeletingAccount = true
+                                        scope.launch {
+                                            val result = authClient.deleteAccount()
+                                            isDeletingAccount = false
+                                            showDeleteConfirm = false
+                                            if (result.success) {
+                                                authUser = null
+                                            } else {
+                                                // Show error via a toast or snackbar
+                                            }
+                                        }
+                                    },
+                                    enabled = !isDeletingAccount,
+                                    colors = ButtonDefaults.buttonColors(containerColor = Ruby, contentColor = Snow),
+                                ) {
+                                    if (isDeletingAccount) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            color = Snow,
+                                            strokeWidth = 2.dp,
+                                        )
+                                    } else {
+                                        Text(stringResource(R.string.settings_delete_account_confirm))
+                                    }
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(
+                                    onClick = { showDeleteConfirm = false },
+                                    enabled = !isDeletingAccount,
+                                ) {
+                                    Text(stringResource(R.string.common_cancel), color = Silver)
+                                }
+                            },
+                        )
+                    }
                 } else {
                     Text(
-                        text = if (accountSignInLocked) {
-                            "Account tools are locked on Free. Unlock Lifetime Access to sign in and sync."
-                        } else {
-                            "Sign in to manage your subscription and devices."
-                        },
+                        text = stringResource(R.string.settings_sign_in_manage),
                         style = MaterialTheme.typography.bodyMedium,
                         color = Torve.colors.textSecondary,
                     )
                     Spacer(Modifier.height(12.dp))
                     Button(
-                        onClick = {
-                            onPremiumAction(PremiumFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD) { onLoginClick() }
-                        },
+                        onClick = { onLoginClick() },
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Amber,
                             contentColor = Obsidian,
                         ),
                     ) {
-                        if (accountSignInLocked) {
-                            Icon(
-                                imageVector = Icons.Default.Lock,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                            )
-                            Spacer(Modifier.width(6.dp))
-                        }
-                        Text(if (accountSignInLocked) PremiumAccess.UNLOCK_WITH_LIFETIME_LABEL else "Sign In / Create Account")
+                        Text(stringResource(R.string.settings_sign_in_create))
                     }
                 }
             }
@@ -325,7 +421,7 @@ fun SettingsScreen(
                 }
                 Text(
                     if (accountSetupLocked) {
-                        "${stringResource(R.string.settings_profiles)} (${PremiumAccess.LOCKED_LABEL})"
+                        "${stringResource(R.string.settings_profiles)} (${stringResource(R.string.premium_locked)})"
                     } else {
                         stringResource(R.string.settings_profiles)
                     },
@@ -354,7 +450,7 @@ fun SettingsScreen(
                 }
                 Text(
                     if (isLocked(PremiumFeature.DOWNLOADS)) {
-                        "${stringResource(R.string.settings_downloads)} (${PremiumAccess.LOCKED_LABEL})"
+                        "${stringResource(R.string.settings_downloads)} (${stringResource(R.string.premium_locked)})"
                     } else {
                         stringResource(R.string.settings_downloads)
                     },
@@ -378,7 +474,7 @@ fun SettingsScreen(
         if (cloudProviderLocked) {
             LockedSettingsCard(
                 title = stringResource(R.string.settings_cloud_service),
-                description = "Connect cloud providers and debrid services with Lifetime Access.",
+                description = stringResource(R.string.settings_cloud_desc),
                 onUnlock = { onLockedFeatureClick(PremiumFeature.CLOUD_PROVIDER_SETUP) },
             )
         } else {
@@ -477,6 +573,7 @@ fun SettingsScreen(
                         value = state.debridApiKey,
                         onValueChange = { viewModel.setDebridApiKey(it) },
                         label = stringResource(R.string.settings_api_key),
+                        isSensitive = true,
                     )
                     Spacer(Modifier.height(8.dp))
                     Row(
@@ -754,7 +851,7 @@ fun SettingsScreen(
                             viewModel.setRegionCode(normalized)
                         }
                     },
-                    label = "Region",
+                    label = stringResource(R.string.settings_region),
                     placeholder = "US",
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -921,7 +1018,7 @@ fun SettingsScreen(
         // ── Content Management ──
         val addonViewModel: AddonViewModel = koinInject()
         val addonState by addonViewModel.state.collectAsState()
-        SectionHeader(title = "Content Management")
+        SectionHeader(title = stringResource(R.string.settings_content_management))
         Spacer(Modifier.height(8.dp))
 
         Card(
@@ -930,8 +1027,8 @@ fun SettingsScreen(
         ) {
             Column(modifier = Modifier.padding(vertical = 4.dp)) {
                 SettingsNavRow(
-                    title = "Home Layout",
-                    subtitle = "Section order & poster style",
+                    title = stringResource(R.string.settings_home_layout),
+                    subtitle = stringResource(R.string.settings_home_layout_sub),
                     locked = customLayoutLocked,
                     onClick = {
                         onPremiumAction(PremiumFeature.SYNC_CUSTOM_LAYOUTS) { onHomeLayoutClick() }
@@ -939,14 +1036,14 @@ fun SettingsScreen(
                 )
                 HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
                 SettingsNavRow(
-                    title = "Card Style",
-                    subtitle = "Size, hover zoom, watched indicators, appearance",
+                    title = stringResource(R.string.settings_card_style),
+                    subtitle = stringResource(R.string.settings_card_style_sub),
                     onClick = onCardStyleClick,
                 )
                 HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
                 SettingsNavRow(
-                    title = "Addons & Content Sources",
-                    subtitle = "${addonState.addons.size} installed · Browse & manage",
+                    title = stringResource(R.string.settings_addons_title),
+                    subtitle = stringResource(R.string.settings_addons_sub, addonState.addons.size),
                     locked = addonLocked,
                     onClick = {
                         onPremiumAction(PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT) { onAddonCatalogClick() }
@@ -954,8 +1051,8 @@ fun SettingsScreen(
                 )
                 HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
                 SettingsNavRow(
-                    title = "Streaming Services",
-                    subtitle = "Personalize home services",
+                    title = stringResource(R.string.settings_streaming_services),
+                    subtitle = stringResource(R.string.settings_streaming_services_sub),
                     locked = customSourcesLocked,
                     onClick = {
                         onPremiumAction(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT) { onStreamingServicesClick() }
@@ -963,8 +1060,8 @@ fun SettingsScreen(
                 )
                 HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
                 SettingsNavRow(
-                    title = "Stream Groups",
-                    subtitle = "${state.streamGroups.size} groups",
+                    title = stringResource(R.string.settings_stream_groups),
+                    subtitle = stringResource(R.string.settings_stream_groups_sub, state.streamGroups.size),
                     locked = customSourcesLocked,
                     onClick = {
                         onPremiumAction(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT) { onStreamGroupsClick() }
@@ -972,8 +1069,8 @@ fun SettingsScreen(
                 )
                 HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
                 SettingsNavRow(
-                    title = "Regex Patterns",
-                    subtitle = "${state.regexPatterns.size} patterns",
+                    title = stringResource(R.string.settings_regex_patterns),
+                    subtitle = stringResource(R.string.settings_regex_patterns_sub, state.regexPatterns.size),
                     locked = customSourcesLocked,
                     onClick = {
                         onPremiumAction(PremiumFeature.ADVANCED_CONNECTION_CONFIGURATION) { onRegexPatternsClick() }
@@ -990,14 +1087,14 @@ fun SettingsScreen(
                 )
                 HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
                 SettingsNavRow(
-                    title = "Ratings",
-                    subtitle = "Multi-source rating pills",
+                    title = stringResource(R.string.settings_ratings),
+                    subtitle = stringResource(R.string.settings_ratings_sub),
                     onClick = onRatingSettingsClick,
                 )
                 HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
                 SettingsNavRow(
-                    title = "Integrations",
-                    subtitle = "Trakt, SIMKL, Jellyfin, Plex",
+                    title = stringResource(R.string.settings_integrations),
+                    subtitle = stringResource(R.string.settings_integrations_sub),
                     locked = traktLocked,
                     onClick = {
                         onPremiumAction(PremiumFeature.TRAKT_CONNECT) { onIntegrationsClick() }
@@ -1015,7 +1112,7 @@ fun SettingsScreen(
         if (kodiLocked) {
             LockedSettingsCard(
                 title = stringResource(R.string.settings_kodi_remote),
-                description = "Configure Kodi hosts and remote control integration with Lifetime Access.",
+                description = stringResource(R.string.settings_kodi_desc),
                 onUnlock = { onLockedFeatureClick(PremiumFeature.KODI_SETUP) },
             )
         } else {
@@ -1134,12 +1231,12 @@ fun SettingsScreen(
         Spacer(Modifier.height(24.dp))
 
         // ── AI Features ──
-        SectionHeader(title = "AI Features")
+        SectionHeader(title = stringResource(R.string.settings_ai_features))
         Spacer(Modifier.height(8.dp))
 
         if (aiProviderLocked) {
             LockedSettingsCard(
-                title = "AI Features",
+                title = stringResource(R.string.settings_ai_features),
                 description = "Connect AI providers and API keys with Lifetime Access.",
                 onUnlock = { onLockedFeatureClick(PremiumFeature.AI_PROVIDER_SETUP) },
             )
@@ -1205,6 +1302,7 @@ fun SettingsScreen(
                     onValueChange = { viewModel.setActiveAiApiKey(it) },
                     label = "${state.aiProvider.label} API Key",
                     placeholder = state.aiProvider.keyPlaceholder,
+                    isSensitive = true,
                 )
                 Spacer(Modifier.height(8.dp))
                 Row(
@@ -1425,13 +1523,13 @@ fun SettingsScreen(
         Spacer(Modifier.height(24.dp))
 
         // ── Backup & Sync ──
-        SectionHeader(title = "Backup")
+        SectionHeader(title = stringResource(R.string.settings_backup))
         Spacer(Modifier.height(8.dp))
 
         if (backupLocked) {
             LockedSettingsCard(
-                title = "Backup",
-                description = "Backup and restore personalized settings with Lifetime Access.",
+                title = stringResource(R.string.settings_backup),
+                description = stringResource(R.string.settings_backup_desc),
                 onUnlock = { onLockedFeatureClick(PremiumFeature.CLOUD_BACKUP_RESTORE) },
             )
         } else {
@@ -1555,133 +1653,6 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(24.dp))
 
-        // ── Account ──
-        // Local Sync & Pairing
-        SectionHeader(title = "Local Sync")
-        Spacer(Modifier.height(8.dp))
-
-        if (pairingLocked || deviceLinkingLocked) {
-            LockedSettingsCard(
-                title = "Local Sync",
-                description = "Pair devices and sync settings across screens with Lifetime Access.",
-                onUnlock = { onLockedFeatureClick(PremiumFeature.DEVICE_SYNC) },
-            )
-        } else {
-            // Local Sync
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Charcoal),
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                val syncStatusTitle = if (syncState.isAuthenticated) "Local Sync Ready" else "Local Mode"
-                val syncStatusSubtext = if (syncState.isAuthenticated) {
-                    "Profile ${syncState.profileName ?: syncState.userEmail ?: "Unknown"} is ready for local Wi-Fi pairing."
-                } else {
-                    "Create a local profile to pair TVs and hand off playback on your Wi-Fi."
-                }
-
-                Text(
-                    text = syncStatusTitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Snow,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = syncStatusSubtext,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Torve.colors.textSecondary,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = "Transport: ${syncState.wsStatus}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Torve.colors.textTertiary,
-                )
-
-                Spacer(Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Button(
-                        onClick = {
-                            onPremiumAction(PremiumFeature.ACCOUNT_SETUP) { onAccountClick() }
-                        },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Amber,
-                            contentColor = Obsidian,
-                        ),
-                    ) {
-                        Text(
-                            if (accountSetupLocked) {
-                                PremiumAccess.UNLOCK_WITH_LIFETIME_LABEL
-                            } else if (syncState.isAuthenticated) {
-                                "Manage Profile"
-                            } else {
-                                "Create Profile"
-                            },
-                        )
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            onPremiumAction(PremiumFeature.PHONE_PAIRING) { onDevicesClick() }
-                        },
-                        modifier = Modifier.weight(1f),
-                        enabled = syncState.isAuthenticated || pairingLocked,
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
-                    ) {
-                        if (pairingLocked) {
-                            Icon(
-                                imageVector = Icons.Default.Lock,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                            )
-                            Spacer(Modifier.width(6.dp))
-                        }
-                        Text(if (pairingLocked) "Pair Device (Locked)" else "Pair Device")
-                    }
-                }
-                val hasPairedTvs = syncState.isAuthenticated &&
-                    syncCoordinator.targetDevices().any { it.deviceType == "tv" }
-                if (hasPairedTvs) {
-                    Spacer(Modifier.height(8.dp))
-                    Button(
-                        onClick = { showSyncSheet = true },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Emerald,
-                            contentColor = Snow,
-                        ),
-                    ) {
-                        Text("Sync Settings to TV")
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-                OutlinedButton(
-                    onClick = {
-                        onPremiumAction(PremiumFeature.DEVICE_LINKING) { onManageDevicesClick() }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
-                ) {
-                    Text("Manage Devices")
-                }
-            }
-        }
-        }
-
-        if (showSyncSheet && !pairingLocked && !deviceLinkingLocked) {
-            SyncToTvBottomSheet(
-                syncCoordinator = syncCoordinator,
-                syncRepository = syncRepository,
-                onDismiss = { showSyncSheet = false },
-            )
-        }
-
-        Spacer(Modifier.height(24.dp))
-
         // ── About & Legal ──
         SectionHeader(title = stringResource(R.string.settings_about))
         Spacer(Modifier.height(8.dp))
@@ -1723,7 +1694,7 @@ fun SettingsScreen(
                 )
                 HorizontalDivider(color = Steel.copy(alpha = 0.3f))
                 SettingsLinkItem(
-                    title = "Diagnostics",
+                    title = stringResource(R.string.settings_diagnostics),
                     locked = diagnosticsLocked,
                     onClick = {
                         onPremiumAction(PremiumFeature.DIAGNOSTICS) { onDiagnosticsClick() }
@@ -1731,7 +1702,7 @@ fun SettingsScreen(
                 )
                 HorizontalDivider(color = Steel.copy(alpha = 0.3f))
                 SettingsLinkItem(
-                    title = "Report Issue",
+                    title = stringResource(R.string.settings_report_issue),
                     onClick = {
                         val versionName = try {
                             context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
@@ -1761,7 +1732,7 @@ fun SettingsScreen(
         var showResetAppearanceConfirm by remember { mutableStateOf(false) }
 
         Text(
-            text = "Danger Zone",
+            text = stringResource(R.string.settings_danger_zone),
             style = MaterialTheme.typography.titleSmall,
             color = Ruby,
         )
@@ -1848,7 +1819,7 @@ private fun LockedSettingsCard(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = "$title · ${PremiumAccess.LOCKED_LABEL}",
+                    text = "$title · ${stringResource(R.string.premium_locked)}",
                     style = MaterialTheme.typography.titleSmall,
                     color = Snow,
                     fontWeight = FontWeight.SemiBold,
@@ -1865,7 +1836,7 @@ private fun LockedSettingsCard(
                 onClick = onUnlock,
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
             ) {
-                Text(PremiumAccess.UNLOCK_WITH_LIFETIME_LABEL)
+                Text(stringResource(R.string.premium_unlock_with_lifetime))
             }
         }
     }
@@ -1948,6 +1919,7 @@ private fun SettingsTextField(
     onValueChange: (String) -> Unit,
     label: String,
     placeholder: String = label,
+    isSensitive: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier) {
@@ -1960,6 +1932,7 @@ private fun SettingsTextField(
             textStyle = MaterialTheme.typography.bodyMedium.copy(color = Snow),
             singleLine = true,
             cursorBrush = SolidColor(Amber),
+            visualTransformation = if (isSensitive) PasswordVisualTransformation() else VisualTransformation.None,
             decorationBox = { innerTextField ->
                 Box(
                     modifier = Modifier
@@ -2048,7 +2021,7 @@ private fun SettingsNavRow(
             }
             Text(
                 text = if (locked) {
-                    "$subtitle · ${PremiumAccess.LIFETIME_REQUIRED_LABEL}"
+                    "$subtitle · ${stringResource(R.string.premium_requires_lifetime)}"
                 } else {
                     subtitle
                 },
@@ -2070,7 +2043,7 @@ private fun LiveTvSettingsSection(
         Spacer(Modifier.height(8.dp))
         LockedSettingsCard(
             title = stringResource(R.string.settings_live_tv),
-            description = "Manage channel playlists and persistent favorites with Lifetime Access.",
+            description = stringResource(R.string.settings_channels_desc),
             onUnlock = onLockedClick,
         )
         return
@@ -2254,217 +2227,6 @@ private fun DebridDeviceCodeSection(
         ) {
             CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Amber)
             Text(stringResource(R.string.settings_waiting_auth), style = MaterialTheme.typography.bodySmall, color = Silver)
-        }
-    }
-}
-
-private enum class SyncCategory(val label: String, val key: String) {
-    ADDONS("Addons", "addons"),
-    QUALITY("Quality & Streaming Preferences", "preferences"),
-    INTEGRATIONS("Integrations (Trakt, OMDB, MDBList, Cloud, AI)", "integrations"),
-    PLAYLISTS("Channel Playlists", "playlists"),
-    FAVORITES("Channel Favorites", "favorites"),
-    PROGRESS("Watch Progress", "progress"),
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun SyncToTvBottomSheet(
-    syncCoordinator: SyncCoordinator,
-    syncRepository: SyncRepository,
-    onDismiss: () -> Unit,
-) {
-    val scope = rememberCoroutineScope()
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val tvDevices = remember { syncCoordinator.targetDevices().filter { it.deviceType == "tv" } }
-    var selectedCategories by remember {
-        mutableStateOf(setOf(SyncCategory.ADDONS, SyncCategory.QUALITY, SyncCategory.INTEGRATIONS, SyncCategory.PLAYLISTS))
-    }
-    var selectedDeviceId by remember { mutableStateOf(tvDevices.firstOrNull()?.id) }
-    var isSending by remember { mutableStateOf(false) }
-    var resultMessage by remember { mutableStateOf<String?>(null) }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = Charcoal,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 8.dp)
-                .padding(bottom = 32.dp),
-        ) {
-            Text(
-                text = "Sync Settings to TV",
-                style = MaterialTheme.typography.titleLarge,
-                color = Snow,
-                fontWeight = FontWeight.Bold,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = "Select what to push to your paired TV.",
-                style = MaterialTheme.typography.bodySmall,
-                color = Silver,
-            )
-            Spacer(Modifier.height(16.dp))
-
-            SyncCategory.entries.forEach { category ->
-                val checked = category in selectedCategories
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            selectedCategories = if (checked) {
-                                selectedCategories - category
-                            } else {
-                                selectedCategories + category
-                            }
-                        }
-                        .padding(vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Checkbox(
-                        checked = checked,
-                        onCheckedChange = { isChecked ->
-                            selectedCategories = if (isChecked) {
-                                selectedCategories + category
-                            } else {
-                                selectedCategories - category
-                            }
-                        },
-                        colors = CheckboxDefaults.colors(
-                            checkedColor = Amber,
-                            uncheckedColor = Silver,
-                            checkmarkColor = Obsidian,
-                        ),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = category.label,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Snow,
-                    )
-                }
-            }
-
-            if (tvDevices.size > 1) {
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    text = "Target Device",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Silver,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Spacer(Modifier.height(4.dp))
-                tvDevices.forEach { device ->
-                    val isSelected = device.id == selectedDeviceId
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { selectedDeviceId = device.id }
-                            .background(
-                                if (isSelected) Amber.copy(alpha = 0.15f) else Gunmetal,
-                                RoundedCornerShape(8.dp),
-                            )
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = device.deviceName,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (isSelected) Amber else Snow,
-                            modifier = Modifier.weight(1f),
-                        )
-                        if (isSelected) {
-                            Icon(
-                                Icons.Default.Check,
-                                contentDescription = null,
-                                tint = Amber,
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(4.dp))
-                }
-            }
-
-            resultMessage?.let { msg ->
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    text = msg,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (msg.startsWith("Error")) Ruby else Emerald,
-                )
-            }
-
-            Spacer(Modifier.height(20.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                OutlinedButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Silver),
-                ) {
-                    Text("Cancel")
-                }
-                Button(
-                    onClick = {
-                        val targetId = selectedDeviceId ?: return@Button
-                        val categories = selectedCategories.map { it.key }
-                        if (categories.isEmpty()) return@Button
-                        isSending = true
-                        resultMessage = null
-                        scope.launch {
-                            val result = runCatching {
-                                val fullPayload = syncRepository.exportSyncPayload()
-                                val filtered = fullPayload.copy(
-                                    addons = if ("addons" in categories) fullPayload.addons else emptyList(),
-                                    preferences = if ("preferences" in categories) fullPayload.preferences else emptyList(),
-                                    channelPlaylists = if ("playlists" in categories) fullPayload.channelPlaylists else emptyList(),
-                                    channelFavorites = if ("favorites" in categories) fullPayload.channelFavorites else emptyList(),
-                                    watchProgress = if ("progress" in categories) fullPayload.watchProgress else emptyList(),
-                                    integrationSecrets = if ("integrations" in categories) fullPayload.integrationSecrets else emptyList(),
-                                )
-                                val syncJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
-                                val payloadJson = syncJson.encodeToString(
-                                    com.torve.domain.sync.SyncPayload.serializer(),
-                                    filtered,
-                                )
-                                syncCoordinator.sendSettingsPush(
-                                    targetDeviceId = targetId,
-                                    categories = categories,
-                                    payloadJson = payloadJson,
-                                ).getOrThrow()
-                            }
-                            isSending = false
-                            resultMessage = if (result.isSuccess) {
-                                "Synced successfully!"
-                            } else {
-                                "Error: ${result.exceptionOrNull()?.message ?: "Unknown error"}"
-                            }
-                        }
-                    },
-                    modifier = Modifier.weight(1f),
-                    enabled = selectedCategories.isNotEmpty() && selectedDeviceId != null && !isSending,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Amber,
-                        contentColor = Obsidian,
-                    ),
-                ) {
-                    if (isSending) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp,
-                            color = Obsidian,
-                        )
-                    } else {
-                        Text("Sync")
-                    }
-                }
-            }
         }
     }
 }

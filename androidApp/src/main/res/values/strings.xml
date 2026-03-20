@@ -152,6 +152,20 @@
     <string name="settings_account_desc">Once available, you\'ll be able to create an account to sync your settings, watchlist, watch progress, and card style presets across all your devices. No action needed — this feature will be enabled automatically in a future update.</string>
 
     <string name="settings_about">About</string>
+
+    <!-- Delete Account -->
+    <string name="settings_delete_account">Delete Account</string>
+    <string name="settings_delete_account_subtitle">Permanently remove your Torve account and associated data</string>
+    <string name="settings_delete_account_title">Delete your account?</string>
+    <string name="settings_delete_account_body">Deleting your Torve account will permanently remove your account and associated data, including saved preferences, watchlist, favorites, linked devices, and other account-related data that is no longer required.\n\nSome limited information may be retained where necessary for security, fraud prevention, billing, dispute resolution, or legal compliance.\n\nThis action cannot be undone.</string>
+    <string name="settings_delete_account_confirm">Delete Account</string>
+    <string name="settings_delete_account_deleting">Deleting account…</string>
+    <string name="settings_delete_account_success">Your account has been deleted</string>
+    <string name="settings_delete_account_error_title">Could not delete account</string>
+    <string name="settings_delete_account_error_body">We could not complete your account deletion right now. Please try again in a moment.</string>
+    <string name="tv_settings_delete_account_subtitle">Permanently delete your Torve account</string>
+    <string name="tv_settings_delete_account_title">Delete account?</string>
+    <string name="tv_settings_delete_account_body">This will permanently delete your Torve account and associated data. This action cannot be undone.</string>
     <string name="settings_privacy_policy">Privacy Policy</string>
     <string name="settings_terms">Terms &amp; Conditions</string>
     <string name="settings_help">Help &amp; Documentation</string>

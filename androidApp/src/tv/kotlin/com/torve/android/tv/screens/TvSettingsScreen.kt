@@ -6,6 +6,11 @@ import androidx.activity.compose.BackHandler
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
@@ -1365,6 +1370,80 @@ internal fun TvSettingsScreen(
                     focusedHint = "Requires a second press to avoid accidental sign-out.",
                     premiumLocked = isLockedFeature(TvEntitledFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD),
                 )
+            }
+            item(key = "auth_delete_account") {
+                var showDeleteDialog by remember { mutableStateOf(false) }
+                var isDeletingAccount by remember { mutableStateOf(false) }
+                val deleteRequester = remember("auth_delete_account") { FocusRequester() }
+                TvSettingCard(
+                    title = stringResource(R.string.settings_delete_account),
+                    subtitle = stringResource(R.string.tv_settings_delete_account_subtitle),
+                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                    focusRequester = deleteRequester,
+                    onFocused = { onContentFocused(deleteRequester) },
+                    onClick = { if (!isDeletingAccount) showDeleteDialog = true },
+                    rowType = TvSettingRowType.DANGEROUS,
+                )
+                if (showDeleteDialog) {
+                    AlertDialog(
+                        onDismissRequest = { if (!isDeletingAccount) showDeleteDialog = false },
+                        containerColor = Charcoal,
+                        title = { Text(stringResource(R.string.tv_settings_delete_account_title), color = Snow) },
+                        text = {
+                            if (isDeletingAccount) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    CircularProgressIndicator(modifier = Modifier.width(18.dp).height(18.dp), color = Amber, strokeWidth = 2.dp)
+                                    Spacer(Modifier.width(12.dp))
+                                    Text(stringResource(R.string.settings_delete_account_deleting), color = Silver)
+                                }
+                            } else {
+                                Text(stringResource(R.string.tv_settings_delete_account_body), color = Silver)
+                            }
+                        },
+                        confirmButton = {
+                            val cancelRequester = remember { FocusRequester() }
+                            val confirmRequester = remember { FocusRequester() }
+                            LaunchedEffect(Unit) { cancelRequester.requestFocus() }
+                            Row {
+                                androidx.compose.material3.TextButton(
+                                    onClick = { showDeleteDialog = false },
+                                    enabled = !isDeletingAccount,
+                                    modifier = Modifier.focusRequester(cancelRequester),
+                                ) { Text(stringResource(R.string.common_cancel), color = Silver) }
+                                Spacer(Modifier.width(8.dp))
+                                Button(
+                                    onClick = {
+                                        isDeletingAccount = true
+                                        authScope.launch {
+                                            val result = authClient.deleteAccount()
+                                            isDeletingAccount = false
+                                            showDeleteDialog = false
+                                            if (result.success) {
+                                                authUser = null
+                                                authEmail = ""
+                                                authPassword = ""
+                                                subscriptionViewModel.loadSubscription()
+                                                TvNotificationQueue.post(
+                                                    context.getString(R.string.settings_delete_account_success),
+                                                    NotificationType.SUCCESS,
+                                                )
+                                            } else {
+                                                TvNotificationQueue.post(
+                                                    context.getString(R.string.settings_delete_account_error_body),
+                                                    NotificationType.ERROR,
+                                                )
+                                            }
+                                        }
+                                    },
+                                    enabled = !isDeletingAccount,
+                                    colors = ButtonDefaults.buttonColors(containerColor = Ruby, contentColor = Snow),
+                                    modifier = Modifier.focusRequester(confirmRequester),
+                                ) { Text(stringResource(R.string.settings_delete_account_confirm)) }
+                            }
+                        },
+                        dismissButton = {},
+                    )
+                }
             }
         } else {
             // Not logged in — show email/password fields + login/register
