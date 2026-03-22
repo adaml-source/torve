@@ -30,6 +30,7 @@ class AuthLogoutRequest(BaseModel):
 
 
 class PairingCodeRequest(BaseModel):
+    device_id: str = Field(min_length=8, max_length=128)
     installation_id: str = Field(min_length=8, max_length=128)
     device_name: str = Field(min_length=1, max_length=120)
     device_type: str = Field(min_length=1, max_length=40)
@@ -38,6 +39,11 @@ class PairingCodeRequest(BaseModel):
 
 class PairingClaimRequest(BaseModel):
     code: str = Field(min_length=4, max_length=12)
+    device_id: str = Field(min_length=8, max_length=128)
+    installation_id: str | None = Field(default=None, min_length=8, max_length=128)
+    device_name: str | None = Field(default=None, min_length=1, max_length=120)
+    device_type: str | None = Field(default=None, min_length=1, max_length=40)
+    platform: str | None = Field(default=None, min_length=1, max_length=40)
 
 
 class PairingStatusRequest(BaseModel):
@@ -48,6 +54,7 @@ class PairingStatusRequest(BaseModel):
 class UserResponse(BaseModel):
     id: str
     email: str
+    is_verified: bool
     created_at: datetime
 
 
@@ -288,3 +295,39 @@ class DeviceListResponse(BaseModel):
     active_count: int
     max_active: int
     swaps_remaining: int
+
+
+class AccountSettingsResponse(BaseModel):
+    settings: dict[str, str] = {}
+    updated_at: str | None = None
+    updated_by_device_id: str | None = None
+
+
+class AccountSettingsPatchRequest(BaseModel):
+    settings: dict[str, str | None]
+
+
+# ── Playlist Schemas ──
+
+
+class PlaylistSaveRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    url: str = Field(default="", max_length=2000)
+    epg_url: str | None = Field(default=None, max_length=2000)
+    playlist_type: str = Field(default="m3u", pattern="^(m3u|xtream)$")
+    server: str | None = Field(default=None, max_length=500)
+    username: str | None = Field(default=None, max_length=200)
+    password: str | None = Field(default=None, max_length=500)
+
+
+class PlaylistResponse(BaseModel):
+    id: str
+    name: str
+    url: str
+    epg_url: str | None = None
+    playlist_type: str
+    server: str | None = None
+    username: str | None = None
+    has_password: bool = False
+    created_at: datetime
+    updated_at: datetime

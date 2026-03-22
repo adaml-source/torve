@@ -105,7 +105,7 @@ class SubscriptionRepositoryImpl(
         return try {
             // Use device-aware access state instead of just entitlements
             val accessState = deviceApi.getAccessState(token)
-            val devicePremium = accessState.premium.premium_access
+            val devicePremium = accessState?.premium?.premium_access ?: false
             if (devicePremium) {
                 onBackendEntitlementGranted(true)
             }
@@ -126,6 +126,16 @@ class SubscriptionRepositoryImpl(
             ?: return BackendPremiumResult.Offline(getActiveSubscription()?.isPro == true)
         return try {
             val accessState = deviceApi.getAccessState(token)
+            if (accessState == null) {
+                // Endpoint unavailable — fall back to entitlement-only check
+                val state = entitlementApi.getEntitlements(token)
+                return if (state.premium_access) {
+                    onBackendEntitlementGranted(true)
+                    BackendPremiumResult.Active
+                } else {
+                    BackendPremiumResult.NoEntitlement
+                }
+            }
             val hasEntitlement = accessState.premium.has_entitlement
             val devicePremium = accessState.premium.premium_access
             val reason = accessState.premium.reason

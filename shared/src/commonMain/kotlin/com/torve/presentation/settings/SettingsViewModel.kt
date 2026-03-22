@@ -37,6 +37,7 @@ import com.torve.domain.repository.WatchlistRepository
 import com.torve.domain.sync.SyncRepository
 import com.torve.platform.NetworkMonitor
 import com.torve.platform.recommendedMaxQuality
+import com.torve.presentation.settings.SettingsRefreshNotifier
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.coroutines.CoroutineScope
@@ -47,6 +48,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
@@ -70,6 +72,7 @@ class SettingsViewModel(
     private val libraryOverlayService: LibraryOverlayService,
     private val omdbClient: OmdbClient,
     private val aiSuggestClient: AiSuggestClient,
+    private val settingsRefreshNotifier: SettingsRefreshNotifier,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(SettingsUiState())
@@ -77,6 +80,13 @@ class SettingsViewModel(
 
     private var debridPollJob: Job? = null
     private var traktPollJob: Job? = null
+
+    /**
+     * Callback to push an integration credential to the backend.
+     * Set by the DI layer after construction to avoid circular dependency.
+     * Signature: (integrationType, credentials map, displayIdentifier) -> Unit
+     */
+    var onIntegrationSaved: (suspend (String, Map<String, String>, String?) -> Unit)? = null
 
     companion object {
         const val KEY_DEBRID_PROVIDER = "debrid_provider"
@@ -133,6 +143,13 @@ class SettingsViewModel(
         const val KEY_CARD_PREFS = "card_prefs"
         const val KEY_CARD_STYLE_PRESETS = "card_style_presets"
         const val KEY_CARD_DEFAULT_PRESET_ID = "card_style_default_preset_id"
+
+        /** Mask a secret value for display: show last 4 chars only. */
+        fun maskSecret(value: String): String {
+            if (value.isBlank()) return ""
+            if (value.length <= 4) return "••••"
+            return "••••" + value.takeLast(4)
+        }
     }
 
     private val jsonParser = Json { ignoreUnknownKeys = true }
@@ -146,11 +163,30 @@ class SettingsViewModel(
 
     init {
         loadSavedSettings()
+        scope.launch {
+            settingsRefreshNotifier.events.collect {
+                refreshSettings()
+            }
+        }
     }
 
-    /** Re-read all settings from disk/secure store. Call after sync import. */
+    /** Re-read all settings from disk/secure store. Call after sync import or logout. */
     fun refreshSettings() {
         loadSavedSettings()
+    }
+
+    /**
+     * One-time migration: if a secret exists in the plaintext preferences DB
+     * but not yet in the encrypted secure store, move it there and delete the pref.
+     * After this, the pref key is gone — [loadSavedSettings] reads only from secure store.
+     */
+    private suspend fun migrateSecretPref(prefKey: String, secretKey: IntegrationSecretKey) {
+        if (integrationSecretStore.get(secretKey) != null) return
+        val legacy = prefsRepo.getString(prefKey)
+        if (!legacy.isNullOrBlank()) {
+            integrationSecretStore.put(secretKey, legacy)
+            prefsRepo.remove(prefKey)
+        }
     }
 
     private fun loadSavedSettings() {
@@ -159,17 +195,17 @@ class SettingsViewModel(
                 try { DebridServiceType.valueOf(it) } catch (_: Exception) { null }
             } ?: DebridServiceType.REAL_DEBRID
 
+            // Load per-provider debrid API keys from secure store only.
+            // Legacy plaintext fallbacks are migrated once then removed — never
+            // used as ongoing fallbacks (prevents stale keys surviving logout).
             val legacyDebridApiKey = prefsRepo.getString(KEY_DEBRID_API_KEY) ?: ""
             val legacySingleKey = integrationSecretStore.get(IntegrationSecretKey.DEBRID_API_KEY)
                 ?: legacyDebridApiKey
-
-            // Load per-provider API keys
             val allDebridKeys = mutableMapOf<DebridServiceType, String>()
             for (p in DebridServiceType.entries) {
                 val key = integrationSecretStore.get(debridSecretKey(p))
                 if (!key.isNullOrBlank()) allDebridKeys[p] = key
             }
-            // Migrate legacy single key → per-provider slot
             if (allDebridKeys.isEmpty() && legacySingleKey.isNotBlank()) {
                 allDebridKeys[provider] = legacySingleKey
                 integrationSecretStore.put(debridSecretKey(provider), legacySingleKey)
@@ -177,11 +213,14 @@ class SettingsViewModel(
                 prefsRepo.remove(KEY_DEBRID_API_KEY)
             }
             val apiKey = allDebridKeys[provider] ?: ""
-            val legacyTraktAccessToken = prefsRepo.getString(KEY_TRAKT_ACCESS_TOKEN) ?: ""
-            val legacyTraktRefreshToken = prefsRepo.getString(KEY_TRAKT_REFRESH_TOKEN) ?: ""
+            // Trakt: secure store is authoritative. Migrate legacy pref keys once.
             val traktTokens = traktTokenStore.read()
-            val traktAccessToken = traktTokens?.accessToken ?: legacyTraktAccessToken
-            val traktRefreshToken = traktTokens?.refreshToken ?: legacyTraktRefreshToken
+            migrateSecretPref(KEY_TRAKT_ACCESS_TOKEN, IntegrationSecretKey.TRAKT_ACCESS_TOKEN)
+            migrateSecretPref(KEY_TRAKT_REFRESH_TOKEN, IntegrationSecretKey.TRAKT_REFRESH_TOKEN)
+            val traktAccessToken = traktTokens?.accessToken
+                ?: integrationSecretStore.get(IntegrationSecretKey.TRAKT_ACCESS_TOKEN) ?: ""
+            val traktRefreshToken = traktTokens?.refreshToken
+                ?: integrationSecretStore.get(IntegrationSecretKey.TRAKT_REFRESH_TOKEN) ?: ""
 
             val maxQuality = prefsRepo.getString(KEY_MAX_QUALITY)?.let {
                 try { StreamQuality.valueOf(it) } catch (_: Exception) { null }
@@ -194,9 +233,9 @@ class SettingsViewModel(
             val hdrEnabled = prefsRepo.getString(KEY_HDR_ENABLED)?.toBooleanStrictOrNull() ?: false
             val scrobbleEnabled = prefsRepo.getString(KEY_TRAKT_SCROBBLE)?.toBooleanStrictOrNull() ?: true
             val simklClientId = prefsRepo.getString(KEY_SIMKL_CLIENT_ID) ?: ""
-            val legacySimklAccessToken = prefsRepo.getString(KEY_SIMKL_ACCESS_TOKEN) ?: ""
-            val simklAccessToken = integrationSecretStore.get(IntegrationSecretKey.SIMKL_ACCESS_TOKEN)
-                ?: legacySimklAccessToken
+            // Simkl: secure store is authoritative. Migrate legacy pref key once.
+            migrateSecretPref(KEY_SIMKL_ACCESS_TOKEN, IntegrationSecretKey.SIMKL_ACCESS_TOKEN)
+            val simklAccessToken = integrationSecretStore.get(IntegrationSecretKey.SIMKL_ACCESS_TOKEN) ?: ""
             if (simklClientId.isNotBlank()) simklClient.setClientId(simklClientId)
 
             val kodiHosts = prefsRepo.getString(KEY_KODI_HOSTS)?.let { json ->
@@ -250,31 +289,30 @@ class SettingsViewModel(
             } ?: DEFAULT_STREAM_GROUPS
             val dedupeResults = prefsRepo.getString(KEY_DEDUPE_RESULTS)?.toBooleanStrictOrNull() ?: true
 
-            val legacyClaudeApiKey = prefsRepo.getString(KEY_CLAUDE_API_KEY) ?: ""
-            val claudeApiKey = integrationSecretStore.get(IntegrationSecretKey.CLAUDE_API_KEY)
-                ?: legacyClaudeApiKey
+            // All integration secrets: secure store is the ONLY source of truth.
+            // Legacy pref keys are migrated once on first read, then deleted.
+            // This prevents stale credentials from surviving logout.
+            migrateSecretPref(KEY_CLAUDE_API_KEY, IntegrationSecretKey.CLAUDE_API_KEY)
+            migrateSecretPref(KEY_CHATGPT_API_KEY, IntegrationSecretKey.CHATGPT_API_KEY)
+            migrateSecretPref(KEY_GEMINI_API_KEY, IntegrationSecretKey.GEMINI_API_KEY)
+            migrateSecretPref(KEY_PERPLEXITY_API_KEY, IntegrationSecretKey.PERPLEXITY_API_KEY)
+            migrateSecretPref(KEY_DEEPSEEK_API_KEY, IntegrationSecretKey.DEEPSEEK_API_KEY)
+            migrateSecretPref(KEY_OMDB_API_KEY, IntegrationSecretKey.OMDB_API_KEY)
+            migrateSecretPref(KEY_MDBLIST_API_KEY, IntegrationSecretKey.MDBLIST_API_KEY)
+            migrateSecretPref("jellyfin_api_key", IntegrationSecretKey.JELLYFIN_API_KEY)
+
             val aiProvider = prefsRepo.getString(KEY_AI_PROVIDER)?.let {
                 try { AiProvider.valueOf(it) } catch (_: Exception) { null }
             } ?: AiProvider.CLAUDE
-            val legacyChatGptApiKey = prefsRepo.getString(KEY_CHATGPT_API_KEY) ?: ""
-            val chatGptApiKey = integrationSecretStore.get(IntegrationSecretKey.CHATGPT_API_KEY)
-                ?: legacyChatGptApiKey
-            val legacyGeminiApiKey = prefsRepo.getString(KEY_GEMINI_API_KEY) ?: ""
-            val geminiApiKey = integrationSecretStore.get(IntegrationSecretKey.GEMINI_API_KEY)
-                ?: legacyGeminiApiKey
-            val legacyPerplexityApiKey = prefsRepo.getString(KEY_PERPLEXITY_API_KEY) ?: ""
-            val perplexityApiKey = integrationSecretStore.get(IntegrationSecretKey.PERPLEXITY_API_KEY)
-                ?: legacyPerplexityApiKey
-            val legacyDeepSeekApiKey = prefsRepo.getString(KEY_DEEPSEEK_API_KEY) ?: ""
-            val deepSeekApiKey = integrationSecretStore.get(IntegrationSecretKey.DEEPSEEK_API_KEY)
-                ?: legacyDeepSeekApiKey
-            val omdbApiKey = integrationSecretStore.get(IntegrationSecretKey.OMDB_API_KEY)
-                ?: prefsRepo.getString(KEY_OMDB_API_KEY) ?: ""
-            val legacyMdblistApiKey = prefsRepo.getString(KEY_MDBLIST_API_KEY) ?: ""
-            val mdblistApiKey = integrationSecretStore.get(IntegrationSecretKey.MDBLIST_API_KEY)
-                ?: legacyMdblistApiKey
+            val claudeApiKey = integrationSecretStore.get(IntegrationSecretKey.CLAUDE_API_KEY) ?: ""
+            val chatGptApiKey = integrationSecretStore.get(IntegrationSecretKey.CHATGPT_API_KEY) ?: ""
+            val geminiApiKey = integrationSecretStore.get(IntegrationSecretKey.GEMINI_API_KEY) ?: ""
+            val perplexityApiKey = integrationSecretStore.get(IntegrationSecretKey.PERPLEXITY_API_KEY) ?: ""
+            val deepSeekApiKey = integrationSecretStore.get(IntegrationSecretKey.DEEPSEEK_API_KEY) ?: ""
+            val omdbApiKey = integrationSecretStore.get(IntegrationSecretKey.OMDB_API_KEY) ?: ""
+            val mdblistApiKey = integrationSecretStore.get(IntegrationSecretKey.MDBLIST_API_KEY) ?: ""
             val jellyfinServerUrl = prefsRepo.getString(KEY_JELLYFIN_SERVER_URL) ?: ""
-            val legacyJellyfinApiKey = prefsRepo.getString("jellyfin_api_key") ?: ""
+            val jellyfinApiKey = integrationSecretStore.get(IntegrationSecretKey.JELLYFIN_API_KEY) ?: ""
             val plexServerUrl = prefsRepo.getString(KEY_PLEX_SERVER_URL) ?: ""
             val plexAccessToken = integrationSecretStore.get(IntegrationSecretKey.PLEX_ACCESS_TOKEN) ?: ""
             val regionCode = prefsRepo.getString(KEY_REGION_CODE)?.uppercase()?.takeIf { it.length == 2 } ?: "US"
@@ -296,9 +334,15 @@ class SettingsViewModel(
                     debridApiKey = apiKey,
                     debridConnected = apiKey.isNotBlank(),
                     connectedDebridProviders = allDebridKeys,
+                    // Clear runtime-only account-linked state that isn't re-read from stores.
+                    // After logout, secrets are empty → connected=false → profiles/users gone.
+                    debridUser = if (apiKey.isNotBlank()) it.debridUser else null,
+                    debridLoading = false,
                     traktAccessToken = traktAccessToken,
                     traktRefreshToken = traktRefreshToken,
                     traktConnected = traktAccessToken.isNotBlank(),
+                    traktUser = if (traktAccessToken.isNotBlank()) it.traktUser else null,
+                    traktStats = if (traktAccessToken.isNotBlank()) it.traktStats else null,
                     traktScrobbleEnabled = scrobbleEnabled,
                     traktLastSyncTime = traktLastSyncTime,
                     availabilityLastSyncTime = availabilityLastSyncTime,
@@ -306,6 +350,7 @@ class SettingsViewModel(
                     simklClientId = simklClientId,
                     simklAccessToken = simklAccessToken,
                     simklConnected = simklAccessToken.isNotBlank(),
+                    simklUser = if (simklAccessToken.isNotBlank()) it.simklUser else null,
                     maxQuality = maxQuality,
                     minQuality = minQuality,
                     maxFileSizeMb = maxFileSizeMb,
@@ -336,12 +381,18 @@ class SettingsViewModel(
                     perplexityApiKey = perplexityApiKey,
                     deepSeekApiKey = deepSeekApiKey,
                     omdbApiKey = omdbApiKey,
+                    omdbValidationResult = null,
+                    aiKeyValidationResult = null,
                     mdblistApiKey = mdblistApiKey,
                     jellyfinServerUrl = jellyfinServerUrl,
-                    jellyfinApiKey = "",
+                    jellyfinApiKey = jellyfinApiKey,
+                    jellyfinProfiles = if (jellyfinApiKey.isNotBlank()) it.jellyfinProfiles else emptyList(),
+                    selectedJellyfinUserId = if (jellyfinApiKey.isNotBlank()) it.selectedJellyfinUserId else null,
+                    jellyfinStatusMessage = null,
                     plexServerUrl = plexServerUrl,
                     plexAccessToken = plexAccessToken,
                     plexConnected = plexAccessToken.isNotBlank(),
+                    plexError = null,
                     regionCode = regionCode,
                     ratingPrefs = ratingPrefs,
                     cardStylePresets = cardStylePresets,
@@ -349,58 +400,9 @@ class SettingsViewModel(
                 )
             }
 
-            // Migrate legacy keys to IntegrationSecretStore
-            if (legacyJellyfinApiKey.isNotBlank()) {
-                integrationSecretStore.put(IntegrationSecretKey.JELLYFIN_API_KEY, legacyJellyfinApiKey)
-                prefsRepo.remove("jellyfin_api_key")
-            }
-            // OMDB: migrate from prefs to secure store if not yet there
-            val legacyOmdbApiKey = prefsRepo.getString(KEY_OMDB_API_KEY) ?: ""
-            if (legacyOmdbApiKey.isNotBlank() && integrationSecretStore.get(IntegrationSecretKey.OMDB_API_KEY) == null) {
-                integrationSecretStore.put(IntegrationSecretKey.OMDB_API_KEY, legacyOmdbApiKey)
-                prefsRepo.remove(KEY_OMDB_API_KEY)
-            }
-            // legacy debrid key migration handled above
-            if (legacyTraktAccessToken.isNotBlank() && traktTokens == null) {
-                traktTokenStore.write(
-                    com.torve.data.trakt.TraktTokens(
-                        accessToken = legacyTraktAccessToken,
-                        refreshToken = legacyTraktRefreshToken,
-                        expiresIn = 0,
-                        createdAt = 0L,
-                    ),
-                )
-                prefsRepo.remove(KEY_TRAKT_ACCESS_TOKEN)
-                prefsRepo.remove(KEY_TRAKT_REFRESH_TOKEN)
-            }
-            if (legacySimklAccessToken.isNotBlank()) {
-                integrationSecretStore.put(IntegrationSecretKey.SIMKL_ACCESS_TOKEN, legacySimklAccessToken)
-                prefsRepo.remove(KEY_SIMKL_ACCESS_TOKEN)
-            }
-            if (legacyClaudeApiKey.isNotBlank()) {
-                integrationSecretStore.put(IntegrationSecretKey.CLAUDE_API_KEY, legacyClaudeApiKey)
-                prefsRepo.remove(KEY_CLAUDE_API_KEY)
-            }
-            if (legacyChatGptApiKey.isNotBlank()) {
-                integrationSecretStore.put(IntegrationSecretKey.CHATGPT_API_KEY, legacyChatGptApiKey)
-                prefsRepo.remove(KEY_CHATGPT_API_KEY)
-            }
-            if (legacyGeminiApiKey.isNotBlank()) {
-                integrationSecretStore.put(IntegrationSecretKey.GEMINI_API_KEY, legacyGeminiApiKey)
-                prefsRepo.remove(KEY_GEMINI_API_KEY)
-            }
-            if (legacyPerplexityApiKey.isNotBlank()) {
-                integrationSecretStore.put(IntegrationSecretKey.PERPLEXITY_API_KEY, legacyPerplexityApiKey)
-                prefsRepo.remove(KEY_PERPLEXITY_API_KEY)
-            }
-            if (legacyDeepSeekApiKey.isNotBlank()) {
-                integrationSecretStore.put(IntegrationSecretKey.DEEPSEEK_API_KEY, legacyDeepSeekApiKey)
-                prefsRepo.remove(KEY_DEEPSEEK_API_KEY)
-            }
-            if (legacyMdblistApiKey.isNotBlank()) {
-                integrationSecretStore.put(IntegrationSecretKey.MDBLIST_API_KEY, legacyMdblistApiKey)
-                prefsRepo.remove(KEY_MDBLIST_API_KEY)
-            }
+            // Legacy migration block removed — migrateSecretPref() handles all
+            // one-time imports from plaintext prefs → secure store above.
+
             if (apiKey.isNotBlank()) {
                 verifyDebridConnection()
             }
@@ -459,6 +461,14 @@ class SettingsViewModel(
                         connectedDebridProviders = updated,
                     )
                 }
+                // Sync to backend
+                runCatching {
+                    onIntegrationSaved?.invoke(
+                        "DEBRID_API_KEY_${provider.name}",
+                        mapOf("api_key" to apiKey),
+                        provider.name,
+                    )
+                }
             } else {
                 _state.update {
                     it.copy(debridLoading = false, debridError = result.error)
@@ -515,6 +525,14 @@ class SettingsViewModel(
                             debridDeviceCode = null,
                             isPollingDebrid = false,
                             connectedDebridProviders = updated,
+                        )
+                    }
+                    // Sync to backend
+                    runCatching {
+                        onIntegrationSaved?.invoke(
+                            "DEBRID_API_KEY_${provider.name}",
+                            mapOf("api_key" to result.apiKey),
+                            provider.name,
                         )
                     }
                     verifyDebridConnection()
@@ -606,6 +624,17 @@ class SettingsViewModel(
                                 isPollingTrakt = false,
                             )
                         }
+                        // Sync to backend — Trakt requires both tokens for restore
+                        runCatching {
+                            onIntegrationSaved?.invoke(
+                                "TRAKT_TOKENS",
+                                mapOf(
+                                    "access_token" to result.tokens.accessToken,
+                                    "refresh_token" to result.tokens.refreshToken,
+                                ),
+                                "Trakt",
+                            )
+                        }
                         verifyTraktConnection()
                         initialTraktImport()
                         return@launch
@@ -636,16 +665,45 @@ class SettingsViewModel(
         }
     }
 
+    // Trakt validation dedupe: prevent multiple concurrent/repeated API calls.
+    // Cooldown of 30s between validations. One validation at a time.
+    private var traktValidationRunning = false
+    private var traktLastValidatedAt = 0L
+    private val TRAKT_VALIDATION_COOLDOWN_MS = 30_000L
+
     private suspend fun verifyTraktConnection() {
+        val now = Clock.System.now().toEpochMilliseconds()
+        if (traktValidationRunning) {
+            println("[TraktInit] Validation skipped (already running)")
+            return
+        }
+        if (now - traktLastValidatedAt < TRAKT_VALIDATION_COOLDOWN_MS && _state.value.traktUser != null) {
+            println("[TraktInit] Validation skipped (cooldown active, already validated)")
+            return
+        }
+        traktValidationRunning = true
+        println("[TraktInit] Validation started")
         try {
             val user = traktClient.getUser(_state.value.traktAccessToken)
             _state.update { it.copy(traktUser = user, traktConnected = true, traktApiStatus = "Online") }
-            // Also load stats
+            traktLastValidatedAt = now
+            println("[TraktInit] Validation success")
             loadTraktStats()
         } catch (e: Exception) {
-            _state.update {
-                it.copy(traktConnected = false, traktError = e.message, traktApiStatus = "Error")
+            val is429 = e.message?.contains("429") == true || e.message?.contains("rate") == true
+            if (is429) {
+                // Don't disconnect on rate limit — tokens are likely valid
+                traktLastValidatedAt = now // prevent immediate retry
+                _state.update { it.copy(traktApiStatus = "Rate limited — will retry later") }
+                println("[TraktInit] Rate limited, cooldown until ${now + TRAKT_VALIDATION_COOLDOWN_MS}")
+            } else {
+                _state.update {
+                    it.copy(traktConnected = false, traktError = e.message, traktApiStatus = "Error")
+                }
+                println("[TraktInit] Validation failed: ${e.message}")
             }
+        } finally {
+            traktValidationRunning = false
         }
     }
 
@@ -804,6 +862,61 @@ class SettingsViewModel(
         }
     }
 
+    // ── UI-only input updaters (no persistence) ─────────────────
+    // These update the displayed value without writing to the secure store.
+    // Persistence happens only on explicit Save/Connect/Test actions.
+
+    /** Update AI API key input — UI state only, does NOT persist. */
+    fun updateActiveAiApiKeyInput(key: String) {
+        val field = when (_state.value.aiProvider) {
+            AiProvider.CLAUDE -> _state.value.copy(claudeApiKey = key)
+            AiProvider.CHATGPT -> _state.value.copy(chatGptApiKey = key)
+            AiProvider.GEMINI -> _state.value.copy(geminiApiKey = key)
+            AiProvider.PERPLEXITY -> _state.value.copy(perplexityApiKey = key)
+            AiProvider.DEEPSEEK -> _state.value.copy(deepSeekApiKey = key)
+        }
+        _state.value = field.copy(aiKeyValidationResult = null)
+    }
+
+    /** Save AI API key to secure store, then validate. */
+    fun saveAndValidateAiApiKey() {
+        setActiveAiApiKey(_state.value.activeAiApiKey)
+        validateAiApiKey()
+    }
+
+    /** Update OMDB API key input — UI state only, does NOT persist. */
+    fun updateOmdbApiKeyInput(key: String) {
+        _state.update { it.copy(omdbApiKey = key, omdbValidationResult = null) }
+    }
+
+    /** Save OMDB API key to secure store, then validate. */
+    fun saveAndValidateOmdbApiKey() {
+        setOmdbApiKey(_state.value.omdbApiKey)
+        validateOmdbApiKey()
+    }
+
+    /** Update Jellyfin API key input — UI state only, does NOT persist. */
+    fun updateJellyfinApiKeyInput(key: String) {
+        _state.update { it.copy(jellyfinApiKey = key) }
+    }
+
+    /** Save Jellyfin credentials to secure store, then test connection. */
+    fun saveAndTestJellyfinConnection() {
+        setJellyfinApiKey(_state.value.jellyfinApiKey)
+        testJellyfinConnection()
+    }
+
+    /** Update Plex access token input — UI state only, does NOT persist. */
+    fun updatePlexAccessTokenInput(token: String) {
+        _state.update { it.copy(plexAccessToken = token) }
+    }
+
+    /** Save Plex credentials to secure store, then test connection. */
+    fun saveAndConnectPlex() {
+        setPlexAccessToken(_state.value.plexAccessToken)
+        testPlexConnection()
+    }
+
     fun validateAiApiKey() {
         val provider = _state.value.aiProvider
         val key = _state.value.activeAiApiKey
@@ -875,6 +988,13 @@ class SettingsViewModel(
 
     fun setJellyfinApiKey(key: String) {
         _state.update { it.copy(jellyfinApiKey = key) }
+        scope.launch {
+            if (key.isBlank()) {
+                integrationSecretStore.remove(IntegrationSecretKey.JELLYFIN_API_KEY)
+            } else {
+                integrationSecretStore.put(IntegrationSecretKey.JELLYFIN_API_KEY, key)
+            }
+        }
     }
 
     private val jellyfinService: com.torve.data.integrations.JellyfinLibraryOverlayService?
@@ -1142,6 +1262,14 @@ class SettingsViewModel(
                             simklConnected = true,
                             simklDeviceCode = null,
                             isPollingSimkl = false,
+                        )
+                    }
+                    // Sync to backend
+                    runCatching {
+                        onIntegrationSaved?.invoke(
+                            "SIMKL_ACCESS_TOKEN",
+                            mapOf("access_token" to tokens.accessToken),
+                            "Simkl",
                         )
                     }
                     // Verify by fetching user

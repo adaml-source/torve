@@ -36,8 +36,15 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
+import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Alignment
@@ -55,8 +62,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import com.torve.android.R
 import coil3.compose.AsyncImage
 import coil3.compose.SubcomposeAsyncImage
 import com.torve.android.ui.theme.Amber
@@ -276,7 +285,7 @@ fun PosterCard(
                 ) {
                     Icon(
                         Icons.Rounded.DownloadDone,
-                        contentDescription = "Downloaded",
+                        contentDescription = stringResource(R.string.downloaded_cd),
                         tint = Obsidian,
                         modifier = Modifier.size(14.dp),
                     )
@@ -654,7 +663,7 @@ fun SectionHeader(
         if (showCustomize && onCustomizeClick != null) {
             Icon(
                 Icons.Rounded.Tune,
-                contentDescription = "Customize",
+                contentDescription = stringResource(R.string.common_customize_cd),
                 tint = Ash,
                 modifier = Modifier
                     .size(18.dp)
@@ -677,6 +686,48 @@ fun SectionHeader(
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Back Button — Circular translucent navigation button
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Peek Password Transformation — shows last-typed character
+// for 1 second before masking. Use for all sensitive fields
+// that are in hidden mode to give standard password-entry UX.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/**
+ * A [VisualTransformation] that briefly reveals the most recently typed
+ * character (1 second) then masks it with a bullet (•). This is the standard
+ * mobile password-entry experience. Pass the current field value so the
+ * composable can detect new characters.
+ */
+@Composable
+fun rememberPeekPasswordTransformation(currentValue: String): VisualTransformation {
+    var revealIndex by remember { mutableStateOf(-1) }
+    val prevLength = remember { intArrayOf(0) }
+
+    LaunchedEffect(currentValue) {
+        if (currentValue.length > prevLength[0] && currentValue.isNotEmpty()) {
+            revealIndex = currentValue.lastIndex
+            prevLength[0] = currentValue.length
+            delay(1.seconds)
+            revealIndex = -1
+        } else {
+            prevLength[0] = currentValue.length
+            revealIndex = -1
+        }
+    }
+
+    val idx = revealIndex
+    return remember(idx) {
+        VisualTransformation { text ->
+            val masked = buildString {
+                text.forEachIndexed { i, c ->
+                    append(if (i == idx) c else '\u2022')
+                }
+            }
+            TransformedText(AnnotatedString(masked), OffsetMapping.Identity)
+        }
+    }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @Composable
 fun BackButton(
@@ -693,7 +744,7 @@ fun BackButton(
     ) {
         Icon(
             imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-            contentDescription = "Back",
+            contentDescription = stringResource(R.string.common_back_cd),
             tint = Snow,
             modifier = Modifier.size(20.dp),
         )

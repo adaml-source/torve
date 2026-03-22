@@ -38,6 +38,10 @@ class WatchHistoryRepositoryImpl(
         return queries.getAllHistory().executeAsList().map { it.toDomain() }
     }
 
+    override suspend fun getForMedia(mediaId: String): List<WatchHistoryEntry> {
+        return queries.getHistoryForMedia(mediaId).executeAsList().map { it.toDomain() }
+    }
+
     override suspend fun record(entry: WatchHistoryEntry) {
         queries.insertHistory(
             id = entry.id,

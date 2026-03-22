@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -50,7 +51,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -143,11 +148,14 @@ fun DetailScreen(
     var showActionSheet by remember { mutableStateOf(false) }
     var resolvedUrl by remember { mutableStateOf("") }
     var showTrailer by remember { mutableStateOf(false) }
+    // Tracks whether the current stream resolution is for download (not playback)
+    var pendingEpisodeDownload by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     val context = LocalContext.current
 
     // Wire download callbacks to trigger WorkManager
     LaunchedEffect(downloadViewModel) {
         downloadViewModel.onDownloadEnqueued = { downloadId ->
+            android.util.Log.w("DetailScreen", "onDownloadEnqueued callback fired, downloadId=$downloadId")
             DownloadWorker.enqueue(context, downloadId)
         }
     }
@@ -164,13 +172,28 @@ fun DetailScreen(
         viewModel.loadDetail(type, id)
     }
 
+    // Refresh watch state when returning from the player (lifecycle ON_RESUME).
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        var resumeCount = 0
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                // Skip the initial resume — loadDetail already handles it.
+                if (resumeCount++ > 0) {
+                    viewModel.refreshWatchState()
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     var resolvedFallbackUrl by remember { mutableStateOf("") }
     LaunchedEffect(state.resolvedStream) {
         state.resolvedStream?.let { resolved ->
             val url = resolved.transcodeUrls?.mp4
                 ?: resolved.transcodeUrls?.hls
                 ?: resolved.url
-            // Build a fallback chain: if primary is the direct URL, fallback to HLS transcode
             val fallback = if (url == resolved.url) {
                 resolved.transcodeUrls?.hls ?: resolved.transcodeUrls?.mp4 ?: ""
             } else if (url == resolved.transcodeUrls?.mp4) {
@@ -180,8 +203,41 @@ fun DetailScreen(
             }
             resolvedUrl = url
             resolvedFallbackUrl = fallback
-            showActionSheet = true
             viewModel.clearResolvedStream()
+
+            // If this resolution was triggered by an episode download button,
+            // enqueue the download directly instead of showing the action sheet.
+            val dlTarget = pendingEpisodeDownload
+            if (dlTarget != null) {
+                val item = state.mediaItem
+                android.util.Log.w("DetailScreen", "pendingEpisodeDownload resolved: target=$dlTarget item=${item?.title} url=$url")
+                if (item != null) {
+                    val (s, e) = dlTarget
+                    val dlTitle = "${item.title} S${s.toString().padStart(2, '0')}E${e.toString().padStart(2, '0')}"
+                    android.util.Log.w("DetailScreen", "Calling downloadViewModel.enqueueDownload for $dlTitle")
+                    downloadViewModel.enqueueDownload(
+                        com.torve.domain.model.Download(
+                            id = "${item.tmdbId}_${s}_${e}_${System.currentTimeMillis()}",
+                            mediaId = item.tmdbId.toString(),
+                            mediaType = item.type,
+                            title = dlTitle,
+                            posterUrl = item.posterUrl,
+                            streamUrl = url,
+                            status = com.torve.domain.model.DownloadStatus.PENDING,
+                            seasonNumber = s,
+                            episodeNumber = e,
+                        ),
+                    )
+                    android.widget.Toast.makeText(
+                        context,
+                        context.getString(R.string.notif_download_started) + ": $dlTitle",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                pendingEpisodeDownload = null
+            } else {
+                showActionSheet = true
+            }
         }
     }
 
@@ -236,13 +292,7 @@ fun DetailScreen(
                                 .background(Brush.verticalGradient(HeroGradient)),
                         )
 
-                        // Back button
-                        com.torve.android.ui.components.BackButton(
-                            onClick = onBack,
-                            modifier = Modifier
-                                .statusBarsPadding()
-                                .padding(start = 12.dp, top = 8.dp),
-                        )
+                        // Back button removed — floating version below
                     }
 
                     // ── Content Section ──
@@ -263,7 +313,7 @@ fun DetailScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(
-                                    text = "In Library",
+                                    text = stringResource(R.string.detail_in_library),
                                     color = Amber,
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.SemiBold,
@@ -367,7 +417,15 @@ fun DetailScreen(
                                         onLockedFeatureClick(PremiumFeature.STREAM_PLAYBACK)
                                     } else if (settingsState.debridConnected) {
                                         if (item.type == MediaType.SERIES) {
-                                            viewModel.playNextEpisode()
+                                            // If the user already selected a specific episode,
+                                            // play that one. Otherwise auto-resolve next unwatched.
+                                            val ctxS = state.streamContextSeason
+                                            val ctxE = state.streamContextEpisode
+                                            if (ctxS != null && ctxE != null) {
+                                                viewModel.fetchStreams(season = ctxS, episode = ctxE)
+                                            } else {
+                                                viewModel.playNextEpisode()
+                                            }
                                         } else {
                                             viewModel.fetchStreams()
                                         }
@@ -405,12 +463,15 @@ fun DetailScreen(
                                         modifier = Modifier.size(22.dp),
                                     )
                                     Spacer(Modifier.width(8.dp))
+                                    val playLabel = when {
+                                        streamPlaybackLocked -> stringResource(R.string.premium_unlock_with_lifetime)
+                                        !settingsState.debridConnected -> stringResource(R.string.detail_connect_cloud)
+                                        item.type == MediaType.SERIES && state.streamContextSeason != null && state.streamContextEpisode != null ->
+                                            "S${state.streamContextSeason.toString().padStart(2, '0')}E${state.streamContextEpisode.toString().padStart(2, '0')}"
+                                        else -> state.primaryPlayLabel
+                                    }
                                     Text(
-                                        when {
-                                            streamPlaybackLocked -> PremiumAccess.UNLOCK_WITH_LIFETIME_LABEL
-                                            settingsState.debridConnected -> stringResource(R.string.common_play)
-                                            else -> stringResource(R.string.detail_connect_cloud)
-                                        },
+                                        playLabel,
                                         style = MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.Bold,
                                     )
@@ -426,7 +487,7 @@ fun DetailScreen(
                                 add(
                                     DetailSecondaryActionSpec(
                                         label = when {
-                                            watchlistEditLocked -> PremiumAccess.UNLOCK_WITH_LIFETIME_LABEL
+                                            watchlistEditLocked -> stringResource(R.string.premium_unlock_with_lifetime)
                                             isInWatchlist -> stringResource(R.string.detail_in_watchlist)
                                             else -> stringResource(R.string.detail_watchlist)
                                         },
@@ -459,7 +520,7 @@ fun DetailScreen(
                                     add(
                                         DetailSecondaryActionSpec(
                                             label = when {
-                                                watchedStatusLocked -> PremiumAccess.UNLOCK_WITH_LIFETIME_LABEL
+                                                watchedStatusLocked -> stringResource(R.string.premium_unlock_with_lifetime)
                                                 state.isMarkedWatched -> stringResource(R.string.detail_unwatched)
                                                 else -> stringResource(R.string.detail_watched)
                                             },
@@ -483,7 +544,7 @@ fun DetailScreen(
                                     add(
                                         DetailSecondaryActionSpec(
                                             label = if (traktListLocked) {
-                                                PremiumAccess.UNLOCK_WITH_LIFETIME_LABEL
+                                                stringResource(R.string.premium_unlock_with_lifetime)
                                             } else {
                                                 state.userRating?.let { "Rated $it/10" } ?: "Rate"
                                             },
@@ -655,6 +716,7 @@ fun DetailScreen(
                                 },
                                 onEpisodeDownload = { season, episode ->
                                     if (settingsState.debridConnected) {
+                                        pendingEpisodeDownload = season to episode
                                         viewModel.fetchStreams(season = season, episode = episode)
                                     }
                                 },
@@ -703,6 +765,13 @@ fun DetailScreen(
                                         onLockedFeatureClick(PremiumFeature.WATCHED_STATUS_EDIT)
                                     } else {
                                         viewModel.markSeasonWatched(season)
+                                    }
+                                },
+                                onToggleEpisodeWatched = { season, episode ->
+                                    if (watchedStatusLocked) {
+                                        onLockedFeatureClick(PremiumFeature.WATCHED_STATUS_EDIT)
+                                    } else {
+                                        viewModel.toggleEpisodeWatched(season, episode)
                                     }
                                 },
                             )
@@ -881,6 +950,15 @@ fun DetailScreen(
                 }
             }
         }
+
+            // Floating back button — always visible regardless of scroll position
+            com.torve.android.ui.components.BackButton(
+                onClick = onBack,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .padding(start = 12.dp, top = 8.dp),
+            )
         }
     }
 }
@@ -893,7 +971,7 @@ private fun WhereToWatchSection(
     error: String?,
     onOpenOffer: (AvailabilityOffer) -> Unit,
 ) {
-    SectionHeader(title = "Where to Watch")
+    SectionHeader(title = stringResource(R.string.detail_where_to_watch))
     Spacer(Modifier.height(8.dp))
     when {
         isLoading -> {

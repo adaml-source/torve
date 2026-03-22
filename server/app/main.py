@@ -10,7 +10,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from .config import get_settings
 from .db import get_session
-from .models import AccountSettings, Device, DeviceActivationEvent, Entitlement, EventOutbox, PairingCode, Purchase, Session, User, WatchStateReport, utcnow
+from .models import AccountSettings, Device, DeviceActivationEvent, Entitlement, EventOutbox, PairingCode, Purchase, Session, User, UserPlaylist, WatchStateReport, utcnow
 from .realtime import ConnectionRegistry, deliver_pending_events, dispatch_event
 from .schemas import (
     AccountSettingsPatchRequest,
@@ -56,6 +56,8 @@ from .schemas import (
     UserResponse,
     WatchStateReportRequest,
     WatchStateReportResponse,
+    PlaylistSaveRequest,
+    PlaylistResponse,
 )
 from .security import (
     create_access_token,
@@ -121,6 +123,7 @@ def as_user_response(user: User) -> UserResponse:
     return UserResponse(
         id=user.id,
         email=user.email,
+        is_verified=user.is_verified,
         created_at=user.created_at,
     )
 
@@ -1473,3 +1476,105 @@ async def websocket_endpoint(
     finally:
         if registered_device_id is not None:
             await registry.unregister(user_id=user_id, device_id=registered_device_id)
+
+
+# ── Playlist CRUD ──────────────────────────────────────────────
+
+
+def _playlist_response(p: UserPlaylist) -> PlaylistResponse:
+    return PlaylistResponse(
+        id=p.id,
+        name=p.name,
+        url=p.url,
+        epg_url=p.epg_url,
+        playlist_type=p.playlist_type,
+        server=p.server,
+        username=p.username,
+        has_password=bool(p.password_enc),
+        created_at=p.created_at,
+        updated_at=p.updated_at,
+    )
+
+
+@app.get("/me/playlists", response_model=list[PlaylistResponse])
+async def get_playlists(
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    result = await session.execute(
+        select(UserPlaylist).where(UserPlaylist.user_id == user.id).order_by(UserPlaylist.name)
+    )
+    return [_playlist_response(p) for p in result.scalars().all()]
+
+
+@app.put("/me/playlists/{playlist_id}", response_model=PlaylistResponse)
+async def save_playlist(
+    playlist_id: str,
+    body: PlaylistSaveRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    result = await session.execute(
+        select(UserPlaylist).where(UserPlaylist.id == playlist_id, UserPlaylist.user_id == user.id)
+    )
+    existing = result.scalar_one_or_none()
+    now = utcnow()
+    if existing:
+        existing.name = body.name
+        existing.url = body.url
+        existing.epg_url = body.epg_url
+        existing.playlist_type = body.playlist_type
+        existing.server = body.server
+        existing.username = body.username
+        if body.password is not None:
+            existing.password_enc = body.password  # TODO: encrypt at rest
+        existing.updated_at = now
+    else:
+        existing = UserPlaylist(
+            id=playlist_id,
+            user_id=user.id,
+            name=body.name,
+            url=body.url,
+            epg_url=body.epg_url,
+            playlist_type=body.playlist_type,
+            server=body.server,
+            username=body.username,
+            password_enc=body.password,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(existing)
+    await session.commit()
+    await session.refresh(existing)
+    return _playlist_response(existing)
+
+
+@app.delete("/me/playlists/{playlist_id}")
+async def delete_playlist(
+    playlist_id: str,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    await session.execute(
+        delete(UserPlaylist).where(UserPlaylist.id == playlist_id, UserPlaylist.user_id == user.id)
+    )
+    await session.commit()
+    return {"status": "ok"}
+
+
+@app.get("/me/playlists/{playlist_id}/credentials")
+async def get_playlist_credentials(
+    playlist_id: str,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    result = await session.execute(
+        select(UserPlaylist).where(UserPlaylist.id == playlist_id, UserPlaylist.user_id == user.id)
+    )
+    p = result.scalar_one_or_none()
+    if not p:
+        raise HTTPException(status_code=404)
+    return {
+        "username": p.username,
+        "password": p.password_enc,  # TODO: decrypt at rest
+    }

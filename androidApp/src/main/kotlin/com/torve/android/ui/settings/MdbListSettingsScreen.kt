@@ -16,6 +16,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
@@ -37,12 +39,15 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.torve.android.R
@@ -68,7 +73,14 @@ fun MdbListSettingsScreen(
 ) {
     val settingsState by settingsViewModel.state.collectAsState()
     val mdbState by mdbListViewModel.state.collectAsState()
+    val authClient: com.torve.data.auth.AuthClient = koinInject()
+    val authUser by authClient.authUserFlow.collectAsState()
     var apiKeyInput by remember { mutableStateOf(settingsState.mdblistApiKey) }
+    val accountSessionCoordinator: com.torve.presentation.session.AccountSessionCoordinator = koinInject()
+    val mdbScope = rememberCoroutineScope()
+    val defaultStorageMode = if (authUser != null) com.torve.domain.integrations.IntegrationStorageMode.ACCOUNT
+        else com.torve.domain.integrations.IntegrationStorageMode.DEVICE_ONLY
+    var mdblistStorageMode by remember(defaultStorageMode) { mutableStateOf(defaultStorageMode) }
     var showSaved by remember { mutableStateOf(false) }
 
     Column(
@@ -108,6 +120,8 @@ fun MdbListSettingsScreen(
                     color = Silver,
                 )
                 Spacer(Modifier.height(8.dp))
+                var apiKeyRevealed by remember { mutableStateOf(false) }
+                val apiKeyPeek = com.torve.android.ui.components.rememberPeekPasswordTransformation(apiKeyInput)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(
                         value = apiKeyInput,
@@ -115,7 +129,18 @@ fun MdbListSettingsScreen(
                         modifier = Modifier.weight(1f),
                         placeholder = { Text(stringResource(R.string.mdblist_enter_key), color = Steel) },
                         singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
+                        visualTransformation = if (apiKeyRevealed) VisualTransformation.None else apiKeyPeek,
+                        trailingIcon = if (apiKeyInput.isNotEmpty()) {
+                            {
+                                IconButton(onClick = { apiKeyRevealed = !apiKeyRevealed }) {
+                                    Icon(
+                                        imageVector = if (apiKeyRevealed) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                                        contentDescription = if (apiKeyRevealed) "Hide" else "Show",
+                                        tint = Silver,
+                                    )
+                                }
+                            }
+                        } else null,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Snow,
                             unfocusedTextColor = Snow,
@@ -129,6 +154,15 @@ fun MdbListSettingsScreen(
                         settingsViewModel.setMdblistApiKey(apiKeyInput)
                         mdbListViewModel.refreshApiKey()
                         showSaved = true
+                        if (mdblistStorageMode == com.torve.domain.integrations.IntegrationStorageMode.ACCOUNT) {
+                            mdbScope.launch {
+                                accountSessionCoordinator.saveIntegrationToBackend(
+                                    integrationType = "MDBLIST_API_KEY",
+                                    credentials = mapOf("api_key" to apiKeyInput),
+                                    displayIdentifier = "MDBList",
+                                )
+                            }
+                        }
                     }) {
                         Text(
                             if (showSaved) stringResource(R.string.mdblist_saved) else stringResource(R.string.mdblist_save),
@@ -143,6 +177,12 @@ fun MdbListSettingsScreen(
                         showSaved = false
                     }
                 }
+                Spacer(Modifier.height(4.dp))
+                com.torve.android.ui.components.StorageModeSelector(
+                    selected = mdblistStorageMode,
+                    onModeSelected = { mdblistStorageMode = it },
+                    isSignedIn = authUser != null,
+                )
             }
 
             // Tabs: Popular / Search

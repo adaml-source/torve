@@ -8,6 +8,8 @@ import com.torve.db.TorveDatabase
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.WatchProgress
 import com.torve.domain.repository.WatchProgressRepository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 
@@ -19,7 +21,9 @@ class WatchProgressRepositoryImpl(
 ) : WatchProgressRepository {
 
     override suspend fun getInProgress(limit: Long): List<WatchProgress> {
-        return database.torveQueries.getInProgress(limit).executeAsList().map { row ->
+        val rows = database.torveQueries.getInProgress(limit).executeAsList()
+        // Return local data immediately — don't block on TMDB calls.
+        val result = rows.map { row ->
             WatchProgress(
                 mediaId = row.media_id,
                 mediaType = MediaType.fromString(row.media_type),
@@ -34,6 +38,42 @@ class WatchProgressRepositoryImpl(
                 updatedAt = row.updated_at,
             )
         }
+        // Backfill missing poster/backdrop URLs from TMDB asynchronously.
+        // This updates the DB so next read will have the URLs.
+        val needsEnrichment = rows.filter { it.poster_url == null || it.backdrop_url == null }
+        if (needsEnrichment.isNotEmpty()) {
+            kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+                for (row in needsEnrichment) {
+                    val tmdbId = row.media_id.toIntOrNull() ?: continue
+                    val isMovie = row.media_type == "movie"
+                    runCatching {
+                        val (poster, backdrop) = if (isMovie) {
+                            val d = tmdbClient.getMovieDetail(tmdbId)
+                            TmdbMappers.posterUrl(d.posterPath) to TmdbMappers.backdropUrl(d.backdropPath)
+                        } else {
+                            val d = tmdbClient.getTvDetail(tmdbId)
+                            TmdbMappers.posterUrl(d.posterPath) to TmdbMappers.backdropUrl(d.backdropPath)
+                        }
+                        if (poster != null || backdrop != null) {
+                            database.torveQueries.upsertProgress(
+                                media_id = row.media_id,
+                                media_type = row.media_type,
+                                title = row.title,
+                                poster_url = poster ?: row.poster_url,
+                                backdrop_url = backdrop ?: row.backdrop_url,
+                                position_ms = row.position_ms,
+                                duration_ms = row.duration_ms,
+                                season_number = row.season_number,
+                                episode_number = row.episode_number,
+                                show_title = row.show_title,
+                                updated_at = row.updated_at,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        return result
     }
 
     override suspend fun getProgress(mediaId: String): WatchProgress? {
@@ -55,6 +95,11 @@ class WatchProgressRepositoryImpl(
     }
 
     override suspend fun saveProgress(progress: WatchProgress) {
+        // Preserve existing poster/backdrop URLs if the new values are null,
+        // so a failed TMDB lookup or Trakt sync doesn't overwrite good data.
+        val existing = runCatching { database.torveQueries.getProgress(progress.mediaId).executeAsOneOrNull() }.getOrNull()
+        val posterUrl = progress.posterUrl ?: existing?.poster_url
+        val backdropUrl = progress.backdropUrl ?: existing?.backdrop_url
         database.torveQueries.upsertProgress(
             media_id = progress.mediaId,
             media_type = when (progress.mediaType) {
@@ -62,8 +107,8 @@ class WatchProgressRepositoryImpl(
                 MediaType.SERIES -> "series"
             },
             title = progress.title,
-            poster_url = progress.posterUrl,
-            backdrop_url = progress.backdropUrl,
+            poster_url = posterUrl,
+            backdrop_url = backdropUrl,
             position_ms = progress.positionMs,
             duration_ms = progress.durationMs,
             season_number = progress.seasonNumber?.toLong(),
@@ -106,6 +151,10 @@ class WatchProgressRepositoryImpl(
                 updatedAt = row.updated_at,
             )
         }
+    }
+
+    override suspend fun deleteProgress(mediaId: String) {
+        database.torveQueries.deleteProgressByMediaId(mediaId)
     }
 
     override suspend fun clearAllProgress() {

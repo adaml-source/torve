@@ -6,6 +6,7 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
+import com.torve.domain.integrations.IntegrationStorageMode
 import com.torve.domain.security.SecureStorage
 import java.nio.charset.StandardCharsets
 import java.security.KeyStore
@@ -26,6 +27,30 @@ class AndroidKeystoreSecretStore(
     override suspend fun get(key: IntegrationSecretKey): String? = getString(key.name)
 
     override suspend fun remove(key: IntegrationSecretKey) = remove(key.name)
+
+    // ── Storage mode tracking ──────────────────────────────────
+    // Stored in the same encrypted SharedPreferences with a "_mode" suffix.
+    // Defaults to DEVICE_ONLY for all existing installations (backward-compatible).
+
+    private fun modeKey(key: IntegrationSecretKey): String = "${key.name}_mode"
+
+    override suspend fun setStorageMode(key: IntegrationSecretKey, mode: IntegrationStorageMode) {
+        prefs.edit().putString(modeKey(key), mode.name).apply()
+    }
+
+    override suspend fun getStorageMode(key: IntegrationSecretKey): IntegrationStorageMode {
+        val stored = prefs.getString(modeKey(key), null) ?: return IntegrationStorageMode.DEVICE_ONLY
+        return runCatching { IntegrationStorageMode.valueOf(stored) }.getOrDefault(IntegrationStorageMode.DEVICE_ONLY)
+    }
+
+    override suspend fun clearAllSecrets() {
+        val editor = prefs.edit()
+        for (key in IntegrationSecretKey.entries) {
+            editor.remove(key.name)
+            editor.remove(modeKey(key))
+        }
+        editor.apply()
+    }
 
     override suspend fun putString(key: String, value: String) {
         val encrypted = encrypt(value)

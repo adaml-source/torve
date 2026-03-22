@@ -107,28 +107,43 @@ class CatalogViewModel(
                 val filter = _state.value.filter
                 val genreId = _state.value.selectedGenreId
                 val providerId = _state.value.providerId
+                val category = _state.value.selectedCategory
 
-                val result = if (filter.isActive || genreId != null || providerId != null) {
-                    // Use discover API when any filter, genre, or provider is active
-                    metadataRepo.discover(
-                        type = mediaType,
-                        page = 1,
-                        sortBy = filter.sortBy.apiValue,
-                        withGenres = genreId?.toString(),
-                        minRating = filter.minRating,
-                        year = filter.year,
-                        yearTo = filter.yearTo,
-                        runtimeGte = filter.runtimeFilter?.minMinutes,
-                        runtimeLte = filter.runtimeFilter?.maxMinutes,
-                        withWatchProviders = providerId?.toString(),
-                        watchRegion = if (providerId != null) "US" else null,
-                    )
-                } else {
-                    // Use curated list endpoints
-                    when (_state.value.selectedCategory) {
-                        CatalogCategory.TRENDING -> metadataRepo.getTrendingPaged(mediaType)
-                        CatalogCategory.POPULAR -> metadataRepo.getPopularPaged(mediaType)
-                        CatalogCategory.TOP_RATED -> metadataRepo.getTopRatedPaged(mediaType)
+                val result = when {
+                    // In Progress: always local data, never discovery endpoints
+                    category == CatalogCategory.IN_PROGRESS -> {
+                        loadInProgressItems(genreId)
+                    }
+                    // No genre/filter/provider active: use curated list endpoints
+                    !filter.isActive && genreId == null && providerId == null -> {
+                        when (category) {
+                            CatalogCategory.TRENDING -> metadataRepo.getTrendingPaged(mediaType)
+                            CatalogCategory.POPULAR -> metadataRepo.getPopularPaged(mediaType)
+                            CatalogCategory.TOP_RATED -> metadataRepo.getTopRatedPaged(mediaType)
+                            CatalogCategory.IN_PROGRESS -> error("unreachable")
+                        }
+                    }
+                    // Genre/filter/provider active: use discover API with chip-specific sort
+                    else -> {
+                        val chipSort = if (filter.sortBy != SortOption.POPULARITY_DESC) {
+                            filter.sortBy.apiValue
+                        } else {
+                            chipSortBy(category)
+                        }
+                        val chipMinRating = filter.minRating ?: chipMinRating(category)
+                        metadataRepo.discover(
+                            type = mediaType,
+                            page = 1,
+                            sortBy = chipSort,
+                            withGenres = genreId?.toString(),
+                            minRating = chipMinRating,
+                            year = filter.year,
+                            yearTo = filter.yearTo,
+                            runtimeGte = filter.runtimeFilter?.minMinutes,
+                            runtimeLte = filter.runtimeFilter?.maxMinutes,
+                            withWatchProviders = providerId?.toString(),
+                            watchRegion = if (providerId != null) "US" else null,
+                        )
                     }
                 }
 
@@ -152,6 +167,52 @@ class CatalogViewModel(
         }
     }
 
+    /** Sort parameter for the TMDB discover API, differentiated by chip. */
+    private fun chipSortBy(category: CatalogCategory): String = when (category) {
+        CatalogCategory.TRENDING -> "popularity.desc"
+        CatalogCategory.POPULAR -> "vote_count.desc"
+        CatalogCategory.TOP_RATED -> "vote_average.desc"
+        CatalogCategory.IN_PROGRESS -> "popularity.desc"
+    }
+
+    /** Minimum rating guard — prevents Top Rated from surfacing obscure 1-vote titles. */
+    private fun chipMinRating(category: CatalogCategory): Float? = when (category) {
+        CatalogCategory.TOP_RATED -> 6.0f
+        else -> null
+    }
+
+    /** Build In Progress results from local watch history, optionally filtered by genre. */
+    private suspend fun loadInProgressItems(genreId: Int?): PagedResult {
+        val progressItems = watchProgressRepo?.getInProgress(50) ?: emptyList()
+        val targetType = if (mediaType == "movie") MediaType.MOVIE else MediaType.SERIES
+        val items = progressItems
+            .filter { it.mediaType == targetType }
+            .mapNotNull { wp ->
+                val tmdbId = wp.mediaId.toIntOrNull() ?: return@mapNotNull null
+                MediaItem(
+                    id = wp.mediaId,
+                    tmdbId = tmdbId,
+                    title = wp.showTitle ?: wp.title,
+                    posterUrl = wp.posterUrl,
+                    type = wp.mediaType,
+                    year = null,
+                )
+            }
+        // If genre selected, enrich items to get genreIds then filter
+        val filtered = if (genreId != null && items.isNotEmpty()) {
+            val enriched = items.mapNotNull { item ->
+                runCatching {
+                    val type = if (item.type == MediaType.SERIES) "tv" else "movie"
+                    metadataRepo.getDetail(type, item.tmdbId ?: return@mapNotNull null)
+                }.getOrNull()
+            }
+            enriched.filter { genreId in it.genreIds }
+        } else {
+            items
+        }
+        return PagedResult(items = filtered, page = 1, totalPages = 1, totalResults = filtered.size)
+    }
+
     fun loadMore() {
         val s = _state.value
         if (s.isLoadingMore || !s.hasMore || s.isLoading) return
@@ -168,14 +229,30 @@ class CatalogViewModel(
                 val filter = s.filter
                 val genreId = s.selectedGenreId
                 val providerId = s.providerId
+                val category = s.selectedCategory
 
-                val result = if (filter.isActive || genreId != null || providerId != null) {
+                if (category == CatalogCategory.IN_PROGRESS) return@launch
+
+                val result = if (!filter.isActive && genreId == null && providerId == null) {
+                    when (category) {
+                        CatalogCategory.TRENDING -> metadataRepo.getTrendingPaged(mediaType, nextPage)
+                        CatalogCategory.POPULAR -> metadataRepo.getPopularPaged(mediaType, nextPage)
+                        CatalogCategory.TOP_RATED -> metadataRepo.getTopRatedPaged(mediaType, nextPage)
+                        CatalogCategory.IN_PROGRESS -> return@launch
+                    }
+                } else {
+                    val chipSort = if (filter.sortBy != SortOption.POPULARITY_DESC) {
+                        filter.sortBy.apiValue
+                    } else {
+                        chipSortBy(category)
+                    }
+                    val chipMin = filter.minRating ?: chipMinRating(category)
                     metadataRepo.discover(
                         type = mediaType,
                         page = nextPage,
-                        sortBy = filter.sortBy.apiValue,
+                        sortBy = chipSort,
                         withGenres = genreId?.toString(),
-                        minRating = filter.minRating,
+                        minRating = chipMin,
                         year = filter.year,
                         yearTo = filter.yearTo,
                         runtimeGte = filter.runtimeFilter?.minMinutes,
@@ -183,12 +260,6 @@ class CatalogViewModel(
                         withWatchProviders = providerId?.toString(),
                         watchRegion = if (providerId != null) "US" else null,
                     )
-                } else {
-                    when (s.selectedCategory) {
-                        CatalogCategory.TRENDING -> metadataRepo.getTrendingPaged(mediaType, nextPage)
-                        CatalogCategory.POPULAR -> metadataRepo.getPopularPaged(mediaType, nextPage)
-                        CatalogCategory.TOP_RATED -> metadataRepo.getTopRatedPaged(mediaType, nextPage)
-                    }
                 }
 
                 val combined = _state.value.items + result.items
@@ -268,7 +339,21 @@ class CatalogViewModel(
     }
 
     fun updateSearchQuery(query: String) {
-        _state.update { it.copy(searchQuery = query) }
+        _state.update {
+            if (query.length < 2 && it.searchQuery.length >= 2) {
+                // Transition from searchable → too short: clear search state
+                // so previous results don't linger when the user deletes text.
+                it.copy(
+                    searchQuery = query,
+                    searchResults = emptyList(),
+                    hasActiveSearch = false,
+                    aiSearchLabel = null,
+                    aiSearchError = null,
+                )
+            } else {
+                it.copy(searchQuery = query)
+            }
+        }
         searchQueryFlow.value = query
     }
 

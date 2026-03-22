@@ -19,7 +19,11 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -50,6 +54,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -155,7 +162,7 @@ private val navTabDefs = listOf(
     NavTab("movies", R.string.nav_movies, Icons.Filled.Movie, Icons.Outlined.Movie),
     NavTab("tv_shows", R.string.nav_tv_shows, Icons.Filled.Tv, Icons.Outlined.Tv),
     NavTab("live_tv", R.string.nav_channels, Icons.Filled.LiveTv, Icons.Outlined.LiveTv),
-    NavTab("watchlist_tab", R.string.nav_watchlist, Icons.Filled.Bookmark, Icons.Outlined.BookmarkBorder),
+    NavTab("watchlist_tab", R.string.nav_library, Icons.Filled.Bookmark, Icons.Outlined.BookmarkBorder),
     NavTab("profile_tab", R.string.nav_settings, Icons.Filled.Settings, Icons.Outlined.Settings),
 )
 
@@ -167,7 +174,7 @@ private val tvNavTabDefs = listOf(
     NavTab("movies", R.string.nav_movies, Icons.Filled.Movie, Icons.Outlined.Movie),
     NavTab("tv_shows", R.string.nav_tv_shows, Icons.Filled.Tv, Icons.Outlined.Tv),
     NavTab("live_tv", R.string.nav_channels, Icons.Filled.LiveTv, Icons.Outlined.LiveTv),
-    NavTab("watchlist_tab", R.string.nav_watchlist, Icons.Filled.Bookmark, Icons.Outlined.BookmarkBorder),
+    NavTab("watchlist_tab", R.string.nav_library, Icons.Filled.Bookmark, Icons.Outlined.BookmarkBorder),
     NavTab("profile_tab", R.string.nav_settings, Icons.Filled.Settings, Icons.Outlined.Settings),
 )
 
@@ -251,7 +258,108 @@ fun TorveNavGraph(
         }
     }
 
+    // Content padding: the nav bar Row applies navigationBarsPadding() internally,
+    // so its total rendered height = row content + system nav inset.
+    // Content must clear: 56dp (row) + nav inset. The 12dp scrim overlaps content intentionally.
+    val navBarInsetBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val contentBottomPadding = if (showBottomBar) 56.dp + navBarInsetBottom else navBarInsetBottom
+
     Box(modifier = Modifier.fillMaxSize()) {
+        // ── Restore progress banner ──
+        val accountSessionCoordinator: com.torve.presentation.session.AccountSessionCoordinator = koinInject()
+        val restoreProgress by accountSessionCoordinator.restoreProgress.collectAsState()
+        if (restoreProgress.phase == com.torve.presentation.session.RestorePhase.RUNNING ||
+            restoreProgress.phase == com.torve.presentation.session.RestorePhase.COMPLETED ||
+            restoreProgress.phase == com.torve.presentation.session.RestorePhase.COMPLETED_WITH_ERRORS
+        ) {
+            androidx.compose.animation.AnimatedVisibility(
+                visible = true,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .zIndex(10f)
+                    .statusBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+            ) {
+                androidx.compose.material3.Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = androidx.compose.material3.CardDefaults.cardColors(
+                        containerColor = com.torve.android.ui.theme.Gunmetal,
+                    ),
+                    shape = RoundedCornerShape(10.dp),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (restoreProgress.phase == com.torve.presentation.session.RestorePhase.RUNNING) {
+                            androidx.compose.material3.CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = com.torve.android.ui.theme.Amber,
+                            )
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            text = restoreProgress.message,
+                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                            color = com.torve.android.ui.theme.Snow,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (restoreProgress.phase != com.torve.presentation.session.RestorePhase.RUNNING) {
+                            // Auto-dismiss after 3 seconds
+                            LaunchedEffect(restoreProgress.phase) {
+                                kotlinx.coroutines.delay(3000)
+                                accountSessionCoordinator.dismissRestoreProgress()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Always-composed Home layer (mobile) ──
+        // Home is kept alive so returning to the Home tab is instant (no
+        // composition rebuild, no Coil image re-decode). Hidden when
+        // another route is active via graphicsLayer alpha + focus/semantics gating.
+        val isHomeVisible = !isTvMode && currentRoute == MOBILE_HOME_ROUTE
+        if (!isTvMode) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = contentBottomPadding)
+                    .zIndex(if (isHomeVisible) 2f else -1f)
+                    .graphicsLayer { alpha = if (isHomeVisible) 1f else 0f }
+                    .then(
+                        if (!isHomeVisible) Modifier.clearAndSetSemantics {} else Modifier
+                    ),
+            ) {
+                HomeScreen(
+                    onMediaClick = { item ->
+                        if (isHomeVisible) navController.navigateToDetail(item)
+                    },
+                    onContinueWatchingClick = { progress ->
+                        if (!isHomeVisible) return@HomeScreen
+                        val id = progress.mediaId.toIntOrNull() ?: return@HomeScreen
+                        val type = if (progress.mediaType == MediaType.SERIES) "tv" else "movie"
+                        navController.navigate("detail/$type/$id")
+                    },
+                    onSeeAllClick = { sectionId ->
+                        if (isHomeVisible) navController.navigate("seeall/${Uri.encode(sectionId)}")
+                    },
+                    onProviderClick = { providerId, providerName ->
+                        if (isHomeVisible) navController.navigate("provider/$providerId/${Uri.encode(providerName)}")
+                    },
+                    onPersonClick = { personId ->
+                        if (isHomeVisible) navController.navigate("person/$personId")
+                    },
+                    isLifetimeUnlocked = subscriptionState.isPro,
+                    onLockedFeatureClick = requestLifetimeUnlock,
+                )
+            }
+        }
+
         // Main content
         NavHost(
             navController = navController,
@@ -260,7 +368,7 @@ fun TorveNavGraph(
                 .fillMaxSize()
                 .padding(
                     start = if (showTvNavRail) 138.dp else 0.dp,
-                    bottom = if (showBottomBar) 56.dp else 0.dp,
+                    bottom = contentBottomPadding,
                 ),
         ) {
             // Setup wizard
@@ -283,28 +391,8 @@ fun TorveNavGraph(
                 )
             }
 
-            // Home tab — Unified HomeScreen with all content (movies + TV)
-            composable("home") {
-                HomeScreen(
-                    onMediaClick = { item -> navController.navigateToDetail(item) },
-                    onContinueWatchingClick = { progress ->
-                        val id = progress.mediaId.toIntOrNull() ?: return@HomeScreen
-                        val type = if (progress.mediaType == MediaType.SERIES) "tv" else "movie"
-                        navController.navigate("detail/$type/$id")
-                    },
-                    onSeeAllClick = { sectionId ->
-                        navController.navigate("seeall/${Uri.encode(sectionId)}")
-                    },
-                    onProviderClick = { providerId, providerName ->
-                        navController.navigate("provider/$providerId/${Uri.encode(providerName)}")
-                    },
-                    onPersonClick = { personId ->
-                        navController.navigate("person/$personId")
-                    },
-                    isLifetimeUnlocked = subscriptionState.isPro,
-                    onLockedFeatureClick = requestLifetimeUnlock,
-                )
-            }
+            // Home tab — empty placeholder; actual content is always-composed above
+            composable("home") { }
 
             // Movies tab — CatalogScreen for movies
             composable("movies") {
@@ -490,6 +578,23 @@ fun TorveNavGraph(
                             val id = entry.mediaId.toIntOrNull() ?: return@WatchlistScreen
                             navController.navigate("detail/${entry.mediaType}/$id")
                         },
+                        onDownloadsClick = {
+                            if (isLocked(PremiumFeature.DOWNLOADS)) {
+                                requestLifetimeUnlock(PremiumFeature.DOWNLOADS)
+                            } else {
+                                navController.navigate("downloads")
+                            }
+                        },
+                        onJellyfinItemPlay = { streamUrl, title ->
+                            navController.navigate(
+                                "player?url=${Uri.encode(streamUrl)}" +
+                                    "&title=${Uri.encode(title)}" +
+                                    "&mediaId=" +
+                                    "&mediaType=movie" +
+                                    "&posterUrl=" +
+                                    "&backdropUrl=",
+                            )
+                        },
                     )
                 }
             }
@@ -536,13 +641,7 @@ fun TorveNavGraph(
                             navController.navigate("manage_devices")
                         }
                     },
-                    onLoginClick = {
-                        if (isLocked(PremiumFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD)) {
-                            requestLifetimeUnlock(PremiumFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD)
-                        } else {
-                            navController.navigate("login")
-                        }
-                    },
+                    onLoginClick = { navController.navigate("login") },
                     onPrivacyPolicyClick = { navController.navigate("legal/privacy") },
                     onTermsClick = { navController.navigate("legal/terms") },
                     onHelpClick = { navController.navigate("legal/help") },
@@ -649,13 +748,7 @@ fun TorveNavGraph(
                             navController.navigate("manage_devices")
                         }
                     },
-                    onLoginClick = {
-                        if (isLocked(PremiumFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD)) {
-                            requestLifetimeUnlock(PremiumFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD)
-                        } else {
-                            navController.navigate("login")
-                        }
-                    },
+                    onLoginClick = { navController.navigate("login") },
                     onPrivacyPolicyClick = { navController.navigate("legal/privacy") },
                     onTermsClick = { navController.navigate("legal/terms") },
                     onHelpClick = { navController.navigate("legal/help") },
@@ -923,6 +1016,7 @@ fun TorveNavGraph(
                 } else {
                     AccountScreen(
                         onOpenDevices = { navController.navigate("sync_devices") },
+                        onManageDevices = { navController.navigate("manage_devices") },
                         onBack = { navController.popBackStack() },
                     )
                 }
@@ -983,21 +1077,14 @@ fun TorveNavGraph(
 
             // Login
             composable("login") {
-                if (isLocked(PremiumFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD)) {
-                    PaywallScreen(
-                        onBack = { navController.popBackStack() },
-                        onDeviceLimitReached = { navController.navigate("device_limit_reached") },
-                        lockedFeature = PremiumFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD,
-                    )
-                } else {
-                    LoginScreen(
-                        onLoginSuccess = {
-                            subscriptionViewModel.loadSubscription()
-                            navController.popBackStack()
-                        },
-                        onSkip = { navController.popBackStack() },
-                    )
-                }
+                LoginScreen(
+                    onLoginSuccess = {
+                        subscriptionViewModel.loadSubscription()
+                        navController.popBackStack()
+                    },
+                    onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                    onSkip = { navController.popBackStack() },
+                )
             }
 
             // See All screen — paginated grid for any section

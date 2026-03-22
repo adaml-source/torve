@@ -185,8 +185,74 @@ class DetailViewModel(
     }
 
     /**
-     * For TV shows: auto-start the next unwatched or in-progress episode.
-     * Priority: 1) resume partially-watched episode, 2) first unwatched episode, 3) S01E01.
+     * Resolve which episode the play button should target.
+     * Priority: 1) resume partially-watched, 2) first unwatched, 3) S01E01.
+     * Updates [DetailUiState.nextEpisode] — the single source of truth for both
+     * the play button label and the playback target.
+     */
+    private suspend fun resolveNextEpisode() {
+        val item = _state.value.mediaItem ?: return
+        if (item.type != MediaType.SERIES) {
+            _state.update { it.copy(nextEpisode = null) }
+            return
+        }
+
+        // 1. Check for a partially-watched episode (2%–90% progress)
+        val allProgress = try { watchProgressRepo.getAllProgress() } catch (_: Exception) { emptyList() }
+        val inProgress = allProgress
+            .filter { it.seasonNumber != null && it.episodeNumber != null }
+            .filter { it.showTitle == item.title || it.mediaId == item.id.toString() }
+            .filter { it.progressPercent > 0.02f && it.progressPercent < 0.9f }
+            .maxByOrNull { it.updatedAt }
+
+        if (inProgress != null) {
+            _state.update {
+                it.copy(nextEpisode = NextEpisodeInfo(
+                    season = inProgress.seasonNumber!!,
+                    episode = inProgress.episodeNumber!!,
+                    progressPercent = inProgress.progressPercent,
+                    mode = NextEpisodeMode.RESUME_IN_PROGRESS,
+                ))
+            }
+            return
+        }
+
+        // 2. Find next unwatched episode across all seasons
+        val watched = _state.value.watchedEpisodes
+        val seasons = item.seasons
+            .filter { it.seasonNumber > 0 }
+            .sortedBy { it.seasonNumber }
+
+        for (season in seasons) {
+            for (ep in 1..season.episodeCount) {
+                if (episodeKey(season.seasonNumber, ep) !in watched) {
+                    _state.update {
+                        it.copy(nextEpisode = NextEpisodeInfo(
+                            season = season.seasonNumber,
+                            episode = ep,
+                            mode = NextEpisodeMode.PLAY_FIRST_UNWATCHED,
+                        ))
+                    }
+                    return
+                }
+            }
+        }
+
+        // 3. All episodes watched — restart from S01E01
+        val firstSeason = seasons.firstOrNull()
+        if (firstSeason != null) {
+            _state.update {
+                it.copy(nextEpisode = NextEpisodeInfo(
+                    season = firstSeason.seasonNumber,
+                    episode = 1,
+                    mode = NextEpisodeMode.PLAY_FROM_START,
+                ))
+            }
+        }
+    }
+
+    /**
+     * For TV shows: play the resolved next episode.
      * For movies: delegates straight to fetchStreams().
      */
     fun playNextEpisode() {
@@ -195,40 +261,17 @@ class DetailViewModel(
             fetchStreams()
             return
         }
-
-        scope.launch {
-            // 1. Check for a partially-watched episode (2%–90% progress)
-            val allProgress = try { watchProgressRepo.getAllProgress() } catch (_: Exception) { emptyList() }
-            val inProgress = allProgress
-                .filter { it.seasonNumber != null && it.episodeNumber != null }
-                .filter { it.showTitle == item.title || it.mediaId == item.id.toString() }
-                .filter { it.progressPercent > 0.02f && it.progressPercent < 0.9f }
-                .maxByOrNull { it.updatedAt }
-
-            if (inProgress != null) {
-                fetchStreams(season = inProgress.seasonNumber, episode = inProgress.episodeNumber)
-                return@launch
-            }
-
-            // 2. Find next unwatched episode across all seasons
-            val watched = _state.value.watchedEpisodes
-            val seasons = item.seasons
-                .filter { it.seasonNumber > 0 }
-                .sortedBy { it.seasonNumber }
-
-            for (season in seasons) {
-                for (ep in 1..season.episodeCount) {
-                    if ("s${season.seasonNumber}e$ep" !in watched) {
-                        fetchStreams(season = season.seasonNumber, episode = ep)
-                        return@launch
-                    }
+        val next = _state.value.nextEpisode
+        if (next != null) {
+            fetchStreams(season = next.season, episode = next.episode)
+        } else {
+            // Fallback — resolve inline if not yet computed
+            scope.launch {
+                resolveNextEpisode()
+                val resolved = _state.value.nextEpisode
+                if (resolved != null) {
+                    fetchStreams(season = resolved.season, episode = resolved.episode)
                 }
-            }
-
-            // 3. All episodes watched — restart from S01E01
-            val firstSeason = seasons.firstOrNull()
-            if (firstSeason != null) {
-                fetchStreams(season = firstSeason.seasonNumber, episode = 1)
             }
         }
     }
@@ -619,7 +662,7 @@ class DetailViewModel(
                 val now = Clock.System.now().toEpochMilliseconds()
                 for (ep in 1..episodeCount) {
                     val entry = WatchHistoryEntry(
-                        id = "${item.id}_s${seasonNumber}e$ep",
+                        id = "${item.id}_${episodeKey(seasonNumber, ep)}",
                         mediaId = item.id,
                         mediaType = MediaType.SERIES.name,
                         title = seasonDetail?.episodes?.getOrNull(ep - 1)?.name ?: "Episode $ep",
@@ -633,12 +676,92 @@ class DetailViewModel(
                     )
                     watchHistoryRepo.record(entry)
                 }
-                // Update watched episodes set
                 val newWatched = _state.value.watchedEpisodes.toMutableSet()
                 for (ep in 1..episodeCount) {
-                    newWatched.add("s${seasonNumber}e$ep")
+                    newWatched.add(episodeKey(seasonNumber, ep))
                 }
                 _state.update { it.copy(watchedEpisodes = newWatched) }
+                resolveNextEpisode()
+            } catch (_: Exception) { }
+        }
+    }
+
+    /**
+     * Toggle watched state for a single episode.
+     * Unwatching also clears any partial playback progress for that episode.
+     */
+    fun toggleEpisodeWatched(seasonNumber: Int, episodeNumber: Int) {
+        val key = episodeKey(seasonNumber, episodeNumber)
+        if (key in _state.value.watchedEpisodes) {
+            unmarkEpisodeWatched(seasonNumber, episodeNumber)
+        } else {
+            markEpisodeWatched(seasonNumber, episodeNumber)
+        }
+    }
+
+    private fun markEpisodeWatched(seasonNumber: Int, episodeNumber: Int) {
+        val item = _state.value.mediaItem ?: return
+        scope.launch {
+            try {
+                val epTitle = _state.value.seasonDetail?.episodes
+                    ?.getOrNull(episodeNumber - 1)?.name ?: "Episode $episodeNumber"
+                val entry = WatchHistoryEntry(
+                    id = "${item.id}_${episodeKey(seasonNumber, episodeNumber)}",
+                    mediaId = item.id,
+                    mediaType = MediaType.SERIES.name,
+                    title = epTitle,
+                    posterUrl = item.posterUrl,
+                    backdropUrl = item.backdropUrl,
+                    watchedAt = Clock.System.now().toEpochMilliseconds(),
+                    durationWatchedMs = 0,
+                    seasonNumber = seasonNumber,
+                    episodeNumber = episodeNumber,
+                    showTitle = item.title,
+                )
+                watchHistoryRepo.record(entry)
+                val newWatched = _state.value.watchedEpisodes + episodeKey(seasonNumber, episodeNumber)
+                _state.update { it.copy(watchedEpisodes = newWatched) }
+                resolveNextEpisode()
+            } catch (_: Exception) { }
+        }
+    }
+
+    private fun unmarkEpisodeWatched(seasonNumber: Int, episodeNumber: Int) {
+        val item = _state.value.mediaItem ?: return
+        scope.launch {
+            try {
+                // Remove watch history entry
+                val historyId = "${item.id}_${episodeKey(seasonNumber, episodeNumber)}"
+                watchHistoryRepo.delete(historyId)
+                // Clear partial playback progress for this episode so the resolver
+                // does not immediately surface it as "Resume".
+                watchProgressRepo.deleteProgress(item.id)
+                // Update UI state
+                val newWatched = _state.value.watchedEpisodes - episodeKey(seasonNumber, episodeNumber)
+                _state.update { it.copy(watchedEpisodes = newWatched, watchProgress = null) }
+                resolveNextEpisode()
+            } catch (_: Exception) { }
+        }
+    }
+
+    /**
+     * Refresh watch state from repositories (media-scoped, not full-table).
+     * Call after returning from player, after toggling watched, or after sync.
+     */
+    fun refreshWatchState() {
+        val item = _state.value.mediaItem ?: return
+        scope.launch {
+            try {
+                // Refresh watched episodes (media-scoped)
+                val history = watchHistoryRepo.getForMedia(item.id)
+                val watched = history
+                    .filter { it.seasonNumber != null && it.episodeNumber != null }
+                    .map { episodeKey(it.seasonNumber!!, it.episodeNumber!!) }
+                    .toSet()
+                // Refresh playback progress
+                val progress = watchProgressRepo.getProgress(item.id)
+                _state.update { it.copy(watchedEpisodes = watched, watchProgress = progress) }
+                resolveNextEpisode()
             } catch (_: Exception) { }
         }
     }
@@ -647,12 +770,13 @@ class DetailViewModel(
         val item = _state.value.mediaItem ?: return
         scope.launch {
             try {
-                val history = watchHistoryRepo.getAll()
+                val history = watchHistoryRepo.getForMedia(item.id)
                 val watched = history
-                    .filter { it.mediaId == item.id && it.seasonNumber != null && it.episodeNumber != null }
-                    .map { "s${it.seasonNumber}e${it.episodeNumber}" }
+                    .filter { it.seasonNumber != null && it.episodeNumber != null }
+                    .map { episodeKey(it.seasonNumber!!, it.episodeNumber!!) }
                     .toSet()
                 _state.update { it.copy(watchedEpisodes = watched) }
+                resolveNextEpisode()
             } catch (_: Exception) { }
         }
     }

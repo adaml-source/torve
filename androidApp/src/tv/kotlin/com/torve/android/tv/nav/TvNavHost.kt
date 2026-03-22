@@ -37,10 +37,20 @@ fun TvNavHost(
     railFocusRequester: FocusRequester,
     onVoiceSearchQuery: (String) -> Unit,
     onSettingsClick: () -> Unit = {},
+    // Focus state cleanup handled in TvRoot via isSubRouteActive LaunchedEffect
+    onHomeLayoutBack: () -> Unit = { navController.popBackStack() },
+    // Focus state cleanup handled in TvRoot via isSubRouteActive LaunchedEffect
+    onRatingsBack: () -> Unit = { navController.popBackStack() },
     onRequestLifetimeUnlock: (TvEntitledFeature) -> Unit = {},
     isStreamPlaybackLocked: Boolean = false,
     onFirstContentRequester: (FocusRequester) -> Unit = {},
     onContentFocused: (FocusRequester) -> Unit = {},
+    homeLayoutEntryFocusRequester: FocusRequester,
+    onHomeLayoutEntryReadyChanged: (Boolean) -> Unit = {},
+    onHomeLayoutEntryFocused: () -> Unit = {},
+    ratingsEntryFocusRequester: FocusRequester,
+    onRatingsEntryReadyChanged: (Boolean) -> Unit = {},
+    onRatingsEntryFocused: () -> Unit = {},
 ) {
     NavHost(
         navController = navController,
@@ -52,24 +62,32 @@ fun TvNavHost(
         composable(TvRoutes.HOME_LAYOUT) {
             TvHomeLayoutScreen(
                 railFocusRequester = railFocusRequester,
-                onBack = { navController.popBackStack() },
+                onBack = onHomeLayoutBack,
                 onFirstContentRequester = onFirstContentRequester,
                 onContentFocused = onContentFocused,
+                entryFocusRequester = homeLayoutEntryFocusRequester,
+                onEntryFocusReadyChanged = onHomeLayoutEntryReadyChanged,
+                onEntryFocusFocused = onHomeLayoutEntryFocused,
             )
         }
 
         composable(TvRoutes.RATINGS_SETTINGS) {
             TvRatingsSettingsScreen(
                 railFocusRequester = railFocusRequester,
-                onBack = { navController.popBackStack() },
+                onBack = onRatingsBack,
                 onFirstContentRequester = onFirstContentRequester,
                 onContentFocused = onContentFocused,
+                entryFocusRequester = ratingsEntryFocusRequester,
+                onEntryFocusReadyChanged = onRatingsEntryReadyChanged,
+                onEntryFocusFocused = onRatingsEntryFocused,
             )
         }
 
         composable(TvRoutes.DEVICE_LIMIT_REACHED) {
             TvDeviceLimitReachedScreen(
+                // Focus state cleanup handled in TvRoot via isSubRouteActive LaunchedEffect
                 onBack = { navController.popBackStack() },
+                // Focus state cleanup handled in TvRoot via isSubRouteActive LaunchedEffect
                 onActivated = { navController.popBackStack() },
             )
         }
@@ -91,6 +109,7 @@ fun TvNavHost(
                 title = title,
                 railFocusRequester = railFocusRequester,
                 onMediaClick = { item -> navController.navigateToTvDetails(item) },
+                // Focus state cleanup handled in TvRoot via isSubRouteActive LaunchedEffect
                 onBack = { navController.popBackStack() },
                 onFirstContentRequester = onFirstContentRequester,
                 onContentFocused = onContentFocused,
@@ -115,11 +134,13 @@ fun TvNavHost(
                 id = detailId,
                 autoPlay = autoPlay,
                 railFocusRequester = railFocusRequester,
+                // Focus state cleanup handled in TvRoot via isSubRouteActive LaunchedEffect
                 onBack = { navController.popBackStack() },
                 onFirstContentRequester = onFirstContentRequester,
                 onContentFocused = onContentFocused,
                 onMediaClick = { item -> navController.navigateToTvDetails(item) },
                 onSettingsClick = {
+                    // Focus state cleanup handled in TvRoot via isSubRouteActive LaunchedEffect
                     navController.popBackStack()
                     onSettingsClick()
                 },
@@ -167,6 +188,7 @@ fun TvNavHost(
             if (isStreamPlaybackLocked) {
                 LaunchedEffect(Unit) {
                     onRequestLifetimeUnlock(TvEntitledFeature.STREAM_PLAYBACK)
+                    // Focus state cleanup handled in TvRoot via isSubRouteActive LaunchedEffect
                     navController.popBackStack()
                 }
             } else {
@@ -174,6 +196,7 @@ fun TvNavHost(
                     channelUrl = backStackEntry.arguments?.getString("channelUrl") ?: "",
                     channelName = backStackEntry.arguments?.getString("channelName") ?: "",
                     groupName = backStackEntry.arguments?.getString("groupName") ?: "",
+                    // Focus state cleanup handled in TvRoot via isSubRouteActive LaunchedEffect
                     onBack = { navController.popBackStack() },
                 )
             }
@@ -200,6 +223,7 @@ fun TvNavHost(
             if (isStreamPlaybackLocked) {
                 LaunchedEffect(Unit) {
                     onRequestLifetimeUnlock(TvEntitledFeature.STREAM_PLAYBACK)
+                    // Focus state cleanup handled in TvRoot via isSubRouteActive LaunchedEffect
                     navController.popBackStack()
                 }
             } else {
@@ -223,6 +247,7 @@ fun TvNavHost(
                             onVoiceSearchQuery(normalized)
                         }
                     },
+                    // Focus state cleanup handled in TvRoot via isSubRouteActive LaunchedEffect
                     onBack = { navController.popBackStack() },
                 )
             }

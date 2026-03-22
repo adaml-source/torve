@@ -35,7 +35,11 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -198,6 +202,21 @@ fun TvDetailsScreen(
 
     LaunchedEffect(type, id) {
         detailViewModel.loadDetail(type, id)
+    }
+
+    // Refresh watch state when returning from player (lifecycle ON_RESUME).
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        var resumeCount = 0
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                if (resumeCount++ > 0) {
+                    detailViewModel.refreshWatchState()
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     LaunchedEffect(state.mediaItem?.id) {
@@ -416,7 +435,7 @@ fun TvDetailsScreen(
                                 state.isLoadingStreams -> stringResource(R.string.tv_detail_finding_streams)
                                 state.isResolving -> stringResource(R.string.tv_detail_resolving)
                                 !settingsState.debridConnected -> stringResource(R.string.tv_detail_connect_cloud)
-                                else -> stringResource(R.string.tv_action_play)
+                                else -> state.primaryPlayLabel
                             }
                             TvActionButton(
                                 text = playText,
@@ -829,6 +848,9 @@ fun TvDetailsScreen(
                             detailViewModel.fetchStreams(season = season, episode = episode)
                         },
                         onSeasonDownload = { },
+                        onToggleEpisodeWatched = { season, episode ->
+                            detailViewModel.toggleEpisodeWatched(season, episode)
+                        },
                         onFirstContentRequester = onFirstContentRequester,
                         onContentFocused = onContentFocused,
                     )

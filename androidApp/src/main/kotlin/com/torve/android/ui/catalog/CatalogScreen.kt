@@ -21,6 +21,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.ui.zIndex
 import androidx.compose.foundation.layout.width
@@ -67,6 +70,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.CompositionLocalProvider
@@ -122,6 +126,10 @@ private val TV_GENRES = listOf(
     10765 to "Sci-Fi & Fantasy", 53 to "Thriller", 10768 to "War & Politics",
 )
 
+// Floating search overlay heights — keep in sync with the overlay Column below.
+private val SEARCH_BAR_BLOCK_HEIGHT = 72.dp  // search field + vertical padding
+private val BACK_TITLE_ROW_HEIGHT = 44.dp    // optional back/title row
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun CatalogScreen(
@@ -143,9 +151,15 @@ fun CatalogScreen(
         BackHandler(onBack = onBack)
     }
 
-    // Reset grid scroll position when viewModel changes (e.g. provider type switch)
-    LaunchedEffect(viewModel) {
-        gridState.scrollToItem(0)
+    // Scroll to 0 only when mediaType changes within the same back-stack entry
+    // (e.g. provider route movie ↔ tv switch). Do NOT scroll on recomposition
+    // from details → back — rememberLazyGridState (saveable) restores position.
+    var lastResetMediaType by rememberSaveable { mutableStateOf(mediaType) }
+    LaunchedEffect(mediaType) {
+        if (mediaType != lastResetMediaType) {
+            lastResetMediaType = mediaType
+            gridState.scrollToItem(0)
+        }
     }
 
     LaunchedEffect(mdblistApiKey) {
@@ -169,7 +183,11 @@ fun CatalogScreen(
             }
     }
 
-    val isSearchMode = state.searchQuery.length >= 2 || state.hasActiveSearch
+    // Only switch to search results when we actually HAVE results or a completed search.
+    // This prevents the grid from blanking during the debounce window (typing "h" → "he"
+    // would immediately show empty searchResults before the 300ms debounce fires).
+    val isSearchMode = state.hasActiveSearch || state.isAiSearching ||
+        (state.isSearching && state.searchResults.isNotEmpty())
     val displayItems = if (isSearchMode) state.searchResults else state.items
     val isLoadingMore = if (isSearchMode) state.isSearchingMore else state.isLoadingMore
 
@@ -186,6 +204,12 @@ fun CatalogScreen(
         // Show search bar when at top or scrolling up, hide when scrolling down
         !isScrollingDown || firstVisible <= 1
     } }
+
+    // Top padding so grid content starts below the floating search overlay.
+    val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val showBackTitleRow = onBack != null || title != null
+    val gridTopPadding = statusBarTop + SEARCH_BAR_BLOCK_HEIGHT +
+        if (showBackTitleRow) BACK_TITLE_ROW_HEIGHT else 0.dp
 
     val defaultCardStyle = resolveCardStyle(
         presets = settingsState.cardStylePresets,
@@ -224,7 +248,12 @@ fun CatalogScreen(
                 LazyVerticalGrid(
                     state = gridState,
                     columns = GridCells.Adaptive(minSize = 130.dp),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+                    contentPadding = PaddingValues(
+                        top = gridTopPadding,
+                        start = 16.dp,
+                        end = 16.dp,
+                        bottom = 24.dp,
+                    ),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
@@ -250,7 +279,7 @@ fun CatalogScreen(
                         LazyRow(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            items(CatalogCategory.entries) { category ->
+                            items(CatalogCategory.entries.filter { it != CatalogCategory.IN_PROGRESS }) { category ->
                                 val selected = state.selectedCategory == category
                                 FilterChip(
                                     selected = selected,
@@ -357,7 +386,7 @@ fun CatalogScreen(
                     // ── Poster Grid ──
                     items(
                         displayItems.size,
-                        key = { index -> "${displayItems[index].id}_$index" },
+                        key = { index -> "${displayItems[index].type}_${displayItems[index].id}" },
                     ) { index ->
                         val item = displayItems[index]
                         PosterCard(

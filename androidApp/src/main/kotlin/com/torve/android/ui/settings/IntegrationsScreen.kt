@@ -10,7 +10,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,6 +24,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
@@ -32,7 +36,12 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
@@ -42,7 +51,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
@@ -76,7 +88,15 @@ fun IntegrationsScreen(
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
     val secretStore: IntegrationSecretStore = koinInject()
+    val authClient: com.torve.data.auth.AuthClient = koinInject()
+    val authUser by authClient.authUserFlow.collectAsState()
+    val accountSessionCoordinator: com.torve.presentation.session.AccountSessionCoordinator = koinInject()
     val scope = rememberCoroutineScope()
+    val defaultStorageMode = if (authUser != null) com.torve.domain.integrations.IntegrationStorageMode.ACCOUNT
+        else com.torve.domain.integrations.IntegrationStorageMode.DEVICE_ONLY
+    var omdbStorageMode by remember(defaultStorageMode) { mutableStateOf(defaultStorageMode) }
+    var jellyfinStorageMode by remember(defaultStorageMode) { mutableStateOf(defaultStorageMode) }
+    var plexStorageMode by remember(defaultStorageMode) { mutableStateOf(defaultStorageMode) }
 
     LaunchedEffect(Unit) {
         secretStore.get(IntegrationSecretKey.JELLYFIN_API_KEY)?.let { stored ->
@@ -104,6 +124,8 @@ fun IntegrationsScreen(
             color = Snow,
             fontWeight = FontWeight.Bold,
         )
+        Spacer(Modifier.height(8.dp))
+        com.torve.android.ui.components.StorageModeExplainer()
         Spacer(Modifier.height(4.dp))
         Text(
             stringResource(R.string.integrations_subtitle),
@@ -121,16 +143,14 @@ fun IntegrationsScreen(
             IntegrationTextField(
                 label = stringResource(R.string.settings_api_key),
                 value = state.omdbApiKey,
-                onValueChange = { value ->
-                    viewModel.setOmdbApiKey(value)
-                    scope.launch {
-                        if (value.isBlank()) {
-                            secretStore.remove(IntegrationSecretKey.OMDB_API_KEY)
-                        } else {
-                            secretStore.put(IntegrationSecretKey.OMDB_API_KEY, value)
-                        }
-                    }
-                },
+                onValueChange = { viewModel.updateOmdbApiKeyInput(it) },
+                isSensitive = true,
+            )
+            Spacer(Modifier.height(4.dp))
+            com.torve.android.ui.components.StorageModeSelector(
+                selected = omdbStorageMode,
+                onModeSelected = { omdbStorageMode = it },
+                isSignedIn = authUser != null,
             )
             Spacer(Modifier.height(8.dp))
             Row(
@@ -138,7 +158,18 @@ fun IntegrationsScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Button(
-                    onClick = { viewModel.validateOmdbApiKey() },
+                    onClick = {
+                        viewModel.saveAndValidateOmdbApiKey()
+                        if (omdbStorageMode == com.torve.domain.integrations.IntegrationStorageMode.ACCOUNT) {
+                            scope.launch {
+                                accountSessionCoordinator.saveIntegrationToBackend(
+                                    integrationType = "OMDB_API_KEY",
+                                    credentials = mapOf("api_key" to state.omdbApiKey),
+                                    displayIdentifier = "OMDB",
+                                )
+                            }
+                        }
+                    },
                     enabled = !state.omdbValidating && state.omdbApiKey.isNotBlank(),
                     colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
                 ) {
@@ -287,20 +318,30 @@ fun IntegrationsScreen(
             IntegrationTextField(
                 label = stringResource(R.string.settings_api_key),
                 value = state.jellyfinApiKey,
-                onValueChange = { value ->
-                    viewModel.setJellyfinApiKey(value)
-                    scope.launch {
-                        if (value.isBlank()) {
-                            secretStore.remove(IntegrationSecretKey.JELLYFIN_API_KEY)
-                        } else {
-                            secretStore.put(IntegrationSecretKey.JELLYFIN_API_KEY, value)
-                        }
-                    }
-                },
+                onValueChange = { viewModel.updateJellyfinApiKeyInput(it) },
+                isSensitive = true,
+            )
+            Spacer(Modifier.height(4.dp))
+            com.torve.android.ui.components.StorageModeSelector(
+                selected = jellyfinStorageMode,
+                onModeSelected = { jellyfinStorageMode = it },
+                isSignedIn = authUser != null,
             )
             Spacer(Modifier.height(8.dp))
             OutlinedButton(
-                onClick = { viewModel.testJellyfinConnection() },
+                onClick = {
+                    viewModel.saveAndTestJellyfinConnection()
+                    if (jellyfinStorageMode == com.torve.domain.integrations.IntegrationStorageMode.ACCOUNT) {
+                        scope.launch {
+                            accountSessionCoordinator.saveIntegrationToBackend(
+                                integrationType = "JELLYFIN_API_KEY",
+                                credentials = mapOf("api_key" to state.jellyfinApiKey),
+                                displayIdentifier = "Jellyfin",
+                                config = mapOf("server_url" to state.jellyfinServerUrl),
+                            )
+                        }
+                    }
+                },
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
             ) {
@@ -355,16 +396,14 @@ fun IntegrationsScreen(
             IntegrationTextField(
                 label = stringResource(R.string.integrations_access_token),
                 value = state.plexAccessToken,
-                onValueChange = { value ->
-                    viewModel.setPlexAccessToken(value)
-                    scope.launch {
-                        if (value.isBlank()) {
-                            secretStore.remove(IntegrationSecretKey.PLEX_ACCESS_TOKEN)
-                        } else {
-                            secretStore.put(IntegrationSecretKey.PLEX_ACCESS_TOKEN, value)
-                        }
-                    }
-                },
+                onValueChange = { viewModel.updatePlexAccessTokenInput(it) },
+                isSensitive = true,
+            )
+            Spacer(Modifier.height(4.dp))
+            com.torve.android.ui.components.StorageModeSelector(
+                selected = plexStorageMode,
+                onModeSelected = { plexStorageMode = it },
+                isSignedIn = authUser != null,
             )
             Spacer(Modifier.height(4.dp))
             Text(
@@ -372,6 +411,27 @@ fun IntegrationsScreen(
                 color = Silver.copy(alpha = 0.6f),
                 style = MaterialTheme.typography.bodySmall,
             )
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = {
+                    viewModel.saveAndConnectPlex()
+                    if (plexStorageMode == com.torve.domain.integrations.IntegrationStorageMode.ACCOUNT) {
+                        scope.launch {
+                            accountSessionCoordinator.saveIntegrationToBackend(
+                                integrationType = "PLEX_ACCESS_TOKEN",
+                                credentials = mapOf("access_token" to state.plexAccessToken),
+                                displayIdentifier = "Plex",
+                                config = mapOf("server_url" to state.plexServerUrl),
+                            )
+                        }
+                    }
+                },
+                enabled = state.plexAccessToken.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
+            ) {
+                Text("Save & Connect")
+            }
             Spacer(Modifier.height(8.dp))
 
             if (state.plexConnected) {
@@ -514,7 +574,10 @@ private fun IntegrationTextField(
     label: String,
     value: String,
     onValueChange: (String) -> Unit,
+    isSensitive: Boolean = false,
 ) {
+    var revealed by remember { mutableStateOf(false) }
+    val peekTransformation = com.torve.android.ui.components.rememberPeekPasswordTransformation(value)
     Column {
         Text(label, style = MaterialTheme.typography.bodySmall, color = Torve.colors.textSecondary)
         Spacer(Modifier.height(4.dp))
@@ -524,18 +587,33 @@ private fun IntegrationTextField(
             singleLine = true,
             textStyle = MaterialTheme.typography.bodyMedium.copy(color = Snow),
             cursorBrush = SolidColor(Amber),
+            visualTransformation = if (isSensitive && !revealed) peekTransformation else VisualTransformation.None,
+            keyboardOptions = if (isSensitive) KeyboardOptions(keyboardType = KeyboardType.Password) else KeyboardOptions.Default,
             modifier = Modifier.fillMaxWidth(),
             decorationBox = { inner ->
-                Column(
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(Gunmetal, RoundedCornerShape(8.dp))
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                        .padding(start = 12.dp, end = if (isSensitive) 4.dp else 12.dp, top = 10.dp, bottom = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (value.isBlank()) {
-                        Text(label, color = Torve.colors.textHint, style = MaterialTheme.typography.bodySmall)
+                    Box(modifier = Modifier.weight(1f)) {
+                        if (value.isBlank()) {
+                            Text(label, color = Torve.colors.textHint, style = MaterialTheme.typography.bodySmall)
+                        }
+                        inner()
                     }
-                    inner()
+                    if (isSensitive && value.isNotEmpty()) {
+                        IconButton(onClick = { revealed = !revealed }, modifier = Modifier.size(32.dp)) {
+                            Icon(
+                                imageVector = if (revealed) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                                contentDescription = if (revealed) "Hide" else "Show",
+                                tint = Silver,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
                 }
             },
         )

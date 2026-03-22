@@ -45,6 +45,7 @@ enum class CatalogCategory(val label: String) {
     TRENDING("Trending"),
     POPULAR("Popular"),
     TOP_RATED("Top Rated"),
+    IN_PROGRESS("In Progress"),
 }
 
 data class CatalogFilter(

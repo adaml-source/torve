@@ -39,6 +39,10 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.OpenInBrowser
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -177,18 +181,23 @@ fun SettingsScreen(
     val collectionsLocked = isLocked(PremiumFeature.PERSISTENT_COLLECTIONS)
     val customLayoutLocked = isLocked(PremiumFeature.SYNC_CUSTOM_LAYOUTS)
     val backupLocked = isLocked(PremiumFeature.CLOUD_BACKUP_RESTORE)
-    var authUser by remember { mutableStateOf<AuthUser?>(null) }
-    var authRefreshKey by remember { mutableIntStateOf(0) }
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) { authRefreshKey++ }
+    // Observe the authoritative auth user flow — reacts immediately to
+    // login, logout, and verification status changes without manual refresh.
+    val authUser by authClient.authUserFlow.collectAsState()
+
+    // Storage mode state for credential entry sections
+    // Default to ACCOUNT when signed in — integrations sync to backend automatically.
+    // User can opt out to DEVICE_ONLY if they prefer local-only storage.
+    val defaultStorageMode = if (authUser != null) com.torve.domain.integrations.IntegrationStorageMode.ACCOUNT
+        else com.torve.domain.integrations.IntegrationStorageMode.DEVICE_ONLY
+    var debridStorageMode by remember(defaultStorageMode) { mutableStateOf(defaultStorageMode) }
+    var aiKeyStorageMode by remember(defaultStorageMode) { mutableStateOf(defaultStorageMode) }
+
+    // Seed the flow on first composition if it's null (e.g. cold start).
+    LaunchedEffect(Unit) {
+        if (authClient.authUserFlow.value == null) {
+            authClient.getAuthenticatedUser() // triggers persistAuth → emitCurrentUser
         }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-    LaunchedEffect(authRefreshKey) {
-        authUser = authClient.getAuthenticatedUser()
     }
     LaunchedEffect(authUser?.id) {
         if (authUser != null) {
@@ -240,6 +249,7 @@ fun SettingsScreen(
                         VerificationBanner(
                             email = authUser?.email ?: "",
                             authClient = authClient,
+                            onVerified = { /* flow updates automatically via checkVerificationStatus → emitCurrentUser */ },
                         )
                     }
                     Spacer(Modifier.height(4.dp))
@@ -290,23 +300,45 @@ fun SettingsScreen(
                         }
                     }
                     Spacer(Modifier.height(8.dp))
+                    var showSignOutConfirm by remember { mutableStateOf(false) }
                     OutlinedButton(
-                        onClick = {
-                            scope.launch {
-                                authClient.logout()
-                                authUser = null
-                            }
-                        },
+                        onClick = { showSignOutConfirm = true },
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Torve.colors.textSecondary),
                     ) {
                         Text("Sign Out")
                     }
+                    if (showSignOutConfirm) {
+                        AlertDialog(
+                            onDismissRequest = { showSignOutConfirm = false },
+                            title = { Text("Sign out?") },
+                            text = {
+                                Text("Signing out clears local credentials stored on this device. Integrations saved to your Torve account can be restored when you sign in again.")
+                            },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    showSignOutConfirm = false
+                                    scope.launch {
+                                        authClient.logout()
+                                        accountSessionCoordinator.signOut()
+                                    }
+                                }) {
+                                    Text("Sign Out", color = Amber)
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showSignOutConfirm = false }) {
+                                    Text("Cancel")
+                                }
+                            },
+                        )
+                    }
                     Spacer(Modifier.height(16.dp))
                     var showDeleteConfirm by remember { mutableStateOf(false) }
                     var isDeletingAccount by remember { mutableStateOf(false) }
+                    var deleteError by remember { mutableStateOf<String?>(null) }
                     OutlinedButton(
-                        onClick = { showDeleteConfirm = true },
+                        onClick = { showDeleteConfirm = true; deleteError = null },
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Ruby),
                         enabled = !isDeletingAccount,
@@ -327,19 +359,28 @@ fun SettingsScreen(
                             onDismissRequest = { if (!isDeletingAccount) showDeleteConfirm = false },
                             containerColor = Charcoal,
                             title = { Text(stringResource(R.string.settings_delete_account_title), color = Snow) },
-                            text = { Text(stringResource(R.string.settings_delete_account_body), color = Silver) },
+                            text = {
+                                Column {
+                                    Text(stringResource(R.string.settings_delete_account_body), color = Silver)
+                                    deleteError?.let { err ->
+                                        Spacer(Modifier.height(8.dp))
+                                        Text(err, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
+                            },
                             confirmButton = {
                                 Button(
                                     onClick = {
                                         isDeletingAccount = true
+                                        deleteError = null
                                         scope.launch {
                                             val result = authClient.deleteAccount()
                                             isDeletingAccount = false
-                                            showDeleteConfirm = false
                                             if (result.success) {
-                                                authUser = null
+                                                showDeleteConfirm = false
+                                                accountSessionCoordinator.signOut()
                                             } else {
-                                                // Show error via a toast or snackbar
+                                                deleteError = result.error ?: "Failed to delete account"
                                             }
                                         }
                                     },
@@ -429,40 +470,12 @@ fun SettingsScreen(
             }
         }
         Spacer(Modifier.height(8.dp))
-        Row(
+        OutlinedButton(
+            onClick = onCalendarClick,
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
         ) {
-            OutlinedButton(
-                onClick = {
-                    onPremiumAction(PremiumFeature.DOWNLOADS) { onDownloadsClick() }
-                },
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
-            ) {
-                if (isLocked(PremiumFeature.DOWNLOADS)) {
-                    Icon(
-                        imageVector = Icons.Default.Lock,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                }
-                Text(
-                    if (isLocked(PremiumFeature.DOWNLOADS)) {
-                        "${stringResource(R.string.settings_downloads)} (${stringResource(R.string.premium_locked)})"
-                    } else {
-                        stringResource(R.string.settings_downloads)
-                    },
-                )
-            }
-            OutlinedButton(
-                onClick = onCalendarClick,
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
-            ) {
-                Text(stringResource(R.string.settings_calendar))
-            }
+            Text(stringResource(R.string.settings_calendar))
         }
 
         Spacer(Modifier.height(24.dp))
@@ -576,12 +589,31 @@ fun SettingsScreen(
                         isSensitive = true,
                     )
                     Spacer(Modifier.height(8.dp))
+                    com.torve.android.ui.components.StorageModeSelector(
+                        selected = debridStorageMode,
+                        onModeSelected = { debridStorageMode = it },
+                        isSignedIn = authUser != null,
+                    )
+                    Spacer(Modifier.height(8.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Button(
-                            onClick = { viewModel.connectDebridWithApiKey() },
+                            onClick = {
+                                viewModel.connectDebridWithApiKey()
+                                println("[DebridSave] storageMode=$debridStorageMode authUser=${authUser?.email}")
+                                if (debridStorageMode == com.torve.domain.integrations.IntegrationStorageMode.ACCOUNT) {
+                                    println("[DebridSave] Pushing to backend...")
+                                    scope.launch {
+                                        accountSessionCoordinator.saveIntegrationToBackend(
+                                            integrationType = "DEBRID_API_KEY_${state.debridProvider.name}",
+                                            credentials = mapOf("api_key" to state.debridApiKey),
+                                            displayIdentifier = state.debridProvider.name,
+                                        )
+                                    }
+                                }
+                            },
                             modifier = Modifier.weight(1f),
                             enabled = !state.debridLoading,
                             colors = ButtonDefaults.buttonColors(
@@ -1299,10 +1331,16 @@ fun SettingsScreen(
                 Spacer(Modifier.height(8.dp))
                 SettingsTextField(
                     value = state.activeAiApiKey,
-                    onValueChange = { viewModel.setActiveAiApiKey(it) },
+                    onValueChange = { viewModel.updateActiveAiApiKeyInput(it) },
                     label = "${state.aiProvider.label} API Key",
                     placeholder = state.aiProvider.keyPlaceholder,
                     isSensitive = true,
+                )
+                Spacer(Modifier.height(4.dp))
+                com.torve.android.ui.components.StorageModeSelector(
+                    selected = aiKeyStorageMode,
+                    onModeSelected = { aiKeyStorageMode = it },
+                    isSignedIn = authUser != null,
                 )
                 Spacer(Modifier.height(8.dp))
                 Row(
@@ -1310,7 +1348,18 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     FilledTonalButton(
-                        onClick = { viewModel.validateAiApiKey() },
+                        onClick = {
+                            viewModel.saveAndValidateAiApiKey()
+                            if (aiKeyStorageMode == com.torve.domain.integrations.IntegrationStorageMode.ACCOUNT) {
+                                scope.launch {
+                                    accountSessionCoordinator.saveIntegrationToBackend(
+                                        integrationType = "${state.aiProvider.name}_API_KEY",
+                                        credentials = mapOf("api_key" to state.activeAiApiKey),
+                                        displayIdentifier = state.aiProvider.label,
+                                    )
+                                }
+                            }
+                        },
                         enabled = !state.aiKeyValidating && state.activeAiApiKey.isNotBlank(),
                         colors = ButtonDefaults.filledTonalButtonColors(
                             containerColor = Amber,
@@ -1321,7 +1370,7 @@ fun SettingsScreen(
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Obsidian, strokeWidth = 2.dp)
                             Spacer(Modifier.width(6.dp))
                         }
-                        Text(if (state.aiKeyValidating) "Testing..." else "Test Key")
+                        Text(if (state.aiKeyValidating) "Saving..." else "Save & Test")
                     }
                     state.aiKeyValidationResult?.let { result ->
                         when (result) {
@@ -1922,6 +1971,8 @@ private fun SettingsTextField(
     isSensitive: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
+    var revealed by remember { mutableStateOf(false) }
+    val peekTransformation = com.torve.android.ui.components.rememberPeekPasswordTransformation(value)
     Column(modifier = modifier) {
         Text(label, style = MaterialTheme.typography.bodySmall, color = Torve.colors.textSecondary)
         Spacer(Modifier.height(4.dp))
@@ -1932,18 +1983,32 @@ private fun SettingsTextField(
             textStyle = MaterialTheme.typography.bodyMedium.copy(color = Snow),
             singleLine = true,
             cursorBrush = SolidColor(Amber),
-            visualTransformation = if (isSensitive) PasswordVisualTransformation() else VisualTransformation.None,
+            visualTransformation = if (isSensitive && !revealed) peekTransformation else VisualTransformation.None,
+            keyboardOptions = if (isSensitive) KeyboardOptions(keyboardType = KeyboardType.Password) else KeyboardOptions.Default,
             decorationBox = { innerTextField ->
-                Box(
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(Gunmetal, RoundedCornerShape(8.dp))
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                        .padding(start = 14.dp, end = if (isSensitive) 4.dp else 14.dp, top = 12.dp, bottom = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (value.isEmpty()) {
-                        Text(placeholder, style = MaterialTheme.typography.bodyMedium, color = Torve.colors.textHint)
+                    Box(modifier = Modifier.weight(1f)) {
+                        if (value.isEmpty()) {
+                            Text(placeholder, style = MaterialTheme.typography.bodyMedium, color = Torve.colors.textHint)
+                        }
+                        innerTextField()
                     }
-                    innerTextField()
+                    if (isSensitive && value.isNotEmpty()) {
+                        IconButton(onClick = { revealed = !revealed }, modifier = Modifier.size(32.dp)) {
+                            Icon(
+                                imageVector = if (revealed) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                                contentDescription = if (revealed) "Hide" else "Show",
+                                tint = Silver,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
                 }
             },
         )

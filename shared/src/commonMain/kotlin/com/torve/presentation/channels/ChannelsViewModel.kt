@@ -47,6 +47,7 @@ class ChannelsViewModel(
     private val prefsRepo: PreferencesRepository,
     private val catchupResolver: CatchupResolver = CatchupResolver(),
     private val backgroundDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
+    private val playlistBackup: com.torve.presentation.session.AccountSessionCoordinator? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(ChannelsUiState())
@@ -966,7 +967,22 @@ class ChannelsViewModel(
             _state.update { it.copy(isAddingPlaylist = true, error = null) }
             try {
                 val epg = st.newPlaylistEpgUrl.ifBlank { null }
-                withContext(backgroundDispatcher) { channelRepo.addPlaylist(st.newPlaylistName, st.newPlaylistUrl, epg) }
+                val playlist = withContext(backgroundDispatcher) { channelRepo.addPlaylist(st.newPlaylistName, st.newPlaylistUrl, epg) }
+                // Backup to backend for cross-device restore
+                val backendOk = runCatching {
+                    playlistBackup?.savePlaylistToBackend(
+                        playlistId = playlist.id,
+                        name = st.newPlaylistName,
+                        url = st.newPlaylistUrl,
+                        epgUrl = epg,
+                        playlistType = "m3u",
+                    ) ?: false
+                }.getOrElse { e ->
+                    println("[PlaylistSync] Backend save FAILED for M3U '${playlist.id}': ${e.message}")
+                    false
+                }
+                if (backendOk) println("[PlaylistSync] Backend save OK for M3U '${playlist.id}'")
+                else println("[PlaylistSync] Backend save failed for M3U '${playlist.id}'")
                 dismissAddPlaylistDialog()
                 loadPlaylists()
             } catch (e: Exception) {
@@ -984,7 +1000,7 @@ class ChannelsViewModel(
         scope.launch {
             _state.update { it.copy(isAddingPlaylist = true, error = null) }
             try {
-                withContext(backgroundDispatcher) {
+                val playlist = withContext(backgroundDispatcher) {
                     channelRepo.addXtreamPlaylist(
                         name = st.newPlaylistName,
                         server = st.newXtreamServer,
@@ -992,6 +1008,22 @@ class ChannelsViewModel(
                         password = st.newXtreamPassword,
                     )
                 }
+                // Backup to backend for cross-device restore
+                val backendOk = runCatching {
+                    playlistBackup?.savePlaylistToBackend(
+                        playlistId = playlist.id,
+                        name = st.newPlaylistName,
+                        playlistType = "xtream",
+                        server = st.newXtreamServer,
+                        username = st.newXtreamUsername,
+                        password = st.newXtreamPassword,
+                    ) ?: false
+                }.getOrElse { e ->
+                    println("[PlaylistSync] Backend save FAILED for Xtream '${playlist.id}': ${e.message}")
+                    false
+                }
+                if (backendOk) println("[PlaylistSync] Backend save OK for Xtream '${playlist.id}'")
+                else println("[PlaylistSync] Backend save failed for Xtream '${playlist.id}'")
                 dismissAddPlaylistDialog()
                 loadPlaylists()
             } catch (e: Exception) {
@@ -1080,6 +1112,8 @@ class ChannelsViewModel(
                 withContext(backgroundDispatcher) {
                     channelRepo.removePlaylist(playlistId)
                 }
+                // Also delete from backend
+                runCatching { playlistBackup?.deletePlaylistFromBackend(playlistId) }
                 if (_state.value.selectedPlaylistId == playlistId) {
                     _state.update { it.copy(selectedPlaylistId = null, channels = emptyList(), groupedChannels = emptyMap()) }
                     withContext(backgroundDispatcher) { prefsRepo.remove(KEY_CHANNELS_SELECTED_PLAYLIST) }
@@ -1113,6 +1147,7 @@ class ChannelsViewModel(
         scope.launch {
             try {
                 withContext(backgroundDispatcher) { channelRepo.removePlaylist(id) }
+                runCatching { playlistBackup?.deletePlaylistFromBackend(id) }
                 loadPlaylists()
             } catch (_: Exception) { }
         }

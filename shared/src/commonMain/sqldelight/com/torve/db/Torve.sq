@@ -45,6 +45,9 @@ SELECT * FROM watch_progress WHERE media_id = ?;
 upsertProgress:
 INSERT OR REPLACE INTO watch_progress (media_id, media_type, title, poster_url, backdrop_url, position_ms, duration_ms, season_number, episode_number, show_title, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
+deleteProgressByMediaId:
+DELETE FROM watch_progress WHERE media_id = ?;
+
 clearAllProgress:
 DELETE FROM watch_progress;
 
@@ -123,6 +126,9 @@ INSERT OR REPLACE INTO debrid_account (service, api_key, username, email, premiu
 deleteDebridAccount:
 DELETE FROM debrid_account WHERE service = ?;
 
+deleteAllDebridAccounts:
+DELETE FROM debrid_account;
+
 -- IPTV playlists
 CREATE TABLE iptv_playlist (
     id TEXT NOT NULL PRIMARY KEY,
@@ -153,6 +159,9 @@ WHERE id = ?;
 
 deletePlaylist:
 DELETE FROM iptv_playlist WHERE id = ?;
+
+deleteAllPlaylists:
+DELETE FROM iptv_playlist;
 
 -- Persisted IPTV channel catalog snapshots
 CREATE TABLE iptv_channel (
@@ -193,6 +202,59 @@ SELECT *
 FROM iptv_channel
 WHERE playlist_id = ? AND generation_id = ?
 ORDER BY sort_index ASC;
+
+getCategoryCountsForPlaylist:
+SELECT group_title, COUNT(*) AS channel_count
+FROM iptv_channel
+WHERE playlist_id = ? AND generation_id = ?
+  AND NOT EXISTS (SELECT 1 FROM iptv_hidden_channel WHERE hidden_id = stable_id)
+GROUP BY group_title
+ORDER BY group_title ASC;
+
+getChannelsForPlaylistCategory:
+SELECT *
+FROM iptv_channel
+WHERE playlist_id = ? AND generation_id = ? AND group_title = ?
+  AND NOT EXISTS (SELECT 1 FROM iptv_hidden_channel WHERE hidden_id = stable_id)
+ORDER BY sort_index ASC;
+
+getChannelsForPlaylistCategoryNull:
+SELECT *
+FROM iptv_channel
+WHERE playlist_id = ? AND generation_id = ? AND group_title IS NULL
+  AND NOT EXISTS (SELECT 1 FROM iptv_hidden_channel WHERE hidden_id = stable_id)
+ORDER BY sort_index ASC;
+
+getTotalChannelCountForPlaylist:
+SELECT COUNT(*) AS total_count
+FROM iptv_channel
+WHERE playlist_id = ? AND generation_id = ?
+  AND NOT EXISTS (SELECT 1 FROM iptv_hidden_channel WHERE hidden_id = stable_id);
+
+searchChannelsForPlaylist:
+SELECT *
+FROM iptv_channel
+WHERE playlist_id = ? AND generation_id = ?
+  AND (name LIKE ? OR tvg_name LIKE ? OR group_title LIKE ?)
+  AND NOT EXISTS (SELECT 1 FROM iptv_hidden_channel WHERE hidden_id = stable_id)
+ORDER BY sort_index ASC
+LIMIT 100;
+
+getChannelByTvgId:
+SELECT stable_id
+FROM iptv_channel
+WHERE tvg_id = ? AND generation_id = (
+    SELECT CAST(value AS INTEGER) FROM preference WHERE key = 'iptv_channel_active_generation_' || playlist_id
+)
+LIMIT 1;
+
+getChannelByPlaylistAndName:
+SELECT stable_id
+FROM iptv_channel
+WHERE playlist_id = ? AND name = ? AND generation_id = (
+    SELECT CAST(value AS INTEGER) FROM preference WHERE key = 'iptv_channel_active_generation_' || playlist_id
+)
+LIMIT 1;
 
 getChannelForPlaylistGeneration:
 SELECT *
@@ -235,6 +297,9 @@ DELETE FROM iptv_channel WHERE playlist_id = ? AND generation_id != ?;
 deleteChannelsForPlaylist:
 DELETE FROM iptv_channel WHERE playlist_id = ?;
 
+deleteAllChannels:
+DELETE FROM iptv_channel;
+
 -- IPTV favorite channels
 CREATE TABLE iptv_favorite (
     channel_id TEXT NOT NULL PRIMARY KEY,
@@ -256,6 +321,9 @@ DELETE FROM iptv_favorite WHERE channel_id = ?;
 
 isFavorite:
 SELECT COUNT(*) FROM iptv_favorite WHERE channel_id = ?;
+
+deleteAllFavorites:
+DELETE FROM iptv_favorite;
 
 -- Recently viewed IPTV channels
 CREATE TABLE iptv_recent (
@@ -294,6 +362,21 @@ SELECT * FROM iptv_category_config WHERE playlist_id = ? ORDER BY sort_order ASC
 
 upsertCategoryConfig:
 INSERT OR REPLACE INTO iptv_category_config (playlist_id, category_name, is_visible, sort_order) VALUES (?, ?, ?, ?);
+
+-- Hidden channels — small set, synced from preferences.
+-- Used by browse queries via NOT EXISTS to exclude hidden channels at SQL level.
+CREATE TABLE IF NOT EXISTS iptv_hidden_channel (
+    hidden_id TEXT NOT NULL PRIMARY KEY
+);
+
+insertHiddenChannel:
+INSERT OR IGNORE INTO iptv_hidden_channel (hidden_id) VALUES (?);
+
+clearHiddenChannels:
+DELETE FROM iptv_hidden_channel;
+
+getAllHiddenChannelIds:
+SELECT hidden_id FROM iptv_hidden_channel;
 
 -- IPTV EPG channels (persisted source metadata)
 CREATE TABLE iptv_epg_channel (
@@ -591,6 +674,9 @@ SELECT * FROM watch_history ORDER BY watched_at DESC;
 insertHistory:
 INSERT OR REPLACE INTO watch_history (id, media_id, media_type, title, poster_url, backdrop_url, watched_at, duration_watched_ms, season_number, episode_number, show_title)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+getHistoryForMedia:
+SELECT * FROM watch_history WHERE media_id = ? ORDER BY watched_at DESC;
 
 deleteHistory:
 DELETE FROM watch_history WHERE id = ?;

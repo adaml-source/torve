@@ -71,6 +71,7 @@ private val RAIL_EXPANDED_WIDTH = 160.dp
 fun TvNavRail(
     destinations: List<TvTopDestination>,
     selectedRoute: String,
+    activeRoute: String = selectedRoute,
     isExpanded: Boolean,
     railFocusRequester: FocusRequester,
     onRailFocusChanged: (Boolean) -> Unit,
@@ -98,7 +99,9 @@ fun TvNavRail(
     }
 
     // Use rememberUpdatedState so focusProperties.enter always reads
-    // the latest selectedRoute — even if the lambda identity doesn't change.
+    // the latest activeRoute (the committed tab) — not highlightedRoute which
+    // updates too late during focus entry transitions.
+    val currentActiveRoute by rememberUpdatedState(activeRoute)
     val currentSelectedRoute by rememberUpdatedState(selectedRoute)
     var railHasFocus by remember { mutableStateOf(false) }
 
@@ -132,7 +135,10 @@ fun TvNavRail(
                 onRailFocusChanged(it.hasFocus)
             }
             .focusProperties {
-                enter = { itemRequesters[currentSelectedRoute] ?: FocusRequester.Default }
+                // Use activeRoute (committed selectedTopRoute) for entry focus, not
+                // highlightedRoute. This prevents focus from landing on a stale rail
+                // item when focus falls to the rail during content disposal.
+                enter = { itemRequesters[currentActiveRoute] ?: itemRequesters[currentSelectedRoute] ?: FocusRequester.Default }
             }
             .focusGroup()
             .padding(horizontal = 8.dp, vertical = 24.dp),
@@ -173,7 +179,10 @@ fun TvNavRail(
                     onMoveToContent(destination.route)
                 },
                 onClick = {
+                    // .clickable fires via accessibility/interaction, bypassing onPreviewKeyEvent.
+                    // Must do the same as onMoveRight to move focus into content.
                     onConfirm(destination.route)
+                    onMoveToContent(destination.route)
                 },
                 onItemFocused = {
                     if (navigateOnFocus) {
@@ -189,7 +198,7 @@ fun TvNavRail(
     var prevRailHasFocus by remember { mutableStateOf(false) }
     LaunchedEffect(railHasFocus) {
         if (railHasFocus && !prevRailHasFocus) {
-            val preferred = itemRequesters[currentSelectedRoute]
+            val preferred = itemRequesters[currentActiveRoute] ?: itemRequesters[currentSelectedRoute]
             val fallback = orderedRoutes.firstOrNull()?.let { itemRequesters[it] }
             runCatching {
                 when {
@@ -215,6 +224,10 @@ private fun TvNavRailItem(
 ) {
     val reduceMotion = rememberTvReduceMotionPreference()
     var focused by remember { mutableStateOf(false) }
+    // Track whether OK/Enter KeyDown was received on THIS item, so we only
+    // act on KeyUp if the press started here (prevents KeyUp bounce from
+    // content cards that were disposed between KeyDown and KeyUp).
+    var keyDownReceivedHere by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
         targetValue = if (reduceMotion) 1f else if (focused) 1.04f else 1f,
         label = "railItemScale",
@@ -257,29 +270,36 @@ private fun TvNavRailItem(
             .onFocusChanged {
                 val wasFocused = focused
                 focused = it.isFocused
+                // Reset KeyDown tracking when focus changes — prevents stale state
+                // from blocking OK presses after focus arrives via route switch.
+                if (it.isFocused && !wasFocused) keyDownReceivedHere = false
                 if (it.isFocused && !wasFocused) onItemFocused()
             }
             .onPreviewKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown) {
-                    when (event.key) {
-                        Key.DirectionRight -> {
-                            onMoveRight()
-                            true
-                        }
-                        Key.Enter, Key.DirectionCenter -> {
-                            onConfirm()
-                            true
-                        }
-                        else -> false
+                when {
+                    // Right arrow: move to content on KeyDown (safe — clickable ignores Right)
+                    event.key == Key.DirectionRight && event.type == KeyEventType.KeyDown -> {
+                        onMoveRight()
+                        true
                     }
-                } else if (event.type == KeyEventType.KeyUp &&
-                    (event.key == Key.Enter || event.key == Key.DirectionCenter)
-                ) {
-                    // Consume KeyUp for Enter/Center to prevent .clickable
-                    // from firing onClick on a different item after focus bounces.
-                    true
-                } else {
-                    false
+                    event.key == Key.DirectionRight && event.type == KeyEventType.KeyUp -> true
+
+                    // Enter/Center: mark KeyDown received here, act on KeyUp only if
+                    // KeyDown was also on this item. This prevents KeyUp bounce from
+                    // content cards that were disposed between KeyDown and KeyUp.
+                    (event.key == Key.Enter || event.key == Key.DirectionCenter) && event.type == KeyEventType.KeyDown -> {
+                        keyDownReceivedHere = true
+                        true
+                    }
+                    (event.key == Key.Enter || event.key == Key.DirectionCenter) && event.type == KeyEventType.KeyUp -> {
+                        if (keyDownReceivedHere) {
+                            keyDownReceivedHere = false
+                            onMoveRight()
+                        }
+                        true // always consume to prevent clickable from firing
+                    }
+
+                    else -> false
                 }
             }
             .clickable(

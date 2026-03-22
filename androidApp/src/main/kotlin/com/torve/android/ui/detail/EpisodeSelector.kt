@@ -1,7 +1,9 @@
 package com.torve.android.ui.detail
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -65,6 +67,7 @@ fun EpisodeSelector(
     onDownloadSeason: (season: Int) -> Unit,
     onDownloadAll: () -> Unit,
     onMarkSeasonWatched: (season: Int) -> Unit = {},
+    onToggleEpisodeWatched: (season: Int, episode: Int) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     if (seasons.isEmpty()) return
@@ -225,6 +228,7 @@ fun EpisodeSelector(
                             isWatched = watchedEpisodes.contains(key),
                             onPlay = { onEpisodePlay(selectedSeason, episode.episodeNumber) },
                             onDownload = { onEpisodeDownload(selectedSeason, episode.episodeNumber) },
+                            onToggleWatched = { onToggleEpisodeWatched(selectedSeason, episode.episodeNumber) },
                         )
                     }
                 }
@@ -234,19 +238,24 @@ fun EpisodeSelector(
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun EpisodeCard(
     episode: Episode,
     season: Int,
     isWatched: Boolean = false,
     onPlay: () -> Unit,
     onDownload: () -> Unit,
+    onToggleWatched: () -> Unit = {},
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .clickable(onClick = onPlay)
+            .combinedClickable(
+                onClick = onPlay,
+                onLongClick = onToggleWatched,
+            )
             .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

@@ -34,13 +34,17 @@ android {
         }
     }
 
+    val baseVersionCode = 9
+
     defaultConfig {
         applicationId = "com.torve.app"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1
+        versionCode = baseVersionCode
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        multiDexEnabled = true
+        multiDexKeepProguard = file("multidex-config.pro")
 
         // Only bundle ARM native libs — Fire TV and most Android devices are ARM.
         // Removes x86/x86_64 FFmpeg .so files that bloat APK and cause GC pressure.
@@ -67,9 +71,11 @@ android {
         }
         create("mobile") {
             dimension = "formFactor"
+            versionCode = 10000 + baseVersionCode
         }
         create("tv") {
             dimension = "formFactor"
+            versionCode = 20000 + baseVersionCode
         }
     }
 

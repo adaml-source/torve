@@ -33,6 +33,7 @@ class ChannelRepositoryImpl(
     private val m3uParser: M3uParser,
     private val epgParser: EpgParser,
     private val xtreamClient: XtreamClient,
+    private val secureStorage: com.torve.domain.security.SecureStorage,
 ) : ChannelRepository {
 
     companion object {
@@ -66,6 +67,55 @@ class ChannelRepositoryImpl(
         private const val CHANNEL_DEBUG_LOG_ENABLED = false
     }
 
+    // ── Secure Xtream password storage ────────────────────────
+    // Passwords are stored in encrypted SecureStorage keyed by playlist ID.
+    // SQLite password column is kept for backwards compat but always written as null.
+
+    private fun xtreamPasswordKey(playlistId: String) = "xtream_pwd_$playlistId"
+
+    private suspend fun saveXtreamPassword(playlistId: String, password: String) {
+        secureStorage.putString(xtreamPasswordKey(playlistId), password)
+        println("[XtreamCred] Password saved securely for playlist $playlistId")
+    }
+
+    private suspend fun loadXtreamPassword(playlistId: String): String? {
+        val pw = secureStorage.getString(xtreamPasswordKey(playlistId))
+        if (pw == null) println("[XtreamCred] No secure password found for playlist $playlistId")
+        return pw
+    }
+
+    private suspend fun removeXtreamPassword(playlistId: String) {
+        secureStorage.remove(xtreamPasswordKey(playlistId))
+        println("[XtreamCred] Password removed for playlist $playlistId")
+    }
+
+    /** Migrate any plaintext passwords from SQLite to secure storage. Idempotent. */
+    private suspend fun migrateXtreamPasswords() {
+        val playlists = database.torveQueries.getAllPlaylists().executeAsList()
+        for (row in playlists) {
+            if (row.type == "xtream" && !row.password.isNullOrBlank()) {
+                val existing = secureStorage.getString(xtreamPasswordKey(row.id))
+                if (existing == null) {
+                    secureStorage.putString(xtreamPasswordKey(row.id), row.password!!)
+                    println("[XtreamCred] Migrated plaintext password for playlist ${row.id}")
+                }
+                // Null out plaintext password in SQLite
+                database.torveQueries.insertPlaylist(
+                    id = row.id,
+                    name = row.name,
+                    url = row.url,
+                    epg_url = row.epg_url,
+                    channel_count = row.channel_count,
+                    last_updated = row.last_updated,
+                    type = row.type,
+                    server = row.server,
+                    username = row.username,
+                    password = null,
+                )
+            }
+        }
+    }
+
     // In-memory cache of parsed playlists and EPG data
     private val playlistCache = mutableMapOf<String, List<Channel>>()
     private val epgCache = mutableMapOf<String, EpgData>()
@@ -83,8 +133,8 @@ class ChannelRepositoryImpl(
         val allowedCanonicalKeys: Set<String>,
     )
 
-    override suspend fun addPlaylist(name: String, url: String, epgUrl: String?): ChannelPlaylist {
-        val id = "ch_${Clock.System.now().toEpochMilliseconds()}"
+    override suspend fun addPlaylist(name: String, url: String, epgUrl: String?, id: String?): ChannelPlaylist {
+        val id = id ?: "ch_${Clock.System.now().toEpochMilliseconds()}"
         val now = Clock.System.now().toEpochMilliseconds()
 
         // Fetch and parse the playlist
@@ -124,8 +174,9 @@ class ChannelRepositoryImpl(
         server: String,
         username: String,
         password: String,
+        id: String?,
     ): ChannelPlaylist {
-        val id = "xtream_${Clock.System.now().toEpochMilliseconds()}"
+        val id = id ?: "xtream_${Clock.System.now().toEpochMilliseconds()}"
         val now = Clock.System.now().toEpochMilliseconds()
         val xtreamEpgUrl = buildXtreamEpgUrl(server, username, password)
 
@@ -157,6 +208,8 @@ class ChannelRepositoryImpl(
         )
 
         val allChannels = channels + vodChannels
+        // Store password in secure storage, never in SQLite
+        saveXtreamPassword(id, password)
         persistPlaylistSnapshot(
             playlistId = id,
             playlistName = name,
@@ -165,7 +218,7 @@ class ChannelRepositoryImpl(
             playlistType = "xtream",
             server = server,
             username = username,
-            password = password,
+            password = null, // never persist plaintext in SQLite
             channels = allChannels,
             updatedAt = now,
         )
@@ -181,11 +234,12 @@ class ChannelRepositoryImpl(
             type = PlaylistType.XTREAM,
             server = server,
             username = username,
-            password = password,
+            password = password, // in-memory only for immediate use
         )
     }
 
     override suspend fun removePlaylist(id: String) {
+        removeXtreamPassword(id) // clear from secure storage
         database.torveQueries.deletePlaylist(id)
         database.torveQueries.deleteChannelsForPlaylist(id)
         playlistCache.remove(id)
@@ -222,11 +276,18 @@ class ChannelRepositoryImpl(
             type = playlist.type,
             server = playlist.server,
             username = playlist.username,
-            password = playlist.password,
+            password = null, // never persist plaintext in SQLite
         )
     }
 
+    private var xtreamPasswordsMigrated = false
+
     override suspend fun getPlaylists(): List<ChannelPlaylist> {
+        // One-time migration: move plaintext passwords from SQLite → secure storage
+        if (!xtreamPasswordsMigrated) {
+            xtreamPasswordsMigrated = true
+            runCatching { migrateXtreamPasswords() }
+        }
         return database.torveQueries.getAllPlaylists().executeAsList().map { row ->
             ChannelPlaylist(
                 id = row.id,
@@ -238,7 +299,8 @@ class ChannelRepositoryImpl(
                 type = PlaylistType.fromString(row.type),
                 server = row.server,
                 username = row.username,
-                password = row.password,
+                // Password comes from secure storage, never from SQLite
+                password = if (row.type == "xtream") loadXtreamPassword(row.id) else null,
             )
         }
     }
@@ -250,33 +312,35 @@ class ChannelRepositoryImpl(
 
         val now = Clock.System.now().toEpochMilliseconds()
 
-        if (playlist.type == "xtream" && playlist.server != null && playlist.username != null && playlist.password != null) {
+        // Load Xtream password from secure storage, not SQLite
+        val xtreamPassword = if (playlist.type == "xtream") loadXtreamPassword(playlistId) else null
+        if (playlist.type == "xtream" && playlist.server != null && playlist.username != null && xtreamPassword != null) {
             // Xtream playlist refresh
-            val categories = xtreamClient.getLiveCategories(playlist.server, playlist.username, playlist.password)
-            val liveStreams = xtreamClient.getLiveStreams(playlist.server, playlist.username, playlist.password)
+            val categories = xtreamClient.getLiveCategories(playlist.server, playlist.username, xtreamPassword)
+            val liveStreams = xtreamClient.getLiveStreams(playlist.server, playlist.username, xtreamPassword)
             val channels = xtreamClient.mapLiveToChannels(
                 streams = liveStreams,
                 categories = categories,
                 server = playlist.server,
                 username = playlist.username,
-                password = playlist.password,
+                password = xtreamPassword,
                 playlistId = playlistId,
             )
 
-            val vodCategories = try { xtreamClient.getVodCategories(playlist.server, playlist.username, playlist.password) } catch (_: Exception) { emptyList() }
-            val vodStreams = try { xtreamClient.getVodStreams(playlist.server, playlist.username, playlist.password) } catch (_: Exception) { emptyList() }
+            val vodCategories = try { xtreamClient.getVodCategories(playlist.server, playlist.username, xtreamPassword) } catch (_: Exception) { emptyList() }
+            val vodStreams = try { xtreamClient.getVodStreams(playlist.server, playlist.username, xtreamPassword) } catch (_: Exception) { emptyList() }
             val vodChannels = xtreamClient.mapVodToChannels(
                 streams = vodStreams,
                 categories = vodCategories,
                 server = playlist.server,
                 username = playlist.username,
-                password = playlist.password,
+                password = xtreamPassword,
                 playlistId = playlistId,
             )
             val xtreamEpgUrl = playlist.epg_url ?: buildXtreamEpgUrl(
                 server = playlist.server,
                 username = playlist.username,
-                password = playlist.password,
+                password = xtreamPassword,
             )
 
             val allChannels = channels + vodChannels
@@ -288,7 +352,7 @@ class ChannelRepositoryImpl(
                 playlistType = "xtream",
                 server = playlist.server,
                 username = playlist.username,
-                password = playlist.password,
+                password = null, // never persist plaintext in SQLite
                 channels = allChannels,
                 updatedAt = now,
             )
@@ -320,17 +384,18 @@ class ChannelRepositoryImpl(
     override suspend fun refreshEpg(playlistId: String, hiddenChannelIds: Set<String>) {
         val playlist = database.torveQueries.getPlaylist(playlistId).executeAsOneOrNull()
             ?: return
+        val epgXtreamPw = if (playlist.type == "xtream") loadXtreamPassword(playlistId) else null
         val sourceUrl = playlist.epg_url?.trim()?.takeIf { it.isNotEmpty() }
             ?: if (
                 playlist.type == "xtream" &&
                 playlist.server != null &&
                 playlist.username != null &&
-                playlist.password != null
+                epgXtreamPw != null
             ) {
                 buildXtreamEpgUrl(
                     server = playlist.server,
                     username = playlist.username,
-                    password = playlist.password,
+                    password = epgXtreamPw,
                 )
             } else {
                 null
@@ -399,15 +464,192 @@ class ChannelRepositoryImpl(
         }
     }
 
+    /**
+     * Lightweight category listing — returns category names with channel counts
+     * without loading any channel objects into memory.
+     */
+    override suspend fun getCategoryCounts(playlistId: String): List<Pair<String, Long>> {
+        repairChannelCatalogIfNeeded(playlistId)
+        val generationId = getActiveChannelGeneration(playlistId) ?: return emptyList()
+        val results = database.torveQueries
+            .getCategoryCountsForPlaylist(playlistId, generationId)
+            .executeAsList()
+        if (results.isNotEmpty()) {
+            return results.map { row -> (row.group_title ?: "Ungrouped") to row.channel_count }
+        }
+        // Active generation has no data — find any generation that does.
+        val fallbackGeneration = database.torveQueries
+            .getChannelsForPlaylistGeneration(playlistId, generationId)
+            .executeAsList()
+        if (fallbackGeneration.isEmpty()) {
+            // Try loading via getChannels which handles catalog repair and cache rebuild.
+            val channels = getChannels(playlistId)
+            val repairedGeneration = getActiveChannelGeneration(playlistId) ?: return emptyList()
+            return database.torveQueries
+                .getCategoryCountsForPlaylist(playlistId, repairedGeneration)
+                .executeAsList()
+                .map { row -> (row.group_title ?: "Ungrouped") to row.channel_count }
+        }
+        return results.map { row -> (row.group_title ?: "Ungrouped") to row.channel_count }
+    }
+
+    /**
+     * Load channels for a single category only — avoids materializing the full playlist.
+     */
+    override suspend fun getChannelsForCategory(playlistId: String, categoryName: String): List<Channel> {
+        val generationId = getActiveChannelGeneration(playlistId) ?: return emptyList()
+        val rows = if (categoryName == "Ungrouped") {
+            database.torveQueries
+                .getChannelsForPlaylistCategoryNull(playlistId, generationId)
+                .executeAsList()
+        } else {
+            database.torveQueries
+                .getChannelsForPlaylistCategory(playlistId, generationId, categoryName)
+                .executeAsList()
+        }
+        return rows.map { row ->
+            Channel(
+                name = row.name,
+                url = row.stream_url,
+                tvgId = row.tvg_id,
+                tvgName = row.tvg_name,
+                tvgLogo = row.logo_url,
+                groupTitle = row.group_title,
+                tvgLanguage = row.tvg_language,
+                tvgCountry = row.tvg_country,
+                tvgShift = row.tvg_shift?.toInt(),
+                channelNumber = row.channel_number?.toInt(),
+                duration = row.duration.toInt(),
+                catchupType = row.catchup_type,
+                catchupDays = row.catchup_days?.toInt(),
+                catchupSource = row.catchup_source,
+                userAgent = row.user_agent,
+                vlcOptions = decodeVlcOptions(row.vlc_options),
+                kodiProps = decodeKodiProps(row.kodi_props),
+                playlistId = playlistId,
+                contentType = parseContentType(row.content_type),
+            )
+        }
+    }
+
+    /**
+     * Get total channel count without loading any channel objects.
+     */
+    override suspend fun getTotalChannelCount(playlistId: String): Long {
+        val generationId = getActiveChannelGeneration(playlistId) ?: return 0L
+        return database.torveQueries
+            .getTotalChannelCountForPlaylist(playlistId, generationId)
+            .executeAsOne()
+    }
+
     override suspend fun searchChannels(query: String): List<Channel> {
-        val lowerQuery = query.lowercase()
-        return getPlaylists()
-            .flatMap { playlist -> getChannels(playlist.id) }
-            .filter { ch ->
-            ch.name.lowercase().contains(lowerQuery) ||
-                ch.tvgName?.lowercase()?.contains(lowerQuery) == true ||
-                ch.groupTitle?.lowercase()?.contains(lowerQuery) == true
+        // SQL-level search with LIKE — avoids loading all channels into memory.
+        val pattern = "%${query}%"
+        val playlists = getPlaylists()
+        return playlists.flatMap { playlist ->
+            val generationId = getActiveChannelGeneration(playlist.id) ?: return@flatMap emptyList()
+            database.torveQueries
+                .searchChannelsForPlaylist(playlist.id, generationId, pattern, pattern, pattern)
+                .executeAsList()
+                .map { row ->
+                    Channel(
+                        name = row.name,
+                        url = row.stream_url,
+                        tvgId = row.tvg_id,
+                        tvgName = row.tvg_name,
+                        tvgLogo = row.logo_url,
+                        groupTitle = row.group_title,
+                        tvgLanguage = row.tvg_language,
+                        tvgCountry = row.tvg_country,
+                        tvgShift = row.tvg_shift?.toInt(),
+                        channelNumber = row.channel_number?.toInt(),
+                        duration = row.duration.toInt(),
+                        catchupType = row.catchup_type,
+                        catchupDays = row.catchup_days?.toInt(),
+                        catchupSource = row.catchup_source,
+                        userAgent = row.user_agent,
+                        vlcOptions = decodeVlcOptions(row.vlc_options),
+                        kodiProps = decodeKodiProps(row.kodi_props),
+                        playlistId = playlist.id,
+                        contentType = parseContentType(row.content_type),
+                    )
+                }
+        }
+    }
+
+    /**
+     * Sync the hidden channel set to the iptv_hidden_channel table so browse queries
+     * can exclude hidden channels at the SQL level via NOT EXISTS.
+     * Migrates legacy hidden IDs to stable_id format where possible.
+     */
+    override fun getHiddenChannelIds(): Set<String> {
+        return database.torveQueries.getAllHiddenChannelIds().executeAsList().toSet()
+    }
+
+    override fun syncHiddenChannelsToDb(hiddenIds: Set<String>) {
+        val migrated = migrateLegacyHiddenIds(hiddenIds)
+        database.transaction {
+            database.torveQueries.clearHiddenChannels()
+            for (id in migrated) {
+                database.torveQueries.insertHiddenChannel(id)
             }
+        }
+    }
+
+    /**
+     * Migrate legacy hidden channel IDs (pre-stable_id format) to the current stable_id
+     * format so they match the iptv_channel.stable_id column in SQL NOT EXISTS queries.
+     *
+     * Legacy format: "tvgId" or "playlistId_channelName" (no "::" separator)
+     * Stable format: "playlistId::tvgId" or "playlistId::normalizedUrl" or "playlistId::normalizedName"
+     *
+     * Returns the migrated set. Any legacy ID that cannot be mapped is kept as-is
+     * (won't match any stable_id but won't be lost either).
+     */
+    private fun migrateLegacyHiddenIds(hiddenIds: Set<String>): Set<String> {
+        if (hiddenIds.isEmpty()) return hiddenIds
+        val result = mutableSetOf<String>()
+        var migrated = 0
+        var unmapped = 0
+        for (id in hiddenIds) {
+            if (id.contains("::")) {
+                // Already in stable format
+                result.add(id)
+                continue
+            }
+            // Legacy format — try to resolve to stable_id via DB lookup.
+            // Case 1: bare tvg_id (e.g. "channel.epg.id")
+            val byTvgId = runCatching {
+                database.torveQueries.getChannelByTvgId(id).executeAsOneOrNull()
+            }.getOrNull()
+            if (byTvgId != null) {
+                result.add(byTvgId)
+                migrated++
+                continue
+            }
+            // Case 2: "playlistId_channelName" format
+            val underscoreIdx = id.indexOf('_')
+            if (underscoreIdx > 0 && underscoreIdx < id.length - 1) {
+                val playlistId = id.substring(0, underscoreIdx)
+                val channelName = id.substring(underscoreIdx + 1)
+                val byName = runCatching {
+                    database.torveQueries.getChannelByPlaylistAndName(playlistId, channelName)
+                        .executeAsOneOrNull()
+                }.getOrNull()
+                if (byName != null) {
+                    result.add(byName)
+                    migrated++
+                    continue
+                }
+            }
+            // Cannot map — keep the legacy ID (safe but won't match stable_id in SQL).
+            result.add(id)
+            unmapped++
+        }
+        if (migrated > 0 || unmapped > 0) {
+            println("HiddenChannelMigration: total=${hiddenIds.size} migrated=$migrated unmapped=$unmapped alreadyStable=${hiddenIds.size - migrated - unmapped}")
+        }
+        return result
     }
 
     override suspend fun getEpg(playlistId: String): EpgData {
@@ -533,6 +775,25 @@ class ChannelRepositoryImpl(
 
     override suspend fun clearRecentlyViewedChannels() {
         database.torveQueries.clearRecentChannels()
+    }
+
+    override suspend fun clearAll() {
+        // Clear Xtream passwords from secure storage before deleting playlists
+        val playlists = database.torveQueries.getAllPlaylists().executeAsList()
+        for (p in playlists) {
+            if (p.type == "xtream") removeXtreamPassword(p.id)
+        }
+        println("[XtreamCred] Cleared ${playlists.count { it.type == "xtream" }} secure passwords on sign-out")
+        database.torveQueries.deleteAllChannels()
+        database.torveQueries.deleteAllFavorites()
+        database.torveQueries.clearRecentChannels()
+        database.torveQueries.deleteAllPlaylists()
+        database.torveQueries.deleteAllDebridAccounts()
+        // Clear in-memory caches
+        playlistCache.clear()
+        epgCache.clear()
+        epgErrorCache.clear()
+        epgProgressCache.clear()
     }
 
     override suspend fun getChannelsByContentType(

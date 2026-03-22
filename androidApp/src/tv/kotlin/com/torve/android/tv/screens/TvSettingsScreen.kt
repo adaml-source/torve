@@ -325,9 +325,15 @@ internal fun TvSettingsScreen(
         confirmSignOut = false
         confirmEnableDiagnostics = false
         confirmHideAllChannelGroups = false
-        // Re-read auth user when returning to Account tab (picks up is_verified changes)
+        // Re-read auth user when returning to Account tab and refresh verification status
         if (selectedCategory == TvSettingsCategory.ACCOUNT) {
             authUser = authClient.getAuthenticatedUser()
+            if (authUser?.isVerified == false) {
+                val verified = authClient.checkVerificationStatus()
+                if (verified) {
+                    authUser = authClient.getAuthenticatedUser()
+                }
+            }
         }
     }
 
@@ -362,6 +368,29 @@ internal fun TvSettingsScreen(
     val addAddonCardRequester = remember { FocusRequester() }
     val authAccountRequester = remember { FocusRequester() }
     val authEmailRequester = remember { FocusRequester() }
+
+    // Restore focus after addon installation completes.
+    // The installed card is removed from composition — we focus the next suggested
+    // addon at the same position, or fall back to the "Add Addon" card.
+    val prevInstalling = remember { mutableStateOf(false) }
+    val installedAddonIndex = remember { mutableStateOf(-1) }
+    val suggestedAddonRequesters = remember { mutableMapOf<String, FocusRequester>() }
+    LaunchedEffect(addonState.isInstalling) {
+        if (prevInstalling.value && !addonState.isInstalling) {
+            // Allow recomposition to settle (item removal + layout)
+            kotlinx.coroutines.delay(80)
+            val idx = installedAddonIndex.value
+            val installedUrls = addonState.addons.map { it.manifestUrl }.toSet()
+            val currentSuggested = POPULAR_ADDONS.filter { it.url !in installedUrls &&
+                (addonCategory == AddonCategory.ALL || addonCategory in it.categories) }
+            // Focus the addon now at the installed position, or the last one, or the add-card
+            val target = currentSuggested.getOrNull(idx.coerceAtMost(currentSuggested.lastIndex))
+            val requester = target?.let { suggestedAddonRequesters[it.url] }
+            runCatching { (requester ?: addAddonCardRequester).requestFocus() }
+            installedAddonIndex.value = -1
+        }
+        prevInstalling.value = addonState.isInstalling
+    }
 
     LaunchedEffect(showChannelManager) {
         if (showChannelManager) {
@@ -822,8 +851,15 @@ internal fun TvSettingsScreen(
             }
         }
     }
+    // Report the selected category chip as the content entry point so
+    // Right/OK from the NavRail lands on the chip, not a LazyColumn card.
+    LaunchedEffect(selectedCategory) {
+        onFirstContentRequester(selectedCategoryFocusRequester)
+    }
+
     BackHandler(
         enabled = isActive &&
+            !isRailFocused &&
             !hasPendingExactSettingsRestore &&
             !showLanguagePicker &&
             !showMaxQualityPicker &&
@@ -1349,6 +1385,7 @@ internal fun TvSettingsScreen(
                                         reason = "confirm",
                                     )
                                     authClient.logout()
+                                    accountSessionCoordinator.signOut()
                                     authUser = null
                                     authEmail = ""
                                     authPassword = ""
@@ -1417,8 +1454,9 @@ internal fun TvSettingsScreen(
                                         authScope.launch {
                                             val result = authClient.deleteAccount()
                                             isDeletingAccount = false
-                                            showDeleteDialog = false
                                             if (result.success) {
+                                                showDeleteDialog = false
+                                                accountSessionCoordinator.signOut()
                                                 authUser = null
                                                 authEmail = ""
                                                 authPassword = ""
@@ -1429,7 +1467,7 @@ internal fun TvSettingsScreen(
                                                 )
                                             } else {
                                                 TvNotificationQueue.post(
-                                                    context.getString(R.string.settings_delete_account_error_body),
+                                                    result.error ?: context.getString(R.string.settings_delete_account_error_body),
                                                     NotificationType.ERROR,
                                                 )
                                             }
@@ -2461,11 +2499,12 @@ internal fun TvSettingsScreen(
                         (addonCategory == AddonCategory.ALL || addonCategory in addon.categories)
                 }
 
-                items(
+                itemsIndexed(
                     filteredSuggested,
-                    key = { "suggested_${it.url}" },
-                ) { suggested ->
+                    key = { _, s -> "suggested_${s.url}" },
+                ) { index, suggested ->
                     val requester = remember("suggested_${suggested.url.hashCode()}") { FocusRequester() }
+                    suggestedAddonRequesters[suggested.url] = requester
                     TvSettingCard(
                         title = suggested.name,
                         subtitle = suggested.description,
@@ -2473,9 +2512,9 @@ internal fun TvSettingsScreen(
                         focusRequester = requester,
                         onFocused = { onContentFocused(requester) },
                         onClick = {
+                            installedAddonIndex.value = index
                             addonViewModel.setInstallUrl(suggested.url)
                             addonViewModel.installAddon()
-                            onContentFocused(addAddonCardRequester)
                         },
                     )
                 }
@@ -4196,8 +4235,9 @@ private fun TvTextInputCard(
     val localRequester = remember(key) { FocusRequester() }
     val requester = focusRequester ?: localRequester
     val locked = premiumFeature != null && premiumLocked
+    var passwordRevealed by remember { mutableStateOf(false) }
     val maskedValue = if (value.isBlank()) stringResource(R.string.tv_settings_not_set)
-                      else if (isPassword) "\u2022".repeat(value.length)
+                      else if (isPassword && !passwordRevealed) "\u2022".repeat(value.length)
                       else SettingsViewModel.maskSecret(value)
 
     Column(
@@ -4230,20 +4270,34 @@ private fun TvTextInputCard(
             premiumLocked = locked,
         )
         AnimatedVisibility(visible = isExpanded && !locked) {
-            TvClickToEditOutlinedTextField(
-                value = value,
-                onValueChange = onValueChange,
-                singleLine = true,
-                label = { Text(title) },
-                visualTransformation = if (isPassword) {
-                    androidx.compose.ui.text.input.PasswordVisualTransformation()
-                } else {
-                    androidx.compose.ui.text.input.VisualTransformation.None
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-            )
+            Column {
+                TvClickToEditOutlinedTextField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    singleLine = true,
+                    label = { Text(title) },
+                    visualTransformation = if (isPassword && !passwordRevealed) {
+                        androidx.compose.ui.text.input.PasswordVisualTransformation()
+                    } else {
+                        androidx.compose.ui.text.input.VisualTransformation.None
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                )
+                if (isPassword && value.isNotEmpty()) {
+                    val toggleRequester = remember { FocusRequester() }
+                    TvSettingCard(
+                        title = if (passwordRevealed) "Hide value" else "Show value",
+                        subtitle = "",
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        focusRequester = toggleRequester,
+                        onFocused = { },
+                        onClick = { passwordRevealed = !passwordRevealed },
+                        rowType = TvSettingRowType.TOGGLE,
+                    )
+                }
+            }
         }
     }
 }

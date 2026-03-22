@@ -33,6 +33,8 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
@@ -461,7 +463,11 @@ fun TvRoot() {
                 selectedTopRoute = selectedTopRoute,
             )
             val settingsCandidates = if (activeRoute == TvRoutes.SETTINGS) {
-                listOfNotNull(settingsEntryRequester)
+                listOfNotNull(
+                    firstContentFocusByRoute[TvRoutes.SETTINGS],
+                    settingsEntryRequester,
+                    settingsMainEntryFocusRequester,
+                ).distinct()
             } else {
                 listOfNotNull(
                     lastFocusedContentByRoute[activeRoute],
@@ -482,10 +488,8 @@ fun TvRoot() {
             if (candidates.isEmpty() && attempt < 1) continue
             break
         }
-        if (selectedTopRoute == TvRoutes.SETTINGS) {
-            return@LaunchedEffect
-        }
         pendingContentEntryRoute = null
+        // Last resort: put focus back on the rail so the user isn't stuck
         try { railFocusRequester.requestFocus() } catch (_: Throwable) { }
     }
 
@@ -524,6 +528,13 @@ fun TvRoot() {
     /* ── Track visited tabs ────────────────────────────────────────────────────────────── */
     LaunchedEffect(selectedTopRoute) {
         visitedTabs = visitedTabs + selectedTopRoute
+        // Clear stale Settings focus entries when leaving the Settings tab.
+        // Only one tab is composed at a time — stored requesters from a disposed
+        // tab can crash focusSearch if referenced during spatial navigation.
+        if (selectedTopRoute != TvRoutes.SETTINGS) {
+            firstContentFocusByRoute.remove(TvRoutes.SETTINGS)
+            lastFocusedContentByRoute.remove(TvRoutes.SETTINGS)
+        }
         // Only clear hero state when entering a tab via content, not during rail browsing.
         // This prevents the hero from blanking on every debounced tab switch.
         if (!isRailFocused) {
@@ -1136,7 +1147,11 @@ fun TvRoot() {
                         // hasn't happened yet). The focusRestoreTrigger LaunchedEffect
                         // handles the delayed fallback after recomposition.
                         val candidates = if (route == TvRoutes.SETTINGS) {
-                            listOfNotNull(settingsEntryRequester)
+                            listOfNotNull(
+                                firstContentFocusByRoute[TvRoutes.SETTINGS],
+                                settingsEntryRequester,
+                                settingsMainEntryFocusRequester,
+                            ).distinct()
                         } else {
                             listOfNotNull(
                                 lastFocusedContentByRoute[route],
@@ -1174,7 +1189,11 @@ fun TvRoot() {
                         // on the rail, so the user couldn't enter content pages.
                         pendingContentEntryRoute = route
                         val candidates = if (route == TvRoutes.SETTINGS) {
-                            listOfNotNull(settingsEntryRequester)
+                            listOfNotNull(
+                                firstContentFocusByRoute[TvRoutes.SETTINGS],
+                                settingsEntryRequester,
+                                settingsMainEntryFocusRequester,
+                            ).distinct()
                         } else {
                             listOfNotNull(
                                 lastFocusedContentByRoute[route],
@@ -1223,11 +1242,11 @@ fun TvRoot() {
         content = {
             Box(modifier = Modifier.fillMaxSize()) {
                 /* ── Layer 1: Keep-alive tab screens ───────────────────────── */
-                // SaveableStateHolder: Only the ACTIVE tab is composed at any given time.
-                // Inactive tabs' saveable state (scroll positions, text input, etc.) is
-                // preserved in memory but their composition trees are disposed — eliminating
-                // the recomposition amplification where all 7 tabs recompose on every VM
-                // state emission. This is the single largest ANR reduction.
+                // Home is always composed (hidden when inactive) for instant return.
+                // Other tabs are composed only when active — their saveable state
+                // (scroll positions, etc.) is preserved by SaveableStateHolder but
+                // their composition trees are disposed. This keeps max 2 tabs
+                // composed (Home + current) — well below the 7-tab ANR threshold.
                 val stateHolder = rememberSaveableStateHolder()
                 // Keep tab content composed even when a sub-route (Details, See All) is active,
                 // but hide it visually. This prevents focus from falling to the rail during
@@ -1235,98 +1254,123 @@ fun TvRoot() {
                 val activeTabRoute = selectedTopRoute
                 val tabContentVisible = !isSubRouteActive
 
-                activeTabRoute?.let { route ->
-                    stateHolder.SaveableStateProvider(route) {
+                // Shared hero overlay content — only attached to the visible tab.
+                val heroOverlayContent: (@Composable () -> Unit) = {
+                    val heroItem = displayedFeaturedItem
+                    val heroInWatchlist = heroItem?.let {
+                        watchlistViewModel.isInWatchlist(it.id)
+                    } == true
+                    TvHeroOverlay(
+                        featuredItem = heroItem,
+                        sectionTitle = sectionTitle,
+                        subtitle = sectionSubtitle,
+                        primaryActionFocusRequester = headerPrimaryActionRequester,
+                        railFocusRequester = railFocusRequester,
+                        onDetailsFeatured = {
+                            heroItem?.let {
+                                navController.navigateToTvDetails(it)
+                            }
+                        },
+                        onTrailerFeatured = {
+                            heroItem?.let { item ->
+                                val trailerKey = item.trailerKey
+                                if (trailerKey.isNullOrBlank()) {
+                                    TvNotificationQueue.post("Trailer unavailable", NotificationType.ERROR)
+                                } else {
+                                    val intent = Intent(
+                                        Intent.ACTION_VIEW,
+                                        Uri.parse("https://www.youtube.com/watch?v=$trailerKey"),
+                                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    runCatching { context.startActivity(intent) }
+                                        .onFailure {
+                                            TvNotificationQueue.post("Trailer unavailable", NotificationType.ERROR)
+                                        }
+                                }
+                            }
+                        },
+                        isInWatchlist = heroInWatchlist,
+                        onWatchlistToggle = {
+                            heroItem?.let {
+                                watchlistViewModel.toggleWatchlist(it)
+                            }
+                        },
+                    )
+                }
+
+                /* ── Layer 1a: Home — always composed, hidden when inactive ── */
+                val isHomeVisible = activeTabRoute == TvRoutes.HOME && tabContentVisible
+                stateHolder.SaveableStateProvider(TvRoutes.HOME) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(if (isHomeVisible) 1f else 0f)
+                            .graphicsLayer { alpha = if (isHomeVisible) 1f else 0f }
+                            // Move off-screen when hidden to prevent spatial focus
+                            // from finding Home content before recomposition updates
+                            // the focusProperties canFocus flag.
+                            .offset(x = if (isHomeVisible) 0.dp else 10000.dp)
+                            .focusGroup()
+                            .focusProperties {
+                                if (!isHomeVisible) {
+                                    canFocus = false
+                                    enter = { FocusRequester.Cancel }
+                                } else if (showHero && TvRoutes.HOME in heroRoutes) {
+                                    up = headerPrimaryActionRequester
+                                }
+                            }
+                            .then(
+                                if (!isHomeVisible) Modifier.clearAndSetSemantics {} else Modifier
+                            ),
+                    ) {
+                        val homeHeroOverlay: (@Composable () -> Unit)? =
+                            if (isHomeVisible && showHero && TvRoutes.HOME in heroRoutes) heroOverlayContent else null
+
+                        TvHomeScreen(
+                            railFocusRequester = railFocusRequester,
+                            headerFocusRequester = headerPrimaryActionRequester,
+                            onMediaClick = { item -> navController.navigateToTvDetails(item) },
+                            onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.HOME] = it },
+                            onContentFocused = { lastFocusedContentByRoute[TvRoutes.HOME] = it },
+                            onMediaFocused = onBrowseMediaFocused,
+                            contextMenuActionsForItem = contextMenuActionsForItem,
+                            onContextMenuAction = onContextMenuAction,
+                            onSeeAll = { railKey, title ->
+                                val mt = when {
+                                    railKey.contains("movie") -> "movie"
+                                    railKey.contains("show") || railKey.contains("tv") -> "tv"
+                                    else -> "movie"
+                                }
+                                navigateToSeeAll(railKey, title, mt)
+                            },
+                            heroOverlay = homeHeroOverlay,
+                            shouldAutoFocus = false,
+                        )
+                    }
+                }
+
+                /* ── Layer 1b: Other tabs — composed only when active ───────── */
+                if (activeTabRoute != null && activeTabRoute != TvRoutes.HOME) {
+                    stateHolder.SaveableStateProvider(activeTabRoute) {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .alpha(if (tabContentVisible) 1f else 0f)
+                                .zIndex(1f)
+                                .graphicsLayer { alpha = if (tabContentVisible) 1f else 0f }
                                 .focusGroup()
                                 .focusProperties {
                                     if (!tabContentVisible) {
                                         canFocus = false
                                         enter = { FocusRequester.Cancel }
                                     }
-                                    // Only route Up to the hero overlay when it is actually
-                                    // composed and the requester is attached. On non-hero
-                                    // routes the requester is uninitialized — referencing it
-                                    // from focusProperties causes focusSearch to crash.
-                                    if (showHero && route in heroRoutes) {
+                                    if (showHero && activeTabRoute in heroRoutes) {
                                         up = headerPrimaryActionRequester
                                     }
                                 },
                         ) {
-                            val isActiveTab = true
-                                // Only the active tab gets the hero overlay (avoids shared FocusRequester conflicts)
-                                val tabHeroOverlay: (@Composable () -> Unit)? =
-                                    if (isActiveTab && showHero && route in heroRoutes) {
-                                        {
-                                            val heroItem = displayedFeaturedItem
-                                            val heroInWatchlist = heroItem?.let {
-                                                watchlistViewModel.isInWatchlist(it.id)
-                                            } == true
-                                            TvHeroOverlay(
-                                                featuredItem = heroItem,
-                                                sectionTitle = sectionTitle,
-                                                subtitle = sectionSubtitle,
-                                                primaryActionFocusRequester = headerPrimaryActionRequester,
-                                                railFocusRequester = railFocusRequester,
-                                                onDetailsFeatured = {
-                                                    heroItem?.let {
-                                                        navController.navigateToTvDetails(it)
-                                                    }
-                                                },
-                                                onTrailerFeatured = {
-                                                    heroItem?.let { item ->
-                                                        val trailerKey = item.trailerKey
-                                                        if (trailerKey.isNullOrBlank()) {
-                                                            TvNotificationQueue.post("Trailer unavailable", NotificationType.ERROR)
-                                                        } else {
-                                                            val intent = Intent(
-                                                                Intent.ACTION_VIEW,
-                                                                Uri.parse("https://www.youtube.com/watch?v=$trailerKey"),
-                                                            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                            runCatching { context.startActivity(intent) }
-                                                                .onFailure {
-                                                                    TvNotificationQueue.post("Trailer unavailable", NotificationType.ERROR)
-                                                                }
-                                                        }
-                                                    }
-                                                },
-                                                isInWatchlist = heroInWatchlist,
-                                                onWatchlistToggle = {
-                                                    heroItem?.let {
-                                                        watchlistViewModel.toggleWatchlist(it)
-                                                    }
-                                                },
-                                            )
-                                        }
-                                    } else {
-                                        null
-                                    }
+                            val tabHeroOverlay: (@Composable () -> Unit)? =
+                                if (showHero && activeTabRoute in heroRoutes) heroOverlayContent else null
 
-                                when (route) {
-                                    TvRoutes.HOME -> TvHomeScreen(
-                                        railFocusRequester = railFocusRequester,
-                                        headerFocusRequester = headerPrimaryActionRequester,
-                                        onMediaClick = { item -> navController.navigateToTvDetails(item) },
-                                        onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.HOME] = it },
-                                        onContentFocused = { lastFocusedContentByRoute[TvRoutes.HOME] = it },
-                                        onMediaFocused = onBrowseMediaFocused,
-                                        contextMenuActionsForItem = contextMenuActionsForItem,
-                                        onContextMenuAction = onContextMenuAction,
-                                        onSeeAll = { railKey, title ->
-                                            val mt = when {
-                                                railKey.contains("movie") -> "movie"
-                                                railKey.contains("show") || railKey.contains("tv") -> "tv"
-                                                else -> "movie"
-                                            }
-                                            navigateToSeeAll(railKey, title, mt)
-                                        },
-                                        heroOverlay = tabHeroOverlay,
-                                        shouldAutoFocus = false,
-                                    )
-
+                            when (activeTabRoute) {
                                     TvRoutes.MOVIES -> TvMoviesScreen(
                                         railFocusRequester = railFocusRequester,
                                         headerFocusRequester = headerPrimaryActionRequester,
@@ -1384,7 +1428,7 @@ fun TvRoot() {
                                         onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.IPTV] = it },
                                         onContentFocused = { lastFocusedContentByRoute[TvRoutes.IPTV] = it },
                                         shouldAutoFocus = false,
-                                        isActive = isActiveTab,
+                                        isActive = true,
                                         isSubRouteActive = isSubRouteActive,
                                         isRailFocused = isRailFocused,
                                         isRailExpanded = isRailExpanded,
@@ -1470,8 +1514,8 @@ fun TvRoot() {
                                         TvSettingsDestination.MAIN -> {
                                             TvSettingsScreen(
                                                 railFocusRequester = railFocusRequester,
-                                                onFirstContentRequester = {},
-                                                onContentFocused = {},
+                                                onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.SETTINGS] = it },
+                                                onContentFocused = { lastFocusedContentByRoute[TvRoutes.SETTINGS] = it },
                                                 mainEntryFocusRequester = settingsMainEntryFocusRequester,
                                                 homeLayoutFocusRequester = settingsHomeLayoutCardRequester,
                                                 ratingsFocusRequester = settingsRatingsCardRequester,
@@ -1511,15 +1555,15 @@ fun TvRoot() {
                                                 pairedDevicesFocusRequester = settingsPairedDevicesCardRequester,
                                                 activatedDevicesFocusRequester = settingsActivatedDevicesCardRequester,
                                                 settingsFocusController = settingsFocusStateMachine,
-                                                isActive = isActiveTab,
+                                                isActive = true,
                                                 isRailFocused = isRailFocused,
                                             )
                                         }
                                     }
                                 }
-                            }
                         }
                     }
+                }
 
                 // Mark route as visited for state preservation
                 LaunchedEffect(selectedTopRoute) {

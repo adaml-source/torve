@@ -4,7 +4,9 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -63,6 +65,7 @@ fun TvEpisodePicker(
     onSeasonSelected: (Int) -> Unit,
     onEpisodeSelected: (season: Int, episode: Int) -> Unit,
     onSeasonDownload: ((Int) -> Unit)? = null,
+    onToggleEpisodeWatched: (season: Int, episode: Int) -> Unit = { _, _ -> },
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
 ) {
@@ -127,7 +130,7 @@ fun TvEpisodePicker(
             seasonDetail != null && seasonDetail.episodes.isNotEmpty() -> {
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    contentPadding = PaddingValues(end = 16.dp),
+                    contentPadding = PaddingValues(start = 8.dp, end = 16.dp),
                 ) {
                     itemsIndexed(
                         items = seasonDetail.episodes,
@@ -150,6 +153,7 @@ fun TvEpisodePicker(
                             isWatched = isWatched,
                             progress = episodeProgress,
                             onClick = { onEpisodeSelected(selectedSeason, episode.episodeNumber) },
+                            onLongClick = { onToggleEpisodeWatched(selectedSeason, episode.episodeNumber) },
                         )
                     }
                 }
@@ -219,12 +223,14 @@ private fun TvSeasonChip(
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun TvEpisodeCard(
     episode: Episode,
     seasonNumber: Int,
     isWatched: Boolean,
     progress: Float?,
     onClick: () -> Unit,
+    onLongClick: () -> Unit = {},
 ) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(targetValue = if (focused) 1.06f else 1f, label = "episodeScale")
@@ -242,10 +248,11 @@ private fun TvEpisodeCard(
             .border(2.dp, borderColor, RoundedCornerShape(12.dp))
             .clip(RoundedCornerShape(12.dp))
             .onFocusChanged { focused = it.isFocused }
-            .clickable(
+            .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick,
+                onLongClick = onLongClick,
             ),
     ) {
         if (episode.stillUrl != null) {

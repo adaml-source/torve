@@ -69,7 +69,11 @@ class DeviceGovernanceViewModel(
                     return@launch
                 }
                 val access = deviceApi.getAccessState(token)
-                applyAccessState(access)
+                if (access != null) {
+                    applyAccessState(access)
+                } else {
+                    _state.update { it.copy(isLoading = false) }
+                }
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = "Failed to check access: ${e.message}") }
             }
@@ -104,22 +108,20 @@ class DeviceGovernanceViewModel(
     }
 
     /**
-     * Remove a device by ID. After success, auto-activates current device.
+     * Remove a device by ID. On success: optimistic local removal, then
+     * sequential re-fetch from backend for accurate state.
      */
     fun removeDevice(deviceId: String) {
         scope.launch {
             _state.update { it.copy(isRemoving = true, error = null, removeSuccess = false) }
             try {
-                val token = authClient.getValidAccessToken() ?: return@launch
+                val token = authClient.getValidAccessToken() ?: run {
+                    _state.update { it.copy(isRemoving = false, error = "Not logged in") }
+                    return@launch
+                }
                 val result = deviceApi.removeDevice(token, deviceId)
 
-                if (result.removed) {
-                    _state.update { it.copy(removeSuccess = true, swapsRemaining = result.swaps_remaining) }
-                    // Auto-activate current device after removal
-                    activateCurrentDevice()
-                    // Refresh device list
-                    fetchDevices()
-                } else {
+                if (!result.removed) {
                     _state.update {
                         it.copy(
                             isRemoving = false,
@@ -129,6 +131,52 @@ class DeviceGovernanceViewModel(
                                 else -> "Could not remove device."
                             },
                             swapsRemaining = result.swaps_remaining,
+                        )
+                    }
+                    return@launch
+                }
+
+                val selfRevoke = deviceId == _state.value.currentDeviceId
+
+                // Optimistic local removal — device disappears immediately
+                _state.update { current ->
+                    current.copy(
+                        isRemoving = false,
+                        removeSuccess = true,
+                        swapsRemaining = result.swaps_remaining,
+                        devices = current.devices.filter { it.id != deviceId },
+                        activeDeviceCount = (current.activeDeviceCount - 1).coerceAtLeast(0),
+                        currentDeviceActive = if (selfRevoke) false else current.currentDeviceActive,
+                        premiumAccess = if (selfRevoke) false else current.premiumAccess,
+                    )
+                }
+
+                // Auto-activate current device after removal (skip for self-revoke)
+                if (!selfRevoke) {
+                    runCatching {
+                        val activateToken = authClient.getValidAccessToken() ?: return@runCatching
+                        val activateResult = deviceApi.activateCurrent(activateToken)
+                        _state.update {
+                            it.copy(
+                                premiumAccess = activateResult.activated,
+                                currentDeviceActive = activateResult.activated,
+                                activeDeviceCount = activateResult.active_device_count,
+                                swapsRemaining = activateResult.swaps_remaining,
+                            )
+                        }
+                    }
+                }
+
+                // Re-fetch device list from backend for accurate data
+                runCatching {
+                    val refreshToken = authClient.getValidAccessToken() ?: return@runCatching
+                    val list = deviceApi.getDevices(refreshToken)
+                    _state.update {
+                        it.copy(
+                            devices = list.devices,
+                            activeDeviceCount = list.active_count,
+                            maxActiveDevices = list.max_active,
+                            swapsRemaining = list.swaps_remaining,
                         )
                     }
                 }

@@ -18,6 +18,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.ui.draw.scale
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -224,7 +225,26 @@ fun PlayerScreen(
     var isPlaying by remember { mutableStateOf(false) }
     var currentPosition by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
+    // isInPipMode is a Compose mutableStateOf — reads trigger recomposition automatically.
+    val isInPip = ActivePlaybackState.isInPipMode
     var showControls by remember { mutableStateOf(true) }
+    // Hide controls in PiP; restore when leaving PiP.
+    LaunchedEffect(isInPip) {
+        if (isInPip) {
+            showControls = false
+        } else {
+            // Re-apply immersive mode when exiting PiP back to fullscreen.
+            val activity = context as? Activity
+            if (activity != null) {
+                val window = activity.window
+                val controller = WindowInsetsControllerCompat(window, window.decorView)
+                WindowCompat.setDecorFitsSystemWindows(window, false)
+                controller.hide(WindowInsetsCompat.Type.systemBars())
+                controller.systemBarsBehavior =
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        }
+    }
     var sliderPosition by remember { mutableFloatStateOf(0f) }
     var isSeeking by remember { mutableStateOf(false) }
     var showTrackDialog by remember { mutableStateOf(false) }
@@ -1075,6 +1095,7 @@ fun PlayerScreen(
         val listener = object : PlayerListener {
             override fun onStateChanged(state: PlayerState) {
                 isPlaying = state.isPlaying
+                ActivePlaybackState.isPlaying = state.isPlaying
                 duration = state.durationMs
                 if (!isSeeking) {
                     currentPosition = state.positionMs
@@ -1359,6 +1380,7 @@ fun PlayerScreen(
                     )
                 }
             }
+            ActivePlaybackState.isPlaying = false
             engine.removeListener(listener)
             audioEqualizer?.release()
             engine.release()
@@ -2730,13 +2752,30 @@ private fun FocusableIconButton(
 ) {
     val reduceMotion = rememberTvReduceMotionPreference()
     var focused by remember { mutableStateOf(false) }
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
     val scale by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = if (reduceMotion) 1f else if (focused) 1.15f else 1f,
+        targetValue = when {
+            reduceMotion -> 1f
+            isPressed -> 0.9f
+            focused -> 1.15f
+            else -> 1f
+        },
         label = "iconBtnScale",
+    )
+    val bgAlpha by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = when {
+            isPressed -> 0.3f
+            focused -> 0.15f
+            else -> 0f
+        },
+        label = "iconBtnBg",
     )
     Box(
         modifier = modifier
             .scale(scale)
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.White.copy(alpha = bgAlpha), RoundedCornerShape(8.dp))
             .border(
                 width = if (focused) 2.dp else 0.dp,
                 color = if (focused) com.torve.android.ui.theme.Amber else Color.Transparent,
@@ -2748,13 +2787,14 @@ private fun FocusableIconButton(
                     onFocused?.invoke()
                 }
             }
-            .focusable()
+            .focusable(interactionSource = interactionSource)
             .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
+                interactionSource = interactionSource,
+                indication = null, // custom feedback via scale + background
                 onClick = onClick,
             )
-            .padding(8.dp),
+            // 12dp padding ensures 24dp icon + 24dp padding = 48dp minimum touch target
+            .padding(12.dp),
         contentAlignment = Alignment.Center,
     ) {
         content()

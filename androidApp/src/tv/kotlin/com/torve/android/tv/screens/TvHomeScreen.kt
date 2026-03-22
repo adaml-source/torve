@@ -1,35 +1,50 @@
 package com.torve.android.tv.screens
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.res.stringResource
 import com.torve.android.R
-import com.torve.android.tv.TvScreenCache
-import com.torve.android.tv.toMediaItemOrNull
-import com.torve.android.tv.components.TvCardStyle
 import com.torve.android.tv.components.TvBrowseLayout
+import com.torve.android.tv.components.TvCardStyle
 import com.torve.android.tv.components.TvContentRail
 import com.torve.android.tv.components.TvMediaContextMenuAction
 import com.torve.android.tv.components.TvMediaRails
 import com.torve.android.tv.components.dedupeAcrossRails
 import com.torve.android.tv.components.rememberTvFocusMemory
+import com.torve.android.tv.toMediaItemOrNull
+import com.torve.domain.model.CatalogShelf
+import com.torve.domain.model.CustomSection
+import com.torve.domain.model.HomeSection
+import com.torve.domain.model.HomeSectionConfig
 import com.torve.domain.model.MediaItem
-import com.torve.domain.repository.MetadataRepository
-import com.torve.domain.repository.WatchProgressRepository
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
+import com.torve.domain.model.MediaType
+import com.torve.presentation.home.HomeUiState
+import com.torve.presentation.home.HomeViewModel
 import org.koin.compose.koinInject
 
-private data class TvHomeUiState(
-    val loading: Boolean = true,
-    val rails: List<TvContentRail> = emptyList(),
-    val error: String? = null,
-)
+private sealed interface TvHomeRenderItem {
+    val order: Int
+}
+
+private data class BuiltInHomeItem(
+    val config: HomeSectionConfig,
+) : TvHomeRenderItem {
+    override val order: Int = config.order
+}
+
+private data class CustomHomeItem(
+    val section: CustomSection,
+) : TvHomeRenderItem {
+    override val order: Int = section.order
+}
+
+private data class AddonShelfHomeItem(
+    val shelf: CatalogShelf,
+    override val order: Int,
+) : TvHomeRenderItem
 
 @Composable
 fun TvHomeScreen(
@@ -46,102 +61,37 @@ fun TvHomeScreen(
     contextMenuActionsForItem: ((MediaItem, Float?) -> List<TvMediaContextMenuAction>)? = null,
     onContextMenuAction: ((MediaItem, TvMediaContextMenuAction, Float?) -> Unit)? = null,
 ) {
-    val metadataRepo: MetadataRepository = koinInject()
-    val watchProgressRepo: WatchProgressRepository = koinInject()
+    val homeViewModel: HomeViewModel = koinInject()
+    val state by homeViewModel.state.collectAsState()
+    val sectionConfigs by homeViewModel.sectionConfigs.collectAsState()
+    val customSections by homeViewModel.customSections.collectAsState()
+    val homeLayoutOrder by homeViewModel.homeLayoutOrder.collectAsState()
     val focusMemory = rememberTvFocusMemory()
+    val emptyMessage = state.error ?: stringResource(R.string.tv_no_data)
 
-    val continueWatchingLabel = stringResource(R.string.tv_section_continue_watching)
-    val recommendedLabel = stringResource(R.string.tv_section_recommended)
-    val trendingMoviesLabel = stringResource(R.string.tv_section_trending_movies)
-    val trendingShowsLabel = stringResource(R.string.tv_section_trending_shows)
-
-    var uiState by remember {
-        mutableStateOf(TvScreenCache.get<TvHomeUiState>("home") ?: TvHomeUiState())
+    val rails = remember(
+        state,
+        sectionConfigs,
+        customSections,
+        homeLayoutOrder,
+    ) {
+        buildTvHomeRails(
+            state = state,
+            sectionConfigs = sectionConfigs,
+            customSections = customSections,
+            homeLayoutOrder = homeLayoutOrder,
+        )
     }
 
-    LaunchedEffect(Unit) {
-        if (uiState.rails.isNotEmpty()) return@LaunchedEffect
-        uiState = TvHomeUiState(loading = true)
-        uiState = try {
-            val rails = coroutineScope {
-                val inProgressDeferred = async { watchProgressRepo.getInProgress(20) }
-                val trendingMoviesDeferred = async { metadataRepo.getTrending("movie") }
-                val trendingShowsDeferred = async { metadataRepo.getTrending("tv") }
-                val popularMoviesDeferred = async { metadataRepo.getPopular("movie") }
-                val popularShowsDeferred = async { metadataRepo.getPopular("tv") }
-
-                val inProgressRaw = inProgressDeferred.await()
-                val inProgress = inProgressRaw
-                    .mapNotNull { it.toMediaItemOrNull() }
-                    .filter { it.tmdbId != null }
-                    .take(20)
-
-                val progressMap = inProgressRaw
-                    .filter { it.progressPercent > 0f }
-                    .associate { it.mediaId to it.progressPercent }
-
-                val trendingMovies = trendingMoviesDeferred.await().take(24)
-                val trendingShows = trendingShowsDeferred.await().take(24)
-                val recommended = (popularMoviesDeferred.await() + popularShowsDeferred.await())
-                    .distinctBy { it.tmdbId ?: "${it.type}:${it.id}" }
-                    .take(24)
-
-                buildList {
-                    if (inProgress.isNotEmpty()) {
-                        add(
-                            TvContentRail(
-                                key = "continue_watching",
-                                title = continueWatchingLabel,
-                                items = inProgress,
-                                cardStyle = TvCardStyle.BACKDROP,
-                                progressByMediaId = progressMap,
-                            ),
-                        )
-                    }
-                    if (recommended.isNotEmpty()) {
-                        add(
-                            TvContentRail(
-                                key = "recommended",
-                                title = recommendedLabel,
-                                items = recommended,
-                            ),
-                        )
-                    }
-                    if (trendingMovies.isNotEmpty()) {
-                        add(
-                            TvContentRail(
-                                key = "trending_movies",
-                                title = trendingMoviesLabel,
-                                items = trendingMovies,
-                            ),
-                        )
-                    }
-                    if (trendingShows.isNotEmpty()) {
-                        add(
-                            TvContentRail(
-                                key = "trending_shows",
-                                title = trendingShowsLabel,
-                                items = trendingShows,
-                            ),
-                        )
-                    }
-                }.dedupeAcrossRails()
-            }
-            TvHomeUiState(loading = false, rails = rails).also { TvScreenCache.put("home", it) }
-        } catch (t: Throwable) {
-            TvHomeUiState(loading = false, error = t.message ?: "Failed to load home content")
-        }
-    }
-
-    val emptyMessage = uiState.error ?: stringResource(R.string.tv_no_data)
     TvMediaRails(
-        rails = uiState.rails,
+        rails = rails,
         railFocusRequester = railFocusRequester,
         headerFocusRequester = headerFocusRequester,
         onMediaClick = onMediaClick,
         onFirstContentRequester = onFirstContentRequester,
         onContentFocused = onContentFocused,
-        loading = uiState.loading,
+        screenId = "home",
+        loading = state.isLoading,
         emptyMessage = emptyMessage,
         focusMemory = focusMemory,
         onMediaFocused = onMediaFocused,
@@ -152,4 +102,197 @@ fun TvHomeScreen(
         contextMenuActionsForItem = contextMenuActionsForItem,
         onContextMenuAction = onContextMenuAction,
     )
+}
+
+private fun buildTvHomeRails(
+    state: HomeUiState,
+    sectionConfigs: List<HomeSectionConfig>,
+    customSections: List<CustomSection>,
+    homeLayoutOrder: List<String>,
+): List<TvContentRail> {
+    val orderIndex = homeLayoutOrder.withIndex().associate { it.value to it.index }
+    val addonShelfVisibility = state.addonShelfVisibility
+
+    fun itemKey(item: TvHomeRenderItem): String = when (item) {
+        is BuiltInHomeItem -> "section:${item.config.section.name}"
+        is CustomHomeItem -> "custom:${item.section.id}"
+        is AddonShelfHomeItem -> "addon:${item.shelf.id}"
+    }
+
+    val renderItems = buildList<TvHomeRenderItem> {
+        sectionConfigs.filter { it.enabled }.forEach { add(BuiltInHomeItem(it)) }
+        customSections.filter { it.enabled }.forEach { add(CustomHomeItem(it)) }
+        state.addonShelves.forEachIndexed { index, shelf ->
+            if (addonShelfVisibility[shelf.id] != false) {
+                add(
+                    AddonShelfHomeItem(
+                        shelf = shelf,
+                        order = orderIndex["addon:${shelf.id}"] ?: (10_000 + 100 + index),
+                    ),
+                )
+            }
+        }
+    }.sortedWith(
+        compareBy<TvHomeRenderItem> { item ->
+            orderIndex[itemKey(item)] ?: (10_000 + item.order)
+        }.thenBy { it.order },
+    )
+
+    val rails = mutableListOf<TvContentRail>()
+    renderItems.forEach { item ->
+        when (item) {
+            is BuiltInHomeItem -> {
+                rails += buildBuiltInRails(item.config, state)
+            }
+            is CustomHomeItem -> {
+                val items = state.customShelves[item.section.id].orEmpty().take(24)
+                if (items.isNotEmpty()) {
+                    rails += TvContentRail(
+                        key = "custom:${item.section.id}",
+                        title = item.section.title,
+                        items = items,
+                    )
+                }
+            }
+            is AddonShelfHomeItem -> {
+                val items = item.shelf.items.take(24)
+                if (items.isNotEmpty()) {
+                    rails += TvContentRail(
+                        key = "addon:${item.shelf.id}",
+                        title = item.shelf.title,
+                        items = items,
+                    )
+                }
+            }
+        }
+    }
+
+    return rails.dedupeAcrossRails()
+}
+
+private fun buildBuiltInRails(
+    config: HomeSectionConfig,
+    state: HomeUiState,
+): List<TvContentRail> {
+    val title = config.customTitle ?: config.section.defaultTitle
+    return when (config.section) {
+        HomeSection.SEARCH_BAR,
+        HomeSection.HERO,
+        HomeSection.STREAMING_SERVICES,
+        HomeSection.ACTORS,
+        HomeSection.DIRECTORS,
+        HomeSection.ADDON_SHELVES -> {
+            emptyList()
+        }
+
+        HomeSection.CONTINUE_WATCHING -> {
+            val items = state.continueWatching
+                .mapNotNull { it.toMediaItemOrNull() }
+                .filter { it.tmdbId != null }
+                .take(20)
+            if (items.isEmpty()) emptyList()
+            else {
+                listOf(
+                    TvContentRail(
+                        key = "continue_watching",
+                        title = title,
+                        items = items,
+                        cardStyle = TvCardStyle.BACKDROP,
+                        progressByMediaId = state.continueWatching
+                            .filter { it.progressPercent > 0f }
+                            .associate { it.mediaId to it.progressPercent },
+                    ),
+                )
+            }
+        }
+
+        HomeSection.WATCHLIST -> {
+            val items = state.watchlistItems.take(24)
+            if (items.isEmpty()) emptyList()
+            else listOf(TvContentRail(key = "watchlist", title = title, items = items))
+        }
+
+        HomeSection.WATCHLIST_MOVIES -> {
+            val items = state.watchlistItems
+                .filter { it.type == MediaType.MOVIE }
+                .take(24)
+            if (items.isEmpty()) emptyList()
+            else listOf(TvContentRail(key = "watchlist_movies", title = title, items = items))
+        }
+
+        HomeSection.WATCHLIST_TV -> {
+            val items = state.watchlistItems
+                .filter { it.type == MediaType.SERIES }
+                .take(24)
+            if (items.isEmpty()) emptyList()
+            else listOf(TvContentRail(key = "watchlist_tv", title = title, items = items))
+        }
+
+        HomeSection.TRENDING_MOVIES,
+        HomeSection.TRENDING_TV,
+        HomeSection.POPULAR_MOVIES,
+        HomeSection.NOW_PLAYING,
+        HomeSection.NEW_RELEASES,
+        HomeSection.TOP_RATED -> {
+            val shelf = state.shelves.firstOrNull { it.id == config.section.shelfId }
+            val items = shelf?.items?.take(24).orEmpty()
+            if (items.isEmpty()) emptyList()
+            else {
+                listOf(
+                    TvContentRail(
+                        key = config.section.shelfId ?: config.section.name.lowercase(),
+                        title = title,
+                        items = items,
+                    ),
+                )
+            }
+        }
+
+        HomeSection.RECOMMENDED -> {
+            val items = state.recommendedItems.map { it.item }.take(24)
+            if (items.isEmpty()) emptyList()
+            else listOf(TvContentRail(key = "recommended", title = title, items = items))
+        }
+
+        HomeSection.RECENTLY_WATCHED -> {
+            val items = state.recentlyWatched.take(24)
+            if (items.isEmpty()) emptyList()
+            else listOf(TvContentRail(key = "recently_watched", title = title, items = items))
+        }
+
+        HomeSection.HIDDEN_GEMS -> {
+            val shelf = state.hiddenGemsShelf
+            val items = shelf?.items?.take(24).orEmpty()
+            if (items.isEmpty()) emptyList()
+            else listOf(TvContentRail(key = shelf?.id ?: "hidden_gems", title = title, items = items))
+        }
+
+        HomeSection.BECAUSE_YOU_WATCHED -> {
+            state.becauseYouWatched.mapNotNull { shelf ->
+                shelf.items.take(24)
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { items ->
+                        TvContentRail(
+                            key = shelf.id,
+                            title = shelf.title,
+                            items = items,
+                        )
+                    }
+            }
+        }
+
+        HomeSection.MDBLIST_SHELVES -> {
+            state.mdbListShelves.mapNotNull { shelf ->
+                shelf.items.take(24)
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { items ->
+                        TvContentRail(
+                            key = "mdblist:${shelf.id}",
+                            title = shelf.title,
+                            items = items,
+                        )
+                    }
+            }
+        }
+    }
 }

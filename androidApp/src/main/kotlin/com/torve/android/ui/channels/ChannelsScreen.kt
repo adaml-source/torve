@@ -17,6 +17,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.LiveTv
 import androidx.compose.material.icons.rounded.Refresh
@@ -39,6 +45,9 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -333,7 +342,7 @@ internal fun AddPlaylistDialog(
                 if (isXtream) {
                     StyledTextField(value = xtreamServer, onValueChange = onXtreamServerChange, label = stringResource(R.string.channels_server_url), placeholder = "http://example.com:8080")
                     StyledTextField(value = xtreamUsername, onValueChange = onXtreamUsernameChange, label = stringResource(R.string.channels_username))
-                    StyledTextField(value = xtreamPassword, onValueChange = onXtreamPasswordChange, label = stringResource(R.string.channels_password))
+                    StyledTextField(value = xtreamPassword, onValueChange = onXtreamPasswordChange, label = stringResource(R.string.channels_password), isSensitive = true)
                 } else {
                     StyledTextField(value = url, onValueChange = onUrlChange, label = stringResource(R.string.channels_m3u_url))
                     StyledTextField(value = epgUrl, onValueChange = onEpgUrlChange, label = stringResource(R.string.channels_epg_optional))
@@ -376,7 +385,10 @@ private fun StyledTextField(
     onValueChange: (String) -> Unit,
     label: String,
     placeholder: String? = null,
+    isSensitive: Boolean = false,
 ) {
+    var revealed by remember { mutableStateOf(false) }
+    val peekTransformation = com.torve.android.ui.components.rememberPeekPasswordTransformation(value)
     Column {
         Text(
             text = label,
@@ -384,11 +396,12 @@ private fun StyledTextField(
             color = Torve.colors.textTertiary,
             modifier = Modifier.padding(bottom = 4.dp),
         )
-        Box(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(8.dp))
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .padding(start = 12.dp, end = if (isSensitive) 4.dp else 12.dp, top = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             BasicTextField(
                 value = value,
@@ -396,7 +409,9 @@ private fun StyledTextField(
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
                 cursorBrush = SolidColor(Amber),
-                modifier = Modifier.fillMaxWidth(),
+                visualTransformation = if (isSensitive && !revealed) peekTransformation else VisualTransformation.None,
+                keyboardOptions = if (isSensitive) KeyboardOptions(keyboardType = KeyboardType.Password) else KeyboardOptions.Default,
+                modifier = Modifier.weight(1f),
                 decorationBox = { innerTextField ->
                     Box {
                         if (value.isEmpty()) {
@@ -410,6 +425,16 @@ private fun StyledTextField(
                     }
                 },
             )
+            if (isSensitive && value.isNotEmpty()) {
+                IconButton(onClick = { revealed = !revealed }, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        imageVector = if (revealed) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                        contentDescription = if (revealed) "Hide" else "Show",
+                        tint = Torve.colors.textTertiary,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
         }
     }
 }

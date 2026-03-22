@@ -10,6 +10,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -21,6 +27,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.ui.res.stringResource
 import com.torve.android.R
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -28,19 +35,29 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import com.torve.android.sync.SyncCoordinator
 import com.torve.data.auth.AuthClient
+import com.torve.presentation.session.AccountSessionCoordinator
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.seconds
 import org.koin.compose.koinInject
 
 @Composable
 fun LoginScreen(
     onLoginSuccess: () -> Unit,
+    onDeviceLimitReached: () -> Unit,
     onSkip: () -> Unit,
     authClient: AuthClient = koinInject(),
+    accountSessionCoordinator: AccountSessionCoordinator = koinInject(),
+    syncCoordinator: SyncCoordinator = koinInject(),
 ) {
     val scope = rememberCoroutineScope()
     var isRegisterMode by remember { mutableStateOf(false) }
@@ -51,6 +68,9 @@ fun LoginScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var successMessage by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
+
+    val peekTransformation = com.torve.android.ui.components.rememberPeekPasswordTransformation(password)
+    var passwordRevealed by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -110,8 +130,22 @@ fun LoginScreen(
                 label = { Text(stringResource(R.string.login_password)) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
+                visualTransformation = when {
+                    passwordRevealed -> VisualTransformation.None
+                    isRegisterMode -> VisualTransformation.None
+                    else -> peekTransformation
+                },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                trailingIcon = if (password.isNotEmpty()) {
+                    {
+                        IconButton(onClick = { passwordRevealed = !passwordRevealed }) {
+                            Icon(
+                                imageVector = if (passwordRevealed) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                                contentDescription = if (passwordRevealed) "Hide password" else "Show password",
+                            )
+                        }
+                    }
+                } else null,
             )
         }
 
@@ -179,7 +213,22 @@ fun LoginScreen(
                         }
                         isLoading = false
                         if (result.success) {
-                            onLoginSuccess()
+                            if (isRegisterMode) {
+                                successMessage = "Account created! Please check your email to verify your address."
+                                delay(2000)
+                            }
+                            val bootstrap = accountSessionCoordinator.bootstrapAfterSignIn()
+                            syncCoordinator.refreshDevices()
+                            if (bootstrap.deviceLimitReached) {
+                                error = bootstrap.error
+                                    ?: "You have reached your 5-device limit. Remove an existing device to continue."
+                                onDeviceLimitReached()
+                            } else {
+                                // Proceed after successful login. Registration errors
+                                // are stored in AccountSessionCoordinator.state.lastError
+                                // and surfaced on the Settings/Manage Devices screens.
+                                onLoginSuccess()
+                            }
                         } else {
                             error = result.error
                         }
@@ -222,3 +271,4 @@ fun LoginScreen(
         }
     }
 }
+

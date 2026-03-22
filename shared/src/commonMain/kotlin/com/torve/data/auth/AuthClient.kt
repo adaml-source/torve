@@ -6,11 +6,26 @@ import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.delete
+import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
+import io.ktor.client.request.prepareGet
+import io.ktor.client.statement.bodyAsChannel
+import io.ktor.http.HttpStatusCode
+import io.ktor.utils.io.readUTF8Line
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.datetime.Clock
@@ -77,6 +92,94 @@ class AuthClient(
 
     private val refreshMutex = Mutex()
 
+    /**
+     * Observable auth user state. Emitted on login, register, logout, token refresh,
+     * and verification status check. UI should collect this instead of calling
+     * [getCurrentUser] once — ensures verification state updates propagate immediately.
+     */
+    private val _authUser = MutableStateFlow<AuthUser?>(null)
+    val authUserFlow: StateFlow<AuthUser?> = _authUser.asStateFlow()
+
+    private suspend fun emitCurrentUser() {
+        _authUser.value = getCurrentUser()
+    }
+
+    // ── SSE verification events ──────────────────────────────────
+    // SSE events from GET /me/events are triggers only — they prompt an
+    // authoritative refresh via checkVerificationStatus(), never directly
+    // mutate auth state. This prevents a single concurrent connection via
+    // sseJob guard and reconnects with exponential backoff on failure.
+
+    private val sseScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var sseJob: Job? = null
+
+    /**
+     * Start listening for server-sent verification events.
+     * Automatically called when an unverified user signs in.
+     * Safe to call multiple times — only one connection is active at a time.
+     */
+    fun startVerificationEvents() {
+        if (sseJob?.isActive == true) return
+        sseJob = sseScope.launch {
+            var backoffMs = 1_000L
+            while (isActive) {
+                try {
+                    val token = getValidAccessToken() ?: break
+                    httpClient.prepareGet("${baseUrl()}/me/events") {
+                        bearerAuth(token)
+                        headers.append("Accept", "text/event-stream")
+                    }.execute { response ->
+                        if (response.status == HttpStatusCode.Unauthorized) {
+                            // Token expired — try refresh once, then stop
+                            val refreshed = refreshTokens()
+                            if (!refreshed.success) return@execute
+                            return@execute // will reconnect in next loop iteration
+                        }
+                        if (!response.status.isSuccess()) return@execute
+
+                        backoffMs = 1_000L // reset on successful connect
+                        val channel = response.bodyAsChannel()
+                        var currentEvent = ""
+                        while (isActive && !channel.isClosedForRead) {
+                            val line = channel.readUTF8Line() ?: break
+                            when {
+                                line.startsWith("event:") -> {
+                                    currentEvent = line.removePrefix("event:").trim()
+                                }
+                                line.startsWith("data:") -> {
+                                    if (currentEvent == "EMAIL_VERIFIED") {
+                                        // SSE event is a trigger only — fetch authoritative state.
+                                        checkVerificationStatus()
+                                        return@execute // verified → stop SSE
+                                    }
+                                    currentEvent = ""
+                                }
+                                line.isBlank() -> {
+                                    currentEvent = "" // reset on empty line (end of event frame)
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                    // Transient failure — reconnect with backoff
+                }
+
+                // If already verified after a reconnect, stop
+                val user = getCurrentUser()
+                if (user == null || user.isVerified) break
+
+                delay(backoffMs)
+                backoffMs = (backoffMs * 2).coerceAtMost(30_000L)
+            }
+        }
+    }
+
+    /** Stop the SSE connection. Called on logout and when verification completes. */
+    fun stopVerificationEvents() {
+        sseJob?.cancel()
+        sseJob = null
+    }
+
     private fun baseUrl() = baseUrlProvider().trimEnd('/')
 
     suspend fun isLoggedIn(): Boolean {
@@ -127,6 +230,33 @@ class AuthClient(
             return null
         }
         return getCurrentUser()
+    }
+
+    /**
+     * Authoritative refresh of the local auth user from the backend GET /me endpoint.
+     * Merges the full UserOut response into the local cache and emits through [authUserFlow].
+     * Returns the current `is_verified` value. This is the single refresh path used by
+     * SSE event handlers, manual "Check" button, and app-resume hooks.
+     */
+    suspend fun checkVerificationStatus(): Boolean {
+        val accessToken = getValidAccessToken() ?: return false
+        return try {
+            val resp = httpClient.get("${baseUrl()}/me") {
+                bearerAuth(accessToken)
+            }
+            if (!resp.status.isSuccess()) return false
+            val user: UserResponseDto = resp.body()
+            // Merge all authoritative fields into local cache
+            localSettingsRepository.setString(KEY_AUTH_USER_ID, user.id)
+            localSettingsRepository.setString(KEY_AUTH_EMAIL, user.email)
+            user.display_name?.let { localSettingsRepository.setString(KEY_AUTH_DISPLAY_NAME, it) }
+            localSettingsRepository.setString(KEY_AUTH_IS_VERIFIED, user.is_verified.toString())
+            emitCurrentUser()
+            if (user.is_verified) stopVerificationEvents()
+            user.is_verified
+        } catch (_: Exception) {
+            false
+        }
     }
 
     fun currentDeviceRegistration(): DeviceRegistrationDto = deviceRegistrationProvider()
@@ -296,21 +426,21 @@ class AuthClient(
     }
 
     suspend fun deleteAccount(): AuthResult {
-        try {
-            val accessToken = secureStorage.getString(KEY_AUTH_ACCESS_TOKEN)
-            if (accessToken != null) {
-                val response = httpClient.delete("${baseUrl()}/auth/account") {
-                    bearerAuth(accessToken)
-                }
-                if (response.status.value !in 200..299) {
-                    return AuthResult(success = false, error = "Could not delete account (HTTP ${response.status.value})")
-                }
+        val accessToken = getValidAccessToken()
+            ?: return AuthResult(success = false, error = "Not signed in")
+        return try {
+            val response = httpClient.delete("${baseUrl()}/auth/account") {
+                bearerAuth(accessToken)
+            }
+            if (response.status.value !in 200..299) {
+                AuthResult(success = false, error = "Could not delete account (HTTP ${response.status.value})")
+            } else {
+                clearAuth()
+                AuthResult(success = true)
             }
         } catch (e: Exception) {
-            return AuthResult(success = false, error = e.message ?: "Could not delete account")
+            AuthResult(success = false, error = e.message ?: "Could not delete account")
         }
-        clearAuth()
-        return AuthResult(success = true)
     }
 
     /**
@@ -358,9 +488,17 @@ class AuthClient(
         response.device?.id?.takeIf { it.isNotBlank() }?.let {
             localSettingsRepository.setString(KEY_AUTH_DEVICE_ID, it)
         }
+        emitCurrentUser()
+        // Auto-start SSE for unverified users, stop for verified
+        if (!response.user.is_verified) {
+            startVerificationEvents()
+        } else {
+            stopVerificationEvents()
+        }
     }
 
     private suspend fun clearAuth() {
+        stopVerificationEvents()
         secureStorage.remove(KEY_AUTH_ACCESS_TOKEN)
         secureStorage.remove(KEY_AUTH_REFRESH_TOKEN)
         secureStorage.remove(KEY_TOKEN_EXPIRES_AT)
@@ -369,6 +507,7 @@ class AuthClient(
         localSettingsRepository.remove(KEY_AUTH_DISPLAY_NAME)
         localSettingsRepository.remove(KEY_AUTH_IS_VERIFIED)
         localSettingsRepository.remove(KEY_AUTH_DEVICE_ID)
+        _authUser.value = null
     }
 }
 
