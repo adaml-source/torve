@@ -74,9 +74,11 @@ fun TvNavRail(
     activeRoute: String = selectedRoute,
     isExpanded: Boolean,
     railFocusRequester: FocusRequester,
+    preferredEntryRoute: String? = null,
     onRailFocusChanged: (Boolean) -> Unit,
+    onPreferredEntryRouteConsumed: () -> Unit = {},
     onMoveToContent: (String) -> Unit,
-    onConfirm: (String) -> Unit,
+    onConfirm: (String) -> Unit = {},
     onNavigate: (String) -> Unit,
     navigateOnFocus: Boolean = false,
     modifier: Modifier = Modifier,
@@ -103,6 +105,7 @@ fun TvNavRail(
     // updates too late during focus entry transitions.
     val currentActiveRoute by rememberUpdatedState(activeRoute)
     val currentSelectedRoute by rememberUpdatedState(selectedRoute)
+    val currentPreferredEntryRoute by rememberUpdatedState(preferredEntryRoute)
     var railHasFocus by remember { mutableStateOf(false) }
 
     Column(
@@ -138,7 +141,12 @@ fun TvNavRail(
                 // Use activeRoute (committed selectedTopRoute) for entry focus, not
                 // highlightedRoute. This prevents focus from landing on a stale rail
                 // item when focus falls to the rail during content disposal.
-                enter = { itemRequesters[currentActiveRoute] ?: itemRequesters[currentSelectedRoute] ?: FocusRequester.Default }
+                enter = {
+                    currentPreferredEntryRoute?.let(itemRequesters::get)
+                        ?: itemRequesters[currentActiveRoute]
+                        ?: itemRequesters[currentSelectedRoute]
+                        ?: FocusRequester.Default
+                }
             }
             .focusGroup()
             .padding(horizontal = 8.dp, vertical = 24.dp),
@@ -169,22 +177,27 @@ fun TvNavRail(
                         down = downRequester
                         left = currentRequester
                     },
-                onConfirm = {
-                    onConfirm(destination.route)
-                },
                 // Always consume Right and use explicit focus restore.
                 // Natural spatial focus traversal causes drift (e.g. Settings scrolls 4 rows).
                 onMoveRight = {
-                    onConfirm(destination.route)
                     onMoveToContent(destination.route)
                 },
                 onClick = {
                     // .clickable fires via accessibility/interaction, bypassing onPreviewKeyEvent.
                     // Must do the same as onMoveRight to move focus into content.
-                    onConfirm(destination.route)
                     onMoveToContent(destination.route)
                 },
                 onItemFocused = {
+                    val preferredRoute = currentPreferredEntryRoute
+                    if (preferredRoute != null) {
+                        if (destination.route == preferredRoute) {
+                            onPreferredEntryRouteConsumed()
+                        } else if (railHasFocus) {
+                            // Ignore transient focus on the wrong rail item while a
+                            // programmatic content-to-rail handoff is still settling.
+                            return@TvNavRailItem
+                        }
+                    }
                     if (navigateOnFocus) {
                         onNavigate(destination.route)
                     }
@@ -198,7 +211,9 @@ fun TvNavRail(
     var prevRailHasFocus by remember { mutableStateOf(false) }
     LaunchedEffect(railHasFocus) {
         if (railHasFocus && !prevRailHasFocus) {
-            val preferred = itemRequesters[currentActiveRoute] ?: itemRequesters[currentSelectedRoute]
+            val preferred = currentPreferredEntryRoute?.let(itemRequesters::get)
+                ?: itemRequesters[currentActiveRoute]
+                ?: itemRequesters[currentSelectedRoute]
             val fallback = orderedRoutes.firstOrNull()?.let { itemRequesters[it] }
             runCatching {
                 when {
@@ -216,7 +231,6 @@ private fun TvNavRailItem(
     destination: TvTopDestination,
     selected: Boolean,
     expanded: Boolean,
-    onConfirm: () -> Unit,
     onMoveRight: () -> Unit,
     onClick: () -> Unit,
     onItemFocused: () -> Unit,

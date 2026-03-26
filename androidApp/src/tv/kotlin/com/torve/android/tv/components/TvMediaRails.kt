@@ -41,7 +41,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -77,6 +76,9 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.torve.android.R
+import com.torve.android.tv.focus.TvFocusTargetId
+import com.torve.android.tv.focus.rememberRegisteredTvFocusRequester
+import com.torve.android.tv.focus.rememberTvModalFocusRestoreController
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.AmberLight
 import com.torve.android.ui.theme.Charcoal
@@ -111,7 +113,6 @@ private data class TvMediaContextMenuState(
     val item: MediaItem,
     val progress: Float?,
     val anchorBounds: Rect?,
-    val restoreFocusRequester: FocusRequester,
     val actions: List<TvMediaContextMenuAction>,
 )
 
@@ -147,6 +148,7 @@ fun TvMediaRails(
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
     modifier: Modifier = Modifier,
+    screenId: String = "tv_media_rails",
     headerFocusRequester: FocusRequester? = null,
     focusMemory: TvFocusMemory = rememberTvFocusMemory(),
     loading: Boolean = false,
@@ -165,48 +167,58 @@ fun TvMediaRails(
         browseLayout == TvBrowseLayout.POSTER_ONLY
 
     val requesterMap = remember { mutableMapOf<String, FocusRequester>() }
-    val signature = remember(rails) { rails.joinToString("|") { "${it.key}:${it.items.size}" } }
-    val menuScope = rememberCoroutineScope()
+    val rowListStateByKey = remember { mutableMapOf<String, androidx.compose.foundation.lazy.LazyListState>() }
+    val modalFocusRestoreController = rememberTvModalFocusRestoreController(key = "media_rails_$screenId")
+    val columnListState = rememberLazyListState()
+    val signature = remember(rails) { rails.joinToString("|") { r -> "${r.key}:${r.items.size}:${r.items.take(5).joinToString(",") { it.id }}" } }
     var contextMenuState by remember { mutableStateOf<TvMediaContextMenuState?>(null) }
 
     fun openContextMenu(
         item: MediaItem,
         progress: Float?,
-        focusRequester: FocusRequester,
+        target: TvFocusTargetId,
         anchorBounds: Rect?,
+        rowListState: androidx.compose.foundation.lazy.LazyListState,
     ) {
         val actionsProvider = contextMenuActionsForItem ?: return
         val actions = actionsProvider(item, progress).filter { it.label.isNotBlank() }
         if (actions.isEmpty()) return
+        modalFocusRestoreController.captureOrigin(
+            target = target,
+            outerListState = columnListState,
+            innerListState = rowListState,
+        )
         contextMenuState = TvMediaContextMenuState(
             item = item,
             progress = progress,
             anchorBounds = anchorBounds,
-            restoreFocusRequester = focusRequester,
             actions = actions,
         )
     }
 
     fun dismissContextMenu(restoreFocus: Boolean = true) {
-        val state = contextMenuState
-        contextMenuState = null
-        if (restoreFocus && state != null) {
-            menuScope.launch {
-                kotlinx.coroutines.delay(16)
-                runCatching { state.restoreFocusRequester.requestFocus() }
-            }
+        if (restoreFocus && contextMenuState != null) {
+            modalFocusRestoreController.requestRestore()
         }
+        contextMenuState = null
     }
 
     // Prune stale entries when rails change so disposed FocusRequesters
     // don't accumulate and cause crashes on focus restore.
     LaunchedEffect(signature) {
         val validKeys = mutableSetOf<String>()
+        val validRowKeys = mutableSetOf<String>()
         for (rail in rails) {
+            validRowKeys += rail.key
             for (i in rail.items.indices) { validKeys.add("${rail.key}:$i") }
             validKeys.add("${rail.key}:see_all")
         }
         requesterMap.keys.retainAll(validKeys)
+        rowListStateByKey.keys.retainAll(validRowKeys)
+        // TODO: modalFocusRestoreController does not expose a pruneStaleTargets() method,
+        // so stale entries in its internal requesterByTarget map are not cleaned up here.
+        // Targets are individually unregistered via DisposableEffect in rememberRegisteredTvFocusRequester,
+        // but orphaned entries could linger if composition disposal is delayed.
     }
 
     LaunchedEffect(signature, shouldAutoFocus) {
@@ -219,6 +231,15 @@ fun TvMediaRails(
         val targetIndex = focusMemory.lastFocusedIndexByRow[targetRowKey] ?: 0
         val target = requesterMap["$targetRowKey:$targetIndex"] ?: requesterMap["$firstKey:0"]
         try { target?.requestFocus() } catch (_: Throwable) { }
+    }
+
+    LaunchedEffect(contextMenuState, modalFocusRestoreController.pendingRestore?.restoreToken) {
+        if (contextMenuState != null) return@LaunchedEffect
+        modalFocusRestoreController.restorePendingFocus(
+            screenId = screenId,
+            outerListState = columnListState,
+            innerListStateForRowKey = { rowKey -> rowListStateByKey[rowKey] },
+        )
     }
 
     when {
@@ -263,6 +284,7 @@ fun TvMediaRails(
             val rowItemSpacing = 12.dp
             val rowVerticalFocusInset = 10.dp
             LazyColumn(
+                state = columnListState,
                 modifier = modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 32.dp),
                 verticalArrangement = Arrangement.spacedBy(28.dp),
@@ -276,6 +298,7 @@ fun TvMediaRails(
 
                 itemsIndexed(rails, key = { _, row -> row.key }) { rowIndex, row ->
                     val rowListState = rememberLazyListState()
+                    rowListStateByKey[row.key] = rowListState
                     Column(
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
@@ -306,7 +329,22 @@ fun TvMediaRails(
                                 },
                             ) { itemIndex, item ->
                                 val mapKey = "${row.key}:$itemIndex"
-                                val focusRequester = remember(mapKey) { FocusRequester() }
+                                val target = remember(row.key, itemIndex, item.id, item.tmdbId) {
+                                    TvFocusTargetId(
+                                        screenId = screenId,
+                                        rowKey = row.key,
+                                        itemKey = item.tmdbId?.let { "tmdb_${item.type}_$it" } ?: "${item.type}_${item.id}",
+                                        rowIndex = rowIndex,
+                                        itemIndex = itemIndex,
+                                        targetType = "card",
+                                    )
+                                }
+                                val baseRequester = remember(mapKey) { FocusRequester() }
+                                val focusRequester = rememberRegisteredTvFocusRequester(
+                                    controller = modalFocusRestoreController,
+                                    target = target,
+                                    externalRequester = baseRequester,
+                                )
                                 requesterMap[mapKey] = focusRequester
 
                                 val isFirstItem = rowIndex == 0 && itemIndex == 0
@@ -330,6 +368,7 @@ fun TvMediaRails(
                                     }
 
                                 val onItemFocused: () -> Unit = {
+                                    modalFocusRestoreController.markFocused(target)
                                     focusMemory.lastFocusedRowKey = row.key
                                     focusMemory.lastFocusedIndexByRow[row.key] = itemIndex
                                     onContentFocused(focusRequester)
@@ -366,8 +405,9 @@ fun TvMediaRails(
                                                 openContextMenu(
                                                     item = item,
                                                     progress = progress,
-                                                    focusRequester = focusRequester,
+                                                    target = target,
                                                     anchorBounds = anchorBounds,
+                                                    rowListState = rowListState,
                                                 )
                                             },
                                         )
@@ -469,12 +509,33 @@ private fun TvPosterCard(
                 },
             ),
     ) {
-        AsyncImage(
-            model = item.posterUrl ?: item.backdropUrl,
-            contentDescription = item.title,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize(),
-        )
+        val posterImageUrl = item.posterUrl ?: item.backdropUrl
+        if (posterImageUrl.isNullOrBlank()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFF1A1A2E)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = item.title,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Snow,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(8.dp),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+            }
+        } else {
+            AsyncImage(
+                model = posterImageUrl,
+                contentDescription = item.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
 
         if (showTitles) {
             Box(
@@ -570,8 +631,11 @@ private fun TvMediaContextMenu(
     BackHandler(onBack = onDismiss)
 
     LaunchedEffect(state.item.id, state.actions.size) {
-        kotlinx.coroutines.delay(30)
-        runCatching { firstActionRequester.requestFocus() }
+        repeat(10) {
+            kotlinx.coroutines.delay(50)
+            val success = runCatching { firstActionRequester.requestFocus() }.isSuccess
+            if (success) return@LaunchedEffect
+        }
     }
 
     Popup(

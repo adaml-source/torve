@@ -1,6 +1,5 @@
 package com.torve.android.ui.tv
 
-import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,6 +15,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import com.torve.android.test.TorveTestHostActivity
 import com.torve.android.tv.TvSettingsDestination
 import org.junit.Rule
 import org.junit.Test
@@ -33,7 +33,7 @@ import org.junit.Test
 class TvSettingsNavigationTest {
 
     @get:Rule
-    val composeRule = createAndroidComposeRule<ComponentActivity>()
+    val composeRule = createAndroidComposeRule<TorveTestHostActivity>()
 
     /**
      * Minimal harness that mirrors the real TvRoot settings navigation.
