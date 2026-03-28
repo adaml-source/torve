@@ -1425,7 +1425,6 @@ internal fun TvSettingsScreen(
     val categoryOrder = remember(categoryEntries) { categoryEntries.map { it.first } }
     val categoryLockFeature = remember {
         mapOf(
-            TvSettingsCategory.ACCOUNT to TvEntitledFeature.ACCOUNT_SETUP,
             TvSettingsCategory.LIBRARY to TvEntitledFeature.PERSISTENT_COLLECTIONS,
             TvSettingsCategory.CONNECTIONS to TvEntitledFeature.CLOUD_PROVIDER_SETUP,
             TvSettingsCategory.ADVANCED to TvEntitledFeature.ADVANCED_CONNECTION_CONFIGURATION,
@@ -1433,7 +1432,6 @@ internal fun TvSettingsScreen(
     }
     val partiallyLockedCategories = remember {
         setOf(
-            TvSettingsCategory.ACCOUNT,
             TvSettingsCategory.LIBRARY,
             TvSettingsCategory.CONNECTIONS,
         )
@@ -1665,12 +1663,7 @@ internal fun TvSettingsScreen(
                     modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                     focusRequester = settingsContentRequester,
                     onFocused = { onContentFocused(settingsContentRequester) },
-                    onClick = {
-                        runPremiumAction(TvEntitledFeature.ACCOUNT_SETUP) {
-                            setupMode = TvSetupMode.ANDROID_PHONE
-                        }
-                    },
-                    premiumLocked = isLockedFeature(TvEntitledFeature.ACCOUNT_SETUP),
+                    onClick = { setupMode = TvSetupMode.ANDROID_PHONE },
                 )
             }
             item(key = "mode_ios") {
@@ -1681,12 +1674,7 @@ internal fun TvSettingsScreen(
                     modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                     focusRequester = requester,
                     onFocused = { onContentFocused(requester) },
-                    onClick = {
-                        runPremiumAction(TvEntitledFeature.ACCOUNT_SETUP) {
-                            setupMode = TvSetupMode.IOS_PHONE
-                        }
-                    },
-                    premiumLocked = isLockedFeature(TvEntitledFeature.ACCOUNT_SETUP),
+                    onClick = { setupMode = TvSetupMode.IOS_PHONE },
                 )
             }
             item(key = "mode_tv_only") {
@@ -1697,12 +1685,7 @@ internal fun TvSettingsScreen(
                     modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                     focusRequester = requester,
                     onFocused = { onContentFocused(requester) },
-                    onClick = {
-                        runPremiumAction(TvEntitledFeature.ACCOUNT_SETUP) {
-                            setupMode = TvSetupMode.TV_ONLY
-                        }
-                    },
-                    premiumLocked = isLockedFeature(TvEntitledFeature.ACCOUNT_SETUP),
+                    onClick = { setupMode = TvSetupMode.TV_ONLY },
                 )
             }
         }
@@ -2302,32 +2285,29 @@ internal fun TvSettingsScreen(
                         onContentFocused(requester)
                     },
                     onClick = {
-                        runPremiumAction(TvEntitledFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD) {
-                            if (confirmSignOut) {
-                                authScope.launch {
-                                    settingsFocusController.captureOrigin(
-                                        itemId = authLogoutTarget.itemId,
-                                        outerListState = settingsListState,
-                                        reason = "confirm",
-                                    )
-                                    pendingAuthTransitionFocusTarget = authEmailTarget
-                                    authClient.logout()
-                                    accountSessionCoordinator.signOut()
-                                    authUser = null
-                                    authEmail = ""
-                                    authPassword = ""
-                                    confirmSignOut = false
-                                    subscriptionViewModel.loadSubscription()
-                                    TvNotificationQueue.post("Logged out", NotificationType.INFO)
-                                }
-                            } else {
-                                confirmSignOut = true
+                        if (confirmSignOut) {
+                            authScope.launch {
+                                settingsFocusController.captureOrigin(
+                                    itemId = authLogoutTarget.itemId,
+                                    outerListState = settingsListState,
+                                    reason = "confirm",
+                                )
+                                pendingAuthTransitionFocusTarget = authEmailTarget
+                                authClient.logout()
+                                accountSessionCoordinator.signOut()
+                                authUser = null
+                                authEmail = ""
+                                authPassword = ""
+                                confirmSignOut = false
+                                subscriptionViewModel.loadSubscription()
+                                TvNotificationQueue.post("Logged out", NotificationType.INFO)
                             }
+                        } else {
+                            confirmSignOut = true
                         }
                     },
                     rowType = TvSettingRowType.DANGEROUS,
                     focusedHint = "Requires a second press to avoid accidental sign-out.",
-                    premiumLocked = isLockedFeature(TvEntitledFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD),
                 )
             }
             item(key = "auth_delete_account") {
@@ -2434,9 +2414,6 @@ internal fun TvSettingsScreen(
                     },
                     onExpandToggle = { expandedInput = if (expandedInput == it) null else it },
                     onValueChange = { authEmail = it },
-                    premiumFeature = TvEntitledFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD,
-                    premiumLocked = isLockedFeature(TvEntitledFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD),
-                    onLockedClick = { onRequestLifetimeUnlock(TvEntitledFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD) },
                 )
             }
             item(key = "auth_password") {
@@ -2459,9 +2436,6 @@ internal fun TvSettingsScreen(
                     onExpandToggle = { expandedInput = if (expandedInput == it) null else it },
                     onValueChange = { authPassword = it },
                     isPassword = true,
-                    premiumFeature = TvEntitledFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD,
-                    premiumLocked = isLockedFeature(TvEntitledFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD),
-                    onLockedClick = { onRequestLifetimeUnlock(TvEntitledFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD) },
                 )
             }
             if (authShowRegister) {
@@ -2485,9 +2459,6 @@ internal fun TvSettingsScreen(
                         onExpandToggle = { expandedInput = if (expandedInput == it) null else it },
                         onValueChange = { authConfirmPassword = it },
                         isPassword = true,
-                        premiumFeature = TvEntitledFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD,
-                        premiumLocked = isLockedFeature(TvEntitledFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD),
-                        onLockedClick = { onRequestLifetimeUnlock(TvEntitledFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD) },
                     )
                 }
             }
@@ -2509,51 +2480,48 @@ internal fun TvSettingsScreen(
                         onContentFocused(requester)
                     },
                     onClick = {
-                        runPremiumAction(TvEntitledFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD) {
-                            if (!authIsLoading) {
-                                if (authShowRegister && authPassword != authConfirmPassword) {
-                                    authError = "Passwords do not match"
-                                    TvNotificationQueue.post("Passwords do not match", NotificationType.ERROR)
-                                    return@runPremiumAction
+                        if (!authIsLoading) {
+                            if (authShowRegister && authPassword != authConfirmPassword) {
+                                authError = "Passwords do not match"
+                                TvNotificationQueue.post("Passwords do not match", NotificationType.ERROR)
+                                return@TvSettingCard
+                            }
+                            authError = null
+                            authIsLoading = true
+                            authScope.launch {
+                                settingsFocusController.captureOrigin(
+                                    itemId = authSubmitTarget.itemId,
+                                    outerListState = settingsListState,
+                                    reason = "confirm",
+                                )
+                                val result = if (authShowRegister) {
+                                    authClient.register(authEmail, authPassword, null)
+                                } else {
+                                    authClient.login(authEmail, authPassword)
                                 }
-                                authError = null
-                                authIsLoading = true
-                                authScope.launch {
-                                    settingsFocusController.captureOrigin(
-                                        itemId = authSubmitTarget.itemId,
-                                        outerListState = settingsListState,
-                                        reason = "confirm",
-                                    )
-                                    val result = if (authShowRegister) {
-                                        authClient.register(authEmail, authPassword, null)
-                                    } else {
-                                        authClient.login(authEmail, authPassword)
-                                    }
-                                    authIsLoading = false
-                                    if (result.success) {
-                                        pendingAuthTransitionFocusTarget = authAccountTarget
-                                        authUser = result.user
-                                        authPassword = ""
-                                        authConfirmPassword = ""
-                                        subscriptionViewModel.loadSubscription()
-                                        // Fetch and apply shared account settings (language, ratings, etc.)
-                                        runCatching { accountSessionCoordinator.bootstrapAfterSignIn() }
-                                        settingsViewModel.refreshSettings()
-                                        onAuthSuccess()
-                                        val msg = if (authShowRegister)
-                                            "Account created! Check your email to verify your address."
-                                        else "Logged in!"
-                                        TvNotificationQueue.post(msg, NotificationType.SUCCESS)
-                                    } else {
-                                        authError = result.error
-                                        TvNotificationQueue.post(result.error ?: "Failed", NotificationType.ERROR)
-                                    }
+                                authIsLoading = false
+                                if (result.success) {
+                                    pendingAuthTransitionFocusTarget = authAccountTarget
+                                    authUser = result.user
+                                    authPassword = ""
+                                    authConfirmPassword = ""
+                                    subscriptionViewModel.loadSubscription()
+                                    // Fetch and apply shared account settings (language, ratings, etc.)
+                                    runCatching { accountSessionCoordinator.bootstrapAfterSignIn() }
+                                    settingsViewModel.refreshSettings()
+                                    onAuthSuccess()
+                                    val msg = if (authShowRegister)
+                                        "Account created! Check your email to verify your address."
+                                    else "Logged in!"
+                                    TvNotificationQueue.post(msg, NotificationType.SUCCESS)
+                                } else {
+                                    authError = result.error
+                                    TvNotificationQueue.post(result.error ?: "Failed", NotificationType.ERROR)
                                 }
                             }
                         }
                     },
                     rowType = TvSettingRowType.ACTION,
-                    premiumLocked = isLockedFeature(TvEntitledFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD),
                 )
             }
             item(key = "auth_toggle") {
@@ -2572,14 +2540,11 @@ internal fun TvSettingsScreen(
                         onContentFocused(requester)
                     },
                     onClick = {
-                        runPremiumAction(TvEntitledFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD) {
-                            authShowRegister = !authShowRegister
-                            authConfirmPassword = ""
-                            authError = null
-                        }
+                        authShowRegister = !authShowRegister
+                        authConfirmPassword = ""
+                        authError = null
                     },
                     rowType = TvSettingRowType.NAVIGATION,
-                    premiumLocked = isLockedFeature(TvEntitledFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD),
                 )
             }
             if (!authShowRegister) {
@@ -2620,7 +2585,6 @@ internal fun TvSettingsScreen(
                             }
                         },
                         rowType = TvSettingRowType.ACTION,
-                        premiumLocked = isLockedFeature(TvEntitledFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD),
                     )
                 }
             }

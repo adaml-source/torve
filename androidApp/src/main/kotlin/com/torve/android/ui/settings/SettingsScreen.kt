@@ -185,8 +185,6 @@ fun SettingsScreen(
             }
         }
     }
-    val accountSetupLocked = isLocked(PremiumFeature.ACCOUNT_SETUP)
-    val accountSignInLocked = isLocked(PremiumFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD)
     val deviceLinkingLocked = isLocked(PremiumFeature.DEVICE_LINKING)
     val pairingLocked = isLocked(PremiumFeature.PHONE_PAIRING)
     val cloudProviderLocked = isLocked(PremiumFeature.CLOUD_PROVIDER_SETUP)
@@ -476,27 +474,11 @@ fun SettingsScreen(
                 }
             }
             OutlinedButton(
-                onClick = {
-                    onPremiumAction(PremiumFeature.ACCOUNT_SETUP) { onProfilesClick() }
-                },
+                onClick = onProfilesClick,
                 modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
             ) {
-                if (accountSetupLocked) {
-                    Icon(
-                        imageVector = Icons.Default.Lock,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                }
-                Text(
-                    if (accountSetupLocked) {
-                        "${stringResource(R.string.settings_profiles)} (${stringResource(R.string.premium_locked)})"
-                    } else {
-                        stringResource(R.string.settings_profiles)
-                    },
-                )
+                Text(stringResource(R.string.settings_profiles))
             }
         }
         if (BuildConfig.HAS_BILLING) {

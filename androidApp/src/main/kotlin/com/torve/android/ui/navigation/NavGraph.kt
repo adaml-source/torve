@@ -273,7 +273,6 @@ fun TorveNavGraph(
     val requestLifetimeUnlock: (PremiumFeature) -> Unit = remember(navController) {
         { feature -> navController.navigateToLifetimeUnlock(feature) }
     }
-    val canAccessAccountSurface = subscriptionState.hasEntitlement || !isLocked(PremiumFeature.ACCOUNT_SETUP)
     val canAccessManageDevicesSurface = subscriptionState.hasEntitlement || !isLocked(PremiumFeature.DEVICE_LINKING)
 
     LaunchedEffect(syncState.blockedFeature, currentRoute) {
@@ -678,21 +677,9 @@ fun TorveNavGraph(
                         }
                     },
                     onSubscriptionClick = { navController.navigate("paywall") },
-                    onProfilesClick = {
-                        if (isLocked(PremiumFeature.ACCOUNT_SETUP)) {
-                            requestLifetimeUnlock(PremiumFeature.ACCOUNT_SETUP)
-                        } else {
-                            navController.navigate("profiles")
-                        }
-                    },
+                    onProfilesClick = { navController.navigate("profiles") },
                     onCalendarClick = { navController.navigate("calendar") },
-                    onAccountClick = {
-                        if (!canAccessAccountSurface) {
-                            requestLifetimeUnlock(PremiumFeature.ACCOUNT_SETUP)
-                        } else {
-                            navController.navigate("sync_account")
-                        }
-                    },
+                    onAccountClick = { navController.navigate("sync_account") },
                     onDevicesClick = {
                         if (isLocked(PremiumFeature.PHONE_PAIRING)) {
                             requestLifetimeUnlock(PremiumFeature.PHONE_PAIRING)
@@ -785,21 +772,9 @@ fun TorveNavGraph(
                         }
                     },
                     onSubscriptionClick = { navController.navigate("paywall") },
-                    onProfilesClick = {
-                        if (isLocked(PremiumFeature.ACCOUNT_SETUP)) {
-                            requestLifetimeUnlock(PremiumFeature.ACCOUNT_SETUP)
-                        } else {
-                            navController.navigate("profiles")
-                        }
-                    },
+                    onProfilesClick = { navController.navigate("profiles") },
                     onCalendarClick = { navController.navigate("calendar") },
-                    onAccountClick = {
-                        if (!canAccessAccountSurface) {
-                            requestLifetimeUnlock(PremiumFeature.ACCOUNT_SETUP)
-                        } else {
-                            navController.navigate("sync_account")
-                        }
-                    },
+                    onAccountClick = { navController.navigate("sync_account") },
                     onDevicesClick = {
                         if (isLocked(PremiumFeature.PHONE_PAIRING)) {
                             requestLifetimeUnlock(PremiumFeature.PHONE_PAIRING)
@@ -1085,32 +1060,15 @@ fun TorveNavGraph(
 
             // Profiles
             composable("profiles") {
-                if (isLocked(PremiumFeature.ACCOUNT_SETUP)) {
-                    PaywallScreen(
-                        onBack = { navController.popBackStack() },
-                        onDeviceLimitReached = { navController.navigate("device_limit_reached") },
-                        lockedFeature = PremiumFeature.ACCOUNT_SETUP,
-                    )
-                } else {
-                    ProfileScreen(onBack = { navController.popBackStack() })
-                }
+                ProfileScreen(onBack = { navController.popBackStack() })
             }
 
             composable("sync_account") {
-                if (!canAccessAccountSurface) {
-                    PaywallScreen(
-                        onBack = { navController.popBackStack() },
-                        onDeviceLimitReached = { navController.navigate("device_limit_reached") },
-                        onManageDevices = { navController.navigate("manage_devices") },
-                        lockedFeature = PremiumFeature.ACCOUNT_SETUP,
-                    )
-                } else {
-                    AccountScreen(
-                        onOpenDevices = { navController.navigate("sync_devices") },
-                        onManageDevices = { navController.navigate("manage_devices") },
-                        onBack = { navController.popBackStack() },
-                    )
-                }
+                AccountScreen(
+                    onOpenDevices = { navController.navigate("sync_devices") },
+                    onManageDevices = { navController.navigate("manage_devices") },
+                    onBack = { navController.popBackStack() },
+                )
             }
 
             composable("sync_devices") {
