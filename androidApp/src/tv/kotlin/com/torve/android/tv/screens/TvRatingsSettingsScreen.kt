@@ -1,5 +1,6 @@
 package com.torve.android.tv.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -10,11 +11,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -31,10 +35,23 @@ fun TvRatingsSettingsScreen(
     onBack: () -> Unit,
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
+    entryFocusRequester: FocusRequester,
+    onEntryFocusReadyChanged: (Boolean) -> Unit = {},
+    onEntryFocusFocused: () -> Unit = {},
     settingsViewModel: SettingsViewModel = koinInject(),
 ) {
     val settingsState by settingsViewModel.state.collectAsState()
     val prefs = settingsState.ratingPrefs
+
+    BackHandler(onBack = onBack)
+
+    LaunchedEffect(entryFocusRequester) {
+        onFirstContentRequester(entryFocusRequester)
+    }
+    DisposableEffect(Unit) {
+        onEntryFocusReadyChanged(false)
+        onDispose { onEntryFocusReadyChanged(false) }
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -43,14 +60,18 @@ fun TvRatingsSettingsScreen(
     ) {
         // Title / back
         item(key = "title") {
-            val requester = remember("rt_title") { FocusRequester() }
-            onFirstContentRequester(requester)
             TvSettingCard(
                 title = stringResource(R.string.tv_ratings_title),
                 subtitle = "",
-                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
-                focusRequester = requester,
-                onFocused = { onContentFocused(requester) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusProperties { left = railFocusRequester }
+                    .onGloballyPositioned { onEntryFocusReadyChanged(true) },
+                focusRequester = entryFocusRequester,
+                onFocused = {
+                    onEntryFocusFocused()
+                    onContentFocused(entryFocusRequester)
+                },
                 onClick = onBack,
             )
         }

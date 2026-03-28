@@ -12,6 +12,13 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
 
 object HttpClientFactory {
+    const val DEFAULT_REQUEST_TIMEOUT_MS = 30_000L
+    const val DEFAULT_CONNECT_TIMEOUT_MS = 10_000L
+    const val DEFAULT_SOCKET_TIMEOUT_MS = 30_000L
+
+    const val EPG_REQUEST_TIMEOUT_MS = 120_000L
+    const val EPG_CONNECT_TIMEOUT_MS = 20_000L
+    const val EPG_SOCKET_TIMEOUT_MS = 120_000L
 
     val json = Json {
         ignoreUnknownKeys = true
@@ -26,9 +33,29 @@ object HttpClientFactory {
         }
 
         install(HttpTimeout) {
-            requestTimeoutMillis = 30_000
-            connectTimeoutMillis = 10_000
-            socketTimeoutMillis = 30_000
+            requestTimeoutMillis = DEFAULT_REQUEST_TIMEOUT_MS
+            connectTimeoutMillis = DEFAULT_CONNECT_TIMEOUT_MS
+            socketTimeoutMillis = DEFAULT_SOCKET_TIMEOUT_MS
+        }
+
+        install(Logging) {
+            level = LogLevel.HEADERS
+        }
+
+        defaultRequest {
+            contentType(ContentType.Application.Json)
+        }
+    }
+
+    fun createTmdb(): HttpClient = HttpClient(platformTmdbHttpEngine()) {
+        install(ContentNegotiation) {
+            json(json)
+        }
+
+        install(HttpTimeout) {
+            requestTimeoutMillis = DEFAULT_REQUEST_TIMEOUT_MS
+            connectTimeoutMillis = DEFAULT_CONNECT_TIMEOUT_MS
+            socketTimeoutMillis = DEFAULT_SOCKET_TIMEOUT_MS
         }
 
         install(Logging) {
@@ -46,9 +73,9 @@ object HttpClientFactory {
         expectSuccess = false
 
         install(HttpTimeout) {
-            requestTimeoutMillis = 120_000
-            connectTimeoutMillis = 20_000
-            socketTimeoutMillis = 120_000
+            requestTimeoutMillis = EPG_REQUEST_TIMEOUT_MS
+            connectTimeoutMillis = EPG_CONNECT_TIMEOUT_MS
+            socketTimeoutMillis = EPG_SOCKET_TIMEOUT_MS
         }
 
         install(Logging) {

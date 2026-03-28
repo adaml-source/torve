@@ -3,15 +3,17 @@ package com.torve.data.account
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.bearerAuth
+import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.patch
-import io.ktor.client.request.delete
+import io.ktor.client.request.post
 import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
+import kotlinx.coroutines.delay
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -20,6 +22,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import com.torve.platform.torveVerboseLog
 
 private val lenientJson = Json {
     ignoreUnknownKeys = true
@@ -74,11 +77,11 @@ class AccountSettingsApi(
             ) {
                 bearerAuth(accessToken)
             }.bodyAsText()
-            println("[IntegrationAPI] GET credentials for $integrationType: ${raw.take(100)}")
+            torveVerboseLog { "[IntegrationAPI] GET credentials for $integrationType: ${raw.take(100)}" }
             val dto: IntegrationCredentialsDto = lenientJson.decodeFromString(raw)
             dto.credentials
         } catch (e: Exception) {
-            println("[IntegrationAPI] GET credentials FAILED for $integrationType: ${e.message}")
+            torveVerboseLog { "[IntegrationAPI] GET credentials FAILED for $integrationType: ${e.message}" }
             null
         }
     }
@@ -95,7 +98,7 @@ class AccountSettingsApi(
     ): Boolean {
         return try {
             val url = "${baseUrl()}/me/integrations/$integrationType"
-            println("[IntegrationAPI] PUT $url")
+            torveVerboseLog { "[IntegrationAPI] PUT $url" }
             val resp = httpClient.put(url) {
                 bearerAuth(accessToken)
                 contentType(ContentType.Application.Json)
@@ -104,11 +107,11 @@ class AccountSettingsApi(
             val ok = resp.status.isSuccess()
             if (!ok) {
                 val body = try { resp.bodyAsText() } catch (_: Exception) { "" }
-                println("[IntegrationAPI] PUT failed: ${resp.status.value} body=$body")
+                torveVerboseLog { "[IntegrationAPI] PUT failed: ${resp.status.value} body=$body" }
             }
             ok
         } catch (e: Exception) {
-            println("[IntegrationAPI] PUT exception: ${e::class.simpleName} ${e.message}")
+            torveVerboseLog { "[IntegrationAPI] PUT exception: ${e::class.simpleName} ${e.message}" }
             false
         }
     }
@@ -117,10 +120,21 @@ class AccountSettingsApi(
 
     suspend fun getPlaylists(accessToken: String): List<RemotePlaylistDto> {
         return try {
-            httpClient.get("${baseUrl()}/me/playlists") {
+            val response = httpClient.get("${baseUrl()}/me/playlists") {
                 bearerAuth(accessToken)
-            }.body()
-        } catch (_: Exception) {
+            }
+            if (!response.status.isSuccess()) {
+                torveVerboseLog { "[PlaylistAPI] GET playlists FAILED: ${response.status.value}" }
+                return emptyList()
+            }
+            val raw = response.bodyAsText()
+            val playlists = lenientJson.decodeFromString<List<RemotePlaylistDto>>(raw)
+            torveVerboseLog {
+                "[PlaylistAPI] GET playlists OK count=${playlists.size} xtream_candidates=${playlists.count { it.isXtreamPlaylist() }}"
+            }
+            playlists
+        } catch (e: Exception) {
+            torveVerboseLog { "[PlaylistAPI] GET playlists FAILED: ${e::class.simpleName} ${e.message}" }
             emptyList()
         }
     }
@@ -156,13 +170,42 @@ class AccountSettingsApi(
         accessToken: String,
         playlistId: String,
     ): PlaylistCredentialsDto? {
-        return try {
-            httpClient.get("${baseUrl()}/me/playlists/$playlistId/credentials") {
-                bearerAuth(accessToken)
-            }.body()
-        } catch (_: Exception) {
-            null
+        repeat(3) { attempt ->
+            try {
+                val response = httpClient.get("${baseUrl()}/me/playlists/$playlistId/credentials") {
+                    bearerAuth(accessToken)
+                }
+                if (response.status.isSuccess()) {
+                    return response.body()
+                }
+                val raw = runCatching { response.bodyAsText() }.getOrDefault("")
+                if (response.status.value == 429 && attempt < 2) {
+                    val delayMs = playlistCredentialRetryDelayMs(
+                        retryAfterHeader = response.headers["Retry-After"],
+                        attempt = attempt,
+                    )
+                    torveVerboseLog {
+                        "[PlaylistAPI] GET credentials RATE LIMITED for $playlistId: retrying_in_ms=$delayMs attempt=${attempt + 1}"
+                    }
+                    delay(delayMs)
+                    return@repeat
+                }
+                torveVerboseLog { "[PlaylistAPI] GET credentials FAILED for $playlistId: ${response.status.value} ${raw.take(160)}" }
+                return null
+            } catch (e: Exception) {
+                if (attempt < 2) {
+                    val delayMs = playlistCredentialRetryDelayMs(retryAfterHeader = null, attempt = attempt)
+                    torveVerboseLog {
+                        "[PlaylistAPI] GET credentials RETRY for $playlistId: ${e::class.simpleName} ${e.message} delay_ms=$delayMs attempt=${attempt + 1}"
+                    }
+                    delay(delayMs)
+                    return@repeat
+                }
+                torveVerboseLog { "[PlaylistAPI] GET credentials FAILED for $playlistId: ${e::class.simpleName} ${e.message}" }
+                return null
+            }
         }
+        return null
     }
 
     suspend fun patchAccountSettings(
@@ -174,6 +217,66 @@ class AccountSettingsApi(
             setBody(AccountSettingsPatchRequest(settings))
         }.bodyAsText()
         return parseAccountSettingsResponse(raw)
+    }
+
+    suspend fun getAddons(accessToken: String): List<AddonDto> {
+        val response = httpClient.get("${baseUrl()}/me/addons") {
+            bearerAuth(accessToken)
+        }
+        if (!response.status.isSuccess()) {
+            error("GET /me/addons failed (${response.status.value})")
+        }
+        return response.body()
+    }
+
+    suspend fun installAddon(
+        accessToken: String,
+        request: AddonInstallRequest,
+    ): AddonDto {
+        val response = httpClient.post("${baseUrl()}/me/addons") {
+            bearerAuth(accessToken)
+            contentType(ContentType.Application.Json)
+            setBody(request)
+        }
+        if (!response.status.isSuccess()) {
+            error("POST /me/addons failed (${response.status.value})")
+        }
+        return response.body()
+    }
+
+    suspend fun removeAddon(accessToken: String, serverId: String) {
+        val response = httpClient.delete("${baseUrl()}/me/addons/$serverId") {
+            bearerAuth(accessToken)
+        }
+        if (!response.status.isSuccess()) {
+            error("DELETE /me/addons/$serverId failed (${response.status.value})")
+        }
+    }
+
+    suspend fun toggleAddon(accessToken: String, serverId: String): AddonDto {
+        val response = httpClient.post("${baseUrl()}/me/addons/$serverId/toggle") {
+            bearerAuth(accessToken)
+        }
+        if (!response.status.isSuccess()) {
+            error("POST /me/addons/$serverId/toggle failed (${response.status.value})")
+        }
+        return response.body()
+    }
+
+    suspend fun updateAddon(
+        accessToken: String,
+        serverId: String,
+        request: AddonUpdateRequest,
+    ): AddonDto {
+        val response = httpClient.patch("${baseUrl()}/me/addons/$serverId") {
+            bearerAuth(accessToken)
+            contentType(ContentType.Application.Json)
+            setBody(request)
+        }
+        if (!response.status.isSuccess()) {
+            error("PATCH /me/addons/$serverId failed (${response.status.value})")
+        }
+        return response.body()
     }
 }
 
@@ -271,8 +374,24 @@ data class RemotePlaylistDto(
 data class PlaylistCredentialsDto(
     @SerialName("playlist_id")
     val playlistId: String = "",
+    val username: String? = null,
     val password: String? = null,
 )
+
+internal fun RemotePlaylistDto.isXtreamPlaylist(
+    resolvedPlaylistId: String = playlistId.ifBlank { id },
+): Boolean {
+    val normalizedType = playlistType.trim().lowercase()
+    return normalizedType == "xtream" || resolvedPlaylistId.startsWith("xtream_", ignoreCase = true)
+}
+
+internal fun playlistCredentialRetryDelayMs(
+    retryAfterHeader: String?,
+    attempt: Int,
+): Long {
+    val retryAfterMs = retryAfterHeader?.trim()?.toLongOrNull()?.times(1000)
+    return retryAfterMs?.coerceIn(500L, 5_000L) ?: ((attempt + 1) * 750L)
+}
 
 @Serializable
 data class SavePlaylistRequest(
@@ -299,4 +418,66 @@ data class SaveIntegrationRequest(
     @SerialName("display_identifier")
     val displayIdentifier: String? = null,
     val config: Map<String, String> = emptyMap(),
+)
+
+@Serializable
+data class AddonDto(
+    val id: String,
+    @SerialName("manifest_url")
+    val manifestUrl: String,
+    @SerialName("addon_id")
+    val addonId: String? = null,
+    val name: String? = null,
+    val description: String? = null,
+    val version: String? = null,
+    @SerialName("has_catalog")
+    val hasCatalog: Boolean = false,
+    @SerialName("has_streams")
+    val hasStreams: Boolean = false,
+    @SerialName("is_enabled")
+    val isEnabled: Boolean = true,
+    @SerialName("sort_order")
+    val sortOrder: Int = 0,
+    @SerialName("installed_from")
+    val installedFrom: String = "app",
+    @SerialName("created_at")
+    val createdAt: String,
+    @SerialName("updated_at")
+    val updatedAt: String,
+)
+
+@Serializable
+data class AddonInstallRequest(
+    @SerialName("manifest_url")
+    val manifestUrl: String,
+    @SerialName("addon_id")
+    val addonId: String? = null,
+    val name: String? = null,
+    val description: String? = null,
+    val version: String? = null,
+    @SerialName("has_catalog")
+    val hasCatalog: Boolean = false,
+    @SerialName("has_streams")
+    val hasStreams: Boolean = false,
+    @SerialName("installed_from")
+    val installedFrom: String = "app",
+)
+
+@Serializable
+data class AddonUpdateRequest(
+    @SerialName("addon_id")
+    val addonId: String? = null,
+    val name: String? = null,
+    val description: String? = null,
+    val version: String? = null,
+    @SerialName("has_catalog")
+    val hasCatalog: Boolean? = null,
+    @SerialName("has_streams")
+    val hasStreams: Boolean? = null,
+    @SerialName("is_enabled")
+    val isEnabled: Boolean? = null,
+    @SerialName("sort_order")
+    val sortOrder: Int? = null,
+    @SerialName("installed_from")
+    val installedFrom: String? = null,
 )

@@ -21,8 +21,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.torve.android.R
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.AmberSubtle
 import com.torve.android.ui.theme.Charcoal
@@ -63,7 +65,7 @@ fun FilterBottomSheet(
                 .padding(horizontal = 24.dp, vertical = 16.dp),
         ) {
             Text(
-                text = "Filter",
+                text = stringResource(R.string.channels_filter),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = Snow,
@@ -110,7 +112,7 @@ fun FilterBottomSheet(
             Spacer(Modifier.height(24.dp))
 
             Text(
-                text = "Sort",
+                text = stringResource(R.string.channels_sort),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = Snow,

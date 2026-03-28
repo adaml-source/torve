@@ -17,10 +17,6 @@ class StremioAddonClient(
     private val httpClient: HttpClient,
     private val json: Json,
 ) {
-    companion object {
-        const val TORRENTIO_BASE = "https://torrentio.strem.fun"
-    }
-
     /**
      * Fetch the addon manifest from a base URL.
      */
@@ -74,18 +70,6 @@ class StremioAddonClient(
         } catch (e: Exception) {
             emptyList()
         }
-    }
-
-    /**
-     * Convenience: fetch streams from Torrentio specifically.
-     */
-    suspend fun fetchTorrentioStreams(
-        type: MediaType,
-        imdbId: String,
-        season: Int? = null,
-        episode: Int? = null,
-    ): List<ParsedStream> {
-        return getStreams(TORRENTIO_BASE, type, imdbId, season, episode)
     }
 
     /**

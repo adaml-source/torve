@@ -40,6 +40,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.res.stringResource
+import com.torve.android.R
 import com.torve.android.tv.premium.TvEntitledFeature
 import com.torve.android.tv.premium.TvPremiumAccess
 import com.torve.android.ui.theme.Amber
@@ -174,7 +176,7 @@ fun TvLifetimeUnlockDialog(
                         onClick = onUnlock,
                     )
                     TvUnlockDialogButton(
-                        title = "Not now",
+                        title = stringResource(R.string.tv_settings_not_now),
                         modifier = Modifier.weight(1f),
                         secondary = true,
                         onClick = onDismiss,

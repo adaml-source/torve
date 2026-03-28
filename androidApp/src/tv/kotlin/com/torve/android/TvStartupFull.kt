@@ -2,13 +2,11 @@ package com.torve.android
 
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -18,12 +16,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
-import androidx.core.os.LocaleListCompat
 import com.torve.android.tv.TvRoot
 import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.TorveTheme
-import com.torve.presentation.settings.AppLanguage
-import com.torve.presentation.settings.SettingsViewModel
 
 /**
  * Single setContent that transitions from placeholder → TvRoot.
@@ -62,23 +57,7 @@ object TvStartupFull {
                     )
                 }
             } else {
-                val settingsViewModel: SettingsViewModel = org.koin.compose.koinInject()
-
-                LaunchedEffect(Unit) {
-                    val currentAppLocales = AppCompatDelegate.getApplicationLocales()
-                    if (currentAppLocales.isEmpty) {
-                        val saved = settingsViewModel.state.value.appLanguage
-                        if (saved != AppLanguage.ENGLISH) {
-                            AppCompatDelegate.setApplicationLocales(
-                                LocaleListCompat.forLanguageTags(saved.code),
-                            )
-                        }
-                    }
-                }
-
-                val settingsState by settingsViewModel.state.collectAsState()
-
-                TorveTheme(themeMode = settingsState.themeMode) {
+                TorveTheme {
                     TvRoot()
                 }
             }

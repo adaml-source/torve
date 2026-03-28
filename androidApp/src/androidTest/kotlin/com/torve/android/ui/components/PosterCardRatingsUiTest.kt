@@ -1,10 +1,10 @@
 package com.torve.android.ui.components
 
-import androidx.activity.ComponentActivity
-import androidx.compose.ui.test.assertDoesNotExist
-import androidx.compose.ui.test.assertExists
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import com.torve.android.test.TorveTestHostActivity
 import com.torve.domain.model.CardStyle
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaRatings
@@ -12,13 +12,14 @@ import com.torve.domain.model.MediaType
 import com.torve.domain.model.RatingDisplayPrefs
 import com.torve.domain.model.RatingPillPosition
 import com.torve.domain.model.RatingSource
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 
 class PosterCardRatingsUiTest {
 
     @get:Rule
-    val composeRule = createAndroidComposeRule<ComponentActivity>()
+    val composeRule = createAndroidComposeRule<TorveTestHostActivity>()
 
     @Test
     fun posterCard_rendersInsidePills_withProviderFilterAndMaxLimit() {
@@ -46,11 +47,11 @@ class PosterCardRatingsUiTest {
             )
         }
 
-        composeRule.onNodeWithTag("poster_ratings_inside").assertExists()
-        composeRule.onNodeWithTag("poster_ratings_outside").assertDoesNotExist()
-        composeRule.onNodeWithTag("rating_chip_TMDB").assertExists()
-        composeRule.onNodeWithTag("rating_chip_IMDB").assertExists()
-        composeRule.onNodeWithTag("rating_chip_ROTTEN_TOMATOES").assertDoesNotExist()
+        composeRule.onNodeWithTag("poster_ratings_inside").assertIsDisplayed()
+        assertEquals(0, composeRule.onAllNodesWithTag("poster_ratings_outside").fetchSemanticsNodes().size)
+        composeRule.onNodeWithTag("rating_chip_TMDB").assertIsDisplayed()
+        composeRule.onNodeWithTag("rating_chip_IMDB").assertIsDisplayed()
+        assertEquals(0, composeRule.onAllNodesWithTag("rating_chip_ROTTEN_TOMATOES").fetchSemanticsNodes().size)
     }
 
     @Test
@@ -71,10 +72,10 @@ class PosterCardRatingsUiTest {
             )
         }
 
-        composeRule.onNodeWithTag("poster_ratings_inside").assertDoesNotExist()
-        composeRule.onNodeWithTag("poster_ratings_outside").assertExists()
-        composeRule.onNodeWithTag("rating_chip_IMDB").assertExists()
-        composeRule.onNodeWithTag("rating_chip_TMDB").assertExists()
+        assertEquals(0, composeRule.onAllNodesWithTag("poster_ratings_inside").fetchSemanticsNodes().size)
+        composeRule.onNodeWithTag("poster_ratings_outside").assertIsDisplayed()
+        composeRule.onNodeWithTag("rating_chip_IMDB").assertIsDisplayed()
+        composeRule.onNodeWithTag("rating_chip_TMDB").assertIsDisplayed()
     }
 
     private fun testItem(): MediaItem = MediaItem(
@@ -89,4 +90,3 @@ class PosterCardRatingsUiTest {
         rating = 7.8,
     )
 }
-

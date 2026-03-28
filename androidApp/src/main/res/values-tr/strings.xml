@@ -167,6 +167,7 @@
     <string name="paywall_subtitle">Pro abonelikle yayın izleyin, indirin ve canlı TV izleyin</string>
     <string name="paywall_free">Ücretsiz</string>
     <string name="paywall_pro">Pro</string>
+    <string name="paywall_multi_cloud">Bulut Hizmetleri</string>
     <string name="paywall_search_browse">Ara &amp; Gözat</string>
     <string name="paywall_channels">Canlı TV</string>
     <string name="paywall_trakt_simkl">Trakt &amp; SIMKL Senkronizasyonu</string>
@@ -366,7 +367,7 @@
     <!-- Home Layout Screen -->
     <string name="home_layout_title">Ana Sayfa Düzeni</string>
     <string name="home_layout_reset">Sıfırla</string>
-    <string name="home_layout_hint">Sıralamak için basılı tutup sürükleyin. Kart stilini özelleştirmek için bir bölüme dokunun.</string>
+    <string name="home_layout_hint">Yeniden sıralamak için tutamacı sürükleyin. Kart stilini özelleştirmek için bir bölüme dokunun.</string>
     <string name="home_layout_add_custom">Özel Bölüm Ekle</string>
     <string name="home_layout_collapse">Daralt</string>
     <string name="home_layout_customize">Özelleştir</string>
@@ -384,10 +385,23 @@
     <string name="addon_catalog_available">Mevcut</string>
     <string name="addon_catalog_installing">Yükleniyor…</string>
     <string name="addon_catalog_install">Yükle</string>
-    <string name="addon_catalog_open_browser">Tarayıcıda Aç</string>
-    <string name="addon_catalog_copy_url">URL Kopyala</string>
+    <string name="addon_catalog_open_browser">Tarayıcıda aç</string>
+    <string name="addon_catalog_copy_url">URL kopyala</string>
     <string name="addon_catalog_manifest_hint">Sayfa bir JSON bildirimi gösteriyorsa, URL\'sini kopyalayıp tekrar deneyin.</string>
+    <string name="addon_popular_cinemeta_name">Cinemeta</string>
+    <string name="addon_popular_cinemeta_desc">IMDB/TMDB\'den film ve dizi bilgileri</string>
+    <string name="addon_popular_tmdb_name">The Movie Database Addon</string>
+    <string name="addon_popular_tmdb_desc">TMDB destekli zengin kataloglar - trend, popüler, en yüksek puanlı</string>
+    <string name="addon_popular_trakt_name">Trakt Listeleri</string>
+    <string name="addon_popular_trakt_desc">Trakt listelerine ve trend, popüler ve merakla beklenen içeriklere eriş</string>
+    <string name="addon_popular_imdb_name">IMDB Katalogları</string>
+    <string name="addon_popular_imdb_desc">IMDB film ve dizi listeleri - Top 250, Most Popular, Box Office</string>
+    <string name="addon_popular_rpdb_name">RPDB Katalogları</string>
+    <string name="addon_popular_rpdb_desc">Puanlı poster veritabanı - puan katmanlı kataloglar</string>
+    <string name="addon_popular_opensubtitles_name">OpenSubtitles v3</string>
+    <string name="addon_popular_opensubtitles_desc">OpenSubtitles.com altyazıları - en büyük altyazı veritabanı</string>
     <string name="addon_category_all">Tümü</string>
+    <string name="addon_category_streams">Kaynaklar</string>
     <string name="addon_category_catalogs">Kataloglar</string>
     <string name="addon_category_subtitles">Altyazılar</string>
 
@@ -532,7 +546,7 @@
     <string name="eq_custom">Özel</string>
 
     <!-- Home Customize (extended) -->
-    <string name="home_streaming_services">Yayın servisleri</string>
+    <string name="home_streaming_services">Uygunluk Hizmetleri</string>
     <string name="home_tmdb_credit">Veriler TMDB tarafından sağlanmıştır</string>
     <string name="home_move_up">Yukarı taşı</string>
     <string name="home_move_down">Aşağı taşı</string>
@@ -811,8 +825,8 @@
     <string name="tv_settings_sync_ready">Eşleştirilmiş telefondan tüm ayarları içe aktar</string>
     <string name="tv_settings_pair_first">Önce bir telefon eşleştirin</string>
     <string name="tv_settings_region">İçerik bölgesi</string>
-    <string name="tv_settings_streaming_services">Yayın servisleri</string>
-    <string name="tv_settings_home_layout_note">Ana sayfa düzenini, kart stillerini, değerlendirme kaynaklarını ve yayın servislerini özelleştirmek için — Torve uygulamasında yapılandırın ve yukarıdaki \"Telefondan ayarları senkronize et\"e dokunun.</string>
+    <string name="tv_settings_streaming_services">Uygunluk Hizmetleri</string>
+    <string name="tv_settings_home_layout_note">Ana sayfa düzenini, kart stillerini, değerlendirme kaynaklarını ve uygunluk hizmetlerini özelleştirmek için — Torve uygulamasında yapılandırın ve yukarıdaki \"Telefondan ayarları senkronize et\"e dokunun.</string>
 
     <!-- TV Settings: Setup Mode -->
     <string name="tv_settings_setup_prompt">Torve\'yi nasıl kullanıyorsunuz?</string>
@@ -1075,8 +1089,9 @@
     <string name="settings_card_style">Kart Stili</string>
     <string name="settings_card_style_sub">Boyut, yakınlaştırma, izlendi göstergeleri, görünüm</string>
     <string name="settings_addons_sub">%d yüklü · Göz at &amp; yönet</string>
-    <string name="settings_streaming_services">Yayın Hizmetleri</string>
-    <string name="settings_streaming_services_sub">Ana sayfa hizmetlerini özelleştir</string>
+    <string name="settings_streaming_services">Uygunluk Hizmetleri</string>
+    <string name="settings_streaming_services_sub">Ana sayfa uygunluğunu özelleştir</string>
+    <string name="settings_streaming_services_desc">Ana sayfanda hangi uygunluk hizmetlerinin görüneceğini seç. Bu hizmetlerde bulunan içerikler Torve’de gezinirken öne çıkarılır.</string>
     <string name="settings_stream_groups">Stream Grupları</string>
     <string name="settings_stream_groups_sub">%d grup</string>
     <string name="settings_regex_patterns">Regex Kalıpları</string>
@@ -1095,6 +1110,8 @@
     <string name="settings_report_issue">Sorun Bildir</string>
     <string name="settings_danger_zone">Tehlikeli Bölge</string>
     <string name="settings_region">Bölge</string>
+    <string name="settings_availability_region">Uygunluk Bölgesi</string>
+    <string name="settings_availability_region_desc">2 harfli ülke kodu (ör. US, GB, DE). Ayrıntı sayfalarında hangi uygunluk sağlayıcılarının gösterileceğini belirler.</string>
     <string name="sync_no_targets">Eşleştirilmiş hedef cihaz bulunamadı.</string>
     <string name="sync_device_info">%1$s - %2$s</string>
     <string name="search_create_profile_first">TV\'ye arama göndermek için yerel profil oluşturun</string>
@@ -1149,6 +1166,7 @@
     <string name="downloaded_cd">İndirildi</string>
     <string name="watched_cd">İzlendi</string>
     <string name="drag_to_reorder_cd">Yeniden sıralamak için sürükle</string>
+    <string name="detail_open_failed">Bu öğenin ayrıntıları açılamadı</string>
     <string name="discover_title">Keşfet</string>
     <string name="next_format">Sonraki: %s</string>
 
@@ -1282,7 +1300,7 @@
     <string name="tv_settings_linked_services_desc">Eşleştirilmiş telefonunuzdaki mevcut hesap bağlantı durumu.</string>
     <string name="tv_settings_metadata_providers">Meta veri sağlayıcıları</string>
     <string name="tv_settings_metadata_read_only">Telefon senkronizasyonu tarafından yönetilirken salt okunur.</string>
-    <string name="tv_settings_streaming_accounts">Yayın hesapları</string>
+    <string name="tv_settings_streaming_accounts">Bulut Hesapları</string>
     <string name="tv_settings_streaming_accounts_desc">Bulut ve izleme hizmetlerinizi doğrudan TV\'de bağlayın.</string>
     <string name="tv_settings_metadata_keys_desc">Meta veri hizmetleri için anahtarlar ve doğrulama.</string>
     <string name="tv_settings_integrations_title">Entegrasyonlar</string>
@@ -1315,4 +1333,3 @@
     <string name="tv_home_layout_instructions">Etkinleştirmek/devre dışı bırakmak için OK. Taşımak için SAĞ, sıralamak için YUKARI/AŞAĞI, bitirmek için SOL.</string>
     <string name="tv_settings_sign_in_share">Bir satın almayı 5 cihaza kadar paylaşmak için giriş yapın.</string>
 </resources>
-

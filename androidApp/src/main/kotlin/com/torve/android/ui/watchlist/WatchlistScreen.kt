@@ -32,9 +32,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -53,6 +55,7 @@ import com.torve.android.ui.theme.Gunmetal
 import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Torve
+import com.torve.data.integrations.JellyfinBrowseItem
 import com.torve.domain.model.resolveCardStyle
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
@@ -61,9 +64,11 @@ import com.torve.domain.model.WatchProgress
 import com.torve.domain.repository.WatchHistoryRepository
 import com.torve.domain.repository.WatchProgressRepository
 import com.torve.data.mdblist.RatingsEnricher
+import com.torve.presentation.jellyfin.JellyfinBrowserViewModel
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.watchlist.WatchlistViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.koin.compose.koinInject
 
@@ -72,20 +77,31 @@ fun WatchlistScreen(
     onMediaClick: (MediaItem) -> Unit,
     onContinueWatchingClick: (WatchProgress) -> Unit = {},
     onHistoryItemClick: (WatchHistoryEntry) -> Unit = {},
+    onDownloadsClick: () -> Unit = {},
+    onJellyfinItemPlay: (streamUrl: String, title: String) -> Unit = { _, _ -> },
     watchlistViewModel: WatchlistViewModel = koinInject(),
     watchProgressRepo: WatchProgressRepository = koinInject(),
     watchHistoryRepo: WatchHistoryRepository = koinInject(),
     settingsViewModel: SettingsViewModel = koinInject(),
     ratingsEnricher: RatingsEnricher = koinInject(),
+    jellyfinBrowserViewModel: JellyfinBrowserViewModel = koinInject(),
 ) {
     val watchlistState by watchlistViewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
     var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = listOf(
-        stringResource(R.string.watchlist_title),
-        stringResource(R.string.watchlist_in_progress),
-        stringResource(R.string.watchlist_history),
-    )
+
+    val isJellyfinConnected by produceState(false) {
+        value = jellyfinBrowserViewModel.isConnected()
+    }
+
+    val tabs = buildList {
+        add(stringResource(R.string.watchlist_title))
+        add(stringResource(R.string.download_title))
+        if (isJellyfinConnected) add(stringResource(R.string.watchlist_jellyfin))
+    }
+
+    // Guard against tab index out of bounds when Jellyfin disconnects
+    if (selectedTab >= tabs.size) selectedTab = 0
 
     LaunchedEffect(Unit) {
         watchlistViewModel.loadWatchlist()
@@ -95,8 +111,8 @@ fun WatchlistScreen(
     var inProgress by remember { mutableIntStateOf(0) }
     var inProgressItems = remember { mutableListOf<WatchProgress>() }
     var historyItems = remember { mutableListOf<WatchHistoryEntry>() }
-    var progressLoaded by remember { androidx.compose.runtime.mutableStateOf(false) }
-    var historyLoaded by remember { androidx.compose.runtime.mutableStateOf(false) }
+    var progressLoaded by remember { mutableStateOf(false) }
+    var historyLoaded by remember { mutableStateOf(false) }
 
     LaunchedEffect(selectedTab) {
         if (selectedTab == 1 && !progressLoaded) {
@@ -119,7 +135,7 @@ fun WatchlistScreen(
         }
     }
 
-    var enrichedWatchlist by remember { androidx.compose.runtime.mutableStateOf<List<MediaItem>>(emptyList()) }
+    var enrichedWatchlist by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     LaunchedEffect(watchlistState.items, settingsState.mdblistApiKey) {
         val baseItems = watchlistState.items.map { wlItem ->
             MediaItem(
@@ -156,34 +172,35 @@ fun WatchlistScreen(
     ) {
         // Header
         Text(
-            text = stringResource(R.string.watchlist_title),
+            text = stringResource(R.string.nav_library),
             style = MaterialTheme.typography.headlineLarge,
             color = Snow,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
         )
 
-        // Sub-tabs
-        SingleChoiceSegmentedButtonRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp),
+        // Sub-tabs — horizontally scrollable chips
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            tabs.forEachIndexed { index, label ->
-                SegmentedButton(
-                    selected = selectedTab == index,
-                    onClick = { selectedTab = index },
-                    shape = SegmentedButtonDefaults.itemShape(index = index, count = tabs.size),
-                    colors = SegmentedButtonDefaults.colors(
-                        activeContainerColor = Amber.copy(alpha = 0.2f),
-                        activeContentColor = Amber,
-                        inactiveContainerColor = Gunmetal,
-                        inactiveContentColor = Torve.colors.textSecondary,
-                        activeBorderColor = Amber.copy(alpha = 0.4f),
-                        inactiveBorderColor = Gunmetal,
-                    ),
+            items(tabs.size) { index ->
+                val selected = selectedTab == index
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (selected) Amber.copy(alpha = 0.2f) else Gunmetal)
+                        .clickable { selectedTab = index }
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
                 ) {
-                    Text(label, style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        text = tabs[index],
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (selected) Amber else Torve.colors.textSecondary,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                        maxLines = 1,
+                    )
                 }
             }
         }
@@ -196,16 +213,18 @@ fun WatchlistScreen(
                 isLoading = watchlistState.isLoading,
                 onMediaClick = onMediaClick,
             )
-            1 -> InProgressTab(
-                items = inProgressItems,
-                isLoaded = progressLoaded,
-                onItemClick = onContinueWatchingClick,
-            )
-            2 -> HistoryTab(
-                items = historyItems,
-                isLoaded = historyLoaded,
-                onItemClick = onHistoryItemClick,
-            )
+            1 -> {
+                LaunchedEffect(Unit) {
+                    onDownloadsClick()
+                    selectedTab = 0
+                }
+            }
+            2 -> if (isJellyfinConnected) {
+                JellyfinTab(
+                    viewModel = jellyfinBrowserViewModel,
+                    onItemPlay = onJellyfinItemPlay,
+                )
+            }
         }
     }
     }
@@ -515,6 +534,239 @@ private fun HistoryEntryCard(
                     style = MaterialTheme.typography.labelSmall,
                     color = Torve.colors.textTertiary,
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun JellyfinTab(
+    viewModel: JellyfinBrowserViewModel,
+    onItemPlay: (streamUrl: String, title: String) -> Unit,
+) {
+    val state by viewModel.state.collectAsState()
+
+    LaunchedEffect(Unit) { viewModel.loadLibrary() }
+
+    if (state.isLoading && state.sections.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = Amber, modifier = Modifier.size(40.dp))
+        }
+        return
+    }
+
+    state.error?.let { error ->
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(error, color = Torve.colors.textSecondary, style = MaterialTheme.typography.bodyMedium)
+        }
+        return
+    }
+
+    if (state.sections.isEmpty() && !state.isLoading) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                stringResource(R.string.jellyfin_library_empty),
+                color = Torve.colors.textSecondary,
+                style = MaterialTheme.typography.titleMedium,
+            )
+        }
+        return
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = 24.dp),
+    ) {
+        for (section in state.sections) {
+            val items = state.sectionItems[section.id] ?: continue
+            if (items.isEmpty()) continue
+
+            item(key = "header_${section.id}") {
+                Text(
+                    "${section.name} (${items.size})",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Amber,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                )
+            }
+            item(key = "row_${section.id}") {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(items, key = { it.id }) { jfItem ->
+                        JellyfinItemCard(
+                            item = jfItem,
+                            viewModel = viewModel,
+                            onPlay = onItemPlay,
+                        )
+                    }
+                }
+            }
+            item(key = "spacer_${section.id}") { Spacer(Modifier.height(16.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun JellyfinItemCard(
+    item: JellyfinBrowseItem,
+    viewModel: JellyfinBrowserViewModel,
+    onPlay: (streamUrl: String, title: String) -> Unit,
+) {
+    val imageUrl by produceState<String?>(null, item.id) {
+        value = viewModel.buildImageUrl(item.id)
+    }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+
+    Column(
+        modifier = Modifier
+            .width(120.dp)
+            .clickable {
+                scope.launch {
+                    val url = viewModel.buildStreamUrl(item.id)
+                    if (url != null) onPlay(url, item.name)
+                }
+            },
+    ) {
+        AsyncImage(
+            model = imageUrl,
+            contentDescription = item.name,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(2f / 3f)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Gunmetal),
+            contentScale = ContentScale.Crop,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = item.name,
+            style = MaterialTheme.typography.bodySmall,
+            color = Snow,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        item.productionYear?.let { year ->
+            Text(
+                text = year.toString(),
+                style = MaterialTheme.typography.labelSmall,
+                color = Torve.colors.textTertiary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DownloadsTab(
+    downloads: List<com.torve.domain.model.Download>,
+    isLoading: Boolean,
+) {
+    if (isLoading) {
+        Box(
+            modifier = Modifier.fillMaxSize().padding(32.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            CircularProgressIndicator(color = Amber, modifier = Modifier.size(28.dp))
+        }
+        return
+    }
+
+    if (downloads.isEmpty()) {
+        Box(
+            modifier = Modifier.fillMaxSize().padding(32.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = stringResource(R.string.download_no_downloads),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Torve.colors.textSecondary,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "Tap the download icon on an episode to save it for offline access.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Torve.colors.textTertiary,
+                )
+            }
+        }
+        return
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(downloads, key = { it.id }) { dl ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Gunmetal)
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (!dl.posterUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = dl.posterUrl,
+                        contentDescription = dl.title,
+                        modifier = Modifier
+                            .width(48.dp)
+                            .aspectRatio(2f / 3f)
+                            .clip(RoundedCornerShape(6.dp)),
+                        contentScale = ContentScale.Crop,
+                    )
+                    Spacer(Modifier.width(12.dp))
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = dl.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Snow,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    val statusText = when (dl.status) {
+                        com.torve.domain.model.DownloadStatus.PENDING -> "Pending"
+                        com.torve.domain.model.DownloadStatus.DOWNLOADING -> {
+                            val pct = if ((dl.fileSizeBytes ?: 0) > 0) {
+                                ((dl.downloadedBytes ?: 0) * 100 / dl.fileSizeBytes!!).toInt()
+                            } else 0
+                            "Downloading · $pct%"
+                        }
+                        com.torve.domain.model.DownloadStatus.COMPLETED -> "Ready offline"
+                        com.torve.domain.model.DownloadStatus.FAILED -> "Failed"
+                        com.torve.domain.model.DownloadStatus.PAUSED -> "Paused"
+                    }
+                    Text(
+                        text = statusText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = when (dl.status) {
+                            com.torve.domain.model.DownloadStatus.COMPLETED -> Amber
+                            com.torve.domain.model.DownloadStatus.FAILED -> MaterialTheme.colorScheme.error
+                            else -> Torve.colors.textSecondary
+                        },
+                    )
+                    if (dl.status == com.torve.domain.model.DownloadStatus.DOWNLOADING) {
+                        val pct = if ((dl.fileSizeBytes ?: 0) > 0) {
+                            (dl.downloadedBytes ?: 0).toFloat() / dl.fileSizeBytes!!.toFloat()
+                        } else 0f
+                        Spacer(Modifier.height(4.dp))
+                        LinearProgressIndicator(
+                            progress = { pct },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(2.dp)),
+                            color = Amber,
+                            trackColor = Obsidian,
+                        )
+                    }
+                }
             }
         }
     }

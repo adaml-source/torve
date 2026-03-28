@@ -1,15 +1,15 @@
 """Add device governance: activation columns on devices, device_activation_events table.
 
-Revision ID: 0004
-Revises: 0003
+Revision ID: 0004_device_governance
+Revises: 0003_purchases_entitlements
 Create Date: 2026-03-07
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision = "0004"
-down_revision = "0003"
+revision = "0004_device_governance"
+down_revision = "0003_purchases_entitlements"
 branch_labels = None
 depends_on = None
 

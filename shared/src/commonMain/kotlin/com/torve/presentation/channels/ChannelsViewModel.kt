@@ -48,6 +48,7 @@ class ChannelsViewModel(
     private val catchupResolver: CatchupResolver = CatchupResolver(),
     private val backgroundDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
     private val playlistBackup: com.torve.presentation.session.AccountSessionCoordinator? = null,
+    private val settingsRefreshNotifier: com.torve.presentation.settings.SettingsRefreshNotifier? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(ChannelsUiState())
@@ -61,6 +62,15 @@ class ChannelsViewModel(
 
     init {
         println("CHANNELS_VM_INIT: ChannelsViewModel created on thread=${Thread.currentThread().name}")
+        // Reload playlists when settings/integrations refresh (e.g. after background restore)
+        settingsRefreshNotifier?.let { notifier ->
+            scope.launch {
+                notifier.events.collect {
+                    println("[ChannelsVM] Settings refresh → reloading playlists")
+                    loadPlaylists()
+                }
+            }
+        }
         // ── TiviMate-style cache-first startup ──
         // Single orchestrated sequence: restore cache → load prefs → load playlists.
         // All DB/prefs IO runs on backgroundDispatcher. Only _state.update touches Main.
@@ -463,10 +473,22 @@ class ChannelsViewModel(
     // --- Category management ---
 
     fun toggleCategoryExpanded(categoryName: String) {
+        var shouldLoadChannels = false
         _state.update {
             val expanded = it.expandedCategories.toMutableSet()
-            if (categoryName in expanded) expanded.remove(categoryName) else expanded.add(categoryName)
+            if (categoryName in expanded) {
+                expanded.remove(categoryName)
+            } else {
+                expanded.add(categoryName)
+                shouldLoadChannels = it.categories
+                    .firstOrNull { category -> category.name == categoryName }
+                    ?.channels
+                    ?.isEmpty() != false
+            }
             it.copy(expandedCategories = expanded)
+        }
+        if (shouldLoadChannels) {
+            loadCategoryChannels(categoryName)
         }
     }
 
@@ -1348,20 +1370,22 @@ class ChannelsViewModel(
         scope.launch {
             val st = _state.value
             val categoryChannels = withContext(backgroundDispatcher) {
-                // getChannelsForCategory already excludes hidden channels via SQL NOT EXISTS.
-                val raw = channelRepo.getChannelsForCategory(playlistId, categoryName)
-                // Adult content filter remains in-memory (not a per-channel DB flag).
-                val filtered = if (st.xxxEnabled) raw else {
-                    val adultKeywords = setOf("xxx", "adult", "18+", "porn", "erotic")
-                    raw.filter { ch ->
-                        val group = ch.groupTitle?.lowercase() ?: ""
-                        val name = ch.name.lowercase()
-                        adultKeywords.none { kw -> group.contains(kw) || name.contains(kw) }
-                    }
-                }
-                filtered.map { EnrichedChannel(channel = it) }
+                getChannelsForCategoryDirect(playlistId, categoryName)
             }
-            _state.update { it.copy(selectedGroup = categoryName, categoryChannels = categoryChannels) }
+            _state.update { current ->
+                fun mergeChannels(categories: List<ChannelCategory>): List<ChannelCategory> =
+                    categories.map { category ->
+                        if (category.name == categoryName) category.copy(channels = categoryChannels)
+                        else category
+                    }
+
+                current.copy(
+                    selectedGroup = categoryName,
+                    categoryChannels = categoryChannels,
+                    categories = mergeChannels(current.categories),
+                    allCategories = mergeChannels(current.allCategories),
+                )
+            }
         }
     }
 

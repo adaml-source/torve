@@ -30,6 +30,7 @@ import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.NewReleases
 import androidx.compose.material.icons.rounded.PlayCircleOutline
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.Subscriptions
 import androidx.compose.material.icons.rounded.Theaters
@@ -279,6 +280,7 @@ private fun SectionConfigRow(
 
 // Section icons
 fun HomeSection.icon(): ImageVector = when (this) {
+    HomeSection.SEARCH_BAR -> Icons.Rounded.Search
     HomeSection.HERO -> Icons.AutoMirrored.Rounded.FeaturedPlayList
     HomeSection.CONTINUE_WATCHING -> Icons.Rounded.PlayCircleOutline
     HomeSection.WATCHLIST -> Icons.Rounded.BookmarkBorder

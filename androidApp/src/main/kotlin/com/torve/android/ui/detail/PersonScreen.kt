@@ -1,6 +1,7 @@
 package com.torve.android.ui.detail
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,7 +17,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -33,6 +34,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,6 +49,7 @@ import coil3.compose.AsyncImage
 import com.torve.android.ui.components.CardSize
 import com.torve.android.ui.components.LocalCardStyle
 import com.torve.android.ui.components.PosterCard
+import com.torve.android.ui.components.mediaItemLazyKey
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Torve
 import com.torve.domain.model.MediaItem
@@ -143,13 +148,15 @@ fun PersonScreen(
                         }
                         if (state.biography.isNotBlank()) {
                             Spacer(Modifier.height(8.dp))
+                            var bioExpanded by remember { mutableStateOf(false) }
                             Text(
                                 text = state.biography,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Torve.colors.textSecondary,
-                                maxLines = 4,
-                                overflow = TextOverflow.Ellipsis,
+                                maxLines = if (bioExpanded) Int.MAX_VALUE else 4,
+                                overflow = if (bioExpanded) TextOverflow.Clip else TextOverflow.Ellipsis,
                                 textAlign = TextAlign.Center,
+                                modifier = Modifier.clickable { bioExpanded = !bioExpanded },
                             )
                         }
                     }
@@ -172,7 +179,7 @@ fun PersonScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    items(state.credits, key = { "${it.tmdbId}_${it.type}" }) { item ->
+                    itemsIndexed(state.credits, key = { index, item -> mediaItemLazyKey(item, index) }) { _, item ->
                         PosterCard(
                             item = item,
                             sizeOverride = CardSize.SMALL,

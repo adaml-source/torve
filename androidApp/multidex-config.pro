@@ -1,0 +1,4 @@
+-keep class com.torve.di.SharedModuleKt { *; }
+-keep class com.torve.data.ai.** { *; }
+-keep class com.torve.data.addon.** { *; }
+-keep class com.torve.presentation.settings.SettingsViewModel { *; }

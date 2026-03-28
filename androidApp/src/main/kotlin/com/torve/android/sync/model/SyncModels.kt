@@ -51,6 +51,8 @@ data class SyncUserDto(
 @Serializable
 data class SyncDeviceDto(
     val id: String,
+    @SerialName("pairing_id")
+    val pairingId: String? = null,
     @SerialName("installation_id")
     val installationId: String,
     @SerialName("device_name")
@@ -60,6 +62,8 @@ data class SyncDeviceDto(
     val platform: String,
     @SerialName("last_seen_at")
     val lastSeenAt: String,
+    @SerialName("pairing_state")
+    val pairingState: String = "paired",
     @SerialName("revoked_at")
     val revokedAt: String? = null,
 )
@@ -229,4 +233,20 @@ sealed class SyncInboundEvent {
         val payloadJson: String,
         val issuedByDeviceId: String? = null,
     ) : SyncInboundEvent()
+}
+
+/** Secure-channel state for a paired device. */
+enum class SecureChannelState {
+    NOT_PAIRED,
+    PAIRED_BACKEND_ONLY,
+    PAIRED_LAN_UNREACHABLE,
+    PAIRED_LAN_REACHABLE_NO_SECRET,
+    PAIRED_SECURE_CHANNEL_READY,
+    PAIRED_REVOKED,
+}
+
+/** Role of a paired device. */
+enum class PairingRole {
+    SETUP_OWNER,
+    CONTROLLER,
 }

@@ -9,9 +9,22 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.widget.FrameLayout
 import android.widget.TextView
-import androidx.activity.enableEdgeToEdge
+import android.widget.Toast
+import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import com.torve.android.tv.TvRoot
+import com.torve.android.ui.system.configureTorveEdgeToEdge
+import com.torve.android.ui.theme.TorveTheme
+import com.torve.data.auth.AuthEvent
+import com.torve.data.auth.AuthClient
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
+import org.koin.java.KoinJavaComponent.getKoin
 
 /**
  * TV entry point.  Startup uses 2 stages:
@@ -24,12 +37,51 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
  */
 class TvMainActivity : AppCompatActivity() {
     private val handler = Handler(Looper.getMainLooper())
+    private val activityScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var composeStarted = false
+    private var hasResumedBefore = false
+
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        return try {
+            super.dispatchKeyEvent(event)
+        } catch (e: IllegalStateException) {
+            // Compose focusSearch can crash with "FocusRequester is not initialized"
+            // when a FocusRequester stored in focusProperties becomes detached during
+            // lazy-list recomposition. Swallow instead of crashing the app.
+            android.util.Log.w("TvMainActivity", "Focus dispatch error swallowed", e)
+            false
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (hasResumedBefore && composeStarted) {
+            CoroutineScope(Dispatchers.Main).launch {
+                val authClient: AuthClient = getKoin().get()
+                val user = authClient.getCurrentUser()
+                if (user != null && !user.isVerified) {
+                    authClient.checkVerificationStatus()
+                }
+            }
+        }
+        hasResumedBefore = true
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        configureTorveEdgeToEdge()
+        val authClient: AuthClient = getKoin().get()
+
+        activityScope.launch {
+            authClient.authEvents.collectLatest { event ->
+                when (event) {
+                    is AuthEvent.SessionExpired -> {
+                        Toast.makeText(this@TvMainActivity, event.message, Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        }
 
         val logo = TextView(this).apply {
             text = "TORVE"
@@ -72,7 +124,16 @@ class TvMainActivity : AppCompatActivity() {
      */
     private fun showComposeContent() {
         com.torve.android.debug.AnrDebugLogger.log("STARTUP setContent BEGIN")
-        TvStartupFull.show(this)
+        setContent {
+            TorveTheme {
+                TvRoot()
+            }
+        }
         com.torve.android.debug.AnrDebugLogger.log("STARTUP setContent END")
+    }
+
+    override fun onDestroy() {
+        activityScope.cancel()
+        super.onDestroy()
     }
 }

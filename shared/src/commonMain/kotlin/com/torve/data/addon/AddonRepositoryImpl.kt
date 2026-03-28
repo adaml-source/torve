@@ -15,7 +15,14 @@ class AddonRepositoryImpl(
     private val json: Json,
 ) : AddonRepository {
 
-    override suspend fun installAddon(url: String): InstalledAddon {
+    override suspend fun installAddon(
+        url: String,
+        enabled: Boolean,
+        priority: Int?,
+        serverId: String?,
+        syncedAt: Long?,
+        installedFrom: String,
+    ): InstalledAddon {
         val baseUrl = url.trimEnd('/').removeSuffix("/manifest.json")
         val stremioManifest = addonClient.getManifest(baseUrl)
         val manifest = stremioManifest.toDomain(
@@ -28,6 +35,8 @@ class AddonRepositoryImpl(
 
         val maxPriority = database.torveQueries.getAllAddons().executeAsList()
             .maxOfOrNull { it.priority } ?: -1
+        val storedPriority = priority ?: (maxPriority + 1).toInt()
+        val storedInstalledFrom = normalizeInstallSource(installedFrom)
 
         database.torveQueries.insertAddon(
             manifest_url = manifestUrl,
@@ -37,17 +46,23 @@ class AddonRepositoryImpl(
             description = manifest.description,
             logo = manifest.logo,
             manifest_json = manifestJson,
-            is_enabled = 1,
-            priority = maxPriority + 1,
+            is_enabled = if (enabled) 1 else 0,
+            priority = storedPriority.toLong(),
             installed_at = now,
+            server_id = serverId,
+            synced_at = syncedAt,
+            installed_from = storedInstalledFrom,
         )
 
         return InstalledAddon(
             manifestUrl = manifestUrl,
             manifest = manifest,
-            isEnabled = true,
-            priority = (maxPriority + 1).toInt(),
+            isEnabled = enabled,
+            priority = storedPriority,
             installedAt = now,
+            serverId = serverId,
+            syncedAt = syncedAt,
+            installedFrom = storedInstalledFrom,
         )
     }
 
@@ -56,37 +71,11 @@ class AddonRepositoryImpl(
     }
 
     override suspend fun getInstalledAddons(): List<InstalledAddon> {
-        return database.torveQueries.getAllAddons().executeAsList().map { row ->
-            val manifest = try {
-                json.decodeFromString(AddonManifest.serializer(), row.manifest_json)
-            } catch (_: Exception) {
-                AddonManifest(id = row.id, name = row.name, version = row.version)
-            }
-            InstalledAddon(
-                manifestUrl = row.manifest_url,
-                manifest = manifest,
-                isEnabled = row.is_enabled == 1L,
-                priority = row.priority.toInt(),
-                installedAt = row.installed_at,
-            )
-        }
+        return database.torveQueries.getAllAddons().executeAsList().map(::mapRow)
     }
 
     override suspend fun getEnabledAddons(): List<InstalledAddon> {
-        return database.torveQueries.getEnabledAddons().executeAsList().map { row ->
-            val manifest = try {
-                json.decodeFromString(AddonManifest.serializer(), row.manifest_json)
-            } catch (_: Exception) {
-                AddonManifest(id = row.id, name = row.name, version = row.version)
-            }
-            InstalledAddon(
-                manifestUrl = row.manifest_url,
-                manifest = manifest,
-                isEnabled = true,
-                priority = row.priority.toInt(),
-                installedAt = row.installed_at,
-            )
-        }
+        return database.torveQueries.getEnabledAddons().executeAsList().map(::mapRow)
     }
 
     override suspend fun toggleAddon(manifestUrl: String, enabled: Boolean) {
@@ -111,6 +100,46 @@ class AddonRepositoryImpl(
             fallbackId = baseUrl,
             fallbackName = fallbackNameFromUrl(baseUrl),
         )
+    }
+
+    override suspend fun getAddon(manifestUrl: String): InstalledAddon? {
+        return database.torveQueries.getAddonByUrl(manifestUrl).executeAsOneOrNull()?.let(::mapRow)
+    }
+
+    override suspend fun markAddonSynced(
+        manifestUrl: String,
+        serverId: String,
+        syncedAt: Long?,
+        installedFrom: String,
+    ) {
+        database.torveQueries.markAddonSynced(
+            server_id = serverId,
+            synced_at = syncedAt,
+            installed_from = normalizeInstallSource(installedFrom),
+            manifest_url = manifestUrl,
+        )
+    }
+
+    override suspend fun syncRemoteState(
+        manifestUrl: String,
+        serverId: String,
+        enabled: Boolean,
+        priority: Int,
+        syncedAt: Long,
+        installedFrom: String,
+    ) {
+        database.torveQueries.syncAddonWithServer(
+            server_id = serverId,
+            synced_at = syncedAt,
+            installed_from = normalizeInstallSource(installedFrom),
+            is_enabled = if (enabled) 1 else 0,
+            priority = priority.toLong(),
+            manifest_url = manifestUrl,
+        )
+    }
+
+    override suspend fun clearSyncMetadata() {
+        database.torveQueries.clearAddonSyncMetadata()
     }
 
     private fun StremioManifest.toDomain(
@@ -145,5 +174,32 @@ class AddonRepositoryImpl(
     private fun fallbackNameFromUrl(url: String): String {
         val host = url.substringAfter("://").substringBefore("/").trim()
         return if (host.isNotBlank()) host else "Unknown Addon"
+    }
+
+    private fun mapRow(row: com.torve.db.Addon): InstalledAddon {
+        val manifest = try {
+            json.decodeFromString(AddonManifest.serializer(), row.manifest_json)
+        } catch (_: Exception) {
+            AddonManifest(id = row.id, name = row.name, version = row.version)
+        }
+        return InstalledAddon(
+            manifestUrl = row.manifest_url,
+            manifest = manifest,
+            isEnabled = row.is_enabled == 1L,
+            priority = row.priority.toInt(),
+            installedAt = row.installed_at,
+            serverId = row.server_id,
+            syncedAt = row.synced_at,
+            installedFrom = normalizeInstallSource(row.installed_from),
+        )
+    }
+
+    private fun normalizeInstallSource(installedFrom: String?): String {
+        return when (installedFrom?.lowercase()) {
+            "app" -> "app"
+            "web" -> "web"
+            "sync" -> "sync"
+            else -> "app"
+        }
     }
 }

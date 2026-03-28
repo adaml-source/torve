@@ -1,9 +1,10 @@
 """
-Device governance policy for Torve Pro premium access.
+Device governance policy for Torve account device slots.
 
-This module enforces device-limited premium: owning a premium entitlement
-does NOT automatically grant access on every device. Each device must be
-activated, and the total number of active devices is capped.
+This module enforces the shared active-device slot model used by both
+account ownership and premium access checks. A device claims a slot when it
+is activated for the account, and the same activated records are what
+/me/devices returns by default.
 
 Business rules:
 - max 5 active devices per account (configurable via DEVICE_MAX_ACTIVE)
@@ -77,6 +78,7 @@ async def count_active_devices(session: AsyncSession, user_id: str) -> int:
             Device.user_id == user_id,
             Device.activated_at.isnot(None),
             Device.removed_at.is_(None),
+            Device.revoked_at.is_(None),
         )
     )
     return result.scalar_one()
@@ -88,6 +90,7 @@ async def get_active_devices(session: AsyncSession, user_id: str) -> list[Device
             Device.user_id == user_id,
             Device.activated_at.isnot(None),
             Device.removed_at.is_(None),
+            Device.revoked_at.is_(None),
         ).order_by(Device.last_seen_at.desc())
     )
     return list(result.scalars().all())

@@ -20,19 +20,25 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.BookmarkBorder
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -52,6 +58,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
@@ -60,6 +67,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.torve.android.R
+import com.torve.android.premium.AccessTier
 import com.torve.android.premium.PremiumAccess
 import com.torve.android.premium.PremiumFeature
 import com.torve.android.ui.components.CardSize
@@ -109,7 +117,7 @@ fun HomeScreen(
     onSeeAllClick: (String) -> Unit = {},
     onProviderClick: (providerId: Int, providerName: String) -> Unit = { _, _ -> },
     onPersonClick: (Int) -> Unit = {},
-    isLifetimeUnlocked: Boolean = false,
+    accessTier: AccessTier = AccessTier.FREE,
     onLockedFeatureClick: (PremiumFeature) -> Unit = {},
     mediaType: String = "all",
     viewModel: HomeViewModel = koinInject(),
@@ -128,7 +136,6 @@ fun HomeScreen(
         ALL_STREAMING_SERVICES.filter { it.tmdbProviderId in enabledServiceIds }
     }
     val providerLogos by viewModel.providerLogos.collectAsState()
-    val accessTier = remember(isLifetimeUnlocked) { PremiumAccess.tierFrom(isLifetimeUnlocked) }
     val watchlistLocked = remember(accessTier) {
         PremiumAccess.isPremiumLocked(PremiumFeature.WATCHLIST_EDIT, accessTier)
     }
@@ -221,12 +228,14 @@ fun HomeScreen(
                         color = Torve.colors.textPrimary,
                     )
                     Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = state.error ?: "",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Torve.colors.textTertiary,
-                    )
-                    Spacer(Modifier.height(16.dp))
+                    state.error?.let { message ->
+                        Text(
+                            text = message,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Torve.colors.textTertiary,
+                        )
+                        Spacer(Modifier.height(16.dp))
+                    }
                     FilledTonalButton(onClick = { viewModel.refresh() }) {
                         Text(stringResource(R.string.home_try_again))
                     }
@@ -574,7 +583,10 @@ fun HomeScreen(
                                                     items = gems.items,
                                                     shelfType = gems.type,
                                                     onItemClick = onMediaClick,
-                                                    onSeeAll = {},
+                                                    onSeeAll = {
+                                                        SeeAllViewModel.pendingItems["hidden_gems"] = (config.customTitle ?: gems.title) to gems.items
+                                                        onSeeAllClick("shelf:hidden_gems")
+                                                    },
                                                 )
                                             }
                                         }
@@ -602,7 +614,10 @@ fun HomeScreen(
                                                         items = shelf.items,
                                                         shelfType = shelf.type,
                                                         onItemClick = onMediaClick,
-                                                        onSeeAll = {},
+                                                        onSeeAll = {
+                                                            SeeAllViewModel.pendingItems[shelf.id] = shelf.title to shelf.items
+                                                            onSeeAllClick("shelf:${shelf.id}")
+                                                        },
                                                     )
                                                     Spacer(Modifier.height(8.dp))
                                                 }
@@ -637,6 +652,8 @@ fun HomeScreen(
                                     }
                                 }
                             }
+                            // SEARCH_BAR is a floating overlay, not a LazyColumn section
+                            HomeSection.SEARCH_BAR -> {}
                         }
                     }
                     is CustomItem -> {
@@ -693,6 +710,99 @@ fun HomeScreen(
                     }
 
                     // (Hidden Gems is now part of the section config loop above)
+                }
+            }
+        }
+
+        // ── Search ──
+        val showSearchBar = remember(sectionConfigs) {
+            sectionConfigs.any { it.section == HomeSection.SEARCH_BAR && it.enabled }
+        }
+        val isSearchMode = showSearchBar && state.searchQuery.length >= 2
+        if (isSearchMode) {
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = 130.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background)
+                    .statusBarsPadding()
+                    .padding(top = 64.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                if (state.isSearching) {
+                    item(
+                        key = "loading",
+                        span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) },
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(32.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CircularProgressIndicator(color = Amber, modifier = Modifier.size(24.dp))
+                        }
+                    }
+                } else {
+                    items(
+                        state.searchResults.size,
+                        key = { index -> "${state.searchResults[index].id}_$index" },
+                    ) { index ->
+                        val item = state.searchResults[index]
+                        PosterCard(
+                            item = item,
+                            sizeOverride = CardSize.MEDIUM,
+                            onClick = { onMediaClick(item) },
+                        )
+                    }
+                    if (state.searchResults.isEmpty()) {
+                        item(
+                            key = "empty",
+                            span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) },
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(48.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.search_no_results),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = Torve.colors.textSecondary,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Floating Search Bar ──
+        if (showSearchBar) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.TopCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Obsidian, Obsidian, Obsidian.copy(alpha = 0.9f), Color.Transparent),
+                        ),
+                    )
+                    .statusBarsPadding(),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                ) {
+                    HomeSearchBar(
+                        searchQuery = state.searchQuery,
+                        onQueryChange = { viewModel.updateSearchQuery(it) },
+                        onClearSearch = { viewModel.clearSearch() },
+                    )
                 }
             }
         }
@@ -908,7 +1018,7 @@ private fun HeroSlide(
                     Spacer(Modifier.width(6.dp))
                     Text(
                         when {
-                            isWatchlistLocked -> PremiumAccess.UNLOCK_WITH_LIFETIME_LABEL
+                            isWatchlistLocked -> stringResource(R.string.premium_unlock_with_lifetime)
                             isInWatchlist -> stringResource(R.string.home_in_watchlist)
                             else -> stringResource(R.string.home_watchlist)
                         },
@@ -1165,6 +1275,70 @@ fun PersonAvatarCard(
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Search Bar
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@Composable
+private fun HomeSearchBar(
+    searchQuery: String,
+    onQueryChange: (String) -> Unit,
+    onClearSearch: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Gunmetal)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        BasicTextField(
+            value = searchQuery,
+            onValueChange = onQueryChange,
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodyMedium.copy(color = Snow),
+            cursorBrush = SolidColor(Amber),
+            modifier = Modifier.fillMaxWidth(),
+            decorationBox = { innerTextField ->
+                Box {
+                    if (searchQuery.isEmpty()) {
+                        Text(
+                            text = stringResource(R.string.home_search_hint),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Torve.colors.textHint,
+                        )
+                    }
+                    innerTextField()
+                }
+            },
+        )
+        if (searchQuery.isNotEmpty()) {
+            IconButton(
+                onClick = onClearSearch,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .size(24.dp),
+            ) {
+                Icon(
+                    Icons.Rounded.Close,
+                    contentDescription = stringResource(R.string.common_close),
+                    tint = Torve.colors.textTertiary,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        } else {
+            Icon(
+                Icons.Rounded.Search,
+                contentDescription = null,
+                tint = Torve.colors.textTertiary,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .size(18.dp),
+            )
+        }
+    }
+}
+
 // Skeleton Loader — Full screen loading placeholder
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

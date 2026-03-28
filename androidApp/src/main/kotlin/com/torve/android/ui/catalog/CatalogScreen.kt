@@ -386,7 +386,7 @@ fun CatalogScreen(
                     // ── Poster Grid ──
                     items(
                         displayItems.size,
-                        key = { index -> "${displayItems[index].type}_${displayItems[index].id}" },
+                        key = { index -> "${displayItems[index].type}_${displayItems[index].id}_$index" },
                     ) { index ->
                         val item = displayItems[index]
                         PosterCard(

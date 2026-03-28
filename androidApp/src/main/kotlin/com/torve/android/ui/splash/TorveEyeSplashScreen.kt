@@ -105,27 +105,39 @@ fun TorveEyeSplashScreen(
     var eyeRotation by remember { mutableFloatStateOf(0f) }
 
     // ── Sound ──
+    // Start silent — fade-in prevents the transient pop from MP3 decoder priming
+    val targetVolume = 0.65f // moderate loudness, avoids speaker distortion
     val mediaPlayer = remember {
         try {
             MediaPlayer.create(context, R.raw.torve_sting_dark)?.apply {
-                setVolume(0.85f, 0.85f)
+                setVolume(0f, 0f)
             }
         } catch (_: Exception) { null }
     }
+    val soundReleased = remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
         onDispose {
-            try {
-                if (mediaPlayer?.isPlaying == true) mediaPlayer.stop()
-                mediaPlayer?.release()
-            } catch (_: Exception) {}
+            if (!soundReleased.value) {
+                soundReleased.value = true
+                try {
+                    if (mediaPlayer?.isPlaying == true) mediaPlayer.stop()
+                    mediaPlayer?.release()
+                } catch (_: Exception) {}
+            }
         }
     }
 
     // ── Phase state machine ──
     LaunchedEffect(Unit) {
+        // Start playback then fade in over ~80ms to mask MP3 decoder priming pop
         mediaPlayer?.start()
-        delay(100)
+        for (step in 1..8) {
+            val vol = targetVolume * step / 8f
+            try { mediaPlayer?.setVolume(vol, vol) } catch (_: Exception) {}
+            delay(10)
+        }
+        delay(20) // remaining time to align with original 100ms delay
 
         // Act 1: Eye opening
         phase = SplashPhase.EYE_OPENING
@@ -176,17 +188,20 @@ fun TorveEyeSplashScreen(
             val steps = 20
             val stepDelay = 25L // 20 × 25ms = 500ms
             for (i in steps downTo 0) {
-                val vol = i.toFloat() / steps
+                val vol = targetVolume * i.toFloat() / steps
                 try { mediaPlayer?.setVolume(vol, vol) } catch (_: Exception) {}
                 // Also advance portal progress
                 portalProgress = ((System.currentTimeMillis() - portalStart).toFloat() / 500f)
                     .coerceIn(0f, 1f)
                 delay(stepDelay)
             }
-            try {
-                mediaPlayer?.stop()
-                mediaPlayer?.release()
-            } catch (_: Exception) {}
+            if (!soundReleased.value) {
+                soundReleased.value = true
+                try {
+                    mediaPlayer?.stop()
+                    mediaPlayer?.release()
+                } catch (_: Exception) {}
+            }
             onSplashComplete()
         }
     }

@@ -130,6 +130,7 @@ class SeeAllViewModel(
                 val items = watchHistoryRepo.getRecent(50).map { entry ->
                     MediaItem(
                         id = entry.mediaId,
+                        tmdbId = entry.mediaId.toIntOrNull(),
                         type = if (entry.mediaType == MediaType.SERIES.name || entry.mediaType == "tv") MediaType.SERIES else MediaType.MOVIE,
                         title = entry.title,
                         posterUrl = entry.posterUrl,
@@ -161,6 +162,7 @@ class SeeAllViewModel(
                 val items = watchHistoryRepo.getRecent(50).map { entry ->
                     MediaItem(
                         id = entry.mediaId,
+                        tmdbId = entry.mediaId.toIntOrNull(),
                         type = if (entry.mediaType == MediaType.SERIES.name || entry.mediaType == "tv") MediaType.SERIES else MediaType.MOVIE,
                         title = entry.title,
                         posterUrl = entry.posterUrl,

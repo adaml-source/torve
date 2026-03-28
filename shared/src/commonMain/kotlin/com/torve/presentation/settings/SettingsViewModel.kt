@@ -1,7 +1,6 @@
 package com.torve.presentation.settings
 
 import com.torve.data.ai.AiProvider
-import com.torve.data.ai.AiSuggestClient
 import com.torve.data.debrid.DebridClient
 import com.torve.data.kodi.KodiClient
 import com.torve.data.kodi.KodiHost
@@ -71,7 +70,6 @@ class SettingsViewModel(
     private val integrationSecretStore: IntegrationSecretStore,
     private val libraryOverlayService: LibraryOverlayService,
     private val omdbClient: OmdbClient,
-    private val aiSuggestClient: AiSuggestClient,
     private val settingsRefreshNotifier: SettingsRefreshNotifier,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -161,6 +159,28 @@ class SettingsViewModel(
         DebridServiceType.TORBOX -> IntegrationSecretKey.DEBRID_API_KEY_TORBOX
     }
 
+    private suspend fun buildDebridSyncCredentials(
+        provider: DebridServiceType,
+        apiKey: String,
+    ): Map<String, String> {
+        val credentials = linkedMapOf<String, String>()
+        if (apiKey.isNotBlank()) {
+            credentials["api_key"] = apiKey
+        }
+        if (provider == DebridServiceType.REAL_DEBRID) {
+            integrationSecretStore.get(IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN)
+                ?.takeIf { it.isNotBlank() }
+                ?.let { credentials["refresh_token"] = it }
+            integrationSecretStore.get(IntegrationSecretKey.DEBRID_RD_CLIENT_ID)
+                ?.takeIf { it.isNotBlank() }
+                ?.let { credentials["client_id"] = it }
+            integrationSecretStore.get(IntegrationSecretKey.DEBRID_RD_CLIENT_SECRET)
+                ?.takeIf { it.isNotBlank() }
+                ?.let { credentials["client_secret"] = it }
+        }
+        return credentials
+    }
+
     init {
         loadSavedSettings()
         scope.launch {
@@ -213,6 +233,7 @@ class SettingsViewModel(
                 prefsRepo.remove(KEY_DEBRID_API_KEY)
             }
             val apiKey = allDebridKeys[provider] ?: ""
+            println("[SettingsLoad] Debrid provider=$provider apiKey=${if (apiKey.isNotBlank()) "${apiKey.length} chars" else "EMPTY"} providers=${allDebridKeys.keys}")
             // Trakt: secure store is authoritative. Migrate legacy pref keys once.
             val traktTokens = traktTokenStore.read()
             migrateSecretPref(KEY_TRAKT_ACCESS_TOKEN, IntegrationSecretKey.TRAKT_ACCESS_TOKEN)
@@ -403,6 +424,7 @@ class SettingsViewModel(
             // Legacy migration block removed — migrateSecretPref() handles all
             // one-time imports from plaintext prefs → secure store above.
 
+            println("[SettingsLoad] debridConnected=${apiKey.isNotBlank()} traktConnected=${traktAccessToken.isNotBlank()} simklConnected=${simklAccessToken.isNotBlank()}")
             if (apiKey.isNotBlank()) {
                 verifyDebridConnection()
             }
@@ -465,7 +487,7 @@ class SettingsViewModel(
                 runCatching {
                     onIntegrationSaved?.invoke(
                         "DEBRID_API_KEY_${provider.name}",
-                        mapOf("api_key" to apiKey),
+                        buildDebridSyncCredentials(provider, apiKey),
                         provider.name,
                     )
                 }
@@ -531,7 +553,7 @@ class SettingsViewModel(
                     runCatching {
                         onIntegrationSaved?.invoke(
                             "DEBRID_API_KEY_${provider.name}",
-                            mapOf("api_key" to result.apiKey),
+                            buildDebridSyncCredentials(provider, result.apiKey),
                             provider.name,
                         )
                     }
@@ -545,17 +567,36 @@ class SettingsViewModel(
         }
     }
 
+    // Debrid validation dedupe: prevent repeated API calls during restore.
+    private var debridValidationRunning = false
+    private var debridLastValidatedAt = 0L
+
     private suspend fun verifyDebridConnection() {
-        val result = debridClient.verifyApiKey(
-            _state.value.debridProvider,
-            _state.value.debridApiKey,
-        )
-        _state.update {
-            it.copy(
-                debridUser = result.user,
-                debridConnected = result.success,
-                debridError = if (!result.success) result.error else null,
+        val now = Clock.System.now().toEpochMilliseconds()
+        if (debridValidationRunning) {
+            println("[DebridInit] Validation skipped (already running)")
+            return
+        }
+        if (now - debridLastValidatedAt < 30_000L && _state.value.debridConnected) {
+            println("[DebridInit] Validation skipped (cooldown, already connected)")
+            return
+        }
+        debridValidationRunning = true
+        try {
+            val result = debridClient.verifyApiKey(
+                _state.value.debridProvider,
+                _state.value.debridApiKey,
             )
+            _state.update {
+                it.copy(
+                    debridUser = result.user,
+                    debridConnected = result.success,
+                    debridError = if (!result.success) result.error else null,
+                )
+            }
+            if (result.success) debridLastValidatedAt = now
+        } finally {
+            debridValidationRunning = false
         }
     }
 
@@ -924,15 +965,11 @@ class SettingsViewModel(
             _state.update { it.copy(aiKeyValidationResult = "Enter an API key first") }
             return
         }
-        _state.update { it.copy(aiKeyValidating = true, aiKeyValidationResult = null) }
-        scope.launch {
-            try {
-                aiSuggestClient.suggest(provider, key, "best sci-fi movies")
-                _state.update { it.copy(aiKeyValidating = false, aiKeyValidationResult = "valid") }
-            } catch (e: Exception) {
-                val msg = e.message?.take(120) ?: "Validation failed"
-                _state.update { it.copy(aiKeyValidating = false, aiKeyValidationResult = msg) }
-            }
+        _state.update {
+            it.copy(
+                aiKeyValidating = false,
+                aiKeyValidationResult = "AI validation is unavailable in this build",
+            )
         }
     }
 
@@ -945,7 +982,6 @@ class SettingsViewModel(
         scope.launch {
             integrationSecretStore.put(IntegrationSecretKey.OMDB_API_KEY, key)
             prefsRepo.remove(KEY_OMDB_API_KEY)
-            // Also persist to preferences so OmdbClient can read it
             prefsRepo.setString(OmdbClient.KEY_OMDB_API_KEY, key)
         }
     }

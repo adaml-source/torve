@@ -9,6 +9,7 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import com.torve.android.R
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
@@ -37,7 +38,7 @@ class EpisodeNotificationWorker(
                 ensureNotificationChannel()
                 val titles = calendar.take(3).joinToString(", ") { it.showTitle }
                 val body = if (calendar.size > 3) {
-                    "$titles and ${calendar.size - 3} more"
+                    applicationContext.getString(R.string.notif_episodes_and_more, titles, calendar.size - 3)
                 } else {
                     titles
                 }
@@ -45,7 +46,7 @@ class EpisodeNotificationWorker(
                 if (hasNotificationPermission()) {
                     val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
                         .setSmallIcon(android.R.drawable.ic_popup_reminder)
-                        .setContentTitle("New Episodes Available")
+                        .setContentTitle(applicationContext.getString(R.string.notif_new_episodes))
                         .setContentText(body)
                         .setStyle(NotificationCompat.BigTextStyle().bigText(body))
                         .setPriority(NotificationCompat.PRIORITY_DEFAULT)
@@ -67,10 +68,10 @@ class EpisodeNotificationWorker(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Episode Notifications",
+                applicationContext.getString(R.string.notif_channel_episodes),
                 NotificationManager.IMPORTANCE_DEFAULT,
             ).apply {
-                description = "Notifications for new TV show episodes"
+                description = applicationContext.getString(R.string.notif_channel_episodes_desc)
             }
             val manager = applicationContext.getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)

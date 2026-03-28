@@ -4,6 +4,8 @@ import com.torve.data.ai.AiProvider
 import com.torve.data.ai.KeywordSearchService
 import com.torve.data.mdblist.MdbListApi
 import com.torve.data.mdblist.RatingsEnricher
+import com.torve.data.network.catalogContentLoadErrorMessage
+import com.torve.data.network.sanitizeNetworkDiagnosticText
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.dedupeByStableKey
 import com.torve.domain.model.MediaType
@@ -13,12 +15,14 @@ import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.repository.MetadataRepository
 import com.torve.domain.repository.PreferencesRepository
 import com.torve.domain.repository.WatchProgressRepository
+import com.torve.platform.torveVerboseLog
 import com.torve.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -42,6 +46,13 @@ class CatalogViewModel(
     private val integrationSecretStore: IntegrationSecretStore? = null,
     initialProviderId: Int? = null,
 ) {
+    private data class CatalogShelvesLoad(
+        val continueWatching: List<com.torve.domain.model.WatchProgress>,
+        val trending: List<MediaItem>,
+        val popular: List<MediaItem>,
+        val topRated: List<MediaItem>,
+    )
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(CatalogUiState(providerId = initialProviderId))
     val state: StateFlow<CatalogUiState> = _state.asStateFlow()
@@ -57,39 +68,47 @@ class CatalogViewModel(
     private fun loadShelves() {
         if (watchProgressRepo == null) return
         scope.launch {
+            torveVerboseLog { "CATALOG_TAB shelves_fetch_start mediaType=$mediaType" }
             try {
                 val targetType = if (mediaType == "tv") MediaType.SERIES else MediaType.MOVIE
-
-                val continueDeferred = async { watchProgressRepo.getInProgress(20) }
-                val trendingDeferred = async { metadataRepo.getTrending(mediaType) }
-                val popularDeferred = async { metadataRepo.getPopular(mediaType) }
-                val topRatedDeferred = async { metadataRepo.getTopRated(mediaType) }
-
-                val continueWatching = continueDeferred.await()
-                    .filter { it.mediaType == targetType }
-                val trending = trendingDeferred.await()
-                val popular = popularDeferred.await()
-                val topRated = topRatedDeferred.await()
+                val shelvesLoad = supervisorScope {
+                    val continueDeferred = async { watchProgressRepo.getInProgress(20) }
+                    val trendingDeferred = async { metadataRepo.getTrending(mediaType) }
+                    val popularDeferred = async { metadataRepo.getPopular(mediaType) }
+                    val topRatedDeferred = async { metadataRepo.getTopRated(mediaType) }
+                    CatalogShelvesLoad(
+                        continueWatching = continueDeferred.await().filter { it.mediaType == targetType },
+                        trending = trendingDeferred.await(),
+                        popular = popularDeferred.await(),
+                        topRated = topRatedDeferred.await(),
+                    )
+                }
 
                 _state.update {
                     it.copy(
-                        continueWatching = continueWatching,
-                        trendingItems = trending,
-                        popularItems = popular,
-                        topRatedItems = topRated,
+                        continueWatching = shelvesLoad.continueWatching,
+                        trendingItems = shelvesLoad.trending,
+                        popularItems = shelvesLoad.popular,
+                        topRatedItems = shelvesLoad.topRated,
                         shelvesLoaded = true,
                     )
                 }
-                enrichAndUpdateItems(trending) { items ->
+                torveVerboseLog {
+                    "CATALOG_TAB shelves_fetch_success mediaType=$mediaType trending=${shelvesLoad.trending.size} popular=${shelvesLoad.popular.size} topRated=${shelvesLoad.topRated.size}"
+                }
+                enrichAndUpdateItems(shelvesLoad.trending) { items ->
                     _state.update { it.copy(trendingItems = items) }
                 }
-                enrichAndUpdateItems(popular) { items ->
+                enrichAndUpdateItems(shelvesLoad.popular) { items ->
                     _state.update { it.copy(popularItems = items) }
                 }
-                enrichAndUpdateItems(topRated) { items ->
+                enrichAndUpdateItems(shelvesLoad.topRated) { items ->
                     _state.update { it.copy(topRatedItems = items) }
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                torveVerboseLog {
+                    "CATALOG_TAB shelves_fetch_failure mediaType=$mediaType ${e::class.simpleName}: ${e.message}"
+                }
                 _state.update { it.copy(shelvesLoaded = true) }
             }
         }
@@ -102,6 +121,9 @@ class CatalogViewModel(
 
     fun loadCatalog() {
         scope.launch {
+            torveVerboseLog {
+                "CATALOG_TAB bootstrap_start mediaType=$mediaType category=${_state.value.selectedCategory}"
+            }
             _state.update { it.copy(isLoading = true, error = null, currentPage = 1) }
             try {
                 val filter = _state.value.filter
@@ -158,11 +180,17 @@ class CatalogViewModel(
                         activeFilterCount = filter.activeCount + (if (genreId != null) 1 else 0),
                     )
                 }
+                torveVerboseLog {
+                    "CATALOG_TAB state_transition state=success mediaType=$mediaType category=$category items=${finalItems.size} page=${result.page}/${result.totalPages}"
+                }
                 enrichAndUpdateItems(finalItems) { items ->
                     _state.update { it.copy(items = items) }
                 }
             } catch (e: Exception) {
-                _state.update { it.copy(isLoading = false, error = e.message) }
+                torveVerboseLog {
+                    "CATALOG_TAB state_transition state=error mediaType=$mediaType category=${_state.value.selectedCategory} ${e::class.simpleName}: ${sanitizeNetworkDiagnosticText(e.message)}"
+                }
+                _state.update { it.copy(isLoading = false, error = catalogContentLoadErrorMessage(mediaType)) }
             }
         }
     }
@@ -277,6 +305,9 @@ class CatalogViewModel(
                     _state.update { it.copy(items = items) }
                 }
             } catch (_: Exception) {
+                torveVerboseLog {
+                    "Catalog loadMore failed mediaType=$mediaType category=${_state.value.selectedCategory}"
+                }
                 _state.update { it.copy(isLoadingMore = false) }
             }
         }
@@ -305,6 +336,9 @@ class CatalogViewModel(
                     _state.update { it.copy(searchResults = items) }
                 }
             } catch (_: Exception) {
+                torveVerboseLog {
+                    "Catalog loadMoreSearch failed mediaType=$mediaType query=${s.searchQuery}"
+                }
                 _state.update { it.copy(isSearchingMore = false) }
             }
         }
@@ -382,6 +416,9 @@ class CatalogViewModel(
                             _state.update { it.copy(searchResults = items) }
                         }
                     } catch (_: Exception) {
+                        torveVerboseLog {
+                            "Catalog search failed mediaType=$mediaType query=$query"
+                        }
                         _state.update { it.copy(isSearching = false) }
                     }
                 }

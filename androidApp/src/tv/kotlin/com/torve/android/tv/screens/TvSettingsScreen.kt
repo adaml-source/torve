@@ -3670,8 +3670,8 @@ internal fun TvSettingsScreen(
                         target = addonTarget,
                     )
                     TvSettingCard(
-                        title = suggested.name,
-                        subtitle = suggested.description,
+                        title = stringResource(suggested.nameRes),
+                        subtitle = stringResource(suggested.descriptionRes),
                         modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                         focusRequester = requester,
                         onFocused = {

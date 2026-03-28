@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Card
 import coil3.compose.AsyncImage
 import com.torve.android.R
+import com.torve.android.ui.components.mediaItemLazyKey
 import com.torve.data.mdblist.RatingsEnricher
 import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.model.MediaItem
@@ -191,7 +192,7 @@ private fun TvContentRow(
             horizontalArrangement = Arrangement.spacedBy(18.dp),
             contentPadding = PaddingValues(end = 12.dp),
         ) {
-            itemsIndexed(items, key = { _, item -> item.tmdbId ?: item.id.hashCode() }) { index, item ->
+            itemsIndexed(items, key = { index, item -> mediaItemLazyKey(item, index) }) { index, item ->
                 TvMediaCard(
                     item = item,
                     onClick = { onItemClick(item) },
@@ -261,4 +262,3 @@ private fun TvMediaCard(
         }
     }
 }
-

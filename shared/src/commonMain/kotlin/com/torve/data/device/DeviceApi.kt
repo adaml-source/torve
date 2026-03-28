@@ -6,12 +6,16 @@ import io.ktor.client.call.body
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.get
 import io.ktor.client.request.patch
+import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
+import com.torve.domain.model.SubscriptionTier
+import com.torve.platform.torveVerboseLog
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -36,15 +40,35 @@ class DeviceApi(
 
     private fun baseUrl() = baseUrlProvider().trimEnd('/')
 
-    suspend fun getAccessState(accessToken: String): AccessStateDto? {
+    suspend fun getAccessState(
+        accessToken: String,
+        installationId: String? = currentInstallationIdProvider(),
+    ): AccessStateDto? {
+        val effectiveInstallationId = installationId?.takeIf { it.isNotBlank() }
+        torveVerboseLog {
+            "ACCESS_STATE fetch_start installationIdPresent=${effectiveInstallationId != null}"
+        }
         return try {
             val response = httpClient.get("${baseUrl()}/me/access-state") {
                 bearerAuth(accessToken)
+                effectiveInstallationId?.let { parameter("installation_id", it) }
             }
-            if (!response.status.isSuccess()) return null
+            if (!response.status.isSuccess()) {
+                torveVerboseLog {
+                    "ACCESS_STATE fetch_non_success status=${response.status.value} installationIdPresent=${effectiveInstallationId != null}"
+                }
+                return null
+            }
             val raw = response.bodyAsText()
-            json.decodeFromString(AccessStateDto.serializer(), raw)
-        } catch (_: Exception) {
+            json.decodeFromString(AccessStateDto.serializer(), raw).also { decoded ->
+                torveVerboseLog {
+                    "ACCESS_STATE fetch_success hasEntitlement=${decoded.resolvedHasPremiumEntitlement()} deviceActivated=${decoded.resolvedIsDeviceActivated()} blockReason=${decoded.resolvedDeviceBlockReason()}"
+                }
+            }
+        } catch (e: Exception) {
+            torveVerboseLog {
+                "ACCESS_STATE fetch_failure ${e::class.simpleName}: ${e.message}"
+            }
             // Endpoint may not exist on all backend versions — fail gracefully.
             null
         }
@@ -267,7 +291,60 @@ data class AccessStateDto(
     val premium: PremiumStateDto,
     val device: DeviceStateDto,
     val device_limit: DeviceLimitDto,
+    @SerialName("has_premium_access")
+    val has_premium_access: Boolean? = null,
+    @SerialName("access_tier")
+    val access_tier: String? = null,
+    @SerialName("is_device_activated")
+    val is_device_activated: Boolean? = null,
+    @SerialName("device_block_reason")
+    val device_block_reason: String? = null,
 )
+
+fun AccessStateDto.resolvedHasPremiumEntitlement(): Boolean {
+    resolvedAccessTier()?.let { tier ->
+        return tier != SubscriptionTier.FREE
+    }
+    return has_premium_access ?: premium.has_entitlement
+}
+
+fun AccessStateDto.resolvedAccessTier(): SubscriptionTier? {
+    return parseAccessTier(access_tier)
+}
+
+fun AccessStateDto.resolvedIsDeviceActivated(): Boolean {
+    return is_device_activated ?: device.is_active
+}
+
+fun AccessStateDto.resolvedDeviceBlockReason(): String? {
+    return device_block_reason
+        ?.takeIf { it.isNotBlank() }
+        ?: premium.reason.takeIf {
+            it.isNotBlank() && resolvedHasPremiumEntitlement() && !resolvedIsDeviceActivated()
+        }
+}
+
+fun AccessStateDto.resolvedUsablePremiumAccess(): Boolean {
+    return resolvedHasPremiumEntitlement() && resolvedIsDeviceActivated()
+}
+
+internal fun parseAccessTier(raw: String?): SubscriptionTier? {
+    return when (raw?.trim()?.lowercase()) {
+        null,
+        "",
+        -> null
+        "free" -> SubscriptionTier.FREE
+        "monthly",
+        "premium_monthly",
+        -> SubscriptionTier.MONTHLY
+        "lifetime",
+        "premium_lifetime",
+        "rebate_code",
+        "admin_grant",
+        -> SubscriptionTier.LIFETIME
+        else -> null
+    }
+}
 
 @Serializable
 data class ManagedDeviceDto(

@@ -29,10 +29,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.torve.android.R
 import com.torve.android.ui.components.LiveDot
 import com.torve.android.ui.components.SectionHeader
 import com.torve.android.ui.theme.Amber
@@ -55,7 +57,7 @@ fun ChannelsHomeContent(
     ) {
         // Recently Viewed
         if (recentlyViewed.isNotEmpty()) {
-            SectionHeader(title = "Recently Viewed")
+            SectionHeader(title = stringResource(R.string.channels_recently_viewed))
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -69,7 +71,7 @@ fun ChannelsHomeContent(
 
         // Favorites
         if (favorites.isNotEmpty()) {
-            SectionHeader(title = "Favorites")
+            SectionHeader(title = stringResource(R.string.channels_favorites))
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -120,13 +122,13 @@ fun ChannelsHomeContent(
                     )
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        text = "No content yet",
+                        text = stringResource(R.string.channels_no_content),
                         style = MaterialTheme.typography.titleMedium,
                         color = Torve.colors.textSecondary,
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        text = "Add a playlist to get started",
+                        text = stringResource(R.string.channels_add_playlist_start),
                         style = MaterialTheme.typography.bodySmall,
                         color = Torve.colors.textTertiary,
                     )

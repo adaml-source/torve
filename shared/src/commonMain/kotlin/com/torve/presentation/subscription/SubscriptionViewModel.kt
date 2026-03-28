@@ -20,15 +20,69 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import com.torve.platform.torveVerboseLog
 
 private const val KEY_PENDING_AMAZON_VERIFICATION = "subscription_pending_amazon_verification"
 private const val DEFAULT_AMAZON_PRODUCT_ID = "com.torve.pro.lifetime"
+
+internal data class SubscriptionEntitlementUiDecision(
+    val isPro: Boolean,
+    val hasEntitlement: Boolean,
+    val isDeviceActivated: Boolean,
+    val deviceBlockReason: String?,
+    val deviceCapReached: Boolean,
+)
+
+internal fun resolveSubscriptionEntitlementUiDecision(
+    backendResult: BackendPremiumResult?,
+): SubscriptionEntitlementUiDecision {
+    return when (backendResult) {
+        BackendPremiumResult.Active -> SubscriptionEntitlementUiDecision(
+            isPro = true,
+            hasEntitlement = true,
+            isDeviceActivated = true,
+            deviceBlockReason = null,
+            deviceCapReached = false,
+        )
+        is BackendPremiumResult.DeviceBlocked -> SubscriptionEntitlementUiDecision(
+            isPro = false,
+            hasEntitlement = true,
+            isDeviceActivated = false,
+            deviceBlockReason = backendResult.reason,
+            deviceCapReached = true,
+        )
+        BackendPremiumResult.NoEntitlement -> SubscriptionEntitlementUiDecision(
+            isPro = false,
+            hasEntitlement = false,
+            isDeviceActivated = false,
+            deviceBlockReason = null,
+            deviceCapReached = false,
+        )
+        is BackendPremiumResult.Offline -> SubscriptionEntitlementUiDecision(
+            isPro = false,
+            hasEntitlement = false,
+            isDeviceActivated = false,
+            deviceBlockReason = null,
+            deviceCapReached = false,
+        )
+        null -> SubscriptionEntitlementUiDecision(
+            isPro = false,
+            hasEntitlement = false,
+            isDeviceActivated = false,
+            deviceBlockReason = null,
+            deviceCapReached = false,
+        )
+    }
+}
 
 class SubscriptionViewModel(
     private val subscriptionRepo: SubscriptionRepository,
@@ -46,6 +100,11 @@ class SubscriptionViewModel(
     init {
         loadPersistedPendingAmazonVerification()
         loadSubscription()
+        scope.launch {
+            authClient.authUserFlow.collect {
+                loadSubscription()
+            }
+        }
     }
 
     private fun maskToken(token: String, visiblePrefix: Int = 8): String {
@@ -58,7 +117,7 @@ class SubscriptionViewModel(
         detail: String? = null,
         pending: PendingAmazonVerification? = null,
     ) {
-        println(
+        torveVerboseLog {
             buildString {
                 append("SUBSCRIPTION_PURCHASE: milestone=$milestone")
                 pending?.let {
@@ -71,8 +130,8 @@ class SubscriptionViewModel(
                 detail?.takeIf { it.isNotBlank() }?.let {
                     append(" detail=${it.take(220)}")
                 }
-            },
-        )
+            }
+        }
     }
 
     private fun purchaseStatus(
@@ -131,7 +190,25 @@ class SubscriptionViewModel(
         return purchaseStatus(
             kind = PurchaseStatusKind.SIGN_IN_REQUIRED,
             title = "Sign in required",
-            message = "Sign in to Torve before restoring Amazon Lifetime Access on this device.",
+            message = "Sign in to Torve before restoring Amazon Premium on this device.",
+            tone = PurchaseStatusTone.INFO,
+        )
+    }
+
+    private fun buildPurchaseSignInRequiredStatus(storeLabel: String): PurchaseStatusMessage {
+        return purchaseStatus(
+            kind = PurchaseStatusKind.SIGN_IN_REQUIRED,
+            title = "Sign in required",
+            message = "Sign in to Torve before buying Premium through $storeLabel on this device.",
+            tone = PurchaseStatusTone.INFO,
+        )
+    }
+
+    private fun buildRestoreSignInRequiredStatus(storeLabel: String): PurchaseStatusMessage {
+        return purchaseStatus(
+            kind = PurchaseStatusKind.SIGN_IN_REQUIRED,
+            title = "Sign in required",
+            message = "Sign in to Torve before restoring Premium from $storeLabel on this device.",
             tone = PurchaseStatusTone.INFO,
         )
     }
@@ -149,35 +226,80 @@ class SubscriptionViewModel(
         return purchaseStatus(
             kind = PurchaseStatusKind.RESTORE_FOUND_NOTHING,
             title = "Nothing to restore",
-            message = "No Amazon Lifetime Access was found for this Torve account.",
+            message = "No Amazon premium purchase was found for this Torve account.",
             tone = PurchaseStatusTone.INFO,
         )
     }
 
-    private fun buildVerifiedStatus(deviceAccess: Boolean): PurchaseStatusMessage {
+    private fun premiumPlanLabel(tier: SubscriptionTier): String {
+        return when (tier) {
+            SubscriptionTier.MONTHLY -> "Premium Monthly"
+            SubscriptionTier.LIFETIME -> "Premium Lifetime"
+            SubscriptionTier.FREE -> "Premium"
+        }
+    }
+
+    private fun resolveEntitlement(records: List<PremiumEntitlementRecord>): ResolvedPremiumEntitlement {
+        return resolvePremiumEntitlement(
+            records = records,
+            nowEpochMs = Clock.System.now().toEpochMilliseconds(),
+        )
+    }
+
+    private fun buildVerifiedStatus(
+        resolvedEntitlement: ResolvedPremiumEntitlement,
+        deviceAccess: Boolean,
+    ): PurchaseStatusMessage {
+        val premiumLabel = premiumPlanLabel(resolvedEntitlement.tier)
         return purchaseStatus(
             kind = PurchaseStatusKind.VERIFIED,
             title = "Purchase verified",
             message = if (deviceAccess) {
-                "Lifetime Access is active on this device."
+                when (resolvedEntitlement.tier) {
+                    SubscriptionTier.MONTHLY -> {
+                        val until = resolvedEntitlement.expiresAtEpochMs?.let { " until ${formatShortDate(it)}" }.orEmpty()
+                        "$premiumLabel is active on this device$until."
+                    }
+                    SubscriptionTier.LIFETIME -> "$premiumLabel is active on this device."
+                    SubscriptionTier.FREE -> "Premium is active on this device."
+                }
             } else {
-                "Lifetime Access is linked to this account, but this device still needs an available slot."
+                "$premiumLabel is linked to this account, but this device still needs an available slot."
             },
             tone = PurchaseStatusTone.SUCCESS,
         )
     }
 
-    private fun buildRestoredStatus(deviceAccess: Boolean): PurchaseStatusMessage {
+    private fun buildRestoredStatus(
+        resolvedEntitlement: ResolvedPremiumEntitlement,
+        deviceAccess: Boolean,
+    ): PurchaseStatusMessage {
+        val premiumLabel = premiumPlanLabel(resolvedEntitlement.tier)
         return purchaseStatus(
             kind = PurchaseStatusKind.RESTORED,
             title = "Purchase restored",
             message = if (deviceAccess) {
-                "Lifetime Access was restored and is active on this device."
+                when (resolvedEntitlement.tier) {
+                    SubscriptionTier.MONTHLY -> {
+                        val until = resolvedEntitlement.expiresAtEpochMs?.let { " until ${formatShortDate(it)}" }.orEmpty()
+                        "$premiumLabel was restored and is active on this device$until."
+                    }
+                    SubscriptionTier.LIFETIME -> "$premiumLabel was restored and is active on this device."
+                    SubscriptionTier.FREE -> "Premium was restored and is active on this device."
+                }
             } else {
-                "Lifetime Access was restored for this account, but this device still needs an available slot."
+                "$premiumLabel was restored for this account, but this device still needs an available slot."
             },
             tone = PurchaseStatusTone.SUCCESS,
         )
+    }
+
+    private fun formatShortDate(epochMs: Long): String {
+        return runCatching {
+            val instant = kotlinx.datetime.Instant.fromEpochMilliseconds(epochMs)
+            val date = instant.toLocalDateTime(TimeZone.currentSystemDefault()).date
+            "${date.month.name.lowercase().replaceFirstChar { it.uppercase() }} ${date.dayOfMonth}, ${date.year}"
+        }.getOrElse { "later" }
     }
 
     private fun shouldClearPurchaseStatusForActiveSubscription(status: PurchaseStatusMessage?): Boolean {
@@ -187,6 +309,46 @@ class SubscriptionViewModel(
             PurchaseStatusKind.VERIFICATION_FAILED_TEMPORARILY,
             PurchaseStatusKind.BACKEND_UNAVAILABLE,
         )
+    }
+
+    private fun setSignInRequiredStatus(status: PurchaseStatusMessage) {
+        _state.update { current ->
+            current.copy(
+                isPurchasing = false,
+                isLoading = false,
+                error = null,
+                purchaseStatus = status,
+                purchaseVerificationState = if (current.pendingAmazonVerification != null) {
+                    PurchaseVerificationState.PENDING
+                } else {
+                    PurchaseVerificationState.FAILED
+                },
+            )
+        }
+    }
+
+    fun requireAccountForPurchase(storeLabel: String, onAllowed: () -> Unit) {
+        scope.launch {
+            val hasSession = authClient.getValidAccessToken() != null || authClient.isLoggedIn()
+            if (hasSession) {
+                _state.update { it.copy(isLoggedIn = true, error = null) }
+                onAllowed()
+            } else {
+                setSignInRequiredStatus(buildPurchaseSignInRequiredStatus(storeLabel))
+            }
+        }
+    }
+
+    fun requireAccountForRestore(storeLabel: String, onAllowed: () -> Unit) {
+        scope.launch {
+            val hasSession = authClient.getValidAccessToken() != null || authClient.isLoggedIn()
+            if (hasSession) {
+                _state.update { it.copy(isLoggedIn = true, error = null) }
+                onAllowed()
+            } else {
+                setSignInRequiredStatus(buildRestoreSignInRequiredStatus(storeLabel))
+            }
+        }
     }
 
     private fun buildPendingAmazonVerification(
@@ -319,48 +481,25 @@ class SubscriptionViewModel(
                 val isLoggedIn = authClient.isLoggedIn()
                 val backendResult = if (isLoggedIn) subscriptionRepo.refreshFromBackendDetailed() else null
                 val sub = subscriptionRepo.getActiveSubscription()
-                val localIsPro = sub?.isPro == true
-                val isPro: Boolean
-                val hasEntitlement: Boolean
-                val deviceCapReached: Boolean
-                when (backendResult) {
-                    BackendPremiumResult.Active -> {
-                        isPro = true
-                        hasEntitlement = true
-                        deviceCapReached = false
-                    }
-                    is BackendPremiumResult.DeviceBlocked -> {
-                        isPro = false
-                        hasEntitlement = true
-                        deviceCapReached = true
-                    }
-                    BackendPremiumResult.NoEntitlement -> {
-                        isPro = localIsPro
-                        hasEntitlement = localIsPro
-                        deviceCapReached = false
-                    }
-                    is BackendPremiumResult.Offline -> {
-                        isPro = backendResult.localIsPro
-                        hasEntitlement = backendResult.localIsPro
-                        deviceCapReached = false
-                    }
-                    null -> {
-                        isPro = localIsPro
-                        hasEntitlement = localIsPro
-                        deviceCapReached = false
-                    }
-                }
+                val entitlementDecision = resolveSubscriptionEntitlementUiDecision(
+                    backendResult = backendResult,
+                )
 
+                torveVerboseLog {
+                    "SUBSCRIPTION_GATE decision backendResult=${backendResult?.let { it::class.simpleName } ?: "none"} isPro=${entitlementDecision.isPro} hasEntitlement=${entitlementDecision.hasEntitlement} isDeviceActivated=${entitlementDecision.isDeviceActivated}"
+                }
                 _state.update { current ->
                     val pendingStatus = current.pendingAmazonVerification?.toPurchaseStatusMessage(isLoggedIn)
                     current.copy(
                         subscription = sub,
-                        isPro = isPro,
+                        isPro = entitlementDecision.isPro,
                         isLoading = false,
                         isLoggedIn = isLoggedIn,
-                        hasEntitlement = hasEntitlement,
-                        deviceCapReached = deviceCapReached,
-                        showDeviceLimitReached = deviceCapReached,
+                        hasEntitlement = entitlementDecision.hasEntitlement,
+                        isDeviceActivated = entitlementDecision.isDeviceActivated,
+                        deviceBlockReason = entitlementDecision.deviceBlockReason,
+                        deviceCapReached = entitlementDecision.deviceCapReached,
+                        showDeviceLimitReached = entitlementDecision.deviceCapReached,
                         purchaseVerificationState = if (current.pendingAmazonVerification != null) {
                             PurchaseVerificationState.PENDING
                         } else {
@@ -368,17 +507,17 @@ class SubscriptionViewModel(
                         },
                         purchaseStatus = when {
                             pendingStatus != null -> pendingStatus
-                            isPro && shouldClearPurchaseStatusForActiveSubscription(current.purchaseStatus) -> null
+                            entitlementDecision.isPro && shouldClearPurchaseStatusForActiveSubscription(current.purchaseStatus) -> null
                             else -> current.purchaseStatus
                         },
                     )
                 }
-                println(
-                    "SUBSCRIPTION: Entitlement refresh result isPro=$isPro hasEntitlement=$hasEntitlement deviceCapReached=$deviceCapReached loggedIn=$isLoggedIn",
-                )
+                torveVerboseLog {
+                    "SUBSCRIPTION: Entitlement refresh result isPro=${entitlementDecision.isPro} hasEntitlement=${entitlementDecision.hasEntitlement} isDeviceActivated=${entitlementDecision.isDeviceActivated} deviceBlockReason=${entitlementDecision.deviceBlockReason} loggedIn=$isLoggedIn"
+                }
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = e.message) }
-                println("SUBSCRIPTION: Entitlement refresh failed: ${e.message ?: "unknown"}")
+                torveVerboseLog { "SUBSCRIPTION: Entitlement refresh failed: ${e.message ?: "unknown"}" }
             }
         }
     }
@@ -389,9 +528,9 @@ class SubscriptionViewModel(
      */
     fun verifyGooglePurchase(productId: String, purchaseToken: String, platform: String) {
         scope.launch {
-            println(
-                "SUBSCRIPTION: Google purchase callback received productId=$productId token=${maskToken(purchaseToken)} platform=$platform",
-            )
+            torveVerboseLog {
+                "SUBSCRIPTION: Google purchase callback received productId=$productId token=${maskToken(purchaseToken)} platform=$platform"
+            }
             _state.update {
                 it.copy(
                     isPurchasing = true,
@@ -402,53 +541,54 @@ class SubscriptionViewModel(
             }
             try {
                 val accessToken = authClient.getValidAccessToken()
-                if (accessToken != null) {
-                    println("SUBSCRIPTION: Sending Google verify request")
-                    val result = entitlementApi.verifyGooglePurchase(
-                        accessToken = accessToken,
-                        productId = productId,
-                        purchaseToken = purchaseToken,
-                        platform = platform,
-                    )
-                    println(
-                        "SUBSCRIPTION: Google verify response received premiumAccess=${result.premium_access} entitlements=${result.entitlements.size}",
-                    )
-                    val hasEntitlement = result.entitlements.isNotEmpty()
-                    val deviceAccess = result.premium_access
-                    if (deviceAccess) {
-                        subscriptionRepo.onBackendEntitlementGranted(true)
-                    }
-                    loadSubscription()
-                    _state.update {
-                        it.copy(
-                            isPurchasing = false,
-                            showPaywall = false,
-                            hasEntitlement = hasEntitlement,
-                            deviceCapReached = hasEntitlement && !deviceAccess,
-                            showDeviceLimitReached = hasEntitlement && !deviceAccess,
-                            purchaseVerificationState = PurchaseVerificationState.VERIFIED,
-                            purchaseStatus = buildVerifiedStatus(deviceAccess),
-                        )
-                    }
-                } else {
-                    subscriptionRepo.activateSubscription(SubscriptionTier.LIFETIME, purchaseToken)
-                    loadSubscription()
-                    _state.update {
-                        it.copy(
-                            isPurchasing = false,
-                            showPaywall = false,
-                            purchaseVerificationState = PurchaseVerificationState.PENDING,
-                        )
-                    }
+                if (accessToken.isNullOrBlank()) {
+                    setSignInRequiredStatus(buildPurchaseSignInRequiredStatus("Google Play"))
+                    return@launch
                 }
-            } catch (e: Exception) {
-                subscriptionRepo.activateSubscription(SubscriptionTier.LIFETIME, purchaseToken)
+                torveVerboseLog { "SUBSCRIPTION: Sending Google verify request" }
+                val result = entitlementApi.verifyGooglePurchase(
+                    accessToken = accessToken,
+                    productId = productId,
+                    purchaseToken = purchaseToken,
+                    platform = platform,
+                )
+                torveVerboseLog {
+                    "SUBSCRIPTION: Google verify response received premiumAccess=${result.premium_access} entitlements=${result.entitlements.size}"
+                }
+                val resolvedEntitlement = resolveEntitlement(
+                    result.entitlements.map { entitlement ->
+                        PremiumEntitlementRecord(
+                            key = entitlement.key,
+                            status = entitlement.status,
+                            sourceStore = entitlement.source_store,
+                            endsAt = entitlement.ends_at,
+                        )
+                    },
+                )
+                val hasEntitlement = result.entitlements.isNotEmpty()
+                val deviceAccess = result.premium_access
+                if (deviceAccess) {
+                    subscriptionRepo.onBackendEntitlementGranted(true)
+                }
                 loadSubscription()
                 _state.update {
                     it.copy(
                         isPurchasing = false,
                         showPaywall = false,
-                        error = "Purchase activated locally. Sign in to sync across devices.",
+                        hasEntitlement = hasEntitlement,
+                        isDeviceActivated = deviceAccess,
+                        deviceBlockReason = null,
+                        deviceCapReached = hasEntitlement && !deviceAccess,
+                        showDeviceLimitReached = hasEntitlement && !deviceAccess,
+                        purchaseVerificationState = PurchaseVerificationState.VERIFIED,
+                        purchaseStatus = buildVerifiedStatus(resolvedEntitlement, deviceAccess),
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(
+                        isPurchasing = false,
+                        error = "Google Play purchase could not be verified. Try Restore Purchase again after signing in.",
                         purchaseVerificationState = PurchaseVerificationState.FAILED,
                     )
                 }
@@ -472,49 +612,50 @@ class SubscriptionViewModel(
             }
             try {
                 val accessToken = authClient.getValidAccessToken()
-                if (accessToken != null) {
-                    val result = entitlementApi.verifyApplePurchase(
-                        accessToken = accessToken,
-                        transactionJws = transactionJws,
-                        productId = productId,
-                        platform = "ios",
-                    )
-                    val hasEntitlement = result.entitlements.isNotEmpty()
-                    val deviceAccess = result.premium_access
-                    if (deviceAccess) {
-                        subscriptionRepo.onBackendEntitlementGranted(true)
-                    }
-                    loadSubscription()
-                    _state.update {
-                        it.copy(
-                            isPurchasing = false,
-                            showPaywall = false,
-                            hasEntitlement = hasEntitlement,
-                            deviceCapReached = hasEntitlement && !deviceAccess,
-                            showDeviceLimitReached = hasEntitlement && !deviceAccess,
-                            purchaseVerificationState = PurchaseVerificationState.VERIFIED,
-                            purchaseStatus = buildVerifiedStatus(deviceAccess),
-                        )
-                    }
-                } else {
-                    subscriptionRepo.activateSubscription(SubscriptionTier.LIFETIME, "apple_$productId")
-                    loadSubscription()
-                    _state.update {
-                        it.copy(
-                            isPurchasing = false,
-                            showPaywall = false,
-                            purchaseVerificationState = PurchaseVerificationState.PENDING,
-                        )
-                    }
+                if (accessToken.isNullOrBlank()) {
+                    setSignInRequiredStatus(buildPurchaseSignInRequiredStatus("Apple App Store"))
+                    return@launch
                 }
-            } catch (e: Exception) {
-                subscriptionRepo.activateSubscription(SubscriptionTier.LIFETIME, "apple_$productId")
+                val result = entitlementApi.verifyApplePurchase(
+                    accessToken = accessToken,
+                    transactionJws = transactionJws,
+                    productId = productId,
+                    platform = "ios",
+                )
+                val resolvedEntitlement = resolveEntitlement(
+                    result.entitlements.map { entitlement ->
+                        PremiumEntitlementRecord(
+                            key = entitlement.key,
+                            status = entitlement.status,
+                            sourceStore = entitlement.source_store,
+                            endsAt = entitlement.ends_at,
+                        )
+                    },
+                )
+                val hasEntitlement = result.entitlements.isNotEmpty()
+                val deviceAccess = result.premium_access
+                if (deviceAccess) {
+                    subscriptionRepo.onBackendEntitlementGranted(true)
+                }
                 loadSubscription()
                 _state.update {
                     it.copy(
                         isPurchasing = false,
                         showPaywall = false,
-                        error = "Purchase activated locally. Sign in to sync across devices.",
+                        hasEntitlement = hasEntitlement,
+                        isDeviceActivated = deviceAccess,
+                        deviceBlockReason = null,
+                        deviceCapReached = hasEntitlement && !deviceAccess,
+                        showDeviceLimitReached = hasEntitlement && !deviceAccess,
+                        purchaseVerificationState = PurchaseVerificationState.VERIFIED,
+                        purchaseStatus = buildVerifiedStatus(resolvedEntitlement, deviceAccess),
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(
+                        isPurchasing = false,
+                        error = "Apple purchase could not be verified. Try Restore Purchase again after signing in.",
                         purchaseVerificationState = PurchaseVerificationState.FAILED,
                     )
                 }
@@ -522,7 +663,7 @@ class SubscriptionViewModel(
         }
     }
 
-    fun markAmazonPurchasePending(message: String) {
+    fun markPurchasePending(message: String) {
         val status = buildAmazonCallbackPendingStatus(message.trim())
         logPurchaseMilestone("amazon_callback_pending", detail = status.message)
         _state.update {
@@ -535,6 +676,10 @@ class SubscriptionViewModel(
         }
     }
 
+    fun markAmazonPurchasePending(message: String) {
+        markPurchasePending(message)
+    }
+
     fun verifyAmazonPurchase(
         receiptId: String,
         amazonUserId: String,
@@ -545,9 +690,9 @@ class SubscriptionViewModel(
             val sanitizedReceipt = receiptId.trim()
             val sanitizedUserId = amazonUserId.trim()
             val sanitizedProductId = productId.trim().ifBlank { DEFAULT_AMAZON_PRODUCT_ID }
-            println(
-                "SUBSCRIPTION: Amazon purchase callback received receipt=${maskToken(sanitizedReceipt)} productId=$sanitizedProductId hasUserId=${sanitizedUserId.isNotBlank()} platform=$platform",
-            )
+            torveVerboseLog {
+                "SUBSCRIPTION: Amazon purchase callback received receipt=${maskToken(sanitizedReceipt)} productId=$sanitizedProductId hasUserId=${sanitizedUserId.isNotBlank()} platform=$platform"
+            }
             _state.update {
                 it.copy(
                     isPurchasing = true,
@@ -585,7 +730,7 @@ class SubscriptionViewModel(
                     reason = previousPending?.reason ?: PendingAmazonVerificationReason.RETRY_VERIFICATION,
                     previous = previousPending,
                     incrementAttempt = false,
-                    lastMessage = "Sign in to Torve, then choose Retry Verification to finish Lifetime Access activation.",
+                    lastMessage = "Sign in to Torve, then choose Retry Verification to finish Premium activation.",
                 )
                 persistPendingAmazonVerification(pending)
                 val status = pending.toPurchaseStatusMessage(isLoggedIn = false)
@@ -623,6 +768,16 @@ class SubscriptionViewModel(
                     productId = sanitizedProductId,
                     platform = platform,
                 )
+                val resolvedEntitlement = resolveEntitlement(
+                    result.entitlements.map { entitlement ->
+                        PremiumEntitlementRecord(
+                            key = entitlement.key,
+                            status = entitlement.status,
+                            sourceStore = entitlement.source_store,
+                            endsAt = entitlement.ends_at,
+                        )
+                    },
+                )
                 val hasEntitlement = result.entitlements.isNotEmpty()
                 val deviceAccess = result.premium_access
                 if (deviceAccess) {
@@ -630,7 +785,7 @@ class SubscriptionViewModel(
                 }
                 persistPendingAmazonVerification(null)
                 loadSubscription()
-                val status = buildVerifiedStatus(deviceAccess)
+                val status = buildVerifiedStatus(resolvedEntitlement, deviceAccess)
                 logPurchaseMilestone(
                     milestone = "amazon_verify_success",
                     detail = "premiumAccess=$deviceAccess entitlements=${result.entitlements.size}",
@@ -641,6 +796,8 @@ class SubscriptionViewModel(
                         showPaywall = false,
                         error = null,
                         hasEntitlement = hasEntitlement,
+                        isDeviceActivated = deviceAccess,
+                        deviceBlockReason = null,
                         deviceCapReached = hasEntitlement && !deviceAccess,
                         showDeviceLimitReached = hasEntitlement && !deviceAccess,
                         purchaseVerificationState = PurchaseVerificationState.VERIFIED,
@@ -746,6 +903,16 @@ class SubscriptionViewModel(
                     store = "amazon",
                     platform = platform,
                 )
+                val resolvedEntitlement = resolveEntitlement(
+                    result.entitlements.map { entitlement ->
+                        PremiumEntitlementRecord(
+                            key = entitlement.key,
+                            status = entitlement.status,
+                            sourceStore = entitlement.source_store,
+                            endsAt = entitlement.ends_at,
+                        )
+                    },
+                )
                 val hasEntitlement = result.entitlements.isNotEmpty()
                 val deviceAccess = result.premium_access
 
@@ -755,7 +922,7 @@ class SubscriptionViewModel(
                     }
                     persistPendingAmazonVerification(null)
                     loadSubscription()
-                    val status = buildRestoredStatus(deviceAccess)
+                    val status = buildRestoredStatus(resolvedEntitlement, deviceAccess)
                     logPurchaseMilestone(
                         milestone = "amazon_restore_success",
                         detail = "premiumAccess=$deviceAccess entitlements=${result.entitlements.size}",
@@ -766,6 +933,8 @@ class SubscriptionViewModel(
                             error = null,
                             showPaywall = false,
                             hasEntitlement = true,
+                            isDeviceActivated = deviceAccess,
+                            deviceBlockReason = null,
                             deviceCapReached = !deviceAccess,
                             showDeviceLimitReached = !deviceAccess,
                             purchaseVerificationState = PurchaseVerificationState.RESTORED,
@@ -853,6 +1022,87 @@ class SubscriptionViewModel(
         }
     }
 
+    fun restoreStorePurchases(store: String, platform: String, storeLabel: String) {
+        scope.launch {
+            _state.update {
+                it.copy(
+                    isLoading = true,
+                    error = null,
+                    purchaseStatus = null,
+                )
+            }
+
+            val accessToken = authClient.getValidAccessToken()
+            if (accessToken.isNullOrBlank()) {
+                setSignInRequiredStatus(buildRestoreSignInRequiredStatus(storeLabel))
+                return@launch
+            }
+
+            try {
+                val result = entitlementApi.restorePurchases(
+                    accessToken = accessToken,
+                    store = store,
+                    platform = platform,
+                )
+                val resolvedEntitlement = resolveEntitlement(
+                    result.entitlements.map { entitlement ->
+                        PremiumEntitlementRecord(
+                            key = entitlement.key,
+                            status = entitlement.status,
+                            sourceStore = entitlement.source_store,
+                            endsAt = entitlement.ends_at,
+                        )
+                    },
+                )
+                val hasEntitlement = result.entitlements.isNotEmpty()
+                val deviceAccess = result.premium_access
+
+                if (hasEntitlement) {
+                    if (deviceAccess) {
+                        subscriptionRepo.onBackendEntitlementGranted(true)
+                    }
+                    loadSubscription()
+                    _state.update {
+                        it.copy(
+                            isLoading = false,
+                            error = null,
+                            showPaywall = false,
+                            hasEntitlement = true,
+                            isDeviceActivated = deviceAccess,
+                            deviceBlockReason = null,
+                            deviceCapReached = !deviceAccess,
+                            showDeviceLimitReached = !deviceAccess,
+                            purchaseVerificationState = PurchaseVerificationState.RESTORED,
+                            purchaseStatus = buildRestoredStatus(resolvedEntitlement, deviceAccess),
+                        )
+                    }
+                } else {
+                    _state.update {
+                        it.copy(
+                            isLoading = false,
+                            error = null,
+                            purchaseStatus = purchaseStatus(
+                                kind = PurchaseStatusKind.RESTORE_FOUND_NOTHING,
+                                title = "Nothing to restore",
+                                message = "No premium purchase was found for this Torve account on $storeLabel.",
+                                tone = PurchaseStatusTone.INFO,
+                            ),
+                            purchaseVerificationState = PurchaseVerificationState.FAILED,
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(
+                        isLoading = false,
+                        error = "$storeLabel restore could not be completed. Try again after signing in.",
+                        purchaseVerificationState = PurchaseVerificationState.FAILED,
+                    )
+                }
+            }
+        }
+    }
+
     /**
      * Legacy: local-only purchase activation.
      * Use verifyGooglePurchase / verifyApplePurchase for backend-verified flow.
@@ -866,50 +1116,19 @@ class SubscriptionViewModel(
                     purchaseStatus = null,
                 )
             }
-            try {
-                subscriptionRepo.activateSubscription(SubscriptionTier.LIFETIME, purchaseToken)
-                loadSubscription()
-                _state.update {
-                    it.copy(
-                        isPurchasing = false,
-                        showPaywall = false,
-                        purchaseVerificationState = PurchaseVerificationState.VERIFIED,
-                    )
-                }
-            } catch (e: Exception) {
-                _state.update {
-                    it.copy(
-                        isPurchasing = false,
-                        error = e.message,
-                        purchaseVerificationState = PurchaseVerificationState.FAILED,
-                    )
-                }
+            _state.update {
+                it.copy(
+                    isPurchasing = false,
+                    error = "Local purchase activation is disabled. Verify purchases through the store restore flow.",
+                    purchaseVerificationState = PurchaseVerificationState.FAILED,
+                )
             }
         }
     }
 
     fun restorePurchase(purchaseToken: String) {
         scope.launch {
-            _state.update {
-                it.copy(
-                    isLoading = true,
-                    error = null,
-                    purchaseStatus = null,
-                )
-            }
-            try {
-                subscriptionRepo.restorePurchase(purchaseToken)
-                loadSubscription()
-                _state.update { it.copy(purchaseVerificationState = PurchaseVerificationState.RESTORED) }
-            } catch (e: Exception) {
-                _state.update {
-                    it.copy(
-                        isLoading = false,
-                        error = e.message,
-                        purchaseVerificationState = PurchaseVerificationState.FAILED,
-                    )
-                }
-            }
+            setSignInRequiredStatus(buildRestoreSignInRequiredStatus("Google Play"))
         }
     }
 
@@ -946,12 +1165,22 @@ class SubscriptionViewModel(
                 val deviceId = deviceIdProvider.getDeviceId()
                 when (val result = rebateCodeApi.redeemCode(code, deviceId)) {
                     is RebateResult.Success -> {
-                        subscriptionRepo.activateSubscription(
-                            SubscriptionTier.LIFETIME,
-                            "rebate_$code",
-                        )
-                        _state.update { it.copy(isRedeeming = false, rebateSuccess = true, rebateCode = "") }
-                        loadSubscription()
+                        val backendResult = if (authClient.isLoggedIn()) {
+                            subscriptionRepo.refreshFromBackendDetailed()
+                        } else {
+                            null
+                        }
+                        if (backendResult == BackendPremiumResult.Active) {
+                            _state.update { it.copy(isRedeeming = false, rebateSuccess = true, rebateCode = "") }
+                            loadSubscription()
+                        } else {
+                            _state.update {
+                                it.copy(
+                                    isRedeeming = false,
+                                    error = "Code accepted, but premium access must still be confirmed by the Torve backend.",
+                                )
+                            }
+                        }
                     }
                     is RebateResult.Error -> {
                         _state.update { it.copy(isRedeeming = false, error = result.message) }
@@ -984,5 +1213,9 @@ class SubscriptionViewModel(
 
     fun dismissDeviceLimitReached() {
         _state.update { it.copy(showDeviceLimitReached = false) }
+    }
+
+    fun refreshAccess() {
+        loadSubscription()
     }
 }

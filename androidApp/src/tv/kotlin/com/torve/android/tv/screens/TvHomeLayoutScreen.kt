@@ -23,7 +23,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -41,6 +43,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -65,6 +68,9 @@ fun TvHomeLayoutScreen(
     onBack: () -> Unit,
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
+    entryFocusRequester: FocusRequester,
+    onEntryFocusReadyChanged: (Boolean) -> Unit = {},
+    onEntryFocusFocused: () -> Unit = {},
     homeViewModel: HomeViewModel = koinInject(),
     settingsViewModel: SettingsViewModel = koinInject(),
     keywordSearchService: KeywordSearchService = koinInject(),
@@ -88,6 +94,14 @@ fun TvHomeLayoutScreen(
     // Media type cycling
     val mediaTypes = remember { listOf("movie", "tv", "both") }
 
+    LaunchedEffect(entryFocusRequester) {
+        onFirstContentRequester(entryFocusRequester)
+    }
+    DisposableEffect(Unit) {
+        onEntryFocusReadyChanged(false)
+        onDispose { onEntryFocusReadyChanged(false) }
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 40.dp, top = 20.dp, end = 40.dp, bottom = 24.dp),
@@ -95,21 +109,25 @@ fun TvHomeLayoutScreen(
     ) {
         // Title
         item(key = "title") {
-            val requester = remember("hl_title") { FocusRequester() }
-            onFirstContentRequester(requester)
             TvSettingCard(
                 title = stringResource(R.string.tv_home_layout_title),
                 subtitle = "",
-                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
-                focusRequester = requester,
-                onFocused = { onContentFocused(requester) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusProperties { left = railFocusRequester }
+                    .onGloballyPositioned { onEntryFocusReadyChanged(true) },
+                focusRequester = entryFocusRequester,
+                onFocused = {
+                    onEntryFocusFocused()
+                    onContentFocused(entryFocusRequester)
+                },
                 onClick = onBack,
             )
         }
 
         item(key = "reorder_hint") {
             Text(
-                text = "Press OK to enable or disable. Press RIGHT to enter move mode, UP or DOWN to reorder, LEFT to finish.",
+                text = stringResource(R.string.tv_home_layout_instructions),
                 style = MaterialTheme.typography.bodySmall,
                 color = Ash,
                 modifier = Modifier.padding(top = 2.dp, bottom = 6.dp, start = 4.dp),

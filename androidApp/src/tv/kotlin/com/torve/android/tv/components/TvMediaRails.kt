@@ -244,10 +244,20 @@ fun TvMediaRails(
 
     when {
         loading && rails.isEmpty() -> {
+            val loadingRequester = remember { FocusRequester() }
+            onFirstContentRequester(loadingRequester)
             Box(
                 modifier = modifier
                     .fillMaxSize()
-                    .padding(horizontal = 44.dp),
+                    .padding(horizontal = 44.dp)
+                    .focusRequester(loadingRequester)
+                    .focusProperties { left = railFocusRequester }
+                    .onFocusChanged { if (it.isFocused) onContentFocused(loadingRequester) }
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {},
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 CircularProgressIndicator(color = Amber)

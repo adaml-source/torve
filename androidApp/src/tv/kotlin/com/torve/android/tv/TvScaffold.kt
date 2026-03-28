@@ -76,12 +76,12 @@ fun TvScaffold(
 
                 // Right content area takes remaining space.
                 // clipToBounds prevents LazyRow items from rendering
-                // partially under the info panel.
+                // partially under the info panel — only needed when the panel is visible.
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
-                        .clipToBounds(),
+                        .then(if (showInfoPanel) Modifier.clipToBounds() else Modifier),
                 ) {
                     content()
                 }

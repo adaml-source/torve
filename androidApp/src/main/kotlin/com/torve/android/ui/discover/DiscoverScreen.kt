@@ -31,8 +31,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.torve.android.R
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.AmberDark
 import com.torve.android.ui.theme.Amethyst
@@ -67,7 +69,7 @@ fun DiscoverScreen(
     ) {
         // Header
         Text(
-            text = "Discover",
+            text = stringResource(R.string.discover_title),
             style = MaterialTheme.typography.headlineLarge,
             color = Snow,
             fontWeight = FontWeight.Bold,

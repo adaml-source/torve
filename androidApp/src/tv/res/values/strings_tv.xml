@@ -116,8 +116,8 @@
     <string name="tv_settings_sync_ready">Import all settings from your paired phone</string>
     <string name="tv_settings_pair_first">Pair a phone first to sync</string>
     <string name="tv_settings_region">Content Region</string>
-    <string name="tv_settings_streaming_services">Streaming Services</string>
-    <string name="tv_settings_home_layout_note">To customize your Home tab layout, card styles, rating sources, and streaming services — configure them on the Torve mobile app and tap \"Sync Settings from Phone\" above.</string>
+    <string name="tv_settings_streaming_services">Availability Services</string>
+    <string name="tv_settings_home_layout_note">To customize your Home tab layout, card styles, rating sources, and availability services — configure them on the Torve mobile app and tap \"Sync Settings from Phone\" above.</string>
 
     <!-- Setup mode -->
     <string name="tv_settings_setup_prompt">How do you use Torve?</string>
@@ -337,7 +337,7 @@
 
     <!-- Addon catalog -->
     <string name="tv_addon_category_all">All</string>
-    <string name="tv_addon_category_streams">Streams</string>
+    <string name="tv_addon_category_streams">Sources</string>
     <string name="tv_addon_category_catalogs">Catalogs</string>
     <string name="tv_addon_category_subtitles">Subtitles</string>
     <string name="tv_addon_suggested">Suggested Addons</string>

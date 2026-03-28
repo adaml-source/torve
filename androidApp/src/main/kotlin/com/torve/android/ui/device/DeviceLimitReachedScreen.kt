@@ -44,6 +44,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.torve.android.R
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Snow
 import com.torve.data.device.ManagedDeviceDto
@@ -72,10 +74,10 @@ fun DeviceLimitReachedScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
         TopAppBar(
-            title = { Text("Device Limit Reached") },
+            title = { Text(stringResource(R.string.device_limit_title)) },
             navigationIcon = {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_cd))
                 }
             },
         )
@@ -94,14 +96,14 @@ fun DeviceLimitReachedScreen(
                 )
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    text = "Your Torve Pro account is already active on ${state.maxActiveDevices} devices. Remove one device to activate Torve Pro on this device.",
+                    text = stringResource(R.string.device_limit_message, state.maxActiveDevices),
                     style = MaterialTheme.typography.bodyLarge,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(24.dp))
                 Text(
-                    text = "Active Devices",
+                    text = stringResource(R.string.device_limit_active_devices),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
@@ -133,7 +135,7 @@ fun DeviceLimitReachedScreen(
             item {
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    text = "To activate this device, remove one from your account.",
+                    text = stringResource(R.string.device_limit_activate_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
@@ -178,7 +180,7 @@ private fun DeviceLimitRow(
                     )
                     if (device.is_current) {
                         Spacer(Modifier.width(8.dp))
-                        Text("THIS DEVICE", style = MaterialTheme.typography.labelSmall, color = Amber, fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.manage_devices_this_device), style = MaterialTheme.typography.labelSmall, color = Amber, fontWeight = FontWeight.Bold)
                     }
                 }
                 Text(
@@ -193,7 +195,7 @@ private fun DeviceLimitRow(
                     onClick = { showConfirm = true },
                     enabled = !isRemoving,
                 ) {
-                    Icon(Icons.Default.Delete, contentDescription = "Remove", tint = MaterialTheme.colorScheme.error)
+                    Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.common_remove), tint = MaterialTheme.colorScheme.error)
                 }
             }
         }
@@ -202,15 +204,15 @@ private fun DeviceLimitRow(
     if (showConfirm) {
         AlertDialog(
             onDismissRequest = { showConfirm = false },
-            title = { Text("Remove Device") },
-            text = { Text("Remove \"${device.device_name}\"? This will free a slot and Torve Pro will be activated on your current device.") },
+            title = { Text(stringResource(R.string.manage_devices_remove_title)) },
+            text = { Text(stringResource(R.string.device_limit_remove_confirm, device.device_name)) },
             confirmButton = {
                 TextButton(onClick = { showConfirm = false; onRemove() }) {
-                    Text("Remove & Activate", color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.device_limit_remove_activate), color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showConfirm = false }) { Text("Cancel") }
+                TextButton(onClick = { showConfirm = false }) { Text(stringResource(R.string.common_cancel)) }
             },
         )
     }

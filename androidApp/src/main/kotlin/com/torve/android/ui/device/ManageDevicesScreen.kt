@@ -43,6 +43,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.torve.android.R
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Snow
 import com.torve.data.device.ManagedDeviceDto
@@ -63,10 +65,10 @@ fun ManageDevicesScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
         TopAppBar(
-            title = { Text("Manage Devices") },
+            title = { Text(stringResource(R.string.manage_devices_title)) },
             navigationIcon = {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_cd))
                 }
             },
         )
@@ -83,13 +85,13 @@ fun ManageDevicesScreen(
                 // Header
                 item {
                     Text(
-                        text = "Your Torve Pro account can be active on up to ${state.maxActiveDevices} devices at a time.",
+                        text = stringResource(R.string.manage_devices_limit_info, state.maxActiveDevices),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "${state.activeDeviceCount} of ${state.maxActiveDevices} devices active",
+                        text = stringResource(R.string.manage_devices_count, state.activeDeviceCount, state.maxActiveDevices),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = Amber,
@@ -111,12 +113,12 @@ fun ManageDevicesScreen(
                 item {
                     Spacer(Modifier.height(16.dp))
                     Text(
-                        text = "Removing a device frees a slot for another device.",
+                        text = stringResource(R.string.manage_devices_remove_info),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Text(
-                        text = "Inactive devices may stop counting automatically after extended inactivity.",
+                        text = stringResource(R.string.manage_devices_inactive_info),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -179,7 +181,7 @@ private fun DeviceRow(
                     if (device.is_current) {
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            text = "THIS DEVICE",
+                            text = stringResource(R.string.manage_devices_this_device),
                             style = MaterialTheme.typography.labelSmall,
                             color = Amber,
                             fontWeight = FontWeight.Bold,
@@ -193,13 +195,13 @@ private fun DeviceRow(
                 )
                 if (device.is_active) {
                     Text(
-                        text = "Active",
+                        text = stringResource(R.string.manage_devices_active),
                         style = MaterialTheme.typography.labelSmall,
                         color = Color(0xFF22C55E),
                     )
                 } else if (device.removed_at != null) {
                     Text(
-                        text = "Removed",
+                        text = stringResource(R.string.manage_devices_removed),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -213,7 +215,7 @@ private fun DeviceRow(
                 ) {
                     Icon(
                         Icons.Default.Delete,
-                        contentDescription = "Remove device",
+                        contentDescription = stringResource(R.string.manage_devices_remove_cd),
                         tint = MaterialTheme.colorScheme.error,
                     )
                 }
@@ -224,19 +226,19 @@ private fun DeviceRow(
     if (showConfirm) {
         AlertDialog(
             onDismissRequest = { showConfirm = false },
-            title = { Text("Remove Device") },
-            text = { Text("Remove \"${device.device_name}\" from your Torve Pro account? This will free a device slot.") },
+            title = { Text(stringResource(R.string.manage_devices_remove_title)) },
+            text = { Text(stringResource(R.string.manage_devices_remove_confirm, device.device_name)) },
             confirmButton = {
                 TextButton(onClick = {
                     showConfirm = false
                     onRemove()
                 }) {
-                    Text("Remove", color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.common_remove), color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showConfirm = false }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.common_cancel))
                 }
             },
         )

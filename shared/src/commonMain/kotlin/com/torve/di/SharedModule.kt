@@ -1,7 +1,5 @@
 package com.torve.di
 
-import com.torve.data.ai.AiSuggestClient
-import com.torve.data.ai.KeywordSearchService
 import com.torve.data.addon.AddonRepositoryImpl
 import com.torve.data.account.AccountAwarePreferencesRepository
 import com.torve.data.account.AccountSettingsApi
@@ -9,6 +7,7 @@ import com.torve.data.account.AccountSettingsRepository
 import com.torve.data.account.AccountSettingsRepositoryImpl
 import com.torve.data.availability.AvailabilityRepositoryImpl
 import com.torve.data.availability.TmdbAvailabilityProvider
+import com.torve.data.addon.AddonSyncService
 import com.torve.data.addon.CatalogAggregator
 import com.torve.data.addon.StreamAggregator
 import com.torve.data.addon.StreamScorer
@@ -17,6 +16,8 @@ import com.torve.data.addon.StremioAddonClient
 import com.torve.data.addon.SubtitleAggregator
 import com.torve.data.addon.StreamRepositoryImpl
 import com.torve.data.auth.AuthClient
+import com.torve.data.ai.AiSuggestClient
+import com.torve.data.ai.KeywordSearchService
 import com.torve.data.device.DeviceApi
 import com.torve.data.entitlement.EntitlementApi
 import com.torve.data.debrid.DebridClient
@@ -100,13 +101,16 @@ import com.torve.presentation.stats.StatsViewModel
 import com.torve.presentation.device.DeviceGovernanceViewModel
 import com.torve.presentation.subscription.SubscriptionViewModel
 import com.torve.presentation.watchlist.WatchlistViewModel
+import com.torve.platform.torveVerboseLog
 import org.koin.core.module.dsl.factoryOf
 import org.koin.core.module.dsl.singleOf
+import org.koin.core.qualifier.named
 import org.koin.dsl.module
 
 val sharedModule = module {
     // Network
     single { HttpClientFactory.create() }
+    single(named("tmdbHttpClient")) { HttpClientFactory.createTmdb() }
     single { HttpClientFactory.json }
 
     // Database
@@ -114,12 +118,12 @@ val sharedModule = module {
     single { TorveDatabase(get()) }
 
     // TMDB
-    singleOf(::TmdbApiClient)
+    single { TmdbApiClient(get(named("tmdbHttpClient"))) }
     single<MetadataRepository> { MetadataRepositoryImpl(get()) }
     single<AvailabilityProvider> { TmdbAvailabilityProvider(get()) }
     single<AvailabilityRepository> { AvailabilityRepositoryImpl(get(), get(), get()) }
 
-    // AI Suggest
+    // AI
     single { AiSuggestClient(get()) }
     single { KeywordSearchService(get(), get()) }
 
@@ -130,6 +134,7 @@ val sharedModule = module {
     single {
         val client = DebridClient(get(), get())
         val secretStore: com.torve.domain.integrations.IntegrationSecretStore = get()
+        val settingsRefreshNotifier: com.torve.presentation.settings.SettingsRefreshNotifier = get()
         client.rdTokenRefresher = com.torve.data.debrid.RdTokenRefresher {
             val refreshToken = secretStore.get(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN) ?: return@RdTokenRefresher null
             val clientId = secretStore.get(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_RD_CLIENT_ID) ?: return@RdTokenRefresher null
@@ -139,9 +144,10 @@ val sharedModule = module {
                 // Persist new tokens
                 secretStore.put(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID, tokens.accessToken)
                 secretStore.put(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN, tokens.refreshToken)
+                settingsRefreshNotifier.notifyRefresh(kotlinx.datetime.Clock.System.now().toEpochMilliseconds())
                 tokens.accessToken
             } catch (e: Exception) {
-                println("TORVE_RD: token refresh failed: ${e.message}")
+                torveVerboseLog { "TORVE_RD: token refresh failed: ${e.message}" }
                 null
             }
         }
@@ -230,6 +236,16 @@ val sharedModule = module {
 
     // Addon Repository
     single<AddonRepository> { AddonRepositoryImpl(get(), get(), get()) }
+    single {
+        AddonSyncService(
+            accessTokenProvider = { get<AuthClient>().getValidAccessToken() },
+            addonRepo = get(),
+            accountSettingsApi = get(),
+            prefsRepo = get(),
+            settingsRefreshNotifier = get(),
+            json = get(),
+        )
+    }
 
     // Channel Repository
     single<ChannelRepository> { ChannelRepositoryImpl(get(), get(), get(), get(), get(), get()) }
@@ -251,7 +267,7 @@ val sharedModule = module {
 
     // Subscription
     single { RebateCodeApi(get()) }
-    single<SubscriptionRepository> { SubscriptionRepositoryImpl(get(), get(), get(), get()) }
+    single<SubscriptionRepository> { SubscriptionRepositoryImpl(get(), get(), get(), get(), get()) }
 
     // Watchlist Repository
     single<WatchlistRepository> { WatchlistRepositoryImpl(get(), get(), get(), get(), get(), get(), get()) }
@@ -260,9 +276,9 @@ val sharedModule = module {
     single<WatchHistoryRepository> { WatchHistoryRepositoryImpl(get(), get(), get(), get(), get(), get()) }
 
     // Sync Repository
-    single<SyncRepository> { SyncRepositoryImpl(get(), get(), get(), get()) }
+    single<SyncRepository> { SyncRepositoryImpl(get(), get(), get()) }
     single { PairingApi(get(), baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL }) }
-    single { AccountSessionCoordinator(get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { AccountSessionCoordinator(get(), get(), get(), get(), get(), get(), get(), get(), get()) }
 
     // Use Cases
     factory { GetRecommendationsUseCase(get(), get()) }
@@ -276,7 +292,7 @@ val sharedModule = module {
     factory { DetailViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     factoryOf(::PersonViewModel)
     single {
-        SettingsViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()).also { vm ->
+        SettingsViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()).also { vm ->
             // Wire integration save callback — breaks circular dep by using lazy resolution.
             vm.onIntegrationSaved = { type, credential, label ->
                 get<AccountSessionCoordinator>().saveIntegrationToBackend(type, credential, label)
@@ -284,7 +300,7 @@ val sharedModule = module {
         }
     }
     factoryOf(::AddonViewModel)
-    single { ChannelsViewModel(get(), get(), get(), backgroundDispatcher = kotlinx.coroutines.Dispatchers.IO, playlistBackup = get()) }
+    single { ChannelsViewModel(get(), get(), get(), backgroundDispatcher = kotlinx.coroutines.Dispatchers.IO, playlistBackup = get(), settingsRefreshNotifier = get()) }
     factory { CalendarViewModel(get(), get()) }
     factoryOf(::DownloadViewModel)
     factory { DownloadCatalogueViewModel(get(), get(), get(), get()) }

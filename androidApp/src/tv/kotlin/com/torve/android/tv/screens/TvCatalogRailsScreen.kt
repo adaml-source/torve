@@ -16,6 +16,7 @@ import com.torve.android.tv.components.TvMediaContextMenuAction
 import com.torve.android.tv.components.TvMediaRails
 import com.torve.android.tv.components.dedupeAcrossRails
 import com.torve.android.tv.components.rememberTvFocusMemory
+import com.torve.data.network.catalogContentLoadErrorMessage
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.ParentalFilter
 import com.torve.domain.model.ContentRating
@@ -145,7 +146,7 @@ internal fun TvCatalogRailsScreen(
             }
             CatalogRailsUiState(loading = false, rails = rails).also { TvScreenCache.put(cacheKey, it) }
         } catch (t: Throwable) {
-            CatalogRailsUiState(loading = false, error = t.message ?: "Failed to load catalog")
+            CatalogRailsUiState(loading = false, error = catalogContentLoadErrorMessage(mediaType))
         }
     }
 
@@ -168,6 +169,7 @@ internal fun TvCatalogRailsScreen(
         onMediaClick = onMediaClick,
         onFirstContentRequester = onFirstContentRequester,
         onContentFocused = onContentFocused,
+        screenId = if (mediaType == "movie") "movies" else "shows",
         focusMemory = focusMemory,
         loading = uiState.loading,
         emptyMessage = emptyMessage,

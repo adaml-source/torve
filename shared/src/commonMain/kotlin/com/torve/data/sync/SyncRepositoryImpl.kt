@@ -40,7 +40,6 @@ internal fun isSensitivePreferenceKey(key: String): Boolean {
 class SyncRepositoryImpl(
     private val database: TorveDatabase,
     private val json: Json,
-    private val subscriptionRepo: com.torve.domain.repository.SubscriptionRepository? = null,
     private val secretStore: IntegrationSecretStore? = null,
 ) : SyncRepository {
     private val tolerantJson = Json { ignoreUnknownKeys = true }
@@ -66,8 +65,13 @@ class SyncRepositoryImpl(
             return isSensitivePreferenceKey(key)
         }
 
-        /** Integration secrets that are safe to sync between paired devices on the same LAN. */
-        val SYNCABLE_SECRET_KEYS = listOf(
+        // Security: secrets are excluded from default export (backup, backend sync).
+        // For explicit local device-to-device transfer, use exportForLocalTransfer()
+        // which includes secrets via LOCAL_TRANSFER_SECRET_KEYS.
+        val SYNCABLE_SECRET_KEYS = emptyList<IntegrationSecretKey>()
+
+        /** Keys included only in explicit local device-to-device transfer. */
+        val LOCAL_TRANSFER_SECRET_KEYS = listOf(
             IntegrationSecretKey.TRAKT_TOKENS,
             IntegrationSecretKey.TRAKT_ACCESS_TOKEN,
             IntegrationSecretKey.TRAKT_REFRESH_TOKEN,
@@ -148,8 +152,6 @@ class SyncRepositoryImpl(
             )
         }
 
-        val subToken = subscriptionRepo?.getActiveSubscription()?.purchaseToken
-
         val secrets = if (secretStore != null) {
             SYNCABLE_SECRET_KEYS.mapNotNull { key ->
                 val value = secretStore.get(key) ?: return@mapNotNull null
@@ -166,13 +168,25 @@ class SyncRepositoryImpl(
             watchProgress = progress,
             channelPlaylists = playlists,
             channelFavorites = favorites,
-            subscriptionToken = subToken,
             integrationSecrets = secrets,
         )
     }
 
     override suspend fun exportToJson(): String {
         return json.encodeToString(exportSyncPayload())
+    }
+
+    override suspend fun exportForLocalTransfer(): String {
+        val base = exportSyncPayload()
+        val secrets = if (secretStore != null) {
+            LOCAL_TRANSFER_SECRET_KEYS.mapNotNull { key ->
+                val value = secretStore.get(key) ?: return@mapNotNull null
+                SyncIntegrationSecret(key = key.name, value = value)
+            }
+        } else {
+            emptyList()
+        }
+        return json.encodeToString(base.copy(integrationSecrets = secrets))
     }
 
     // ── Import ───────────────────────────────────────────────
@@ -203,6 +217,9 @@ class SyncRepositoryImpl(
                     is_enabled = if (addon.isEnabled) 1L else 0L,
                     priority = addon.priority.toLong(),
                     installed_at = Clock.System.now().toEpochMilliseconds(),
+                    server_id = null,
+                    synced_at = null,
+                    installed_from = "sync",
                 )
                 addonsImported++
             } else {
@@ -344,13 +361,14 @@ class SyncRepositoryImpl(
             favoritesImported++
         }
 
-        // Integration secrets: write to secure store + mirror keys that services read from prefs
+        // Integration secrets: write to secure store + mirror keys that services read from prefs.
+        // Only keys in LOCAL_TRANSFER_SECRET_KEYS are accepted (used for LAN device-to-device transfer).
         var secretsImported = 0
         if (secretStore != null) {
             for (secret in payload.integrationSecrets) {
                 val key = runCatching { IntegrationSecretKey.valueOf(secret.key) }.getOrNull()
                     ?: continue
-                if (key !in SYNCABLE_SECRET_KEYS) continue
+                if (key !in LOCAL_TRANSFER_SECRET_KEYS) continue
                 secretStore.put(key, secret.value)
                 secretsImported++
                 // OmdbClient reads from preferences table — mirror the key there
@@ -358,11 +376,6 @@ class SyncRepositoryImpl(
                     queries.setPreference("omdb_api_key", secret.value)
                 }
             }
-        }
-
-        // Import subscription token if present
-        payload.subscriptionToken?.let { token ->
-            subscriptionRepo?.restorePurchase(token)
         }
 
         return SyncResult(

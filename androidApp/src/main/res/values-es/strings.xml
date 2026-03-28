@@ -147,6 +147,7 @@
     <string name="paywall_subtitle">Transmite, descarga y mira TV en vivo con una suscripción Pro</string>
     <string name="paywall_free">Gratis</string>
     <string name="paywall_pro">Pro</string>
+    <string name="paywall_multi_cloud">Servicios en la nube</string>
     <string name="paywall_search_browse">Buscar y explorar</string>
     <string name="paywall_channels">TV en Vivo</string>
     <string name="paywall_trakt_simkl">Sincronización Trakt &amp; SIMKL</string>
@@ -338,7 +339,7 @@
     <!-- Home Layout Screen -->
     <string name="home_layout_title">Diseño de inicio</string>
     <string name="home_layout_reset">Restablecer</string>
-    <string name="home_layout_hint">Mantén presionado y arrastra para reordenar. Toca una sección para personalizar su estilo de tarjeta.</string>
+    <string name="home_layout_hint">Arrastra el asa para reordenar. Toca una sección para personalizar su estilo de tarjeta.</string>
     <string name="home_layout_add_custom">Agregar sección personalizada</string>
     <string name="home_layout_collapse">Contraer</string>
     <string name="home_layout_customize">Personalizar</string>
@@ -358,7 +359,20 @@
     <string name="addon_catalog_open_browser">Abrir en navegador</string>
     <string name="addon_catalog_copy_url">Copiar URL</string>
     <string name="addon_catalog_manifest_hint">Si la página muestra un manifiesto JSON, copia su URL e inténtalo de nuevo.</string>
+    <string name="addon_popular_cinemeta_name">Cinemeta</string>
+    <string name="addon_popular_cinemeta_desc">Información de películas y series de IMDB/TMDB</string>
+    <string name="addon_popular_tmdb_name">The Movie Database Addon</string>
+    <string name="addon_popular_tmdb_desc">Catálogos completos con TMDB - tendencias, populares, mejor valorados</string>
+    <string name="addon_popular_trakt_name">Listas de Trakt</string>
+    <string name="addon_popular_trakt_desc">Accede a tus listas de Trakt y a títulos en tendencia, populares y esperados</string>
+    <string name="addon_popular_imdb_name">Catálogos de IMDB</string>
+    <string name="addon_popular_imdb_desc">Listas de películas y series de IMDB - Top 250, Most Popular, Box Office</string>
+    <string name="addon_popular_rpdb_name">Catálogos de RPDB</string>
+    <string name="addon_popular_rpdb_desc">Base de datos de pósteres con valoraciones - catálogos con superposiciones de puntuación</string>
+    <string name="addon_popular_opensubtitles_name">OpenSubtitles v3</string>
+    <string name="addon_popular_opensubtitles_desc">Subtítulos de OpenSubtitles.com - la mayor base de datos de subtítulos</string>
     <string name="addon_category_all">Todos</string>
+    <string name="addon_category_streams">Fuentes</string>
     <string name="addon_category_catalogs">Catálogos</string>
     <string name="addon_category_subtitles">Subtítulos</string>
 
@@ -503,7 +517,7 @@
     <string name="eq_custom">Personalizado</string>
 
     <!-- Home Customize (extended) -->
-    <string name="home_streaming_services">Servicios de streaming</string>
+    <string name="home_streaming_services">Servicios de disponibilidad</string>
     <string name="home_tmdb_credit">Datos proporcionados por TMDB</string>
     <string name="home_move_up">Mover arriba</string>
     <string name="home_move_down">Mover abajo</string>
@@ -782,8 +796,8 @@
     <string name="tv_settings_sync_ready">Importar todos los ajustes del teléfono emparejado</string>
     <string name="tv_settings_pair_first">Empareja un teléfono primero</string>
     <string name="tv_settings_region">Región de contenido</string>
-    <string name="tv_settings_streaming_services">Servicios de streaming</string>
-    <string name="tv_settings_home_layout_note">Para personalizar el diseño de Inicio, estilos de tarjeta, fuentes de valoración y servicios de streaming — configúralos en la app Torve y toca \"Sincronizar ajustes del teléfono\" arriba.</string>
+    <string name="tv_settings_streaming_services">Servicios de disponibilidad</string>
+    <string name="tv_settings_home_layout_note">Para personalizar el diseño de Inicio, estilos de tarjeta, fuentes de valoración y servicios de disponibilidad — configúralos en la app Torve y toca \"Sincronizar ajustes del teléfono\" arriba.</string>
 
     <!-- TV Settings: Setup Mode -->
     <string name="tv_settings_setup_prompt">¿Cómo usas Torve?</string>
@@ -1046,8 +1060,9 @@
     <string name="settings_card_style">Estilo de Tarjeta</string>
     <string name="settings_card_style_sub">Tamaño, zoom, indicadores de visto, apariencia</string>
     <string name="settings_addons_sub">%d instalados · Buscar &amp; gestionar</string>
-    <string name="settings_streaming_services">Servicios de Streaming</string>
-    <string name="settings_streaming_services_sub">Personalizar servicios de inicio</string>
+    <string name="settings_streaming_services">Servicios de disponibilidad</string>
+    <string name="settings_streaming_services_sub">Personalizar disponibilidad de inicio</string>
+    <string name="settings_streaming_services_desc">Elige qué servicios de disponibilidad aparecen en tu inicio. Los títulos coincidentes de esos servicios se destacarán al explorar Torve.</string>
     <string name="settings_stream_groups">Grupos de Streams</string>
     <string name="settings_stream_groups_sub">%d grupos</string>
     <string name="settings_regex_patterns">Patrones Regex</string>
@@ -1066,6 +1081,8 @@
     <string name="settings_report_issue">Reportar Problema</string>
     <string name="settings_danger_zone">Zona de Peligro</string>
     <string name="settings_region">Región</string>
+    <string name="settings_availability_region">Región de disponibilidad</string>
+    <string name="settings_availability_region_desc">Código de país de 2 letras (p. ej. US, GB, DE). Determina qué proveedores de disponibilidad se muestran en las páginas de detalle.</string>
     <string name="sync_no_targets">No se encontraron dispositivos objetivo vinculados.</string>
     <string name="sync_device_info">%1$s - %2$s</string>
     <string name="search_create_profile_first">Crea un perfil local para enviar búsquedas a un TV</string>
@@ -1120,6 +1137,7 @@
     <string name="downloaded_cd">Descargado</string>
     <string name="watched_cd">Visto</string>
     <string name="drag_to_reorder_cd">Arrastrar para reordenar</string>
+    <string name="detail_open_failed">No se pudieron abrir los detalles de este elemento</string>
     <string name="discover_title">Descubrir</string>
     <string name="next_format">Siguiente: %s</string>
 
@@ -1253,7 +1271,7 @@
     <string name="tv_settings_linked_services_desc">Estado de vinculación actual desde tu teléfono emparejado.</string>
     <string name="tv_settings_metadata_providers">Proveedores de metadatos</string>
     <string name="tv_settings_metadata_read_only">Solo lectura mientras se gestiona por sincronización del teléfono.</string>
-    <string name="tv_settings_streaming_accounts">Cuentas de streaming</string>
+    <string name="tv_settings_streaming_accounts">Cuentas en la nube</string>
     <string name="tv_settings_streaming_accounts_desc">Conecta tus servicios cloud y de seguimiento directamente en la TV.</string>
     <string name="tv_settings_metadata_keys_desc">Claves y validación para servicios de metadatos.</string>
     <string name="tv_settings_integrations_title">Integraciones</string>
@@ -1286,4 +1304,3 @@
     <string name="tv_home_layout_instructions">OK para activar o desactivar. DERECHA para mover, ARRIBA/ABAJO para reordenar, IZQUIERDA para terminar.</string>
     <string name="tv_settings_sign_in_share">Inicia sesión para compartir una compra en hasta 5 dispositivos.</string>
 </resources>
-

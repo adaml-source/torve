@@ -1,5 +1,6 @@
 package com.torve.android.ui.subscription
 
+import android.app.Activity
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,7 +19,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -31,7 +31,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import android.app.Activity
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -50,17 +49,25 @@ import com.torve.android.premium.PremiumAccess
 import com.torve.android.premium.PremiumFeature
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Snow
+import com.torve.domain.model.SubscriptionTier
 import com.torve.presentation.subscription.PurchaseStatusMessage
 import com.torve.presentation.subscription.PurchaseStatusTone
 import com.torve.presentation.subscription.PurchaseVerificationState
+import com.torve.presentation.subscription.SubscriptionUiState
 import com.torve.presentation.subscription.SubscriptionViewModel
+import com.torve.presentation.subscription.accessPresentation
 import org.koin.compose.koinInject
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PaywallScreen(
     onBack: () -> Unit,
     onDeviceLimitReached: () -> Unit = {},
+    onManageDevices: () -> Unit = {},
     lockedFeature: PremiumFeature? = null,
     viewModel: SubscriptionViewModel = koinInject(),
     billingManager: BillingManager = koinInject(),
@@ -71,19 +78,17 @@ fun PaywallScreen(
 
     val isAmazonBuild = BuildConfig.FLAVOR.contains("amazon", ignoreCase = true)
     val isTvBuild = BuildConfig.FLAVOR.contains("tv", ignoreCase = true)
+    val bypassDeviceGateForMobileDebug = BuildConfig.DEBUG && !isTvBuild
     val platform = when {
         isAmazonBuild && isTvBuild -> "amazon_fire_tv"
         isAmazonBuild -> "amazon_appstore_mobile"
         isTvBuild -> "google_play_tv"
         else -> "google_play_mobile"
     }
+    val purchaseStoreLabel = if (isAmazonBuild) "Amazon Appstore" else "Google Play"
 
-    // Navigate to Device Limit Reached screen when device cap is hit after purchase
-    LaunchedEffect(state.showDeviceLimitReached) {
-        if (state.showDeviceLimitReached) {
-            viewModel.dismissDeviceLimitReached()
-            onDeviceLimitReached()
-        }
+    LaunchedEffect(Unit) {
+        viewModel.refreshAccess()
     }
 
     LaunchedEffect(purchaseResult) {
@@ -98,9 +103,10 @@ fun PaywallScreen(
                             platform = if (isTvBuild) "amazon_fire_tv" else "amazon_appstore_mobile",
                         )
                     }
+
                     BillingManager.Store.GOOGLE_PLAY -> {
                         viewModel.verifyGooglePurchase(
-                            productId = "com.torve.pro.lifetime",
+                            productId = result.productId.ifBlank { "com.torve.pro.lifetime" },
                             purchaseToken = result.purchaseToken,
                             platform = platform,
                         )
@@ -108,27 +114,36 @@ fun PaywallScreen(
                 }
                 billingManager.clearPurchaseResult()
             }
+
             is BillingManager.PurchaseResult.Pending -> {
-                viewModel.markAmazonPurchasePending(result.message)
+                viewModel.markPurchasePending(result.message)
                 billingManager.clearPurchaseResult()
             }
+
             is BillingManager.PurchaseResult.AlreadyOwned -> {
                 if (isAmazonBuild) {
                     viewModel.restoreAmazonPurchases(platform = if (isTvBuild) "amazon_fire_tv" else "amazon_appstore_mobile")
                 } else {
-                    viewModel.restorePurchase("restored_purchase")
+                    viewModel.restoreStorePurchases(
+                        store = "google_play",
+                        platform = platform,
+                        storeLabel = purchaseStoreLabel,
+                    )
                 }
                 billingManager.clearPurchaseResult()
             }
+
             is BillingManager.PurchaseResult.Cancelled -> {
                 viewModel.setPurchaseError("Purchase cancelled.")
                 billingManager.clearPurchaseResult()
             }
+
             is BillingManager.PurchaseResult.Error -> {
                 viewModel.setPurchaseError(result.message)
                 billingManager.clearPurchaseResult()
             }
-            null -> {}
+
+            null -> Unit
         }
     }
 
@@ -146,148 +161,59 @@ fun PaywallScreen(
             },
         )
 
-        if (state.isPro) {
-            LifetimeActiveContent(
-                onRestore = {
-                    billingManager.queryExistingPurchases()
+        PaywallContent(
+            state = state,
+            lockedFeature = lockedFeature,
+            purchaseStoreLabel = purchaseStoreLabel,
+            billingManager = billingManager,
+            onRestore = {
+                viewModel.requireAccountForRestore(purchaseStoreLabel) {
                     if (isAmazonBuild) {
-                        viewModel.restoreAmazonPurchases(
-                            platform = if (isTvBuild) "amazon_fire_tv" else "amazon_appstore_mobile",
+                        viewModel.restoreAmazonPurchases(platform = if (isTvBuild) "amazon_fire_tv" else "amazon_appstore_mobile")
+                    } else {
+                        viewModel.restoreStorePurchases(
+                            store = "google_play",
+                            platform = platform,
+                            storeLabel = purchaseStoreLabel,
                         )
                     }
-                },
-            )
-        } else {
-            val billingState by billingManager.billingState.collectAsState()
-            val formattedPrice = billingManager.getFormattedPrice()
-            val priceReady = formattedPrice != null
-            val priceText = when {
-                formattedPrice != null -> formattedPrice
-                billingState is BillingManager.BillingState.Ready -> stringResource(R.string.paywall_price)
-                billingState is BillingManager.BillingState.Error -> stringResource(R.string.paywall_price)
-                else -> stringResource(R.string.paywall_price_loading)
-            }
-            FreeTierContent(
-                state = state,
-                lockedFeature = lockedFeature,
-                formattedPrice = priceText,
-                purchaseEnabled = priceReady,
-                onPurchase = { activity?.let { billingManager.launchPurchase(it) } },
-                onRetryVerification = { viewModel.retryPendingAmazonVerification() },
-                onRestore = {
-                    billingManager.queryExistingPurchases()
-                    if (isAmazonBuild) {
-                        viewModel.restoreAmazonPurchases(
-                            platform = if (isTvBuild) "amazon_fire_tv" else "amazon_appstore_mobile",
-                        )
-                    }
-                },
-            )
-        }
+                }
+            },
+            onManageDevices = onManageDevices,
+            onRefreshAccess = viewModel::refreshAccess,
+            onRetryVerification = viewModel::retryPendingAmazonVerification,
+            onPurchase = { productType ->
+                viewModel.requireAccountForPurchase(purchaseStoreLabel) {
+                    activity?.let { billingManager.launchPurchase(it, productType) }
+                }
+            },
+        )
     }
 }
 
 @Composable
-private fun LifetimeActiveContent(
+private fun PaywallContent(
+    state: SubscriptionUiState,
+    lockedFeature: PremiumFeature?,
+    purchaseStoreLabel: String,
+    billingManager: BillingManager,
     onRestore: () -> Unit,
-) {
-    Column(
-        modifier = Modifier.padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Spacer(Modifier.height(24.dp))
-
-        Icon(
-            Icons.Default.Check,
-            contentDescription = null,
-            tint = Color(0xFF22C55E),
-            modifier = Modifier.size(64.dp),
-        )
-
-        Spacer(Modifier.height(16.dp))
-
-        Text(
-            text = stringResource(R.string.paywall_lifetime_active),
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center,
-        )
-
-        Spacer(Modifier.height(8.dp))
-
-        Text(
-            text = stringResource(R.string.paywall_full_access),
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-        )
-
-        Spacer(Modifier.height(32.dp))
-
-        // All features with check marks
-        AllFeaturesChecked()
-
-        Spacer(Modifier.height(32.dp))
-
-        TextButton(onClick = onRestore) {
-            Text(stringResource(R.string.paywall_restore))
-        }
-    }
-}
-
-@Composable
-private fun AllFeaturesChecked() {
-    val features = listOf(
-        R.string.paywall_search_browse,
-        R.string.paywall_stream_playback,
-        R.string.paywall_downloads,
-        R.string.paywall_channels,
-        R.string.paywall_multi_cloud,
-        R.string.paywall_trakt_simkl,
-        R.string.paywall_ai_search,
-        R.string.paywall_rating_pills,
-        R.string.paywall_custom_home,
-    )
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        features.forEach { featureRes ->
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    Icons.Default.Check,
-                    contentDescription = null,
-                    tint = Color(0xFF22C55E),
-                    modifier = Modifier.size(20.dp),
-                )
-                Spacer(Modifier.width(12.dp))
-                Text(
-                    text = stringResource(featureRes),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = Snow,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun FreeTierContent(
-    state: com.torve.presentation.subscription.SubscriptionUiState,
-    lockedFeature: PremiumFeature? = null,
-    formattedPrice: String? = null,
-    purchaseEnabled: Boolean = true,
-    onPurchase: () -> Unit,
+    onManageDevices: () -> Unit,
+    onRefreshAccess: () -> Unit,
     onRetryVerification: () -> Unit,
-    onRestore: () -> Unit,
+    onPurchase: (BillingManager.ProductType) -> Unit,
 ) {
+    val monthlyOffer = billingManager.getOffer(BillingManager.ProductType.MONTHLY)
+    val lifetimeOffer = billingManager.getOffer(BillingManager.ProductType.LIFETIME)
     val purchaseBlocked = state.purchaseVerificationState == PurchaseVerificationState.PENDING
+    val access = state.accessPresentation()
+
     Column(
         modifier = Modifier.padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            text = stringResource(R.string.paywall_free_status),
+            text = access.accessStatusLabel,
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -295,7 +221,7 @@ private fun FreeTierContent(
         Spacer(Modifier.height(8.dp))
 
         Text(
-            text = stringResource(R.string.paywall_unlock),
+            text = stringResource(R.string.paywall_upgrade_title),
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center,
@@ -304,7 +230,7 @@ private fun FreeTierContent(
         Spacer(Modifier.height(8.dp))
 
         Text(
-            text = stringResource(R.string.paywall_subtitle),
+            text = stringResource(R.string.paywall_upgrade_subtitle),
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -327,7 +253,7 @@ private fun FreeTierContent(
                         )
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            text = PremiumAccess.LIFETIME_REQUIRED_LABEL,
+                            text = stringResource(R.string.premium_requires_lifetime),
                             style = MaterialTheme.typography.labelMedium,
                             color = Amber,
                             fontWeight = FontWeight.SemiBold,
@@ -335,90 +261,78 @@ private fun FreeTierContent(
                     }
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        text = PremiumAccess.titleFor(feature),
+                        text = stringResource(PremiumAccess.titleResFor(feature)),
                         style = MaterialTheme.typography.titleSmall,
                         color = Snow,
                         fontWeight = FontWeight.SemiBold,
                     )
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        text = PremiumAccess.unlockSummaryFor(feature),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
             }
         }
 
         Spacer(Modifier.height(24.dp))
-
         FeatureComparison()
-
         Spacer(Modifier.height(24.dp))
+
+        CurrentAccessCard(
+            state = state,
+            purchaseStoreLabel = purchaseStoreLabel,
+        )
 
         state.purchaseStatus?.let { status ->
-            PurchaseStatusCard(status = status)
             Spacer(Modifier.height(16.dp))
+            PurchaseStatusCard(status = status)
         }
 
-        // Pricing card
-        OutlinedCard(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary),
-        ) {
-            Row(
-                modifier = Modifier.padding(20.dp),
-                verticalAlignment = Alignment.CenterVertically,
+        if (access.shouldShowBuy) {
+            Spacer(Modifier.height(20.dp))
+            PricingOptionCard(
+                title = stringResource(R.string.paywall_monthly_title),
+                description = stringResource(R.string.paywall_monthly_description),
+                price = monthlyOffer?.formattedPrice ?: stringResource(R.string.paywall_price_loading),
+                billingDetails = monthlyOffer?.billingDetails ?: stringResource(R.string.paywall_recurring_label),
+                enabled = monthlyOffer != null && !state.isPurchasing && !purchaseBlocked,
+                actionLabel = stringResource(R.string.paywall_choose_monthly),
+                onClick = { onPurchase(BillingManager.ProductType.MONTHLY) },
+            )
+
+            Spacer(Modifier.height(12.dp))
+
+            PricingOptionCard(
+                title = stringResource(R.string.paywall_lifetime_title),
+                description = stringResource(R.string.paywall_lifetime_description),
+                price = lifetimeOffer?.formattedPrice ?: stringResource(R.string.paywall_price_loading),
+                billingDetails = lifetimeOffer?.billingDetails ?: stringResource(R.string.paywall_one_time_label),
+                enabled = lifetimeOffer != null && !state.isPurchasing && !purchaseBlocked,
+                actionLabel = stringResource(R.string.paywall_choose_lifetime),
+                onClick = { onPurchase(BillingManager.ProductType.LIFETIME) },
+            )
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        if (access.shouldShowManageDevices) {
+            Button(
+                onClick = onManageDevices,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = stringResource(R.string.paywall_lifetime),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = stringResource(R.string.paywall_one_time),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                Text(stringResource(R.string.manage_devices_title))
+            }
+            if (state.isLoggedIn) {
+                TextButton(onClick = onRefreshAccess) {
+                    Text(stringResource(R.string.premium_refresh_access))
                 }
-                Text(
-                    text = formattedPrice ?: stringResource(R.string.paywall_price),
-                    style = if (purchaseEnabled) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = if (purchaseEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            }
+        } else if (state.isLoggedIn) {
+            TextButton(onClick = onRefreshAccess) {
+                Text(stringResource(R.string.premium_refresh_access))
             }
         }
-
-        Spacer(Modifier.height(24.dp))
-
-        Button(
-            onClick = onPurchase,
-            modifier = Modifier.fillMaxWidth().height(56.dp),
-            enabled = purchaseEnabled && !state.isPurchasing && !purchaseBlocked,
-            shape = RoundedCornerShape(16.dp),
-        ) {
-            if (state.isPurchasing) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(24.dp),
-                    color = MaterialTheme.colorScheme.onPrimary,
-                )
-            } else {
-                Text(
-                    text = stringResource(R.string.paywall_get_lifetime),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-            }
-        }
-
-        Spacer(Modifier.height(12.dp))
 
         if (state.purchaseStatus?.showRetryVerification == true) {
             TextButton(onClick = onRetryVerification) {
-                Text("Retry Verification")
+                Text(stringResource(R.string.paywall_retry_verification))
             }
         }
 
@@ -426,16 +340,132 @@ private fun FreeTierContent(
             Text(stringResource(R.string.paywall_restore))
         }
 
+        Text(
+            text = stringResource(R.string.paywall_marketplace_copy, purchaseStoreLabel),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+        Text(
+            text = stringResource(R.string.paywall_refund_copy),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+
         state.error?.let { error ->
             Spacer(Modifier.height(8.dp))
             Text(
                 text = error,
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
             )
         }
 
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun CurrentAccessCard(
+    state: SubscriptionUiState,
+    purchaseStoreLabel: String,
+) {
+    val access = state.accessPresentation()
+
+    OutlinedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = access.accessStatusLabel,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = access.accessHelperText,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            val marketplace = marketplaceLabel(state.subscription?.platform)
+            if (marketplace != null) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "Managed through $marketplace",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else if (access.hasPremiumEntitlement) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "Billing is handled by $purchaseStoreLabel.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PricingOptionCard(
+    title: String,
+    description: String,
+    price: String,
+    billingDetails: String,
+    enabled: Boolean,
+    actionLabel: String,
+    onClick: () -> Unit,
+) {
+    OutlinedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)),
+    ) {
+        Column(modifier = Modifier.padding(18.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text(
+                    text = price,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = billingDetails,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(14.dp))
+            Button(
+                onClick = onClick,
+                enabled = enabled,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+            ) {
+                Text(actionLabel)
+            }
+        }
     }
 }
 
@@ -479,26 +509,36 @@ private fun FeatureComparison() {
         ) {
             Spacer(Modifier.weight(1f))
             Box(modifier = Modifier.width(60.dp), contentAlignment = Alignment.Center) {
-                Text(stringResource(R.string.paywall_free), style = MaterialTheme.typography.labelMedium, color = Snow, fontWeight = FontWeight.Bold)
+                Text(
+                    stringResource(R.string.paywall_free),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Snow,
+                    fontWeight = FontWeight.Bold,
+                )
             }
-            Box(modifier = Modifier.width(60.dp), contentAlignment = Alignment.Center) {
-                Text(stringResource(R.string.paywall_pro), style = MaterialTheme.typography.labelMedium, color = Amber, fontWeight = FontWeight.Bold)
+            Box(modifier = Modifier.width(80.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    stringResource(R.string.paywall_pro),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Amber,
+                    fontWeight = FontWeight.Bold,
+                )
             }
         }
-        FeatureRow(stringResource(R.string.paywall_search_browse), free = true, pro = true)
-        FeatureRow(stringResource(R.string.paywall_stream_playback), free = false, pro = true)
-        FeatureRow(stringResource(R.string.paywall_downloads), free = false, pro = true)
-        FeatureRow(stringResource(R.string.paywall_channels), free = false, pro = true)
-        FeatureRow(stringResource(R.string.paywall_multi_cloud), free = false, pro = true)
-        FeatureRow(stringResource(R.string.paywall_trakt_simkl), free = false, pro = true)
-        FeatureRow(stringResource(R.string.paywall_ai_search), free = false, pro = true)
-        FeatureRow(stringResource(R.string.paywall_rating_pills), free = false, pro = true)
-        FeatureRow(stringResource(R.string.paywall_custom_home), free = false, pro = true)
+        FeatureRow(stringResource(R.string.paywall_search_browse), free = true, premium = true)
+        FeatureRow(stringResource(R.string.paywall_stream_playback), free = false, premium = true)
+        FeatureRow(stringResource(R.string.paywall_downloads), free = false, premium = true)
+        FeatureRow(stringResource(R.string.paywall_channels), free = false, premium = true)
+        FeatureRow(stringResource(R.string.paywall_multi_cloud), free = false, premium = true)
+        FeatureRow(stringResource(R.string.paywall_trakt_simkl), free = false, premium = true)
+        FeatureRow(stringResource(R.string.paywall_ai_search), free = false, premium = true)
+        FeatureRow(stringResource(R.string.paywall_rating_pills), free = false, premium = true)
+        FeatureRow(stringResource(R.string.paywall_custom_home), free = false, premium = true)
     }
 }
 
 @Composable
-private fun FeatureRow(feature: String, free: Boolean, pro: Boolean) {
+private fun FeatureRow(feature: String, free: Boolean, premium: Boolean) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -514,16 +554,21 @@ private fun FeatureRow(feature: String, free: Boolean, pro: Boolean) {
         Box(modifier = Modifier.width(60.dp), contentAlignment = Alignment.Center) {
             if (free) {
                 Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF22C55E), modifier = Modifier.size(20.dp))
-            } else {
-                Icon(Icons.Default.Close, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(20.dp))
             }
         }
-        Box(modifier = Modifier.width(60.dp), contentAlignment = Alignment.Center) {
-            if (pro) {
+        Box(modifier = Modifier.width(80.dp), contentAlignment = Alignment.Center) {
+            if (premium) {
                 Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF22C55E), modifier = Modifier.size(20.dp))
-            } else {
-                Icon(Icons.Default.Close, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(20.dp))
             }
         }
+    }
+}
+
+private fun marketplaceLabel(value: String?): String? {
+    return when (value?.lowercase()) {
+        "google_play" -> "Google Play"
+        "amazon" -> "Amazon Appstore"
+        "apple" -> "Apple App Store"
+        else -> null
     }
 }

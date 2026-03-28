@@ -1,9 +1,12 @@
 package com.torve.presentation.addon
 
+import com.torve.data.addon.AddonSyncService
 import com.torve.domain.repository.AddonRepository
+import com.torve.presentation.settings.SettingsRefreshNotifier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -12,6 +15,8 @@ import kotlinx.coroutines.launch
 
 class AddonViewModel(
     private val addonRepo: AddonRepository,
+    private val addonSyncService: AddonSyncService,
+    settingsRefreshNotifier: SettingsRefreshNotifier,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(AddonUiState())
@@ -19,6 +24,11 @@ class AddonViewModel(
 
     init {
         loadAddons()
+        scope.launch {
+            settingsRefreshNotifier.events.collectLatest {
+                loadAddons()
+            }
+        }
     }
 
     fun loadAddons() {
@@ -44,7 +54,7 @@ class AddonViewModel(
         scope.launch {
             _state.update { it.copy(isInstalling = true, installingUrl = url, lastInstallUrl = url, installError = null) }
             try {
-                addonRepo.installAddon(url)
+                val installedAddon = addonRepo.installAddon(url)
                 val addons = addonRepo.getInstalledAddons()
                 _state.update {
                     it.copy(
@@ -53,6 +63,9 @@ class AddonViewModel(
                         installingUrl = "",
                         installUrl = "",
                     )
+                }
+                scope.launch(Dispatchers.IO) {
+                    addonSyncService.onAddonInstalled(installedAddon)
                 }
             } catch (e: Exception) {
                 _state.update { it.copy(isInstalling = false, installingUrl = "", installError = e.message) }
@@ -63,9 +76,13 @@ class AddonViewModel(
     fun removeAddon(manifestUrl: String) {
         scope.launch {
             try {
+                val existingAddon = addonRepo.getAddon(manifestUrl)
                 addonRepo.removeAddon(manifestUrl)
                 val addons = addonRepo.getInstalledAddons()
                 _state.update { it.copy(addons = addons) }
+                scope.launch(Dispatchers.IO) {
+                    addonSyncService.onAddonRemoved(existingAddon)
+                }
             } catch (e: Exception) {
                 _state.update { it.copy(error = e.message) }
             }
@@ -78,6 +95,9 @@ class AddonViewModel(
                 addonRepo.toggleAddon(manifestUrl, enabled)
                 val addons = addonRepo.getInstalledAddons()
                 _state.update { it.copy(addons = addons) }
+                scope.launch(Dispatchers.IO) {
+                    addonSyncService.onAddonStateChanged(manifestUrl)
+                }
             } catch (e: Exception) {
                 _state.update { it.copy(error = e.message) }
             }
@@ -90,6 +110,9 @@ class AddonViewModel(
                 addonRepo.reorderAddons(orderedUrls)
                 val addons = addonRepo.getInstalledAddons()
                 _state.update { it.copy(addons = addons) }
+                scope.launch(Dispatchers.IO) {
+                    addonSyncService.onAddonOrderChanged(orderedUrls)
+                }
             } catch (e: Exception) {
                 _state.update { it.copy(error = e.message) }
             }

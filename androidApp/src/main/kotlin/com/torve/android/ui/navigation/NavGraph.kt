@@ -137,13 +137,72 @@ import org.koin.compose.koinInject
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 private fun NavHostController.navigateToDetail(item: com.torve.domain.model.MediaItem) {
-    val id = item.tmdbId ?: item.id.toIntOrNull() ?: return
     val type = if (item.type == MediaType.SERIES) "tv" else "movie"
-    navigate("detail/$type/$id")
+    val tmdbId = item.tmdbId ?: item.id.toIntOrNull()
+    when {
+        tmdbId != null -> navigate("detail/$type/$tmdbId")
+        !item.imdbId.isNullOrBlank() -> navigate("detail_imdb/$type/${Uri.encode(item.imdbId)}")
+        else -> return
+    }
 }
 
 private fun NavHostController.navigateToLifetimeUnlock(feature: PremiumFeature) {
     navigate("paywall?feature=${Uri.encode(feature.name)}")
+}
+
+@Composable
+private fun ResolveExternalDetailRoute(
+    type: String,
+    imdbId: String,
+    metadataRepo: MetadataRepository,
+    onResolved: (String, Int) -> Unit,
+    onBack: () -> Unit,
+) {
+    var resolutionError by remember(imdbId, type) { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(imdbId, type) {
+        val resolved = runCatching {
+            metadataRepo.findByImdbId(imdbId, preferredType = type)
+        }.getOrNull()
+        val resolvedTmdbId = resolved?.tmdbId
+        if (resolvedTmdbId != null) {
+            val resolvedType = if (resolved.type == MediaType.SERIES) "tv" else "movie"
+            onResolved(resolvedType, resolvedTmdbId)
+        } else {
+            resolutionError = ""
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(24.dp),
+        ) {
+            if (resolutionError == null) {
+                androidx.compose.material3.CircularProgressIndicator(color = Amber)
+                Text(
+                    text = stringResource(R.string.detail_resolving),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+            } else {
+                Text(
+                    text = resolutionError ?: stringResource(R.string.detail_open_failed),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+                androidx.compose.material3.Button(onClick = onBack) {
+                    Text(text = stringResource(R.string.common_back))
+                }
+            }
+        }
+    }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -204,13 +263,18 @@ fun TorveNavGraph(
     val syncState by syncCoordinator.state.collectAsState()
     var didInitialWatchlistSync by remember { mutableStateOf(false) }
     val dest = if (isTvMode) TV_HOME_ROUTE else MOBILE_HOME_ROUTE
-    val accessTier = rememberEffectivePremiumAccessTier(subscriptionState.isPro)
+    val accessTier = rememberEffectivePremiumAccessTier(
+        subscriptionTier = subscriptionState.subscription?.tier,
+        subscriptionIsPro = subscriptionState.isPro,
+    )
     val isLocked: (PremiumFeature) -> Boolean = remember(accessTier) {
         { feature -> PremiumAccess.isPremiumLocked(feature, accessTier) }
     }
     val requestLifetimeUnlock: (PremiumFeature) -> Unit = remember(navController) {
         { feature -> navController.navigateToLifetimeUnlock(feature) }
     }
+    val canAccessAccountSurface = subscriptionState.hasEntitlement || !isLocked(PremiumFeature.ACCOUNT_SETUP)
+    val canAccessManageDevicesSurface = subscriptionState.hasEntitlement || !isLocked(PremiumFeature.DEVICE_LINKING)
 
     LaunchedEffect(syncState.blockedFeature, currentRoute) {
         val blockedFeature = syncState.blockedFeature ?: return@LaunchedEffect
@@ -220,32 +284,11 @@ fun TorveNavGraph(
         syncCoordinator.clearBlockedFeature()
     }
 
-    // Hoist CatalogViewModels to NavGraph level so they survive detail navigation
     val metadataRepo: MetadataRepository = koinInject()
     val keywordSearchService: KeywordSearchService = koinInject()
     val prefsRepo: com.torve.domain.repository.PreferencesRepository = koinInject()
     val ratingsEnricher: RatingsEnricher = koinInject()
     val integrationSecretStore: IntegrationSecretStore = koinInject()
-    val moviesCatalogViewModel = remember {
-        CatalogViewModel(
-            metadataRepo,
-            "movie",
-            keywordSearchService = keywordSearchService,
-            prefsRepo = prefsRepo,
-            ratingsEnricher = ratingsEnricher,
-            integrationSecretStore = integrationSecretStore,
-        )
-    }
-    val tvCatalogViewModel = remember {
-        CatalogViewModel(
-            metadataRepo,
-            "tv",
-            keywordSearchService = keywordSearchService,
-            prefsRepo = prefsRepo,
-            ratingsEnricher = ratingsEnricher,
-            integrationSecretStore = integrationSecretStore,
-        )
-    }
 
     LaunchedEffect(Unit) {
         watchlistViewModel.loadWatchlist()
@@ -265,15 +308,48 @@ fun TorveNavGraph(
     val contentBottomPadding = if (showBottomBar) 56.dp + navBarInsetBottom else navBarInsetBottom
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // ── Restore progress banner ──
+        // ── Restore progress ──
         val accountSessionCoordinator: com.torve.presentation.session.AccountSessionCoordinator = koinInject()
         val restoreProgress by accountSessionCoordinator.restoreProgress.collectAsState()
-        if (restoreProgress.phase == com.torve.presentation.session.RestorePhase.RUNNING ||
-            restoreProgress.phase == com.torve.presentation.session.RestorePhase.COMPLETED ||
-            restoreProgress.phase == com.torve.presentation.session.RestorePhase.COMPLETED_WITH_ERRORS
+
+        // Blocking overlay during heavy import (playlist channel loading)
+        if (restoreProgress.isImporting) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .zIndex(200f)
+                    .background(com.torve.android.ui.theme.Obsidian.copy(alpha = 0.85f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    androidx.compose.material3.CircularProgressIndicator(
+                        modifier = Modifier.size(48.dp),
+                        color = com.torve.android.ui.theme.Amber,
+                        strokeWidth = 3.dp,
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        text = restoreProgress.message.ifBlank { "Restoring your account data…" },
+                        style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
+                        color = com.torve.android.ui.theme.Snow,
+                    )
+                    if (restoreProgress.totalPlaylists > 0) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = "${restoreProgress.restoredPlaylists}/${restoreProgress.totalPlaylists} playlists",
+                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                            color = com.torve.android.ui.theme.Silver,
+                        )
+                    }
+                }
+            }
+        }
+
+        // Non-blocking banner for completion status
+        if (!restoreProgress.isImporting && restoreProgress.phase != com.torve.presentation.session.RestorePhase.IDLE &&
+            restoreProgress.message.isNotBlank()
         ) {
-            androidx.compose.animation.AnimatedVisibility(
-                visible = true,
+            Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .zIndex(10f)
@@ -293,70 +369,20 @@ fun TorveNavGraph(
                             .padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (restoreProgress.phase == com.torve.presentation.session.RestorePhase.RUNNING) {
-                            androidx.compose.material3.CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp,
-                                color = com.torve.android.ui.theme.Amber,
-                            )
-                        }
-                        Spacer(Modifier.width(10.dp))
                         Text(
                             text = restoreProgress.message,
                             style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                             color = com.torve.android.ui.theme.Snow,
                             modifier = Modifier.weight(1f),
                         )
-                        if (restoreProgress.phase != com.torve.presentation.session.RestorePhase.RUNNING) {
-                            // Auto-dismiss after 3 seconds
-                            LaunchedEffect(restoreProgress.phase) {
-                                kotlinx.coroutines.delay(3000)
-                                accountSessionCoordinator.dismissRestoreProgress()
-                            }
-                        }
                     }
                 }
-            }
-        }
-
-        // ── Always-composed Home layer (mobile) ──
-        // Home is kept alive so returning to the Home tab is instant (no
-        // composition rebuild, no Coil image re-decode). Hidden when
-        // another route is active via graphicsLayer alpha + focus/semantics gating.
-        val isHomeVisible = !isTvMode && currentRoute == MOBILE_HOME_ROUTE
-        if (!isTvMode) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(bottom = contentBottomPadding)
-                    .zIndex(if (isHomeVisible) 2f else -1f)
-                    .graphicsLayer { alpha = if (isHomeVisible) 1f else 0f }
-                    .then(
-                        if (!isHomeVisible) Modifier.clearAndSetSemantics {} else Modifier
-                    ),
-            ) {
-                HomeScreen(
-                    onMediaClick = { item ->
-                        if (isHomeVisible) navController.navigateToDetail(item)
-                    },
-                    onContinueWatchingClick = { progress ->
-                        if (!isHomeVisible) return@HomeScreen
-                        val id = progress.mediaId.toIntOrNull() ?: return@HomeScreen
-                        val type = if (progress.mediaType == MediaType.SERIES) "tv" else "movie"
-                        navController.navigate("detail/$type/$id")
-                    },
-                    onSeeAllClick = { sectionId ->
-                        if (isHomeVisible) navController.navigate("seeall/${Uri.encode(sectionId)}")
-                    },
-                    onProviderClick = { providerId, providerName ->
-                        if (isHomeVisible) navController.navigate("provider/$providerId/${Uri.encode(providerName)}")
-                    },
-                    onPersonClick = { personId ->
-                        if (isHomeVisible) navController.navigate("person/$personId")
-                    },
-                    isLifetimeUnlocked = subscriptionState.isPro,
-                    onLockedFeatureClick = requestLifetimeUnlock,
-                )
+                LaunchedEffect(restoreProgress.phase) {
+                    if (restoreProgress.phase != com.torve.presentation.session.RestorePhase.RUNNING) {
+                        kotlinx.coroutines.delay(3000)
+                        accountSessionCoordinator.dismissRestoreProgress()
+                    }
+                }
             }
         }
 
@@ -391,13 +417,43 @@ fun TorveNavGraph(
                 )
             }
 
-            // Home tab — empty placeholder; actual content is always-composed above
-            composable("home") { }
+            // Home tab — compose only when the Home route is active.
+            composable("home") {
+                HomeScreen(
+                    onMediaClick = { item -> navController.navigateToDetail(item) },
+                    onContinueWatchingClick = { progress ->
+                        val id = progress.mediaId.toIntOrNull() ?: return@HomeScreen
+                        val type = if (progress.mediaType == MediaType.SERIES) "tv" else "movie"
+                        navController.navigate("detail/$type/$id")
+                    },
+                    onSeeAllClick = { sectionId ->
+                        navController.navigate("seeall/${Uri.encode(sectionId)}")
+                    },
+                    onProviderClick = { providerId, providerName ->
+                        navController.navigate("provider/$providerId/${Uri.encode(providerName)}")
+                    },
+                    onPersonClick = { personId ->
+                        navController.navigate("person/$personId")
+                    },
+                    accessTier = accessTier,
+                    onLockedFeatureClick = requestLifetimeUnlock,
+                )
+            }
 
             // Movies tab — CatalogScreen for movies
             composable("movies") {
+                val catalogViewModel = remember {
+                    CatalogViewModel(
+                        metadataRepo,
+                        "movie",
+                        keywordSearchService = keywordSearchService,
+                        prefsRepo = prefsRepo,
+                        ratingsEnricher = ratingsEnricher,
+                        integrationSecretStore = integrationSecretStore,
+                    )
+                }
                 CatalogScreen(
-                    viewModel = moviesCatalogViewModel,
+                    viewModel = catalogViewModel,
                     mediaType = "movie",
                     onMediaClick = { item -> navController.navigateToDetail(item) },
                 )
@@ -405,8 +461,18 @@ fun TorveNavGraph(
 
             // TV Shows tab — CatalogScreen for TV
             composable("tv_shows") {
+                val catalogViewModel = remember {
+                    CatalogViewModel(
+                        metadataRepo,
+                        "tv",
+                        keywordSearchService = keywordSearchService,
+                        prefsRepo = prefsRepo,
+                        ratingsEnricher = ratingsEnricher,
+                        integrationSecretStore = integrationSecretStore,
+                    )
+                }
                 CatalogScreen(
-                    viewModel = tvCatalogViewModel,
+                    viewModel = catalogViewModel,
                     mediaType = "tv",
                     onMediaClick = { item -> navController.navigateToDetail(item) },
                 )
@@ -602,7 +668,7 @@ fun TorveNavGraph(
             // Profile tab — Settings screen with all navigation callbacks
             composable("profile_tab") {
                 SettingsScreen(
-                    isLifetimeUnlocked = subscriptionState.isPro,
+                    accessTier = accessTier,
                     onLockedFeatureClick = requestLifetimeUnlock,
                     onDownloadsClick = {
                         if (isLocked(PremiumFeature.DOWNLOADS)) {
@@ -621,7 +687,7 @@ fun TorveNavGraph(
                     },
                     onCalendarClick = { navController.navigate("calendar") },
                     onAccountClick = {
-                        if (isLocked(PremiumFeature.ACCOUNT_SETUP)) {
+                        if (!canAccessAccountSurface) {
                             requestLifetimeUnlock(PremiumFeature.ACCOUNT_SETUP)
                         } else {
                             navController.navigate("sync_account")
@@ -635,7 +701,7 @@ fun TorveNavGraph(
                         }
                     },
                     onManageDevicesClick = {
-                        if (isLocked(PremiumFeature.DEVICE_LINKING)) {
+                        if (!canAccessManageDevicesSurface) {
                             requestLifetimeUnlock(PremiumFeature.DEVICE_LINKING)
                         } else {
                             navController.navigate("manage_devices")
@@ -709,7 +775,7 @@ fun TorveNavGraph(
             // Settings (accessible from Profile, not in bottom nav)
             composable("settings") {
                 SettingsScreen(
-                    isLifetimeUnlocked = subscriptionState.isPro,
+                    accessTier = accessTier,
                     onLockedFeatureClick = requestLifetimeUnlock,
                     onDownloadsClick = {
                         if (isLocked(PremiumFeature.DOWNLOADS)) {
@@ -728,7 +794,7 @@ fun TorveNavGraph(
                     },
                     onCalendarClick = { navController.navigate("calendar") },
                     onAccountClick = {
-                        if (isLocked(PremiumFeature.ACCOUNT_SETUP)) {
+                        if (!canAccessAccountSurface) {
                             requestLifetimeUnlock(PremiumFeature.ACCOUNT_SETUP)
                         } else {
                             navController.navigate("sync_account")
@@ -742,7 +808,7 @@ fun TorveNavGraph(
                         }
                     },
                     onManageDevicesClick = {
-                        if (isLocked(PremiumFeature.DEVICE_LINKING)) {
+                        if (!canAccessManageDevicesSurface) {
                             requestLifetimeUnlock(PremiumFeature.DEVICE_LINKING)
                         } else {
                             navController.navigate("manage_devices")
@@ -815,6 +881,30 @@ fun TorveNavGraph(
 
             // Detail screen
             composable(
+                route = "detail_imdb/{type}/{imdbId}",
+                arguments = listOf(
+                    navArgument("type") { type = NavType.StringType },
+                    navArgument("imdbId") { type = NavType.StringType },
+                ),
+            ) { backStackEntry ->
+                val detailType = backStackEntry.arguments?.getString("type") ?: "movie"
+                val imdbId = backStackEntry.arguments?.getString("imdbId").orEmpty()
+                ResolveExternalDetailRoute(
+                    type = detailType,
+                    imdbId = imdbId,
+                    metadataRepo = metadataRepo,
+                    onResolved = { resolvedType, resolvedId ->
+                        navController.navigate("detail/$resolvedType/$resolvedId") {
+                            popUpTo(backStackEntry.destination.route ?: "detail_imdb/{type}/{imdbId}") {
+                                inclusive = true
+                            }
+                        }
+                    },
+                    onBack = { navController.popBackStack() },
+                )
+            }
+
+            composable(
                 route = "detail/{type}/{id}",
                 arguments = listOf(
                     navArgument("type") { type = NavType.StringType },
@@ -826,7 +916,7 @@ fun TorveNavGraph(
                 DetailScreen(
                     type = detailType,
                     id = detailId,
-                    isLifetimeUnlocked = subscriptionState.isPro,
+                    accessTier = accessTier,
                     onLockedFeatureClick = requestLifetimeUnlock,
                     onPlayClick = { url, fallbackUrl, season, episode, imdbId ->
                         navController.navigate(
@@ -1007,10 +1097,11 @@ fun TorveNavGraph(
             }
 
             composable("sync_account") {
-                if (isLocked(PremiumFeature.ACCOUNT_SETUP)) {
+                if (!canAccessAccountSurface) {
                     PaywallScreen(
                         onBack = { navController.popBackStack() },
                         onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        onManageDevices = { navController.navigate("manage_devices") },
                         lockedFeature = PremiumFeature.ACCOUNT_SETUP,
                     )
                 } else {
@@ -1027,6 +1118,7 @@ fun TorveNavGraph(
                     PaywallScreen(
                         onBack = { navController.popBackStack() },
                         onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        onManageDevices = { navController.navigate("manage_devices") },
                         lockedFeature = PremiumFeature.PHONE_PAIRING,
                     )
                 } else {
@@ -1052,16 +1144,18 @@ fun TorveNavGraph(
                 PaywallScreen(
                     onBack = { navController.popBackStack() },
                     onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                    onManageDevices = { navController.navigate("manage_devices") },
                     lockedFeature = lockedFeature,
                 )
             }
 
             // Device Governance
             composable("manage_devices") {
-                if (isLocked(PremiumFeature.DEVICE_LINKING)) {
+                if (!canAccessManageDevicesSurface) {
                     PaywallScreen(
                         onBack = { navController.popBackStack() },
                         onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        onManageDevices = { navController.navigate("manage_devices") },
                         lockedFeature = PremiumFeature.DEVICE_LINKING,
                     )
                 } else {
@@ -1269,6 +1363,7 @@ fun TorveNavGraph(
                 LegalScreen(
                     title = "Terms & Conditions",
                     assetFileName = "terms.html",
+                    remoteUrl = "https://torve.app/terms.html",
                     onBack = { navController.popBackStack() },
                 )
             }

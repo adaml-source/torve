@@ -127,6 +127,46 @@ object CategoryNameCleaner {
     }
 
     /**
+     * Lightweight version of processCategories that works with category name -> count pairs
+     * without needing actual channel objects. Used for initial fast category display.
+     */
+    fun processCategoryCountsOnly(rawCounts: List<Pair<String, Long>>): List<ChannelCategory> {
+        data class MergedCategory(
+            var totalCount: Long = 0,
+            val qualityTags: MutableSet<String> = mutableSetOf(),
+            var countryCode: String? = null,
+        )
+
+        val merged = LinkedHashMap<String, MergedCategory>()
+        for ((rawName, count) in rawCounts) {
+            val cleaned = clean(rawName)
+            val key = cleaned.name.lowercase()
+            val entry = merged.getOrPut(key) { MergedCategory(countryCode = cleaned.countryCode) }
+            entry.totalCount += count
+            entry.qualityTags.addAll(cleaned.qualityTags)
+        }
+
+        return merged.entries.map { (key, data) ->
+            // Recover display-cased name from the first raw entry that maps to this key
+            val displayName = rawCounts.firstNotNullOfOrNull { (rawName, _) ->
+                val cleaned = clean(rawName)
+                if (cleaned.name.lowercase() == key) cleaned.name else null
+            } ?: key
+
+            ChannelCategory(
+                name = displayName,
+                channelCount = data.totalCount.toInt(),
+                channels = emptyList(),
+                qualityTags = data.qualityTags,
+                countryCode = data.countryCode,
+            )
+        }.sortedWith(
+            compareBy<ChannelCategory> { it.countryCode?.lowercase() ?: "zzz" }
+                .thenBy { it.name.lowercase() },
+        )
+    }
+
+    /**
      * Process a list of raw categories: clean names, merge duplicates,
      * and combine quality tags from both group name and channel names.
      *

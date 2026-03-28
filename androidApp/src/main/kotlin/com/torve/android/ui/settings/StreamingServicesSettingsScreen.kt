@@ -31,9 +31,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.torve.android.R
 import com.torve.android.ui.components.BackButton
 import com.torve.android.ui.home.ALL_STREAMING_SERVICES
 import com.torve.android.ui.theme.Amber
@@ -71,7 +73,7 @@ fun StreamingServicesSettingsScreen(
             BackButton(onClick = onBack)
             Spacer(Modifier.width(12.dp))
             Text(
-                "Streaming Services",
+                stringResource(R.string.settings_streaming_services),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 color = Snow,
@@ -79,7 +81,7 @@ fun StreamingServicesSettingsScreen(
         }
 
         Text(
-            "Choose which services appear on your home screen. Content from these services will be available to browse and play through Torve.",
+            stringResource(R.string.settings_streaming_services_desc),
             style = MaterialTheme.typography.bodyMedium,
             color = Silver,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
@@ -158,7 +160,7 @@ fun StreamingServicesSettingsScreen(
         }
 
         Text(
-            "Data provided by TMDB",
+            stringResource(R.string.home_tmdb_credit),
             style = MaterialTheme.typography.labelSmall,
             color = Silver,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),

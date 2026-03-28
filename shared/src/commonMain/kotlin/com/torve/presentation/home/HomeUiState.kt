@@ -26,4 +26,8 @@ data class HomeUiState(
     val addonShelfVisibility: Map<String, Boolean> = emptyMap(),
     val mdbListShelves: List<CatalogShelf> = emptyList(),
     val error: String? = null,
+    // Search
+    val searchQuery: String = "",
+    val searchResults: List<MediaItem> = emptyList(),
+    val isSearching: Boolean = false,
 )

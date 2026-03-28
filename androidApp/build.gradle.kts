@@ -34,22 +34,27 @@ android {
         }
     }
 
-    val baseVersionCode = 9
+    val baseVersionCode = 13
 
     defaultConfig {
         applicationId = "com.torve.app"
         minSdk = 24
         targetSdk = 36
         versionCode = baseVersionCode
-        versionName = "1.0.0"
+        versionName = "1.0.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         multiDexEnabled = true
         multiDexKeepProguard = file("multidex-config.pro")
+        manifestPlaceholders["torveAllowBackup"] = "true"
 
-        // Only bundle ARM native libs — Fire TV and most Android devices are ARM.
-        // Removes x86/x86_64 FFmpeg .so files that bloat APK and cause GC pressure.
+        // Default: both ARM ABIs.  Pass -PabiOverride=arm64-v8a for fast dev builds.
         ndk {
-            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+            val override = providers.gradleProperty("abiOverride").orNull
+            if (override != null) {
+                abiFilters += override
+            } else {
+                abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+            }
         }
 
         buildConfigField("String", "BUILD_TIMESTAMP", "\"${System.currentTimeMillis()}\"")
@@ -93,6 +98,7 @@ android {
             isShrinkResources = true
             signingConfig = signingConfigs.getByName("release")
             buildConfigField("Boolean", "ALLOW_DEBUG_PREMIUM_BYPASS", "false")
+            manifestPlaceholders["torveAllowBackup"] = "false"
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",

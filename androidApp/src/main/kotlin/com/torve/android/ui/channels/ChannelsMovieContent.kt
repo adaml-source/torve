@@ -21,7 +21,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.torve.android.R
 import com.torve.android.ui.theme.Steel
 import com.torve.android.ui.theme.Torve
 import com.torve.domain.model.ChannelCategory
@@ -49,13 +51,13 @@ fun ChannelsMovieContent(
                 )
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    text = "No movies available",
+                    text = stringResource(R.string.channels_no_movies),
                     style = MaterialTheme.typography.titleMedium,
                     color = Torve.colors.textSecondary,
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "Movies require an Xtream Codes playlist",
+                    text = stringResource(R.string.channels_movies_xtream),
                     style = MaterialTheme.typography.bodySmall,
                     color = Torve.colors.textTertiary,
                 )

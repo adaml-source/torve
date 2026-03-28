@@ -90,6 +90,7 @@ fun TvSearchScreen(
     var filterType by rememberSaveable { mutableStateOf<String?>(null) } // "movie", "tv", or null (all)
     var aiResultTitle by remember { mutableStateOf<String?>(null) }
     var aiFallback by remember { mutableStateOf(false) }
+    var showFilters by rememberSaveable { mutableStateOf(true) }
     val inputFocusRequester = remember { FocusRequester() }
     val voiceButtonFocusRequester = remember { FocusRequester() }
     val voiceController = rememberVoiceInputController(
@@ -178,49 +179,57 @@ fun TvSearchScreen(
             )
             aiResultTitle = aiResult.title
 
-            val resolvedItems: List<MediaItem> = when (aiResult.mode) {
-                "specific" -> {
+            val resolvedItems: List<MediaItem> = when {
+                aiResult.mode == "specific" && aiResult.specificItems.isNotEmpty() -> {
                     aiResult.specificItems.mapNotNull { item ->
-                        try {
-                            metadataRepo.getDetail(item.mediaType, item.tmdbId)
-                        } catch (_: Throwable) {
-                            null
-                        }
+                        runCatching { metadataRepo.getDetail(item.mediaType, item.tmdbId) }.getOrNull()
                     }
                 }
-                "person_credits", "person_filtered" -> {
-                    val personId = aiResult.personId
-                    if (personId != null) {
-                        try {
-                            metadataRepo.getPersonCredits(personId)
-                        } catch (_: Throwable) {
-                            emptyList()
-                        }
-                    } else emptyList()
+                aiResult.mode == "person_credits" && aiResult.personId != null -> {
+                    metadataRepo.getPersonCredits(aiResult.personId!!)
+                }
+                aiResult.mode == "person_filtered" && aiResult.specificItems.isNotEmpty() -> {
+                    aiResult.specificItems.mapNotNull { item ->
+                        runCatching { metadataRepo.getDetail(item.mediaType, item.tmdbId) }.getOrNull()
+                    }
+                }
+                aiResult.mode == "person_filtered" && aiResult.personId != null -> {
+                    val type = aiResult.mediaType ?: "movie"
+                    val castParam = if (!aiResult.isDirector) aiResult.personId.toString() else null
+                    val crewParam = if (aiResult.isDirector) aiResult.personId.toString() else null
+                    metadataRepo.discover(
+                        type = type,
+                        sortBy = aiResult.sortBy,
+                        withGenres = aiResult.genreIds.takeIf { it.isNotEmpty() }?.joinToString(","),
+                        minRating = aiResult.minRating,
+                        year = aiResult.yearFrom,
+                        yearTo = aiResult.yearTo,
+                        withCast = castParam,
+                        withCrew = crewParam,
+                    ).items.take(60)
                 }
                 else -> { // "discover"
-                    try {
-                        val mediaType = aiResult.mediaType ?: "movie"
-                        val genreString = aiResult.genreIds.takeIf { it.isNotEmpty() }
-                            ?.joinToString(",")
-                        val keywordString = aiResult.keywordIds.takeIf { it.isNotEmpty() }
-                            ?.joinToString(",")
-                        metadataRepo.discover(
-                            type = mediaType,
-                            sortBy = aiResult.sortBy,
-                            withGenres = genreString,
-                            withKeywords = keywordString,
-                            minRating = aiResult.minRating,
-                            year = aiResult.yearFrom,
-                            yearTo = aiResult.yearTo,
-                        ).items.take(60)
-                    } catch (_: Throwable) {
-                        emptyList()
-                    }
+                    val type = aiResult.mediaType ?: "movie"
+                    metadataRepo.discover(
+                        type = type,
+                        sortBy = aiResult.sortBy,
+                        withGenres = aiResult.genreIds.takeIf { it.isNotEmpty() }?.joinToString(","),
+                        withKeywords = aiResult.keywordIds.takeIf { it.isNotEmpty() }?.joinToString("|"),
+                        minRating = aiResult.minRating,
+                        year = aiResult.yearFrom,
+                        yearTo = aiResult.yearTo,
+                    ).items.take(60)
                 }
             }
 
-            results = resolvedItems.take(60)
+            // If AI resolution returned nothing, fall back to standard search
+            if (resolvedItems.isEmpty()) {
+                aiFallback = true
+                aiResultTitle = null
+                results = metadataRepo.searchMulti(query, 1).take(60)
+            } else {
+                results = resolvedItems.take(60)
+            }
         } catch (_: Throwable) {
             // Fallback to standard search
             aiFallback = true
@@ -280,8 +289,18 @@ fun TvSearchScreen(
                         tint = Amber,
                     )
                 }
+                val filterToggleRequester = remember { FocusRequester() }
+                TvSearchChip(
+                    text = if (showFilters) stringResource(R.string.tv_search_hide_filters) else stringResource(R.string.tv_search_show_filters),
+                    modifier = Modifier
+                        .focusRequester(filterToggleRequester)
+                        .focusProperties { left = voiceButtonFocusRequester },
+                    onFocused = { onContentFocused(filterToggleRequester) },
+                    onClick = { showFilters = !showFilters },
+                )
             }
 
+            if (showFilters) {
             // Search mode toggle row
             Row(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -323,7 +342,7 @@ fun TvSearchScreen(
             ) {
                 val allReq = remember { FocusRequester() }
                 TvSearchChip(
-                    text = "All",
+                    text = stringResource(R.string.tv_search_all),
                     selected = filterType == null,
                     modifier = Modifier.focusRequester(allReq).focusProperties { left = railFocusRequester },
                     onFocused = { onContentFocused(allReq) },
@@ -331,7 +350,7 @@ fun TvSearchScreen(
                 )
                 val movieReq = remember { FocusRequester() }
                 TvSearchChip(
-                    text = "Movies",
+                    text = stringResource(R.string.tv_search_movies),
                     selected = filterType == "movie",
                     modifier = Modifier.focusRequester(movieReq),
                     onFocused = { onContentFocused(movieReq) },
@@ -339,7 +358,7 @@ fun TvSearchScreen(
                 )
                 val tvReq = remember { FocusRequester() }
                 TvSearchChip(
-                    text = "TV Shows",
+                    text = stringResource(R.string.tv_search_tv_shows),
                     selected = filterType == "tv",
                     modifier = Modifier.focusRequester(tvReq),
                     onFocused = { onContentFocused(tvReq) },
@@ -377,8 +396,10 @@ fun TvSearchScreen(
 
                 VoiceInputPhase.Idle -> Unit
             }
+            } // end showFilters (mode chips, filter chips, voice status)
         }
 
+        if (showFilters) {
         Text(
             text = stringResource(R.string.tv_section_popular_searches),
             style = MaterialTheme.typography.titleLarge,
@@ -401,6 +422,7 @@ fun TvSearchScreen(
                 )
             }
         }
+        } // end showFilters
 
         when {
             loading -> {
@@ -465,7 +487,7 @@ fun TvSearchScreen(
                             item.tmdbId?.let { "s_${item.type}_$it" } ?: "${item.type}_${item.id}_$index"
                         },
                     ) { index, item ->
-                        val requester = remember(index, item.id) { FocusRequester() }
+                        val requester = remember(item.id) { FocusRequester() }
                         TvSearchResultCard(
                             item = item,
                             modifier = Modifier

@@ -39,7 +39,12 @@ import com.torve.android.ui.theme.Charcoal
 import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Torve
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.stringResource
+import com.torve.android.R
 import com.torve.presentation.stats.StatsViewModel
+import java.time.DayOfWeek
+import java.time.format.TextStyle as DayTextStyle
 import org.koin.compose.koinInject
 
 @Composable
@@ -67,12 +72,12 @@ fun StatsScreen(
             ) {
                 Icon(
                     Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
+                    contentDescription = stringResource(R.string.common_back_cd),
                     tint = Snow,
                 )
             }
             Text(
-                text = "Your Stats",
+                text = stringResource(R.string.stats_title),
                 style = MaterialTheme.typography.titleLarge,
                 color = Snow,
                 fontWeight = FontWeight.Bold,
@@ -108,10 +113,10 @@ fun StatsScreen(
                         .padding(20.dp),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                 ) {
-                    StatBox(value = "${state.totalMovies}", label = "Movies")
-                    StatBox(value = "${state.totalEpisodes}", label = "Episodes")
+                    StatBox(value = "${state.totalMovies}", label = stringResource(R.string.stats_movies))
+                    StatBox(value = "${state.totalEpisodes}", label = stringResource(R.string.stats_episodes))
                     val hours = state.totalMinutes / 60
-                    StatBox(value = "${hours}h", label = "Watch Time")
+                    StatBox(value = "${hours}h", label = stringResource(R.string.stats_watch_time))
                 }
             }
 
@@ -133,17 +138,17 @@ fun StatsScreen(
                     val weekMin = state.thisWeekMinutes % 60
                     StatBox(
                         value = if (weekHrs > 0) "${weekHrs}h ${weekMin}m" else "${weekMin}m",
-                        label = "This Week",
+                        label = stringResource(R.string.stats_this_week),
                     )
                     val monthHrs = state.thisMonthMinutes / 60
                     val monthMin = state.thisMonthMinutes % 60
                     StatBox(
                         value = if (monthHrs > 0) "${monthHrs}h ${monthMin}m" else "${monthMin}m",
-                        label = "This Month",
+                        label = stringResource(R.string.stats_this_month),
                     )
                     StatBox(
                         value = "${state.longestStreak}",
-                        label = "Day Streak",
+                        label = stringResource(R.string.stats_day_streak),
                     )
                 }
             }
@@ -152,7 +157,7 @@ fun StatsScreen(
 
             if (state.topGenres.isNotEmpty()) {
                 Text(
-                    text = "Top Genres",
+                    text = stringResource(R.string.stats_top_genres),
                     style = MaterialTheme.typography.titleMedium,
                     color = Snow,
                     modifier = Modifier.padding(bottom = 8.dp),
@@ -170,7 +175,7 @@ fun StatsScreen(
                             color = Snow,
                         )
                         Text(
-                            text = "${genre.count} watched",
+                            text = stringResource(R.string.stats_watched_count, genre.count),
                             style = MaterialTheme.typography.bodyMedium,
                             color = Torve.colors.textSecondary,
                         )
@@ -181,15 +186,21 @@ fun StatsScreen(
 
             if (state.activityByDay.isNotEmpty()) {
                 Text(
-                    text = "Most Active Days",
+                    text = stringResource(R.string.stats_most_active_days),
                     style = MaterialTheme.typography.titleMedium,
                     color = Snow,
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
                 val maxCount = state.activityByDay.values.maxOrNull() ?: 1
-                val dayOrder = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
-                dayOrder.forEach { day ->
-                    val count = state.activityByDay[day] ?: 0
+                val locale = LocalConfiguration.current.locales[0]
+                val dayOrder = listOf(
+                    DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY,
+                    DayOfWeek.THURSDAY, DayOfWeek.FRIDAY, DayOfWeek.SATURDAY, DayOfWeek.SUNDAY,
+                )
+                dayOrder.forEach { dayOfWeek ->
+                    val englishKey = dayOfWeek.getDisplayName(DayTextStyle.FULL, java.util.Locale.ENGLISH)
+                    val count = state.activityByDay[englishKey] ?: 0
+                    val localizedShort = dayOfWeek.getDisplayName(DayTextStyle.SHORT, locale)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -197,7 +208,7 @@ fun StatsScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = day.take(3),
+                            text = localizedShort,
                             style = MaterialTheme.typography.bodySmall,
                             color = Torve.colors.textSecondary,
                             modifier = Modifier.width(40.dp),
@@ -239,13 +250,13 @@ fun StatsScreen(
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            "No watch data yet",
+                            stringResource(R.string.stats_no_data),
                             style = MaterialTheme.typography.titleMedium,
                             color = Torve.colors.textSecondary,
                         )
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "Start watching to see your stats",
+                            stringResource(R.string.stats_no_data_desc),
                             style = MaterialTheme.typography.bodyMedium,
                             color = Torve.colors.textTertiary,
                         )

@@ -1,7 +1,13 @@
 package com.torve.android.premium
 
+import android.content.Context
+import androidx.annotation.StringRes
+import com.torve.android.R
+import com.torve.domain.model.SubscriptionTier
+
 enum class AccessTier {
     FREE,
+    MONTHLY,
     LIFETIME,
 }
 
@@ -86,14 +92,29 @@ enum class PremiumFeature {
 
 data class PremiumFeaturePolicy(
     val access: PremiumFeatureAccess,
-    val title: String,
-    val unlockSummary: String,
+    @StringRes val titleRes: Int,
 )
 
 object PremiumAccess {
+    @StringRes val LOCKED_LABEL_RES = R.string.premium_locked
+    @StringRes val LIFETIME_REQUIRED_LABEL_RES = R.string.premium_requires_lifetime
+    @StringRes val UNLOCK_WITH_LIFETIME_LABEL_RES = R.string.premium_unlock_with_lifetime
+
+    // Keep legacy constants for any code that still references them directly
     const val LOCKED_LABEL = "Locked"
-    const val LIFETIME_REQUIRED_LABEL = "Requires Lifetime Access"
-    const val UNLOCK_WITH_LIFETIME_LABEL = "Unlock with Lifetime Access"
+    const val LIFETIME_REQUIRED_LABEL = "Requires Premium"
+    const val UNLOCK_WITH_LIFETIME_LABEL = "Upgrade to Premium"
+
+    val lifetimeBenefitResIds: List<Int> = listOf(
+        R.string.premium_benefit_watchlist,
+        R.string.premium_benefit_integrations,
+        R.string.premium_benefit_pairing,
+        R.string.premium_benefit_personalization,
+        R.string.premium_benefit_tools,
+    )
+
+    fun lifetimeBenefits(context: Context): List<String> =
+        lifetimeBenefitResIds.map { context.getString(it) }
 
     val lifetimeBenefits: List<String> = listOf(
         "Watchlist and Favorites",
@@ -105,304 +126,92 @@ object PremiumAccess {
 
     private val featureMatrix: Map<PremiumFeature, PremiumFeaturePolicy> = mapOf(
         // Free
-        PremiumFeature.BROWSE_HOME to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.FREE,
-            title = "Browse Home",
-            unlockSummary = "Browse Home rails and recommendations.",
-        ),
-        PremiumFeature.BROWSE_MOVIES to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.FREE,
-            title = "Browse Movies",
-            unlockSummary = "Browse movie catalogs and rails.",
-        ),
-        PremiumFeature.BROWSE_TV_SHOWS to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.FREE,
-            title = "Browse TV Shows",
-            unlockSummary = "Browse TV show catalogs and rails.",
-        ),
-        PremiumFeature.BROWSE_POSTERS_AND_RAILS to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.FREE,
-            title = "Browse Posters",
-            unlockSummary = "Navigate posters and rows with the remote.",
-        ),
-        PremiumFeature.VIEW_FOCUS_INFO_PANEL to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.FREE,
-            title = "Focused Info Panel",
-            unlockSummary = "View high-level metadata while browsing.",
-        ),
-        PremiumFeature.VIEW_CLEARLOGO_AND_TITLE_ART to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.FREE,
-            title = "Title Artwork",
-            unlockSummary = "View clearlogo and title artwork in browse.",
-        ),
-        PremiumFeature.VIEW_METADATA_AND_RATINGS to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.FREE,
-            title = "Metadata and Ratings",
-            unlockSummary = "Inspect synopsis, cast, and rating providers.",
-        ),
-        PremiumFeature.OPEN_TITLE_DETAILS to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.FREE,
-            title = "View Details",
-            unlockSummary = "Open detail pages for movies and TV shows.",
-        ),
-        PremiumFeature.BASIC_SEARCH_AND_FILTER to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.FREE,
-            title = "Basic Search",
-            unlockSummary = "Use basic search and browse filtering.",
-        ),
-        PremiumFeature.VIEW_ABOUT_PRIVACY_TERMS_SUPPORT to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.FREE,
-            title = "About and Legal",
-            unlockSummary = "View About, Privacy, Terms, and Support pages.",
-        ),
-        PremiumFeature.VIEW_PURCHASE_AND_UNLOCK to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.FREE,
-            title = "Purchase Screen",
-            unlockSummary = "Open Lifetime Access purchase and restore flows.",
-        ),
-        PremiumFeature.BASIC_APP_PREVIEW_EXPERIENCE to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.FREE,
-            title = "App Preview",
-            unlockSummary = "Explore Torve before purchase.",
-        ),
-        PremiumFeature.TRAILER_PLAYBACK to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.FREE,
-            title = "Trailer Playback",
-            unlockSummary = "Play trailers when available.",
-        ),
+        PremiumFeature.BROWSE_HOME to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_browse_home),
+        PremiumFeature.BROWSE_MOVIES to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_browse_movies),
+        PremiumFeature.BROWSE_TV_SHOWS to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_browse_tv_shows),
+        PremiumFeature.BROWSE_POSTERS_AND_RAILS to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_browse_posters),
+        PremiumFeature.VIEW_FOCUS_INFO_PANEL to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_focused_info),
+        PremiumFeature.VIEW_CLEARLOGO_AND_TITLE_ART to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_title_artwork),
+        PremiumFeature.VIEW_METADATA_AND_RATINGS to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_metadata_ratings),
+        PremiumFeature.OPEN_TITLE_DETAILS to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_view_details),
+        PremiumFeature.BASIC_SEARCH_AND_FILTER to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_basic_search),
+        PremiumFeature.VIEW_ABOUT_PRIVACY_TERMS_SUPPORT to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_about_legal),
+        PremiumFeature.VIEW_PURCHASE_AND_UNLOCK to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_purchase_screen),
+        PremiumFeature.BASIC_APP_PREVIEW_EXPERIENCE to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_app_preview),
+        PremiumFeature.TRAILER_PLAYBACK to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_trailer_playback),
 
         // Premium account / personalization
-        PremiumFeature.ACCOUNT_SETUP to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Account Setup",
-            unlockSummary = "Set up Torve account features on this TV.",
-        ),
-        PremiumFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Cloud Sign In",
-            unlockSummary = "Use cloud sign-in and account sync tools.",
-        ),
-        PremiumFeature.SYNC_WATCH_HISTORY to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Synced Watch History",
-            unlockSummary = "Sync watch progress and history across devices.",
-        ),
-        PremiumFeature.SYNC_WATCHLIST to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Synced Watchlist",
-            unlockSummary = "Sync Watchlist across your devices.",
-        ),
-        PremiumFeature.SYNC_FAVORITES to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Synced Favorites",
-            unlockSummary = "Sync Favorites across your devices.",
-        ),
-        PremiumFeature.SYNC_CUSTOM_LAYOUTS to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Custom Layout Sync",
-            unlockSummary = "Save and sync personalized home layouts.",
-        ),
-        PremiumFeature.CROSS_DEVICE_SYNC to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Cross-Device Sync",
-            unlockSummary = "Sync app state between TV and mobile devices.",
-        ),
-        PremiumFeature.CLOUD_BACKUP_RESTORE to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Cloud Backup",
-            unlockSummary = "Back up and restore settings from cloud.",
-        ),
+        PremiumFeature.ACCOUNT_SETUP to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_account_setup),
+        PremiumFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_cloud_sign_in),
+        PremiumFeature.SYNC_WATCH_HISTORY to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_synced_history),
+        PremiumFeature.SYNC_WATCHLIST to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_synced_watchlist),
+        PremiumFeature.SYNC_FAVORITES to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_synced_favorites),
+        PremiumFeature.SYNC_CUSTOM_LAYOUTS to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_custom_layout_sync),
+        PremiumFeature.CROSS_DEVICE_SYNC to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_cross_device_sync),
+        PremiumFeature.CLOUD_BACKUP_RESTORE to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_cloud_backup),
 
         // Premium device / pairing
-        PremiumFeature.PHONE_PAIRING to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Phone Pairing",
-            unlockSummary = "Pair your phone with this TV.",
-        ),
-        PremiumFeature.DEVICE_LINKING to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Device Linking",
-            unlockSummary = "Link and manage devices under one account.",
-        ),
-        PremiumFeature.DEVICE_SYNC to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Device Sync",
-            unlockSummary = "Sync data and preferences across devices.",
-        ),
-        PremiumFeature.TV_PHONE_CONTINUATION to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "TV-Phone Continuation",
-            unlockSummary = "Continue playback between TV and phone.",
-        ),
-        PremiumFeature.QR_PAIRING to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "QR Pairing",
-            unlockSummary = "Use QR-based pairing and linking flows.",
-        ),
+        PremiumFeature.PHONE_PAIRING to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_phone_pairing),
+        PremiumFeature.DEVICE_LINKING to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_device_linking),
+        PremiumFeature.DEVICE_SYNC to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_device_sync),
+        PremiumFeature.TV_PHONE_CONTINUATION to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_tv_phone_continuation),
+        PremiumFeature.QR_PAIRING to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_qr_pairing),
 
         // Premium library / persistence
-        PremiumFeature.WATCHLIST_EDIT to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Watchlist Editing",
-            unlockSummary = "Add and remove Watchlist entries.",
-        ),
-        PremiumFeature.FAVORITES_EDIT to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Favorites Editing",
-            unlockSummary = "Add and remove Favorites entries.",
-        ),
-        PremiumFeature.WATCHED_STATUS_EDIT to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Watched State",
-            unlockSummary = "Mark titles watched or unwatched.",
-        ),
-        PremiumFeature.TRAKT_LIST_MANAGER to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Trakt Lists",
-            unlockSummary = "Manage Trakt lists and sync behavior.",
-        ),
-        PremiumFeature.FAVORITES_MANAGER to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Favorites Manager",
-            unlockSummary = "Manage persistent favorites and saved lists.",
-        ),
-        PremiumFeature.PERSISTENT_COLLECTIONS to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Persistent Collections",
-            unlockSummary = "Create and maintain persistent collections.",
-        ),
+        PremiumFeature.WATCHLIST_EDIT to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_watchlist_editing),
+        PremiumFeature.FAVORITES_EDIT to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_favorites_editing),
+        PremiumFeature.WATCHED_STATUS_EDIT to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_watched_state),
+        PremiumFeature.TRAKT_LIST_MANAGER to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_trakt_lists),
+        PremiumFeature.FAVORITES_MANAGER to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_favorites_manager),
+        PremiumFeature.PERSISTENT_COLLECTIONS to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_persistent_collections),
 
         // Premium integrations / setup
-        PremiumFeature.TRAKT_CONNECT to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Trakt Connect",
-            unlockSummary = "Connect and authorize Trakt integration.",
-        ),
-        PremiumFeature.SIMKL_CONNECT to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Simkl Connect",
-            unlockSummary = "Connect and authorize Simkl integration.",
-        ),
-        PremiumFeature.JELLYFIN_SETUP to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Jellyfin Setup",
-            unlockSummary = "Configure Jellyfin server integration.",
-        ),
-        PremiumFeature.PLEX_SETUP to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Plex Setup",
-            unlockSummary = "Configure Plex server integration.",
-        ),
-        PremiumFeature.KODI_SETUP to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Kodi Setup",
-            unlockSummary = "Configure Kodi host integration.",
-        ),
-        PremiumFeature.OMDB_SETUP to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "OMDb Setup",
-            unlockSummary = "Configure OMDb metadata provider access.",
-        ),
-        PremiumFeature.MDBLIST_SETUP to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "MDBList Setup",
-            unlockSummary = "Configure MDBList keys and collection sync.",
-        ),
-        PremiumFeature.AI_PROVIDER_SETUP to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "AI Provider Setup",
-            unlockSummary = "Configure AI provider and keys.",
-        ),
-        PremiumFeature.CLOUD_PROVIDER_SETUP to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Cloud Provider Setup",
-            unlockSummary = "Configure cloud provider accounts and sources.",
-        ),
-        PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Addon Management",
-            unlockSummary = "Install and manage external addons.",
-        ),
+        PremiumFeature.TRAKT_CONNECT to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_trakt_connect),
+        PremiumFeature.SIMKL_CONNECT to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_simkl_connect),
+        PremiumFeature.JELLYFIN_SETUP to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_jellyfin_setup),
+        PremiumFeature.PLEX_SETUP to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_plex_setup),
+        PremiumFeature.KODI_SETUP to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_kodi_setup),
+        PremiumFeature.OMDB_SETUP to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_omdb_setup),
+        PremiumFeature.MDBLIST_SETUP to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_mdblist_setup),
+        PremiumFeature.AI_PROVIDER_SETUP to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_ai_provider_setup),
+        PremiumFeature.CLOUD_PROVIDER_SETUP to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_cloud_provider_setup),
+        PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_addon_management),
 
         // Premium advanced / power-user tools
-        PremiumFeature.DIAGNOSTICS to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Diagnostics",
-            unlockSummary = "Open diagnostics and troubleshooting tools.",
-        ),
-        PremiumFeature.DEBUG_TOOLS to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Debug Tools",
-            unlockSummary = "Access debug and developer diagnostics.",
-        ),
-        PremiumFeature.PROVIDER_TESTS to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Provider Tests",
-            unlockSummary = "Run provider validation and test flows.",
-        ),
-        PremiumFeature.METADATA_REFRESH_AND_REBUILD to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Metadata Rebuild",
-            unlockSummary = "Refresh and rebuild metadata caches.",
-        ),
-        PremiumFeature.REMATCH_PROVIDER to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Provider Re-Match",
-            unlockSummary = "Manually re-match titles against providers.",
-        ),
-        PremiumFeature.CUSTOM_SOURCE_MANAGEMENT to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Custom Sources",
-            unlockSummary = "Manage custom source pipelines and routing.",
-        ),
-        PremiumFeature.ADVANCED_CONNECTION_CONFIGURATION to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Advanced Connections",
-            unlockSummary = "Configure advanced integration options.",
-        ),
-        PremiumFeature.DEVELOPER_EVENT_LOGS to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Developer Event Logs",
-            unlockSummary = "Inspect internal event and sync logs.",
-        ),
+        PremiumFeature.DIAGNOSTICS to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_diagnostics),
+        PremiumFeature.DEBUG_TOOLS to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_debug_tools),
+        PremiumFeature.PROVIDER_TESTS to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_provider_tests),
+        PremiumFeature.METADATA_REFRESH_AND_REBUILD to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_metadata_rebuild),
+        PremiumFeature.REMATCH_PROVIDER to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_provider_rematch),
+        PremiumFeature.CUSTOM_SOURCE_MANAGEMENT to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_custom_sources),
+        PremiumFeature.ADVANCED_CONNECTION_CONFIGURATION to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_advanced_connections),
+        PremiumFeature.DEVELOPER_EVENT_LOGS to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_developer_logs),
 
         // Optional premium monetization features
-        PremiumFeature.AI_SEARCH_ADVANCED to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "AI Search",
-            unlockSummary = "Use advanced AI-assisted search and discovery.",
-        ),
-        PremiumFeature.ADVANCED_RECOMMENDATIONS to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Advanced Recommendations",
-            unlockSummary = "Use premium recommendation flows.",
-        ),
-        PremiumFeature.MORE_LIKE_THIS_PREMIUM to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "More Like This",
-            unlockSummary = "Use premium recommendation expansion.",
-        ),
-        PremiumFeature.CHOOSE_SOURCE_PREMIUM to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Choose Source",
-            unlockSummary = "Select custom playback sources and integrations.",
-        ),
+        PremiumFeature.AI_SEARCH_ADVANCED to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_ai_search),
+        PremiumFeature.ADVANCED_RECOMMENDATIONS to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_advanced_recommendations),
+        PremiumFeature.MORE_LIKE_THIS_PREMIUM to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_more_like_this),
+        PremiumFeature.CHOOSE_SOURCE_PREMIUM to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_choose_source),
 
         // Existing gates
-        PremiumFeature.STREAM_PLAYBACK to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Stream Playback",
-            unlockSummary = "Play premium cloud streams.",
-        ),
-        PremiumFeature.DOWNLOADS to PremiumFeaturePolicy(
-            access = PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE,
-            title = "Downloads",
-            unlockSummary = "Download and manage offline media.",
-        ),
+        PremiumFeature.STREAM_PLAYBACK to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_stream_playback),
+        PremiumFeature.DOWNLOADS to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_downloads),
     )
 
     fun tierFrom(isLifetimeEntitled: Boolean): AccessTier {
         return if (isLifetimeEntitled) AccessTier.LIFETIME else AccessTier.FREE
+    }
+
+    fun tierFrom(
+        subscriptionTier: SubscriptionTier?,
+        isPremiumActive: Boolean,
+    ): AccessTier {
+        if (!isPremiumActive) return AccessTier.FREE
+        return when (subscriptionTier) {
+            SubscriptionTier.MONTHLY -> AccessTier.MONTHLY
+            SubscriptionTier.LIFETIME -> AccessTier.LIFETIME
+            else -> AccessTier.LIFETIME
+        }
     }
 
     fun requiresLifetimeAccess(feature: PremiumFeature): Boolean {
@@ -410,15 +219,28 @@ object PremiumAccess {
     }
 
     fun canAccess(feature: PremiumFeature, tier: AccessTier): Boolean {
-        return !requiresLifetimeAccess(feature) || tier == AccessTier.LIFETIME
+        return !requiresLifetimeAccess(feature) || tier != AccessTier.FREE
     }
 
     fun isPremiumLocked(feature: PremiumFeature, tier: AccessTier): Boolean {
+        if (com.torve.android.BuildConfig.DEBUG) return false
         return requiresLifetimeAccess(feature) && tier == AccessTier.FREE
     }
 
-    fun titleFor(feature: PremiumFeature): String = featureMatrix.getValue(feature).title
+    @StringRes
+    fun titleResFor(feature: PremiumFeature): Int = featureMatrix.getValue(feature).titleRes
 
-    fun unlockSummaryFor(feature: PremiumFeature): String = featureMatrix.getValue(feature).unlockSummary
+    fun titleFor(context: Context, feature: PremiumFeature): String = context.getString(titleResFor(feature))
+
+    /** Legacy non-Context overload — returns English. Prefer titleFor(context, feature). */
+    fun titleFor(feature: PremiumFeature): String = when (feature) {
+        PremiumFeature.BROWSE_HOME -> "Browse Home"
+        PremiumFeature.BROWSE_MOVIES -> "Browse Movies"
+        PremiumFeature.BROWSE_TV_SHOWS -> "Browse TV Shows"
+        PremiumFeature.STREAM_PLAYBACK -> "Stream Playback"
+        PremiumFeature.DOWNLOADS -> "Downloads"
+        else -> feature.name.lowercase().replaceFirstChar { it.uppercase() }.replace('_', ' ')
+    }
+
+    fun unlockSummaryFor(feature: PremiumFeature): String = ""
 }
-

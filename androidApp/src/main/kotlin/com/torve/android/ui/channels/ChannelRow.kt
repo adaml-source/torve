@@ -27,10 +27,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.torve.android.R
 import com.torve.android.ui.components.LiveDot
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Coral
@@ -143,7 +145,7 @@ fun ChannelRow(
             enriched.nextProgramme?.let { prog ->
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    text = "Next: ${prog.title}",
+                    text = stringResource(R.string.next_format, prog.title),
                     style = MaterialTheme.typography.labelSmall,
                     color = Torve.colors.textTertiary,
                     maxLines = 1,
@@ -156,7 +158,7 @@ fun ChannelRow(
         IconButton(onClick = onFavorite, modifier = Modifier.size(36.dp)) {
             Icon(
                 if (channel.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                contentDescription = "Favorite",
+                contentDescription = stringResource(R.string.channels_favorite_cd),
                 tint = if (channel.isFavorite) Coral else Torve.colors.textTertiary,
                 modifier = Modifier.size(18.dp),
             )

@@ -3,14 +3,18 @@ package com.torve.presentation.session
 import com.torve.data.account.AccountSettingsApi
 import com.torve.data.account.AccountSettingsRefreshResult
 import com.torve.data.account.AccountSettingsRepository
+import com.torve.data.account.isXtreamPlaylist
+import com.torve.data.addon.AddonSyncService
 import com.torve.data.auth.AuthClient
 import com.torve.data.device.AccessStateDto
 import com.torve.data.device.DeviceApi
 import com.torve.data.device.DeviceListDto
 import com.torve.data.device.ManagedDeviceDto
+import com.torve.data.subscription.SubscriptionEntitlementCacheKeys
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationStorageMode
 import com.torve.presentation.settings.SettingsRefreshNotifier
+import com.torve.platform.torveVerboseLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -55,6 +59,8 @@ data class RestoreProgress(
     val currentPlaylistName: String? = null,
     val errorCount: Int = 0,
     val integrationsRestored: Int = 0,
+    /** True while heavy import is running — UI should show blocking overlay. */
+    val isImporting: Boolean = false,
 )
 
 class AccountSessionCoordinator(
@@ -66,12 +72,15 @@ class AccountSessionCoordinator(
     private val settingsRefreshNotifier: SettingsRefreshNotifier,
     private val prefsRepo: com.torve.domain.repository.PreferencesRepository,
     private val channelRepo: com.torve.domain.repository.ChannelRepository,
+    private val addonSyncService: AddonSyncService,
 ) {
     companion object {
         private const val DEFAULT_MAX_ACTIVE_DEVICES = 5
     }
 
-    private val backgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    // Use IO dispatcher for background restore — heavy network + disk work
+    // must not compete with Compose rendering on the Default (CPU) pool.
+    private val backgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val _state = MutableStateFlow(AccountSessionState())
     val state: StateFlow<AccountSessionState> = _state.asStateFlow()
@@ -80,14 +89,26 @@ class AccountSessionCoordinator(
     private val _restoreProgress = MutableStateFlow(RestoreProgress())
     val restoreProgress: StateFlow<RestoreProgress> = _restoreProgress.asStateFlow()
 
+    /**
+     * Restore an existing session on cold start.
+     * Does NOT re-import playlists/integrations if local data already exists.
+     * Full restore only runs after fresh sign-in (when local data was cleared by sign-out).
+     */
     suspend fun restoreSession(): Boolean {
+        torveVerboseLog { "AUTH_BOOTSTRAP restore_session_start" }
         val restored = authClient.restoreSession()
         if (!restored) {
+            torveVerboseLog { "AUTH_BOOTSTRAP restore_session_result restored=false" }
             accountSettingsRepository.clearSessionState()
             return false
         }
-        bootstrapAfterSignIn()
-        return true
+        // On cold start with existing session: lightweight bootstrap only.
+        // Playlists/channels are already in local SQLite from the last session.
+        val result = bootstrap(forceSettingsRefresh = false)
+        torveVerboseLog {
+            "AUTH_BOOTSTRAP restore_session_result restored=true isReady=${result.isReady} deviceLimitReached=${result.deviceLimitReached} error=${result.error}"
+        }
+        return result.isReady
     }
 
     /**
@@ -110,20 +131,27 @@ class AccountSessionCoordinator(
      * Full teardown of session state.
      */
     suspend fun signOut() {
-        println("[SignOut] Playlist/credential cleanup started")
+        torveVerboseLog { "[SignOut] Playlist/credential cleanup started" }
         integrationSecretStore.clearAllSecrets()
-        println("[SignOut] Encrypted secret store cleared")
+        torveVerboseLog { "[SignOut] Encrypted secret store cleared" }
         for (key in integrationSecretStore.legacyPreferenceSecretKeys) {
             prefsRepo.remove(key)
         }
-        println("[SignOut] Legacy preference secrets cleared")
+        prefsRepo.remove(SubscriptionEntitlementCacheKeys.VERIFIED_PRINCIPAL)
+        prefsRepo.remove(SubscriptionEntitlementCacheKeys.VERIFIED_AT_MS)
+        prefsRepo.remove(SubscriptionEntitlementCacheKeys.VERIFIED_HAS_ENTITLEMENT)
+        prefsRepo.remove(SubscriptionEntitlementCacheKeys.VERIFIED_IS_DEVICE_ACTIVATED)
+        prefsRepo.remove(SubscriptionEntitlementCacheKeys.VERIFIED_DEVICE_BLOCK_REASON)
+        torveVerboseLog { "[SignOut] Legacy preference secrets cleared" }
         runCatching { channelRepo.clearAll() }
-        println("[SignOut] SQLite playlists/channels/favorites/recents cleared")
+        torveVerboseLog { "[SignOut] SQLite playlists/channels/favorites/recents cleared" }
+        runCatching { addonSyncService.clearSyncStateOnSignOut() }
+        torveVerboseLog { "[SignOut] Addon sync metadata cleared" }
         accountSettingsRepository.clearSessionState()
         _state.value = AccountSessionState()
         _restoreProgress.value = RestoreProgress()
         settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
-        println("[SignOut] Playlist/credential cleanup finished")
+        torveVerboseLog { "[SignOut] Playlist/credential cleanup finished" }
     }
 
     /**
@@ -135,10 +163,10 @@ class AccountSessionCoordinator(
         displayIdentifier: String? = null,
         config: Map<String, String> = emptyMap(),
     ): Boolean {
-        println("[IntegrationSync] Saving $integrationType to backend (label=$displayIdentifier)")
+        torveVerboseLog { "[IntegrationSync] Saving $integrationType to backend (label=$displayIdentifier)" }
         val token = authClient.getValidAccessToken()
         if (token == null) {
-            println("[IntegrationSync] FAILED: no valid access token")
+            torveVerboseLog { "[IntegrationSync] FAILED: no valid access token" }
             return false
         }
         val ok = accountSettingsApi.saveIntegration(
@@ -152,7 +180,7 @@ class AccountSessionCoordinator(
                 config = config,
             ),
         )
-        println("[IntegrationSync] $integrationType → ${if (ok) "OK" else "FAILED"}")
+        torveVerboseLog { "[IntegrationSync] $integrationType → ${if (ok) "OK" else "FAILED"}" }
         return ok
     }
 
@@ -205,27 +233,45 @@ class AccountSessionCoordinator(
     ): AccountSessionBootstrapResult {
         val token = authClient.getValidAccessToken()
             ?: return AccountSessionBootstrapResult(isReady = false)
+        torveVerboseLog {
+            "AUTH_BOOTSTRAP bootstrap_start forceSettingsRefresh=$forceSettingsRefresh forceStaleRefresh=$forceStaleRefresh"
+        }
         _state.update { it.copy(isBootstrapping = true, lastError = null) }
 
         return runCatching {
             // ── Phase A: Critical path (fast) ─────────────────────
-            println("[Login] Phase A: registering device...")
+            torveVerboseLog { "[Login] Phase A: registering device..." }
             val registrationError = runCatching {
                 deviceApi.registerDevice(token, authClient.currentDeviceRegistration())
             }.exceptionOrNull()?.message
 
-            println("[Login] Phase A: device registered, entering app")
+            torveVerboseLog { "[Login] Phase A: device registered, entering app" }
             _state.update { it.copy(isBootstrapping = false) }
 
             // ── Phase B: Background restore (deferred) ────────────
             if (forceSettingsRefresh) {
-                println("[Login] Phase B: launching background restore")
+                torveVerboseLog { "[Login] Phase B: launching background restore (deferred 5s for home screen)" }
                 backgroundScope.launch {
+                    runCatching { addonSyncService.syncAfterSignIn() }
+                }
+                backgroundScope.launch {
+                    // Wait for home screen to fully load posters before starting heavy
+                    // network/import work. Prevents ANR and incomplete poster loading
+                    // from restore competing with Coil image decoding.
+                    kotlinx.coroutines.delay(5000)
                     backgroundRestore(token)
                 }
             } else if (forceStaleRefresh) {
                 backgroundScope.launch {
                     runCatching { accountSettingsRepository.refreshIfStale(force = true) }
+                }
+            }
+            backgroundScope.launch {
+                runCatching {
+                    addonSyncService.syncIfStale(
+                        reason = if (forceStaleRefresh) "settings_opened" else "foreground",
+                        force = false,
+                    )
                 }
             }
 
@@ -251,7 +297,11 @@ class AccountSessionCoordinator(
                 deviceLimitReached = deviceLimitReached,
                 activeDevices = deviceList.devices,
                 error = registrationError,
-            )
+            ).also { result ->
+                torveVerboseLog {
+                    "AUTH_BOOTSTRAP bootstrap_result isReady=${result.isReady} deviceLimitReached=${result.deviceLimitReached} activeDevices=${result.activeDevices.size} error=${result.error}"
+                }
+            }
         }.getOrElse { error ->
             _state.update {
                 it.copy(
@@ -262,29 +312,46 @@ class AccountSessionCoordinator(
             AccountSessionBootstrapResult(
                 isReady = false,
                 error = error.message ?: "Failed to refresh device session.",
-            )
+            ).also { result ->
+                torveVerboseLog {
+                    "AUTH_BOOTSTRAP bootstrap_failure error=${result.error}"
+                }
+            }
         }
     }
 
     // ── Background restore pipeline ─────────────────────────────
 
     private suspend fun backgroundRestore(token: String) {
+        // Check if local data already exists — skip heavy restore if so.
+        // This prevents re-importing playlists on every app restart.
+        val localPlaylists = runCatching { channelRepo.getPlaylists() }.getOrElse { emptyList() }
+        val hasLocalData = localPlaylists.isNotEmpty()
+        if (hasLocalData) {
+            torveVerboseLog { "[Restore] Local data exists (${localPlaylists.size} playlists) — skipping heavy restore" }
+            // Still sync settings (lightweight)
+            runCatching { accountSettingsRepository.syncAfterSignIn() }
+            settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
+            return
+        }
+
         val startMs = Clock.System.now().toEpochMilliseconds()
         _restoreProgress.value = RestoreProgress(
             phase = RestorePhase.RUNNING,
             message = "Restoring your account data…",
+            isImporting = true,
         )
-        println("[Restore] Background restore started")
+        torveVerboseLog { "[Restore] Background restore started (no local data — full restore)" }
         var errors = 0
 
         // Step 1: Account settings
         _restoreProgress.update { it.copy(message = "Syncing settings…") }
         runCatching {
             accountSettingsRepository.syncAfterSignIn()
-            println("[Restore] Account settings synced")
+            torveVerboseLog { "[Restore] Account settings synced" }
         }.onFailure { e ->
             errors++
-            println("[Restore] Account settings FAILED: ${e.message}")
+            torveVerboseLog { "[Restore] Account settings FAILED: ${e.message}" }
         }
 
         // Step 2: Integrations
@@ -293,22 +360,23 @@ class AccountSessionCoordinator(
             restoreIntegrations(token)
         }.getOrElse {
             errors++
-            println("[Restore] Integrations restore FAILED: ${it.message}")
+            torveVerboseLog { "[Restore] Integrations restore FAILED: ${it.message}" }
             0
         }
-        // Refresh SettingsViewModel so restored integrations show as connected
         settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
 
-        // Step 3: Playlists
+        // Step 3: Playlists (heavy — channels import)
         _restoreProgress.update { it.copy(message = "Restoring playlists…") }
         val (playlistsRestored, playlistsFailed) = runCatching {
             restorePlaylists(token)
         }.getOrElse {
             errors++
-            println("[Restore] Playlist restore FAILED: ${it.message}")
+            torveVerboseLog { "[Restore] Playlist restore FAILED: ${it.message}" }
             0 to 0
         }
         errors += playlistsFailed
+        // Notify ChannelsViewModel to reload playlists from DB
+        settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
 
         // Done
         val elapsed = (Clock.System.now().toEpochMilliseconds() - startMs) / 1000
@@ -325,8 +393,9 @@ class AccountSessionCoordinator(
             totalPlaylists = playlistsRestored + playlistsFailed,
             restoredPlaylists = playlistsRestored,
             errorCount = errors,
+            isImporting = false,
         )
-        println("[Restore] Completed in ${elapsed}s: $integrationsRestored integrations, $playlistsRestored playlists, $errors errors")
+        torveVerboseLog { "[Restore] Completed in ${elapsed}s: $integrationsRestored integrations, $playlistsRestored playlists, $errors errors" }
     }
 
     // ── Integration restore ─────────────────────────────────────
@@ -334,14 +403,14 @@ class AccountSessionCoordinator(
     /** Returns number of integrations restored. */
     private suspend fun restoreIntegrations(token: String): Int {
         val integrations = accountSettingsApi.getIntegrations(token)
-        println("[IntegrationRestore] Found ${integrations.size} integrations on backend")
+        torveVerboseLog { "[IntegrationRestore] Found ${integrations.size} integrations on backend" }
         var restored = 0
         for (integration in integrations) {
             val secretKey = runCatching {
                 IntegrationSecretKey.valueOf(integration.integrationType)
             }.getOrNull()
             if (secretKey == null) {
-                println("[IntegrationRestore] Skipping unknown type: ${integration.integrationType}")
+                torveVerboseLog { "[IntegrationRestore] Skipping unknown type: ${integration.integrationType}" }
                 continue
             }
 
@@ -351,9 +420,14 @@ class AccountSessionCoordinator(
                 else -> IntegrationStorageMode.DEVICE_ONLY
             }
             integrationSecretStore.setStorageMode(secretKey, mode)
+            if (secretKey == IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID) {
+                integrationSecretStore.setStorageMode(IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN, mode)
+                integrationSecretStore.setStorageMode(IntegrationSecretKey.DEBRID_RD_CLIENT_ID, mode)
+                integrationSecretStore.setStorageMode(IntegrationSecretKey.DEBRID_RD_CLIENT_SECRET, mode)
+            }
 
             if (mode == IntegrationStorageMode.ACCOUNT && integration.hasCredentials) {
-                println("[IntegrationRestore] Fetching credentials for ${integration.integrationType}...")
+                torveVerboseLog { "[IntegrationRestore] Fetching credentials for ${integration.integrationType}..." }
                 val credsMap = accountSettingsApi.getIntegrationCredentials(
                     accessToken = token,
                     integrationType = integration.integrationType,
@@ -376,22 +450,43 @@ class AccountSessionCoordinator(
                                 ),
                             )
                             restored++
-                            println("[IntegrationRestore] TRAKT_TOKENS → restored OK (access+refresh)")
+                            torveVerboseLog { "[IntegrationRestore] TRAKT_TOKENS → restored OK (access+refresh)" }
+                        }
+                    } else if (secretKey == IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID) {
+                        val apiKey = credsMap["api_key"].orEmpty()
+                        val refreshToken = credsMap["refresh_token"].orEmpty()
+                        val clientId = credsMap["client_id"].orEmpty()
+                        val clientSecret = credsMap["client_secret"].orEmpty()
+                        if (apiKey.isNotBlank()) {
+                            integrationSecretStore.put(secretKey, apiKey)
+                            if (refreshToken.isNotBlank()) {
+                                integrationSecretStore.put(IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN, refreshToken)
+                            }
+                            if (clientId.isNotBlank()) {
+                                integrationSecretStore.put(IntegrationSecretKey.DEBRID_RD_CLIENT_ID, clientId)
+                            }
+                            if (clientSecret.isNotBlank()) {
+                                integrationSecretStore.put(IntegrationSecretKey.DEBRID_RD_CLIENT_SECRET, clientSecret)
+                            }
+                            restored++
+                            torveVerboseLog {
+                                "[IntegrationRestore] ${integration.integrationType} â†’ restored OK (api_key=${apiKey.isNotBlank()} refresh=${refreshToken.isNotBlank()} client=${clientId.isNotBlank()} secret=${clientSecret.isNotBlank()})"
+                            }
                         }
                     } else {
                         val value = credsMap.values.firstOrNull()
                         if (!value.isNullOrBlank()) {
                             integrationSecretStore.put(secretKey, value)
                             restored++
-                            println("[IntegrationRestore] ${integration.integrationType} → restored OK")
+                            torveVerboseLog { "[IntegrationRestore] ${integration.integrationType} → restored OK" }
                         }
                     }
                 } else {
-                    println("[IntegrationRestore] ${integration.integrationType} → credentials empty")
+                    torveVerboseLog { "[IntegrationRestore] ${integration.integrationType} → credentials empty" }
                 }
             }
         }
-        println("[IntegrationRestore] Done: $restored/${integrations.size}")
+        torveVerboseLog { "[IntegrationRestore] Done: $restored/${integrations.size}" }
         return restored
     }
 
@@ -400,12 +495,13 @@ class AccountSessionCoordinator(
     /** Returns (restored, failed) counts. */
     private suspend fun restorePlaylists(token: String): Pair<Int, Int> {
         val remotePlaylists = accountSettingsApi.getPlaylists(token)
-        println("[PlaylistRestore] Remote playlist count: ${remotePlaylists.size}")
+        torveVerboseLog { "[PlaylistRestore] Remote playlist count: ${remotePlaylists.size}" }
         _restoreProgress.update { it.copy(totalPlaylists = remotePlaylists.size) }
         var restored = 0
         var failed = 0
         for ((index, remote) in remotePlaylists.withIndex()) {
             val pid = remote.playlistId.ifBlank { remote.id }
+            val xtreamPlaylist = remote.isXtreamPlaylist(pid)
             _restoreProgress.update {
                 it.copy(
                     message = "Importing playlist ${index + 1} of ${remotePlaylists.size}…",
@@ -413,27 +509,34 @@ class AccountSessionCoordinator(
                     restoredPlaylists = restored,
                 )
             }
-            println("[PlaylistRestore] Restoring '${remote.name}' (type=${remote.playlistType}, id=$pid)")
+            torveVerboseLog {
+                "[PlaylistRestore] Restoring '${remote.name}' (type=${remote.playlistType}, id=$pid, xtream=$xtreamPlaylist, hasServer=${!remote.server.isNullOrBlank()})"
+            }
             try {
-                if (remote.playlistType == "xtream" && remote.server != null) {
-                    var password = ""
-                    if (remote.hasPassword) {
-                        val creds = accountSettingsApi.getPlaylistCredentials(token, pid)
-                        if (creds?.password != null) {
-                            password = creds.password
-                            println("[PlaylistRestore]   Credentials fetched OK")
-                        } else {
-                            println("[PlaylistRestore]   Credentials fetch failed")
-                        }
+                if (xtreamPlaylist) {
+                    val creds = accountSettingsApi.getPlaylistCredentials(token, pid)
+                    val resolvedUsername = creds?.username?.takeIf { it.isNotBlank() } ?: remote.username.orEmpty()
+                    val password = creds?.password?.takeIf { it.isNotBlank() }.orEmpty()
+                    val server = remote.server?.trim().orEmpty()
+                    if (server.isBlank()) {
+                        failed++
+                        torveVerboseLog { "[PlaylistRestore]   FAILED: missing Xtream server" }
+                        continue
                     }
+                    if (password.isBlank()) {
+                        failed++
+                        torveVerboseLog { "[PlaylistRestore]   FAILED: missing Xtream credentials" }
+                        continue
+                    }
+                    torveVerboseLog { "[PlaylistRestore]   Credentials fetched OK" }
                     channelRepo.addXtreamPlaylist(
                         name = remote.name,
-                        server = remote.server,
-                        username = remote.username ?: "",
+                        server = server,
+                        username = resolvedUsername,
                         password = password,
                         id = pid,
                     )
-                    println("[PlaylistRestore]   Xtream import OK")
+                    torveVerboseLog { "[PlaylistRestore]   Xtream import OK" }
                 } else if (!remote.url.isNullOrBlank()) {
                     channelRepo.addPlaylist(
                         name = remote.name,
@@ -441,17 +544,17 @@ class AccountSessionCoordinator(
                         epgUrl = remote.epgUrl,
                         id = pid,
                     )
-                    println("[PlaylistRestore]   M3U import OK")
+                    torveVerboseLog { "[PlaylistRestore]   M3U import OK" }
                 } else {
-                    println("[PlaylistRestore]   Skipped — no url or server")
+                    torveVerboseLog { "[PlaylistRestore]   Skipped — no url or server" }
                 }
                 restored++
             } catch (e: Exception) {
                 failed++
-                println("[PlaylistRestore]   FAILED: ${e.message}")
+                torveVerboseLog { "[PlaylistRestore]   FAILED: ${e.message}" }
             }
         }
-        println("[PlaylistRestore] Done: $restored restored, $failed failed")
+        torveVerboseLog { "[PlaylistRestore] Done: $restored restored, $failed failed" }
         return restored to failed
     }
 }

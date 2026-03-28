@@ -17,7 +17,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.torve.android.R
 import com.torve.android.ui.theme.Torve
 import com.torve.domain.model.EnrichedChannel
 import com.torve.domain.model.Channel
@@ -45,13 +47,13 @@ fun ChannelsFavouritesContent(
                 )
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    text = "No favourites yet",
+                    text = stringResource(R.string.channels_no_favourites),
                     style = MaterialTheme.typography.titleMedium,
                     color = Torve.colors.textSecondary,
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "Tap the heart on any channel to add it here.",
+                    text = stringResource(R.string.channels_tap_heart),
                     style = MaterialTheme.typography.bodySmall,
                     color = Torve.colors.textTertiary,
                 )

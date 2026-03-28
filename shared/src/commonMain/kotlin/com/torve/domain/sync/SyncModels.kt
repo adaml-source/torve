@@ -16,6 +16,8 @@ data class SyncPayload(
     val channelPlaylists: List<SyncPlaylist> = emptyList(),
     @SerialName("iptvFavorites")
     val channelFavorites: List<SyncFavorite> = emptyList(),
+    // Legacy field retained only for backward compatibility with older exports.
+    // New exports leave this null and imports ignore it.
     val subscriptionToken: String? = null,
     val integrationSecrets: List<SyncIntegrationSecret> = emptyList(),
 )

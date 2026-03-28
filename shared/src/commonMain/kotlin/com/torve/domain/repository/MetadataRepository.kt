@@ -16,6 +16,7 @@ interface MetadataRepository {
     suspend fun getNowPlaying(page: Int = 1): List<MediaItem>
     suspend fun getAiringToday(page: Int = 1): List<MediaItem>
     suspend fun searchMulti(query: String, page: Int = 1): List<MediaItem>
+    suspend fun findByImdbId(imdbId: String, preferredType: String? = null): MediaItem?
     suspend fun getDetail(type: String, id: Int): MediaItem
     suspend fun getSimilar(type: String, id: Int, page: Int = 1): List<MediaItem>
     suspend fun getRecommendations(type: String, id: Int, page: Int = 1): List<MediaItem>

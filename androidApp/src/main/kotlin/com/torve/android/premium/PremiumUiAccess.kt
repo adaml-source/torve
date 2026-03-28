@@ -7,16 +7,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import com.torve.domain.repository.PreferencesRepository
+import com.torve.domain.model.SubscriptionTier
 import org.koin.compose.koinInject
 
 @Composable
 fun rememberEffectivePremiumAccessTier(
+    subscriptionTier: SubscriptionTier?,
     subscriptionIsPro: Boolean,
 ): AccessTier {
     val preferencesRepository: PreferencesRepository = koinInject()
     val debugBypassEnabled by produceState(
         initialValue = false,
-        key1 = subscriptionIsPro,
+        key1 = subscriptionTier,
+        key2 = subscriptionIsPro,
     ) {
         value = if (!com.torve.android.BuildConfig.DEBUG) {
             false
@@ -27,16 +30,24 @@ fun rememberEffectivePremiumAccessTier(
                 ?.toBooleanStrictOrNull() == true
         }
     }
-    val hasEffectiveLifetimeAccess = subscriptionIsPro || debugBypassEnabled
-
-    LaunchedEffect(subscriptionIsPro, debugBypassEnabled, hasEffectiveLifetimeAccess) {
-        Log.d(
-            "PremiumUiAccess",
-            "subscriptionIsPro=$subscriptionIsPro debugBypassEnabled=$debugBypassEnabled effectiveLifetime=$hasEffectiveLifetimeAccess",
+    val effectiveTier = when {
+        debugBypassEnabled -> AccessTier.LIFETIME
+        else -> PremiumAccess.tierFrom(
+            subscriptionTier = subscriptionTier,
+            isPremiumActive = subscriptionIsPro,
         )
     }
 
-    return remember(hasEffectiveLifetimeAccess) {
-        PremiumAccess.tierFrom(hasEffectiveLifetimeAccess)
+    LaunchedEffect(subscriptionTier, subscriptionIsPro, debugBypassEnabled, effectiveTier) {
+        if (com.torve.android.BuildConfig.DEBUG) {
+            Log.d(
+                "PremiumUiAccess",
+                "subscriptionTier=$subscriptionTier subscriptionIsPro=$subscriptionIsPro debugBypassEnabled=$debugBypassEnabled effectiveTier=$effectiveTier",
+            )
+        }
+    }
+
+    return remember(effectiveTier) {
+        effectiveTier
     }
 }

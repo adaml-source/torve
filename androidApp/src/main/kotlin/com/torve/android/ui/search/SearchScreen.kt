@@ -21,7 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -71,6 +71,7 @@ import com.torve.android.voice.VoiceInputUiState
 import com.torve.android.ui.components.CardSize
 import com.torve.android.ui.components.LocalCardStyle
 import com.torve.android.ui.components.PosterCard
+import com.torve.android.ui.components.mediaItemLazyKey
 import com.torve.android.ui.sync.SyncDevicePickerDialog
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.AmberSubtle
@@ -198,12 +199,12 @@ fun SearchScreen(
             IconButton(
                 onClick = {
                     if (!syncState.isAuthenticated) {
-                        Toast.makeText(context, "Create a local profile to send search to a TV", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.search_create_profile_first), Toast.LENGTH_SHORT).show()
                         return@IconButton
                     }
                     if (tvTargets.isEmpty()) {
                         syncCoordinator.refreshDevices()
-                        Toast.makeText(context, "No paired TV devices found", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.search_no_paired_tv), Toast.LENGTH_SHORT).show()
                         return@IconButton
                     }
                     showDevicePicker = true
@@ -211,7 +212,7 @@ fun SearchScreen(
             ) {
                 Icon(
                     imageVector = Icons.Filled.Tv,
-                    contentDescription = "Send search to device",
+                    contentDescription = stringResource(R.string.search_send_to_device_cd),
                     tint = if (syncState.isAuthenticated) Amber else Torve.colors.textTertiary,
                     modifier = Modifier.size(22.dp),
                 )
@@ -241,7 +242,7 @@ fun SearchScreen(
         when (voiceInputState.phase) {
             VoiceInputPhase.Listening -> {
                 Text(
-                    text = "Listening",
+                    text = stringResource(R.string.search_listening),
                     style = MaterialTheme.typography.labelMedium,
                     color = Amber,
                     modifier = Modifier.padding(start = 16.dp, top = 6.dp),
@@ -250,7 +251,7 @@ fun SearchScreen(
 
             VoiceInputPhase.Processing -> {
                 Text(
-                    text = "Processing voice input",
+                    text = stringResource(R.string.search_processing_voice),
                     style = MaterialTheme.typography.labelMedium,
                     color = Torve.colors.textTertiary,
                     modifier = Modifier.padding(start = 16.dp, top = 6.dp),
@@ -522,7 +523,7 @@ fun SearchScreen(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
-                        items(displayItems, key = { it.id }) { item ->
+                        itemsIndexed(displayItems, key = { index, item -> mediaItemLazyKey(item, index) }) { _, item ->
                             PosterCard(
                                 item = item,
                                 sizeOverride = CardSize.MEDIUM,
@@ -566,13 +567,13 @@ fun SearchScreen(
 
     if (showDevicePicker) {
         SyncDevicePickerDialog(
-            title = "Send Search To Device",
+            title = stringResource(R.string.search_send_to_device_title),
             devices = tvTargets,
             onSelectDevice = { device ->
                 showDevicePicker = false
                 val queryToSend = state.query.trim()
                 if (queryToSend.isBlank()) {
-                    Toast.makeText(context, "Enter a search query first", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.search_enter_query_first), Toast.LENGTH_SHORT).show()
                     return@SyncDevicePickerDialog
                 }
                 scope.launch {
@@ -581,7 +582,7 @@ fun SearchScreen(
                         query = queryToSend,
                     )
                     if (result.isSuccess) {
-                        Toast.makeText(context, "Search sent to ${device.deviceName}", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.search_sent_to, device.deviceName), Toast.LENGTH_SHORT).show()
                     } else {
                         Toast.makeText(
                             context,

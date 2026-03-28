@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -74,6 +75,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -87,6 +89,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -190,7 +193,9 @@ fun PlayerScreen(
     prefsRepo: PreferencesRepository = koinInject(),
 ) {
     val context = LocalContext.current
+    val configuration = LocalConfiguration.current
     val isTv = remember(context) { DeviceFormFactor.isTv(context) }
+    val shouldLockLandscape = !isTv && configuration.smallestScreenWidthDp < 600
     val forceExoPlayerOnMobileDebug = BuildConfig.DEBUG && !isTv
     val isLiveChannelPlayback = mediaType.equals("live", ignoreCase = true)
 
@@ -198,24 +203,26 @@ fun PlayerScreen(
     val castService: CastService = koinInject()
     val castAvailable = castService.isAvailable
 
-    // Immersive fullscreen + landscape + keep screen on
-    DisposableEffect(Unit) {
+    // Keep phones in immersive landscape playback, but let large screens rotate/rescale freely.
+    DisposableEffect(shouldLockLandscape) {
         val activity = context as? Activity ?: return@DisposableEffect onDispose {}
         val window = activity.window
         val originalOrientation = activity.requestedOrientation
         val controller = WindowInsetsControllerCompat(window, window.decorView)
 
-        WindowCompat.setDecorFitsSystemWindows(window, false)
         controller.hide(WindowInsetsCompat.Type.systemBars())
         controller.systemBarsBehavior =
             WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        if (shouldLockLandscape) {
+            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         onDispose {
             controller.show(WindowInsetsCompat.Type.systemBars())
-            WindowCompat.setDecorFitsSystemWindows(window, true)
-            activity.requestedOrientation = originalOrientation
+            if (shouldLockLandscape) {
+                activity.requestedOrientation = originalOrientation
+            }
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
     }
@@ -238,7 +245,6 @@ fun PlayerScreen(
             if (activity != null) {
                 val window = activity.window
                 val controller = WindowInsetsControllerCompat(window, window.decorView)
-                WindowCompat.setDecorFitsSystemWindows(window, false)
                 controller.hide(WindowInsetsCompat.Type.systemBars())
                 controller.systemBarsBehavior =
                     WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -408,9 +414,9 @@ fun PlayerScreen(
     val visibleTopMenuTargets = buildList {
         add(TopMenuFocusTarget.BACK)
         if (castAvailable) add(TopMenuFocusTarget.CAST)
-        add(TopMenuFocusTarget.HANDOFF)
-        add(TopMenuFocusTarget.VOICE)
-        if (subtitleTracks.isNotEmpty() || audioTracks.isNotEmpty()) add(TopMenuFocusTarget.TRACKS)
+        if (!isTv) add(TopMenuFocusTarget.HANDOFF)
+        if (!isTv) add(TopMenuFocusTarget.VOICE)
+        add(TopMenuFocusTarget.TRACKS) // Always visible — tracks may load after playback starts
         add(TopMenuFocusTarget.AUDIO_DELAY)
         if (audioEqualizer != null) add(TopMenuFocusTarget.EQUALIZER)
         if (isTv) add(TopMenuFocusTarget.PICTURE_FORMAT)
@@ -1598,34 +1604,19 @@ fun PlayerScreen(
     // State-driven focus restoration: when uiMode changes, restore focus
     // through the coordinator. Only targets currently-registered active regions.
     LaunchedEffect(derivedUiMode, topMenuFocusTick) {
-        // Let composition settle so new regions register before we request focus
-        delay(60)
+        withFrameNanos { }
         when (derivedUiMode) {
             is PlaybackUiMode.ChromeHidden -> {
                 runCatching { playerRootFocusRequester.requestFocus() }
             }
             is PlaybackUiMode.ControlsVisible -> {
-                if (isTv) {
-                    // Try coordinator-mediated focus restoration with retries
-                    var focused = false
-                    for (attempt in 0 until 6) {
-                        if (focusCoordinator.restoreFocusForCurrentMode()) {
-                            focused = true
-                            break
-                        }
-                        if (attempt < 5) delay(40)
-                    }
-                    if (!focused) {
-                        runCatching { playerRootFocusRequester.requestFocus() }
-                    }
-                } else {
-                    focusCoordinator.restoreFocusForCurrentMode()
+                val restored = focusCoordinator.restoreFocusForCurrentMode()
+                if (isTv && !restored) {
+                    runCatching { playerRootFocusRequester.requestFocus() }
                 }
             }
-            // Modal overlays handle their own initial focus internally
-            else -> {
-                focusCoordinator.restoreFocusForCurrentMode()
-            }
+            // Modal overlays handle their own initial focus internally.
+            else -> Unit
         }
     }
 
@@ -1677,10 +1668,7 @@ fun PlayerScreen(
                             if (isTv) {
                                 // Coordinator resolves Up to the correct active region
                                 val target = focusCoordinator.resolveDirectionalMove(FocusDirection.Up)
-                                if (target != null) {
-                                    focusCoordinator.requestFocusToRegion(target)
-                                }
-                                true
+                                target != null && focusCoordinator.requestFocusToRegion(target)
                             } else {
                                 false
                             }
@@ -1690,10 +1678,7 @@ fun PlayerScreen(
                             controlsInteractionTick++
                             if (isTv) {
                                 val target = focusCoordinator.resolveDirectionalMove(FocusDirection.Down)
-                                if (target != null) {
-                                    focusCoordinator.requestFocusToRegion(target)
-                                }
-                                true
+                                target != null && focusCoordinator.requestFocusToRegion(target)
                             } else {
                                 false
                             }
@@ -2318,6 +2303,7 @@ fun PlayerScreen(
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .fillMaxWidth()
+                        .statusBarsPadding()
                         .padding(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -2445,22 +2431,23 @@ fun PlayerScreen(
                         }
                     }
 
-                    if (subtitleTracks.isNotEmpty() || audioTracks.isNotEmpty()) {
-                        FocusableIconButton(
-                            onClick = { showTrackDialog = true },
-                            modifier = topMenuItemModifier(TopMenuFocusTarget.TRACKS),
-                            onFocused = {
-                                lastTopMenuFocusTarget = TopMenuFocusTarget.TRACKS
-                                focusCoordinator.reportFocusedRegion(PlaybackFocusRegion.TopActions, TopMenuFocusTarget.TRACKS.name)
-                            },
-                        ) {
-                            Icon(
-                                Icons.Default.Settings,
-                                contentDescription = stringResource(R.string.player_track_selection),
-                                tint = Color.White,
-                                modifier = Modifier.size(24.dp),
-                            )
-                        }
+                    // Always show track selection — tracks may load after playback starts.
+                    // If no tracks available yet, the dialog will show "No tracks available".
+                    FocusableIconButton(
+                        onClick = { showTrackDialog = true },
+                        modifier = topMenuItemModifier(TopMenuFocusTarget.TRACKS),
+                        onFocused = {
+                            lastTopMenuFocusTarget = TopMenuFocusTarget.TRACKS
+                            focusCoordinator.reportFocusedRegion(PlaybackFocusRegion.TopActions, TopMenuFocusTarget.TRACKS.name)
+                        },
+                    ) {
+                        Icon(
+                            Icons.Default.Settings,
+                            contentDescription = stringResource(R.string.player_track_selection),
+                            tint = if (subtitleTracks.isNotEmpty() || audioTracks.isNotEmpty()) Color.White
+                                else Color.White.copy(alpha = 0.5f),
+                            modifier = Modifier.size(24.dp),
+                        )
                     }
 
                     FocusableIconButton(
@@ -2559,6 +2546,7 @@ fun PlayerScreen(
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopCenter)
+                            .statusBarsPadding()
                             .padding(top = 68.dp)
                             .background(Color(0xC0121B2B), RoundedCornerShape(10.dp))
                             .padding(horizontal = 14.dp, vertical = 8.dp),
@@ -2593,6 +2581,12 @@ fun PlayerScreen(
                         onClick = togglePlayback,
                         modifier = Modifier
                             .focusRequester(playButtonFocusRequester)
+                            .focusProperties {
+                                // UP from transport controls → top menu (last focused or BACK)
+                                up = topMenuRequesters[lastTopMenuFocusTarget]
+                                    ?: topMenuRequesters[TopMenuFocusTarget.BACK]
+                                    ?: FocusRequester.Default
+                            }
                             .onFocusChanged {
                                 if (it.isFocused) focusCoordinator.reportFocusedRegion(PlaybackFocusRegion.TransportControls)
                             },
@@ -2624,6 +2618,7 @@ fun PlayerScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                 ) {
                     val seekPreviewPositionMs = if (isSeeking && duration > 0L) {

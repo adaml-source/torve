@@ -8,21 +8,23 @@ import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.post
+import io.ktor.client.request.prepareGet
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.ContentType
+import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
-import io.ktor.client.request.prepareGet
-import io.ktor.client.statement.bodyAsChannel
-import io.ktor.http.HttpStatusCode
 import io.ktor.utils.io.readUTF8Line
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -63,6 +65,10 @@ data class AuthResult(
     val error: String? = null,
 )
 
+sealed interface AuthEvent {
+    data class SessionExpired(val message: String) : AuthEvent
+}
+
 /**
  * Authentication client for the Torve production backend at [DEFAULT_BASE_URL].
  *
@@ -86,38 +92,29 @@ class AuthClient(
         const val KEY_AUTH_DEVICE_ID = "auth_device_id"
         private const val KEY_TOKEN_EXPIRES_AT = "auth_token_expires_at"
         const val DEFAULT_BASE_URL = "https://api.torve.app"
-        private const val TOKEN_LIFETIME_MS = 14L * 60 * 1000 // 14 min (1 min buffer on 15 min server TTL)
+        private const val TOKEN_LIFETIME_MS = 14L * 60 * 1000
         private const val REFRESH_BUFFER_MS = 60_000L
     }
 
-    private val refreshMutex = Mutex()
+    private val authStateMutex = Mutex()
 
     /**
      * Observable auth user state. Emitted on login, register, logout, token refresh,
-     * and verification status check. UI should collect this instead of calling
-     * [getCurrentUser] once — ensures verification state updates propagate immediately.
+     * and verification status check.
      */
     private val _authUser = MutableStateFlow<AuthUser?>(null)
     val authUserFlow: StateFlow<AuthUser?> = _authUser.asStateFlow()
+
+    private val _authEvents = MutableSharedFlow<AuthEvent>(extraBufferCapacity = 4)
+    val authEvents = _authEvents.asSharedFlow()
 
     private suspend fun emitCurrentUser() {
         _authUser.value = getCurrentUser()
     }
 
-    // ── SSE verification events ──────────────────────────────────
-    // SSE events from GET /me/events are triggers only — they prompt an
-    // authoritative refresh via checkVerificationStatus(), never directly
-    // mutate auth state. This prevents a single concurrent connection via
-    // sseJob guard and reconnects with exponential backoff on failure.
-
     private val sseScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var sseJob: Job? = null
 
-    /**
-     * Start listening for server-sent verification events.
-     * Automatically called when an unverified user signs in.
-     * Safe to call multiple times — only one connection is active at a time.
-     */
     fun startVerificationEvents() {
         if (sseJob?.isActive == true) return
         sseJob = sseScope.launch {
@@ -130,14 +127,13 @@ class AuthClient(
                         headers.append("Accept", "text/event-stream")
                     }.execute { response ->
                         if (response.status == HttpStatusCode.Unauthorized) {
-                            // Token expired — try refresh once, then stop
                             val refreshed = refreshTokens()
                             if (!refreshed.success) return@execute
-                            return@execute // will reconnect in next loop iteration
+                            return@execute
                         }
                         if (!response.status.isSuccess()) return@execute
 
-                        backoffMs = 1_000L // reset on successful connect
+                        backoffMs = 1_000L
                         val channel = response.bodyAsChannel()
                         var currentEvent = ""
                         while (isActive && !channel.isClosedForRead) {
@@ -146,25 +142,25 @@ class AuthClient(
                                 line.startsWith("event:") -> {
                                     currentEvent = line.removePrefix("event:").trim()
                                 }
+
                                 line.startsWith("data:") -> {
                                     if (currentEvent == "EMAIL_VERIFIED") {
-                                        // SSE event is a trigger only — fetch authoritative state.
                                         checkVerificationStatus()
-                                        return@execute // verified → stop SSE
+                                        return@execute
                                     }
                                     currentEvent = ""
                                 }
+
                                 line.isBlank() -> {
-                                    currentEvent = "" // reset on empty line (end of event frame)
+                                    currentEvent = ""
                                 }
                             }
                         }
                     }
                 } catch (_: Exception) {
-                    // Transient failure — reconnect with backoff
+                    // Transient failure, reconnect with backoff.
                 }
 
-                // If already verified after a reconnect, stop
                 val user = getCurrentUser()
                 if (user == null || user.isVerified) break
 
@@ -174,7 +170,6 @@ class AuthClient(
         }
     }
 
-    /** Stop the SSE connection. Called on logout and when verification completes. */
     fun stopVerificationEvents() {
         sseJob?.cancel()
         sseJob = null
@@ -184,32 +179,40 @@ class AuthClient(
 
     suspend fun isLoggedIn(): Boolean {
         if (secureStorage.getString(KEY_AUTH_ACCESS_TOKEN)?.isNotBlank() == true) return true
-        // Check legacy plaintext storage and migrate if found
-        migrateTokensIfNeeded()
+        authStateMutex.withLock {
+            migrateTokensIfNeededLocked()
+        }
         return secureStorage.getString(KEY_AUTH_ACCESS_TOKEN)?.isNotBlank() == true
     }
 
     suspend fun getAccessToken(): String? {
         secureStorage.getString(KEY_AUTH_ACCESS_TOKEN)?.let { return it }
-        migrateTokensIfNeeded()
-        return secureStorage.getString(KEY_AUTH_ACCESS_TOKEN)
+        return authStateMutex.withLock {
+            migrateTokensIfNeededLocked()
+            secureStorage.getString(KEY_AUTH_ACCESS_TOKEN)
+        }
     }
 
     /**
      * Returns a valid access token, proactively refreshing if the token is near expiry.
-     * Uses a Mutex to prevent concurrent refresh calls from racing.
-     * Returns null if not logged in or refresh fails.
+     * Refresh is serialized so only one refresh request can run at a time.
      */
     suspend fun getValidAccessToken(): String? {
-        getAccessToken() ?: return null
-        refreshMutex.withLock {
+        return authStateMutex.withLock {
+            migrateTokensIfNeededLocked()
+            val currentAccessToken = secureStorage.getString(KEY_AUTH_ACCESS_TOKEN) ?: return@withLock null
             val expiresAt = secureStorage.getString(KEY_TOKEN_EXPIRES_AT)?.toLongOrNull() ?: 0L
             val now = Clock.System.now().toEpochMilliseconds()
             if (expiresAt > 0 && now >= expiresAt - REFRESH_BUFFER_MS) {
-                refreshTokens()
+                val refreshResult = refreshTokensLocked()
+                return@withLock if (refreshResult.success) {
+                    secureStorage.getString(KEY_AUTH_ACCESS_TOKEN)
+                } else {
+                    null
+                }
             }
+            currentAccessToken
         }
-        return getAccessToken()
     }
 
     suspend fun getCurrentUser(): AuthUser? {
@@ -221,23 +224,18 @@ class AuthClient(
         return AuthUser(id = id, email = email, displayName = name, isVerified = verified)
     }
 
+    /**
+     * Returns locally cached user information as long as a local session exists.
+     * Transient refresh/network failures must not wipe the session.
+     */
     suspend fun getAuthenticatedUser(): AuthUser? {
         val accessToken = getValidAccessToken()
         if (accessToken.isNullOrBlank()) {
-            if (getCurrentUser() != null) {
-                clearAuth()
-            }
-            return null
+            return if (hasStoredSession()) getCurrentUser() else null
         }
         return getCurrentUser()
     }
 
-    /**
-     * Authoritative refresh of the local auth user from the backend GET /me endpoint.
-     * Merges the full UserOut response into the local cache and emits through [authUserFlow].
-     * Returns the current `is_verified` value. This is the single refresh path used by
-     * SSE event handlers, manual "Check" button, and app-resume hooks.
-     */
     suspend fun checkVerificationStatus(): Boolean {
         val accessToken = getValidAccessToken() ?: return false
         return try {
@@ -246,7 +244,6 @@ class AuthClient(
             }
             if (!resp.status.isSuccess()) return false
             val user: UserResponseDto = resp.body()
-            // Merge all authoritative fields into local cache
             localSettingsRepository.setString(KEY_AUTH_USER_ID, user.id)
             localSettingsRepository.setString(KEY_AUTH_EMAIL, user.email)
             user.display_name?.let { localSettingsRepository.setString(KEY_AUTH_DISPLAY_NAME, it) }
@@ -261,7 +258,6 @@ class AuthClient(
 
     fun currentDeviceRegistration(): DeviceRegistrationDto = deviceRegistrationProvider()
 
-    /** Server-assigned device ID, persisted from the login/register response. */
     suspend fun getServerDeviceId(): String? = localSettingsRepository.getString(KEY_AUTH_DEVICE_ID)
 
     suspend fun login(email: String, password: String): AuthResult {
@@ -292,7 +288,10 @@ class AuthClient(
                 return AuthResult(success = false, error = errorBody?.detail ?: "Login failed (${resp.status.value})")
             }
             val authResp: AuthResponseDto = resp.body()
-            persistAuth(authResp)
+            validateAuthResponse(authResp, requireRefreshToken = true)?.let { return it }
+            authStateMutex.withLock {
+                persistAuthLocked(authResp)
+            }
             authResp.toAuthResult()
         } catch (e: Exception) {
             AuthResult(success = false, error = "Network error: ${e.message}")
@@ -327,7 +326,10 @@ class AuthClient(
                 return AuthResult(success = false, error = errorBody?.detail ?: "Registration failed (${resp.status.value})")
             }
             val authResp: AuthResponseDto = resp.body()
-            persistAuth(authResp, fallbackDisplayName = displayName)
+            validateAuthResponse(authResp, requireRefreshToken = true)?.let { return it }
+            authStateMutex.withLock {
+                persistAuthLocked(authResp, fallbackDisplayName = displayName)
+            }
             authResp.toAuthResult()
         } catch (e: Exception) {
             AuthResult(success = false, error = "Network error: ${e.message}")
@@ -335,32 +337,11 @@ class AuthClient(
     }
 
     suspend fun refreshTokens(): AuthResult {
-        val refreshToken = secureStorage.getString(KEY_AUTH_REFRESH_TOKEN)
-            ?: return AuthResult(success = false, error = "No refresh token")
-        return try {
-            val device = deviceRegistrationProvider()
-            val resp = httpClient.post("${baseUrl()}/auth/refresh") {
-                contentType(ContentType.Application.Json)
-                setBody(RefreshDto(refresh_token = refreshToken, device = device))
-            }
-            if (!resp.status.isSuccess()) {
-                if (resp.status.value == 401) {
-                    clearAuth()
-                }
-                return AuthResult(success = false, error = "Session expired, please log in again")
-            }
-            val authResp: AuthResponseDto = resp.body()
-            persistAuth(authResp)
-            authResp.toAuthResult()
-        } catch (e: Exception) {
-            AuthResult(success = false, error = "Network error: ${e.message}")
+        return authStateMutex.withLock {
+            refreshTokensLocked()
         }
     }
 
-    /**
-     * Request a password reset email for [email].
-     * The backend always returns success to avoid leaking email existence.
-     */
     suspend fun requestPasswordReset(email: String): AuthResult {
         if (email.isBlank() || !email.contains("@")) {
             return AuthResult(success = false, error = "Please enter a valid email address")
@@ -386,10 +367,6 @@ class AuthClient(
         }
     }
 
-    /**
-     * Request a new verification email. Rate limited to 1/min on the backend.
-     * Always returns 200 regardless of whether the email is registered.
-     */
     suspend fun resendVerification(email: String): AuthResult {
         return try {
             val resp = httpClient.post("${baseUrl()}/auth/resend-verification") {
@@ -409,20 +386,22 @@ class AuthClient(
     }
 
     suspend fun logout() {
-        try {
-            val accessToken = secureStorage.getString(KEY_AUTH_ACCESS_TOKEN)
-            val refreshToken = secureStorage.getString(KEY_AUTH_REFRESH_TOKEN)
-            if (accessToken != null) {
-                httpClient.post("${baseUrl()}/auth/logout") {
-                    bearerAuth(accessToken)
-                    contentType(ContentType.Application.Json)
-                    setBody(LogoutDto(refreshToken))
+        authStateMutex.withLock {
+            try {
+                val accessToken = secureStorage.getString(KEY_AUTH_ACCESS_TOKEN)
+                val refreshToken = secureStorage.getString(KEY_AUTH_REFRESH_TOKEN)
+                if (accessToken != null) {
+                    httpClient.post("${baseUrl()}/auth/logout") {
+                        bearerAuth(accessToken)
+                        contentType(ContentType.Application.Json)
+                        setBody(LogoutDto(refreshToken))
+                    }
                 }
+            } catch (_: Exception) {
+                // Best effort - server may not support /auth/logout yet.
             }
-        } catch (_: Exception) {
-            // Best effort — server may not support /auth/logout yet
+            clearAuthLocked()
         }
-        clearAuth()
     }
 
     suspend fun deleteAccount(): AuthResult {
@@ -435,7 +414,7 @@ class AuthClient(
             if (response.status.value !in 200..299) {
                 AuthResult(success = false, error = "Could not delete account (HTTP ${response.status.value})")
             } else {
-                clearAuth()
+                authStateMutex.withLock { clearAuthLocked() }
                 AuthResult(success = true)
             }
         } catch (e: Exception) {
@@ -445,41 +424,44 @@ class AuthClient(
 
     /**
      * Attempt to restore a valid session on app startup.
-     * Migrates legacy tokens to secure storage and silently refreshes.
      */
     suspend fun restoreSession(): Boolean {
-        migrateTokensIfNeeded()
+        authStateMutex.withLock {
+            migrateTokensIfNeededLocked()
+        }
         if (!isLoggedIn()) return false
         return refreshTokens().success
     }
 
-    /**
-     * One-time migration of tokens from plaintext device-local settings
-     * to encrypted SecureStorage.
-     */
-    private suspend fun migrateTokensIfNeeded() {
+    private suspend fun migrateTokensIfNeededLocked() {
         if (secureStorage.getString(KEY_AUTH_ACCESS_TOKEN) != null) return
         val oldAccessToken = localSettingsRepository.getString(KEY_AUTH_ACCESS_TOKEN) ?: return
         val oldRefreshToken = localSettingsRepository.getString(KEY_AUTH_REFRESH_TOKEN)
-        secureStorage.putString(KEY_AUTH_ACCESS_TOKEN, oldAccessToken)
-        if (oldRefreshToken != null) {
-            secureStorage.putString(KEY_AUTH_REFRESH_TOKEN, oldRefreshToken)
-        }
+        secureStorage.updateStrings(
+            mapOf(
+                KEY_AUTH_ACCESS_TOKEN to oldAccessToken,
+                KEY_AUTH_REFRESH_TOKEN to oldRefreshToken,
+            ),
+        )
         localSettingsRepository.remove(KEY_AUTH_ACCESS_TOKEN)
         localSettingsRepository.remove(KEY_AUTH_REFRESH_TOKEN)
     }
 
-    private suspend fun persistAuth(
+    private suspend fun persistAuthLocked(
         response: AuthResponseDto,
         fallbackDisplayName: String? = null,
     ) {
         val expiresAt = Clock.System.now().toEpochMilliseconds() + TOKEN_LIFETIME_MS
-        secureStorage.putString(KEY_AUTH_ACCESS_TOKEN, response.tokens.access_token)
-        // Refresh responses omit refresh_token — keep the original
-        response.tokens.refresh_token?.let {
-            secureStorage.putString(KEY_AUTH_REFRESH_TOKEN, it)
-        }
-        secureStorage.putString(KEY_TOKEN_EXPIRES_AT, expiresAt.toString())
+        val refreshToken = response.tokens.refresh_token
+            ?.takeIf { it.isNotBlank() }
+            ?: secureStorage.getString(KEY_AUTH_REFRESH_TOKEN)
+        secureStorage.updateStrings(
+            mapOf(
+                KEY_AUTH_ACCESS_TOKEN to response.tokens.access_token,
+                KEY_AUTH_REFRESH_TOKEN to refreshToken,
+                KEY_TOKEN_EXPIRES_AT to expiresAt.toString(),
+            ),
+        )
         localSettingsRepository.setString(KEY_AUTH_USER_ID, response.user.id)
         localSettingsRepository.setString(KEY_AUTH_EMAIL, response.user.email)
         (response.user.display_name ?: fallbackDisplayName?.takeIf { it.isNotBlank() })
@@ -489,7 +471,6 @@ class AuthClient(
             localSettingsRepository.setString(KEY_AUTH_DEVICE_ID, it)
         }
         emitCurrentUser()
-        // Auto-start SSE for unverified users, stop for verified
         if (!response.user.is_verified) {
             startVerificationEvents()
         } else {
@@ -497,11 +478,15 @@ class AuthClient(
         }
     }
 
-    private suspend fun clearAuth() {
+    private suspend fun clearAuthLocked() {
         stopVerificationEvents()
-        secureStorage.remove(KEY_AUTH_ACCESS_TOKEN)
-        secureStorage.remove(KEY_AUTH_REFRESH_TOKEN)
-        secureStorage.remove(KEY_TOKEN_EXPIRES_AT)
+        secureStorage.updateStrings(
+            mapOf(
+                KEY_AUTH_ACCESS_TOKEN to null,
+                KEY_AUTH_REFRESH_TOKEN to null,
+                KEY_TOKEN_EXPIRES_AT to null,
+            ),
+        )
         localSettingsRepository.remove(KEY_AUTH_USER_ID)
         localSettingsRepository.remove(KEY_AUTH_EMAIL)
         localSettingsRepository.remove(KEY_AUTH_DISPLAY_NAME)
@@ -509,9 +494,76 @@ class AuthClient(
         localSettingsRepository.remove(KEY_AUTH_DEVICE_ID)
         _authUser.value = null
     }
-}
 
-// ── Backend DTOs ──
+    private suspend fun refreshTokensLocked(): AuthResult {
+        val refreshToken = secureStorage.getString(KEY_AUTH_REFRESH_TOKEN)
+            ?.takeIf { it.isNotBlank() }
+            ?: return AuthResult(success = false, error = "No refresh token")
+
+        return try {
+            val device = deviceRegistrationProvider()
+            val resp = httpClient.post("${baseUrl()}/auth/refresh") {
+                contentType(ContentType.Application.Json)
+                setBody(RefreshDto(refresh_token = refreshToken, device = device))
+            }
+            if (!resp.status.isSuccess()) {
+                val errorBody = runCatching { resp.body<ErrorDto>() }.getOrNull()
+                val message = errorBody?.detail?.takeIf { it.isNotBlank() }
+                    ?: "Session expired, please log in again"
+                if (shouldInvalidateSession(resp.status)) {
+                    invalidateSessionLocked(message)
+                }
+                return AuthResult(success = false, error = message)
+            }
+
+            val authResp: AuthResponseDto = resp.body()
+            validateAuthResponse(authResp, requireRefreshToken = true)?.let { validationError ->
+                invalidateSessionLocked(validationError.error ?: "Session expired, please log in again")
+                return validationError
+            }
+            persistAuthLocked(authResp)
+            authResp.toAuthResult()
+        } catch (e: Exception) {
+            AuthResult(success = false, error = "Network error: ${e.message}")
+        }
+    }
+
+    private fun validateAuthResponse(
+        response: AuthResponseDto,
+        requireRefreshToken: Boolean,
+    ): AuthResult? {
+        if (response.tokens.access_token.isBlank()) {
+            return AuthResult(success = false, error = "Server returned an invalid access token")
+        }
+        if (requireRefreshToken && response.tokens.refresh_token.isNullOrBlank()) {
+            return AuthResult(success = false, error = "Server returned an invalid refresh token")
+        }
+        return null
+    }
+
+    private suspend fun invalidateSessionLocked(message: String) {
+        val hadSession = hasStoredSessionLocked() || getCurrentUser() != null
+        clearAuthLocked()
+        if (hadSession) {
+            _authEvents.emit(AuthEvent.SessionExpired(message))
+        }
+    }
+
+    private fun shouldInvalidateSession(status: HttpStatusCode): Boolean {
+        return status == HttpStatusCode.BadRequest ||
+            status == HttpStatusCode.Unauthorized ||
+            status == HttpStatusCode.Forbidden
+    }
+
+    private suspend fun hasStoredSession(): Boolean {
+        return authStateMutex.withLock { hasStoredSessionLocked() }
+    }
+
+    private suspend fun hasStoredSessionLocked(): Boolean {
+        return secureStorage.getString(KEY_AUTH_ACCESS_TOKEN)?.isNotBlank() == true ||
+            secureStorage.getString(KEY_AUTH_REFRESH_TOKEN)?.isNotBlank() == true
+    }
+}
 
 @Serializable
 data class DeviceRegistrationDto(
@@ -552,11 +604,6 @@ private data class RefreshDto(
 @Serializable
 private data class LogoutDto(val refresh_token: String?)
 
-/**
- * Handles polymorphic `detail` field from the backend:
- * - Structured errors: `{"detail": "Human-readable message"}`
- * - Validation errors (422): `{"detail": [{"msg": "...", ...}, ...]}`
- */
 private object DetailSerializer : KSerializer<String?> {
     override val descriptor: SerialDescriptor =
         PrimitiveSerialDescriptor("Detail", PrimitiveKind.STRING)
@@ -569,6 +616,7 @@ private object DetailSerializer : KSerializer<String?> {
             is JsonArray -> element.mapNotNull { item ->
                 (item as? JsonObject)?.get("msg")?.jsonPrimitive?.contentOrNull
             }.joinToString("; ").ifEmpty { "Validation error" }
+
             else -> element.toString()
         }
     }

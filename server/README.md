@@ -15,6 +15,11 @@ This service provides:
 3. Run migrations:
    - `docker compose exec api alembic upgrade head`
 
+For repeat local runs, prefer the repo-level wrapper:
+- `.\scripts\dev.ps1 -Target backend-up`
+- `.\scripts\dev.ps1 -Target backend-up -BuildImages` only when dependencies or the Docker image changed
+- `.\scripts\dev.ps1 -Target backend-migrate`
+
 The API is served on `http://localhost:8080`.
 
 ## Phase 2 Migration Note

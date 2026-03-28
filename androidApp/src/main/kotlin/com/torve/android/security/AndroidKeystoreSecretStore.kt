@@ -66,6 +66,18 @@ class AndroidKeystoreSecretStore(
         prefs.edit().remove(key).apply()
     }
 
+    override suspend fun updateStrings(updates: Map<String, String?>) {
+        val editor = prefs.edit()
+        updates.forEach { (key, value) ->
+            if (value == null) {
+                editor.remove(key)
+            } else {
+                editor.putString(key, encrypt(value))
+            }
+        }
+        editor.commit()
+    }
+
     private fun encrypt(plain: String): String {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateSecretKey())

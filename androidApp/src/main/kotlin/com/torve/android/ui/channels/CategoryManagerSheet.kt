@@ -86,7 +86,7 @@ fun CategoryManagerSheet(
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "Select countries and categories you want to see",
+                text = stringResource(R.string.channels_select_countries),
                 style = MaterialTheme.typography.bodySmall,
                 color = Torve.colors.textTertiary,
             )

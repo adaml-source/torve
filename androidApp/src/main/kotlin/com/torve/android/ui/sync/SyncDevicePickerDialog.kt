@@ -13,7 +13,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.torve.android.R
 import com.torve.android.sync.model.SyncDeviceDto
 
 @Composable
@@ -29,7 +31,7 @@ fun SyncDevicePickerDialog(
         text = {
             if (devices.isEmpty()) {
                 Text(
-                    text = "No paired target devices found.",
+                    text = stringResource(R.string.sync_no_targets),
                     style = MaterialTheme.typography.bodyMedium,
                 )
             } else {
@@ -56,7 +58,7 @@ fun SyncDevicePickerDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("Close")
+                Text(stringResource(R.string.common_close))
             }
         },
     )

@@ -19,7 +19,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.torve.android.R
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -93,7 +95,7 @@ fun TrailerPlayerDialog(
             ) {
                 Icon(
                     Icons.Default.Close,
-                    contentDescription = "Close",
+                    contentDescription = stringResource(R.string.common_close_cd),
                     tint = Color.White,
                     modifier = Modifier.size(18.dp),
                 )

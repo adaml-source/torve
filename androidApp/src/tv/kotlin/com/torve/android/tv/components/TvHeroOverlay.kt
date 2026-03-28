@@ -23,11 +23,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -68,8 +65,8 @@ fun TvHeroOverlay(
     subtitle: String,
     primaryActionFocusRequester: FocusRequester,
     railFocusRequester: FocusRequester,
-    onPlayFeatured: () -> Unit,
-    onOpenFeatured: () -> Unit,
+    onDetailsFeatured: () -> Unit,
+    onTrailerFeatured: () -> Unit,
     isInWatchlist: Boolean = false,
     onWatchlistToggle: () -> Unit = {},
     modifier: Modifier = Modifier,
@@ -175,9 +172,9 @@ fun TvHeroOverlay(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        // Play button — Amber CTA
+                        // Details button — Amber CTA
                         Button(
-                            onClick = onPlayFeatured,
+                            onClick = onDetailsFeatured,
                             modifier = Modifier
                                 .focusRequester(primaryActionFocusRequester)
                                 .focusProperties {
@@ -190,43 +187,37 @@ fun TvHeroOverlay(
                             ),
                             shape = RoundedCornerShape(8.dp),
                         ) {
-                            Icon(
-                                Icons.Default.PlayArrow,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                            )
-                            Spacer(Modifier.width(6.dp))
                             Text(
-                                text = stringResource(R.string.tv_action_play),
+                                text = stringResource(R.string.tv_action_details),
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.SemiBold,
                             )
                         }
 
-                        // Details button — PROPERLY FOCUSABLE
-                        var detailsFocused by remember { mutableStateOf(false) }
-                        val detailsScale by animateFloatAsState(
-                            targetValue = if (detailsFocused) 1.05f else 1f,
-                            label = "detailsScale",
+                        // Trailer button
+                        var trailerFocused by remember { mutableStateOf(false) }
+                        val trailerScale by animateFloatAsState(
+                            targetValue = if (trailerFocused) 1.05f else 1f,
+                            label = "trailerScale",
                         )
-                        val detailsBorderColor by animateColorAsState(
-                            targetValue = if (detailsFocused) Amber else Color.Transparent,
-                            label = "detailsBorderColor",
+                        val trailerBorderColor by animateColorAsState(
+                            targetValue = if (trailerFocused) Amber else Color.Transparent,
+                            label = "trailerBorderColor",
                         )
 
                         Box(
                             modifier = Modifier
-                                .zIndex(if (detailsFocused) 1f else 0f)
-                                .scale(detailsScale)
-                                .border(2.dp, detailsBorderColor, RoundedCornerShape(8.dp))
+                                .zIndex(if (trailerFocused) 1f else 0f)
+                                .scale(trailerScale)
+                                .border(2.dp, trailerBorderColor, RoundedCornerShape(8.dp))
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(
-                                    if (detailsFocused) Amber.copy(alpha = 0.25f)
+                                    if (trailerFocused) Amber.copy(alpha = 0.25f)
                                     else Snow.copy(alpha = 0.15f),
                                 )
                                 .focusRequester(detailsFocusRequester)
                                 .onFocusChanged {
-                                    detailsFocused = it.isFocused
+                                    trailerFocused = it.isFocused
                                 }
                                 .focusProperties {
                                     left = primaryActionFocusRequester
@@ -235,15 +226,15 @@ fun TvHeroOverlay(
                                 .clickable(
                                     interactionSource = remember { MutableInteractionSource() },
                                     indication = null,
-                                    onClick = onOpenFeatured,
+                                    onClick = onTrailerFeatured,
                                 )
                                 .padding(horizontal = 20.dp, vertical = 11.dp),
                             contentAlignment = Alignment.Center,
                         ) {
                             Text(
-                                text = stringResource(R.string.tv_action_details),
+                                text = stringResource(R.string.tv_action_trailer),
                                 style = MaterialTheme.typography.labelLarge,
-                                color = if (detailsFocused) Amber else Snow,
+                                color = if (trailerFocused) Amber else Snow,
                                 fontWeight = FontWeight.SemiBold,
                             )
                         }

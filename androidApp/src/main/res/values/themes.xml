@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.Torve" parent="Theme.AppCompat.NoActionBar">
-        <!-- Transparent for SDK 35+ enforced edge-to-edge. enableEdgeToEdge() handles scrim. -->
+        <!-- Transparent bars keep the app visually edge-to-edge while app code handles insets. -->
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowBackground">@android:color/black</item>

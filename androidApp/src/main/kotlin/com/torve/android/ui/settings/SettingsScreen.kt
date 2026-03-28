@@ -87,6 +87,7 @@ import androidx.compose.ui.unit.dp
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
 import com.torve.android.R
+import com.torve.android.premium.AccessTier
 import com.torve.android.premium.PremiumAccess
 import com.torve.android.premium.PremiumFeature
 import com.torve.domain.model.DebridServiceType
@@ -114,14 +115,19 @@ import com.torve.presentation.settings.AppLanguage
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.settings.ThemeMode
 import com.torve.presentation.session.AccountSessionCoordinator
+import com.torve.presentation.subscription.SubscriptionViewModel
+import com.torve.presentation.subscription.accessPresentation
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import java.util.Locale
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    isLifetimeUnlocked: Boolean = false,
+    accessTier: AccessTier = AccessTier.FREE,
     onLockedFeatureClick: (PremiumFeature) -> Unit = {},
     onDownloadsClick: () -> Unit = {},
     onSubscriptionClick: () -> Unit = {},
@@ -149,11 +155,24 @@ fun SettingsScreen(
     authClient: AuthClient = koinInject(),
     accountSettingsRepository: AccountSettingsRepository = koinInject(),
     accountSessionCoordinator: AccountSessionCoordinator = koinInject(),
+    subscriptionViewModel: SubscriptionViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
     val syncState by syncCoordinator.state.collectAsState()
     val accountSettingsState by accountSettingsRepository.state.collectAsState()
-    val accessTier = remember(isLifetimeUnlocked) { PremiumAccess.tierFrom(isLifetimeUnlocked) }
+    val subscriptionState by subscriptionViewModel.state.collectAsState()
+    val subscriptionAccess = remember(
+        subscriptionState.subscription,
+        subscriptionState.isPro,
+        subscriptionState.isLoggedIn,
+        subscriptionState.hasEntitlement,
+        subscriptionState.isDeviceActivated,
+        subscriptionState.deviceBlockReason,
+        subscriptionState.deviceCapReached,
+        subscriptionState.purchaseStatus,
+    ) {
+        subscriptionState.accessPresentation()
+    }
     val isLocked: (PremiumFeature) -> Boolean = remember(accessTier) {
         { feature -> PremiumAccess.isPremiumLocked(feature, accessTier) }
     }
@@ -181,6 +200,7 @@ fun SettingsScreen(
     val collectionsLocked = isLocked(PremiumFeature.PERSISTENT_COLLECTIONS)
     val customLayoutLocked = isLocked(PremiumFeature.SYNC_CUSTOM_LAYOUTS)
     val backupLocked = isLocked(PremiumFeature.CLOUD_BACKUP_RESTORE)
+    val canOpenManageDevices = subscriptionState.hasEntitlement || !deviceLinkingLocked
     // Observe the authoritative auth user flow — reacts immediately to
     // login, logout, and verification status changes without manual refresh.
     val authUser by authClient.authUserFlow.collectAsState()
@@ -212,8 +232,14 @@ fun SettingsScreen(
             }
         }
     }
+    LaunchedEffect(Unit) {
+        if (BuildConfig.HAS_BILLING) {
+            subscriptionViewModel.refreshAccess()
+        }
+    }
 
     val scope = rememberCoroutineScope()
+    val premiumStatusLabel = subscriptionAccess.accessStatusLabel
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -283,12 +309,16 @@ fun SettingsScreen(
                         }
                         OutlinedButton(
                             onClick = {
-                                onPremiumAction(PremiumFeature.DEVICE_LINKING) { onManageDevicesClick() }
+                                if (canOpenManageDevices) {
+                                    onManageDevicesClick()
+                                } else {
+                                    onLockedFeatureClick(PremiumFeature.DEVICE_LINKING)
+                                }
                             },
                             modifier = Modifier.weight(1f),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
                         ) {
-                            if (deviceLinkingLocked) {
+                            if (!canOpenManageDevices && deviceLinkingLocked) {
                                 Icon(
                                     imageVector = Icons.Default.Lock,
                                     contentDescription = null,
@@ -296,7 +326,7 @@ fun SettingsScreen(
                                 )
                                 Spacer(Modifier.width(6.dp))
                             }
-                            Text(if (deviceLinkingLocked) "Manage Devices (Locked)" else "Manage Devices")
+                            Text(if (!canOpenManageDevices && deviceLinkingLocked) "Manage Devices (Locked)" else "Manage Devices")
                         }
                     }
                     Spacer(Modifier.height(8.dp))
@@ -467,6 +497,52 @@ fun SettingsScreen(
                         stringResource(R.string.settings_profiles)
                     },
                 )
+            }
+        }
+        if (BuildConfig.HAS_BILLING) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = premiumStatusLabel,
+                style = MaterialTheme.typography.bodySmall,
+                color = Torve.colors.textSecondary,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = subscriptionAccess.accessHelperText,
+                style = MaterialTheme.typography.bodySmall,
+                color = Torve.colors.textSecondary,
+            )
+            subscriptionMarketplaceLabel(subscriptionState.subscription?.platform)?.let { label ->
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = "Managed through $label",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Torve.colors.textSecondary,
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (subscriptionAccess.shouldShowManageDevices) {
+                    Button(
+                        onClick = onManageDevicesClick,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
+                    ) {
+                        Text(stringResource(R.string.manage_devices_title))
+                    }
+                }
+                if (subscriptionState.isLoggedIn) {
+                    OutlinedButton(
+                        onClick = { subscriptionViewModel.refreshAccess() },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
+                    ) {
+                        Text(stringResource(R.string.premium_refresh_access))
+                    }
+                }
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -866,11 +942,11 @@ fun SettingsScreen(
 
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "Streaming Availability Region",
+                    stringResource(R.string.settings_availability_region),
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text(
-                    "2-letter country code (e.g. US, GB, DE). Determines which streaming services are shown on detail pages.",
+                    stringResource(R.string.settings_availability_region_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = Torve.colors.textSecondary,
                 )
@@ -1269,7 +1345,7 @@ fun SettingsScreen(
         if (aiProviderLocked) {
             LockedSettingsCard(
                 title = stringResource(R.string.settings_ai_features),
-                description = "Connect AI providers and API keys with Lifetime Access.",
+                description = "Connect AI providers and API keys with Premium.",
                 onUnlock = { onLockedFeatureClick(PremiumFeature.AI_PROVIDER_SETUP) },
             )
         } else {
@@ -1835,6 +1911,24 @@ fun SettingsScreen(
             style = MaterialTheme.typography.bodySmall,
             color = Torve.colors.textTertiary,
         )
+    }
+}
+
+private fun formatSettingsAccessDate(epochMs: Long): String {
+    val formatter = DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.US)
+    return formatter.format(
+        Instant.ofEpochMilli(epochMs)
+            .atZone(ZoneId.systemDefault())
+            .toLocalDate(),
+    )
+}
+
+private fun subscriptionMarketplaceLabel(value: String?): String? {
+    return when (value?.lowercase()) {
+        "google_play" -> "Google Play"
+        "amazon" -> "Amazon Appstore"
+        "apple" -> "Apple App Store"
+        else -> null
     }
 }
 

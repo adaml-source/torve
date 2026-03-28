@@ -20,6 +20,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.torve.android.R
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.text.font.FontWeight
@@ -66,7 +68,7 @@ fun WatchedOverlay(
                     ) {
                         Icon(
                             Icons.Default.Check,
-                            contentDescription = "Watched",
+                            contentDescription = stringResource(R.string.watched_cd),
                             tint = Color.White,
                             modifier = Modifier.size(12.dp),
                         )
@@ -82,7 +84,7 @@ fun WatchedOverlay(
                     ) {
                         Icon(
                             Icons.Default.CheckCircle,
-                            contentDescription = "Watched",
+                            contentDescription = stringResource(R.string.watched_cd),
                             tint = WatchedGreen.copy(alpha = 0.85f),
                             modifier = Modifier.size(40.dp),
                         )
@@ -99,7 +101,7 @@ fun WatchedOverlay(
                     ) {
                         Icon(
                             Icons.Default.Visibility,
-                            contentDescription = "Watched",
+                            contentDescription = stringResource(R.string.watched_cd),
                             tint = WatchedGreen,
                             modifier = Modifier.size(14.dp),
                         )

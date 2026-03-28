@@ -13,21 +13,34 @@ sealed interface BackendPremiumResult {
     data object Active : BackendPremiumResult
 
     /** User has entitlement but device is blocked (e.g., cap reached). */
-    data class DeviceBlocked(val reason: String) : BackendPremiumResult
+    data class DeviceBlocked(val reason: String? = null) : BackendPremiumResult
 
     /** No premium entitlement at all. */
     data object NoEntitlement : BackendPremiumResult
 
     /** Could not reach backend; local state used. */
-    data class Offline(val localIsPro: Boolean) : BackendPremiumResult
+    data class Offline(
+        val localIsPro: Boolean,
+        val localHasEntitlement: Boolean = localIsPro,
+        val localIsDeviceActivated: Boolean = localIsPro,
+        val localDeviceBlockReason: String? = null,
+    ) : BackendPremiumResult
 }
 
 interface SubscriptionRepository {
     suspend fun getActiveSubscription(): Subscription?
     suspend fun isPro(): Boolean
     suspend fun hasAccess(feature: PremiumFeature): Boolean
+    /**
+     * Legacy local activation hook.
+     * Must not be treated as backend-authoritative entitlement on its own.
+     */
     suspend fun activateSubscription(tier: SubscriptionTier, purchaseToken: String)
     suspend fun ensureFreeTier()
+    /**
+     * Legacy restore hook kept for backward compatibility with older sync/import code.
+     * Must not grant premium unless backend entitlement is confirmed.
+     */
     suspend fun restorePurchase(purchaseToken: String): Subscription?
 
     /** Refresh entitlements from backend. Returns true if premium on this device. */

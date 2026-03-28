@@ -5,7 +5,7 @@ import com.torve.domain.model.WatchProgress
 import com.torve.domain.model.WatchlistItem
 
 fun WatchProgress.toMediaItemOrNull(): MediaItem? {
-    val tmdbId = mediaId.toIntOrNull()
+    val tmdbId = mediaId.substringAfterLast("_", mediaId).toIntOrNull() ?: mediaId.toIntOrNull()
     return MediaItem(
         id = mediaId,
         tmdbId = tmdbId,
@@ -34,4 +34,3 @@ fun WatchlistItem.toMediaItem(): MediaItem {
         rating = rating,
     )
 }
-

@@ -6,7 +6,6 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -470,7 +469,7 @@ private fun CustomSectionRow(
         // Drag handle (same behavior as default sections)
         Icon(
             Icons.Rounded.DragHandle,
-            contentDescription = "Drag to reorder",
+            contentDescription = stringResource(R.string.drag_to_reorder_cd),
             tint = Silver,
             modifier = Modifier
                 .size(32.dp)
@@ -503,7 +502,7 @@ private fun CustomSectionRow(
         ) {
             Icon(
                 Icons.Rounded.Edit,
-                contentDescription = "Edit",
+                contentDescription = stringResource(R.string.common_edit_cd),
                 tint = Silver,
                 modifier = Modifier.size(18.dp),
             )
@@ -551,7 +550,7 @@ private fun AddonShelfRow(
     ) {
         Icon(
             Icons.Rounded.DragHandle,
-            contentDescription = "Drag to reorder",
+            contentDescription = stringResource(R.string.drag_to_reorder_cd),
             tint = Silver,
             modifier = Modifier
                 .size(32.dp)
@@ -665,7 +664,7 @@ private fun SectionRow(
             // Drag handle
             Icon(
                 Icons.Rounded.DragHandle,
-                contentDescription = "Drag to reorder",
+                contentDescription = stringResource(R.string.drag_to_reorder_cd),
                 tint = if (isHero) Smoke else Silver,
                 modifier = Modifier
                     .size(32.dp)
@@ -673,11 +672,11 @@ private fun SectionRow(
                     .then(
                         if (!isHero) {
                             Modifier.pointerInput(Unit) {
-                                detectDragGesturesAfterLongPress(
+                                detectDragGestures(
                                     onDragStart = { currentOnDragStart() },
-                                    onDrag = { change, offset ->
+                                    onDrag = { change, dragAmount ->
                                         change.consume()
-                                        currentOnDrag(offset.y)
+                                        currentOnDrag(dragAmount.y)
                                     },
                                     onDragEnd = { currentOnDragEnd() },
                                     onDragCancel = { currentOnDragEnd() },

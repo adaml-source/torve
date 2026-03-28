@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -30,13 +31,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.torve.android.R
 import com.torve.android.ui.components.BackButton
 import com.torve.android.ui.components.CardSize
 import com.torve.android.ui.components.LocalCardStyle
 import com.torve.android.ui.components.PosterCard
+import com.torve.android.ui.components.mediaItemLazyKey
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Charcoal
 import com.torve.android.ui.theme.Gunmetal
@@ -85,7 +89,7 @@ fun MoodMatcherScreen(
                 modifier = Modifier.align(Alignment.CenterStart),
             )
             Text(
-                text = "What should I watch?",
+                text = stringResource(R.string.mood_what_to_watch),
                 style = MaterialTheme.typography.titleLarge,
                 color = Snow,
                 fontWeight = FontWeight.Bold,
@@ -100,7 +104,7 @@ fun MoodMatcherScreen(
             // Mood selector
             item(key = "mood_header") {
                 Text(
-                    text = "Pick your mood",
+                    text = stringResource(R.string.mood_pick_mood),
                     style = MaterialTheme.typography.titleMedium,
                     color = Amber,
                     fontWeight = FontWeight.SemiBold,
@@ -169,7 +173,7 @@ fun MoodMatcherScreen(
             if (state.results.isNotEmpty()) {
                 item(key = "results_header") {
                     Text(
-                        text = "We think you'll love these",
+                        text = stringResource(R.string.mood_love_these),
                         style = MaterialTheme.typography.titleMedium,
                         color = Amber,
                         fontWeight = FontWeight.SemiBold,
@@ -181,7 +185,7 @@ fun MoodMatcherScreen(
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        items(state.results, key = { it.item.id }) { result ->
+                        itemsIndexed(state.results, key = { index, result -> mediaItemLazyKey(result.item, index) }) { _, result ->
                             Column(
                                 modifier = Modifier.width(130.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -219,4 +223,3 @@ fun MoodMatcherScreen(
     }
     }
 }
-

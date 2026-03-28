@@ -1,8 +1,10 @@
 package com.torve.android.ui.settings
 
+import android.content.Intent
+import android.net.Uri
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,23 +20,20 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -50,12 +49,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
-import android.content.Intent
-import android.net.Uri
-import androidx.compose.ui.res.stringResource
 import com.torve.android.R
 import com.torve.android.ui.components.BackButton
 import com.torve.android.ui.theme.Amber
@@ -68,62 +65,59 @@ import com.torve.android.ui.theme.Steel
 import com.torve.presentation.addon.AddonViewModel
 import org.koin.compose.koinInject
 
-enum class AddonCategory(val label: String) {
-    ALL("All"),
-    STREAMS("Streams"),
-    CATALOGS("Catalogs"),
-    SUBTITLES("Subtitles"),
+enum class AddonCategory(val labelRes: Int) {
+    STREAMS(R.string.addon_category_streams),
+    CATALOGS(R.string.addon_category_catalogs),
+    SUBTITLES(R.string.addon_category_subtitles),
 }
 
 data class PopularAddon(
-    val name: String,
-    val description: String,
+    @StringRes val nameRes: Int,
+    @StringRes val descriptionRes: Int,
     val url: String,
     val categories: List<AddonCategory>,
     val logo: String? = null,
 )
 
 val POPULAR_ADDONS = listOf(
-    // ── Catalogs / Metadata ──
     PopularAddon(
-        "Cinemeta",
-        "Movie & series info from IMDB/TMDB",
+        R.string.addon_popular_cinemeta_name,
+        R.string.addon_popular_cinemeta_desc,
         "https://v3-cinemeta.strem.io/manifest.json",
         listOf(AddonCategory.CATALOGS),
         "https://v3-cinemeta.strem.io/images/cinemeta-logo.png",
     ),
     PopularAddon(
-        "The Movie Database Addon",
-        "Rich catalogs powered by TMDB — trending, popular, top rated",
+        R.string.addon_popular_tmdb_name,
+        R.string.addon_popular_tmdb_desc,
         "https://94c8cb9f702d-tmdb-addon.baby-beamup.club/manifest.json",
         listOf(AddonCategory.CATALOGS),
         "https://www.themoviedb.org/assets/2/v4/logos/v2/blue_square_1-5bdc75aaebeb75dc7ae79426ddd9be3b2be1e342510f8202baf6bffa71d7f5c4.svg",
     ),
     PopularAddon(
-        "Trakt Lists",
-        "Access your Trakt lists, trending, popular, and anticipated titles",
+        R.string.addon_popular_trakt_name,
+        R.string.addon_popular_trakt_desc,
         "https://2ecbbd610840-trakt.baby-beamup.club/manifest.json",
         listOf(AddonCategory.CATALOGS),
         "https://walter.trakt.tv/hotlink-ok/public/favicon.svg",
     ),
     PopularAddon(
-        "IMDB Catalogs",
-        "IMDB movie & series lists — Top 250, Most Popular, Box Office",
+        R.string.addon_popular_imdb_name,
+        R.string.addon_popular_imdb_desc,
         "https://1fe84bc728af-imdb-catalogs.baby-beamup.club/manifest.json",
         listOf(AddonCategory.CATALOGS),
         "https://1fe84bc728af-imdb-catalogs.baby-beamup.club/static/imdb-logo.png",
     ),
     PopularAddon(
-        "RPDB Catalogs",
-        "Rating poster database — catalogs with rating overlays",
+        R.string.addon_popular_rpdb_name,
+        R.string.addon_popular_rpdb_desc,
         "https://1fe84bc728af-rpdb.baby-beamup.club/manifest.json",
         listOf(AddonCategory.CATALOGS),
         "https://ratingposterdb.com/assets/img/logo.svg",
     ),
-    // ── Subtitles ──
     PopularAddon(
-        "OpenSubtitles v3",
-        "Subtitles from OpenSubtitles.com — largest subtitle database",
+        R.string.addon_popular_opensubtitles_name,
+        R.string.addon_popular_opensubtitles_desc,
         "https://opensubtitles-v3.strem.io/manifest.json",
         listOf(AddonCategory.SUBTITLES),
         "https://opensubtitles-v3.strem.io/images/opensubtitles-logo.png",
@@ -139,7 +133,6 @@ fun AddonCatalogScreen(
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     var searchQuery by remember { mutableStateOf("") }
-    var selectedCategory by remember { mutableStateOf(AddonCategory.ALL) }
 
     val installedUrls = remember(state.addons) {
         state.addons
@@ -151,12 +144,14 @@ fun AddonCatalogScreen(
             .toSet()
     }
 
-    val filtered = remember(searchQuery, selectedCategory) {
-        val byCategory = if (selectedCategory == AddonCategory.ALL) POPULAR_ADDONS
-        else POPULAR_ADDONS.filter { selectedCategory in it.categories }
-
-        if (searchQuery.isBlank() || searchQuery.startsWith("http")) byCategory
-        else byCategory.filter { it.name.contains(searchQuery, ignoreCase = true) }
+    val filtered = remember(searchQuery) {
+        if (searchQuery.isBlank() || searchQuery.startsWith("http")) {
+            POPULAR_ADDONS
+        } else {
+            POPULAR_ADDONS.filter { addon ->
+                context.getString(addon.nameRes).contains(searchQuery, ignoreCase = true)
+            }
+        }
     }
 
     val availableAddons = remember(filtered, installedUrls) {
@@ -173,7 +168,6 @@ fun AddonCatalogScreen(
             .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding(),
     ) {
-        // ── Top Bar ──
         Row(
             Modifier
                 .fillMaxWidth()
@@ -197,7 +191,6 @@ fun AddonCatalogScreen(
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
         )
 
-        // ── Search / URL Input ──
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
@@ -218,7 +211,9 @@ fun AddonCatalogScreen(
                 if (searchQuery.startsWith("http")) {
                     if (state.isInstalling) {
                         CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp).padding(4.dp),
+                            modifier = Modifier
+                                .size(24.dp)
+                                .padding(4.dp),
                             color = Amber,
                             strokeWidth = 2.dp,
                         )
@@ -228,40 +223,18 @@ fun AddonCatalogScreen(
                             viewModel.installAddon()
                             searchQuery = ""
                         }) {
-                            Icon(Icons.Default.Add, stringResource(R.string.common_install), tint = Amber)
+                            Icon(
+                                Icons.Default.Add,
+                                stringResource(R.string.common_install),
+                                tint = Amber,
+                            )
                         }
                     }
                 }
             },
         )
 
-        // ── Category Filter Chips ──
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            AddonCategory.entries.forEach { category ->
-                FilterChip(
-                    selected = selectedCategory == category,
-                    onClick = { selectedCategory = category },
-                    label = { Text(category.label) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = Amber,
-                        selectedLabelColor = Gunmetal,
-                        containerColor = Gunmetal,
-                        labelColor = Silver,
-                    ),
-                )
-            }
-        }
-
-        Spacer(Modifier.height(4.dp))
-
         LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
-            // ── Installed Section ──
             if (state.addons.isNotEmpty()) {
                 item(key = "installed_header") {
                     Text(
@@ -280,7 +253,6 @@ fun AddonCatalogScreen(
                             .padding(vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        // Logo with letter fallback
                         AddonLogo(name = addon.manifest.name, logoUrl = addon.manifest.logo)
                         Spacer(Modifier.width(12.dp))
 
@@ -301,7 +273,6 @@ fun AddonCatalogScreen(
                             }
                         }
 
-                        // Toggle
                         Switch(
                             checked = addon.isEnabled,
                             onCheckedChange = { viewModel.toggleAddon(addon.manifestUrl, it) },
@@ -311,9 +282,13 @@ fun AddonCatalogScreen(
                             ),
                         )
 
-                        // Delete
                         IconButton(onClick = { viewModel.removeAddon(addon.manifestUrl) }) {
-                            Icon(Icons.Default.Delete, stringResource(R.string.common_remove), tint = Ruby, modifier = Modifier.size(20.dp))
+                            Icon(
+                                Icons.Default.Delete,
+                                stringResource(R.string.common_remove),
+                                tint = Ruby,
+                                modifier = Modifier.size(20.dp),
+                            )
                         }
                     }
                     HorizontalDivider(color = Steel.copy(alpha = 0.15f))
@@ -324,7 +299,6 @@ fun AddonCatalogScreen(
                 }
             }
 
-            // ── Available Section ──
             if (availableAddons.isNotEmpty()) {
                 item(key = "available_header") {
                     Text(
@@ -338,33 +312,37 @@ fun AddonCatalogScreen(
 
                 items(availableAddons, key = { it.url }) { addon ->
                     val isThisInstalling = state.isInstalling && state.installingUrl == addon.url
+                    val addonName = stringResource(addon.nameRes)
+                    val addonDescription = stringResource(addon.descriptionRes)
+
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .padding(vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        // Logo with letter fallback
-                        AddonLogo(name = addon.name, logoUrl = addon.logo)
+                        AddonLogo(name = addonName, logoUrl = addon.logo)
                         Spacer(Modifier.width(12.dp))
 
                         Column(Modifier.weight(1f)) {
                             Text(
-                                addon.name,
+                                addonName,
                                 style = MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.Medium,
                                 color = Snow,
                             )
                             Spacer(Modifier.height(2.dp))
                             Text(
-                                addon.description,
+                                addonDescription,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Silver,
                                 maxLines = 2,
                             )
                             Spacer(Modifier.height(4.dp))
                             Text(
-                                addon.categories.joinToString(" \u2022 ") { it.label },
+                                addon.categories.joinToString(" \u2022 ") { category ->
+                                    context.getString(category.labelRes)
+                                },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = Ash,
                             )
@@ -388,7 +366,10 @@ fun AddonCatalogScreen(
                                 Spacer(Modifier.width(8.dp))
                                 Text(stringResource(R.string.addon_catalog_installing), color = Amber)
                             } else {
-                                Text(stringResource(R.string.addon_catalog_install), color = if (state.isInstalling) Steel else Amber)
+                                Text(
+                                    stringResource(R.string.addon_catalog_install),
+                                    color = if (state.isInstalling) Steel else Amber,
+                                )
                             }
                         }
                     }
@@ -396,7 +377,6 @@ fun AddonCatalogScreen(
                 }
             }
 
-            // Install error message
             if (state.installError != null) {
                 item(key = "install_error") {
                     Text(

@@ -1,5 +1,14 @@
 # Android App Build And TV Validation
 
+## Repo Fast Path
+
+Use the repo-level wrapper when you want a single stable command surface for Codex or local automation:
+
+```powershell
+.\scripts\dev.ps1 -Target dev-google-tv
+.\scripts\dev.ps1 -Target android-google-tv-release -SkipCrashlyticsUploads
+```
+
 ## Build Commands
 
 ```bash
@@ -18,6 +27,8 @@ If your build environment blocks outbound network, skip Crashlytics mapping uplo
   -x :androidApp:uploadCrashlyticsMappingFileMobileRelease \
   -x :androidApp:uploadCrashlyticsMappingFileTvRelease
 ```
+
+For repo-level automation, prefer `scripts/dev.ps1` over ad hoc Gradle calls.
 
 ## Android TV Emulator Steps
 

@@ -76,12 +76,33 @@ fun TvBackdropCard(
                 onClick = onClick,
             ),
     ) {
-        AsyncImage(
-            model = item.backdropUrl ?: item.posterUrl,
-            contentDescription = item.title,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize(),
-        )
+        val imageUrl = item.backdropUrl ?: item.posterUrl
+        if (imageUrl.isNullOrBlank()) {
+            // Fallback: dark card with title centered when no image is available
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFF1A1A2E)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = item.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Snow,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(16.dp),
+                )
+            }
+        } else {
+            AsyncImage(
+                model = imageUrl,
+                contentDescription = item.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
 
         Box(
             modifier = Modifier

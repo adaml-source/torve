@@ -1,0 +1,392 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tv_nav_iptv">Kanallar</string>
+    <string name="tv_nav_search">Ara</string>
+    <string name="tv_nav_library">K\u00fct\u00fcphane</string>
+    <string name="tv_nav_settings">Ayarlar</string>
+
+    <string name="tv_section_continue_watching">Kald\u0131\u011f\u0131n yerden devam et</string>
+    <string name="tv_section_recommended">\u00d6nerilen</string>
+    <string name="tv_section_trending_movies">Trend filmler</string>
+    <string name="tv_section_trending_shows">Trend diziler</string>
+    <string name="tv_section_popular_movies">Pop\u00fcler filmler</string>
+    <string name="tv_section_top_rated_movies">En \u00e7ok be\u011fenilen filmler</string>
+    <string name="tv_section_popular_shows">Pop\u00fcler diziler</string>
+    <string name="tv_section_top_rated_shows">En \u00e7ok be\u011fenilen diziler</string>
+    <string name="tv_section_watchlist_movies">\u0130zleme listesi filmler</string>
+    <string name="tv_section_watchlist_shows">\u0130zleme listesi diziler</string>
+    <string name="tv_section_popular_searches">Pop\u00fcler aramalar</string>
+    <string name="tv_section_search_results">Sonu\u00e7lar</string>
+
+    <string name="tv_hero_subtitle_home">Ak\u015fam\u0131n\u0131z i\u00e7in se\u00e7ildi</string>
+    <string name="tv_hero_subtitle_movies">Sinema \u00f6ne \u00e7\u0131kanlar</string>
+    <string name="tv_hero_subtitle_shows">Maraton izlenecek diziler</string>
+    <string name="tv_hero_subtitle_iptv">Canl\u0131 TV kanallar\u0131n\u0131z</string>
+    <string name="tv_hero_subtitle_search">Bir \u015feyler bul izle</string>
+    <string name="tv_hero_subtitle_library">Kaydedilen ba\u015fl\u0131klar\u0131n\u0131z</string>
+    <string name="tv_hero_subtitle_settings">Deneyiminizi \u00f6zelle\u015ftirin</string>
+
+    <string name="tv_action_play">Oynat</string>
+    <string name="tv_streams_pick">Yay\u0131n se\u00e7</string>
+    <string name="tv_watchlist_add_to">Ekle\u2026</string>
+    <string name="tv_watchlist_local_only">Yaln\u0131zca yerel liste</string>
+    <string name="tv_action_details">Ayr\u0131nt\u0131lar</string>
+    <string name="tv_action_add_watchlist">\u0130zleme listesine ekle</string>
+    <string name="tv_action_remove_watchlist">\u0130zleme listesinden kald\u0131r</string>
+    <string name="tv_action_trailer">Fragman</string>
+    <string name="tv_action_back">Geri</string>
+
+    <string name="tv_search_hint">Film ve dizi ara</string>
+    <string name="tv_search_empty">Arama veya pop\u00fcler terimleri kullan\u0131n</string>
+    <string name="tv_library_empty">K\u00fct\u00fcphaneniz bo\u015f</string>
+    <string name="tv_loading">Y\u00fckleniyor</string>
+    <string name="tv_no_data">\u015eu anda kullan\u0131labilir bir \u015fey yok</string>
+    <string name="tv_player_preparing">Oynatma haz\u0131rlan\u0131yor</string>
+    <string name="tv_settings_description">TV davran\u0131\u015f\u0131n\u0131 ve hesap entegrasyonlar\u0131n\u0131 uzaktan kumandayla yap\u0131land\u0131rmak i\u00e7in bu ekran\u0131 kullan\u0131n.</string>
+    <string name="tv_settings_cast">Cast, Android TV\'de \u00e7al\u0131\u015f\u0131r ve Play Hizmetleri bulunmayan Fire TV\'de sorunsuz \u015fekilde y\u00f6netilir.</string>
+
+    <!-- Genre labels -->
+    <string name="tv_genre_action">Aksiyon</string>
+    <string name="tv_genre_comedy">Komedi</string>
+    <string name="tv_genre_sci_fi">Sci-Fi</string>
+    <string name="tv_genre_horror">Korku</string>
+    <string name="tv_genre_drama">Dram</string>
+    <string name="tv_genre_animation">Animasyon</string>
+    <string name="tv_genre_action_adventure">Aksiyon &amp; Macera</string>
+    <string name="tv_genre_sci_fi_fantasy">Sci-Fi &amp; Fantastik</string>
+    <string name="tv_genre_crime">Su\u00e7</string>
+
+    <!-- Episode picker -->
+    <string name="tv_episodes_title">B\u00f6l\u00fcmler</string>
+    <string name="tv_no_episodes">Mevcut b\u00f6l\u00fcm yok</string>
+    <string name="tv_watched">\u0130zlendi</string>
+
+    <string name="tv_see_all">T\u00fcm\u00fcn\u00fc g\u00f6r</string>
+
+    <!-- Settings screen -->
+    <string name="tv_settings_section_account">Hesap</string>
+    <string name="tv_settings_section_app">Uygulama</string>
+    <string name="tv_settings_section_about">Hakk\u0131nda</string>
+    <string name="tv_settings_cloud_service">Bulut hizmeti</string>
+    <string name="tv_settings_trakt">Trakt</string>
+    <string name="tv_settings_phone_pairing">Telefon e\u015fle\u015ftirme</string>
+    <string name="tv_settings_language">Dil</string>
+    <string name="tv_settings_playback_quality">Oynatma kalitesi</string>
+    <string name="tv_settings_version">S\u00fcr\u00fcm</string>
+    <string name="tv_settings_connected">Ba\u011fl\u0131</string>
+    <string name="tv_settings_not_connected">Ba\u011fl\u0131 de\u011fil</string>
+    <string name="tv_settings_needs_setup">Kurulum gerekli</string>
+    <string name="tv_settings_paired">E\u015fle\u015ftirildi</string>
+    <string name="tv_settings_pairing_code">E\u015fle\u015ftirme kodu:</string>
+    <string name="tv_settings_generating_code">E\u015fle\u015ftirme kodu olu\u015fturuluyor</string>
+    <string name="tv_settings_not_paired">E\u015fle\u015ftirilmedi</string>
+    <string name="tv_settings_debug">Hata ay\u0131klama</string>
+    <string name="tv_settings_diagnostics">Tan\u0131lama</string>
+    <string name="tv_settings_sync_status">Senkronizasyon durumu</string>
+
+    <!-- Voice search -->
+    <string name="tv_voice_listening">Dinleniyor\u2026</string>
+    <string name="tv_voice_processing">Sesli giri\u015f i\u015fleniyor\u2026</string>
+    <string name="tv_voice_unavailable">Bu cihazda sesli giri\u015f kullan\u0131lam\u0131yor</string>
+
+    <!-- IPTV -->
+    <string name="tv_iptv_empty">Kanal yok. Ayarlardan bir oynatma listesi ekleyin.</string>
+    <string name="tv_iptv_recently_viewed">Son izlenenler</string>
+    <string name="tv_iptv_favorites">Favoriler</string>
+    <string name="tv_iptv_no_playlists_title">Kanal yap\u0131land\u0131r\u0131lmam\u0131\u015f</string>
+    <string name="tv_iptv_no_playlists_subtitle">Telefonunuzda bir M3U oynatma listesi ekleyip TV ile senkronize edin</string>
+    <string name="tv_iptv_all_channels">T\u00fcm kanallar</string>
+    <string name="tv_iptv_channels_count">%d kanal</string>
+    <string name="tv_iptv_now_playing">\u015eu anda oynat\u0131l\u0131yor</string>
+    <string name="tv_iptv_no_channels_in_group">Bu grupta kanal yok</string>
+    <string name="tv_iptv_search_hint">Kanal ara\u2026</string>
+    <string name="tv_iptv_filter_all">T\u00fcm\u00fc</string>
+    <string name="tv_iptv_filter_hd">HD</string>
+    <string name="tv_iptv_filter_fhd">FHD</string>
+    <string name="tv_iptv_filter_4k">4K</string>
+    <string name="tv_iptv_filter_favorites">Favoriler</string>
+    <string name="tv_iptv_preview">\u00d6nizleme</string>
+    <string name="tv_iptv_hold_to_favorite">Favorilere eklemek i\u00e7in OK\'ye bas\u0131l\u0131 tutun</string>
+    <string name="tv_iptv_no_search_results">Araman\u0131zla e\u015fle\u015fen kanal yok</string>
+
+    <!-- Additional settings -->
+    <string name="tv_settings_section_customization">\u00d6zelle\u015ftirme</string>
+    <string name="tv_settings_sync_from_phone">Telefon ayarlar\u0131n\u0131 senkronize et</string>
+    <string name="tv_settings_sync_ready">E\u015fle\u015ftirilmi\u015f telefondan t\u00fcm ayarlar\u0131 i\u00e7e aktar</string>
+    <string name="tv_settings_pair_first">Senkronize etmek i\u00e7in \u00f6nce bir telefon e\u015fle\u015ftirin</string>
+    <string name="tv_settings_region">\u0130\u00e7erik b\u00f6lgesi</string>
+    <string name="tv_settings_streaming_services">Uygunluk Hizmetleri</string>
+    <string name="tv_settings_home_layout_note">Ana sayfa d\u00fczeni, kart stilleri, de\u011ferlendirme kaynaklar\u0131 ve uygunluk hizmetlerini \u00f6zelle\u015ftirmek i\u00e7in \u2014 bunlar\u0131 Torve mobil uygulamas\u0131nda yap\u0131land\u0131r\u0131n ve yukar\u0131daki \"Telefon ayarlar\u0131n\u0131 senkronize et\"e dokunun.</string>
+
+    <!-- Setup mode -->
+    <string name="tv_settings_setup_prompt">Torve\'yi nas\u0131l kullan\u0131yorsunuz?</string>
+    <string name="tv_settings_setup_mode">Kurulum modu</string>
+    <string name="tv_settings_tap_to_change">de\u011fi\u015ftirmek i\u00e7in dokun</string>
+    <string name="tv_settings_mode_android">Android\'de Torve var</string>
+    <string name="tv_settings_mode_android_desc">T\u00fcm ayarlar\u0131 an\u0131nda senkronize etmek i\u00e7in telefonunuzu e\u015fle\u015ftirin</string>
+    <string name="tv_settings_mode_ios">iOS\'te Torve var</string>
+    <string name="tv_settings_mode_ios_desc">Ayarlar\u0131 senkronize etmek i\u00e7in iPhone\'unuzu e\u015fle\u015ftirin</string>
+    <string name="tv_settings_mode_tv_only">Yaln\u0131zca TV \u2014 telefon uygulamas\u0131 yok</string>
+    <string name="tv_settings_mode_tv_only_desc">Her \u015feyi do\u011frudan TV\'nizde ayarlay\u0131n</string>
+    <string name="tv_settings_simkl">SIMKL</string>
+    <string name="tv_settings_change_provider">Bulut sa\u011flay\u0131c\u0131</string>
+    <string name="tv_settings_sync_note">Ana sayfa d\u00fczeni, kart stilleri ve de\u011ferlendirme kaynaklar\u0131n\u0131 \u00f6zelle\u015ftirmek i\u00e7in \u2014 mobil uygulamada yap\u0131land\u0131r\u0131n ve Senkronize Et\'e dokunun.</string>
+
+    <!-- Detail screen -->
+    <string name="tv_detail_director">Y\u00f6netmen</string>
+    <string name="tv_detail_cast">Oyuncular</string>
+    <string name="tv_detail_more_like_this">Benzer ba\u015fl\u0131klar</string>
+    <string name="tv_detail_connect_cloud">Bulutu ba\u011fla</string>
+    <string name="tv_detail_select_manually">Manuel se\u00e7</string>
+    <string name="tv_detail_finding_streams">Yay\u0131nlar aran\u0131yor\u2026</string>
+    <string name="tv_detail_resolving">\u00c7\u00f6z\u00fcmleniyor\u2026</string>
+    <string name="tv_detail_watched">\u0130zlendi</string>
+    <string name="tv_detail_unwatched">\u0130zlenmedi</string>
+    <string name="tv_detail_rate">De\u011ferlendir</string>
+    <string name="tv_detail_rated">De\u011ferlendirildi %1$d/10</string>
+    <string name="tv_detail_where_to_watch">Nerede izlenir</string>
+    <string name="tv_detail_no_offers">Yay\u0131n teklifi mevcut de\u011fil</string>
+    <string name="tv_detail_in_library">K\u00fct\u00fcphanede</string>
+
+    <!-- Sync notices -->
+    <string name="tv_sync_search_received">Telefondan arama al\u0131nd\u0131</string>
+    <string name="tv_sync_playback_received">Oynatma aktar\u0131m\u0131 al\u0131nd\u0131</string>
+
+    <!-- Channels section -->
+    <string name="tv_settings_section_channels">Kanallar</string>
+    <string name="tv_settings_add_playlist">Oynatma listesi ekle</string>
+    <string name="tv_settings_playlist_name">Oynatma listesi ad\u0131</string>
+    <string name="tv_settings_playlist_url">Oynatma listesi URL\'si</string>
+    <string name="tv_settings_playlist_save">Oynatma listesini kaydet</string>
+    <string name="tv_settings_playlist_type_m3u">M3U oynatma listesi</string>
+    <string name="tv_settings_playlist_type_xtream">Sa\u011flay\u0131c\u0131 giri\u015fi</string>
+    <string name="tv_settings_xtream_server">Sunucu URL\'si</string>
+    <string name="tv_settings_xtream_username">Kullan\u0131c\u0131 ad\u0131</string>
+    <string name="tv_settings_xtream_password">\u015eifre</string>
+    <string name="tv_settings_playlist_remove">Kald\u0131r</string>
+    <string name="tv_settings_playlist_confirm_remove">Onaylamak i\u00e7in tekrar dokunun</string>
+    <string name="tv_settings_no_playlists">Yap\u0131land\u0131r\u0131lm\u0131\u015f oynatma listesi yok</string>
+    <string name="tv_settings_channels_count">%d kanal</string>
+
+    <!-- Integrations section -->
+    <string name="tv_settings_section_integrations">Entegrasyonlar</string>
+    <string name="tv_settings_omdb">OMDB</string>
+    <string name="tv_settings_omdb_api_key">OMDB API anahtar\u0131</string>
+    <string name="tv_settings_omdb_test">OMDB\'yi test et</string>
+    <string name="tv_settings_mdblist">MDBList</string>
+    <string name="tv_settings_mdblist_api_key">MDBList API anahtar\u0131</string>
+    <string name="tv_settings_jellyfin">Jellyfin</string>
+    <string name="tv_settings_jellyfin_url">Jellyfin sunucu URL\'si</string>
+    <string name="tv_settings_jellyfin_api_key">Jellyfin API anahtar\u0131</string>
+    <string name="tv_settings_jellyfin_test">Jellyfin\'i test et</string>
+    <string name="tv_settings_plex">Plex</string>
+    <string name="tv_settings_plex_url">Plex sunucu URL\'si</string>
+    <string name="tv_settings_plex_token">Plex eri\u015fim jetonu</string>
+    <string name="tv_settings_plex_test">Plex\'i test et</string>
+    <string name="tv_settings_kodi">Kodi</string>
+    <string name="tv_settings_kodi_name">Ad</string>
+    <string name="tv_settings_kodi_ip">Ana bilgisayar / IP</string>
+    <string name="tv_settings_kodi_port">Port</string>
+    <string name="tv_settings_kodi_add">Kodi ana bilgisayar\u0131 ekle</string>
+    <string name="tv_settings_kodi_test">Test et</string>
+    <string name="tv_settings_test_success">Ba\u011fl\u0131</string>
+    <string name="tv_settings_test_failed">Ba\u011flant\u0131 ba\u015far\u0131s\u0131z</string>
+    <string name="tv_settings_validating">Do\u011frulan\u0131yor\u2026</string>
+    <string name="tv_settings_valid">Ge\u00e7erli</string>
+    <string name="tv_settings_invalid">Ge\u00e7ersiz</string>
+    <string name="tv_settings_not_set">Ayarlanmad\u0131</string>
+    <string name="tv_settings_set">Yap\u0131land\u0131r\u0131ld\u0131</string>
+    <string name="tv_settings_tap_to_edit">D\u00fczenlemek i\u00e7in dokun</string>
+
+    <!-- AI Search -->
+    <string name="tv_settings_section_ai">YZ arama</string>
+    <string name="tv_settings_ai_provider">YZ sa\u011flay\u0131c\u0131</string>
+    <string name="tv_settings_ai_api_key">API anahtar\u0131</string>
+    <string name="tv_settings_ai_test">YZ ba\u011flant\u0131s\u0131n\u0131 test et</string>
+
+    <!-- App section -->
+    <string name="tv_settings_dedupe">Yay\u0131nlar\u0131 tekille\u015ftir</string>
+    <string name="tv_settings_dedupe_on">Etkin \u2014 tekrarlanan yay\u0131nlar gizlendi</string>
+    <string name="tv_settings_dedupe_off">Devre d\u0131\u015f\u0131 \u2014 t\u00fcm yay\u0131nlar g\u00f6steriliyor</string>
+    <string name="tv_settings_home_layout">Ana sayfa d\u00fczeni</string>
+    <string name="tv_settings_home_layout_subtitle">Ana sayfa sekmesindeki b\u00f6l\u00fcmleri \u00f6zelle\u015ftir</string>
+    <string name="tv_settings_ratings">De\u011ferlendirme sa\u011flay\u0131c\u0131lar\u0131</string>
+    <string name="tv_settings_ratings_subtitle">G\u00f6sterilecek de\u011ferlendirmeleri se\u00e7in</string>
+
+    <!-- Home Layout -->
+    <string name="tv_home_layout_title">Ana sayfa d\u00fczeni</string>
+    <string name="tv_home_layout_enabled">Etkin</string>
+    <string name="tv_home_layout_disabled">Devre d\u0131\u015f\u0131</string>
+    <string name="tv_home_layout_move_up">Yukar\u0131 ta\u015f\u0131</string>
+    <string name="tv_home_layout_move_down">A\u015fa\u011f\u0131 ta\u015f\u0131</string>
+    <string name="tv_home_layout_reset">Varsay\u0131lanlara s\u0131f\u0131rla</string>
+    <string name="tv_home_layout_reset_subtitle">T\u00fcm b\u00f6l\u00fcmleri varsay\u0131lan s\u0131ra ve g\u00f6r\u00fcn\u00fcrl\u00fc\u011fe geri y\u00fckle</string>
+    <string name="tv_home_layout_create_custom">\u00d6zel b\u00f6l\u00fcm olu\u015ftur</string>
+    <string name="tv_home_layout_create_custom_subtitle">Ki\u015fisle\u015ftirilmi\u015f i\u00e7erik sat\u0131r\u0131 ekle</string>
+    <string name="tv_home_layout_section_title">B\u00f6l\u00fcm ba\u015fl\u0131\u011f\u0131</string>
+
+    <!-- Ratings settings -->
+    <string name="tv_ratings_title">De\u011ferlendirme sa\u011flay\u0131c\u0131lar\u0131</string>
+    <string name="tv_ratings_show_on_detail">Ayr\u0131nt\u0131 sayfas\u0131nda de\u011ferlendirmeleri g\u00f6ster</string>
+    <string name="tv_ratings_show_torve_score">Torve puan\u0131n\u0131 g\u00f6ster</string>
+    <string name="tv_ratings_section_sources">De\u011ferlendirme kaynaklar\u0131</string>
+    <string name="tv_ratings_max_on_cards">Kartlarda maks. de\u011ferlendirme</string>
+    <string name="tv_ratings_reset">De\u011ferlendirme tercihlerini s\u0131f\u0131rla</string>
+    <string name="tv_ratings_reset_subtitle">Varsay\u0131lan de\u011ferlendirme kaynaklar\u0131n\u0131 ve g\u00f6r\u00fcnt\u00fclemeyi geri y\u00fckle</string>
+
+    <!-- Addons -->
+    <string name="tv_settings_section_addons">Eklentiler</string>
+    <string name="tv_settings_no_addons">Kurulu eklenti yok</string>
+    <string name="tv_settings_addon_install_url">Eklenti bildirim URL\'si</string>
+    <string name="tv_settings_addon_install">Eklenti kur</string>
+    <string name="tv_settings_addon_installing">Kuruluyor\u2026</string>
+    <string name="tv_settings_addon_enabled">Etkin</string>
+    <string name="tv_settings_addon_disabled">Devre d\u0131\u015f\u0131</string>
+    <string name="tv_settings_addon_remove">Kald\u0131r</string>
+    <string name="tv_settings_addon_confirm_remove">Onaylamak i\u00e7in tekrar dokunun</string>
+
+    <!-- MDBList browse -->
+    <string name="tv_settings_mdblist_browse">MDBList\'e g\u00f6z at</string>
+    <string name="tv_settings_mdblist_popular">Pop\u00fcler listeler</string>
+    <string name="tv_settings_mdblist_search">Liste ara</string>
+    <string name="tv_settings_mdblist_search_hint">Topluluk listelerini ara\u2026</string>
+    <string name="tv_settings_mdblist_no_results">Sonu\u00e7 yok</string>
+    <string name="tv_settings_mdblist_items">%d \u00f6\u011fe</string>
+    <string name="tv_settings_mdblist_by">%s taraf\u0131ndan</string>
+    <string name="tv_settings_mdblist_saved">Kay\u0131tl\u0131 listeler</string>
+    <string name="tv_settings_mdblist_no_saved">Kay\u0131tl\u0131 liste yok</string>
+    <string name="tv_settings_mdblist_add">Ekle</string>
+    <string name="tv_settings_mdblist_added">Eklendi</string>
+    <string name="tv_settings_mdblist_no_api_key">\u00d6nce yukar\u0131da MDBList API anahtar\u0131n\u0131 ayarlay\u0131n</string>
+    <string name="tv_settings_mdblist_loading">Listeler y\u00fckleniyor\u2026</string>
+
+    <!-- Custom section AI -->
+    <string name="tv_home_layout_ai_prompt">Ne istedi\u011finizi a\u00e7\u0131klay\u0131n</string>
+    <string name="tv_home_layout_ai_hint">\u00f6rn. s\u0131cac\u0131k k\u0131\u015f filmleri, karanl\u0131k sci-fi gerilim\u2026</string>
+    <string name="tv_home_layout_ai_search">YZ ile bul</string>
+    <string name="tv_home_layout_ai_searching">Aran\u0131yor\u2026</string>
+    <string name="tv_home_layout_ai_found">YZ buldu: %s</string>
+    <string name="tv_home_layout_ai_error">YZ aramas\u0131 ba\u015far\u0131s\u0131z \u2014 tekrar deneyin</string>
+    <string name="tv_home_layout_save">B\u00f6l\u00fcm\u00fc kaydet</string>
+    <string name="tv_home_layout_media_type">Medya t\u00fcr\u00fc</string>
+
+    <!-- Live TV Player -->
+    <string name="tv_live_tv_guide">TV rehberi</string>
+    <string name="tv_live_history">Ge\u00e7mi\u015f</string>
+    <string name="tv_live_clear">Temizle</string>
+    <string name="tv_live_next_label">S\u0131radaki:</string>
+    <string name="tv_live_search">Ara</string>
+    <string name="tv_live_channels_list">Kanallar</string>
+    <string name="tv_live_channels">Kanallar</string>
+    <string name="tv_live_recordings">Kay\u0131tlar</string>
+    <string name="tv_live_multiview">\u00c7oklu g\u00f6r\u00fcn\u00fcm</string>
+    <string name="tv_live_pip">PiP</string>
+    <string name="tv_live_coming_soon">\u00c7ok yak\u0131nda</string>
+    <string name="tv_live_no_programme_data">Program verisi yok</string>
+    <string name="tv_live_settings">Ayarlar</string>
+    <string name="tv_live_playlists">Oynatma listeleri</string>
+    <string name="tv_live_countries">\u00dclkeler</string>
+    <string name="tv_live_select_all">T\u00fcm\u00fcn\u00fc se\u00e7</string>
+    <string name="tv_live_clear_all">T\u00fcm\u00fcn\u00fc temizle</string>
+    <string name="tv_live_current_channel">Ge\u00e7erli kanal</string>
+    <string name="tv_live_add_favorite">%s favorilere ekle</string>
+    <string name="tv_live_remove_favorite">%s favorilerden kald\u0131r</string>
+    <string name="tv_live_category_visibility">Kategori g\u00f6r\u00fcn\u00fcrl\u00fc\u011f\u00fc</string>
+    <string name="tv_live_hidden">Gizli</string>
+    <string name="tv_live_visible">G\u00f6r\u00fcn\u00fcr</string>
+    <string name="tv_live_adult_content">Yeti\u015fkin i\u00e7erik</string>
+    <string name="tv_live_show_adult">Yeti\u015fkin kanallar\u0131 g\u00f6ster</string>
+    <string name="tv_live_active">Etkin</string>
+
+    <!-- Channel manager -->
+    <string name="tv_settings_manage_channels">Kanallar\u0131 y\u00f6net</string>
+    <string name="tv_settings_manage_channels_sub">\u00dclkeye g\u00f6re kanal gruplar\u0131n\u0131 g\u00f6ster veya gizle</string>
+    <string name="tv_settings_show_all">T\u00fcm\u00fcn\u00fc g\u00f6ster</string>
+    <string name="tv_settings_hide_all">T\u00fcm\u00fcn\u00fc gizle</string>
+    <string name="tv_settings_channels_visible">%1$d / %2$d g\u00f6r\u00fcn\u00fcr</string>
+    <string name="tv_settings_no_categories">Y\u00fckl\u00fc kanal grubu yok \u2014 \u00f6nce bir oynatma listesi se\u00e7in</string>
+
+    <!-- Settings reorganization -->
+    <string name="tv_settings_section_stream_quality">Yay\u0131n kalitesi &amp; oynatma</string>
+    <string name="tv_settings_section_language_region">Dil &amp; b\u00f6lge</string>
+    <string name="tv_settings_section_content">\u0130\u00e7erik y\u00f6netimi</string>
+    <string name="tv_settings_autoplay">En iyi yay\u0131n\u0131 otomatik oynat</string>
+    <string name="tv_settings_autoplay_on">Etkin \u2014 en iyi yay\u0131n\u0131 otomatik oynat\u0131r</string>
+    <string name="tv_settings_autoplay_off">Devre d\u0131\u015f\u0131 \u2014 yay\u0131n se\u00e7iciyi g\u00f6sterir</string>
+    <string name="tv_settings_autoplay_next">Sonraki b\u00f6l\u00fcm\u00fc otomatik oynat</string>
+    <string name="tv_settings_autoplay_next_on">Etkin \u2014 sonraki b\u00f6l\u00fcm otomatik oynat\u0131l\u0131r</string>
+    <string name="tv_settings_autoplay_next_off">Devre d\u0131\u015f\u0131 \u2014 ayr\u0131nt\u0131 ekran\u0131na d\u00f6ner</string>
+    <string name="tv_settings_min_quality">Minimum kalite</string>
+    <string name="tv_settings_max_quality">Maksimum kalite</string>
+    <string name="tv_settings_select_quality">Kalite se\u00e7</string>
+    <string name="tv_settings_select_language">Dil se\u00e7</string>
+
+    <!-- Library tabs -->
+    <string name="tv_library_tab_watchlist">\u0130zleme listesi</string>
+    <string name="tv_library_tab_downloads">\u0130ndirmeler</string>
+    <string name="tv_library_tab_recordings">Kay\u0131tlar</string>
+    <string name="tv_library_recordings_coming_soon">Canl\u0131 TV kay\u0131tlar\u0131 \u2014 \u00e7ok yak\u0131nda</string>
+    <string name="tv_library_no_downloads">Hen\u00fcz indirme yok</string>
+
+    <!-- Download actions -->
+    <string name="tv_action_download">\u0130ndir</string>
+    <string name="tv_action_download_all">T\u00fcm\u00fcn\u00fc indir</string>
+    <string name="tv_action_download_season">Sezon %d indir</string>
+    <string name="tv_download_queued">\u0130ndirme s\u0131raya eklendi</string>
+
+    <!-- Addon catalog -->
+    <string name="tv_addon_category_all">T\u00fcm\u00fc</string>
+    <string name="tv_addon_category_streams">Kaynaklar</string>
+    <string name="tv_addon_category_catalogs">Kataloglar</string>
+    <string name="tv_addon_category_subtitles">Altyaz\u0131lar</string>
+    <string name="tv_addon_suggested">\u00d6nerilen eklentiler</string>
+    <string name="tv_addon_installed">Kuruldu</string>
+
+    <!-- Search AI mode -->
+    <string name="tv_search_mode_standard">Standart</string>
+    <string name="tv_search_mode_ai">YZ aramas\u0131</string>
+    <string name="tv_search_ai_configure">Ayarlarda yap\u0131land\u0131r</string>
+    <string name="tv_search_ai_label">YZ: %s</string>
+    <string name="tv_search_ai_fallback">YZ kullan\u0131lam\u0131yor, standart sonu\u00e7lar g\u00f6steriliyor</string>
+    <string name="tv_iptv_filter_chip">Filtre: %s</string>
+    <string name="tv_iptv_sort_chip">S\u0131ralama: %s</string>
+    <string name="tv_iptv_search_prompt">Ara</string>
+    <string name="tv_iptv_search_query">Arama: %s</string>
+    <string name="tv_iptv_preview_idle">Kanal se\u00e7ilmedi</string>
+    <string name="tv_iptv_lists_title">Liste filtreleri</string>
+    <string name="tv_iptv_manage_channels">Kanallar\u0131 y\u00f6net</string>
+    <string name="tv_iptv_countries_all">\u00dclkeler: T\u00fcm\u00fc</string>
+    <string name="tv_iptv_countries_selected">\u00dclkeler: %d se\u00e7ili</string>
+    <string name="tv_iptv_country_filter_title">\u00dclke filtresi</string>
+    <string name="tv_iptv_country_select_all">T\u00fcm \u00fclkeleri se\u00e7</string>
+    <string name="tv_iptv_country_clear_all">\u00dclke filtresini temizle</string>
+    <string name="tv_iptv_country_included">Dahil</string>
+    <string name="tv_iptv_country_filtered">Filtrelendi</string>
+    <string name="tv_iptv_country_search_prompt">\u00dclke ara</string>
+    <string name="tv_iptv_country_search_query">Arama: %s</string>
+    <string name="tv_iptv_country_no_results">E\u015fle\u015fen \u00fclke yok</string>
+    <string name="tv_iptv_country_include_visible">G\u00f6r\u00fcn\u00fcrleri dahil et</string>
+
+    <string name="tv_settings_enabled">Etkin</string>
+    <string name="tv_settings_disabled">Devre d\u0131\u015f\u0131</string>
+    <string name="tv_settings_live_audio_mode">Canl\u0131 ses modu</string>
+    <string name="tv_settings_live_audio_passthrough">Ses ge\u00e7i\u015fi</string>
+    <string name="tv_settings_live_audio_surround">Surround codec\'leri tercih et</string>
+
+    <string name="tv_live_search_hint">Kanal aramak i\u00e7in yaz\u0131n</string>
+    <string name="tv_live_search_query">Arama: %s</string>
+    <string name="tv_live_search_clear_hint">Temizlemek i\u00e7in geri tu\u015fu</string>
+    <string name="tv_live_no_channels_in_list">E\u015fle\u015fen kanal yok</string>
+    <string name="tv_live_mini_preview_title">Canl\u0131 \u00f6nizleme</string>
+    <string name="tv_live_mini_preview_subtitle">Gezinirken oynatma devam eder</string>
+    <string name="tv_live_no_channel_playing">Oynat\u0131lan kanal yok</string>
+    <string name="tv_live_favorite_hint">Favorilere eklemek i\u00e7in OK\'ye uzun bas\u0131n veya Men\u00fc tu\u015funa bas\u0131n</string>
+    <string name="tv_live_audio_output">Ses \u00e7\u0131k\u0131\u015f\u0131</string>
+    <string name="tv_live_audio_mode_auto">Otomatik</string>
+    <string name="tv_live_audio_mode_compatible">Uyumlu sesi tercih et</string>
+    <string name="tv_live_audio_mode_stereo">Stereo / PCM zorla</string>
+    <string name="tv_live_audio_passthrough">Ge\u00e7i\u015fi etkinle\u015ftir</string>
+    <string name="tv_live_audio_passthrough_desc">Desteklendi\u011finde AC3/EAC3/DTS\'yi AVR\'ye g\u00f6nder</string>
+    <string name="tv_live_audio_prefer_surround">Surround izleri tercih et</string>
+    <string name="tv_live_audio_prefer_surround_desc">\u00c7ok kanall\u0131 sesi stereoya g\u00f6re \u00f6nceliklendir</string>
+</resources>

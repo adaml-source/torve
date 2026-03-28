@@ -35,6 +35,8 @@ data class ChannelsUiState(
     val selectedPlaylistId: String? = null,
     val channels: List<EnrichedChannel> = emptyList(),
     val groupedChannels: Map<String, List<EnrichedChannel>> = emptyMap(),
+    /** Channels for the currently selected category — loaded on demand, not from full playlist. */
+    val categoryChannels: List<EnrichedChannel> = emptyList(),
     val favorites: List<Channel> = emptyList(),
     val selectedGroup: String? = null,
     val searchQuery: String = "",

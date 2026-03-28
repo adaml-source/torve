@@ -41,7 +41,7 @@ class StreamRepositoryImpl(
     ): ResolvedStream {
         // If stream has a direct URL (no torrent), try to unrestrict it
         if (stream.directUrl != null && stream.infoHash == null) {
-            return debridClient.unrestrictUrl(provider, apiKey, stream.directUrl)
+            return debridClient.unrestrictUrl(provider, apiKey, stream.directUrl).requirePlayableUrl()
         }
 
         // Torrent stream: resolve through debrid
@@ -53,6 +53,13 @@ class StreamRepositoryImpl(
             apiKey = apiKey,
             infoHash = infoHash,
             fileIdx = stream.fileIdx,
-        )
+        ).requirePlayableUrl()
     }
+}
+
+private fun ResolvedStream.requirePlayableUrl(): ResolvedStream {
+    if (url.isBlank()) {
+        throw IllegalStateException("Resolved stream returned no playable URL")
+    }
+    return this
 }

@@ -48,13 +48,13 @@ class PremiumActionGate(
     private fun blockedMessageFor(feature: PremiumFeature): String {
         return when (feature) {
             PremiumFeature.PHONE_PAIRING,
-            PremiumFeature.QR_PAIRING -> "Lifetime Access required to pair devices."
-            PremiumFeature.DEVICE_LINKING -> "Lifetime Access required to manage paired devices."
+            PremiumFeature.QR_PAIRING -> "Premium is required to pair devices."
+            PremiumFeature.DEVICE_LINKING -> "Premium is required to manage paired devices."
             PremiumFeature.DEVICE_SYNC,
-            PremiumFeature.CROSS_DEVICE_SYNC -> "Lifetime Access required to sync across devices."
-            PremiumFeature.TV_PHONE_CONTINUATION -> "Lifetime Access required to continue playback on another device."
-            PremiumFeature.STREAM_PLAYBACK -> "Lifetime Access required to watch channels and premium streams."
-            else -> "Lifetime Access required for ${PremiumAccess.titleFor(feature)}."
+            PremiumFeature.CROSS_DEVICE_SYNC -> "Premium is required to sync across devices."
+            PremiumFeature.TV_PHONE_CONTINUATION -> "Premium is required to continue playback on another device."
+            PremiumFeature.STREAM_PLAYBACK -> "Premium is required to watch channels and premium streams."
+            else -> "Premium is required for ${PremiumAccess.titleFor(feature)}."
         }
     }
 

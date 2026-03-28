@@ -244,8 +244,9 @@ fun TorveTheme(
         )
     }
 
-    // Set system bar icon contrast: light icons on dark backgrounds, dark icons on light.
-    // Required when using transparent system bar colors with enableEdgeToEdge().
+    // Keep system bar icon contrast aligned with the active app theme.
+    // Transparent system bar colors are provided by the theme; startup edge-to-edge
+    // is configured by the app's own window helper.
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {

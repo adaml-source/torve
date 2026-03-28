@@ -43,7 +43,7 @@ enum class RatingPillStyle {
     companion object {
         /** Migration: map old values to new ones. */
         fun fromLegacy(name: String): RatingPillStyle = when (name) {
-            "COMPACT", "DETAILED", "MINIMAL" -> LETTER
+            "COMPACT", "DETAILED", "MINIMAL" -> ICON
             else -> valueOf(name)
         }
     }
@@ -67,7 +67,7 @@ data class RatingDisplayPrefs(
         .sortedBy { it.defaultOrder },
     val maxRatingsOnCard: Int = 3,
     val allowRatingsOnLandscapeCards: Boolean = false,
-    val pillStyle: RatingPillStyle = RatingPillStyle.LETTER,
+    val pillStyle: RatingPillStyle = RatingPillStyle.ICON,
     val pillPosition: RatingPillPosition = RatingPillPosition.INSIDE,
 )
 

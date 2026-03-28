@@ -15,7 +15,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +36,7 @@ import com.torve.android.ui.components.BackButton
 import com.torve.android.ui.components.CardSize
 import com.torve.android.ui.components.LocalCardStyle
 import com.torve.android.ui.components.PosterCard
+import com.torve.android.ui.components.mediaItemLazyKey
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Snow
 import com.torve.domain.model.MediaItem
@@ -112,7 +113,7 @@ fun SeeAllScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
-                items(state.items, key = { "${it.id}_${it.type}" }) { item ->
+                itemsIndexed(state.items, key = { index, item -> mediaItemLazyKey(item, index) }) { _, item ->
                     PosterCard(
                         item = item,
                         sizeOverride = CardSize.SMALL,

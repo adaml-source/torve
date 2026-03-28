@@ -36,6 +36,21 @@ class LanSyncHttpClient(
         }
     }
 
+    suspend fun sendPairConfirm(
+        service: LanResolvedService,
+        confirmRequest: LanPairConfirmRequest,
+    ): Result<LanStatusResponse> = withContext(Dispatchers.IO) {
+        runCatching {
+            val payload = json.encodeToString(LanPairConfirmRequest.serializer(), confirmRequest)
+            val (_, body) = request(
+                url = endpointUrl(service, PATH_PAIR_CONFIRM),
+                method = "POST",
+                body = payload,
+            )
+            json.decodeFromString(LanStatusResponse.serializer(), body)
+        }
+    }
+
     suspend fun sendEvent(
         service: LanResolvedService,
         event: LanEventEnvelope,
@@ -98,6 +113,39 @@ class LanSyncHttpClient(
         const val READ_TIMEOUT_MS = 3_000
         const val PATH_HELLO = "/sync/hello"
         const val PATH_PAIR_CLAIM = "/sync/pair/claim"
+        const val PATH_PAIR_CONFIRM = "/sync/pair/confirm"
         const val PATH_EVENT = "/sync/event"
+        const val PATH_CHANNEL_INITIATE = "/sync/channel/initiate"
+        const val PATH_CHANNEL_CONFIRM = "/sync/channel/confirm"
+    }
+
+    suspend fun sendChannelInitiate(
+        service: LanResolvedService,
+        request: LanChannelInitiateRequest,
+    ): Result<LanChannelInitiateResponse> = withContext(Dispatchers.IO) {
+        runCatching {
+            val payload = json.encodeToString(LanChannelInitiateRequest.serializer(), request)
+            val (_, body) = request(
+                url = endpointUrl(service, PATH_CHANNEL_INITIATE),
+                method = "POST",
+                body = payload,
+            )
+            json.decodeFromString(LanChannelInitiateResponse.serializer(), body)
+        }
+    }
+
+    suspend fun sendChannelConfirm(
+        service: LanResolvedService,
+        confirmRequest: LanChannelConfirmRequest,
+    ): Result<LanStatusResponse> = withContext(Dispatchers.IO) {
+        runCatching {
+            val payload = json.encodeToString(LanChannelConfirmRequest.serializer(), confirmRequest)
+            val (_, body) = request(
+                url = endpointUrl(service, PATH_CHANNEL_CONFIRM),
+                method = "POST",
+                body = payload,
+            )
+            json.decodeFromString(LanStatusResponse.serializer(), body)
+        }
     }
 }

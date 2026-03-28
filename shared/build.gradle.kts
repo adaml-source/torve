@@ -1,8 +1,31 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.android.library)
     alias(libs.plugins.sqldelight)
+}
+
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) {
+        FileInputStream(file).use(::load)
+    }
+}
+
+fun readTmdbApiKey(): String {
+    return providers.gradleProperty("TMDB_API_KEY").orNull
+        ?: System.getenv("TMDB_API_KEY")
+        ?: localProperties.getProperty("TMDB_API_KEY")
+        ?: ""
+}
+
+fun escapeForBuildConfig(value: String): String {
+    return value
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
 }
 
 kotlin {
@@ -57,6 +80,7 @@ kotlin {
         commonTest.dependencies {
             implementation(libs.kotlin.test)
             implementation(libs.kotlinx.coroutines.test)
+            implementation(libs.ktor.mock)
         }
     }
 }
@@ -66,6 +90,10 @@ android {
     compileSdk = 36
     defaultConfig {
         minSdk = 24
+        buildConfigField("String", "TMDB_API_KEY", "\"${escapeForBuildConfig(readTmdbApiKey())}\"")
+    }
+    buildFeatures {
+        buildConfig = true
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

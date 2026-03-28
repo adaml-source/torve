@@ -80,7 +80,10 @@ CREATE TABLE addon (
     manifest_json TEXT NOT NULL,
     is_enabled INTEGER NOT NULL DEFAULT 1,
     priority INTEGER NOT NULL DEFAULT 0,
-    installed_at INTEGER NOT NULL
+    installed_at INTEGER NOT NULL,
+    server_id TEXT,
+    synced_at INTEGER,
+    installed_from TEXT NOT NULL DEFAULT 'app'
 );
 
 getAllAddons:
@@ -93,13 +96,27 @@ getAddonByUrl:
 SELECT * FROM addon WHERE manifest_url = ?;
 
 insertAddon:
-INSERT OR REPLACE INTO addon (manifest_url, id, name, version, description, logo, manifest_json, is_enabled, priority, installed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO addon (manifest_url, id, name, version, description, logo, manifest_json, is_enabled, priority, installed_at, server_id, synced_at, installed_from) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 updateAddonEnabled:
-UPDATE addon SET is_enabled = ? WHERE manifest_url = ?;
+UPDATE addon SET is_enabled = ?, synced_at = NULL WHERE manifest_url = ?;
 
 updateAddonPriority:
-UPDATE addon SET priority = ? WHERE manifest_url = ?;
+UPDATE addon SET priority = ?, synced_at = NULL WHERE manifest_url = ?;
+
+markAddonSynced:
+UPDATE addon
+SET server_id = ?, synced_at = ?, installed_from = ?
+WHERE manifest_url = ?;
+
+syncAddonWithServer:
+UPDATE addon
+SET server_id = ?, synced_at = ?, installed_from = ?, is_enabled = ?, priority = ?
+WHERE manifest_url = ?;
+
+clearAddonSyncMetadata:
+UPDATE addon
+SET server_id = NULL, synced_at = NULL;
 
 deleteAddon:
 DELETE FROM addon WHERE manifest_url = ?;

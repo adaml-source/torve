@@ -45,10 +45,7 @@ class StreamAggregator(
         debridAccounts: Map<DebridServiceType, String> = emptyMap(),
         preferences: StreamPreferences = StreamPreferences(),
     ): List<ParsedStream> = coroutineScope {
-        val addonUrls = addons
-            .filter { it.isEnabled }
-            .map { it.manifestUrl.removeSuffix("/manifest.json").removeSuffix("/") }
-            .ifEmpty { listOf(StremioAddonClient.TORRENTIO_BASE) }
+        val addonUrls = resolveStreamAddonBaseUrls(addons)
 
         // 1. Fan out to all addons in parallel (single retry on failure)
         val rawStreams = addonUrls.map { url ->
@@ -147,5 +144,25 @@ class StreamAggregator(
                 else -> null
             }
         }
+    }
+}
+
+internal fun resolveStreamAddonBaseUrls(
+    addons: List<InstalledAddon>,
+): List<String> {
+    return addons
+        .filter { addon ->
+            addon.isEnabled &&
+                addon.supportsStreamResolution()
+        }
+        .map { addon ->
+            addon.manifestUrl.removeSuffix("/manifest.json").removeSuffix("/")
+        }
+}
+
+private fun InstalledAddon.supportsStreamResolution(): Boolean {
+    val resources = manifest.resources
+    return resources.isEmpty() || resources.any { resource ->
+        resource.equals("stream", ignoreCase = true)
     }
 }

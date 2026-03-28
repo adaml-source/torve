@@ -1,11 +1,12 @@
 package com.torve.data.progress
 
 import com.torve.db.TorveDatabase
+import com.torve.domain.repository.DeviceLocalSettingsRepository
 import com.torve.domain.repository.PreferencesRepository
 
 class PreferencesRepositoryImpl(
     private val database: TorveDatabase,
-) : PreferencesRepository {
+) : PreferencesRepository, DeviceLocalSettingsRepository {
 
     override suspend fun getString(key: String): String? {
         return database.torveQueries.getPreference(key).executeAsOneOrNull()

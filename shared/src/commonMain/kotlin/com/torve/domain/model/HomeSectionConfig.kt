@@ -11,6 +11,7 @@ enum class HomeSection(
     val defaultEnabled: Boolean,
     val defaultOrder: Int,
 ) {
+    SEARCH_BAR("Search Bar", true, -1),
     HERO("Featured", true, 0),
     CONTINUE_WATCHING("Continue Watching", true, 1),
     WATCHLIST("My Watchlist", true, 2),

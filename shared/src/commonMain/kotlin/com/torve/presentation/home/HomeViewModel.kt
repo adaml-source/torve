@@ -9,7 +9,9 @@ import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.ParentalFilter
+import com.torve.domain.model.PersonSummary
 import com.torve.domain.model.ShelfConfig
+import com.torve.domain.model.WatchlistItem
 import com.torve.domain.model.collectStableKeys
 import com.torve.domain.model.dedupeAcrossShelves
 import com.torve.domain.model.dedupeByStableKey
@@ -32,14 +34,25 @@ import com.torve.data.addon.CatalogAggregator
 import com.torve.data.mdblist.MdbListApi
 import com.torve.data.mdblist.MdbListRepository
 import com.torve.data.mdblist.RatingsEnricher
+import com.torve.data.network.homeContentLoadErrorMessage
+import com.torve.data.network.sanitizeNetworkDiagnosticText
+import com.torve.platform.torveVerboseLog
 import com.torve.presentation.settings.SettingsViewModel
+import com.torve.presentation.settings.SettingsRefreshNotifier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
@@ -62,7 +75,27 @@ class HomeViewModel(
     private val ratingsEnricher: RatingsEnricher,
     private val libraryOverlayService: LibraryOverlayService,
     private val integrationSecretStore: IntegrationSecretStore,
+    private val settingsRefreshNotifier: SettingsRefreshNotifier,
 ) {
+    private data class ArtworkBackfillRequest(
+        val type: MediaType,
+        val tmdbId: Int,
+    )
+
+    private data class HomeLoadInputs(
+        val shelves: List<CatalogShelf>,
+        val continueWatching: List<com.torve.domain.model.WatchProgress>,
+        val overlayContinue: List<com.torve.domain.model.WatchProgress>,
+        val recommendations: List<ScoredMediaItem>,
+        val watchlistItems: List<WatchlistItem>,
+        val recentHistory: List<com.torve.domain.model.WatchHistoryEntry>,
+        val hiddenGems: List<MediaItem>,
+        val recentlyWatched: List<MediaItem>,
+        val popularPeople: List<PersonSummary>,
+        val addonShelves: List<CatalogShelf>,
+        val mdbListShelves: List<CatalogShelf>,
+    )
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(HomeUiState())
     val state: StateFlow<HomeUiState> = _state.asStateFlow()
@@ -93,6 +126,9 @@ class HomeViewModel(
     private val _addonShelfVisibility = MutableStateFlow<Map<String, Boolean>>(emptyMap())
     val addonShelfVisibility: StateFlow<Map<String, Boolean>> = _addonShelfVisibility.asStateFlow()
 
+    // Search
+    private val searchQueryFlow = MutableStateFlow("")
+
     init {
         scope.launch {
             _sectionConfigs.value = loadSectionConfigs()
@@ -102,7 +138,14 @@ class HomeViewModel(
             _homeLayoutOrder.value = ensureAllSectionsInLayoutOrder(loadHomeLayoutOrder())
             loadHomeScreen()
         }
-        loadProviderLogos()
+        scope.launch {
+            settingsRefreshNotifier.events.collect {
+                _sectionConfigs.value = loadSectionConfigs()
+                _homeLayoutOrder.value = ensureAllSectionsInLayoutOrder(loadHomeLayoutOrder())
+                loadHomeScreen()
+            }
+        }
+        observeSearch()
     }
 
     /**
@@ -380,120 +423,137 @@ class HomeViewModel(
 
     fun loadHomeScreen() {
         scope.launch {
+            torveVerboseLog { "HOME_TAB bootstrap_start" }
             _state.update { it.copy(isLoading = true, error = null) }
             try {
                 val dedupe = shouldDedupe()
-                val shelvesDeferred = async { metadataRepo.getHomeShelves() }
-                val continueWatchingDeferred = async { watchProgressRepo.getInProgress(20) }
-                val overlayContinueDeferred = async {
-                    try { libraryOverlayService.getContinueWatching(20) } catch (_: Exception) { emptyList() }
-                }
-                val recommendationsDeferred = async {
-                    try {
-                        recommendationsUseCase.execute()
-                    } catch (_: Exception) {
-                        emptyList()
+                val loadInputs = supervisorScope {
+                    torveVerboseLog { "HOME_TAB repository_fetch_start source=home_shelves" }
+                    val shelvesDeferred = async { metadataRepo.getHomeShelves() }
+                    val continueWatchingDeferred = async { watchProgressRepo.getInProgress(20) }
+                    val overlayContinueDeferred = async {
+                        try { libraryOverlayService.getContinueWatching(20) } catch (_: Exception) { emptyList() }
                     }
-                }
-                val watchlistDeferred = async {
-                    try {
-                        watchlistRepo.getAll().take(20)
-                    } catch (_: Exception) {
-                        emptyList()
-                    }
-                }
-                val historyDeferred = async {
-                    try {
-                        watchHistoryRepo.getRecent(3)
-                    } catch (_: Exception) {
-                        emptyList()
-                    }
-                }
-                val hiddenGemsDeferred = async {
-                    try {
-                        metadataRepo.discover(
-                            type = "movie",
-                            sortBy = "vote_average.desc",
-                            minRating = 7.5f,
-                            page = 1,
-                        ).items.take(20)
-                    } catch (_: Exception) {
-                        emptyList()
-                    }
-                }
-                val recentlyWatchedDeferred = async {
-                    try {
-                        watchHistoryRepo.getRecent(20).map { entry ->
-                            MediaItem(
-                                id = entry.mediaId,
-                                type = if (entry.mediaType == MediaType.SERIES.name || entry.mediaType == "tv") MediaType.SERIES else MediaType.MOVIE,
-                                title = entry.title,
-                                posterUrl = entry.posterUrl,
-                                backdropUrl = entry.backdropUrl,
-                            )
+                    val recommendationsDeferred = async {
+                        try {
+                            recommendationsUseCase.execute()
+                        } catch (_: Exception) {
+                            emptyList()
                         }
-                    } catch (_: Exception) {
-                        emptyList()
                     }
-                }
-                val popularPeopleDeferred = async {
-                    try {
-                        metadataRepo.getPopularPeople()
-                    } catch (_: Exception) {
-                        emptyList()
-                    }
-                }
-                val addonShelvesDeferred = async {
-                    try {
-                        val addons = addonRepo.getInstalledAddons()
-                        if (addons.isEmpty()) emptyList()
-                        else {
-                            val movieShelves = catalogAggregator.fetchCatalogs(addons, "movie")
-                            val seriesShelves = catalogAggregator.fetchCatalogs(addons, "series")
-                            (movieShelves + seriesShelves).distinctBy { it.id }
+                    val watchlistDeferred = async {
+                        try {
+                            watchlistRepo.getAll().take(20)
+                        } catch (_: Exception) {
+                            emptyList()
                         }
-                    } catch (_: Exception) {
-                        emptyList()
                     }
-                }
-                val mdbListShelvesDeferred = async {
-                    try {
-                        val apiKey = prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY) ?: ""
-                        if (apiKey.isBlank()) emptyList()
-                        else {
-                            val savedLists = mdbListRepo.getSavedLists().filter { it.enabled }
-                            savedLists.mapNotNull { listConfig ->
-                                try {
-                                    val items = mdbListRepo.fetchListContent(listConfig.listId, apiKey, listConfig.itemCount)
-                                    if (items.isNotEmpty()) {
-                                        CatalogShelf(
-                                            id = "mdblist_${listConfig.listId}",
-                                            title = listConfig.name,
-                                            items = items,
-                                        )
-                                    } else null
-                                } catch (_: Exception) { null }
+                    val historyDeferred = async {
+                        try {
+                            watchHistoryRepo.getRecent(3)
+                        } catch (_: Exception) {
+                            emptyList()
+                        }
+                    }
+                    val hiddenGemsDeferred = async {
+                        try {
+                            metadataRepo.discover(
+                                type = "movie",
+                                sortBy = "vote_average.desc",
+                                minRating = 7.5f,
+                                page = 1,
+                            ).items.take(20)
+                        } catch (_: Exception) {
+                            emptyList()
+                        }
+                    }
+                    val recentlyWatchedDeferred = async {
+                        try {
+                            watchHistoryRepo.getRecent(20).map { entry ->
+                                MediaItem(
+                                    id = entry.mediaId,
+                                    type = if (entry.mediaType == MediaType.SERIES.name || entry.mediaType == "tv") MediaType.SERIES else MediaType.MOVIE,
+                                    title = entry.title,
+                                    posterUrl = entry.posterUrl,
+                                    backdropUrl = entry.backdropUrl,
+                                )
                             }
+                        } catch (_: Exception) {
+                            emptyList()
                         }
-                    } catch (_: Exception) {
-                        emptyList()
                     }
+                    val popularPeopleDeferred = async {
+                        try {
+                            metadataRepo.getPopularPeople()
+                        } catch (_: Exception) {
+                            emptyList()
+                        }
+                    }
+                    val addonShelvesDeferred = async {
+                        try {
+                            val addons = addonRepo.getInstalledAddons()
+                            if (addons.isEmpty()) emptyList()
+                            else {
+                                val movieShelves = catalogAggregator.fetchCatalogs(addons, "movie")
+                                val seriesShelves = catalogAggregator.fetchCatalogs(addons, "series")
+                                (movieShelves + seriesShelves).distinctBy { it.id }
+                            }
+                        } catch (_: Exception) {
+                            emptyList()
+                        }
+                    }
+                    val mdbListShelvesDeferred = async {
+                        try {
+                            val apiKey = prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY) ?: ""
+                            if (apiKey.isBlank()) emptyList()
+                            else {
+                                val savedLists = mdbListRepo.getSavedLists().filter { it.enabled }
+                                savedLists.mapNotNull { listConfig ->
+                                    try {
+                                        val items = mdbListRepo.fetchListContent(listConfig.listId, apiKey, listConfig.itemCount)
+                                        if (items.isNotEmpty()) {
+                                            CatalogShelf(
+                                                id = "mdblist_${listConfig.listId}",
+                                                title = listConfig.name,
+                                                items = items,
+                                            )
+                                        } else null
+                                    } catch (_: Exception) { null }
+                                }
+                            }
+                        } catch (_: Exception) {
+                            emptyList()
+                        }
+                    }
+                    HomeLoadInputs(
+                        shelves = shelvesDeferred.await(),
+                        continueWatching = continueWatchingDeferred.await(),
+                        overlayContinue = overlayContinueDeferred.await(),
+                        recommendations = recommendationsDeferred.await(),
+                        watchlistItems = watchlistDeferred.await(),
+                        recentHistory = historyDeferred.await(),
+                        hiddenGems = hiddenGemsDeferred.await(),
+                        recentlyWatched = recentlyWatchedDeferred.await(),
+                        popularPeople = popularPeopleDeferred.await(),
+                        addonShelves = addonShelvesDeferred.await(),
+                        mdbListShelves = mdbListShelvesDeferred.await(),
+                    )
                 }
 
-                val shelves = shelvesDeferred.await()
-                val continueWatching = continueWatchingDeferred.await()
-                val overlayContinue = overlayContinueDeferred.await()
+                val shelves = loadInputs.shelves
+                val continueWatching = loadInputs.continueWatching
+                val overlayContinue = loadInputs.overlayContinue
                 val mergedContinueWatching = (continueWatching + overlayContinue)
                     .groupBy { "${it.mediaType.name}:${it.mediaId}" }
                     .mapNotNull { (_, entries) -> entries.maxByOrNull { it.updatedAt } }
                     .sortedByDescending { it.updatedAt }
                     .take(20)
-                val recommendations = recommendationsDeferred.await()
-                val watchlistItems = watchlistDeferred.await()
-                val recentHistory = historyDeferred.await()
-                val hiddenGems = hiddenGemsDeferred.await()
-                val recentlyWatched = recentlyWatchedDeferred.await()
-                val popularPeople = popularPeopleDeferred.await()
+                val recommendations = loadInputs.recommendations
+                val watchlistItems = loadInputs.watchlistItems
+                val recentHistory = loadInputs.recentHistory
+                val hiddenGems = loadInputs.hiddenGems
+                val recentlyWatched = loadInputs.recentlyWatched
+                val popularPeople = loadInputs.popularPeople
                 val popularActors = popularPeople.filter { it.knownForDepartment == "Acting" }.take(20)
                 val directorDepartments = setOf("Directing", "Production", "Writing")
                 val popularDirectors = popularPeople
@@ -503,8 +563,8 @@ class HomeViewModel(
                     }
                     .ifEmpty { popularPeople }
                     .take(20)
-                val addonShelves = addonShelvesDeferred.await()
-                val mdbListShelves = mdbListShelvesDeferred.await()
+                val addonShelves = loadInputs.addonShelves
+                val mdbListShelves = loadInputs.mdbListShelves
 
                 // Register addon shelves in layout order for individual customization
                 ensureAddonShelvesInLayout(addonShelves)
@@ -756,6 +816,9 @@ class HomeViewModel(
                             isLoading = false,
                         )
                     }
+                    torveVerboseLog {
+                        "HOME_TAB state_transition state=success shelves=${_state.value.shelves.size} recommendations=${_state.value.recommendedItems.size}"
+                    }
                 } else {
                     // No dedup — pass through as-is
                     _state.update {
@@ -778,13 +841,56 @@ class HomeViewModel(
                             isLoading = false,
                         )
                     }
+                    torveVerboseLog {
+                        "HOME_TAB state_transition state=success shelves=${_state.value.shelves.size} recommendations=${_state.value.recommendedItems.size}"
+                    }
                 }
+
+                loadProviderLogos()
 
                 // Background enrichment: add MDBList multi-source ratings
                 launchRatingsEnrichment()
+                launchArtworkBackfill()
             } catch (e: Exception) {
-                _state.update { it.copy(isLoading = false, error = e.message ?: "Failed to load") }
+                torveVerboseLog {
+                    "HOME_TAB state_transition state=error ${e::class.simpleName}: ${sanitizeNetworkDiagnosticText(e.message)}"
+                }
+                _state.update { it.copy(isLoading = false, error = homeContentLoadErrorMessage()) }
             }
+        }
+    }
+
+    // ── Search ──
+
+    fun updateSearchQuery(query: String) {
+        _state.update { it.copy(searchQuery = query) }
+        searchQueryFlow.value = query
+    }
+
+    fun clearSearch() {
+        _state.update { it.copy(searchQuery = "", searchResults = emptyList(), isSearching = false) }
+        searchQueryFlow.value = ""
+    }
+
+    @OptIn(FlowPreview::class)
+    private fun observeSearch() {
+        scope.launch {
+            searchQueryFlow
+                .debounce(300)
+                .distinctUntilChanged()
+                .collect { query ->
+                    if (query.length < 2) {
+                        _state.update { it.copy(searchResults = emptyList(), isSearching = false) }
+                        return@collect
+                    }
+                    _state.update { it.copy(isSearching = true) }
+                    try {
+                        val result = metadataRepo.searchMultiPaged(query, page = 1, type = null)
+                        _state.update { it.copy(searchResults = result.items, isSearching = false) }
+                    } catch (_: Exception) {
+                        _state.update { it.copy(isSearching = false) }
+                    }
+                }
         }
     }
 
@@ -794,6 +900,36 @@ class HomeViewModel(
 
     private suspend fun shouldDedupe(): Boolean {
         return prefsRepo.getString(SettingsViewModel.KEY_DEDUPE_RESULTS)?.toBooleanStrictOrNull() ?: true
+    }
+
+    private fun launchArtworkBackfill() {
+        scope.launch {
+            val requests = collectArtworkBackfillRequests(_state.value)
+            if (requests.isEmpty()) return@launch
+
+            val backfilledArtwork = coroutineScope {
+                requests.map { request ->
+                    async {
+                        try {
+                            val detail = metadataRepo.getDetail(request.type.toMetadataType(), request.tmdbId)
+                            if (detail.posterUrl.isNullOrBlank() && detail.backdropUrl.isNullOrBlank()) {
+                                null
+                            } else {
+                                artworkBackfillKey(request.type, request.tmdbId) to detail
+                            }
+                        } catch (_: Exception) {
+                            null
+                        }
+                    }
+                }.mapNotNull { it.await() }.toMap()
+            }
+
+            if (backfilledArtwork.isEmpty()) return@launch
+
+            _state.update { current ->
+                current.applyArtworkBackfill(backfilledArtwork)
+            }
+        }
     }
 
     private fun launchRatingsEnrichment() {
@@ -857,6 +993,85 @@ class HomeViewModel(
             }
         }
     }
+
+    private fun collectArtworkBackfillRequests(state: HomeUiState): List<ArtworkBackfillRequest> {
+        return buildList {
+            addAll(state.shelves.flatMap { it.items })
+            addAll(state.watchlistItems)
+            addAll(state.becauseYouWatched.flatMap { it.items })
+            state.hiddenGemsShelf?.let { addAll(it.items) }
+            addAll(state.recentlyWatched)
+            addAll(state.customShelves.values.flatten())
+            addAll(state.addonShelves.flatMap { it.items })
+            addAll(state.mdbListShelves.flatMap { it.items })
+            addAll(state.recommendedItems.map { it.item })
+        }
+            .asSequence()
+            .filter { it.needsArtworkBackfill() }
+            .mapNotNull { item ->
+                item.tmdbId?.let { tmdbId ->
+                    ArtworkBackfillRequest(type = item.type, tmdbId = tmdbId)
+                }
+            }
+            .distinctBy { artworkBackfillKey(it.type, it.tmdbId) }
+            .take(40)
+            .toList()
+    }
+
+    private fun HomeUiState.applyArtworkBackfill(backfilledArtwork: Map<String, MediaItem>): HomeUiState {
+        val updatedShelves = shelves.map { shelf ->
+            shelf.copy(items = shelf.items.map { it.applyArtworkBackfill(backfilledArtwork) })
+        }
+        val updatedWatchlistItems = watchlistItems.map { it.applyArtworkBackfill(backfilledArtwork) }
+        return copy(
+            shelves = updatedShelves,
+            heroItem = heroItem?.applyArtworkBackfill(backfilledArtwork)
+                ?: updatedShelves.firstOrNull()?.items?.firstOrNull(),
+            recommendedItems = recommendedItems.map { scored ->
+                scored.copy(item = scored.item.applyArtworkBackfill(backfilledArtwork))
+            },
+            watchlistItems = updatedWatchlistItems,
+            watchlistShelf = watchlistShelf?.copy(items = updatedWatchlistItems),
+            becauseYouWatched = becauseYouWatched.map { shelf ->
+                shelf.copy(items = shelf.items.map { it.applyArtworkBackfill(backfilledArtwork) })
+            },
+            hiddenGemsShelf = hiddenGemsShelf?.copy(
+                items = hiddenGemsShelf.items.map { it.applyArtworkBackfill(backfilledArtwork) }
+            ),
+            recentlyWatched = recentlyWatched.map { it.applyArtworkBackfill(backfilledArtwork) },
+            customShelves = customShelves.mapValues { (_, items) ->
+                items.map { it.applyArtworkBackfill(backfilledArtwork) }
+            }.toMutableMap(),
+            addonShelves = addonShelves.map { shelf ->
+                shelf.copy(items = shelf.items.map { it.applyArtworkBackfill(backfilledArtwork) })
+            },
+            mdbListShelves = mdbListShelves.map { shelf ->
+                shelf.copy(items = shelf.items.map { it.applyArtworkBackfill(backfilledArtwork) })
+            },
+        )
+    }
+
+    private fun MediaItem.applyArtworkBackfill(backfilledArtwork: Map<String, MediaItem>): MediaItem {
+        val tmdbId = tmdbId ?: return this
+        if (!needsArtworkBackfill()) return this
+        val detail = backfilledArtwork[artworkBackfillKey(type, tmdbId)] ?: return this
+        return copy(
+            posterUrl = posterUrl.takeUnless { it.isNullOrBlank() } ?: detail.posterUrl,
+            backdropUrl = backdropUrl.takeUnless { it.isNullOrBlank() } ?: detail.backdropUrl,
+            logoUrl = logoUrl.takeUnless { it.isNullOrBlank() } ?: detail.logoUrl,
+        )
+    }
+
+    private fun MediaItem.needsArtworkBackfill(): Boolean {
+        return tmdbId != null && posterUrl.isNullOrBlank() && backdropUrl.isNullOrBlank()
+    }
+
+    private fun MediaType.toMetadataType(): String = when (this) {
+        MediaType.MOVIE -> "movie"
+        MediaType.SERIES -> "tv"
+    }
+
+    private fun artworkBackfillKey(type: MediaType, tmdbId: Int): String = "${type.name}:$tmdbId"
 
     fun toggleShelfVisibility(shelfId: String) {
         scope.launch {

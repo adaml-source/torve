@@ -45,6 +45,8 @@ import com.torve.android.ui.theme.Gunmetal
 import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Torve
+import androidx.compose.ui.res.stringResource
+import com.torve.android.R
 import com.torve.presentation.settings.SettingsViewModel
 import org.koin.compose.koinInject
 
@@ -97,14 +99,14 @@ fun ProfileTabScreen(
 
             Column {
                 Text(
-                    text = state.traktUser?.username ?: "Torve User",
+                    text = state.traktUser?.username ?: stringResource(R.string.profile_torve_user),
                     style = MaterialTheme.typography.headlineSmall,
                     color = Snow,
                     fontWeight = FontWeight.Bold,
                 )
                 if (state.traktConnected) {
                     Text(
-                        text = "Trakt connected",
+                        text = stringResource(R.string.profile_trakt_connected),
                         style = MaterialTheme.typography.bodySmall,
                         color = Torve.colors.textSecondary,
                     )
@@ -126,9 +128,9 @@ fun ProfileTabScreen(
                         .padding(20.dp),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                 ) {
-                    StatItem(value = "${stats.moviesWatched}", label = "Movies")
-                    StatItem(value = "${stats.episodesWatched}", label = "Episodes")
-                    StatItem(value = "${stats.minutesWatched / 60}h", label = "Watch Time")
+                    StatItem(value = "${stats.moviesWatched}", label = stringResource(R.string.stats_movies))
+                    StatItem(value = "${stats.episodesWatched}", label = stringResource(R.string.stats_episodes))
+                    StatItem(value = "${stats.minutesWatched / 60}h", label = stringResource(R.string.stats_watch_time))
                 }
             }
 
@@ -137,7 +139,7 @@ fun ProfileTabScreen(
 
         // Navigation links
         Text(
-            "Quick Access",
+            stringResource(R.string.profile_quick_access),
             style = MaterialTheme.typography.titleMedium,
             color = Amber,
             fontWeight = FontWeight.SemiBold,
@@ -152,44 +154,44 @@ fun ProfileTabScreen(
             Column {
                 ProfileNavItem(
                     icon = Icons.Filled.CalendarMonth,
-                    label = "Calendar",
-                    subtitle = "Upcoming episodes & releases",
+                    label = stringResource(R.string.profile_calendar),
+                    subtitle = stringResource(R.string.profile_calendar_sub),
                     onClick = onCalendarClick,
                 )
                 ProfileNavItem(
                     icon = Icons.Filled.Download,
-                    label = "Downloads",
-                    subtitle = "Manage offline content",
+                    label = stringResource(R.string.profile_downloads),
+                    subtitle = stringResource(R.string.profile_downloads_sub),
                     onClick = onDownloadsClick,
                 )
                 ProfileNavItem(
                     icon = Icons.Filled.BarChart,
-                    label = "Stats",
-                    subtitle = "Your watch activity",
+                    label = stringResource(R.string.profile_stats),
+                    subtitle = stringResource(R.string.profile_stats_sub),
                     onClick = onStatsClick,
                 )
                 ProfileNavItem(
                     icon = Icons.Filled.LiveTv,
-                    label = "Channels",
-                    subtitle = "Channels & playlists",
+                    label = stringResource(R.string.profile_channels),
+                    subtitle = stringResource(R.string.profile_channels_sub),
                     onClick = onChannelsClick,
                 )
                 ProfileNavItem(
                     icon = Icons.Filled.Star,
-                    label = "Subscription",
-                    subtitle = "Manage your plan",
+                    label = stringResource(R.string.profile_subscription),
+                    subtitle = stringResource(R.string.profile_subscription_sub),
                     onClick = onSubscriptionClick,
                 )
                 ProfileNavItem(
                     icon = Icons.Filled.Person,
-                    label = "Profiles",
-                    subtitle = "Switch or manage profiles",
+                    label = stringResource(R.string.profile_profiles),
+                    subtitle = stringResource(R.string.profile_profiles_sub),
                     onClick = onProfilesClick,
                 )
                 ProfileNavItem(
                     icon = Icons.Filled.Settings,
-                    label = "Settings",
-                    subtitle = "Accounts, quality, appearance",
+                    label = stringResource(R.string.profile_settings),
+                    subtitle = stringResource(R.string.profile_settings_sub),
                     onClick = onSettingsClick,
                 )
             }

@@ -8,7 +8,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.torve.android.R
 import com.torve.android.voice.VoiceInputPhase
 import com.torve.android.voice.VoiceInputUiState
 import com.torve.android.voice.rememberVoiceInputController
@@ -42,7 +44,7 @@ fun VoiceSearchButton(
     ) {
         Icon(
             Icons.Default.Mic,
-            contentDescription = "Voice search",
+            contentDescription = stringResource(R.string.common_voice_search_cd),
             tint = Amber,
             modifier = Modifier.size(24.dp),
         )

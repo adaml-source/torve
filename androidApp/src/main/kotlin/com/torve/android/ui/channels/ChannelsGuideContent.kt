@@ -36,11 +36,13 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.torve.android.R
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Torve
 import com.torve.domain.model.EnrichedChannel
@@ -336,7 +338,7 @@ private fun ProgrammeTimeline(
                 contentAlignment = Alignment.CenterStart,
             ) {
                 Text(
-                    text = "No programme info",
+                    text = stringResource(R.string.channels_no_programme),
                     style = MaterialTheme.typography.labelSmall,
                     color = Torve.colors.textHint,
                     modifier = Modifier.padding(horizontal = 8.dp),

@@ -5,6 +5,10 @@ import com.torve.data.device.AccessStateDto
 import com.torve.data.device.DeviceApi
 import com.torve.data.device.DeviceListDto
 import com.torve.data.device.ManagedDeviceDto
+import com.torve.data.device.resolvedDeviceBlockReason
+import com.torve.data.device.resolvedHasPremiumEntitlement
+import com.torve.data.device.resolvedIsDeviceActivated
+import com.torve.data.device.resolvedUsablePremiumAccess
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -180,6 +184,7 @@ class DeviceGovernanceViewModel(
                         )
                     }
                 }
+                fetchAccessState()
             } catch (e: Exception) {
                 _state.update { it.copy(isRemoving = false, error = e.message) }
             }
@@ -208,6 +213,7 @@ class DeviceGovernanceViewModel(
                         reason = result.reason,
                     )
                 }
+                fetchAccessState()
             } catch (e: Exception) {
                 _state.update { it.copy(isActivating = false, error = e.message) }
             }
@@ -238,15 +244,19 @@ class DeviceGovernanceViewModel(
     }
 
     private fun applyAccessState(access: AccessStateDto) {
+        val hasEntitlement = access.resolvedHasPremiumEntitlement()
+        val isDeviceActivated = access.resolvedIsDeviceActivated()
+        val premiumAccess = access.resolvedUsablePremiumAccess()
+        val reason = access.resolvedDeviceBlockReason().orEmpty()
         _state.update {
             it.copy(
                 isLoading = false,
-                hasEntitlement = access.premium.has_entitlement,
-                premiumAccess = access.premium.premium_access,
-                reason = access.premium.reason,
+                hasEntitlement = hasEntitlement,
+                premiumAccess = premiumAccess,
+                reason = reason,
                 currentDeviceId = access.device.id,
                 currentDeviceName = access.device.name,
-                currentDeviceActive = access.device.is_active,
+                currentDeviceActive = isDeviceActivated,
                 activeDeviceCount = access.device.active_device_count,
                 maxActiveDevices = access.device.max_active_devices,
                 capReached = access.device_limit.cap_reached,
@@ -254,8 +264,7 @@ class DeviceGovernanceViewModel(
                 staleDevicesPruned = access.device_limit.stale_devices_pruned,
                 // Pre-load active devices from access-state for immediate display
                 devices = access.device_limit.active_devices.ifEmpty { it.devices },
-                showDeviceLimitReached = access.premium.has_entitlement && !access.premium.premium_access
-                        && access.premium.reason == "device_cap_reached",
+                showDeviceLimitReached = hasEntitlement && !premiumAccess && reason == "device_cap_reached",
             )
         }
     }

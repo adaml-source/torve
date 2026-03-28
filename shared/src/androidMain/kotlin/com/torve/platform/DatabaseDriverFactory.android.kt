@@ -28,6 +28,15 @@ actual class DatabaseDriverFactory(private val context: Context) {
                     if (!alreadyDone) {
                         ensureAllTables(db)
                     }
+                    // Lightweight incremental migrations — always run (idempotent).
+                    db.execSQL(
+                        """CREATE TABLE IF NOT EXISTS iptv_hidden_channel (
+                            hidden_id TEXT NOT NULL PRIMARY KEY
+                        )""",
+                    )
+                    runCatching { db.execSQL("ALTER TABLE addon ADD COLUMN server_id TEXT") }
+                    runCatching { db.execSQL("ALTER TABLE addon ADD COLUMN synced_at INTEGER") }
+                    runCatching { db.execSQL("ALTER TABLE addon ADD COLUMN installed_from TEXT NOT NULL DEFAULT 'app'") }
                 }
             },
         )
@@ -64,17 +73,19 @@ actual class DatabaseDriverFactory(private val context: Context) {
         )
         db.execSQL(
             """CREATE TABLE IF NOT EXISTS addon (
-                id TEXT NOT NULL PRIMARY KEY,
+                manifest_url TEXT NOT NULL PRIMARY KEY,
+                id TEXT NOT NULL,
                 name TEXT NOT NULL,
                 version TEXT NOT NULL,
                 description TEXT,
-                transport_url TEXT NOT NULL,
-                logo_url TEXT,
-                types TEXT NOT NULL,
-                catalogs TEXT,
+                logo TEXT,
+                manifest_json TEXT NOT NULL,
                 is_enabled INTEGER NOT NULL DEFAULT 1,
-                sort_order INTEGER NOT NULL DEFAULT 0,
-                installed_at INTEGER NOT NULL
+                priority INTEGER NOT NULL DEFAULT 0,
+                installed_at INTEGER NOT NULL,
+                server_id TEXT,
+                synced_at INTEGER,
+                installed_from TEXT NOT NULL DEFAULT 'app'
             )""",
         )
         db.execSQL(

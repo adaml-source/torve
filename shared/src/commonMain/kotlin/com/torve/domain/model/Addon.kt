@@ -38,4 +38,7 @@ data class InstalledAddon(
     val isEnabled: Boolean = true,
     val priority: Int = 0,
     val installedAt: Long = 0,
+    val serverId: String? = null,
+    val syncedAt: Long? = null,
+    val installedFrom: String = "app",
 )

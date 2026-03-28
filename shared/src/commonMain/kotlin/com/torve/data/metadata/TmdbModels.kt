@@ -12,6 +12,12 @@ data class TmdbResponse<T>(
 )
 
 @Serializable
+data class TmdbFindResponse(
+    @SerialName("movie_results") val movieResults: List<TmdbMovie> = emptyList(),
+    @SerialName("tv_results") val tvResults: List<TmdbTv> = emptyList(),
+)
+
+@Serializable
 data class TmdbKeyword(
     val id: Int,
     val name: String = "",

@@ -2,9 +2,9 @@ package com.torve.data.channels
 
 import com.torve.domain.model.Channel
 import io.ktor.client.HttpClient
-import io.ktor.client.call.body
 import io.ktor.client.request.get
 import io.ktor.client.request.parameter
+import io.ktor.client.statement.bodyAsText
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -21,10 +21,7 @@ class XtreamClient(
      * Authenticate and get server info.
      */
     suspend fun authenticate(server: String, username: String, password: String): XtreamAuthInfo {
-        val response: XtreamAuthResponse = httpClient.get("${server.trimEnd('/')}/player_api.php") {
-            parameter("username", username)
-            parameter("password", password)
-        }.body()
+        val response = getJson<XtreamAuthResponse>(server, username, password)
         return XtreamAuthInfo(
             isAuthenticated = response.userInfo?.auth == 1,
             status = response.userInfo?.status ?: "Unknown",
@@ -43,11 +40,7 @@ class XtreamClient(
         username: String,
         password: String,
     ): List<XtreamCategory> {
-        return httpClient.get("${server.trimEnd('/')}/player_api.php") {
-            parameter("username", username)
-            parameter("password", password)
-            parameter("action", "get_live_categories")
-        }.body()
+        return getJson(server, username, password, action = "get_live_categories")
     }
 
     /**
@@ -59,12 +52,13 @@ class XtreamClient(
         password: String,
         categoryId: String? = null,
     ): List<XtreamLiveStream> {
-        return httpClient.get("${server.trimEnd('/')}/player_api.php") {
-            parameter("username", username)
-            parameter("password", password)
-            parameter("action", "get_live_streams")
-            categoryId?.let { parameter("category_id", it) }
-        }.body()
+        return getJson(
+            server = server,
+            username = username,
+            password = password,
+            action = "get_live_streams",
+            extraParams = categoryId?.let { mapOf("category_id" to it) }.orEmpty(),
+        )
     }
 
     /**
@@ -75,11 +69,7 @@ class XtreamClient(
         username: String,
         password: String,
     ): List<XtreamCategory> {
-        return httpClient.get("${server.trimEnd('/')}/player_api.php") {
-            parameter("username", username)
-            parameter("password", password)
-            parameter("action", "get_vod_categories")
-        }.body()
+        return getJson(server, username, password, action = "get_vod_categories")
     }
 
     /**
@@ -91,12 +81,13 @@ class XtreamClient(
         password: String,
         categoryId: String? = null,
     ): List<XtreamVodStream> {
-        return httpClient.get("${server.trimEnd('/')}/player_api.php") {
-            parameter("username", username)
-            parameter("password", password)
-            parameter("action", "get_vod_streams")
-            categoryId?.let { parameter("category_id", it) }
-        }.body()
+        return getJson(
+            server = server,
+            username = username,
+            password = password,
+            action = "get_vod_streams",
+            extraParams = categoryId?.let { mapOf("category_id" to it) }.orEmpty(),
+        )
     }
 
     /**
@@ -107,11 +98,7 @@ class XtreamClient(
         username: String,
         password: String,
     ): List<XtreamCategory> {
-        return httpClient.get("${server.trimEnd('/')}/player_api.php") {
-            parameter("username", username)
-            parameter("password", password)
-            parameter("action", "get_series_categories")
-        }.body()
+        return getJson(server, username, password, action = "get_series_categories")
     }
 
     /**
@@ -123,12 +110,29 @@ class XtreamClient(
         password: String,
         categoryId: String? = null,
     ): List<XtreamSeries> {
-        return httpClient.get("${server.trimEnd('/')}/player_api.php") {
+        return getJson(
+            server = server,
+            username = username,
+            password = password,
+            action = "get_series",
+            extraParams = categoryId?.let { mapOf("category_id" to it) }.orEmpty(),
+        )
+    }
+
+    private suspend inline fun <reified T> getJson(
+        server: String,
+        username: String,
+        password: String,
+        action: String? = null,
+        extraParams: Map<String, String> = emptyMap(),
+    ): T {
+        val raw = httpClient.get("${server.trimEnd('/')}/player_api.php") {
             parameter("username", username)
             parameter("password", password)
-            parameter("action", "get_series")
-            categoryId?.let { parameter("category_id", it) }
-        }.body()
+            action?.let { parameter("action", it) }
+            extraParams.forEach { (key, value) -> parameter(key, value) }
+        }.bodyAsText()
+        return json.decodeFromString(raw)
     }
 
     /**

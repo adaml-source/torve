@@ -21,7 +21,10 @@ class LanSyncServer(
     private val json: Json,
     private val selfDeviceProvider: () -> SyncDeviceDto,
     private val onPairClaim: (LanPairClaimRequest) -> LanPairClaimResponse,
+    private val onPairConfirm: (LanPairConfirmRequest) -> LanStatusResponse,
     private val onInboundEvent: (LanEventEnvelope) -> LanStatusResponse,
+    private val onChannelInitiate: (LanChannelInitiateRequest) -> LanChannelInitiateResponse,
+    private val onChannelConfirm: (LanChannelConfirmRequest) -> LanStatusResponse,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     @Volatile
@@ -112,10 +115,31 @@ class LanSyncServer(
                         writeJsonResponse(output, status, response)
                     }
 
+                    method == "POST" && path == PATH_PAIR_CONFIRM -> {
+                        val request = json.decodeFromString(LanPairConfirmRequest.serializer(), body)
+                        val response = onPairConfirm(request)
+                        val status = if (response.status == "ok") 200 else 401
+                        writeJsonResponse(output, status, response)
+                    }
+
                     method == "POST" && path == PATH_EVENT -> {
                         val event = json.decodeFromString(LanEventEnvelope.serializer(), body)
                         val response = onInboundEvent(event)
                         val status = if (response.status == "ok") 200 else 400
+                        writeJsonResponse(output, status, response)
+                    }
+
+                    method == "POST" && path == PATH_CHANNEL_INITIATE -> {
+                        val request = json.decodeFromString(LanChannelInitiateRequest.serializer(), body)
+                        val response = onChannelInitiate(request)
+                        val status = if (response.status == "ok") 200 else 401
+                        writeJsonResponse(output, status, response)
+                    }
+
+                    method == "POST" && path == PATH_CHANNEL_CONFIRM -> {
+                        val request = json.decodeFromString(LanChannelConfirmRequest.serializer(), body)
+                        val response = onChannelConfirm(request)
+                        val status = if (response.status == "ok") 200 else 401
                         writeJsonResponse(output, status, response)
                     }
 
@@ -151,6 +175,7 @@ class LanSyncServer(
         val body = when (payload) {
             is LanHelloResponse -> json.encodeToString(LanHelloResponse.serializer(), payload)
             is LanPairClaimResponse -> json.encodeToString(LanPairClaimResponse.serializer(), payload)
+            is LanChannelInitiateResponse -> json.encodeToString(LanChannelInitiateResponse.serializer(), payload)
             is LanStatusResponse -> json.encodeToString(LanStatusResponse.serializer(), payload)
             else -> json.encodeToString(
                 LanStatusResponse.serializer(),
@@ -206,6 +231,9 @@ class LanSyncServer(
         const val SOCKET_TIMEOUT_MS = 5_000
         const val PATH_HELLO = "/sync/hello"
         const val PATH_PAIR_CLAIM = "/sync/pair/claim"
+        const val PATH_PAIR_CONFIRM = "/sync/pair/confirm"
         const val PATH_EVENT = "/sync/event"
+        const val PATH_CHANNEL_INITIATE = "/sync/channel/initiate"
+        const val PATH_CHANNEL_CONFIRM = "/sync/channel/confirm"
     }
 }

@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -67,6 +68,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import com.torve.android.R
+import com.torve.android.premium.AccessTier
 import com.torve.android.premium.PremiumAccess
 import com.torve.android.premium.PremiumFeature
 import androidx.compose.ui.graphics.Brush
@@ -79,11 +81,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.torve.android.ui.components.CastAvatar
-import com.torve.android.ui.components.PosterCard
 import com.torve.android.ui.components.CardSize
-import com.torve.android.ui.components.SectionHeader
 import com.torve.android.ui.components.LocalCardStyle
 import com.torve.android.ui.components.MultiRatingPills
+import com.torve.android.ui.components.PosterCard
+import com.torve.android.ui.components.SectionHeader
+import com.torve.android.ui.components.mediaItemLazyKey
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Graphite
 import com.torve.android.ui.theme.HeroGradient
@@ -118,7 +121,7 @@ import org.koin.compose.koinInject
 fun DetailScreen(
     type: String,
     id: Int,
-    isLifetimeUnlocked: Boolean = false,
+    accessTier: AccessTier = AccessTier.FREE,
     onLockedFeatureClick: (PremiumFeature) -> Unit = {},
     onPlayClick: (url: String, fallbackUrl: String, season: Int?, episode: Int?, imdbId: String?) -> Unit,
     onBack: () -> Unit,
@@ -136,7 +139,6 @@ fun DetailScreen(
     val state by viewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
     val watchlistState by watchlistViewModel.state.collectAsState()
-    val accessTier = remember(isLifetimeUnlocked) { PremiumAccess.tierFrom(isLifetimeUnlocked) }
     val isLocked: (PremiumFeature) -> Boolean = remember(accessTier) {
         { feature -> PremiumAccess.isPremiumLocked(feature, accessTier) }
     }
@@ -191,15 +193,21 @@ fun DetailScreen(
     var resolvedFallbackUrl by remember { mutableStateOf("") }
     LaunchedEffect(state.resolvedStream) {
         state.resolvedStream?.let { resolved ->
-            val url = resolved.transcodeUrls?.mp4
-                ?: resolved.transcodeUrls?.hls
-                ?: resolved.url
-            val fallback = if (url == resolved.url) {
-                resolved.transcodeUrls?.hls ?: resolved.transcodeUrls?.mp4 ?: ""
-            } else if (url == resolved.transcodeUrls?.mp4) {
-                resolved.transcodeUrls?.hls ?: resolved.url
-            } else {
-                resolved.url
+            val url = listOf(
+                resolved.transcodeUrls?.mp4,
+                resolved.transcodeUrls?.hls,
+                resolved.url,
+            ).firstOrNull { !it.isNullOrBlank() }.orEmpty()
+            val fallback = listOf(
+                resolved.transcodeUrls?.hls,
+                resolved.transcodeUrls?.mp4,
+                resolved.url,
+            ).firstOrNull { !it.isNullOrBlank() && it != url }.orEmpty()
+            if (url.isBlank()) {
+                resolvedUrl = ""
+                resolvedFallbackUrl = ""
+                viewModel.clearResolvedStream()
+                return@let
             }
             resolvedUrl = url
             resolvedFallbackUrl = fallback
@@ -812,7 +820,7 @@ fun DetailScreen(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 contentPadding = PaddingValues(vertical = 4.dp),
                             ) {
-                                items(state.similar, key = { it.id }) { similar ->
+                                itemsIndexed(state.similar, key = { index, item -> mediaItemLazyKey(item, index) }) { _, similar ->
                                     PosterCard(
                                         item = similar,
                                         sizeOverride = CardSize.SMALL,
