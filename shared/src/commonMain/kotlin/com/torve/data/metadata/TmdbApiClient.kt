@@ -73,6 +73,8 @@ class TmdbApiClient(
     private val diagnostics: (TmdbRequestDiagnostic) -> Unit = { diagnostic ->
         torveVerboseLog { diagnostic.toLogLine() }
     },
+    /** Returns a TMDB language tag (e.g. "de", "es", "fr") or null for the TMDB default (English). */
+    private val languageProvider: () -> String? = { null },
 ) {
 
     companion object {
@@ -87,6 +89,20 @@ class TmdbApiClient(
     @Volatile
     private var resolvedHostCache: String? = null
 
+    /** Mutable language override. Set by SettingsViewModel when the user changes language. */
+    @Volatile
+    var contentLanguage: String? = null
+
+    /** Base params included in every TMDB call: API key + language (if set). */
+    private fun baseParams(): List<Pair<String, Any>> = buildList {
+        add("api_key" to apiKeyProvider())
+        val lang = contentLanguage ?: languageProvider()
+        torveVerboseLog { "TMDB_BASE_PARAMS contentLanguage=$contentLanguage languageProvider=${languageProvider()} resolved=$lang" }
+        lang?.takeIf { it.isNotBlank() && it != "en" }?.let {
+            add("language" to it)
+        }
+    }
+
     suspend fun getTrending(
         type: String = "all",
         page: Int = 1,
@@ -95,8 +111,7 @@ class TmdbApiClient(
         return get(
             endpoint = "/trending/$type/week",
             requestCategory = requestCategory,
-            parameters = listOf(
-                "api_key" to apiKeyProvider(),
+            parameters = baseParams() + listOf(
                 "page" to page,
             ),
         )
@@ -110,8 +125,7 @@ class TmdbApiClient(
         return get(
             endpoint = "/$type/popular",
             requestCategory = requestCategory,
-            parameters = listOf(
-                "api_key" to apiKeyProvider(),
+            parameters = baseParams() + listOf(
                 "page" to page,
             ),
         )
@@ -125,8 +139,7 @@ class TmdbApiClient(
         return get(
             endpoint = "/$type/top_rated",
             requestCategory = requestCategory,
-            parameters = listOf(
-                "api_key" to apiKeyProvider(),
+            parameters = baseParams() + listOf(
                 "page" to page,
             ),
         )
@@ -139,8 +152,7 @@ class TmdbApiClient(
         return get(
             endpoint = "/movie/upcoming",
             requestCategory = requestCategory,
-            parameters = listOf(
-                "api_key" to apiKeyProvider(),
+            parameters = baseParams() + listOf(
                 "page" to page,
             ),
         )
@@ -153,8 +165,7 @@ class TmdbApiClient(
         return get(
             endpoint = "/movie/now_playing",
             requestCategory = requestCategory,
-            parameters = listOf(
-                "api_key" to apiKeyProvider(),
+            parameters = baseParams() + listOf(
                 "page" to page,
             ),
         )
@@ -167,8 +178,7 @@ class TmdbApiClient(
         return get(
             endpoint = "/tv/airing_today",
             requestCategory = requestCategory,
-            parameters = listOf(
-                "api_key" to apiKeyProvider(),
+            parameters = baseParams() + listOf(
                 "page" to page,
             ),
         )
@@ -178,8 +188,7 @@ class TmdbApiClient(
         return get(
             endpoint = "/search/multi",
             requestCategory = "tmdb.search.multi",
-            parameters = listOf(
-                "api_key" to apiKeyProvider(),
+            parameters = baseParams() + listOf(
                 "query" to query,
                 "page" to page,
             ),
@@ -190,8 +199,7 @@ class TmdbApiClient(
         return get(
             endpoint = "/find/$imdbId",
             requestCategory = "tmdb.find.imdb",
-            parameters = listOf(
-                "api_key" to apiKeyProvider(),
+            parameters = baseParams() + listOf(
                 "external_source" to "imdb_id",
             ),
         )
@@ -201,10 +209,9 @@ class TmdbApiClient(
         return get(
             endpoint = "/movie/$id",
             requestCategory = "tmdb.detail.movie",
-            parameters = listOf(
-                "api_key" to apiKeyProvider(),
+            parameters = baseParams() + listOf(
                 "append_to_response" to "credits,videos,similar,external_ids,images",
-                "include_image_language" to "en,null",
+                "include_image_language" to "${languageProvider() ?: "en"},null",
             ),
         )
     }
@@ -213,10 +220,9 @@ class TmdbApiClient(
         return get(
             endpoint = "/tv/$id",
             requestCategory = "tmdb.detail.tv",
-            parameters = listOf(
-                "api_key" to apiKeyProvider(),
+            parameters = baseParams() + listOf(
                 "append_to_response" to "credits,videos,similar,external_ids,images",
-                "include_image_language" to "en,null",
+                "include_image_language" to "${languageProvider() ?: "en"},null",
             ),
         )
     }
@@ -225,9 +231,8 @@ class TmdbApiClient(
         return get(
             endpoint = "/$type/$id/images",
             requestCategory = "tmdb.images.$type",
-            parameters = listOf(
-                "api_key" to apiKeyProvider(),
-                "include_image_language" to "en,null",
+            parameters = baseParams() + listOf(
+                "include_image_language" to "${languageProvider() ?: "en"},null",
             ),
         )
     }
@@ -236,7 +241,7 @@ class TmdbApiClient(
         return get(
             endpoint = "/movie/$id/external_ids",
             requestCategory = "tmdb.external_ids.movie",
-            parameters = listOf("api_key" to apiKeyProvider()),
+            parameters = baseParams(),
         )
     }
 
@@ -244,7 +249,7 @@ class TmdbApiClient(
         return get(
             endpoint = "/tv/$id/external_ids",
             requestCategory = "tmdb.external_ids.tv",
-            parameters = listOf("api_key" to apiKeyProvider()),
+            parameters = baseParams(),
         )
     }
 
@@ -252,8 +257,7 @@ class TmdbApiClient(
         return get(
             endpoint = "/$type/$id/similar",
             requestCategory = "tmdb.similar.$type",
-            parameters = listOf(
-                "api_key" to apiKeyProvider(),
+            parameters = baseParams() + listOf(
                 "page" to page,
             ),
         )
@@ -266,8 +270,7 @@ class TmdbApiClient(
         return get(
             endpoint = "/trending/tv/week",
             requestCategory = requestCategory,
-            parameters = listOf(
-                "api_key" to apiKeyProvider(),
+            parameters = baseParams() + listOf(
                 "page" to page,
             ),
         )
@@ -280,8 +283,7 @@ class TmdbApiClient(
         return get(
             endpoint = "/tv/popular",
             requestCategory = requestCategory,
-            parameters = listOf(
-                "api_key" to apiKeyProvider(),
+            parameters = baseParams() + listOf(
                 "page" to page,
             ),
         )
@@ -294,8 +296,7 @@ class TmdbApiClient(
         return get(
             endpoint = "/tv/top_rated",
             requestCategory = requestCategory,
-            parameters = listOf(
-                "api_key" to apiKeyProvider(),
+            parameters = baseParams() + listOf(
                 "page" to page,
             ),
         )
@@ -305,8 +306,7 @@ class TmdbApiClient(
         return get(
             endpoint = "/tv/$id/similar",
             requestCategory = "tmdb.similar.tv",
-            parameters = listOf(
-                "api_key" to apiKeyProvider(),
+            parameters = baseParams() + listOf(
                 "page" to page,
             ),
         )
@@ -316,8 +316,7 @@ class TmdbApiClient(
         return get(
             endpoint = "/$type/$id/recommendations",
             requestCategory = "tmdb.recommendations.$type",
-            parameters = listOf(
-                "api_key" to apiKeyProvider(),
+            parameters = baseParams() + listOf(
                 "page" to page,
             ),
         )
@@ -327,8 +326,7 @@ class TmdbApiClient(
         return get(
             endpoint = "/tv/$id/recommendations",
             requestCategory = "tmdb.recommendations.tv",
-            parameters = listOf(
-                "api_key" to apiKeyProvider(),
+            parameters = baseParams() + listOf(
                 "page" to page,
             ),
         )
@@ -338,8 +336,7 @@ class TmdbApiClient(
         return get(
             endpoint = "/person/popular",
             requestCategory = "tmdb.person.popular",
-            parameters = listOf(
-                "api_key" to apiKeyProvider(),
+            parameters = baseParams() + listOf(
                 "page" to page,
             ),
         )
@@ -349,8 +346,7 @@ class TmdbApiClient(
         return get(
             endpoint = "/search/person",
             requestCategory = "tmdb.search.person",
-            parameters = listOf(
-                "api_key" to apiKeyProvider(),
+            parameters = baseParams() + listOf(
                 "query" to query,
                 "page" to page,
             ),
@@ -361,7 +357,7 @@ class TmdbApiClient(
         return get(
             endpoint = "/person/$personId/combined_credits",
             requestCategory = "tmdb.person.credits",
-            parameters = listOf("api_key" to apiKeyProvider()),
+            parameters = baseParams(),
         )
     }
 
@@ -369,7 +365,7 @@ class TmdbApiClient(
         return get(
             endpoint = "/person/$personId",
             requestCategory = "tmdb.person.detail",
-            parameters = listOf("api_key" to apiKeyProvider()),
+            parameters = baseParams(),
         )
     }
 
@@ -377,8 +373,7 @@ class TmdbApiClient(
         return get(
             endpoint = "/discover/$type",
             requestCategory = "tmdb.discover_genre.$type",
-            parameters = listOf(
-                "api_key" to apiKeyProvider(),
+            parameters = baseParams() + listOf(
                 "with_genres" to genreId,
                 "sort_by" to "popularity.desc",
                 "page" to page,
@@ -412,7 +407,7 @@ class TmdbApiClient(
             endpoint = "/discover/movie",
             requestCategory = requestCategory,
             parameters = buildList {
-                add("api_key" to apiKeyProvider())
+                addAll(baseParams())
                 add("page" to page)
                 add("sort_by" to sortBy)
                 withGenres?.let { add("with_genres" to it) }
@@ -459,7 +454,7 @@ class TmdbApiClient(
             endpoint = "/discover/tv",
             requestCategory = requestCategory,
             parameters = buildList {
-                add("api_key" to apiKeyProvider())
+                addAll(baseParams())
                 add("page" to page)
                 add("sort_by" to sortBy)
                 withGenres?.let { add("with_genres" to it) }
@@ -484,7 +479,7 @@ class TmdbApiClient(
         return get(
             endpoint = "/tv/$tvId/season/$seasonNumber",
             requestCategory = "tmdb.season.detail.tv",
-            parameters = listOf("api_key" to apiKeyProvider()),
+            parameters = baseParams(),
         )
     }
 
@@ -492,8 +487,7 @@ class TmdbApiClient(
         return get(
             endpoint = "/search/keyword",
             requestCategory = "tmdb.search.keyword",
-            parameters = listOf(
-                "api_key" to apiKeyProvider(),
+            parameters = baseParams() + listOf(
                 "query" to query,
             ),
         )
@@ -503,8 +497,7 @@ class TmdbApiClient(
         return get(
             endpoint = "/watch/providers/$type",
             requestCategory = "tmdb.watch_providers.$type",
-            parameters = listOf(
-                "api_key" to apiKeyProvider(),
+            parameters = baseParams() + listOf(
                 "watch_region" to region,
             ),
         )
@@ -514,7 +507,7 @@ class TmdbApiClient(
         return get(
             endpoint = "/$type/$id/watch/providers",
             requestCategory = "tmdb.title_watch_providers.$type",
-            parameters = listOf("api_key" to apiKeyProvider()),
+            parameters = baseParams(),
         )
     }
 

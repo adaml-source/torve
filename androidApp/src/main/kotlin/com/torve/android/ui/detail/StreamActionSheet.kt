@@ -98,7 +98,7 @@ fun StreamActionSheet(
             if (castService.isAvailable) {
                 ActionItem(
                     icon = if (castService.isCasting) Icons.Default.CastConnected else Icons.Default.Cast,
-                    label = if (castService.isCasting) "Cast (Connected)" else "Cast to Device",
+                    label = if (castService.isCasting) stringResource(R.string.stream_cast_connected) else stringResource(R.string.stream_cast_to_device),
                     onClick = {
                         castService.requestCast(
                             url = url,
@@ -123,7 +123,7 @@ fun StreamActionSheet(
             installedPlayers.forEach { player ->
                 ActionItem(
                     icon = Icons.Default.VideoLibrary,
-                    label = "Play in ${player.label}",
+                    label = stringResource(R.string.stream_play_in, player.label),
                     onClick = {
                         val launched = ExternalPlayerLauncher.playInExternalPlayer(
                             context = context,
@@ -132,7 +132,7 @@ fun StreamActionSheet(
                             player = player,
                         )
                         if (!launched) {
-                            Toast.makeText(context, "${player.label} not found", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, context.getString(R.string.stream_player_not_found, player.label), Toast.LENGTH_SHORT).show()
                         }
                         onDismiss()
                     },
@@ -170,7 +170,7 @@ fun StreamActionSheet(
             // Download with VLC
             ActionItem(
                 icon = Icons.Default.Download,
-                label = "Download with VLC",
+                label = stringResource(R.string.stream_download_vlc),
                 accentColor = true,
                 onClick = {
                     val vlcIntent = Intent(Intent.ACTION_VIEW).apply {
@@ -183,7 +183,7 @@ fun StreamActionSheet(
                     try {
                         context.startActivity(vlcIntent)
                     } catch (_: Exception) {
-                        Toast.makeText(context, "VLC is not installed", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.stream_vlc_not_installed), Toast.LENGTH_SHORT).show()
                     }
                     onDismiss()
                 },

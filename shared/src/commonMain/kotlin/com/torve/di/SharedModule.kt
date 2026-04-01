@@ -118,7 +118,21 @@ val sharedModule = module {
     single { TorveDatabase(get()) }
 
     // TMDB
-    single { TmdbApiClient(get(named("tmdbHttpClient"))) }
+    single {
+        val localSettings = get<DeviceLocalSettingsRepository>()
+        val rawLang = kotlinx.coroutines.runBlocking { localSettings.getString("app_language") }
+        val initialLang = rawLang?.let { name ->
+            when (name.uppercase()) {
+                "GERMAN" -> "de"; "SPANISH" -> "es"; "FRENCH" -> "fr"
+                "ITALIAN" -> "it"; "PORTUGUESE" -> "pt"; "TURKISH" -> "tr"
+                else -> null
+            }
+        }
+        torveVerboseLog { "TMDB_INIT rawLang=$rawLang initialLang=$initialLang" }
+        TmdbApiClient(get(named("tmdbHttpClient"))).also {
+            it.contentLanguage = initialLang
+        }
+    }
     single<MetadataRepository> { MetadataRepositoryImpl(get()) }
     single<AvailabilityProvider> { TmdbAvailabilityProvider(get()) }
     single<AvailabilityRepository> { AvailabilityRepositoryImpl(get(), get(), get()) }
@@ -297,6 +311,13 @@ val sharedModule = module {
             vm.onIntegrationSaved = { type, credential, label ->
                 get<AccountSessionCoordinator>().saveIntegrationToBackend(type, credential, label)
             }
+            // Sync app language → TMDB content language.
+            val tmdb = get<TmdbApiClient>()
+            vm.onLanguageChanged = { language ->
+                tmdb.contentLanguage = language.code.takeIf { it != "en" }
+            }
+            // Initial language is set from prefs in the TmdbApiClient single{} block.
+            // The SettingsViewModel init loads it async and will call onLanguageChanged.
         }
     }
     factoryOf(::AddonViewModel)
@@ -305,7 +326,9 @@ val sharedModule = module {
     factoryOf(::DownloadViewModel)
     factory { DownloadCatalogueViewModel(get(), get(), get(), get()) }
     factoryOf(::ProfileViewModel)
-    factoryOf(::SubscriptionViewModel)
+    // Singleton so NavGraph, PaywallScreen, and all other screens share
+    // the same premium state — avoids stale locks after purchase/login.
+    single { SubscriptionViewModel(get(), get(), get(), get(), get(), get(), get()) }
     factoryOf(::DeviceGovernanceViewModel)
     factory { SetupWizardViewModel(get(), get(), get(), get(), get()) }
     single { WatchlistViewModel(get(), get()) }

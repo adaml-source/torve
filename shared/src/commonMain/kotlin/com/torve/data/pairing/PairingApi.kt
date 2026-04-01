@@ -1,6 +1,7 @@
 package com.torve.data.pairing
 
 import com.torve.data.auth.DeviceRegistrationDto
+import com.torve.domain.device.DeviceType
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.HttpRequestBuilder
@@ -199,6 +200,10 @@ data class PairedDeviceDto(
     fun resolvedDeviceName(): String = targetDeviceName.ifBlank { deviceName.ifBlank { "Paired Device" } }
     /** Resolved device type. */
     fun resolvedDeviceType(): String = targetDeviceType.ifBlank { deviceType.ifBlank { "unknown" } }
+    /** Resolved device type enum. */
+    fun resolvedDeviceTypeEnum(): DeviceType = DeviceType.fromWireValue(resolvedDeviceType())
+    /** User-facing device type label. */
+    fun resolvedDeviceTypeLabel(): String = resolvedDeviceTypeEnum().displayLabel
     /** Resolved platform. */
     fun resolvedPlatform(): String = targetPlatform.ifBlank { platform.ifBlank { "unknown" } }
     /** Resolved pairing state. */

@@ -124,7 +124,7 @@ fun StreamPickerSheet(
                         )
                         Spacer(Modifier.height(12.dp))
                         Text(
-                            "Resolving stream...",
+                            stringResource(R.string.stream_resolving),
                             style = MaterialTheme.typography.bodyMedium,
                             color = Torve.colors.textSecondary,
                         )
@@ -138,7 +138,7 @@ fun StreamPickerSheet(
                 ) {
                     if (bestMatch.isNotEmpty()) {
                         item {
-                            GroupHeader("Best Match")
+                            GroupHeader(stringResource(R.string.stream_best_match))
                         }
                         items(bestMatch) { stream ->
                             StreamItem(
@@ -149,7 +149,7 @@ fun StreamPickerSheet(
                     }
                     if (other.isNotEmpty()) {
                         item {
-                            GroupHeader(if (bestMatch.isNotEmpty()) "Other Options" else "Available Streams")
+                            GroupHeader(if (bestMatch.isNotEmpty()) stringResource(R.string.stream_other_options) else stringResource(R.string.stream_available))
                         }
                         items(other) { stream ->
                             StreamItem(

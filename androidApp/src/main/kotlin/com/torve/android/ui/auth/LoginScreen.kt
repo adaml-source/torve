@@ -72,6 +72,10 @@ fun LoginScreen(
     val peekTransformation = com.torve.android.ui.components.rememberPeekPasswordTransformation(password)
     var passwordRevealed by remember { mutableStateOf(false) }
 
+    val resetSentText = stringResource(R.string.login_reset_sent)
+    val accountCreatedText = stringResource(R.string.login_account_created)
+    val deviceLimitText = stringResource(R.string.login_device_limit_reached)
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -91,9 +95,9 @@ fun LoginScreen(
 
         Text(
             text = when {
-                isForgotPasswordMode -> "Reset Password"
-                isRegisterMode -> "Create Account"
-                else -> "Sign In"
+                isForgotPasswordMode -> stringResource(R.string.login_reset_password)
+                isRegisterMode -> stringResource(R.string.login_create_account)
+                else -> stringResource(R.string.login_sign_in)
             },
             style = MaterialTheme.typography.headlineSmall,
             color = MaterialTheme.colorScheme.onBackground,
@@ -141,7 +145,7 @@ fun LoginScreen(
                         IconButton(onClick = { passwordRevealed = !passwordRevealed }) {
                             Icon(
                                 imageVector = if (passwordRevealed) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
-                                contentDescription = if (passwordRevealed) "Hide password" else "Show password",
+                                contentDescription = if (passwordRevealed) stringResource(R.string.login_hide_password) else stringResource(R.string.login_show_password),
                             )
                         }
                     }
@@ -179,7 +183,7 @@ fun LoginScreen(
                         val result = authClient.requestPasswordReset(email)
                         isLoading = false
                         if (result.success) {
-                            successMessage = "If that email exists, a reset link will be sent."
+                            successMessage = resetSentText
                         } else {
                             error = result.error
                         }
@@ -191,14 +195,14 @@ fun LoginScreen(
                 if (isLoading) {
                     CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                 } else {
-                    Text("Send Reset Link")
+                    Text(stringResource(R.string.login_send_reset_link))
                 }
             }
 
             Spacer(Modifier.height(8.dp))
 
             TextButton(onClick = { isForgotPasswordMode = false; error = null; successMessage = null }) {
-                Text("Back to Sign In")
+                Text(stringResource(R.string.login_back_to_sign_in))
             }
         } else {
             Button(
@@ -214,14 +218,14 @@ fun LoginScreen(
                         isLoading = false
                         if (result.success) {
                             if (isRegisterMode) {
-                                successMessage = "Account created! Please check your email to verify your address."
+                                successMessage = accountCreatedText
                                 delay(2000)
                             }
                             val bootstrap = accountSessionCoordinator.bootstrapAfterSignIn()
                             syncCoordinator.refreshDevices()
                             if (bootstrap.deviceLimitReached) {
                                 error = bootstrap.error
-                                    ?: "You have reached your 5-device limit. Remove an existing device to continue."
+                                    ?: deviceLimitText
                                 onDeviceLimitReached()
                             } else {
                                 // Proceed after successful login. Registration errors
@@ -248,7 +252,7 @@ fun LoginScreen(
                 Spacer(Modifier.height(4.dp))
 
                 TextButton(onClick = { isForgotPasswordMode = true; error = null; successMessage = null }) {
-                    Text("Forgot Password?")
+                    Text(stringResource(R.string.login_forgot_password))
                 }
             }
 

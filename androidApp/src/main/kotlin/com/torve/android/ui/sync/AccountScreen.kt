@@ -43,7 +43,8 @@ fun AccountScreen(
     val syncState by syncCoordinator.state.collectAsState()
     val accountSettingsState by accountSettingsRepository.state.collectAsState()
     val subscriptionState by subscriptionViewModel.state.collectAsState()
-    val subscriptionAccess = subscriptionState.accessPresentation()
+    val purchaseStrings: com.torve.presentation.subscription.PurchaseStringResolver = org.koin.compose.koinInject()
+    val subscriptionAccess = subscriptionState.accessPresentation(purchaseStrings)
     val pairedDevices = syncState.devices.filter { it.revokedAt == null }
     val authUserState = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<com.torve.data.auth.AuthUser?>(null) }
 

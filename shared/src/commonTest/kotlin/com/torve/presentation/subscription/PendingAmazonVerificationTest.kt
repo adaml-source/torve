@@ -10,7 +10,7 @@ class PendingAmazonVerificationTest {
     private fun pending(reason: PendingAmazonVerificationReason) = PendingAmazonVerification(
         receiptId = "receipt-123",
         amazonUserId = "amzn-user-123",
-        productId = "com.torve.pro.lifetime.amazon",
+        productId = "com.torve.pro.lifetime",
         platform = "amazon_fire_tv",
         reason = reason,
     )

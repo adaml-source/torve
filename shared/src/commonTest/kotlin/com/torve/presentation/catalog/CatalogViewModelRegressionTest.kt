@@ -98,6 +98,7 @@ class CatalogViewModelRegressionTest {
         override suspend fun getNowPlaying(page: Int): List<MediaItem> = emptyList()
         override suspend fun getAiringToday(page: Int): List<MediaItem> = emptyList()
         override suspend fun searchMulti(query: String, page: Int): List<MediaItem> = emptyList()
+        override suspend fun findByImdbId(imdbId: String, preferredType: String?): MediaItem? = null
         override suspend fun getDetail(type: String, id: Int): MediaItem = error("unused")
         override suspend fun getSimilar(type: String, id: Int, page: Int): List<MediaItem> = emptyList()
         override suspend fun getRecommendations(type: String, id: Int, page: Int): List<MediaItem> = emptyList()

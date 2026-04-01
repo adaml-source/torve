@@ -1,6 +1,7 @@
 package com.torve.android.premium
 
 import android.content.Context
+import android.util.Log
 import androidx.annotation.StringRes
 import com.torve.android.R
 import com.torve.domain.model.SubscriptionTier
@@ -150,9 +151,10 @@ object PremiumAccess {
         PremiumFeature.CROSS_DEVICE_SYNC to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_cross_device_sync),
         PremiumFeature.CLOUD_BACKUP_RESTORE to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_cloud_backup),
 
-        // Premium device / pairing
-        PremiumFeature.PHONE_PAIRING to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_phone_pairing),
-        PremiumFeature.DEVICE_LINKING to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_device_linking),
+        // Device / pairing — management is free for authenticated users;
+        // creating new pairings and cross-device sync stay premium.
+        PremiumFeature.PHONE_PAIRING to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_phone_pairing),
+        PremiumFeature.DEVICE_LINKING to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_device_linking),
         PremiumFeature.DEVICE_SYNC to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_device_sync),
         PremiumFeature.TV_PHONE_CONTINUATION to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_tv_phone_continuation),
         PremiumFeature.QR_PAIRING to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_qr_pairing),
@@ -214,17 +216,30 @@ object PremiumAccess {
         }
     }
 
-    fun requiresLifetimeAccess(feature: PremiumFeature): Boolean {
+    /** Returns true when the feature requires any premium tier (monthly or lifetime). */
+    fun requiresPremiumAccess(feature: PremiumFeature): Boolean {
         return featureMatrix.getValue(feature).access == PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE
     }
 
+    /** @deprecated Use [requiresPremiumAccess] — name was misleading; both monthly and lifetime satisfy the check. */
+    fun requiresLifetimeAccess(feature: PremiumFeature): Boolean = requiresPremiumAccess(feature)
+
     fun canAccess(feature: PremiumFeature, tier: AccessTier): Boolean {
-        return !requiresLifetimeAccess(feature) || tier != AccessTier.FREE
+        return !requiresPremiumAccess(feature) || tier != AccessTier.FREE
     }
 
     fun isPremiumLocked(feature: PremiumFeature, tier: AccessTier): Boolean {
-        if (com.torve.android.BuildConfig.DEBUG) return false
-        return requiresLifetimeAccess(feature) && tier == AccessTier.FREE
+        if (
+            com.torve.android.BuildConfig.DEBUG &&
+            com.torve.android.BuildConfig.ALLOW_DEBUG_PREMIUM_BYPASS
+        ) {
+            return false
+        }
+        val locked = requiresPremiumAccess(feature) && tier == AccessTier.FREE
+        if (com.torve.android.BuildConfig.DEBUG) {
+            runCatching { Log.d("PremiumAccess", "PREMIUM_GATE: feature=${feature.name} tier=$tier locked=$locked") }
+        }
+        return locked
     }
 
     @StringRes

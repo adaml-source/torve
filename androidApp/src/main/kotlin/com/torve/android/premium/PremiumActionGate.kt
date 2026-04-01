@@ -1,6 +1,8 @@
 package com.torve.android.premium
 
+import android.content.Context
 import com.torve.android.BuildConfig
+import com.torve.android.R
 import com.torve.domain.repository.PreferencesRepository
 import com.torve.domain.repository.SubscriptionRepository
 
@@ -19,8 +21,18 @@ class PremiumAccessDeniedException(
 class PremiumActionGate(
     private val subscriptionRepository: SubscriptionRepository,
     private val preferencesRepository: PreferencesRepository,
+    private val context: Context,
 ) {
     suspend fun evaluate(feature: PremiumFeature): PremiumActionDecision {
+        // Features marked FREE in the feature matrix are never gated.
+        if (!PremiumAccess.requiresPremiumAccess(feature)) {
+            return PremiumActionDecision(
+                feature = feature,
+                allowed = true,
+                message = "",
+            )
+        }
+
         if (isExplicitDebugBypassEnabled()) {
             return PremiumActionDecision(
                 feature = feature,
@@ -39,22 +51,19 @@ class PremiumActionGate(
     }
 
     private suspend fun isExplicitDebugBypassEnabled(): Boolean {
-        if (!BuildConfig.DEBUG) return false
-        if (BuildConfig.ALLOW_DEBUG_PREMIUM_BYPASS) return true
-        return preferencesRepository.getString(KEY_DEBUG_PREMIUM_BYPASS_ENABLED)
-            ?.toBooleanStrictOrNull() == true
+        return BuildConfig.DEBUG && BuildConfig.ALLOW_DEBUG_PREMIUM_BYPASS
     }
 
     private fun blockedMessageFor(feature: PremiumFeature): String {
         return when (feature) {
             PremiumFeature.PHONE_PAIRING,
-            PremiumFeature.QR_PAIRING -> "Premium is required to pair devices."
-            PremiumFeature.DEVICE_LINKING -> "Premium is required to manage paired devices."
+            PremiumFeature.QR_PAIRING -> context.getString(R.string.premium_gate_pair_devices)
+            PremiumFeature.DEVICE_LINKING -> context.getString(R.string.premium_gate_manage_paired)
             PremiumFeature.DEVICE_SYNC,
-            PremiumFeature.CROSS_DEVICE_SYNC -> "Premium is required to sync across devices."
-            PremiumFeature.TV_PHONE_CONTINUATION -> "Premium is required to continue playback on another device."
-            PremiumFeature.STREAM_PLAYBACK -> "Premium is required to watch channels and premium streams."
-            else -> "Premium is required for ${PremiumAccess.titleFor(feature)}."
+            PremiumFeature.CROSS_DEVICE_SYNC -> context.getString(R.string.premium_gate_sync_devices)
+            PremiumFeature.TV_PHONE_CONTINUATION -> context.getString(R.string.premium_gate_continue_playback)
+            PremiumFeature.STREAM_PLAYBACK -> context.getString(R.string.premium_gate_stream_playback)
+            else -> context.getString(R.string.premium_gate_generic, PremiumAccess.titleFor(context, feature))
         }
     }
 

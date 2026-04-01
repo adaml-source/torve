@@ -119,4 +119,29 @@ class SubscriptionEntitlementHardeningTest {
         assertFalse(decision.hasEntitlement)
         assertFalse(decision.isDeviceActivated)
     }
+
+    @Test
+    fun activeBackendResultGrantsFullPremiumAccess() {
+        val decision = resolveSubscriptionEntitlementUiDecision(
+            backendResult = BackendPremiumResult.Active,
+        )
+
+        assertTrue(decision.isPro)
+        assertTrue(decision.hasEntitlement)
+        assertTrue(decision.isDeviceActivated)
+        assertFalse(decision.deviceCapReached)
+    }
+
+    @Test
+    fun postLoginRefreshUpdatesStateCorrectly() {
+        // Simulates: user was logged out (null), then logs in and gets Active
+        val loggedOut = resolveSubscriptionEntitlementUiDecision(backendResult = null)
+        assertFalse(loggedOut.isPro)
+
+        val loggedIn = resolveSubscriptionEntitlementUiDecision(
+            backendResult = BackendPremiumResult.Active,
+        )
+        assertTrue(loggedIn.isPro)
+        assertTrue(loggedIn.hasEntitlement)
+    }
 }

@@ -29,7 +29,15 @@ fun escapeForBuildConfig(value: String): String {
 }
 
 kotlin {
+    jvmToolchain(17)
+
     androidTarget {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
+    }
+
+    jvm("desktop") {
         compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
         }
@@ -72,9 +80,24 @@ kotlin {
             implementation(libs.kotlinx.coroutines.android)
         }
 
+        val desktopMain by getting {
+            dependencies {
+                implementation(libs.ktor.cio)
+                implementation(libs.sqldelight.sqlite)
+                implementation(libs.kotlinx.coroutines.swing)
+            }
+        }
+
         iosMain.dependencies {
             implementation(libs.ktor.darwin)
             implementation(libs.sqldelight.native)
+        }
+
+        val desktopTest by getting {
+            dependencies {
+                implementation(libs.kotlin.test)
+                implementation(libs.kotlinx.coroutines.test)
+            }
         }
 
         commonTest.dependencies {

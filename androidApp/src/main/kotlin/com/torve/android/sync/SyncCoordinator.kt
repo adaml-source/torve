@@ -216,11 +216,6 @@ class SyncCoordinator(
 
     fun refreshDevices() {
         scope.launch {
-            val access = premiumActionGate.evaluate(PremiumFeature.DEVICE_LINKING)
-            if (!access.allowed) {
-                markPremiumBlocked(access.feature, access.message)
-                return@launch
-            }
             _state.value = _state.value.copy(isLoading = true, error = null, blockedFeature = null)
             // Restart NSD discovery to pick up services with updated ports after app restarts.
             lanDiscovery.restartDiscovery()
@@ -233,11 +228,6 @@ class SyncCoordinator(
 
     fun revokeDevice(deviceId: String) {
         scope.launch {
-            val access = premiumActionGate.evaluate(PremiumFeature.DEVICE_LINKING)
-            if (!access.allowed) {
-                markPremiumBlocked(access.feature, access.message)
-                return@launch
-            }
             val token = authClient.getValidAccessToken()
             val target = _state.value.devices.firstOrNull { it.id == deviceId }
             if (token.isNullOrBlank() || target?.pairingId.isNullOrBlank()) {

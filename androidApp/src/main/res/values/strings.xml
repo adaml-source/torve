@@ -171,6 +171,12 @@
     <string name="settings_privacy_policy">Privacy Policy</string>
     <string name="settings_terms">Terms &amp; Conditions</string>
     <string name="settings_help">Help &amp; Documentation</string>
+    <string name="help_body">Extensive help and documentation is available for registered and signed-in users at torve.app, in all supported languages.</string>
+    <string name="help_open_web">Open Help &amp; Documentation</string>
+    <string name="help_web_url">https://torve.app/app/help.html</string>
+    <string name="help_support_label">Need further assistance?</string>
+    <string name="help_support_email">support@torve.app</string>
+    <string name="help_support_body">Contact us at</string>
     <string name="settings_share_app">Share App</string>
     <string name="settings_share_text">Check out Torve — a beautiful media player and content organizer! https://torve.app</string>
     <string name="settings_share_title">Share Torve</string>
@@ -220,6 +226,202 @@
     <string name="paywall_enter_code">Enter rebate code</string>
     <string name="paywall_redeem">Redeem</string>
     <string name="paywall_redeem_success">Code redeemed! Premium activated.</string>
+    <string name="paywall_purchase_cancelled">Purchase cancelled.</string>
+    <string name="paywall_managed_through">Managed through %1$s</string>
+
+    <!-- Purchase status messages -->
+    <string name="purchase_received_title">Purchase received</string>
+    <string name="purchase_received_message">%1$s If this does not finish shortly, choose Restore Purchase.</string>
+    <string name="purchase_received_default">Amazon completed the purchase. Torve is waiting for account details to finish verification.</string>
+    <string name="purchase_verification_not_finished_title">Verification not finished</string>
+    <string name="purchase_verification_not_finished_message">Amazon completed the purchase, but Torve could not confirm it yet. Choose Retry Verification or Restore Purchase.</string>
+    <string name="purchase_service_unavailable_title">Verification service unavailable</string>
+    <string name="purchase_service_unavailable_retry">Your Amazon purchase info is saved, but Torve cannot reach the verification service right now. Choose Retry Verification again shortly.</string>
+    <string name="purchase_service_unavailable_restore">Torve cannot reach the verification service right now. Please try Restore Purchase again shortly.</string>
+    <string name="purchase_sign_in_required_title">Sign in required</string>
+    <string name="purchase_sign_in_amazon_restore">Sign in to Torve before restoring Amazon Premium on this device.</string>
+    <string name="purchase_sign_in_buy">Sign in to Torve before buying Premium through %1$s on this device.</string>
+    <string name="purchase_sign_in_restore">Sign in to Torve before restoring Premium from %1$s on this device.</string>
+    <string name="purchase_conflict_title">Purchase linked to another account</string>
+    <string name="purchase_conflict_message">This Amazon purchase is already linked to a different Torve account. Sign in with the original account or contact support.</string>
+    <string name="purchase_nothing_to_restore_title">Nothing to restore</string>
+    <string name="purchase_nothing_to_restore_amazon">No Amazon premium purchase was found for this Torve account.</string>
+    <string name="purchase_nothing_to_restore_store">No premium purchase was found for this Torve account on %1$s.</string>
+    <string name="purchase_verified_title">Purchase verified</string>
+    <string name="purchase_restored_title">Purchase restored</string>
+    <string name="purchase_active_on_device">%1$s is active on this device.</string>
+    <string name="purchase_active_until">%1$s is active on this device until %2$s.</string>
+    <string name="purchase_needs_device_slot">%1$s is linked to this account, but this device still needs an available slot.</string>
+    <string name="purchase_restored_active">%1$s was restored and is active on this device.</string>
+    <string name="purchase_restored_active_until">%1$s was restored and is active on this device until %2$s.</string>
+    <string name="purchase_restored_needs_slot">%1$s was restored for this account, but this device still needs an available slot.</string>
+    <string name="purchase_google_verify_failed">Google Play purchase could not be verified. Try Restore Purchase again or contact support.</string>
+    <string name="purchase_apple_verify_failed">Apple purchase could not be verified. Try Restore Purchase again or contact support.</string>
+    <string name="purchase_store_restore_failed">%1$s restore could not be completed. Try again after signing in.</string>
+    <string name="purchase_premium_monthly">Premium Monthly</string>
+    <string name="purchase_premium_lifetime">Premium Lifetime</string>
+    <string name="purchase_premium_generic">Premium</string>
+
+    <!-- Premium gate messages -->
+    <string name="premium_gate_pair_devices">Premium is required to pair devices.</string>
+    <string name="premium_gate_manage_paired">Premium is required to manage paired devices.</string>
+    <string name="premium_gate_sync_devices">Premium is required to sync across devices.</string>
+    <string name="premium_gate_continue_playback">Premium is required to continue playback on another device.</string>
+    <string name="premium_gate_stream_playback">Premium is required to watch channels and premium streams.</string>
+    <string name="premium_gate_generic">Premium is required for %1$s.</string>
+
+    <!-- Login / Auth -->
+    <string name="login_reset_password">Reset Password</string>
+    <string name="login_forgot_password">Forgot Password?</string>
+    <string name="login_send_reset_link">Send Reset Link</string>
+    <string name="login_back_to_sign_in">Back to Sign In</string>
+    <string name="login_reset_sent">If that email exists, a reset link will be sent.</string>
+    <string name="login_account_created">Account created! Please check your email to verify your address.</string>
+    <string name="login_device_limit_reached">You have reached your 5-device limit. Remove an existing device to continue.</string>
+    <string name="login_hide_password">Hide password</string>
+    <string name="login_show_password">Show password</string>
+
+    <!-- Verification banner -->
+    <string name="verify_email_sent">Verification email sent!</string>
+    <string name="verify_checking">Checking…</string>
+    <string name="verify_wait_before_resend">Please wait before resending.</string>
+    <string name="verify_email_not_verified">Email not verified</string>
+    <string name="verify_ive_verified">I\'ve verified</string>
+    <string name="verify_check">Check</string>
+    <string name="verify_resend">Resend</string>
+
+    <!-- Storage mode selector -->
+    <string name="storage_how_title">How credentials are stored</string>
+    <string name="storage_how_body">Choose whether to save integrations to your Torve account or keep them only on this device.</string>
+    <string name="storage_how_options">• Torve account (recommended) — Restores this integration when you sign in on another device.\n• This device only — Keeps this integration local to this device and does not sync.</string>
+    <string name="storage_how_note">Passwords and API keys are not shown in full after saving.\nDevice-only credentials are cleared when you sign out.</string>
+    <string name="storage_store_label">Store this integration</string>
+    <string name="storage_account_recommended">Save to Torve account (recommended)</string>
+    <string name="storage_account_sign_in_required">Save to Torve account (sign in required)</string>
+    <string name="storage_account_desc">Securely saves this integration to your Torve account and restores it on other devices.</string>
+    <string name="storage_device_only_label">Store on this device only</string>
+    <string name="storage_device_only_desc">Keeps this integration only on this device. It will not be restored on other devices.</string>
+    <string name="storage_keys_note">Passwords and API keys are not shown in full after saving.</string>
+    <string name="storage_badge_account">Account</string>
+    <string name="storage_badge_device_only">Device only</string>
+    <string name="storage_state_connected">Connected</string>
+    <string name="storage_state_needs_reauth">Needs re-authentication</string>
+    <string name="storage_state_needs_credentials">Needs credentials</string>
+    <string name="storage_state_not_configured">Not configured</string>
+    <string name="storage_creds_needed_title">Credentials needed on this device</string>
+    <string name="storage_creds_needed_body">This integration is set to device-only storage. Enter credentials on this device to use it.</string>
+    <string name="storage_creds_enter">Enter credentials</string>
+    <string name="storage_reauth_title">Re-authentication needed</string>
+    <string name="storage_reauth_body">This integration is saved to your Torve account but credentials could not be restored on this device. Please re-authenticate.</string>
+    <string name="storage_reauth_action">Re-authenticate</string>
+    <string name="storage_change_method">Change storage method</string>
+    <string name="storage_remove_title">Remove integration?</string>
+    <string name="storage_remove_account_body">This removes the saved integration from your Torve account and this device.</string>
+    <string name="storage_remove_device_body">This removes the saved integration from this device.</string>
+    <string name="storage_switch_device_title">Store only on this device?</string>
+    <string name="storage_switch_device_body">This will remove the saved credentials from your Torve account. You may need to enter them again on this device.</string>
+    <string name="storage_switch_device_confirm">Switch to device only</string>
+    <string name="storage_switch_account_title">Save to Torve account?</string>
+    <string name="storage_switch_account_body">This will securely save this integration to your Torve account so it can be restored on other devices.</string>
+    <string name="storage_switch_account_confirm">Save to account</string>
+
+    <!-- Settings sign-out -->
+    <string name="settings_sign_out">Sign Out</string>
+    <string name="settings_sign_out_title">Sign out?</string>
+    <string name="settings_sign_out_body">Signing out clears local credentials stored on this device. Integrations saved to your Torve account will be restored when you sign in again.</string>
+
+    <!-- Devices / Pairing -->
+    <string name="devices_secure_channel_ok">Secure channel established with %1$s</string>
+    <string name="devices_secure_channel_fail">Failed to establish secure channel</string>
+    <string name="devices_setup_sent">Setup sent to %1$s</string>
+    <string name="devices_setup_fail">Failed to send setup</string>
+    <string name="devices_send_setup">Send Setup</string>
+    <string name="devices_establish_secure">Establish Secure Channel</string>
+
+    <!-- Stream action sheet -->
+    <string name="stream_cast_connected">Cast (Connected)</string>
+    <string name="stream_cast_to_device">Cast to Device</string>
+    <string name="stream_play_in">Play in %1$s</string>
+    <string name="stream_player_not_found">%1$s not found</string>
+    <string name="stream_download_vlc">Download with VLC</string>
+    <string name="stream_vlc_not_installed">VLC is not installed</string>
+
+    <!-- Player -->
+    <string name="player_replay_unavailable">Replay is unavailable for this programme.</string>
+
+    <!-- Catalog filters -->
+    <string name="catalog_movies">Movies</string>
+    <string name="catalog_tv">TV</string>
+
+    <!-- Integrations -->
+    <string name="integrations_save_connect">Save &amp; Connect</string>
+
+    <!-- Detail / person -->
+    <string name="person_filmography">Filmography</string>
+
+    <!-- Stream picker -->
+    <string name="stream_resolving">Resolving stream…</string>
+    <string name="stream_best_match">Best Match</string>
+    <string name="stream_other_options">Other Options</string>
+    <string name="stream_available">Available Streams</string>
+
+    <!-- TV Settings auth -->
+    <string name="tv_auth_create_account">Create Account</string>
+    <string name="tv_auth_log_in">Log In</string>
+    <string name="tv_auth_please_wait">Please wait…</string>
+    <string name="tv_auth_sign_up_desc">Sign up with email and password</string>
+    <string name="tv_auth_sign_in_desc">Sign in to your Torve account</string>
+    <string name="tv_auth_passwords_mismatch">Passwords do not match</string>
+    <string name="tv_auth_already_have_account">Already have an account?</string>
+    <string name="tv_auth_no_account">Don\'t have an account?</string>
+    <string name="tv_auth_switch_login">Switch to Log In</string>
+    <string name="tv_auth_switch_signup">Switch to Sign Up</string>
+    <string name="tv_premium_needs_activation">Premium active on account. This device needs activation.</string>
+    <string name="tv_premium_check_access">Check this device\'s latest Premium access.</string>
+
+    <!-- TV Live playback menu -->
+    <string name="tv_menu_playback_info">Playback Info</string>
+    <string name="tv_menu_decoder_info">Decoder Info</string>
+    <string name="tv_menu_channel_list">Channel List</string>
+    <string name="tv_menu_channel_list_desc">Browse and switch channels</string>
+    <string name="tv_menu_tv_guide">TV Guide</string>
+    <string name="tv_menu_tv_guide_desc">View programme schedule</string>
+    <string name="tv_menu_playback_options">Playback Options</string>
+    <string name="tv_menu_playback_options_desc">Audio, subtitles, and quality</string>
+    <string name="tv_menu_channel_options">Channel Options</string>
+    <string name="tv_menu_channel_options_desc">Catchup and channel settings</string>
+    <string name="tv_menu_sleep_timer">Sleep Timer</string>
+    <string name="tv_menu_sleep_timer_desc">Set auto-off timer</string>
+    <string name="tv_menu_playback_info_desc">Stream details and diagnostics</string>
+
+    <!-- Settings screen -->
+    <string name="settings_manage_pairings">Manage Pairings</string>
+    <string name="settings_manage_pairings_locked">Manage Pairings (Locked)</string>
+    <string name="settings_manage_devices_locked">Manage Devices (Locked)</string>
+    <string name="settings_paired_count_one">%1$d paired device</string>
+    <string name="settings_paired_count_other">%1$d paired devices</string>
+    <string name="settings_ai_locked_desc">Connect AI providers and API keys with Premium.</string>
+
+    <!-- Access presentation (PurchaseStringResolver) -->
+    <string name="access_free_label">Free</string>
+    <string name="access_free_helper">Torve is free to download. Choose monthly or lifetime access.</string>
+    <string name="access_monthly_active_until">Premium Monthly active until %1$s</string>
+    <string name="access_monthly_active">Premium Monthly active</string>
+    <string name="access_lifetime_active">Premium Lifetime active</string>
+    <string name="access_premium_active">Premium active</string>
+    <string name="access_monthly_on_account">Premium Monthly on account</string>
+    <string name="access_lifetime_on_account">Premium Lifetime on account</string>
+    <string name="access_premium_on_account">Premium active on account</string>
+    <string name="access_monthly_active_device">Premium Monthly is active on this device until %1$s.</string>
+    <string name="access_monthly_active_device_no_date">Premium Monthly is active on this device.</string>
+    <string name="access_lifetime_active_device">Premium Lifetime is active on this device.</string>
+    <string name="access_premium_active_device">Premium is active on this device.</string>
+    <string name="access_monthly_on_account_helper">Premium Monthly is active on your account until %1$s.</string>
+    <string name="access_monthly_on_account_helper_no_date">Premium Monthly is active on your account.</string>
+    <string name="access_lifetime_on_account_helper">Premium Lifetime is active on your account. %1$s</string>
+    <string name="access_premium_on_account_helper">Premium is active on your account. %1$s</string>
+    <string name="access_device_needs_slot">This device needs an available activation slot.</string>
+    <string name="access_device_needs_activation">This device needs activation.</string>
 
     <!-- Catalog Screen -->
     <string name="catalog_failed_to_load">Failed to load</string>

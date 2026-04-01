@@ -171,7 +171,8 @@ fun SettingsScreen(
         subscriptionState.deviceCapReached,
         subscriptionState.purchaseStatus,
     ) {
-        subscriptionState.accessPresentation()
+        val strings: com.torve.presentation.subscription.PurchaseStringResolver = org.koin.java.KoinJavaComponent.getKoin().get()
+        subscriptionState.accessPresentation(strings)
     }
     val isLocked: (PremiumFeature) -> Boolean = remember(accessTier) {
         { feature -> PremiumAccess.isPremiumLocked(feature, accessTier) }
@@ -222,14 +223,7 @@ fun SettingsScreen(
             accountSessionCoordinator.onSettingsOpened()
         }
     }
-    LaunchedEffect(Unit) {
-        if (state.regionCode.isBlank() || state.regionCode == "US") {
-            val country = Locale.getDefault().country.uppercase()
-            if (country.length == 2 && country != state.regionCode) {
-                viewModel.setRegionCode(country)
-            }
-        }
-    }
+    // Region code auto-detection removed — setting is unused.
     LaunchedEffect(Unit) {
         if (BuildConfig.HAS_BILLING) {
             subscriptionViewModel.refreshAccess()
@@ -279,7 +273,11 @@ fun SettingsScreen(
                     Spacer(Modifier.height(4.dp))
                     val pairedDeviceCount = syncState.devices.count { it.revokedAt == null }
                     Text(
-                        text = "$pairedDeviceCount paired device${if (pairedDeviceCount == 1) "" else "s"}",
+                        text = if (pairedDeviceCount == 1) {
+                            stringResource(R.string.settings_paired_count_one, pairedDeviceCount)
+                        } else {
+                            stringResource(R.string.settings_paired_count_other, pairedDeviceCount)
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = Torve.colors.textSecondary,
                     )
@@ -303,7 +301,7 @@ fun SettingsScreen(
                                 )
                                 Spacer(Modifier.width(6.dp))
                             }
-                            Text(if (pairingLocked) "Manage Pairings (Locked)" else "Manage Pairings")
+                            Text(if (pairingLocked) stringResource(R.string.settings_manage_pairings_locked) else stringResource(R.string.settings_manage_pairings))
                         }
                         OutlinedButton(
                             onClick = {
@@ -324,7 +322,7 @@ fun SettingsScreen(
                                 )
                                 Spacer(Modifier.width(6.dp))
                             }
-                            Text(if (!canOpenManageDevices && deviceLinkingLocked) "Manage Devices (Locked)" else "Manage Devices")
+                            Text(if (!canOpenManageDevices && deviceLinkingLocked) stringResource(R.string.settings_manage_devices_locked) else stringResource(R.string.settings_manage_devices))
                         }
                     }
                     Spacer(Modifier.height(8.dp))
@@ -334,14 +332,14 @@ fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Torve.colors.textSecondary),
                     ) {
-                        Text("Sign Out")
+                        Text(stringResource(R.string.settings_sign_out))
                     }
                     if (showSignOutConfirm) {
                         AlertDialog(
                             onDismissRequest = { showSignOutConfirm = false },
-                            title = { Text("Sign out?") },
+                            title = { Text(stringResource(R.string.settings_sign_out_title)) },
                             text = {
-                                Text("Signing out clears local credentials stored on this device. Integrations saved to your Torve account can be restored when you sign in again.")
+                                Text(stringResource(R.string.settings_sign_out_body))
                             },
                             confirmButton = {
                                 TextButton(onClick = {
@@ -351,12 +349,12 @@ fun SettingsScreen(
                                         accountSessionCoordinator.signOut()
                                     }
                                 }) {
-                                    Text("Sign Out", color = Amber)
+                                    Text(stringResource(R.string.settings_sign_out), color = Amber)
                                 }
                             },
                             dismissButton = {
                                 TextButton(onClick = { showSignOutConfirm = false }) {
-                                    Text("Cancel")
+                                    Text(stringResource(R.string.common_cancel))
                                 }
                             },
                         )
@@ -922,29 +920,7 @@ fun SettingsScreen(
                     )
                 }
 
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    stringResource(R.string.settings_availability_region),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Text(
-                    stringResource(R.string.settings_availability_region_desc),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Torve.colors.textSecondary,
-                )
-                Spacer(Modifier.height(6.dp))
-                SettingsTextField(
-                    value = state.regionCode,
-                    onValueChange = { input ->
-                        val normalized = input.trim().uppercase()
-                        if (normalized.length <= 2) {
-                            viewModel.setRegionCode(normalized)
-                        }
-                    },
-                    label = stringResource(R.string.settings_region),
-                    placeholder = "US",
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                // Region selector removed — not used by the app.
             }
         }
 
@@ -1327,7 +1303,7 @@ fun SettingsScreen(
         if (aiProviderLocked) {
             LockedSettingsCard(
                 title = stringResource(R.string.settings_ai_features),
-                description = "Connect AI providers and API keys with Premium.",
+                description = stringResource(R.string.settings_ai_locked_desc),
                 onUnlock = { onLockedFeatureClick(PremiumFeature.AI_PROVIDER_SETUP) },
             )
         } else {
@@ -1467,51 +1443,6 @@ fun SettingsScreen(
             colors = CardDefaults.cardColors(containerColor = Charcoal),
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                // Theme mode
-                var themeExpanded by remember { mutableStateOf(false) }
-                ExposedDropdownMenuBox(
-                    expanded = themeExpanded,
-                    onExpandedChange = { themeExpanded = !themeExpanded },
-                ) {
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .menuAnchor(),
-                        shape = RoundedCornerShape(8.dp),
-                        color = Gunmetal,
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(stringResource(R.string.settings_theme), style = MaterialTheme.typography.bodySmall, color = Torve.colors.textSecondary)
-                                Spacer(Modifier.height(2.dp))
-                                Text(
-                                    state.themeMode.name.lowercase().replaceFirstChar { it.uppercase() },
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = Snow,
-                                )
-                            }
-                            Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = Torve.colors.textSecondary, modifier = Modifier.size(20.dp))
-                        }
-                    }
-                    ExposedDropdownMenu(expanded = themeExpanded, onDismissRequest = { themeExpanded = false }) {
-                        ThemeMode.entries.forEach { mode ->
-                            DropdownMenuItem(
-                                text = { Text(mode.name.lowercase().replaceFirstChar { it.uppercase() }) },
-                                onClick = {
-                                    viewModel.setThemeMode(mode)
-                                    themeExpanded = false
-                                },
-                            )
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(12.dp))
 
                 // Language selector
 

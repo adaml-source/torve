@@ -1,6 +1,7 @@
 package com.torve.data.device
 
 import com.torve.data.auth.DeviceRegistrationDto
+import com.torve.domain.device.DeviceType
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.bearerAuth
@@ -60,6 +61,9 @@ class DeviceApi(
                 return null
             }
             val raw = response.bodyAsText()
+            torveVerboseLog {
+                "ACCESS_STATE raw_response status=${response.status.value} body=${raw.take(500)}"
+            }
             json.decodeFromString(AccessStateDto.serializer(), raw).also { decoded ->
                 torveVerboseLog {
                     "ACCESS_STATE fetch_success hasEntitlement=${decoded.resolvedHasPremiumEntitlement()} deviceActivated=${decoded.resolvedIsDeviceActivated()} blockReason=${decoded.resolvedDeviceBlockReason()}"
@@ -127,9 +131,19 @@ class DeviceApi(
     }
 
     suspend fun removeDevice(accessToken: String, deviceId: String): DeviceRemoveDto {
-        return httpClient.post("${baseUrl()}/me/devices/$deviceId/remove") {
+        val response = httpClient.post("${baseUrl()}/me/devices/$deviceId/remove") {
             bearerAuth(accessToken)
-        }.body()
+        }
+        // Backend may return the old DeviceRemoveDto or a plain DeviceOut on success.
+        // Treat any 2xx as a successful removal.
+        return if (response.status.isSuccess()) {
+            runCatching { response.body<DeviceRemoveDto>() }.getOrElse {
+                DeviceRemoveDto(removed = true, reason = "ok", swaps_remaining = -1)
+            }
+        } else {
+            val detail = runCatching { response.bodyAsText() }.getOrElse { "" }
+            DeviceRemoveDto(removed = false, reason = detail.take(200).ifBlank { "removal_failed" }, swaps_remaining = -1)
+        }
     }
 
     suspend fun renameDevice(accessToken: String, deviceId: String, newName: String): ManagedDeviceDto {
@@ -206,9 +220,10 @@ internal fun normalizeManagedDevice(
 ): ManagedDeviceDto {
     val fallbackName = buildString {
         append(
-            when (device.device_type.lowercase()) {
-                "tv" -> "TV"
-                "tablet" -> "Tablet"
+            when (DeviceType.fromWireValue(device.device_type)) {
+                DeviceType.TV -> "TV"
+                DeviceType.TABLET -> "Tablet"
+                DeviceType.DESKTOP -> "Desktop"
                 else -> "Phone"
             },
         )
@@ -287,10 +302,12 @@ data class DeviceLimitDto(
 
 @Serializable
 data class AccessStateDto(
-    val user: UserDto,
-    val premium: PremiumStateDto,
-    val device: DeviceStateDto,
-    val device_limit: DeviceLimitDto,
+    // Legacy nested objects — nullable for new flat response format
+    val user: UserDto? = null,
+    val premium: PremiumStateDto? = null,
+    val device: DeviceStateDto? = null,
+    val device_limit: DeviceLimitDto? = null,
+    // Canonical flat fields (new backend format)
     @SerialName("has_premium_access")
     val has_premium_access: Boolean? = null,
     @SerialName("access_tier")
@@ -299,13 +316,21 @@ data class AccessStateDto(
     val is_device_activated: Boolean? = null,
     @SerialName("device_block_reason")
     val device_block_reason: String? = null,
+    @SerialName("entitlement_type")
+    val entitlement_type: String? = null,
+    @SerialName("source")
+    val source: String? = null,
+    @SerialName("auto_renew")
+    val auto_renew: Boolean? = null,
 )
 
 fun AccessStateDto.resolvedHasPremiumEntitlement(): Boolean {
+    // Prefer canonical flat field
     resolvedAccessTier()?.let { tier ->
         return tier != SubscriptionTier.FREE
     }
-    return has_premium_access ?: premium.has_entitlement
+    // Fall back to flat boolean or legacy nested field
+    return has_premium_access ?: premium?.has_entitlement ?: false
 }
 
 fun AccessStateDto.resolvedAccessTier(): SubscriptionTier? {
@@ -313,13 +338,13 @@ fun AccessStateDto.resolvedAccessTier(): SubscriptionTier? {
 }
 
 fun AccessStateDto.resolvedIsDeviceActivated(): Boolean {
-    return is_device_activated ?: device.is_active
+    return is_device_activated ?: device?.is_active ?: false
 }
 
 fun AccessStateDto.resolvedDeviceBlockReason(): String? {
     return device_block_reason
         ?.takeIf { it.isNotBlank() }
-        ?: premium.reason.takeIf {
+        ?: premium?.reason?.takeIf {
             it.isNotBlank() && resolvedHasPremiumEntitlement() && !resolvedIsDeviceActivated()
         }
 }
@@ -327,6 +352,10 @@ fun AccessStateDto.resolvedDeviceBlockReason(): String? {
 fun AccessStateDto.resolvedUsablePremiumAccess(): Boolean {
     return resolvedHasPremiumEntitlement() && resolvedIsDeviceActivated()
 }
+
+fun DeviceStateDto.resolvedDeviceType(): DeviceType = DeviceType.fromWireValue(device_type)
+
+fun DeviceStateDto.deviceTypeLabel(): String = resolvedDeviceType().displayLabel
 
 internal fun parseAccessTier(raw: String?): SubscriptionTier? {
     return when (raw?.trim()?.lowercase()) {
@@ -366,6 +395,10 @@ data class ManagedDeviceDto(
     val created_at: String? = null,
     val updated_at: String? = null,
 )
+
+fun ManagedDeviceDto.resolvedDeviceType(): DeviceType = DeviceType.fromWireValue(device_type)
+
+fun ManagedDeviceDto.deviceTypeLabel(): String = resolvedDeviceType().displayLabel
 
 @Serializable
 data class DeviceListDto(

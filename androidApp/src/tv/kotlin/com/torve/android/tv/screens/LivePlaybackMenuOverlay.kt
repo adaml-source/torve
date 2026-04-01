@@ -42,9 +42,11 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.Surface
+import com.torve.android.R
 import com.torve.android.player.DecoderKind
 import com.torve.android.player.PlaybackRuntimeInfo
 import com.torve.android.ui.theme.Amber
@@ -181,7 +183,7 @@ internal fun LivePlaybackMenuOverlay(
                             .padding(start = 40.dp)
                             .fillMaxHeight(0.86f)
                             .width(920.dp),
-                        title = if (route == PlaybackMenuRoute.PLAYBACK_INFO) "Playback Info" else "Decoder Info",
+                        title = if (route == PlaybackMenuRoute.PLAYBACK_INFO) stringResource(R.string.tv_menu_playback_info) else stringResource(R.string.tv_menu_decoder_info),
                         playbackRuntimeInfo = playbackRuntimeInfo,
                         currentChannel = currentChannel,
                         sleepTimerRemainingLabel = sleepTimerRemainingLabel,
@@ -191,12 +193,12 @@ internal fun LivePlaybackMenuOverlay(
                 else -> {
                     val items = when (route) {
                         PlaybackMenuRoute.MAIN -> buildList {
-                            add(PlaybackMenuItem("channel_list", "Channel List", "Browse channel groups"))
-                            add(PlaybackMenuItem("guide", "TV Guide", "Open EPG"))
-                            add(PlaybackMenuItem("playback_options", "Playback Options", "Audio, subtitles, display, decoder"))
-                            add(PlaybackMenuItem("channel_options", "Channel Options", "Favorites, info, reload"))
-                            add(PlaybackMenuItem("sleep_timer", "Sleep Timer", sleepTimerRemainingLabel ?: "Turn off later"))
-                            add(PlaybackMenuItem("playback_info", "Playback Info", "Player, codecs, decoder mode"))
+                            add(PlaybackMenuItem("channel_list", stringResource(R.string.tv_menu_channel_list), stringResource(R.string.tv_menu_channel_list_desc)))
+                            add(PlaybackMenuItem("guide", stringResource(R.string.tv_menu_tv_guide), stringResource(R.string.tv_menu_tv_guide_desc)))
+                            add(PlaybackMenuItem("playback_options", stringResource(R.string.tv_menu_playback_options), stringResource(R.string.tv_menu_playback_options_desc)))
+                            add(PlaybackMenuItem("channel_options", stringResource(R.string.tv_menu_channel_options), stringResource(R.string.tv_menu_channel_options_desc)))
+                            add(PlaybackMenuItem("sleep_timer", stringResource(R.string.tv_menu_sleep_timer), sleepTimerRemainingLabel ?: stringResource(R.string.tv_menu_sleep_timer_desc)))
+                            add(PlaybackMenuItem("playback_info", stringResource(R.string.tv_menu_playback_info), stringResource(R.string.tv_menu_playback_info_desc)))
                             if (pipSupported) add(PlaybackMenuItem("pip", "Picture in Picture", "Keep playing while browsing"))
                             add(
                                 PlaybackMenuItem(
@@ -214,7 +216,7 @@ internal fun LivePlaybackMenuOverlay(
                             PlaybackMenuItem("display_mode", "Aspect Ratio / Display Mode", selectedPictureFormatLabel(pictureFormats, selectedPictureFormatKey)),
                             PlaybackMenuItem("audio_output", "Audio Output Mode", playbackRuntimeInfo.outputMode?.storageValue?.replace('_', ' ') ?: "Unknown"),
                             PlaybackMenuItem("buffer_size", "Buffer Size", selectedBufferPreset.label),
-                            PlaybackMenuItem("decoder_info", "Decoder Info", decoderSummary(playbackRuntimeInfo)),
+                            PlaybackMenuItem("decoder_info", stringResource(R.string.tv_menu_decoder_info), decoderSummary(playbackRuntimeInfo)),
                         )
 
                         PlaybackMenuRoute.CHANNEL_OPTIONS -> listOf(
@@ -583,7 +585,7 @@ private fun PlaybackMenuDetailPane(
                 DetailParagraph(
                     text = when (focusedItemId) {
                         "channel_list" -> "Browse all channels and retune without interrupting playback."
-                        "guide" -> "Open the live programme guide for the current playlist."
+                        "guide" -> "Open the current channel schedule first, then jump into the full live guide."
                         "playback_options" -> "Change audio track, subtitles, display mode, and view decoder details."
                         "channel_options" -> "Manage favorites, inspect the current channel, or reload the stream."
                         "sleep_timer" -> "Stop playback automatically after a selected delay."

@@ -130,9 +130,9 @@ fun DevicesScreen(
                         scope.launch {
                             val result = syncCoordinator.bootstrapSecureChannel(device.id)
                             result.onSuccess {
-                                Toast.makeText(context, "Secure channel established with ${device.deviceName}", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, context.getString(R.string.devices_secure_channel_ok, device.deviceName), Toast.LENGTH_SHORT).show()
                             }.onFailure { error ->
-                                Toast.makeText(context, error.message ?: "Failed to establish secure channel", Toast.LENGTH_LONG).show()
+                                Toast.makeText(context, error.message ?: context.getString(R.string.devices_secure_channel_fail), Toast.LENGTH_LONG).show()
                             }
                         }
                     },
@@ -145,9 +145,9 @@ fun DevicesScreen(
                                 payloadJson = payloadJson,
                             )
                             result.onSuccess {
-                                Toast.makeText(context, "Setup sent to ${device.deviceName}", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, context.getString(R.string.devices_setup_sent, device.deviceName), Toast.LENGTH_SHORT).show()
                             }.onFailure { error ->
-                                Toast.makeText(context, error.message ?: "Failed to send setup", Toast.LENGTH_LONG).show()
+                                Toast.makeText(context, error.message ?: context.getString(R.string.devices_setup_fail), Toast.LENGTH_LONG).show()
                             }
                         }
                     },
@@ -196,12 +196,12 @@ private fun PairedDeviceCard(
                     when (channelState) {
                         SecureChannelState.PAIRED_SECURE_CHANNEL_READY -> {
                             Button(onClick = onSendSetup) {
-                                Text("Send Setup")
+                                Text(stringResource(R.string.devices_send_setup))
                             }
                         }
                         SecureChannelState.PAIRED_LAN_REACHABLE_NO_SECRET -> {
                             Button(onClick = onEstablishSecureChannel) {
-                                Text("Establish Secure Channel")
+                                Text(stringResource(R.string.devices_establish_secure))
                             }
                         }
                         else -> {}

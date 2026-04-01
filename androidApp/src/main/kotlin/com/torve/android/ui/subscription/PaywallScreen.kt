@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -134,7 +135,7 @@ fun PaywallScreen(
             }
 
             is BillingManager.PurchaseResult.Cancelled -> {
-                viewModel.setPurchaseError("Purchase cancelled.")
+                viewModel.setPurchaseError(activity?.getString(R.string.paywall_purchase_cancelled) ?: "Purchase cancelled.")
                 billingManager.clearPurchaseResult()
             }
 
@@ -203,10 +204,21 @@ private fun PaywallContent(
     onRetryVerification: () -> Unit,
     onPurchase: (BillingManager.ProductType) -> Unit,
 ) {
-    val monthlyOffer = billingManager.getOffer(BillingManager.ProductType.MONTHLY)
-    val lifetimeOffer = billingManager.getOffer(BillingManager.ProductType.LIFETIME)
+    val billingState by billingManager.billingState.collectAsState()
+    val monthlyOffer = remember(billingState) {
+        billingManager.getOffer(BillingManager.ProductType.MONTHLY)
+    }
+    val lifetimeOffer = remember(billingState) {
+        billingManager.getOffer(BillingManager.ProductType.LIFETIME)
+    }
+    val billingErrorMessage = (billingState as? BillingManager.BillingState.Error)?.message
+    val billingReady = billingState is BillingManager.BillingState.Ready
+    val billingLoading = billingState is BillingManager.BillingState.Connecting ||
+        billingState is BillingManager.BillingState.Connected ||
+        billingState is BillingManager.BillingState.Disconnected
     val purchaseBlocked = state.purchaseVerificationState == PurchaseVerificationState.PENDING
-    val access = state.accessPresentation()
+    val purchaseStrings: com.torve.presentation.subscription.PurchaseStringResolver = koinInject()
+    val access = state.accessPresentation(purchaseStrings)
 
     Column(
         modifier = Modifier.padding(16.dp),
@@ -286,26 +298,67 @@ private fun PaywallContent(
 
         if (access.shouldShowBuy) {
             Spacer(Modifier.height(20.dp))
-            PricingOptionCard(
-                title = stringResource(R.string.paywall_monthly_title),
-                description = stringResource(R.string.paywall_monthly_description),
-                price = monthlyOffer?.formattedPrice ?: stringResource(R.string.paywall_price_loading),
-                billingDetails = monthlyOffer?.billingDetails ?: stringResource(R.string.paywall_recurring_label),
-                enabled = monthlyOffer != null && !state.isPurchasing && !purchaseBlocked,
-                actionLabel = stringResource(R.string.paywall_choose_monthly),
-                onClick = { onPurchase(BillingManager.ProductType.MONTHLY) },
-            )
+            if (billingLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(28.dp),
+                    strokeWidth = 2.dp,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.paywall_price_loading),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                if (monthlyOffer != null) {
+                    PricingOptionCard(
+                        title = stringResource(R.string.paywall_monthly_title),
+                        description = stringResource(R.string.paywall_monthly_description),
+                        price = monthlyOffer.formattedPrice ?: stringResource(R.string.paywall_price),
+                        billingDetails = monthlyOffer.billingDetails,
+                        enabled = !state.isPurchasing && !purchaseBlocked,
+                        actionLabel = stringResource(R.string.paywall_choose_monthly),
+                        onClick = { onPurchase(BillingManager.ProductType.MONTHLY) },
+                    )
+                    Spacer(Modifier.height(12.dp))
+                }
 
+                if (lifetimeOffer != null) {
+                    PricingOptionCard(
+                        title = stringResource(R.string.paywall_lifetime_title),
+                        description = stringResource(R.string.paywall_lifetime_description),
+                        price = lifetimeOffer.formattedPrice ?: stringResource(R.string.paywall_price),
+                        billingDetails = lifetimeOffer.billingDetails,
+                        enabled = !state.isPurchasing && !purchaseBlocked,
+                        actionLabel = stringResource(R.string.paywall_choose_lifetime),
+                        onClick = { onPurchase(BillingManager.ProductType.LIFETIME) },
+                    )
+                }
+
+                if (monthlyOffer == null && lifetimeOffer == null && billingReady) {
+                    Text(
+                        text = billingErrorMessage ?: stringResource(R.string.paywall_price),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (billingErrorMessage != null) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+        }
+
+        if (access.shouldShowBuy && billingErrorMessage != null && monthlyOffer == null && lifetimeOffer == null) {
             Spacer(Modifier.height(12.dp))
-
-            PricingOptionCard(
-                title = stringResource(R.string.paywall_lifetime_title),
-                description = stringResource(R.string.paywall_lifetime_description),
-                price = lifetimeOffer?.formattedPrice ?: stringResource(R.string.paywall_price_loading),
-                billingDetails = lifetimeOffer?.billingDetails ?: stringResource(R.string.paywall_one_time_label),
-                enabled = lifetimeOffer != null && !state.isPurchasing && !purchaseBlocked,
-                actionLabel = stringResource(R.string.paywall_choose_lifetime),
-                onClick = { onPurchase(BillingManager.ProductType.LIFETIME) },
+            Text(
+                text = billingErrorMessage,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
             )
         }
 
@@ -374,7 +427,8 @@ private fun CurrentAccessCard(
     state: SubscriptionUiState,
     purchaseStoreLabel: String,
 ) {
-    val access = state.accessPresentation()
+    val purchaseStrings: com.torve.presentation.subscription.PurchaseStringResolver = koinInject()
+    val access = state.accessPresentation(purchaseStrings)
 
     OutlinedCard(
         modifier = Modifier.fillMaxWidth(),
@@ -397,14 +451,14 @@ private fun CurrentAccessCard(
             if (marketplace != null) {
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "Managed through $marketplace",
+                    text = stringResource(R.string.paywall_managed_through, marketplace),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else if (access.hasPremiumEntitlement) {
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "Billing is handled by $purchaseStoreLabel.",
+                    text = stringResource(R.string.paywall_marketplace_copy, purchaseStoreLabel),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

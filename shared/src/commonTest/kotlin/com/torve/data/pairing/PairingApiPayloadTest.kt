@@ -17,4 +17,16 @@ class PairingApiPayloadTest {
 
         assertEquals(0, parsed.pairings.size)
     }
+
+    @Test
+    fun resolvedDeviceTypeLabel_supports_desktop() {
+        val pairing = PairedDeviceDto(
+            targetDeviceType = "desktop",
+            targetPlatform = "windows",
+            targetDeviceName = "Office PC",
+        )
+
+        assertEquals("desktop", pairing.resolvedDeviceType())
+        assertEquals("Desktop", pairing.resolvedDeviceTypeLabel())
+    }
 }

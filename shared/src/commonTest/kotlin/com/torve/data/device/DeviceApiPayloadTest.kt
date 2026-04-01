@@ -102,10 +102,10 @@ class DeviceApiPayloadTest {
         val payload = """
             {
               "id":"d2",
-              "device_type":"tv",
-              "platform":"android_tv",
+              "device_type":"desktop",
+              "platform":"windows",
               "display_name":null,
-              "installation_id":"tv-001",
+              "installation_id":"desktop-001",
               "is_active":true,
               "last_seen_at":"2026-03-17T18:00:00Z",
               "created_at":"2026-03-17T16:00:00Z"
@@ -115,7 +115,37 @@ class DeviceApiPayloadTest {
         val device = parseManagedDevicePayload(payload)
 
         assertTrue(device.device_name.isNotBlank())
-        assertTrue(device.device_name.startsWith("TV"))
+        assertTrue(device.device_name.startsWith("Desktop"))
+        assertEquals("Desktop", device.deviceTypeLabel())
+    }
+
+    @Test
+    fun access_state_device_type_label_supports_desktop() {
+        val access = AccessStateDto(
+            user = UserDto(id = "user-1", email = "user@torve.app"),
+            premium = PremiumStateDto(
+                has_entitlement = true,
+                premium_access = true,
+                reason = "",
+                entitlements = emptyList(),
+            ),
+            device = DeviceStateDto(
+                id = "device-1",
+                name = "Windows Workstation",
+                is_active = true,
+                active_device_count = 1,
+                max_active_devices = 5,
+                platform = "windows",
+                device_type = "desktop",
+            ),
+            device_limit = DeviceLimitDto(
+                cap_reached = false,
+                swaps_remaining = 3,
+                stale_devices_pruned = 0,
+            ),
+        )
+
+        assertEquals("Desktop", access.device!!.deviceTypeLabel())
     }
 
     @Test

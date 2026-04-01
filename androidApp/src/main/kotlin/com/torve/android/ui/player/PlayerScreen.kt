@@ -120,6 +120,7 @@ import com.torve.android.voice.PlayerVoiceCommandParser
 import com.torve.android.voice.VoiceInputPhase
 import com.torve.android.voice.rememberVoiceInputController
 import com.torve.android.ui.sync.SyncDevicePickerDialog
+import com.torve.android.ui.system.configureTorveEdgeToEdge
 import com.torve.data.addon.ParsedStream
 import com.torve.data.addon.StreamRuntimeTelemetry
 import com.torve.data.addon.StreamSelector
@@ -195,7 +196,7 @@ fun PlayerScreen(
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
     val isTv = remember(context) { DeviceFormFactor.isTv(context) }
-    val shouldLockLandscape = !isTv && configuration.smallestScreenWidthDp < 600
+    val enablePhoneAutoRotation = !isTv && configuration.smallestScreenWidthDp < 600
     val forceExoPlayerOnMobileDebug = BuildConfig.DEBUG && !isTv
     val isLiveChannelPlayback = mediaType.equals("live", ignoreCase = true)
 
@@ -203,24 +204,25 @@ fun PlayerScreen(
     val castService: CastService = koinInject()
     val castAvailable = castService.isAvailable
 
-    // Keep phones in immersive landscape playback, but let large screens rotate/rescale freely.
-    DisposableEffect(shouldLockLandscape) {
+    // Keep playback immersive, but let phones start in portrait and follow user rotation.
+    DisposableEffect(enablePhoneAutoRotation) {
         val activity = context as? Activity ?: return@DisposableEffect onDispose {}
         val window = activity.window
         val originalOrientation = activity.requestedOrientation
-        val controller = WindowInsetsControllerCompat(window, window.decorView)
+        val controller = configureTorveEdgeToEdge(window, window.decorView)
 
         controller.hide(WindowInsetsCompat.Type.systemBars())
         controller.systemBarsBehavior =
             WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        if (shouldLockLandscape) {
-            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        if (enablePhoneAutoRotation) {
+            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_USER
         }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         onDispose {
             controller.show(WindowInsetsCompat.Type.systemBars())
-            if (shouldLockLandscape) {
+            WindowCompat.setDecorFitsSystemWindows(window, true)
+            if (enablePhoneAutoRotation) {
                 activity.requestedOrientation = originalOrientation
             }
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -235,6 +237,7 @@ fun PlayerScreen(
     // isInPipMode is a Compose mutableStateOf — reads trigger recomposition automatically.
     val isInPip = ActivePlaybackState.isInPipMode
     var showControls by remember { mutableStateOf(true) }
+    var orientationRotateFrom by remember { mutableStateOf<Int?>(null) }
     // Hide controls in PiP; restore when leaving PiP.
     LaunchedEffect(isInPip) {
         if (isInPip) {
@@ -244,7 +247,7 @@ fun PlayerScreen(
             val activity = context as? Activity
             if (activity != null) {
                 val window = activity.window
-                val controller = WindowInsetsControllerCompat(window, window.decorView)
+                val controller = configureTorveEdgeToEdge(window, window.decorView)
                 controller.hide(WindowInsetsCompat.Type.systemBars())
                 controller.systemBarsBehavior =
                     WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -266,8 +269,11 @@ fun PlayerScreen(
     var audioDelayMs by remember { mutableIntStateOf(0) }
     var showEqualizerSheet by remember { mutableStateOf(false) }
     var showDevicePicker by remember { mutableStateOf(false) }
+    var mobileSheetStack by remember { mutableStateOf<List<MobilePlaybackSheet>>(emptyList()) }
     var playbackSpeed by remember { mutableFloatStateOf(1.0f) }
     var pictureFormat by remember { mutableStateOf(PlayerPictureFormat.SOURCE) }
+    var activeReplayProgramme by remember { mutableStateOf<com.torve.domain.model.EpgProgramme?>(null) }
+    var liveBufferDurationMs by remember { mutableIntStateOf(ExoPlayerEngine.DEFAULT_LIVE_BUFFER_MS) }
     var audioEqualizer by remember { mutableStateOf<AudioEqualizer?>(null) }
     var exoPlayerView by remember { mutableStateOf<PlayerView?>(null) }
     var topMenuFocusTick by remember { mutableIntStateOf(0) }
@@ -300,6 +306,8 @@ fun PlayerScreen(
     var currentEpisodeNumber by remember { mutableStateOf(episodeNumber) }
     var currentUrl by remember { mutableStateOf(url) }
     var currentTitle by remember { mutableStateOf(title) }
+    var currentPosterUrl by remember { mutableStateOf(posterUrl) }
+    val mobileActiveSheet = mobileSheetStack.lastOrNull()
     var autoFallbackInProgress by remember { mutableStateOf(false) }
     var currentStreamHostKey by remember { mutableStateOf(StreamRuntimeTelemetry.keyForUrl(url)) }
     var healthWindowStartedAtMs by remember(currentUrl) { mutableLongStateOf(0L) }
@@ -853,6 +861,17 @@ fun PlayerScreen(
                 showControls = true
                 topMenuFocusTick++
                 true
+            }
+            !isTv && mobileActiveSheet != null -> {
+                when (val result = reduceMobilePlaybackBack(showControls, mobileSheetStack)) {
+                    is MobilePlaybackBackResult.Update -> {
+                        showControls = result.controlsVisible
+                        mobileSheetStack = result.sheetStack
+                        true
+                    }
+
+                    MobilePlaybackBackResult.ExitPlayer -> false
+                }
             }
             showNextEpisodeOverlay -> {
                 showNextEpisodeOverlay = false
@@ -1532,10 +1551,10 @@ fun PlayerScreen(
 
     // Auto-hide controls after 5 seconds on non-TV devices.
     var controlsInteractionTick by remember { mutableLongStateOf(0L) }
-    LaunchedEffect(showControls, controlsInteractionTick, isTv, showTrackDialog, showAudioDelayDialog, showPictureFormatPicker, showEqualizerSheet, showDevicePicker, showResumePrompt) {
+    LaunchedEffect(showControls, controlsInteractionTick, isTv, showTrackDialog, showAudioDelayDialog, showPictureFormatPicker, showEqualizerSheet, showDevicePicker, showResumePrompt, mobileActiveSheet) {
         if (!showControls) return@LaunchedEffect
         if (isTv) return@LaunchedEffect
-        if (showTrackDialog || showAudioDelayDialog || showPictureFormatPicker || showEqualizerSheet || showDevicePicker || showResumePrompt) return@LaunchedEffect
+        if (showTrackDialog || showAudioDelayDialog || showPictureFormatPicker || showEqualizerSheet || showDevicePicker || showResumePrompt || mobileActiveSheet != null) return@LaunchedEffect
         delay(5000)
         showControls = false
     }
@@ -1623,6 +1642,209 @@ fun PlayerScreen(
     val handoffTargets = syncCoordinator.targetDevices()
         .filter { it.deviceType.contains("tv", ignoreCase = true) }
     val handoffContentId = mediaId.ifBlank { showTmdbId?.toString().orEmpty() }
+    var mobileCategoryChannels by remember(currentUrl, channelsState.selectedPlaylistId) {
+        mutableStateOf<List<com.torve.domain.model.EnrichedChannel>>(emptyList())
+    }
+    var mobileGuideProgrammes by remember(currentUrl, channelsState.selectedPlaylistId) {
+        mutableStateOf<Map<String, List<com.torve.domain.model.EpgProgramme>>>(emptyMap())
+    }
+    var mobileSheetLoading by remember(currentUrl, channelsState.selectedPlaylistId) {
+        mutableStateOf(false)
+    }
+    var mobileSheetError by remember(currentUrl, channelsState.selectedPlaylistId) {
+        mutableStateOf<String?>(null)
+    }
+    val livePlaybackContext = if (isLiveChannelPlayback) {
+        resolveLivePlaybackContext(
+            url = currentUrl,
+            title = currentTitle,
+            channelsState = channelsState,
+        )
+    } else {
+        ResolvedLivePlaybackContext()
+    }
+    val playbackRuntimeInfo = when {
+        useMpv -> (engine as? MPVPlayerEngine)?.getPlaybackRuntimeInfo()
+        else -> (engine as? ExoPlayerEngine)?.getPlaybackRuntimeInfo()
+    }
+    val supportsLiveBufferControl = isLiveChannelPlayback && engine is ExoPlayerEngine
+    val displayedCurrentProgramme = activeReplayProgramme ?: livePlaybackContext.currentProgramme
+    val displayedNextProgramme = if (activeReplayProgramme == null) {
+        livePlaybackContext.nextProgramme
+    } else {
+        null
+    }
+
+    LaunchedEffect(engine, supportsLiveBufferControl) {
+        liveBufferDurationMs = when {
+            supportsLiveBufferControl -> (engine as ExoPlayerEngine).liveBufferDurationMs
+            else -> ExoPlayerEngine.DEFAULT_LIVE_BUFFER_MS
+        }
+    }
+
+    LaunchedEffect(showControls, mobileActiveSheet, isInPip) {
+        if (isInPip) return@LaunchedEffect
+        val activity = context as? Activity ?: return@LaunchedEffect
+        val controller = configureTorveEdgeToEdge(activity.window, activity.window.decorView)
+        controller.hide(WindowInsetsCompat.Type.systemBars())
+        controller.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+    }
+
+    LaunchedEffect(configuration.orientation, orientationRotateFrom, enablePhoneAutoRotation) {
+        val rotateFrom = orientationRotateFrom ?: return@LaunchedEffect
+        if (!enablePhoneAutoRotation || configuration.orientation == rotateFrom) return@LaunchedEffect
+        val activity = context as? Activity ?: return@LaunchedEffect
+        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+        orientationRotateFrom = null
+    }
+
+    fun showMobileSheet(sheet: MobilePlaybackSheet) {
+        mobileSheetStack = listOf(sheet)
+        showControls = true
+    }
+
+    fun pushMobileSheet(sheet: MobilePlaybackSheet) {
+        mobileSheetStack = mobileSheetStack + sheet
+        showControls = true
+    }
+
+    fun popMobileSheet() {
+        mobileSheetStack = mobileSheetStack.dropLast(1)
+        showControls = true
+    }
+
+    fun rotatePlayerOrientation() {
+        if (!enablePhoneAutoRotation) return
+        val activity = context as? Activity ?: return
+        val currentOrientation = configuration.orientation
+        val targetOrientation = if (currentOrientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        }
+        orientationRotateFrom = currentOrientation
+        activity.requestedOrientation = targetOrientation
+    }
+
+    fun switchToLiveChannel(channel: com.torve.domain.model.Channel) {
+        if (!isLiveChannelPlayback || channel.url.isBlank()) return
+        channelsViewModel.recordChannelViewed(channel)
+        channelsViewModel.selectChannel(channel)
+        currentUrl = channel.url
+        currentTitle = channel.name
+        currentPosterUrl = channel.tvgLogo ?: ""
+        activeReplayProgramme = null
+        currentPosition = 0L
+        duration = 0L
+        sliderPosition = 0f
+        errorMessage = null
+        codecFallbackUsed = false
+        mobileSheetStack = emptyList()
+        showControls = true
+        pendingAutoFallbackResumePositionMs = -1L
+        pendingAutoFallbackResumeDeadlineMs = 0L
+        resetPlaybackHealthWindow()
+        resetSeekAcceleration()
+        currentStreamHostKey = StreamRuntimeTelemetry.keyForUrl(channel.url)
+        (engine as? ExoPlayerEngine)?.setLiveBufferSize(liveBufferDurationMs)
+        engine.stop()
+        engine.play(channel.url)
+    }
+
+    fun canReplayProgramme(channel: com.torve.domain.model.Channel, programme: com.torve.domain.model.EpgProgramme): Boolean {
+        if (!channelsViewModel.canCatchup(channel)) return false
+        if (programme.endTime > System.currentTimeMillis()) return false
+        return channelsViewModel.resolveCatchupUrl(channel, programme) != null
+    }
+
+    fun replayProgramme(
+        channel: com.torve.domain.model.Channel,
+        programme: com.torve.domain.model.EpgProgramme,
+    ) {
+        if (!isLiveChannelPlayback) return
+        val replayUrl = channelsViewModel.resolveCatchupUrl(channel, programme)
+        if (replayUrl.isNullOrBlank()) {
+            Toast.makeText(context, context.getString(R.string.player_replay_unavailable), Toast.LENGTH_SHORT).show()
+            return
+        }
+        channelsViewModel.recordChannelViewed(channel)
+        channelsViewModel.selectChannel(channel)
+        currentUrl = replayUrl
+        currentTitle = channel.name
+        currentPosterUrl = channel.tvgLogo ?: ""
+        activeReplayProgramme = programme
+        currentPosition = 0L
+        duration = 0L
+        sliderPosition = 0f
+        errorMessage = null
+        codecFallbackUsed = false
+        mobileSheetStack = emptyList()
+        showControls = true
+        pendingAutoFallbackResumePositionMs = -1L
+        pendingAutoFallbackResumeDeadlineMs = 0L
+        resetPlaybackHealthWindow()
+        resetSeekAcceleration()
+        currentStreamHostKey = StreamRuntimeTelemetry.keyForUrl(replayUrl)
+        (engine as? ExoPlayerEngine)?.setLiveBufferSize(liveBufferDurationMs)
+        engine.stop()
+        engine.play(replayUrl)
+    }
+
+    LaunchedEffect(
+        mobileActiveSheet,
+        isLiveChannelPlayback,
+        channelsState.selectedPlaylistId,
+        livePlaybackContext.currentCategoryName,
+    ) {
+        if (isTv) return@LaunchedEffect
+        val sheet = mobileActiveSheet
+        if (
+            sheet != MobilePlaybackSheet.ChannelList &&
+            sheet != MobilePlaybackSheet.Guide &&
+            sheet != MobilePlaybackSheet.CurrentChannelGuide
+        ) {
+            mobileSheetLoading = false
+            mobileSheetError = null
+            return@LaunchedEffect
+        }
+        if (!isLiveChannelPlayback) {
+            mobileCategoryChannels = emptyList()
+            mobileGuideProgrammes = emptyMap()
+            mobileSheetLoading = false
+            mobileSheetError = null
+            return@LaunchedEffect
+        }
+        val playlistId = channelsState.selectedPlaylistId
+        val categoryName = livePlaybackContext.currentCategoryName
+        if (playlistId.isNullOrBlank() || categoryName.isNullOrBlank()) {
+            mobileCategoryChannels = emptyList()
+            mobileGuideProgrammes = emptyMap()
+            mobileSheetLoading = false
+            mobileSheetError = "Guide data is unavailable for this channel."
+            return@LaunchedEffect
+        }
+        mobileSheetLoading = true
+        mobileSheetError = null
+        try {
+            val channels = channelsViewModel.getChannelsForCategoryDirect(playlistId, categoryName)
+            mobileCategoryChannels = channels
+            mobileGuideProgrammes = if (
+                sheet == MobilePlaybackSheet.Guide ||
+                sheet == MobilePlaybackSheet.CurrentChannelGuide
+            ) {
+                channelsViewModel.getProgrammesForChannelsDirect(playlistId, channels)
+            } else {
+                emptyMap()
+            }
+        } catch (e: Exception) {
+            mobileCategoryChannels = emptyList()
+            mobileGuideProgrammes = emptyMap()
+            mobileSheetError = e.message ?: "Unable to load channel data."
+        } finally {
+            mobileSheetLoading = false
+        }
+    }
 
     // PlayerSurface region: always in composition (the root video surface)
     RegisterFocusRegion(
@@ -2224,7 +2446,7 @@ fun PlayerScreen(
         }
 
         // Controls overlay
-        if (showControls && !tvModalOverlayOpen) {
+        if (showControls && !tvModalOverlayOpen && isTv) {
             // Region-local requesters — scoped to this conditional block.
             // They live and die with the controls overlay; no cross-tree references.
             val topMenuRequesters = remember(visibleTopMenuTargets) {
@@ -2342,7 +2564,7 @@ fun PlayerScreen(
                                     castService.requestCast(
                                         url = currentUrl,
                                         title = currentTitle,
-                                        posterUrl = posterUrl.ifBlank { null },
+                                        posterUrl = currentPosterUrl.ifBlank { null },
                                     )
                                 }
                                 castService.showCastDialog()
@@ -2696,6 +2918,231 @@ fun PlayerScreen(
                 }
             }
         }
+
+        if (showControls && !isTv) {
+            val seekPreviewPositionMs = if (isSeeking && duration > 0L) {
+                (sliderPosition * duration).toLong().coerceIn(0L, duration)
+            } else {
+                currentPosition
+            }
+            val showGuideAction = isLiveChannelPlayback && livePlaybackContext.currentChannel != null
+            val showChannelListAction = false
+            val showFavoriteAction = isLiveChannelPlayback && livePlaybackContext.currentChannel != null
+            val showPlaybackTransport = !isLiveChannelPlayback || activeReplayProgramme != null
+            val availableMobileSettings = supportedMobilePlaybackSettings(
+                isLivePlayback = isLiveChannelPlayback,
+                supportsLiveBufferControl = supportsLiveBufferControl,
+            )
+            val voiceOverlayMessage = when (voiceController.uiState.value.phase) {
+                VoiceInputPhase.Listening -> "Listening"
+                VoiceInputPhase.Processing -> "Processing voice input"
+                VoiceInputPhase.Error,
+                VoiceInputPhase.Unsupported,
+                -> voiceController.uiState.value.message ?: "Voice input is not available on this device"
+
+                VoiceInputPhase.Idle -> voiceFeedbackMessage
+            }
+
+            MobilePlayerControlsOverlay(
+                title = currentTitle,
+                badgeUrl = livePlaybackContext.currentChannel?.tvgLogo ?: currentPosterUrl.ifBlank { null },
+                subtitle = buildPlayerProgrammeLine(
+                    currentProgramme = displayedCurrentProgramme,
+                    nextProgramme = displayedNextProgramme,
+                ),
+                isLivePlayback = isLiveChannelPlayback && activeReplayProgramme == null,
+                isFavorite = livePlaybackContext.isFavorite,
+                pictureFormatLabel = pictureFormat.shortLabel,
+                showPictureFormatAction = true,
+                showOrientationAction = enablePhoneAutoRotation,
+                showGuideAction = showGuideAction,
+                showChannelListAction = showChannelListAction,
+                castAvailable = castAvailable,
+                isCasting = castService.isCasting,
+                showSubtitleAction = subtitleTracks.isNotEmpty(),
+                showAudioAction = audioTracks.isNotEmpty(),
+                showFavoriteAction = showFavoriteAction,
+                showSettingsAction = availableMobileSettings.isNotEmpty(),
+                showPlaybackTransport = showPlaybackTransport,
+                isPlaying = isPlaying,
+                currentPosition = currentPosition,
+                duration = duration,
+                sliderPosition = sliderPosition,
+                isSeeking = isSeeking,
+                seekPreviewPositionMs = seekPreviewPositionMs,
+                skipSegments = skipSegments,
+                voiceOverlayMessage = voiceOverlayMessage,
+                onBack = onBack,
+                onOpenPictureFormat = { showMobileSheet(MobilePlaybackSheet.Picker(MobilePlaybackPicker.PICTURE_FORMAT)) },
+                onRotateOrientation = { rotatePlayerOrientation() },
+                onOpenGuide = {
+                    val targetSheet = if (livePlaybackContext.currentChannel != null) {
+                        MobilePlaybackSheet.CurrentChannelGuide
+                    } else {
+                        MobilePlaybackSheet.Guide
+                    }
+                    showMobileSheet(targetSheet)
+                },
+                onOpenChannelList = { showMobileSheet(MobilePlaybackSheet.ChannelList) },
+                onOpenMenu = { showMobileSheet(MobilePlaybackSheet.QuickActions) },
+                onToggleFavorite = {
+                    livePlaybackContext.currentChannel?.let(channelsViewModel::toggleFavorite)
+                },
+                onTogglePlayback = togglePlayback,
+                onSeekBack = { seekBy(-10_000L) },
+                onSeekForward = { seekBy(10_000L) },
+                onOpenCast = {
+                    if (currentUrl.isNotBlank()) {
+                        castService.requestCast(
+                            url = currentUrl,
+                            title = currentTitle,
+                            posterUrl = currentPosterUrl.ifBlank { null },
+                        )
+                    }
+                    castService.showCastDialog()
+                },
+                onOpenSubtitlePicker = { showMobileSheet(MobilePlaybackSheet.Picker(MobilePlaybackPicker.SUBTITLE_TRACK)) },
+                onOpenAudioPicker = { showMobileSheet(MobilePlaybackSheet.Picker(MobilePlaybackPicker.AUDIO_TRACK)) },
+                onSliderValueChange = {
+                    isSeeking = true
+                    sliderPosition = it
+                },
+                onSliderValueChangeFinished = {
+                    val target = (sliderPosition * duration).toLong()
+                    val delta = target - currentPosition
+                    performSeekTo(
+                        targetMs = target,
+                        userInitiated = true,
+                        sourceDeltaMs = delta,
+                        showTvFeedback = false,
+                    )
+                    isSeeking = false
+                },
+            )
+        }
+
+        if (!isTv && mobileActiveSheet != null) {
+            MobilePlaybackSheetHost(
+                activeSheet = mobileActiveSheet,
+                canNavigateBack = mobileSheetStack.size > 1,
+                sheetLoading = mobileSheetLoading,
+                sheetError = mobileSheetError,
+                isLivePlayback = isLiveChannelPlayback,
+                isFavorite = livePlaybackContext.isFavorite,
+                currentTitle = currentTitle,
+                currentChannel = livePlaybackContext.currentChannel,
+                currentProgramme = displayedCurrentProgramme,
+                nextProgramme = displayedNextProgramme,
+                playbackRuntimeInfo = playbackRuntimeInfo,
+                subtitleTracks = subtitleTracks,
+                audioTracks = audioTracks,
+                audioDelayMs = audioDelayMs,
+                playbackSpeed = playbackSpeed,
+                pictureFormat = pictureFormat,
+                liveBufferDurationMs = liveBufferDurationMs,
+                liveAudioMode = channelsState.liveAudioOutputMode,
+                availableSettings = supportedMobilePlaybackSettings(
+                    isLivePlayback = isLiveChannelPlayback,
+                    supportsLiveBufferControl = supportsLiveBufferControl,
+                ),
+                categoryChannels = mobileCategoryChannels,
+                guideProgrammes = mobileGuideProgrammes,
+                showEqualizerAction = audioEqualizer != null,
+                handoffAvailable = handoffTargets.isNotEmpty() || !syncState.isAuthenticated,
+                voiceState = voiceController.uiState.value.phase,
+                onDismiss = {
+                    mobileSheetStack = mobileSheetStack.dropLast(1)
+                    showControls = true
+                },
+                onNavigateBack = { popMobileSheet() },
+                onPushSheet = { pushMobileSheet(it) },
+                onToggleFavorite = {
+                    livePlaybackContext.currentChannel?.let(channelsViewModel::toggleFavorite)
+                    mobileSheetStack = emptyList()
+                },
+                onOpenDevicePicker = {
+                    when {
+                        !syncState.isAuthenticated -> {
+                            Toast.makeText(context, context.getString(R.string.player_create_profile_first), Toast.LENGTH_SHORT).show()
+                        }
+                        handoffTargets.isEmpty() -> {
+                            syncCoordinator.refreshDevices()
+                            Toast.makeText(context, context.getString(R.string.player_no_paired_tv), Toast.LENGTH_SHORT).show()
+                        }
+                        else -> {
+                            showDevicePicker = true
+                            mobileSheetStack = emptyList()
+                        }
+                    }
+                },
+                onLaunchVoice = {
+                    if (
+                        voiceController.uiState.value.phase == VoiceInputPhase.Error ||
+                        voiceController.uiState.value.phase == VoiceInputPhase.Unsupported
+                    ) {
+                        voiceController.clearState()
+                    }
+                    voiceController.launch()
+                    mobileSheetStack = emptyList()
+                },
+                onOpenEqualizer = {
+                    showEqualizerSheet = true
+                    mobileSheetStack = emptyList()
+                },
+                onSelectSubtitle = { track ->
+                    if (track == null) {
+                        engine.disableSubtitles()
+                        subtitlesPreferredEnabled = false
+                        preferredSubtitleTrackTag = null
+                    } else {
+                        engine.selectSubtitleTrack(track.id)
+                        subtitlesPreferredEnabled = true
+                        preferredSubtitleTrackTag = trackPreferenceTag(track)
+                    }
+                    mobileSheetStack = mobileSheetStack.dropLast(1)
+                },
+                onSelectAudio = { track ->
+                    engine.selectAudioTrack(track.id)
+                    preferredAudioTrackTag = trackPreferenceTag(track)
+                    mobileSheetStack = mobileSheetStack.dropLast(1)
+                },
+                onApplyAudioDelay = { delayMs ->
+                    audioDelayMs = delayMs
+                    engine.setAudioDelay(delayMs)
+                    mobileSheetStack = mobileSheetStack.dropLast(1)
+                },
+                onApplyPlaybackSpeed = { speed ->
+                    playbackSpeed = speed
+                    engine.setSpeed(speed)
+                    mobileSheetStack = mobileSheetStack.dropLast(1)
+                },
+                onApplyPictureFormat = { selected ->
+                    pictureFormat = selected
+                    mobileSheetStack = mobileSheetStack.dropLast(1)
+                },
+                onApplyLiveAudioMode = { mode ->
+                    channelsViewModel.setLiveAudioOutputMode(mode)
+                    mobileSheetStack = mobileSheetStack.dropLast(1)
+                },
+                onApplyLiveBuffer = { durationMs ->
+                    liveBufferDurationMs = durationMs
+                    (engine as? ExoPlayerEngine)?.setLiveBufferSize(durationMs)
+                    mobileSheetStack = mobileSheetStack.dropLast(1)
+                },
+                onPlayChannel = { channel ->
+                    switchToLiveChannel(channel)
+                },
+                canReplayProgramme = { channel, programme ->
+                    canReplayProgramme(channel, programme)
+                },
+                onReplayProgramme = { channel, programme ->
+                    replayProgramme(channel, programme)
+                },
+                onToggleChannelFavorite = { channel ->
+                    channelsViewModel.toggleFavorite(channel)
+                },
+            )
+        }
     }
 
     if (showDevicePicker) {
@@ -2931,7 +3378,7 @@ private enum class TopMenuFocusTarget {
 }
 
 
-private enum class PlayerPictureFormat(
+internal enum class PlayerPictureFormat(
     val shortLabel: String,
     val label: String,
     val aspectRatio: Float?,
@@ -3024,7 +3471,7 @@ private fun trackPreferenceTag(track: TrackDescription): String {
         ?: track.label.trim().lowercase().take(48)
 }
 
-private fun formatTime(ms: Long): String {
+internal fun formatTime(ms: Long): String {
     if (ms <= 0) return "0:00"
     val totalSeconds = ms / 1000
     val hours = totalSeconds / 3600

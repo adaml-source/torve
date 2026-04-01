@@ -5,6 +5,7 @@ import com.torve.domain.model.DebridServiceType
 import com.torve.domain.model.InstalledAddon
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.ResolvedStream
+import com.torve.domain.model.StreamFetchPolicy
 import com.torve.domain.model.StreamPreferences
 
 interface StreamRepository {
@@ -21,6 +22,7 @@ interface StreamRepository {
         addons: List<InstalledAddon> = emptyList(),
         debridAccounts: Map<DebridServiceType, String> = emptyMap(),
         preferences: StreamPreferences = StreamPreferences(),
+        fetchPolicy: StreamFetchPolicy = StreamFetchPolicy.FULL,
     ): List<ParsedStream>
 
     /**

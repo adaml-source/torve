@@ -21,7 +21,9 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.torve.android.R
 import com.torve.data.auth.AuthClient
 import kotlinx.coroutines.launch
 
@@ -68,11 +70,11 @@ fun VerificationBanner(
         ) {
             Text(
                 text = when (state) {
-                    is BannerState.Sent -> "Verification email sent!"
-                    is BannerState.Checking -> "Checking…"
-                    is BannerState.RateLimited -> "Please wait before resending."
-                    is BannerState.Error -> "Email not verified"
-                    else -> "Email not verified"
+                    is BannerState.Sent -> stringResource(R.string.verify_email_sent)
+                    is BannerState.Checking -> stringResource(R.string.verify_checking)
+                    is BannerState.RateLimited -> stringResource(R.string.verify_wait_before_resend)
+                    is BannerState.Error -> stringResource(R.string.verify_email_not_verified)
+                    else -> stringResource(R.string.verify_email_not_verified)
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -94,7 +96,7 @@ fun VerificationBanner(
                             }
                         }
                     }) {
-                        Text("I've verified")
+                        Text(stringResource(R.string.verify_ive_verified))
                     }
                 }
                 is BannerState.RateLimited -> {}
@@ -111,7 +113,7 @@ fun VerificationBanner(
                                 }
                             }
                         }) {
-                            Text("Check")
+                            Text(stringResource(R.string.verify_check))
                         }
                         TextButton(onClick = {
                             scope.launch {
@@ -124,7 +126,7 @@ fun VerificationBanner(
                                 }
                             }
                         }) {
-                            Text("Resend")
+                            Text(stringResource(R.string.verify_resend))
                         }
                     }
                 }

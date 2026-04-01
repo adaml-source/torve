@@ -430,7 +430,7 @@ fun IntegrationsScreen(
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
             ) {
-                Text("Save & Connect")
+                Text(stringResource(R.string.integrations_save_connect))
             }
             Spacer(Modifier.height(8.dp))
 

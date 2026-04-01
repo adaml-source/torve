@@ -43,7 +43,7 @@ class BillingPriceDisplayTest {
     fun `store-returned price is used directly`() {
         val price = resolvePriceText(
             formattedPrice = "$9.99",
-            billingState = BillingManager.BillingState.Ready(formattedPrice = "$9.99"),
+            billingState = BillingManager.BillingState.Ready(offers = emptyList()) // was formattedPrice = "$9.99"),
         )
         assertEquals("$9.99", price)
     }
@@ -52,7 +52,7 @@ class BillingPriceDisplayTest {
     fun `localized euro price from store is used directly`() {
         val price = resolvePriceText(
             formattedPrice = "9,99 €",
-            billingState = BillingManager.BillingState.Ready(formattedPrice = "9,99 €"),
+            billingState = BillingManager.BillingState.Ready(offers = emptyList()) // was formattedPrice = "9,99 €"),
         )
         assertEquals("9,99 €", price)
     }
@@ -61,7 +61,7 @@ class BillingPriceDisplayTest {
     fun `localized yen price from store is used directly`() {
         val price = resolvePriceText(
             formattedPrice = "¥1,500",
-            billingState = BillingManager.BillingState.Ready(formattedPrice = "¥1,500"),
+            billingState = BillingManager.BillingState.Ready(offers = emptyList()) // was formattedPrice = "¥1,500"),
         )
         assertEquals("¥1,500", price)
     }
@@ -77,7 +77,7 @@ class BillingPriceDisplayTest {
     fun `null price with Ready state shows unavailable fallback`() {
         val price = resolvePriceText(
             formattedPrice = null,
-            billingState = BillingManager.BillingState.Ready(formattedPrice = null),
+            billingState = BillingManager.BillingState.Ready(offers = emptyList()) // was formattedPrice = null),
         )
         assertEquals("Price unavailable", price)
     }
@@ -133,18 +133,25 @@ class BillingPriceDisplayTest {
         }
     }
 
-    // ── BillingState.Ready price extraction ──
+    // ── BillingState.Ready offer extraction ──
 
     @Test
-    fun `getFormattedPrice returns price from Ready state`() {
-        val state = BillingManager.BillingState.Ready(formattedPrice = "R$49,90")
-        assertEquals("R$49,90", (state as BillingManager.BillingState.Ready).formattedPrice)
+    fun `Ready state with offers exposes them`() {
+        val offer = BillingManager.BillingOffer(
+            productType = BillingManager.ProductType.LIFETIME,
+            productId = "com.torve.pro.lifetime",
+            formattedPrice = "R$49,90",
+            billingDetails = "One-time purchase",
+        )
+        val state = BillingManager.BillingState.Ready(offers = listOf(offer))
+        assertEquals(1, state.offers.size)
+        assertEquals("R$49,90", state.offers.first().formattedPrice)
     }
 
     @Test
-    fun `getFormattedPrice returns null from Ready with null price`() {
-        val state = BillingManager.BillingState.Ready(formattedPrice = null)
-        assertNull((state as BillingManager.BillingState.Ready).formattedPrice)
+    fun `Ready state with empty offers list`() {
+        val state = BillingManager.BillingState.Ready(offers = emptyList())
+        assertTrue(state.offers.isEmpty())
     }
 
     // ── Product ID tests ──
@@ -171,7 +178,7 @@ class BillingPriceDisplayTest {
         val formattedPrice: String? = null // store returned nothing
         val price = resolvePriceText(
             formattedPrice = formattedPrice,
-            billingState = BillingManager.BillingState.Ready(formattedPrice = null),
+            billingState = BillingManager.BillingState.Ready(offers = emptyList()) // was formattedPrice = null),
         )
         // Must NOT contain any currency amount
         assertTrue(!price.matches(Regex(".*\\d+[.,]\\d+.*")))

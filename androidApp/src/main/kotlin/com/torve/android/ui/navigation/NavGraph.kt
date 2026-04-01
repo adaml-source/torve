@@ -83,6 +83,7 @@ import com.torve.android.ui.download.DownloadCatalogueScreen
 import com.torve.android.ui.download.DownloadScreen
 import com.torve.android.ui.download.DownloadedShowDetailScreen
 import com.torve.android.ui.channels.ChannelsScreen
+import com.torve.android.ui.legal.HelpScreen
 import com.torve.android.ui.legal.LegalScreen
 import com.torve.android.ui.legal.PrivacyPolicyScreen
 import com.torve.android.ui.mood.MoodMatcherScreen
@@ -273,7 +274,7 @@ fun TorveNavGraph(
     val requestLifetimeUnlock: (PremiumFeature) -> Unit = remember(navController) {
         { feature -> navController.navigateToLifetimeUnlock(feature) }
     }
-    val canAccessManageDevicesSurface = subscriptionState.hasEntitlement || !isLocked(PremiumFeature.DEVICE_LINKING)
+    val canAccessManageDevicesSurface = subscriptionState.isLoggedIn
 
     LaunchedEffect(syncState.blockedFeature, currentRoute) {
         val blockedFeature = syncState.blockedFeature ?: return@LaunchedEffect
@@ -680,20 +681,8 @@ fun TorveNavGraph(
                     onProfilesClick = { navController.navigate("profiles") },
                     onCalendarClick = { navController.navigate("calendar") },
                     onAccountClick = { navController.navigate("sync_account") },
-                    onDevicesClick = {
-                        if (isLocked(PremiumFeature.PHONE_PAIRING)) {
-                            requestLifetimeUnlock(PremiumFeature.PHONE_PAIRING)
-                        } else {
-                            navController.navigate("sync_devices")
-                        }
-                    },
-                    onManageDevicesClick = {
-                        if (!canAccessManageDevicesSurface) {
-                            requestLifetimeUnlock(PremiumFeature.DEVICE_LINKING)
-                        } else {
-                            navController.navigate("manage_devices")
-                        }
-                    },
+                    onDevicesClick = { navController.navigate("sync_devices") },
+                    onManageDevicesClick = { navController.navigate("manage_devices") },
                     onLoginClick = { navController.navigate("login") },
                     onPrivacyPolicyClick = { navController.navigate("legal/privacy") },
                     onTermsClick = { navController.navigate("legal/terms") },
@@ -775,20 +764,8 @@ fun TorveNavGraph(
                     onProfilesClick = { navController.navigate("profiles") },
                     onCalendarClick = { navController.navigate("calendar") },
                     onAccountClick = { navController.navigate("sync_account") },
-                    onDevicesClick = {
-                        if (isLocked(PremiumFeature.PHONE_PAIRING)) {
-                            requestLifetimeUnlock(PremiumFeature.PHONE_PAIRING)
-                        } else {
-                            navController.navigate("sync_devices")
-                        }
-                    },
-                    onManageDevicesClick = {
-                        if (!canAccessManageDevicesSurface) {
-                            requestLifetimeUnlock(PremiumFeature.DEVICE_LINKING)
-                        } else {
-                            navController.navigate("manage_devices")
-                        }
-                    },
+                    onDevicesClick = { navController.navigate("sync_devices") },
+                    onManageDevicesClick = { navController.navigate("manage_devices") },
                     onLoginClick = { navController.navigate("login") },
                     onPrivacyPolicyClick = { navController.navigate("legal/privacy") },
                     onTermsClick = { navController.navigate("legal/terms") },
@@ -1071,17 +1048,10 @@ fun TorveNavGraph(
                 )
             }
 
+            // Pairings — accessible to all authenticated users (individual
+            // pair-creation actions may still check premium at runtime).
             composable("sync_devices") {
-                if (isLocked(PremiumFeature.PHONE_PAIRING)) {
-                    PaywallScreen(
-                        onBack = { navController.popBackStack() },
-                        onDeviceLimitReached = { navController.navigate("device_limit_reached") },
-                        onManageDevices = { navController.navigate("manage_devices") },
-                        lockedFeature = PremiumFeature.PHONE_PAIRING,
-                    )
-                } else {
-                    DevicesScreen(onBack = { navController.popBackStack() })
-                }
+                DevicesScreen(onBack = { navController.popBackStack() })
             }
 
             // Paywall
@@ -1107,18 +1077,9 @@ fun TorveNavGraph(
                 )
             }
 
-            // Device Governance
+            // Device Governance — accessible to all authenticated users
             composable("manage_devices") {
-                if (!canAccessManageDevicesSurface) {
-                    PaywallScreen(
-                        onBack = { navController.popBackStack() },
-                        onDeviceLimitReached = { navController.navigate("device_limit_reached") },
-                        onManageDevices = { navController.navigate("manage_devices") },
-                        lockedFeature = PremiumFeature.DEVICE_LINKING,
-                    )
-                } else {
-                    ManageDevicesScreen(onBack = { navController.popBackStack() })
-                }
+                ManageDevicesScreen(onBack = { navController.popBackStack() })
             }
             composable("device_limit_reached") {
                 DeviceLimitReachedScreen(
@@ -1313,24 +1274,20 @@ fun TorveNavGraph(
                 }
             }
 
-            // Legal screens
+            // Legal screens — point to web with language; fall back to bundled assets.
             composable("legal/privacy") {
                 PrivacyPolicyScreen(onBack = { navController.popBackStack() })
             }
             composable("legal/terms") {
                 LegalScreen(
-                    title = "Terms & Conditions",
+                    title = stringResource(R.string.settings_terms),
                     assetFileName = "terms.html",
                     remoteUrl = "https://torve.app/terms.html",
                     onBack = { navController.popBackStack() },
                 )
             }
             composable("legal/help") {
-                LegalScreen(
-                    title = "Help & Documentation",
-                    assetFileName = "help.html",
-                    onBack = { navController.popBackStack() },
-                )
+                HelpScreen(onBack = { navController.popBackStack() })
             }
         }
 

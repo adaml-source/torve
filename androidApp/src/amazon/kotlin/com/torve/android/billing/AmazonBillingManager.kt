@@ -17,13 +17,16 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
 
     companion object {
         private const val TAG = "AmazonBilling"
-        private const val MONTHLY_PRODUCT_ID = "com.torve.pro.monthly"
+        private const val MONTHLY_SUBSCRIPTION_PARENT = "com.torve.pro.subscription"
+        private const val MONTHLY_SUBSCRIPTION_TERM = "com.torve.pro.monthly"
         private const val LIFETIME_PRODUCT_ID = "com.torve.pro.lifetime"
-        private const val LIFETIME_PRODUCT_ID_AMAZON = "com.torve.pro.lifetime.amazon"
+        private val MONTHLY_PRODUCT_IDS = listOf(
+            MONTHLY_SUBSCRIPTION_TERM,
+            MONTHLY_SUBSCRIPTION_PARENT,
+        )
         private val PRODUCT_IDS = setOf(
-            MONTHLY_PRODUCT_ID,
+            *MONTHLY_PRODUCT_IDS.toTypedArray(),
             LIFETIME_PRODUCT_ID,
-            LIFETIME_PRODUCT_ID_AMAZON,
         )
     }
 
@@ -68,7 +71,7 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
     private val productIdByType = mutableMapOf<BillingManager.ProductType, String>()
     private var cachedAmazonUserId: String? = null
     private var pendingAmazonPurchase: PendingAmazonPurchase? = null
-    private var isInitialized = false
+    @Volatile private var isInitialized = false
 
     private fun emitAmazonSuccess(receiptId: String, productId: String, amazonUserId: String) {
         _purchaseResult.value = BillingManager.PurchaseResult.Success(
@@ -98,16 +101,25 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
         if (isInitialized) return
         isInitialized = true
         _billingState.value = BillingManager.BillingState.Connecting
-        try {
-            PurchasingService.registerListener(context, this)
-            PurchasingService.getUserData()
-            PurchasingService.getProductData(PRODUCT_IDS)
-            logDebug { "Registered listener and requested product data for SKUs=$PRODUCT_IDS" }
-        } catch (e: Exception) {
-            logError(e) { "Failed to initialize Amazon IAP" }
-            _billingState.value = BillingManager.BillingState.Error(
-                e.message ?: "Failed to initialize Amazon IAP",
-            )
+        val init = Runnable {
+            try {
+                PurchasingService.registerListener(context, this)
+                // SDK 3.0.x may auto-fetch user data inside registerListener();
+                // a duplicate getUserData() call would throw "resource already registered".
+                runCatching { PurchasingService.getUserData() }
+                PurchasingService.getProductData(PRODUCT_IDS)
+                logDebug { "Registered listener and requested product data for SKUs=$PRODUCT_IDS" }
+            } catch (e: Exception) {
+                logError(e) { "Failed to initialize Amazon IAP" }
+                _billingState.value = BillingManager.BillingState.Error(
+                    e.message ?: "Failed to initialize Amazon IAP",
+                )
+            }
+        }
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            init.run()
+        } else {
+            android.os.Handler(android.os.Looper.getMainLooper()).post(init)
         }
     }
 
@@ -142,6 +154,10 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
         return offersByType[productType]
     }
 
+    private fun resolveMonthlySku(productData: Map<String, com.amazon.device.iap.model.Product>): String? {
+        return MONTHLY_PRODUCT_IDS.firstOrNull { sku -> productData.containsKey(sku) }
+    }
+
     override fun clearPurchaseResult() {
         _purchaseResult.value = null
     }
@@ -169,26 +185,24 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
     }
 
     override fun onProductDataResponse(response: ProductDataResponse) {
+        logDebug { "onProductDataResponse status=${response.requestStatus} keys=${response.productData?.keys} unavailable=${response.unavailableSkus}" }
         when (response.requestStatus) {
             ProductDataResponse.RequestStatus.SUCCESSFUL -> {
                 offersByType.clear()
                 productIdByType.clear()
 
-                response.productData[MONTHLY_PRODUCT_ID]?.let { product ->
+                resolveMonthlySku(response.productData)?.let { sku ->
+                    val product = response.productData[sku] ?: return@let
                     offersByType[BillingManager.ProductType.MONTHLY] = BillingManager.BillingOffer(
                         productType = BillingManager.ProductType.MONTHLY,
-                        productId = MONTHLY_PRODUCT_ID,
+                        productId = sku,
                         formattedPrice = product.price,
                         billingDetails = "Recurring billing",
                     )
-                    productIdByType[BillingManager.ProductType.MONTHLY] = MONTHLY_PRODUCT_ID
+                    productIdByType[BillingManager.ProductType.MONTHLY] = sku
                 }
 
-                val lifetimeSku = when {
-                    response.productData.containsKey(LIFETIME_PRODUCT_ID_AMAZON) -> LIFETIME_PRODUCT_ID_AMAZON
-                    response.productData.containsKey(LIFETIME_PRODUCT_ID) -> LIFETIME_PRODUCT_ID
-                    else -> null
-                }
+                val lifetimeSku = if (response.productData.containsKey(LIFETIME_PRODUCT_ID)) LIFETIME_PRODUCT_ID else null
                 lifetimeSku?.let { sku ->
                     val product = response.productData[sku] ?: return@let
                     offersByType[BillingManager.ProductType.LIFETIME] = BillingManager.BillingOffer(
@@ -200,21 +214,33 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
                     productIdByType[BillingManager.ProductType.LIFETIME] = sku
                 }
 
-                _billingState.value = BillingManager.BillingState.Ready(
-                    offers = offersByType.values.toList(),
-                )
+                val offers = offersByType.values.toList()
+                if (offers.isEmpty()) {
+                    val unavailableSkus = response.unavailableSkus.orEmpty().sorted()
+                    val message = if (unavailableSkus.isNotEmpty()) {
+                        "Amazon Appstore did not return product data for: ${unavailableSkus.joinToString(", ")}."
+                    } else {
+                        "Amazon Appstore returned no product data. Check Live App Testing and Amazon SKU setup."
+                    }
+                    logError { message }
+                    _billingState.value = BillingManager.BillingState.Error(message)
+                } else {
+                    _billingState.value = BillingManager.BillingState.Ready(offers = offers)
+                }
             }
 
             ProductDataResponse.RequestStatus.FAILED,
             ProductDataResponse.RequestStatus.NOT_SUPPORTED,
             -> {
-                logError { "Product data request failed: ${response.requestStatus}" }
-                _billingState.value = BillingManager.BillingState.Ready(offers = emptyList())
+                val message = "Amazon product data request failed: ${response.requestStatus}"
+                logError { message }
+                _billingState.value = BillingManager.BillingState.Error(message)
             }
 
             else -> {
-                logWarn { "Unknown product data status: ${response.requestStatus}" }
-                _billingState.value = BillingManager.BillingState.Ready(offers = emptyList())
+                val message = "Amazon product data returned unexpected status: ${response.requestStatus}"
+                logWarn { message }
+                _billingState.value = BillingManager.BillingState.Error(message)
             }
         }
     }
@@ -279,10 +305,8 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
                     }
                     .maxByOrNull { receipt ->
                         when (receipt.sku) {
-                            LIFETIME_PRODUCT_ID,
-                            LIFETIME_PRODUCT_ID_AMAZON,
-                            -> 2
-                            MONTHLY_PRODUCT_ID -> 1
+                            LIFETIME_PRODUCT_ID -> 2
+                            in MONTHLY_PRODUCT_IDS -> 1
                             else -> 0
                         }
                     }

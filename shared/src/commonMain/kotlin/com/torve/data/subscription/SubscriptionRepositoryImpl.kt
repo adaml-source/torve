@@ -135,15 +135,16 @@ class SubscriptionRepositoryImpl(
         return try {
             val accessState = deviceApi.getAccessState(token)
                 ?: return offlineBackendResult()
+            val entitlementRecords = accessState.premium?.entitlements?.map { entitlement ->
+                PremiumEntitlementRecord(
+                    key = entitlement.key,
+                    status = entitlement.status,
+                    sourceStore = entitlement.source_store,
+                    endsAt = entitlement.ends_at,
+                )
+            } ?: emptyList()
             val resolvedEntitlement = resolvePremiumEntitlement(
-                records = accessState.premium.entitlements.map { entitlement ->
-                    PremiumEntitlementRecord(
-                        key = entitlement.key,
-                        status = entitlement.status,
-                        sourceStore = entitlement.source_store,
-                        endsAt = entitlement.ends_at,
-                    )
-                },
+                records = entitlementRecords,
                 nowEpochMs = Clock.System.now().toEpochMilliseconds(),
             )
             val hasEntitlement = accessState.resolvedHasPremiumEntitlement() || resolvedEntitlement.hasEntitlement

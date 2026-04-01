@@ -45,7 +45,7 @@ internal data class SubscriptionEntitlementUiDecision(
 internal fun resolveSubscriptionEntitlementUiDecision(
     backendResult: BackendPremiumResult?,
 ): SubscriptionEntitlementUiDecision {
-    return when (backendResult) {
+    val decision = when (backendResult) {
         BackendPremiumResult.Active -> SubscriptionEntitlementUiDecision(
             isPro = true,
             hasEntitlement = true,
@@ -68,6 +68,8 @@ internal fun resolveSubscriptionEntitlementUiDecision(
             deviceCapReached = false,
         )
         is BackendPremiumResult.Offline -> SubscriptionEntitlementUiDecision(
+            // Fail-closed: offline users do not get premium UI access.
+            // The offline grace period is handled in the repository layer.
             isPro = false,
             hasEntitlement = false,
             isDeviceActivated = false,
@@ -82,6 +84,10 @@ internal fun resolveSubscriptionEntitlementUiDecision(
             deviceCapReached = false,
         )
     }
+    com.torve.platform.torveVerboseLog {
+        "ENTITLEMENT_DECISION: backend=${backendResult?.let { it::class.simpleName } ?: "null"} → isPro=${decision.isPro} hasEntitlement=${decision.hasEntitlement} isDeviceActivated=${decision.isDeviceActivated} deviceBlock=${decision.deviceBlockReason}"
+    }
+    return decision
 }
 
 class SubscriptionViewModel(
@@ -91,6 +97,7 @@ class SubscriptionViewModel(
     private val authClient: AuthClient,
     private val entitlementApi: EntitlementApi,
     private val prefsRepo: PreferencesRepository,
+    private val strings: PurchaseStringResolver = DefaultPurchaseStringResolver(),
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(SubscriptionUiState())
@@ -151,13 +158,11 @@ class SubscriptionViewModel(
     }
 
     private fun buildAmazonCallbackPendingStatus(message: String): PurchaseStatusMessage {
-        val summary = message.ifBlank {
-            "Amazon completed the purchase. Torve is waiting for account details to finish verification."
-        }
+        val summary = message.ifBlank { strings.amazonCallbackPendingDefault() }
         return purchaseStatus(
             kind = PurchaseStatusKind.PENDING_VERIFICATION,
-            title = "Purchase received",
-            message = "$summary If this does not finish shortly, choose Restore Purchase.",
+            title = strings.purchaseReceivedTitle(),
+            message = "$summary ${strings.purchaseReceivedSuffix()}",
             tone = PurchaseStatusTone.INFO,
         )
     }
@@ -165,8 +170,8 @@ class SubscriptionViewModel(
     private fun buildTemporaryVerificationStatus(showRetryVerification: Boolean): PurchaseStatusMessage {
         return purchaseStatus(
             kind = PurchaseStatusKind.VERIFICATION_FAILED_TEMPORARILY,
-            title = "Verification not finished",
-            message = "Amazon completed the purchase, but Torve could not confirm it yet. Choose Retry Verification or Restore Purchase.",
+            title = strings.verificationNotFinishedTitle(),
+            message = strings.verificationNotFinishedMessage(),
             tone = PurchaseStatusTone.ERROR,
             showRetryVerification = showRetryVerification,
         )
@@ -175,11 +180,11 @@ class SubscriptionViewModel(
     private fun buildBackendUnavailableStatus(showRetryVerification: Boolean): PurchaseStatusMessage {
         return purchaseStatus(
             kind = PurchaseStatusKind.BACKEND_UNAVAILABLE,
-            title = "Verification service unavailable",
+            title = strings.verificationUnavailableTitle(),
             message = if (showRetryVerification) {
-                "Your Amazon purchase info is saved, but Torve cannot reach the verification service right now. Choose Retry Verification again shortly."
+                strings.verificationUnavailableRetry()
             } else {
-                "Torve cannot reach the verification service right now. Please try Restore Purchase again shortly."
+                strings.verificationUnavailableRestore()
             },
             tone = PurchaseStatusTone.ERROR,
             showRetryVerification = showRetryVerification,
@@ -189,8 +194,8 @@ class SubscriptionViewModel(
     private fun buildRestoreSignInRequiredStatus(): PurchaseStatusMessage {
         return purchaseStatus(
             kind = PurchaseStatusKind.SIGN_IN_REQUIRED,
-            title = "Sign in required",
-            message = "Sign in to Torve before restoring Amazon Premium on this device.",
+            title = strings.signInRequiredTitle(),
+            message = strings.signInAmazonRestore(),
             tone = PurchaseStatusTone.INFO,
         )
     }
@@ -198,8 +203,8 @@ class SubscriptionViewModel(
     private fun buildPurchaseSignInRequiredStatus(storeLabel: String): PurchaseStatusMessage {
         return purchaseStatus(
             kind = PurchaseStatusKind.SIGN_IN_REQUIRED,
-            title = "Sign in required",
-            message = "Sign in to Torve before buying Premium through $storeLabel on this device.",
+            title = strings.signInRequiredTitle(),
+            message = strings.signInBuy(storeLabel),
             tone = PurchaseStatusTone.INFO,
         )
     }
@@ -207,8 +212,8 @@ class SubscriptionViewModel(
     private fun buildRestoreSignInRequiredStatus(storeLabel: String): PurchaseStatusMessage {
         return purchaseStatus(
             kind = PurchaseStatusKind.SIGN_IN_REQUIRED,
-            title = "Sign in required",
-            message = "Sign in to Torve before restoring Premium from $storeLabel on this device.",
+            title = strings.signInRequiredTitle(),
+            message = strings.signInRestore(storeLabel),
             tone = PurchaseStatusTone.INFO,
         )
     }
@@ -216,8 +221,8 @@ class SubscriptionViewModel(
     private fun buildPurchaseConflictStatus(): PurchaseStatusMessage {
         return purchaseStatus(
             kind = PurchaseStatusKind.PURCHASE_CONFLICT,
-            title = "Purchase linked to another account",
-            message = "This Amazon purchase is already linked to a different Torve account. Sign in with the original account or contact support.",
+            title = strings.purchaseConflictTitle(),
+            message = strings.purchaseConflictMessage(),
             tone = PurchaseStatusTone.ERROR,
         )
     }
@@ -225,19 +230,13 @@ class SubscriptionViewModel(
     private fun buildRestoreFoundNothingStatus(): PurchaseStatusMessage {
         return purchaseStatus(
             kind = PurchaseStatusKind.RESTORE_FOUND_NOTHING,
-            title = "Nothing to restore",
-            message = "No Amazon premium purchase was found for this Torve account.",
+            title = strings.nothingToRestoreTitle(),
+            message = strings.nothingToRestoreAmazon(),
             tone = PurchaseStatusTone.INFO,
         )
     }
 
-    private fun premiumPlanLabel(tier: SubscriptionTier): String {
-        return when (tier) {
-            SubscriptionTier.MONTHLY -> "Premium Monthly"
-            SubscriptionTier.LIFETIME -> "Premium Lifetime"
-            SubscriptionTier.FREE -> "Premium"
-        }
-    }
+    private fun premiumPlanLabel(tier: SubscriptionTier): String = strings.premiumPlanLabel(tier)
 
     private fun resolveEntitlement(records: List<PremiumEntitlementRecord>): ResolvedPremiumEntitlement {
         return resolvePremiumEntitlement(
@@ -253,18 +252,18 @@ class SubscriptionViewModel(
         val premiumLabel = premiumPlanLabel(resolvedEntitlement.tier)
         return purchaseStatus(
             kind = PurchaseStatusKind.VERIFIED,
-            title = "Purchase verified",
+            title = strings.purchaseVerifiedTitle(),
             message = if (deviceAccess) {
                 when (resolvedEntitlement.tier) {
                     SubscriptionTier.MONTHLY -> {
-                        val until = resolvedEntitlement.expiresAtEpochMs?.let { " until ${formatShortDate(it)}" }.orEmpty()
-                        "$premiumLabel is active on this device$until."
+                        val date = resolvedEntitlement.expiresAtEpochMs?.let { formatShortDate(it) }
+                        date?.let { strings.activeOnDeviceUntil(premiumLabel, it) }
+                            ?: strings.activeOnDevice(premiumLabel)
                     }
-                    SubscriptionTier.LIFETIME -> "$premiumLabel is active on this device."
-                    SubscriptionTier.FREE -> "Premium is active on this device."
+                    else -> strings.activeOnDevice(premiumLabel)
                 }
             } else {
-                "$premiumLabel is linked to this account, but this device still needs an available slot."
+                strings.needsDeviceSlot(premiumLabel)
             },
             tone = PurchaseStatusTone.SUCCESS,
         )
@@ -277,18 +276,18 @@ class SubscriptionViewModel(
         val premiumLabel = premiumPlanLabel(resolvedEntitlement.tier)
         return purchaseStatus(
             kind = PurchaseStatusKind.RESTORED,
-            title = "Purchase restored",
+            title = strings.purchaseRestoredTitle(),
             message = if (deviceAccess) {
                 when (resolvedEntitlement.tier) {
                     SubscriptionTier.MONTHLY -> {
-                        val until = resolvedEntitlement.expiresAtEpochMs?.let { " until ${formatShortDate(it)}" }.orEmpty()
-                        "$premiumLabel was restored and is active on this device$until."
+                        val date = resolvedEntitlement.expiresAtEpochMs?.let { formatShortDate(it) }
+                        date?.let { strings.restoredActiveOnDeviceUntil(premiumLabel, it) }
+                            ?: strings.restoredActiveOnDevice(premiumLabel)
                     }
-                    SubscriptionTier.LIFETIME -> "$premiumLabel was restored and is active on this device."
-                    SubscriptionTier.FREE -> "Premium was restored and is active on this device."
+                    else -> strings.restoredActiveOnDevice(premiumLabel)
                 }
             } else {
-                "$premiumLabel was restored for this account, but this device still needs an available slot."
+                strings.restoredNeedsDeviceSlot(premiumLabel)
             },
             tone = PurchaseStatusTone.SUCCESS,
         )
@@ -401,7 +400,7 @@ class SubscriptionViewModel(
                 it.copy(
                     pendingAmazonVerification = pending,
                     purchaseVerificationState = PurchaseVerificationState.PENDING,
-                    purchaseStatus = pending.toPurchaseStatusMessage(isLoggedIn),
+                    purchaseStatus = pending.toPurchaseStatusMessage(isLoggedIn, strings),
                 )
             }
             logPurchaseMilestone("pending_context_loaded", pending = pending)
@@ -489,7 +488,7 @@ class SubscriptionViewModel(
                     "SUBSCRIPTION_GATE decision backendResult=${backendResult?.let { it::class.simpleName } ?: "none"} isPro=${entitlementDecision.isPro} hasEntitlement=${entitlementDecision.hasEntitlement} isDeviceActivated=${entitlementDecision.isDeviceActivated}"
                 }
                 _state.update { current ->
-                    val pendingStatus = current.pendingAmazonVerification?.toPurchaseStatusMessage(isLoggedIn)
+                    val pendingStatus = current.pendingAmazonVerification?.toPurchaseStatusMessage(isLoggedIn, strings)
                     current.copy(
                         subscription = sub,
                         isPro = entitlementDecision.isPro,
@@ -588,7 +587,7 @@ class SubscriptionViewModel(
                 _state.update {
                     it.copy(
                         isPurchasing = false,
-                        error = "Google Play purchase could not be verified. Try Restore Purchase again after signing in.",
+                        error = strings.googleVerifyFailed(),
                         purchaseVerificationState = PurchaseVerificationState.FAILED,
                     )
                 }
@@ -655,7 +654,7 @@ class SubscriptionViewModel(
                 _state.update {
                     it.copy(
                         isPurchasing = false,
-                        error = "Apple purchase could not be verified. Try Restore Purchase again after signing in.",
+                        error = strings.appleVerifyFailed(),
                         purchaseVerificationState = PurchaseVerificationState.FAILED,
                     )
                 }
@@ -704,7 +703,7 @@ class SubscriptionViewModel(
 
             if (sanitizedReceipt.isBlank() || sanitizedUserId.isBlank()) {
                 val status = buildAmazonCallbackPendingStatus(
-                    "Amazon completed the purchase. Torve is waiting for account details to finish verification.",
+                    strings.amazonCallbackPendingDefault(),
                 )
                 logPurchaseMilestone("amazon_verify_waiting_for_account_data", detail = status.message)
                 _state.update {
@@ -730,10 +729,10 @@ class SubscriptionViewModel(
                     reason = previousPending?.reason ?: PendingAmazonVerificationReason.RETRY_VERIFICATION,
                     previous = previousPending,
                     incrementAttempt = false,
-                    lastMessage = "Sign in to Torve, then choose Retry Verification to finish Premium activation.",
+                    lastMessage = strings.pendingRetryMessage(),
                 )
                 persistPendingAmazonVerification(pending)
-                val status = pending.toPurchaseStatusMessage(isLoggedIn = false)
+                val status = pending.toPurchaseStatusMessage(isLoggedIn = false, strings = strings)
                 logPurchaseMilestone("amazon_verify_waiting_for_sign_in", detail = status.message, pending = pending)
                 _state.update {
                     it.copy(
@@ -877,7 +876,7 @@ class SubscriptionViewModel(
 
             val accessToken = authClient.getValidAccessToken()
             if (accessToken.isNullOrBlank()) {
-                val status = existingPending?.toPurchaseStatusMessage(isLoggedIn = false)
+                val status = existingPending?.toPurchaseStatusMessage(isLoggedIn = false, strings = strings)
                     ?: buildRestoreSignInRequiredStatus()
                 logPurchaseMilestone("amazon_restore_waiting_for_sign_in", detail = status.message, pending = existingPending)
                 _state.update {
@@ -943,7 +942,7 @@ class SubscriptionViewModel(
                         )
                     }
                 } else {
-                    val status = existingPending?.toPurchaseStatusMessage(isLoggedIn = true)
+                    val status = existingPending?.toPurchaseStatusMessage(isLoggedIn = true, strings = strings)
                         ?: buildRestoreFoundNothingStatus()
                     logPurchaseMilestone(
                         milestone = if (existingPending != null) {
@@ -989,7 +988,7 @@ class SubscriptionViewModel(
                         it.copy(
                             isLoading = false,
                             error = null,
-                            purchaseStatus = updatedPending.toPurchaseStatusMessage(isLoggedIn = true),
+                            purchaseStatus = updatedPending.toPurchaseStatusMessage(isLoggedIn = true, strings = strings),
                             purchaseVerificationState = PurchaseVerificationState.PENDING,
                             pendingAmazonVerification = updatedPending,
                         )
@@ -1083,8 +1082,8 @@ class SubscriptionViewModel(
                             error = null,
                             purchaseStatus = purchaseStatus(
                                 kind = PurchaseStatusKind.RESTORE_FOUND_NOTHING,
-                                title = "Nothing to restore",
-                                message = "No premium purchase was found for this Torve account on $storeLabel.",
+                                title = strings.nothingToRestoreTitle(),
+                                message = strings.nothingToRestoreStore(storeLabel),
                                 tone = PurchaseStatusTone.INFO,
                             ),
                             purchaseVerificationState = PurchaseVerificationState.FAILED,
@@ -1095,7 +1094,7 @@ class SubscriptionViewModel(
                 _state.update {
                     it.copy(
                         isLoading = false,
-                        error = "$storeLabel restore could not be completed. Try again after signing in.",
+                        error = strings.storeRestoreFailed(storeLabel),
                         purchaseVerificationState = PurchaseVerificationState.FAILED,
                     )
                 }
@@ -1119,7 +1118,7 @@ class SubscriptionViewModel(
             _state.update {
                 it.copy(
                     isPurchasing = false,
-                    error = "Local purchase activation is disabled. Verify purchases through the store restore flow.",
+                    error = strings.localPurchaseDisabled(),
                     purchaseVerificationState = PurchaseVerificationState.FAILED,
                 )
             }
@@ -1177,7 +1176,7 @@ class SubscriptionViewModel(
                             _state.update {
                                 it.copy(
                                     isRedeeming = false,
-                                    error = "Code accepted, but premium access must still be confirmed by the Torve backend.",
+                                    error = strings.rebateCodeBackendPending(),
                                 )
                             }
                         }
@@ -1196,11 +1195,11 @@ class SubscriptionViewModel(
         val isPro = _state.value.isPro
         if (!isPro) {
             val featureName = when (feature) {
-                PremiumFeature.STREAM_PLAYBACK -> "Stream Playback"
-                PremiumFeature.DOWNLOAD -> "Downloads"
-                PremiumFeature.CHANNELS -> "Channels"
-                PremiumFeature.MULTI_DEBRID -> "Multi-Cloud"
-                PremiumFeature.ADVANCED_FILTERS -> "Advanced Filters"
+                PremiumFeature.STREAM_PLAYBACK -> strings.featureStreamPlayback()
+                PremiumFeature.DOWNLOAD -> strings.featureDownloads()
+                PremiumFeature.CHANNELS -> strings.featureChannels()
+                PremiumFeature.MULTI_DEBRID -> strings.featureMultiCloud()
+                PremiumFeature.ADVANCED_FILTERS -> strings.featureAdvancedFilters()
             }
             _state.update { it.copy(showPaywall = true, paywallFeature = featureName) }
         }

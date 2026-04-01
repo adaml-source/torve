@@ -24,9 +24,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.torve.android.R
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Emerald
 import com.torve.android.ui.theme.Gunmetal
@@ -53,27 +55,26 @@ fun StorageModeExplainer(modifier: Modifier = Modifier) {
             .padding(12.dp),
     ) {
         Text(
-            text = "How credentials are stored",
+            text = stringResource(R.string.storage_how_title),
             style = MaterialTheme.typography.titleSmall,
             color = Torve.colors.textPrimary,
             fontWeight = FontWeight.SemiBold,
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            text = "Choose whether to save integrations to your Torve account or keep them only on this device.",
+            text = stringResource(R.string.storage_how_body),
             style = MaterialTheme.typography.bodySmall,
             color = Torve.colors.textSecondary,
         )
         Spacer(Modifier.height(6.dp))
         Text(
-            text = "• Torve account (recommended) — Restores this integration when you sign in on another device.\n" +
-                "• This device only — Keeps this integration local to this device and does not sync.",
+            text = stringResource(R.string.storage_how_options),
             style = MaterialTheme.typography.labelSmall,
             color = Torve.colors.textHint,
         )
         Spacer(Modifier.height(6.dp))
         Text(
-            text = "Passwords and API keys are not shown in full after saving.\nDevice-only credentials are cleared when you sign out.",
+            text = stringResource(R.string.storage_how_note),
             style = MaterialTheme.typography.labelSmall,
             color = Torve.colors.textHint,
         )
@@ -91,15 +92,15 @@ fun StorageModeSelector(
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
         Text(
-            text = "Store this integration",
+            text = stringResource(R.string.storage_store_label),
             style = MaterialTheme.typography.labelMedium,
             color = Torve.colors.textSecondary,
         )
         Spacer(Modifier.height(6.dp))
 
         StorageModeOption(
-            label = if (isSignedIn) "Save to Torve account (recommended)" else "Save to Torve account (sign in required)",
-            description = "Securely saves this integration to your Torve account and restores it on other devices.",
+            label = if (isSignedIn) stringResource(R.string.storage_account_recommended) else stringResource(R.string.storage_account_sign_in_required),
+            description = stringResource(R.string.storage_account_desc),
             selected = selected == IntegrationStorageMode.ACCOUNT,
             enabled = isSignedIn,
             onClick = { if (isSignedIn) onModeSelected(IntegrationStorageMode.ACCOUNT) },
@@ -108,8 +109,8 @@ fun StorageModeSelector(
         Spacer(Modifier.height(4.dp))
 
         StorageModeOption(
-            label = "Store on this device only",
-            description = "Keeps this integration only on this device. It will not be restored on other devices.",
+            label = stringResource(R.string.storage_device_only_label),
+            description = stringResource(R.string.storage_device_only_desc),
             selected = selected == IntegrationStorageMode.DEVICE_ONLY,
             enabled = true,
             onClick = { onModeSelected(IntegrationStorageMode.DEVICE_ONLY) },
@@ -117,7 +118,7 @@ fun StorageModeSelector(
 
         Spacer(Modifier.height(6.dp))
         Text(
-            text = "Passwords and API keys are not shown in full after saving.",
+            text = stringResource(R.string.storage_keys_note),
             style = MaterialTheme.typography.labelSmall,
             color = Torve.colors.textHint,
         )
@@ -177,8 +178,8 @@ fun StorageModeBadge(
     modifier: Modifier = Modifier,
 ) {
     val (text, bg, fg) = when (mode) {
-        IntegrationStorageMode.ACCOUNT -> Triple("Account", Amber.copy(alpha = 0.15f), Amber)
-        IntegrationStorageMode.DEVICE_ONLY -> Triple("Device only", Gunmetal, Torve.colors.textHint)
+        IntegrationStorageMode.ACCOUNT -> Triple(stringResource(R.string.storage_badge_account), Amber.copy(alpha = 0.15f), Amber)
+        IntegrationStorageMode.DEVICE_ONLY -> Triple(stringResource(R.string.storage_badge_device_only), Gunmetal, Torve.colors.textHint)
     }
     StatusBadgeText(text, bg, fg, modifier)
 }
@@ -189,10 +190,10 @@ fun RuntimeStateBadge(
     modifier: Modifier = Modifier,
 ) {
     val (text, bg, fg) = when (state) {
-        IntegrationRuntimeState.CONNECTED -> Triple("Connected", Emerald.copy(alpha = 0.15f), Emerald)
-        IntegrationRuntimeState.NEEDS_REAUTH -> Triple("Needs re-authentication", Ruby.copy(alpha = 0.15f), Ruby)
-        IntegrationRuntimeState.NEEDS_CREDENTIALS -> Triple("Needs credentials", Ruby.copy(alpha = 0.15f), Ruby)
-        IntegrationRuntimeState.NOT_CONFIGURED -> Triple("Not configured", Gunmetal, Torve.colors.textHint)
+        IntegrationRuntimeState.CONNECTED -> Triple(stringResource(R.string.storage_state_connected), Emerald.copy(alpha = 0.15f), Emerald)
+        IntegrationRuntimeState.NEEDS_REAUTH -> Triple(stringResource(R.string.storage_state_needs_reauth), Ruby.copy(alpha = 0.15f), Ruby)
+        IntegrationRuntimeState.NEEDS_CREDENTIALS -> Triple(stringResource(R.string.storage_state_needs_credentials), Ruby.copy(alpha = 0.15f), Ruby)
+        IntegrationRuntimeState.NOT_CONFIGURED -> Triple(stringResource(R.string.storage_state_not_configured), Gunmetal, Torve.colors.textHint)
     }
     StatusBadgeText(text, bg, fg, modifier)
 }
@@ -231,14 +232,14 @@ fun MissingCredentialsCard(
 ) {
     val (title, body, actionLabel) = when (runtimeState) {
         IntegrationRuntimeState.NEEDS_CREDENTIALS -> Triple(
-            "Credentials needed on this device",
-            "This integration is set to device-only storage. Enter credentials on this device to use it.",
-            "Enter credentials",
+            stringResource(R.string.storage_creds_needed_title),
+            stringResource(R.string.storage_creds_needed_body),
+            stringResource(R.string.storage_creds_enter),
         )
         IntegrationRuntimeState.NEEDS_REAUTH -> Triple(
-            "Re-authentication needed",
-            "This integration is saved to your Torve account but credentials could not be restored on this device. Please re-authenticate.",
-            "Re-authenticate",
+            stringResource(R.string.storage_reauth_title),
+            stringResource(R.string.storage_reauth_body),
+            stringResource(R.string.storage_reauth_action),
         )
         else -> return // Only render for actionable states
     }
@@ -270,7 +271,7 @@ fun MissingCredentialsCard(
                 Text(actionLabel, style = MaterialTheme.typography.labelMedium)
             }
             OutlinedButton(onClick = onChangeStorageMethod) {
-                Text("Change storage method", style = MaterialTheme.typography.labelMedium)
+                Text(stringResource(R.string.storage_change_method), style = MaterialTheme.typography.labelMedium)
             }
         }
     }
@@ -286,21 +287,21 @@ fun RemoveIntegrationDialog(
 ) {
     val body = when (storageMode) {
         IntegrationStorageMode.ACCOUNT ->
-            "This removes the saved integration from your Torve account and this device."
+            stringResource(R.string.storage_remove_account_body)
         IntegrationStorageMode.DEVICE_ONLY ->
-            "This removes the saved integration from this device."
+            stringResource(R.string.storage_remove_device_body)
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Remove integration?") },
+        title = { Text(stringResource(R.string.storage_remove_title)) },
         text = { Text(body) },
         confirmButton = {
             TextButton(onClick = onConfirm) {
-                Text("Remove", color = Ruby)
+                Text(stringResource(R.string.common_remove), color = Ruby)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel)) }
         },
     )
 }
@@ -313,14 +314,14 @@ fun ChangeStorageModeDialog(
 ) {
     val (title, body, confirmLabel) = when (currentMode) {
         IntegrationStorageMode.ACCOUNT -> Triple(
-            "Store only on this device?",
-            "This will remove the saved credentials from your Torve account. You may need to enter them again on this device.",
-            "Switch to device only",
+            stringResource(R.string.storage_switch_device_title),
+            stringResource(R.string.storage_switch_device_body),
+            stringResource(R.string.storage_switch_device_confirm),
         )
         IntegrationStorageMode.DEVICE_ONLY -> Triple(
-            "Save to Torve account?",
-            "This will securely save this integration to your Torve account so it can be restored on other devices.",
-            "Save to account",
+            stringResource(R.string.storage_switch_account_title),
+            stringResource(R.string.storage_switch_account_body),
+            stringResource(R.string.storage_switch_account_confirm),
         )
     }
     AlertDialog(
@@ -333,7 +334,7 @@ fun ChangeStorageModeDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel)) }
         },
     )
 }

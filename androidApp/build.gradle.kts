@@ -34,14 +34,14 @@ android {
         }
     }
 
-    val baseVersionCode = 13
+    val baseVersionCode = 20
 
     defaultConfig {
         applicationId = "com.torve.app"
         minSdk = 24
         targetSdk = 36
         versionCode = baseVersionCode
-        versionName = "1.0.4"
+        versionName = "1.0.11"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         multiDexEnabled = true
         multiDexKeepProguard = file("multidex-config.pro")
@@ -91,7 +91,7 @@ android {
 
     buildTypes {
         debug {
-            buildConfigField("Boolean", "ALLOW_DEBUG_PREMIUM_BYPASS", "true")
+            buildConfigField("Boolean", "ALLOW_DEBUG_PREMIUM_BYPASS", "false")
         }
         release {
             isMinifyEnabled = true
@@ -119,6 +119,8 @@ android {
 }
 
 kotlin {
+    jvmToolchain(17)
+
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }

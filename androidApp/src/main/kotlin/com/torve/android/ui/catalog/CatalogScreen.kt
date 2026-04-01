@@ -490,7 +490,7 @@ fun CatalogScreen(
                                 FilterChip(
                                     selected = isMovie,
                                     onClick = { onMediaTypeChange("movie") },
-                                    label = { Text("Movies", style = MaterialTheme.typography.labelMedium) },
+                                    label = { Text(stringResource(R.string.catalog_movies), style = MaterialTheme.typography.labelMedium) },
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = Amber,
                                         selectedLabelColor = Obsidian,
@@ -508,7 +508,7 @@ fun CatalogScreen(
                                 FilterChip(
                                     selected = !isMovie,
                                     onClick = { onMediaTypeChange("tv") },
-                                    label = { Text("TV", style = MaterialTheme.typography.labelMedium) },
+                                    label = { Text(stringResource(R.string.catalog_tv), style = MaterialTheme.typography.labelMedium) },
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = Amber,
                                         selectedLabelColor = Obsidian,

@@ -86,6 +86,9 @@ class SettingsViewModel(
      */
     var onIntegrationSaved: (suspend (String, Map<String, String>, String?) -> Unit)? = null
 
+    /** Notifies the TMDB client when the user changes the app language. Set by DI. */
+    var onLanguageChanged: ((AppLanguage) -> Unit)? = null
+
     companion object {
         const val KEY_DEBRID_PROVIDER = "debrid_provider"
         const val KEY_DEBRID_API_KEY = "debrid_api_key"
@@ -273,6 +276,7 @@ class SettingsViewModel(
             val appLanguage = prefsRepo.getString(KEY_APP_LANGUAGE)?.let {
                 try { AppLanguage.valueOf(it) } catch (_: Exception) { null }
             } ?: AppLanguage.ENGLISH
+            onLanguageChanged?.invoke(appLanguage)
 
             val autoPlayEnabled = prefsRepo.getString(KEY_AUTO_PLAY_ENABLED)?.toBooleanStrictOrNull() ?: true
             val autoPlayNextEpisodeEnabled = prefsRepo.getString(KEY_AUTO_PLAY_NEXT_EPISODE)?.toBooleanStrictOrNull() ?: true
@@ -1510,6 +1514,7 @@ class SettingsViewModel(
 
     fun setAppLanguage(language: AppLanguage) {
         _state.update { it.copy(appLanguage = language) }
+        onLanguageChanged?.invoke(language)
         scope.launch { prefsRepo.setString(KEY_APP_LANGUAGE, language.name) }
     }
 

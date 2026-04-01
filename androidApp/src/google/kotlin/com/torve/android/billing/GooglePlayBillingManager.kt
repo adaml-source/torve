@@ -20,7 +20,12 @@ class GooglePlayBillingManager(context: Context) : BillingManager, PurchasesUpda
 
     companion object {
         private const val MONTHLY_PRODUCT_ID = "com.torve.pro.monthly"
+        private const val MONTHLY_PRODUCT_ID_SUBSCRIPTION = "com.torve.pro.subscription"
         private const val LIFETIME_PRODUCT_ID = "com.torve.pro.lifetime"
+        private val MONTHLY_PRODUCT_IDS = listOf(
+            MONTHLY_PRODUCT_ID_SUBSCRIPTION,
+            MONTHLY_PRODUCT_ID,
+        )
     }
 
     private data class GooglePlayOffer(
@@ -45,7 +50,7 @@ class GooglePlayBillingManager(context: Context) : BillingManager, PurchasesUpda
     override val purchaseResult: StateFlow<BillingManager.PurchaseResult?> = _purchaseResult.asStateFlow()
 
     private val offersByType = mutableMapOf<BillingManager.ProductType, GooglePlayOffer>()
-    private var isInitialized = false
+    @Volatile private var isInitialized = false
 
     override fun initialize() {
         if (isInitialized) return
@@ -74,10 +79,12 @@ class GooglePlayBillingManager(context: Context) : BillingManager, PurchasesUpda
         val params = QueryProductDetailsParams.newBuilder()
             .setProductList(
                 listOf(
-                    QueryProductDetailsParams.Product.newBuilder()
-                        .setProductId(MONTHLY_PRODUCT_ID)
-                        .setProductType(BillingClient.ProductType.SUBS)
-                        .build(),
+                    *MONTHLY_PRODUCT_IDS.map { sku ->
+                        QueryProductDetailsParams.Product.newBuilder()
+                            .setProductId(sku)
+                            .setProductType(BillingClient.ProductType.SUBS)
+                            .build()
+                    }.toTypedArray(),
                     QueryProductDetailsParams.Product.newBuilder()
                         .setProductId(LIFETIME_PRODUCT_ID)
                         .setProductType(BillingClient.ProductType.INAPP)
@@ -95,7 +102,7 @@ class GooglePlayBillingManager(context: Context) : BillingManager, PurchasesUpda
             offersByType.clear()
             detailsList.forEach { details ->
                 when (details.productId) {
-                    MONTHLY_PRODUCT_ID -> {
+                    in MONTHLY_PRODUCT_IDS -> {
                         val offer = details.subscriptionOfferDetails
                             ?.firstOrNull()
                             ?.pricingPhases
@@ -103,7 +110,7 @@ class GooglePlayBillingManager(context: Context) : BillingManager, PurchasesUpda
                             ?.firstOrNull()
                         offersByType[BillingManager.ProductType.MONTHLY] = GooglePlayOffer(
                             productType = BillingManager.ProductType.MONTHLY,
-                            productId = MONTHLY_PRODUCT_ID,
+                            productId = details.productId,
                             billingProductType = BillingClient.ProductType.SUBS,
                             productDetails = details,
                             offerToken = details.subscriptionOfferDetails?.firstOrNull()?.offerToken,
@@ -174,7 +181,7 @@ class GooglePlayBillingManager(context: Context) : BillingManager, PurchasesUpda
 
             purchases.firstOrNull { purchase ->
                 purchase.purchaseState == Purchase.PurchaseState.PENDING &&
-                    purchase.products.any { it == MONTHLY_PRODUCT_ID || it == LIFETIME_PRODUCT_ID }
+                    purchase.products.any { it in MONTHLY_PRODUCT_IDS || it == LIFETIME_PRODUCT_ID }
             }?.let { pendingPurchase ->
                 _purchaseResult.value = BillingManager.PurchaseResult.Pending(
                     message = "Your Google Play purchase is still pending. Finish it in Google Play to unlock Premium.",
@@ -185,7 +192,7 @@ class GooglePlayBillingManager(context: Context) : BillingManager, PurchasesUpda
 
             purchases.firstOrNull { purchase ->
                 purchase.purchaseState == Purchase.PurchaseState.PURCHASED &&
-                    purchase.products.any { it == MONTHLY_PRODUCT_ID || it == LIFETIME_PRODUCT_ID }
+                    purchase.products.any { it in MONTHLY_PRODUCT_IDS || it == LIFETIME_PRODUCT_ID }
             }?.let { ownedPurchase ->
                 if (!ownedPurchase.isAcknowledged) {
                     acknowledgePurchase(ownedPurchase)

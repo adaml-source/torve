@@ -45,6 +45,7 @@ import coil3.compose.AsyncImage
 import com.torve.android.R
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Torve
+import com.torve.domain.model.canonicalEpgChannelKey
 import com.torve.domain.model.EnrichedChannel
 import com.torve.domain.model.EpgProgramme
 import com.torve.domain.model.Channel
@@ -61,6 +62,8 @@ fun ChannelsGuideContent(
     guideProgrammes: Map<String, List<EpgProgramme>>,
     isLoading: Boolean,
     onChannelPlay: (Channel) -> Unit,
+    canReplayProgramme: (Channel, EpgProgramme) -> Boolean = { _, _ -> false },
+    onProgrammePlay: ((Channel, EpgProgramme) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     if (isLoading) {
@@ -156,8 +159,17 @@ fun ChannelsGuideContent(
         // Channel rows with timeline
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             items(channels, key = { "guide_${it.channel.playlistId}_${it.channel.url}" }) { enriched ->
-                val chKey = enriched.channel.tvgId ?: "${enriched.channel.playlistId}_${enriched.channel.name}"
-                val progs = guideProgrammes[chKey] ?: emptyList()
+                val progs = remember(enriched.channel, guideProgrammes) {
+                    val chKey = canonicalEpgChannelKey(
+                        playlistId = enriched.channel.playlistId,
+                        channel = enriched.channel,
+                    )
+                    if (chKey.isNullOrBlank()) {
+                        emptyList()
+                    } else {
+                        guideProgrammes[chKey].orEmpty()
+                    }
+                }
 
                 Row(
                     modifier = Modifier
@@ -178,11 +190,14 @@ fun ChannelsGuideContent(
                             .horizontalScroll(scrollState),
                     ) {
                         ProgrammeTimeline(
+                            channel = enriched.channel,
                             programmes = progs,
                             baseTime = baseTime,
                             now = now,
                             totalWidth = timelineWidthDp,
                             onPlay = { onChannelPlay(enriched.channel) },
+                            canReplayProgramme = canReplayProgramme,
+                            onProgrammePlay = onProgrammePlay,
                         )
                     }
                 }
@@ -291,11 +306,14 @@ private fun ChannelCell(
 
 @Composable
 private fun ProgrammeTimeline(
+    channel: Channel,
     programmes: List<EpgProgramme>,
     baseTime: Long,
     now: Long,
     totalWidth: Dp,
     onPlay: () -> Unit,
+    canReplayProgramme: (Channel, EpgProgramme) -> Boolean,
+    onProgrammePlay: ((Channel, EpgProgramme) -> Unit)?,
 ) {
     val nowLineColor = Amber
     val density = LocalDensity.current
@@ -357,6 +375,7 @@ private fun ProgrammeTimeline(
 
                     val isCurrent = now in prog.startTime until prog.endTime
                     val isPast = prog.endTime <= now
+                    val canReplay = isPast && canReplayProgramme(channel, prog)
 
                     val bgColor = when {
                         isCurrent -> Amber.copy(alpha = 0.2f)
@@ -382,11 +401,28 @@ private fun ProgrammeTimeline(
                                     )
                                 }
                             }
-                            .clickable(onClick = onPlay)
+                            .clickable(
+                                onClick = {
+                                    if (canReplay && onProgrammePlay != null) {
+                                        onProgrammePlay(channel, prog)
+                                    } else {
+                                        onPlay()
+                                    }
+                                },
+                            )
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                         contentAlignment = Alignment.CenterStart,
                     ) {
                         Column {
+                            if (canReplay) {
+                                Text(
+                                    text = "Replay",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Amber,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                )
+                            }
                             Text(
                                 text = prog.title,
                                 style = MaterialTheme.typography.labelSmall,

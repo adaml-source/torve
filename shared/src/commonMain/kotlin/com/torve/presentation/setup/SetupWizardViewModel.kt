@@ -233,23 +233,27 @@ class SetupWizardViewModel(
 
     fun completeSetup() {
         scope.launch {
-            val s = _state.value
-            // Save quality preferences
-            prefsRepo.setString("stream_max_quality", s.maxQuality.name)
-            prefsRepo.setString("stream_cached_only", s.cachedOnly.toString())
-
-            // Save Trakt credentials if provided
-            if (s.traktClientId.isNotBlank()) {
-                prefsRepo.setString("trakt_client_id", s.traktClientId)
-                if (s.traktClientSecret.isNotBlank()) {
-                    integrationSecretStore.put(IntegrationSecretKey.TRAKT_CLIENT_SECRET, s.traktClientSecret)
-                    prefsRepo.remove("trakt_client_secret")
-                }
-            }
-
-            // Mark setup as complete
-            prefsRepo.setString(KEY_SETUP_COMPLETED, "true")
+            completeSetupNow()
         }
+    }
+
+    suspend fun completeSetupNow() {
+        val s = _state.value
+        // Save quality preferences
+        prefsRepo.setString("stream_max_quality", s.maxQuality.name)
+        prefsRepo.setString("stream_cached_only", s.cachedOnly.toString())
+
+        // Save Trakt credentials if provided
+        if (s.traktClientId.isNotBlank()) {
+            prefsRepo.setString("trakt_client_id", s.traktClientId)
+            if (s.traktClientSecret.isNotBlank()) {
+                integrationSecretStore.put(IntegrationSecretKey.TRAKT_CLIENT_SECRET, s.traktClientSecret)
+                prefsRepo.remove("trakt_client_secret")
+            }
+        }
+
+        // Mark setup as complete
+        prefsRepo.setString(KEY_SETUP_COMPLETED, "true")
     }
 
     suspend fun isSetupCompleted(): Boolean {

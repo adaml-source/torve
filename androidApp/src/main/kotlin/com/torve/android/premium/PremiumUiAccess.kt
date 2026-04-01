@@ -6,29 +6,20 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import com.torve.domain.repository.PreferencesRepository
 import com.torve.domain.model.SubscriptionTier
-import org.koin.compose.koinInject
 
 @Composable
 fun rememberEffectivePremiumAccessTier(
     subscriptionTier: SubscriptionTier?,
     subscriptionIsPro: Boolean,
 ): AccessTier {
-    val preferencesRepository: PreferencesRepository = koinInject()
     val debugBypassEnabled by produceState(
         initialValue = false,
         key1 = subscriptionTier,
         key2 = subscriptionIsPro,
     ) {
-        value = if (!com.torve.android.BuildConfig.DEBUG) {
-            false
-        } else if (com.torve.android.BuildConfig.ALLOW_DEBUG_PREMIUM_BYPASS) {
-            true
-        } else {
-            preferencesRepository.getString(PremiumActionGate.KEY_DEBUG_PREMIUM_BYPASS_ENABLED)
-                ?.toBooleanStrictOrNull() == true
-        }
+        value = com.torve.android.BuildConfig.DEBUG &&
+            com.torve.android.BuildConfig.ALLOW_DEBUG_PREMIUM_BYPASS
     }
     val effectiveTier = when {
         debugBypassEnabled -> AccessTier.LIFETIME

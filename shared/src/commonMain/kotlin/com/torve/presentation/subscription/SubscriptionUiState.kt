@@ -61,33 +61,36 @@ data class PendingAmazonVerification(
     val lastMessage: String? = null,
 )
 
-fun PendingAmazonVerification.toPurchaseStatusMessage(isLoggedIn: Boolean): PurchaseStatusMessage {
+fun PendingAmazonVerification.toPurchaseStatusMessage(
+    isLoggedIn: Boolean,
+    strings: PurchaseStringResolver = DefaultPurchaseStringResolver(),
+): PurchaseStatusMessage {
     return when {
         !isLoggedIn -> PurchaseStatusMessage(
             kind = PurchaseStatusKind.SIGN_IN_REQUIRED,
-            title = "Sign in required",
-            message = "Your Amazon purchase is saved. Sign in to Torve, then choose Retry Verification to finish Premium activation.",
+            title = strings.signInRequiredTitle(),
+            message = strings.pendingSignInMessage(),
             tone = PurchaseStatusTone.INFO,
             showRetryVerification = true,
         )
         reason == PendingAmazonVerificationReason.BACKEND_UNAVAILABLE -> PurchaseStatusMessage(
             kind = PurchaseStatusKind.BACKEND_UNAVAILABLE,
-            title = "Verification service unavailable",
-            message = "Your Amazon purchase info is saved, but Torve cannot reach the verification service right now. Choose Retry Verification again shortly.",
+            title = strings.verificationUnavailableTitle(),
+            message = strings.pendingBackendUnavailableMessage(),
             tone = PurchaseStatusTone.ERROR,
             showRetryVerification = true,
         )
         reason == PendingAmazonVerificationReason.TEMPORARY_FAILURE -> PurchaseStatusMessage(
             kind = PurchaseStatusKind.VERIFICATION_FAILED_TEMPORARILY,
-            title = "Verification not finished",
-            message = "Amazon completed the purchase, but Torve could not confirm it yet. Choose Retry Verification or Restore Purchase.",
+            title = strings.verificationNotFinishedTitle(),
+            message = strings.pendingVerificationNotFinishedMessage(),
             tone = PurchaseStatusTone.ERROR,
             showRetryVerification = true,
         )
         else -> PurchaseStatusMessage(
             kind = PurchaseStatusKind.PENDING_VERIFICATION,
-            title = "Verification pending",
-            message = "Your Amazon purchase is waiting to be verified. Choose Retry Verification to finish Premium activation.",
+            title = strings.verificationPendingTitle(),
+            message = strings.pendingVerificationWaitingMessage(),
             tone = PurchaseStatusTone.INFO,
             showRetryVerification = true,
         )
@@ -140,52 +143,43 @@ data class SubscriptionAccessPresentation(
     val deviceBlockReason: String? = null,
 )
 
-fun SubscriptionUiState.accessPresentation(): SubscriptionAccessPresentation {
+fun SubscriptionUiState.accessPresentation(
+    strings: PurchaseStringResolver = DefaultPurchaseStringResolver(),
+): SubscriptionAccessPresentation {
     val tier = subscription?.tier ?: SubscriptionTier.FREE
     val hasPremiumEntitlement = hasEntitlement
     val deviceActivated = isDeviceActivated
     val isUsablePremiumOnThisDevice = isPro && hasPremiumEntitlement && deviceActivated
     val isPremiumButBlockedOnThisDevice = hasPremiumEntitlement && !deviceActivated
     val expiryText = subscription?.expiresAt?.let(::formatSubscriptionAccessDate)
-    val premiumName = when (tier) {
-        SubscriptionTier.MONTHLY -> "Premium Monthly"
-        SubscriptionTier.LIFETIME -> "Premium Lifetime"
-        SubscriptionTier.FREE -> "Premium"
-    }
-    val blockMessage = deviceBlockMessage(deviceBlockReason)
+    val blockMessage = deviceBlockMessage(deviceBlockReason, strings)
 
     val accessStatusLabel = when {
         isUsablePremiumOnThisDevice && tier == SubscriptionTier.MONTHLY ->
-            expiryText?.let { "Premium Monthly active until $it" } ?: "Premium Monthly active"
-        isUsablePremiumOnThisDevice && tier == SubscriptionTier.LIFETIME -> "Premium Lifetime active"
-        isUsablePremiumOnThisDevice -> "Premium active"
-        isPremiumButBlockedOnThisDevice && tier == SubscriptionTier.MONTHLY -> "Premium Monthly on account"
-        isPremiumButBlockedOnThisDevice && tier == SubscriptionTier.LIFETIME -> "Premium Lifetime on account"
-        isPremiumButBlockedOnThisDevice -> "Premium active on account"
-        else -> "Free"
+            expiryText?.let { strings.monthlyActiveUntil(it) } ?: strings.monthlyActive()
+        isUsablePremiumOnThisDevice && tier == SubscriptionTier.LIFETIME -> strings.lifetimeActive()
+        isUsablePremiumOnThisDevice -> strings.premiumActive()
+        isPremiumButBlockedOnThisDevice && tier == SubscriptionTier.MONTHLY -> strings.monthlyOnAccount()
+        isPremiumButBlockedOnThisDevice && tier == SubscriptionTier.LIFETIME -> strings.lifetimeOnAccount()
+        isPremiumButBlockedOnThisDevice -> strings.premiumOnAccount()
+        else -> strings.freeLabel()
     }
 
     val accessHelperText = when {
         isUsablePremiumOnThisDevice && tier == SubscriptionTier.MONTHLY ->
-            expiryText?.let { "Premium Monthly is active on this device until $it." }
-                ?: "Premium Monthly is active on this device."
+            strings.monthlyActiveOnDevice(expiryText)
         isUsablePremiumOnThisDevice && tier == SubscriptionTier.LIFETIME ->
-            "Premium Lifetime is active on this device."
+            strings.lifetimeActiveOnDevice()
         isUsablePremiumOnThisDevice ->
-            "Premium is active on this device."
+            strings.premiumActiveOnDevice()
         isPremiumButBlockedOnThisDevice && tier == SubscriptionTier.MONTHLY ->
-            buildString {
-                append("Premium Monthly is active on your account")
-                expiryText?.let { append(" until $it") }
-                append(". ")
-                append(blockMessage)
-            }
+            "${strings.monthlyOnAccountHelper(expiryText)} $blockMessage"
         isPremiumButBlockedOnThisDevice && tier == SubscriptionTier.LIFETIME ->
-            "Premium Lifetime is active on your account. $blockMessage"
+            strings.lifetimeOnAccountHelper(blockMessage)
         isPremiumButBlockedOnThisDevice ->
-            "Premium is active on your account. $blockMessage"
+            strings.premiumOnAccountHelper(blockMessage)
         else ->
-            "Torve is free to download. Choose monthly or lifetime access."
+            strings.freeHelperText()
     }
 
     return SubscriptionAccessPresentation(
@@ -228,17 +222,13 @@ fun SubscriptionUiState.recommendedPremiumActions(): List<PremiumSurfaceAction> 
     return actions.distinct()
 }
 
-private fun deviceBlockMessage(reason: String?): String {
+private fun deviceBlockMessage(reason: String?, strings: PurchaseStringResolver): String {
     return when (reason?.trim()?.lowercase()) {
         "device_cap_reached",
         "activation_slot_exhausted",
         "no_activation_slots",
-        -> "This device needs an available activation slot."
-        "device_not_activated",
-        "device_removed",
-        "activation_required",
-        -> "This device needs activation."
-        else -> "This device needs activation."
+        -> strings.deviceNeedsSlot()
+        else -> strings.deviceNeedsActivation()
     }
 }
 

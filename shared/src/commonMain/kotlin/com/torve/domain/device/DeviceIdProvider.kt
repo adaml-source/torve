@@ -5,7 +5,7 @@ import com.torve.data.auth.DeviceRegistrationDto
 interface DeviceIdProvider {
     fun getDeviceId(): String
     fun getDeviceName(): String = "Unknown Device"
-    fun getDeviceType(): String = "phone"
+    fun getDeviceType(): String = DeviceType.PHONE.wireValue
     fun getPlatform(): String = "android"
     fun getAppVersion(): String? = null
 
