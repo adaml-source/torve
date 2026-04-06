@@ -2155,7 +2155,10 @@ internal fun TvSettingsScreen(
                 )
             }
             // Show account settings sync error (not pairing transport errors)
-            accountSettingsState.lastError?.let { settingsSyncError ->
+            accountSettingsState.lastError?.let { errorKey ->
+                val resolvedSyncError = com.torve.android.error.resolveErrorKey(context, errorKey)
+                    ?: com.torve.presentation.error.defaultUserFacingMessages[errorKey]
+                    ?: errorKey
                 item(key = "account_sync_error") {
                     val requester = rememberRegisteredTvSettingsFocusRequester(
                         controller = settingsFocusController,
@@ -2164,7 +2167,7 @@ internal fun TvSettingsScreen(
                     )
                     TvSettingCard(
                         title = stringResource(R.string.tv_settings_sync_error),
-                        subtitle = settingsSyncError,
+                        subtitle = resolvedSyncError,
                         modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                         focusRequester = requester,
                         onFocused = {
@@ -2764,6 +2767,13 @@ internal fun TvSettingsScreen(
                                         ?: "Verification is already pending. Choose Retry Verification or Restore Purchase.",
                                     NotificationType.INFO,
                                 )
+                            } else if (authUser != null) {
+                                activity?.let {
+                                    billingManager.launchPurchase(
+                                        it,
+                                        com.torve.android.billing.BillingManager.ProductType.MONTHLY,
+                                    )
+                                }
                             } else {
                                 subscriptionViewModel.requireAccountForPurchase(purchaseStoreLabel) {
                                     activity?.let {
@@ -2813,6 +2823,13 @@ internal fun TvSettingsScreen(
                                         ?: "Verification is already pending. Choose Retry Verification or Restore Purchase.",
                                     NotificationType.INFO,
                                 )
+                            } else if (authUser != null) {
+                                activity?.let {
+                                    billingManager.launchPurchase(
+                                        it,
+                                        com.torve.android.billing.BillingManager.ProductType.LIFETIME,
+                                    )
+                                }
                             } else {
                                 subscriptionViewModel.requireAccountForPurchase(purchaseStoreLabel) {
                                     activity?.let {

@@ -55,10 +55,20 @@ import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.RatingSource
+import com.torve.domain.model.deriveProvidersToRender
 import com.torve.domain.repository.MetadataRepository
+import com.torve.android.ui.components.getRatingValue
+import com.torve.presentation.settings.SettingsViewModel
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.koin.compose.koinInject
+
+/** App-lifetime enriched item cache — survives all recomposition/navigation.
+ *  SnapshotStateMap so Compose observes reads and recomposes when entries are added. */
+private val enrichedItemCache = androidx.compose.runtime.mutableStateMapOf<String, MediaItem>()
 
 /**
  * Left-side contextual info panel for TV browsing.
@@ -74,50 +84,59 @@ fun TvFocusDetailsPanel(
     logoLookupResolved: Boolean = false,
 ) {
     val metadataRepo: MetadataRepository = koinInject()
+    val ratingsEnricher: com.torve.data.mdblist.RatingsEnricher = koinInject()
+    val prefsRepo: com.torve.domain.repository.PreferencesRepository = koinInject()
+    val secretStore: com.torve.domain.integrations.IntegrationSecretStore = koinInject()
     var lastResolvedLogoUrl by remember { mutableStateOf<String?>(null) }
-    val castCache = remember { mutableStateMapOf<String, List<CastMember>>() }
-    var resolvedCast by remember { mutableStateOf<List<CastMember>>(emptyList()) }
+    val enrichScope = rememberCoroutineScope()
 
     LaunchedEffect(focusedItem?.logoUrl) {
         val resolved = focusedItem?.logoUrl?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
         lastResolvedLogoUrl = resolved
     }
 
+    // Per-focus enrichment: calls enrichSingle which checks SQLite cache first (instant
+    // for items enriched by HomeViewModel or rail-level enrichment). For cache misses,
+    // does network calls. Results stored in static enrichedItemCache so returning to an
+    // item is always instant.
     LaunchedEffect(focusedItem?.let { "${it.type}:${it.tmdbId ?: it.id}" }) {
-        val item = focusedItem
-        if (item == null) {
-            resolvedCast = emptyList()
-            return@LaunchedEffect
-        }
-
+        val item = focusedItem ?: return@LaunchedEffect
         val itemKey = "${item.type}:${item.tmdbId ?: item.id}"
-        val immediateCast = item.cast.take(8)
-        if (immediateCast.isNotEmpty()) {
-            castCache[itemKey] = immediateCast
-            resolvedCast = immediateCast
-            return@LaunchedEffect
-        }
+        val tmdbId = item.tmdbId ?: return@LaunchedEffect
+        if (enrichedItemCache.containsKey(itemKey)) return@LaunchedEffect
 
-        castCache[itemKey]?.let { cached ->
-            resolvedCast = cached
-            return@LaunchedEffect
-        }
-
-        val tmdbId = item.tmdbId
-        if (tmdbId == null) {
-            castCache[itemKey] = emptyList()
-            resolvedCast = emptyList()
-            return@LaunchedEffect
-        }
-
-        val mediaType = if (item.type == MediaType.MOVIE) "movie" else "tv"
-        val fetchedCast = withContext(Dispatchers.IO) {
-            runCatching { metadataRepo.getDetail(mediaType, tmdbId).cast.take(8) }
-                .getOrDefault(emptyList())
-        }
-        castCache[itemKey] = fetchedCast
-        if (focusedItem?.let { "${it.type}:${it.tmdbId ?: it.id}" } == itemKey) {
-            resolvedCast = fetchedCast
+        enrichScope.launch {
+            try {
+                // Fetch TMDB detail for imdbId + cast + overview
+                val mediaType = if (item.type == MediaType.MOVIE) "movie" else "tv"
+                val detail = withContext(Dispatchers.IO) {
+                    runCatching { metadataRepo.getDetail(mediaType, tmdbId) }.getOrNull()
+                }
+                val itemWithDetail = item.copy(
+                    imdbId = detail?.imdbId ?: item.imdbId,
+                    overview = item.overview ?: detail?.overview,
+                    genres = item.genres.ifEmpty { detail?.genres ?: emptyList() },
+                    year = item.year ?: detail?.year,
+                    runtime = item.runtime ?: detail?.runtime,
+                    cast = if (item.cast.isNotEmpty()) item.cast else detail?.cast?.take(8) ?: emptyList(),
+                )
+                // Enrich ratings via SQLite cache or network
+                val apiKey = withContext(Dispatchers.IO) {
+                    runCatching {
+                        secretStore.get(com.torve.domain.integrations.IntegrationSecretKey.MDBLIST_API_KEY)
+                            ?: prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY)
+                            ?: com.torve.data.mdblist.MdbListApi.DEFAULT_API_KEY
+                    }.getOrDefault(com.torve.data.mdblist.MdbListApi.DEFAULT_API_KEY)
+                }
+                val enriched = withContext(Dispatchers.IO) {
+                    runCatching { ratingsEnricher.enrichSingle(itemWithDetail, apiKey) }.getOrNull()
+                }
+                val result = enriched ?: itemWithDetail
+                enrichedItemCache[itemKey] = result
+            } catch (_: Exception) {
+                // Cache raw item so we don't retry failed enrichments endlessly
+                enrichedItemCache[itemKey] = item
+            }
         }
     }
 
@@ -137,19 +156,37 @@ fun TvFocusDetailsPanel(
         AnimatedContent(
             targetState = focusedItem,
             transitionSpec = {
-                fadeIn(tween(200)) togetherWith fadeOut(tween(150))
+                fadeIn(tween(50)) togetherWith fadeOut(tween(30))
             },
             contentKey = { it?.let { "${it.type}:${it.tmdbId ?: it.id}" } },
             label = "focusPanel",
         ) { item ->
             if (item != null) {
+                // Read enriched data directly from the static cache on every render.
+                // enrichVersion is read to trigger recomposition when new data arrives.
+                val itemKey = "${item.type}:${item.tmdbId ?: item.id}"
+                val cached = enrichedItemCache[itemKey]
+                val base = if (cached != null) {
+                    item.copy(
+                        ratings = item.ratings ?: cached.ratings,
+                        overview = item.overview ?: cached.overview,
+                        genres = item.genres.ifEmpty { cached.genres },
+                        year = item.year ?: cached.year,
+                        runtime = item.runtime ?: cached.runtime,
+                        cast = if (item.cast.isNotEmpty()) item.cast else cached.cast,
+                    )
+                } else item
+                val displayItem = base.let { b ->
+                    val latestLogo = item.logoUrl?.takeIf { it.isNotBlank() } ?: b.logoUrl
+                    if (latestLogo != b.logoUrl) b.copy(logoUrl = latestLogo) else b
+                }
                 FocusPanelContent(
-                    item = item,
+                    item = displayItem,
                     progress = progress,
                     logoLookupInFlight = logoLookupInFlight,
                     logoLookupResolved = logoLookupResolved,
                     retainedLogoUrl = lastResolvedLogoUrl,
-                    cast = resolvedCast,
+                    cast = displayItem.cast.take(8),
                 )
             } else {
                 Box(Modifier.fillMaxSize())
@@ -215,14 +252,17 @@ private fun FocusPanelContent(
             }
         }
 
-        // 4. Ratings row
+        // 4. Ratings row — respects user-configured providers and order
+        val settingsViewModel: SettingsViewModel = koinInject()
+        val settingsState by settingsViewModel.state.collectAsState()
+        val ratingPrefs = settingsState.ratingPrefs
         val ratings = item.ratings
         if (ratings != null && hasAnyRating(ratings)) {
             Spacer(Modifier.height(14.dp))
-            RatingsRow(ratings)
+            RatingsRow(ratings, ratingPrefs)
         } else if (item.rating != null && item.rating!! > 0) {
             Spacer(Modifier.height(14.dp))
-            FallbackRatingRow(item.rating!!)
+            FallbackRatingRow(item.rating!!, ratingPrefs)
         }
 
         // 5. Synopsis — TV-readable size, expanded with poster removed
@@ -307,6 +347,16 @@ private fun ClearlogoOrTitle(
 
 @Composable
 private fun FallbackTextTitle(title: String, minHeight: androidx.compose.ui.unit.Dp) {
+    // Resolve the font style once outside AnimatedContent's transient scope so
+    // Compose doesn't re-resolve the bundled font on every new target state.
+    val resolvedStyle = remember {
+        androidx.compose.ui.text.TextStyle(
+            fontFamily = com.torve.android.ui.theme.JakartaSans,
+            fontWeight = FontWeight.Bold,
+            fontSize = 18.sp,
+            lineHeight = 28.sp,
+        )
+    }
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -315,10 +365,7 @@ private fun FallbackTextTitle(title: String, minHeight: androidx.compose.ui.unit
     ) {
         Text(
             text = title,
-            style = MaterialTheme.typography.headlineSmall.copy(
-                fontWeight = FontWeight.Bold,
-                lineHeight = 28.sp,
-            ),
+            style = resolvedStyle,
             color = Snow,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
@@ -463,33 +510,31 @@ private fun hasAnyRating(r: MediaRatings): Boolean {
 }
 
 @Composable
-private fun RatingsRow(ratings: MediaRatings) {
+private fun RatingsRow(
+    ratings: MediaRatings,
+    prefs: com.torve.domain.model.RatingDisplayPrefs = com.torve.domain.model.RatingDisplayPrefs(),
+) {
+    val enabledProviders = prefs.enabledProviders.filterNot {
+        it == RatingSource.TORVE && !prefs.showTorveScoreOnCards
+    }
+    val providers = deriveProvidersToRender(
+        enabledProviders = enabledProviders,
+        providerOrder = prefs.providerOrder,
+        maxRatingsOnCard = prefs.maxRatingsOnCard,
+    )
+    val pills = providers.mapNotNull { source ->
+        val value = getRatingValue(source, ratings, prefs)
+        if (value != null) source to value else null
+    }
+    if (pills.isEmpty()) return
     Row(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ratings.imdbScore?.let { score ->
+        pills.forEach { (source, value) ->
             RatingBadge(
-                iconRes = ratingSourceIconRes(RatingSource.IMDB, ratings),
-                value = "%.1f".format(score),
-            )
-        }
-        ratings.rottenTomatoesScore?.let { score ->
-            RatingBadge(
-                iconRes = ratingSourceIconRes(RatingSource.ROTTEN_TOMATOES, ratings),
-                value = "${score}%",
-            )
-        }
-        ratings.rtAudienceScore?.let { score ->
-            RatingBadge(
-                iconRes = ratingSourceIconRes(RatingSource.RT_AUDIENCE, ratings),
-                value = "${score}%",
-            )
-        }
-        ratings.tmdbScore?.let { score ->
-            RatingBadge(
-                iconRes = ratingSourceIconRes(RatingSource.TMDB, ratings),
-                value = "%.1f".format(score),
+                iconRes = ratingSourceIconRes(source, ratings),
+                value = value,
             )
         }
     }
@@ -524,7 +569,12 @@ private fun RatingBadge(iconRes: Int?, value: String) {
 }
 
 @Composable
-private fun FallbackRatingRow(tmdbRating: Double) {
+private fun FallbackRatingRow(
+    tmdbRating: Double,
+    prefs: com.torve.domain.model.RatingDisplayPrefs = com.torve.domain.model.RatingDisplayPrefs(),
+) {
+    // Only show the TMDB fallback if TMDB is enabled in preferences
+    if (!prefs.enabledProviders.contains(RatingSource.TMDB)) return
     Row(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,

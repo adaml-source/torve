@@ -1,5 +1,6 @@
 package com.torve.presentation.subscription
 
+import com.torve.presentation.error.defaultMessage
 import com.torve.data.auth.AuthClient
 import com.torve.data.entitlement.EntitlementApi
 import com.torve.data.subscription.RebateCodeApi
@@ -507,6 +508,7 @@ class SubscriptionViewModel(
                         purchaseStatus = when {
                             pendingStatus != null -> pendingStatus
                             entitlementDecision.isPro && shouldClearPurchaseStatusForActiveSubscription(current.purchaseStatus) -> null
+                            isLoggedIn && current.purchaseStatus?.kind == PurchaseStatusKind.SIGN_IN_REQUIRED -> null
                             else -> current.purchaseStatus
                         },
                     )
@@ -515,7 +517,7 @@ class SubscriptionViewModel(
                     "SUBSCRIPTION: Entitlement refresh result isPro=${entitlementDecision.isPro} hasEntitlement=${entitlementDecision.hasEntitlement} isDeviceActivated=${entitlementDecision.isDeviceActivated} deviceBlockReason=${entitlementDecision.deviceBlockReason} loggedIn=$isLoggedIn"
                 }
             } catch (e: Exception) {
-                _state.update { it.copy(isLoading = false, error = e.message) }
+                _state.update { it.copy(isLoading = false, error = com.torve.presentation.error.UserFacingError.UNKNOWN.defaultMessage()) }
                 torveVerboseLog { "SUBSCRIPTION: Entitlement refresh failed: ${e.message ?: "unknown"}" }
             }
         }
@@ -1186,7 +1188,8 @@ class SubscriptionViewModel(
                     }
                 }
             } catch (e: Exception) {
-                _state.update { it.copy(isRedeeming = false, error = e.message) }
+                torveVerboseLog { "SUBSCRIPTION: Rebate redemption failed: ${e.message}" }
+                _state.update { it.copy(isRedeeming = false, error = com.torve.presentation.error.UserFacingError.UNKNOWN.defaultMessage()) }
             }
         }
     }

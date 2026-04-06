@@ -20,6 +20,9 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
         private const val MONTHLY_SUBSCRIPTION_PARENT = "com.torve.pro.subscription"
         private const val MONTHLY_SUBSCRIPTION_TERM = "com.torve.pro.monthly"
         private const val LIFETIME_PRODUCT_ID = "com.torve.pro.lifetime"
+        private const val SAFE_BILLING_INIT_MESSAGE = "Could not connect to the store. Please try again."
+        private const val SAFE_PURCHASE_FAILED_MESSAGE = "Purchase could not be completed. Please try again."
+        private const val SAFE_PRODUCT_UNAVAILABLE_MESSAGE = "This product is not available right now."
         private val MONTHLY_PRODUCT_IDS = listOf(
             MONTHLY_SUBSCRIPTION_TERM,
             MONTHLY_SUBSCRIPTION_PARENT,
@@ -47,15 +50,14 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
         }
     }
 
-    private inline fun logError(
+    private fun logError(
         throwable: Throwable? = null,
-        message: () -> String,
+        message: String,
     ) {
-        if (!com.torve.android.BuildConfig.DEBUG) return
         if (throwable != null) {
-            Log.e(TAG, message(), throwable)
+            Log.e(TAG, message, throwable)
         } else {
-            Log.e(TAG, message())
+            Log.e(TAG, message)
         }
     }
 
@@ -98,21 +100,21 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
     }
 
     override fun initialize() {
-        if (isInitialized) return
+        // Allow re-init when stuck in Error state (e.g. Amazon SDK returned FAILED
+        // during LAT catalog propagation). Skip only if already connecting or ready.
+        if (isInitialized && _billingState.value !is BillingManager.BillingState.Error) return
         isInitialized = true
         _billingState.value = BillingManager.BillingState.Connecting
         val init = Runnable {
             try {
                 PurchasingService.registerListener(context, this)
-                // SDK 3.0.x may auto-fetch user data inside registerListener();
-                // a duplicate getUserData() call would throw "resource already registered".
                 runCatching { PurchasingService.getUserData() }
                 PurchasingService.getProductData(PRODUCT_IDS)
                 logDebug { "Registered listener and requested product data for SKUs=$PRODUCT_IDS" }
             } catch (e: Exception) {
-                logError(e) { "Failed to initialize Amazon IAP" }
+                logError(e, "Failed to initialize Amazon IAP")
                 _billingState.value = BillingManager.BillingState.Error(
-                    e.message ?: "Failed to initialize Amazon IAP",
+                    SAFE_BILLING_INIT_MESSAGE,
                 )
             }
         }
@@ -129,13 +131,13 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
             return
         }
         try {
+            Log.i(TAG, "launchPurchase productId=$productId type=$productType")
             PurchasingService.getUserData()
             PurchasingService.purchase(productId)
-            logDebug { "Launched purchase for $productId" }
         } catch (e: Exception) {
-            logError(e) { "Failed to launch purchase" }
+            logError(e, "Failed to launch purchase")
             _purchaseResult.value = BillingManager.PurchaseResult.Error(
-                e.message ?: "Failed to launch purchase",
+                SAFE_PURCHASE_FAILED_MESSAGE,
             )
         }
     }
@@ -146,7 +148,7 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
             PurchasingService.getPurchaseUpdates(true)
             logDebug { "Querying existing purchases" }
         } catch (e: Exception) {
-            logError(e) { "Failed to query existing purchases" }
+            logError(e, "Failed to query existing purchases")
         }
     }
 
@@ -217,13 +219,12 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
                 val offers = offersByType.values.toList()
                 if (offers.isEmpty()) {
                     val unavailableSkus = response.unavailableSkus.orEmpty().sorted()
-                    val message = if (unavailableSkus.isNotEmpty()) {
-                        "Amazon Appstore did not return product data for: ${unavailableSkus.joinToString(", ")}."
+                    if (unavailableSkus.isNotEmpty()) {
+                        logError(message = "Amazon Appstore did not return product data for: ${unavailableSkus.joinToString(", ")}.")
                     } else {
-                        "Amazon Appstore returned no product data. Check Live App Testing and Amazon SKU setup."
+                        logError(message = "Amazon Appstore returned no product data. Check Live App Testing and Amazon SKU setup.")
                     }
-                    logError { message }
-                    _billingState.value = BillingManager.BillingState.Error(message)
+                    _billingState.value = BillingManager.BillingState.Error(SAFE_PRODUCT_UNAVAILABLE_MESSAGE)
                 } else {
                     _billingState.value = BillingManager.BillingState.Ready(offers = offers)
                 }
@@ -232,20 +233,19 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
             ProductDataResponse.RequestStatus.FAILED,
             ProductDataResponse.RequestStatus.NOT_SUPPORTED,
             -> {
-                val message = "Amazon product data request failed: ${response.requestStatus}"
-                logError { message }
-                _billingState.value = BillingManager.BillingState.Error(message)
+                logError(message = "Amazon product data request failed: ${response.requestStatus}")
+                _billingState.value = BillingManager.BillingState.Error(SAFE_BILLING_INIT_MESSAGE)
             }
 
             else -> {
-                val message = "Amazon product data returned unexpected status: ${response.requestStatus}"
-                logWarn { message }
-                _billingState.value = BillingManager.BillingState.Error(message)
+                logWarn { "Amazon product data returned unexpected status: ${response.requestStatus}" }
+                _billingState.value = BillingManager.BillingState.Error(SAFE_BILLING_INIT_MESSAGE)
             }
         }
     }
 
     override fun onPurchaseResponse(response: PurchaseResponse) {
+        Log.i(TAG, "onPurchaseResponse status=${response.requestStatus} sku=${response.receipt?.sku}")
         when (response.requestStatus) {
             PurchaseResponse.RequestStatus.SUCCESSFUL -> {
                 val receipt = response.receipt
@@ -335,7 +335,7 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
             PurchaseUpdatesResponse.RequestStatus.FAILED,
             PurchaseUpdatesResponse.RequestStatus.NOT_SUPPORTED,
             -> {
-                logError { "Purchase updates failed: ${response.requestStatus}" }
+                logError(message = "Purchase updates failed: ${response.requestStatus}")
             }
 
             else -> {

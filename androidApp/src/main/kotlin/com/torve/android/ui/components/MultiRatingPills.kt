@@ -186,7 +186,7 @@ private fun getSourceColors(source: RatingSource, displayValue: String, ratings:
     }
 }
 
-private fun getRatingValue(source: RatingSource, ratings: MediaRatings, prefs: RatingDisplayPrefs): String? {
+fun getRatingValue(source: RatingSource, ratings: MediaRatings, prefs: RatingDisplayPrefs): String? {
     return when (source) {
         RatingSource.TORVE -> calculateTorveScore(ratings, prefs.torveWeights)?.let { "%.0f".format(it) }
         RatingSource.IMDB -> ratings.imdbScore?.let { "%.1f".format(it) }

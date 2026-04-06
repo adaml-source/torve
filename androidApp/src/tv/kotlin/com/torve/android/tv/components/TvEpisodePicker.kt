@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -70,6 +71,7 @@ fun TvEpisodePicker(
     onContentFocused: (FocusRequester) -> Unit,
 ) {
     val seasonsLabel = stringResource(R.string.tv_episodes_title)
+    val firstEpisodeRequester = remember { FocusRequester() }
     Column(
         verticalArrangement = Arrangement.spacedBy(16.dp),
         modifier = Modifier.fillMaxWidth(),
@@ -79,6 +81,7 @@ fun TvEpisodePicker(
             style = MaterialTheme.typography.headlineSmall,
             color = Snow,
             fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.focusProperties { canFocus = false },
         )
 
         // Season tabs
@@ -97,7 +100,9 @@ fun TvEpisodePicker(
                 TvSeasonChip(
                     seasonNumber = season.seasonNumber,
                     isSelected = season.seasonNumber == selectedSeason,
-                    modifier = Modifier.focusRequester(requester),
+                    modifier = Modifier
+                        .focusRequester(requester)
+                        .focusProperties { down = firstEpisodeRequester },
                     onFocused = { onContentFocused(requester) },
                     onClick = { onSeasonSelected(season.seasonNumber) },
                 )
@@ -107,6 +112,7 @@ fun TvEpisodePicker(
                 item(key = "dl_season") {
                     TvDownloadSeasonChip(
                         seasonNumber = selectedSeason,
+                        modifier = Modifier.focusProperties { down = firstEpisodeRequester },
                         onFocused = {},
                         onClick = { onSeasonDownload(selectedSeason) },
                     )
@@ -135,7 +141,7 @@ fun TvEpisodePicker(
                     itemsIndexed(
                         items = seasonDetail.episodes,
                         key = { _, ep -> "ep_${selectedSeason}_${ep.episodeNumber}" },
-                    ) { _, episode ->
+                    ) { index, episode ->
                         val episodeKey = "s${selectedSeason}e${episode.episodeNumber}"
                         val isWatched = episodeKey in watchedEpisodes
                         val episodeProgress = if (
@@ -154,6 +160,7 @@ fun TvEpisodePicker(
                             progress = episodeProgress,
                             onClick = { onEpisodeSelected(selectedSeason, episode.episodeNumber) },
                             onLongClick = { onToggleEpisodeWatched(selectedSeason, episode.episodeNumber) },
+                            modifier = if (index == 0) Modifier.focusRequester(firstEpisodeRequester) else Modifier,
                         )
                     }
                 }
@@ -231,6 +238,7 @@ private fun TvEpisodeCard(
     progress: Float?,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
+    modifier: Modifier = Modifier,
 ) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(targetValue = if (focused) 1.06f else 1f, label = "episodeScale")
@@ -240,7 +248,7 @@ private fun TvEpisodeCard(
     )
 
     Box(
-        modifier = Modifier
+        modifier = modifier
             .width(260.dp)
             .aspectRatio(16f / 9f)
             .zIndex(if (focused) 1f else 0f)

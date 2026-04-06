@@ -34,14 +34,14 @@ android {
         }
     }
 
-    val baseVersionCode = 20
+    val baseVersionCode = 38
 
     defaultConfig {
         applicationId = "com.torve.app"
         minSdk = 24
         targetSdk = 36
         versionCode = baseVersionCode
-        versionName = "1.0.11"
+        versionName = "1.0.29"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         multiDexEnabled = true
         multiDexKeepProguard = file("multidex-config.pro")

@@ -68,6 +68,12 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.torve.android.R
 import com.torve.android.premium.rememberEffectivePremiumAccessTier
+import com.torve.android.ui.detail.DetailPlaybackReadinessCard
+import com.torve.android.ui.detail.DetailRatingsAttribution
+import com.torve.android.ui.detail.StreamExperienceBadges
+import com.torve.android.ui.detail.StreamReadinessLabel
+import com.torve.android.ui.detail.groupPlaybackOptionStreams
+import com.torve.android.ui.detail.streamUiKey
 import com.torve.android.ui.components.mediaItemLazyKey
 import com.torve.android.ui.theme.*
 import com.torve.android.player.DeviceCodecProbe
@@ -85,6 +91,7 @@ import androidx.compose.material3.Icon
 import com.torve.android.download.DownloadWorker
 import com.torve.data.download.BulkDownloadManager
 import com.torve.domain.model.AvailabilityOfferType
+import com.torve.domain.model.ContentWarmupTrigger
 import com.torve.domain.model.Download
 import com.torve.domain.model.DownloadStatus
 import com.torve.domain.model.MediaItem
@@ -236,6 +243,13 @@ fun TvDetailsScreen(
         }
     }
 
+    LaunchedEffect(watchlistState.snackbarMessage) {
+        watchlistState.snackbarMessage?.let { message ->
+            TvNotificationQueue.post(message, NotificationType.SUCCESS)
+            watchlistViewModel.clearSnackbar()
+        }
+    }
+
     // Auto-load first season detail for series
     LaunchedEffect(state.mediaItem?.id, state.mediaItem?.seasons) {
         val media = state.mediaItem ?: return@LaunchedEffect
@@ -357,7 +371,8 @@ fun TvDetailsScreen(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 16.dp, top = 20.dp, end = 16.dp, bottom = 24.dp),
     ) {
-        mediaItem?.let { item ->
+        if (mediaItem != null) {
+            val item = mediaItem
             // ── Hero backdrop + title + buttons ──
             item(key = "hero") {
                 Box(
@@ -448,7 +463,12 @@ fun TvDetailsScreen(
                                     .focusRequester(playFocusRequester)
                                     .focusProperties { left = railFocusRequester },
                                 enabled = !isBusy,
-                                onFocused = { onContentFocused(playFocusRequester) },
+                                onFocused = {
+                                    onContentFocused(playFocusRequester)
+                                    detailViewModel.warmupLikelyPlaybackTarget(
+                                        ContentWarmupTrigger.TV_PLAY_ACTION_FOCUS,
+                                    )
+                                },
                                 onClick = {
                                     if (!settingsState.debridConnected) {
                                         runPremiumAction(TvEntitledFeature.CLOUD_PROVIDER_SETUP) {
@@ -611,37 +631,61 @@ fun TvDetailsScreen(
             }
 
             // ── Multi-source ratings ──
-            if (item.ratings != null) {
+            val ratingPrefs = settingsState.ratingPrefs
+            if (item.ratings != null && ratingPrefs.showRatingsOnDetailPage) {
                 item(key = "ratings") {
                     val r = item.ratings!!
+                    val enabled = ratingPrefs.enabledProviders.toSet()
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.padding(bottom = 14.dp),
                     ) {
-                        r.imdbScore?.let { score ->
-                            TvRatingChip(label = "IMDb", value = "%.1f".format(score), iconRes = R.drawable.ic_rating_imdb)
-                        }
-                        r.rottenTomatoesScore?.let { score ->
-                            val rtIcon = when {
-                                score >= 75 -> R.drawable.ic_rt_certified_fresh
-                                score >= 60 -> R.drawable.ic_rt_fresh
-                                else -> R.drawable.ic_rt_rotten
+                        for (source in ratingPrefs.providerOrder) {
+                            if (source !in enabled) continue
+                            when (source) {
+                                com.torve.domain.model.RatingSource.IMDB -> r.imdbScore?.let { score ->
+                                    TvRatingChip(label = "IMDb", value = "%.1f".format(score), iconRes = R.drawable.ic_rating_imdb)
+                                }
+                                com.torve.domain.model.RatingSource.ROTTEN_TOMATOES -> r.rottenTomatoesScore?.let { score ->
+                                    val rtIcon = when {
+                                        score >= 75 -> R.drawable.ic_rt_certified_fresh
+                                        score >= 60 -> R.drawable.ic_rt_fresh
+                                        else -> R.drawable.ic_rt_rotten
+                                    }
+                                    TvRatingChip(label = "RT", value = "${score}%", iconRes = rtIcon)
+                                }
+                                com.torve.domain.model.RatingSource.TMDB -> r.tmdbScore?.let { score ->
+                                    TvRatingChip(label = "TMDB", value = "%.1f".format(score), iconRes = R.drawable.tmbd_logo)
+                                }
+                                com.torve.domain.model.RatingSource.METACRITIC -> r.metacriticScore?.let { score ->
+                                    TvRatingChip(label = "MC", value = "$score", iconRes = R.drawable.ic_rating_metacritic)
+                                }
+                                com.torve.domain.model.RatingSource.TRAKT -> r.traktScore?.let { score ->
+                                    TvRatingChip(label = "Trakt", value = "%.0f".format(score), iconRes = R.drawable.ic_rating_trakt)
+                                }
+                                com.torve.domain.model.RatingSource.LETTERBOXD -> r.letterboxdScore?.let { score ->
+                                    TvRatingChip(label = "LB", value = "%.1f".format(score), iconRes = R.drawable.ic_rating_letterboxd)
+                                }
+                                com.torve.domain.model.RatingSource.RT_AUDIENCE -> r.rtAudienceScore?.let { score ->
+                                    TvRatingChip(label = "RT Aud", value = "${score}%", iconRes = R.drawable.ic_rt_fresh)
+                                }
+                                com.torve.domain.model.RatingSource.MDBLIST -> r.mdblistScore?.let { score ->
+                                    TvRatingChip(label = "MDB", value = "%.1f".format(score), iconRes = R.drawable.ic_rating_mdblist)
+                                }
+                                com.torve.domain.model.RatingSource.MAL -> r.malScore?.let { score ->
+                                    TvRatingChip(label = "MAL", value = "%.1f".format(score), iconRes = R.drawable.ic_rating_mal)
+                                }
+                                else -> Unit
                             }
-                            TvRatingChip(label = "RT", value = "${score}%", iconRes = rtIcon)
-                        }
-                        r.tmdbScore?.let { score ->
-                            TvRatingChip(label = "TMDB", value = "%.1f".format(score), iconRes = R.drawable.tmbd_logo)
-                        }
-                        r.metacriticScore?.let { score ->
-                            TvRatingChip(label = "MC", value = "$score", iconRes = R.drawable.ic_rating_metacritic)
-                        }
-                        r.traktScore?.let { score ->
-                            TvRatingChip(label = "Trakt", value = "%.0f".format(score), iconRes = R.drawable.ic_rating_trakt)
-                        }
-                        r.letterboxdScore?.let { score ->
-                            TvRatingChip(label = "LB", value = "%.1f".format(score), iconRes = R.drawable.ic_rating_letterboxd)
                         }
                     }
+                }
+                item(key = "ratings_attribution") {
+                    DetailRatingsAttribution(
+                        ratings = item.ratings!!,
+                        prefs = ratingPrefs,
+                        modifier = Modifier.padding(bottom = 14.dp),
+                    )
                 }
             }
 
@@ -729,19 +773,7 @@ fun TvDetailsScreen(
                                                     chipFocused = it.isFocused
                                                     if (it.isFocused) onContentFocused(chipReq)
                                                 }
-                                                .clickable(
-                                                    interactionSource = remember { MutableInteractionSource() },
-                                                    indication = null,
-                                                ) {
-                                                    val url = offer.deeplinkUrl ?: offer.webUrl
-                                                    if (url != null) {
-                                                        runCatching {
-                                                            context.startActivity(
-                                                                Intent(Intent.ACTION_VIEW, Uri.parse(url)),
-                                                            )
-                                                        }
-                                                    }
-                                                }
+                                                // Info-only — no external links
                                                 .padding(horizontal = 12.dp, vertical = 6.dp),
                                         ) {
                                             Row(
@@ -1032,6 +1064,20 @@ fun TvDetailsScreen(
             }
 
             // ── Resolve error ──
+            if (state.isLoadingStreams || state.isResolving || state.streams.isNotEmpty()) {
+                item(key = "playback_readiness") {
+                    DetailPlaybackReadinessCard(
+                        streams = state.streams,
+                        startupCandidates = state.startupCandidates,
+                        startupStatus = state.playbackStartupStatus,
+                        isLoadingStreams = state.isLoadingStreams,
+                        isResolving = state.isResolving,
+                        isLoadingMoreSources = state.isLoadingMoreSources,
+                        modifier = Modifier.padding(top = 14.dp),
+                    )
+                }
+            }
+
             if (state.resolveError != null) {
                 item(key = "resolve_error") {
                     Text(
@@ -1045,6 +1091,9 @@ fun TvDetailsScreen(
 
             // ── Stream Picker (when auto-play is off or auto-play failed) ──
             if (state.showStreamPicker && state.streams.isNotEmpty()) {
+                val groups = groupPlaybackOptionStreams(state.streams, state.startupCandidates)
+                val startupCandidateMap = state.startupCandidates.associateBy { it.streamKey }
+                val firstStreamKey = groups.firstOrNull()?.items?.firstOrNull()?.streamUiKey()
                 item(key = "picker_header") {
                     Text(
                         text = stringResource(R.string.tv_streams_pick),
@@ -1054,14 +1103,40 @@ fun TvDetailsScreen(
                         modifier = Modifier.padding(top = 18.dp, bottom = 8.dp),
                     )
                 }
-                itemsIndexed(
-                    state.streams,
-                    key = { index, _ -> "stream_$index" },
-                ) { index, stream ->
-                    val req = if (index == 0) firstStreamFocusRequester else remember { FocusRequester() }
+                groups.forEach { group ->
+                    item(key = "picker_group_${group.title}") {
+                        Column(modifier = Modifier.padding(bottom = 6.dp)) {
+                            Text(
+                                text = group.title,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = Amber,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            group.subtitle?.let {
+                                Text(
+                                    text = it,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Silver,
+                                )
+                            }
+                        }
+                    }
+                    itemsIndexed(
+                        group.items,
+                        key = { index, stream -> "stream_${group.title}_${index}_${stream.streamUiKey()}" },
+                    ) { _, stream ->
+                    val startupCandidate = startupCandidateMap[stream.streamUiKey()]
+                    val req = if (stream.streamUiKey() == firstStreamKey) {
+                        firstStreamFocusRequester
+                    } else {
+                        remember { FocusRequester() }
+                    }
                     var focused by remember { mutableStateOf(false) }
                     val bg = if (focused) Amber.copy(alpha = 0.2f) else Graphite
-                    val streamBorderColor by animateColorAsState(targetValue = if (focused) Amber else Steel.copy(alpha = 0.3f), label = "streamBorder")
+                    val streamBorderColor by animateColorAsState(
+                        targetValue = if (focused) Amber else Steel.copy(alpha = 0.3f),
+                        label = "streamBorder",
+                    )
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1113,6 +1188,11 @@ fun TvDetailsScreen(
 
                             // Center column: quality details
                             Column(modifier = Modifier.weight(1f)) {
+                                StreamReadinessLabel(
+                                    stream = stream,
+                                    startupCandidate = startupCandidate,
+                                    modifier = Modifier.padding(bottom = 2.dp),
+                                )
                                 Text(
                                     text = buildString {
                                         append(stream.quality)
@@ -1146,6 +1226,11 @@ fun TvDetailsScreen(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
+                                Spacer(Modifier.height(6.dp))
+                                StreamExperienceBadges(
+                                    stream = stream,
+                                    startupCandidate = startupCandidate,
+                                )
                             }
 
                             // Cached indicator
@@ -1173,42 +1258,21 @@ fun TvDetailsScreen(
                     )
                 }
             }
-        } ?: item(key = "empty") {
-            Text(
-                text = state.error ?: stringResource(R.string.tv_no_data),
-                style = MaterialTheme.typography.bodyLarge,
-                color = Snow,
-            )
-        }
-    }
-
-    // Watchlist feedback toast
-    watchlistState.snackbarMessage?.let { msg ->
-        LaunchedEffect(msg) {
-            kotlinx.coroutines.delay(2000)
-            watchlistViewModel.clearSnackbar()
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 72.dp)
-                .align(Alignment.BottomCenter),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = msg,
-                style = MaterialTheme.typography.titleMedium,
-                color = Snow,
-                modifier = Modifier
-                    .background(Charcoal.copy(alpha = 0.9f), RoundedCornerShape(12.dp))
-                    .padding(horizontal = 24.dp, vertical = 12.dp),
-            )
+        } else {
+            item(key = "empty") {
+                Text(
+                    text = com.torve.android.error.resolveErrorKey(androidx.compose.ui.platform.LocalContext.current, state.error) ?: stringResource(R.string.tv_no_data),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Snow,
+                )
+            }
         }
     }
 
     // Download toast now rendered by TvNotificationQueue in TvRoot
 
     } // end Box
+}
 }
 
 @Composable

@@ -50,17 +50,17 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -121,6 +121,7 @@ import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Torve
 import com.torve.domain.model.MediaType
+import com.torve.domain.model.extractTmdbIdOrNull
 import com.torve.data.ai.KeywordSearchService
 import com.torve.data.mdblist.RatingsEnricher
 import com.torve.domain.integrations.IntegrationSecretStore
@@ -217,6 +218,31 @@ data class NavTab(
     val iconUnselected: ImageVector,
 )
 
+@Composable
+private fun PersistentMobileTabPane(
+    visible: Boolean,
+    content: @Composable () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .zIndex(if (visible) 1f else 0f)
+            .layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints)
+                if (visible) {
+                    layout(placeable.width, placeable.height) {
+                        placeable.place(0, 0)
+                    }
+                } else {
+                    // Keep the subtree alive, but remove it from layout and hit-testing.
+                    layout(0, 0) {}
+                }
+            },
+    ) {
+        content()
+    }
+}
+
 private val navTabDefs = listOf(
     NavTab("home", R.string.nav_home, Icons.Filled.Home, Icons.Outlined.Home),
     NavTab("movies", R.string.nav_movies, Icons.Filled.Movie, Icons.Outlined.Movie),
@@ -226,6 +252,7 @@ private val navTabDefs = listOf(
     NavTab("profile_tab", R.string.nav_settings, Icons.Filled.Settings, Icons.Outlined.Settings),
 )
 
+private const val MOBILE_ROOT_ROUTE = "mobile_root"
 private const val MOBILE_HOME_ROUTE = "home"
 private const val TV_HOME_ROUTE = "tv_home"
 
@@ -249,8 +276,9 @@ fun TorveNavGraph(
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+    var mobileSelectedTab by rememberSaveable { mutableStateOf(MOBILE_HOME_ROUTE) }
 
-    val showBottomBar = !isTvMode && currentRoute in navTabDefs.map { it.route }
+    val showBottomBar = !isTvMode && currentRoute == MOBILE_ROOT_ROUTE
     val showTvNavRail = isTvMode && currentRoute in tvNavTabDefs.map { it.route }
 
     val setupViewModel: SetupWizardViewModel = koinInject()
@@ -263,7 +291,7 @@ fun TorveNavGraph(
     val subscriptionState by subscriptionViewModel.state.collectAsState()
     val syncState by syncCoordinator.state.collectAsState()
     var didInitialWatchlistSync by remember { mutableStateOf(false) }
-    val dest = if (isTvMode) TV_HOME_ROUTE else MOBILE_HOME_ROUTE
+    val dest = if (isTvMode) TV_HOME_ROUTE else MOBILE_ROOT_ROUTE
     val accessTier = rememberEffectivePremiumAccessTier(
         subscriptionTier = subscriptionState.subscription?.tier,
         subscriptionIsPro = subscriptionState.isPro,
@@ -289,6 +317,38 @@ fun TorveNavGraph(
     val prefsRepo: com.torve.domain.repository.PreferencesRepository = koinInject()
     val ratingsEnricher: RatingsEnricher = koinInject()
     val integrationSecretStore: IntegrationSecretStore = koinInject()
+    val movieCatalogViewModel = remember(
+        metadataRepo,
+        keywordSearchService,
+        prefsRepo,
+        ratingsEnricher,
+        integrationSecretStore,
+    ) {
+        CatalogViewModel(
+            metadataRepo,
+            "movie",
+            keywordSearchService = keywordSearchService,
+            prefsRepo = prefsRepo,
+            ratingsEnricher = ratingsEnricher,
+            integrationSecretStore = integrationSecretStore,
+        )
+    }
+    val tvCatalogViewModel = remember(
+        metadataRepo,
+        keywordSearchService,
+        prefsRepo,
+        ratingsEnricher,
+        integrationSecretStore,
+    ) {
+        CatalogViewModel(
+            metadataRepo,
+            "tv",
+            keywordSearchService = keywordSearchService,
+            prefsRepo = prefsRepo,
+            ratingsEnricher = ratingsEnricher,
+            integrationSecretStore = integrationSecretStore,
+        )
+    }
 
     LaunchedEffect(Unit) {
         watchlistViewModel.loadWatchlist()
@@ -402,7 +462,7 @@ fun TorveNavGraph(
                 SetupWizardScreen(
                     viewModel = setupViewModel,
                     onComplete = {
-                        val target = if (isTvMode) TV_HOME_ROUTE else MOBILE_HOME_ROUTE
+                        val target = if (isTvMode) TV_HOME_ROUTE else MOBILE_ROOT_ROUTE
                         navController.navigate(target) {
                             popUpTo("setup") { inclusive = true }
                         }
@@ -417,85 +477,222 @@ fun TorveNavGraph(
                 )
             }
 
-            // Home tab — compose only when the Home route is active.
-            composable("home") {
-                HomeScreen(
-                    onMediaClick = { item -> navController.navigateToDetail(item) },
-                    onContinueWatchingClick = { progress ->
-                        val id = progress.mediaId.toIntOrNull() ?: return@HomeScreen
-                        val type = if (progress.mediaType == MediaType.SERIES) "tv" else "movie"
-                        navController.navigate("detail/$type/$id")
-                    },
-                    onSeeAllClick = { sectionId ->
-                        navController.navigate("seeall/${Uri.encode(sectionId)}")
-                    },
-                    onProviderClick = { providerId, providerName ->
-                        navController.navigate("provider/$providerId/${Uri.encode(providerName)}")
-                    },
-                    onPersonClick = { personId ->
-                        navController.navigate("person/$personId")
-                    },
-                    accessTier = accessTier,
-                    onLockedFeatureClick = requestLifetimeUnlock,
-                )
-            }
-
-            // Movies tab — CatalogScreen for movies
-            composable("movies") {
-                val catalogViewModel = remember {
-                    CatalogViewModel(
-                        metadataRepo,
-                        "movie",
-                        keywordSearchService = keywordSearchService,
-                        prefsRepo = prefsRepo,
-                        ratingsEnricher = ratingsEnricher,
-                        integrationSecretStore = integrationSecretStore,
-                    )
-                }
-                CatalogScreen(
-                    viewModel = catalogViewModel,
-                    mediaType = "movie",
-                    onMediaClick = { item -> navController.navigateToDetail(item) },
-                )
-            }
-
-            // TV Shows tab — CatalogScreen for TV
-            composable("tv_shows") {
-                val catalogViewModel = remember {
-                    CatalogViewModel(
-                        metadataRepo,
-                        "tv",
-                        keywordSearchService = keywordSearchService,
-                        prefsRepo = prefsRepo,
-                        ratingsEnricher = ratingsEnricher,
-                        integrationSecretStore = integrationSecretStore,
-                    )
-                }
-                CatalogScreen(
-                    viewModel = catalogViewModel,
-                    mediaType = "tv",
-                    onMediaClick = { item -> navController.navigateToDetail(item) },
-                )
-            }
-
-            // Live TV tab
-            composable("live_tv") {
-                ChannelsScreen(
-                    onChannelPlay = { channel ->
-                        if (isLocked(PremiumFeature.STREAM_PLAYBACK)) {
-                            requestLifetimeUnlock(PremiumFeature.STREAM_PLAYBACK)
+            composable(MOBILE_ROOT_ROUTE) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    PersistentMobileTabPane(visible = mobileSelectedTab == MOBILE_HOME_ROUTE) {
+                        HomeScreen(
+                            onMediaClick = { item -> navController.navigateToDetail(item) },
+                            onContinueWatchingClick = { progress ->
+                                val id = progress.mediaId.extractTmdbIdOrNull() ?: return@HomeScreen
+                                val type = if (progress.mediaType == MediaType.SERIES) "tv" else "movie"
+                                navController.navigate("detail/$type/$id")
+                            },
+                            onSeeAllClick = { sectionId ->
+                                navController.navigate("seeall/${Uri.encode(sectionId)}")
+                            },
+                            onProviderClick = { providerId, providerName ->
+                                navController.navigate("provider/$providerId/${Uri.encode(providerName)}")
+                            },
+                            onPersonClick = { personId ->
+                                navController.navigate("person/$personId")
+                            },
+                            accessTier = accessTier,
+                            onLockedFeatureClick = requestLifetimeUnlock,
+                        )
+                    }
+                    PersistentMobileTabPane(visible = mobileSelectedTab == "movies") {
+                        CatalogScreen(
+                            viewModel = movieCatalogViewModel,
+                            mediaType = "movie",
+                            onMediaClick = { item -> navController.navigateToDetail(item) },
+                        )
+                    }
+                    PersistentMobileTabPane(visible = mobileSelectedTab == "tv_shows") {
+                        CatalogScreen(
+                            viewModel = tvCatalogViewModel,
+                            mediaType = "tv",
+                            onMediaClick = { item -> navController.navigateToDetail(item) },
+                        )
+                    }
+                    PersistentMobileTabPane(visible = mobileSelectedTab == "live_tv") {
+                        ChannelsScreen(
+                            onChannelPlay = { channel ->
+                                if (isLocked(PremiumFeature.STREAM_PLAYBACK)) {
+                                    requestLifetimeUnlock(PremiumFeature.STREAM_PLAYBACK)
+                                } else {
+                                    navController.navigate(
+                                        "player?url=${Uri.encode(channel.url)}" +
+                                            "&title=${Uri.encode(channel.name)}" +
+                                            "&mediaId=" +
+                                            "&mediaType=live" +
+                                            "&posterUrl=${Uri.encode(channel.tvgLogo ?: "")}" +
+                                            "&backdropUrl=",
+                                    )
+                                }
+                            },
+                        )
+                    }
+                    PersistentMobileTabPane(visible = mobileSelectedTab == "watchlist_tab") {
+                        if (isLocked(PremiumFeature.WATCHLIST_EDIT)) {
+                            PaywallScreen(
+                                onBack = { navController.popBackStack() },
+                                onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                                lockedFeature = PremiumFeature.WATCHLIST_EDIT,
+                            )
                         } else {
-                            navController.navigate(
-                                "player?url=${Uri.encode(channel.url)}" +
-                                    "&title=${Uri.encode(channel.name)}" +
-                                    "&mediaId=" +
-                                    "&mediaType=live" +
-                                    "&posterUrl=${Uri.encode(channel.tvgLogo ?: "")}" +
-                                    "&backdropUrl=",
+                            WatchlistScreen(
+                                onMediaClick = { item -> navController.navigateToDetail(item) },
+                                onContinueWatchingClick = { progress ->
+                                    val id = progress.mediaId.extractTmdbIdOrNull() ?: return@WatchlistScreen
+                                    val type = if (progress.mediaType == MediaType.SERIES) "tv" else "movie"
+                                    navController.navigate("detail/$type/$id")
+                                },
+                                onHistoryItemClick = { entry ->
+                                    val id = entry.mediaId.extractTmdbIdOrNull() ?: return@WatchlistScreen
+                                    navController.navigate("detail/${entry.mediaType}/$id")
+                                },
+                                onDownloadsClick = {
+                                    if (isLocked(PremiumFeature.DOWNLOADS)) {
+                                        requestLifetimeUnlock(PremiumFeature.DOWNLOADS)
+                                    } else {
+                                        navController.navigate("downloads")
+                                    }
+                                },
+                                onJellyfinItemPlay = { streamUrl, title ->
+                                    navController.navigate(
+                                        "player?url=${Uri.encode(streamUrl)}" +
+                                            "&title=${Uri.encode(title)}" +
+                                            "&mediaId=" +
+                                            "&mediaType=movie" +
+                                            "&posterUrl=" +
+                                            "&backdropUrl=",
+                                    )
+                                },
                             )
                         }
-                    },
-                )
+                    }
+                    PersistentMobileTabPane(visible = mobileSelectedTab == "profile_tab") {
+                        SettingsScreen(
+                            accessTier = accessTier,
+                            onLockedFeatureClick = requestLifetimeUnlock,
+                            onDownloadsClick = {
+                                if (isLocked(PremiumFeature.DOWNLOADS)) {
+                                    requestLifetimeUnlock(PremiumFeature.DOWNLOADS)
+                                } else {
+                                    navController.navigate("downloads")
+                                }
+                            },
+                            onSubscriptionClick = { navController.navigate("paywall") },
+                            onProfilesClick = { navController.navigate("profiles") },
+                            onCalendarClick = { navController.navigate("calendar") },
+                            onAccountClick = { navController.navigate("sync_account") },
+                            onDevicesClick = { navController.navigate("sync_devices") },
+                            onManageDevicesClick = { navController.navigate("manage_devices") },
+                            onLoginClick = { navController.navigate("login") },
+                            onPrivacyPolicyClick = { navController.navigate("legal/privacy") },
+                            onTermsClick = { navController.navigate("legal/terms") },
+                            onHelpClick = { navController.navigate("legal/help") },
+                            onStreamingServicesClick = {
+                                if (isLocked(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT)) {
+                                    requestLifetimeUnlock(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT)
+                                } else {
+                                    navController.navigate("streaming_services_settings")
+                                }
+                            },
+                            onAddonCatalogClick = {
+                                if (isLocked(PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT)) {
+                                    requestLifetimeUnlock(PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT)
+                                } else {
+                                    navController.navigate("addon_catalog")
+                                }
+                            },
+                            onRegexPatternsClick = {
+                                if (isLocked(PremiumFeature.ADVANCED_CONNECTION_CONFIGURATION)) {
+                                    requestLifetimeUnlock(PremiumFeature.ADVANCED_CONNECTION_CONFIGURATION)
+                                } else {
+                                    navController.navigate("regex_patterns")
+                                }
+                            },
+                            onStreamGroupsClick = {
+                                if (isLocked(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT)) {
+                                    requestLifetimeUnlock(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT)
+                                } else {
+                                    navController.navigate("stream_groups")
+                                }
+                            },
+                            onHomeLayoutClick = {
+                                if (isLocked(PremiumFeature.SYNC_CUSTOM_LAYOUTS)) {
+                                    requestLifetimeUnlock(PremiumFeature.SYNC_CUSTOM_LAYOUTS)
+                                } else {
+                                    navController.navigate("home_layout")
+                                }
+                            },
+                            onMdbListClick = {
+                                if (isLocked(PremiumFeature.MDBLIST_SETUP)) {
+                                    requestLifetimeUnlock(PremiumFeature.MDBLIST_SETUP)
+                                } else {
+                                    navController.navigate("mdblist_settings")
+                                }
+                            },
+                            onRatingSettingsClick = { navController.navigate("rating_settings") },
+                            onCardStyleClick = { navController.navigate("card_style_settings") },
+                            onIntegrationsClick = {
+                                if (isLocked(PremiumFeature.TRAKT_CONNECT)) {
+                                    requestLifetimeUnlock(PremiumFeature.TRAKT_CONNECT)
+                                } else {
+                                    navController.navigate("integrations")
+                                }
+                            },
+                            onDiagnosticsClick = {
+                                if (isLocked(PremiumFeature.DIAGNOSTICS)) {
+                                    requestLifetimeUnlock(PremiumFeature.DIAGNOSTICS)
+                                } else {
+                                    navController.navigate("diagnostics")
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+
+            composable(MOBILE_HOME_ROUTE) {
+                LaunchedEffect(Unit) {
+                    mobileSelectedTab = MOBILE_HOME_ROUTE
+                    navController.navigate(MOBILE_ROOT_ROUTE) {
+                        popUpTo(MOBILE_HOME_ROUTE) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                }
+            }
+
+            composable("movies") {
+                LaunchedEffect(Unit) {
+                    mobileSelectedTab = "movies"
+                    navController.navigate(MOBILE_ROOT_ROUTE) {
+                        popUpTo("movies") { inclusive = true }
+                        launchSingleTop = true
+                    }
+                }
+            }
+
+            composable("tv_shows") {
+                LaunchedEffect(Unit) {
+                    mobileSelectedTab = "tv_shows"
+                    navController.navigate(MOBILE_ROOT_ROUTE) {
+                        popUpTo("tv_shows") { inclusive = true }
+                        launchSingleTop = true
+                    }
+                }
+            }
+
+            composable("live_tv") {
+                LaunchedEffect(Unit) {
+                    mobileSelectedTab = "live_tv"
+                    navController.navigate(MOBILE_ROOT_ROUTE) {
+                        popUpTo("live_tv") { inclusive = true }
+                        launchSingleTop = true
+                    }
+                }
             }
 
             // Channels (also accessible via non-tab navigation)
@@ -624,128 +821,24 @@ fun TorveNavGraph(
                 )
             }
 
-            // Watchlist tab — 3 sub-tabs: Watchlist, In Progress, History
             composable("watchlist_tab") {
-                if (isLocked(PremiumFeature.WATCHLIST_EDIT)) {
-                    PaywallScreen(
-                        onBack = { navController.popBackStack() },
-                        onDeviceLimitReached = { navController.navigate("device_limit_reached") },
-                        lockedFeature = PremiumFeature.WATCHLIST_EDIT,
-                    )
-                } else {
-                    WatchlistScreen(
-                        onMediaClick = { item -> navController.navigateToDetail(item) },
-                        onContinueWatchingClick = { progress ->
-                            val id = progress.mediaId.toIntOrNull() ?: return@WatchlistScreen
-                            val type = if (progress.mediaType == MediaType.SERIES) "tv" else "movie"
-                            navController.navigate("detail/$type/$id")
-                        },
-                        onHistoryItemClick = { entry ->
-                            val id = entry.mediaId.toIntOrNull() ?: return@WatchlistScreen
-                            navController.navigate("detail/${entry.mediaType}/$id")
-                        },
-                        onDownloadsClick = {
-                            if (isLocked(PremiumFeature.DOWNLOADS)) {
-                                requestLifetimeUnlock(PremiumFeature.DOWNLOADS)
-                            } else {
-                                navController.navigate("downloads")
-                            }
-                        },
-                        onJellyfinItemPlay = { streamUrl, title ->
-                            navController.navigate(
-                                "player?url=${Uri.encode(streamUrl)}" +
-                                    "&title=${Uri.encode(title)}" +
-                                    "&mediaId=" +
-                                    "&mediaType=movie" +
-                                    "&posterUrl=" +
-                                    "&backdropUrl=",
-                            )
-                        },
-                    )
+                LaunchedEffect(Unit) {
+                    mobileSelectedTab = "watchlist_tab"
+                    navController.navigate(MOBILE_ROOT_ROUTE) {
+                        popUpTo("watchlist_tab") { inclusive = true }
+                        launchSingleTop = true
+                    }
                 }
             }
 
-            // Profile tab — Settings screen with all navigation callbacks
             composable("profile_tab") {
-                SettingsScreen(
-                    accessTier = accessTier,
-                    onLockedFeatureClick = requestLifetimeUnlock,
-                    onDownloadsClick = {
-                        if (isLocked(PremiumFeature.DOWNLOADS)) {
-                            requestLifetimeUnlock(PremiumFeature.DOWNLOADS)
-                        } else {
-                            navController.navigate("downloads")
-                        }
-                    },
-                    onSubscriptionClick = { navController.navigate("paywall") },
-                    onProfilesClick = { navController.navigate("profiles") },
-                    onCalendarClick = { navController.navigate("calendar") },
-                    onAccountClick = { navController.navigate("sync_account") },
-                    onDevicesClick = { navController.navigate("sync_devices") },
-                    onManageDevicesClick = { navController.navigate("manage_devices") },
-                    onLoginClick = { navController.navigate("login") },
-                    onPrivacyPolicyClick = { navController.navigate("legal/privacy") },
-                    onTermsClick = { navController.navigate("legal/terms") },
-                    onHelpClick = { navController.navigate("legal/help") },
-                    onStreamingServicesClick = {
-                        if (isLocked(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT)) {
-                            requestLifetimeUnlock(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT)
-                        } else {
-                            navController.navigate("streaming_services_settings")
-                        }
-                    },
-                    onAddonCatalogClick = {
-                        if (isLocked(PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT)) {
-                            requestLifetimeUnlock(PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT)
-                        } else {
-                            navController.navigate("addon_catalog")
-                        }
-                    },
-                    onRegexPatternsClick = {
-                        if (isLocked(PremiumFeature.ADVANCED_CONNECTION_CONFIGURATION)) {
-                            requestLifetimeUnlock(PremiumFeature.ADVANCED_CONNECTION_CONFIGURATION)
-                        } else {
-                            navController.navigate("regex_patterns")
-                        }
-                    },
-                    onStreamGroupsClick = {
-                        if (isLocked(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT)) {
-                            requestLifetimeUnlock(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT)
-                        } else {
-                            navController.navigate("stream_groups")
-                        }
-                    },
-                    onHomeLayoutClick = {
-                        if (isLocked(PremiumFeature.SYNC_CUSTOM_LAYOUTS)) {
-                            requestLifetimeUnlock(PremiumFeature.SYNC_CUSTOM_LAYOUTS)
-                        } else {
-                            navController.navigate("home_layout")
-                        }
-                    },
-                    onMdbListClick = {
-                        if (isLocked(PremiumFeature.MDBLIST_SETUP)) {
-                            requestLifetimeUnlock(PremiumFeature.MDBLIST_SETUP)
-                        } else {
-                            navController.navigate("mdblist_settings")
-                        }
-                    },
-                    onRatingSettingsClick = { navController.navigate("rating_settings") },
-                    onCardStyleClick = { navController.navigate("card_style_settings") },
-                    onIntegrationsClick = {
-                        if (isLocked(PremiumFeature.TRAKT_CONNECT)) {
-                            requestLifetimeUnlock(PremiumFeature.TRAKT_CONNECT)
-                        } else {
-                            navController.navigate("integrations")
-                        }
-                    },
-                    onDiagnosticsClick = {
-                        if (isLocked(PremiumFeature.DIAGNOSTICS)) {
-                            requestLifetimeUnlock(PremiumFeature.DIAGNOSTICS)
-                        } else {
-                            navController.navigate("diagnostics")
-                        }
-                    },
-                )
+                LaunchedEffect(Unit) {
+                    mobileSelectedTab = "profile_tab"
+                    navController.navigate(MOBILE_ROOT_ROUTE) {
+                        popUpTo("profile_tab") { inclusive = true }
+                        launchSingleTop = true
+                    }
+                }
             }
 
             // Settings (accessible from Profile, not in bottom nav)
@@ -1342,15 +1435,16 @@ fun TorveNavGraph(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     navTabDefs.forEach { tab ->
-                        val selected = currentRoute == tab.route
+                        val selected = mobileSelectedTab == tab.route
                         NavBarItem(
                             tab = tab,
                             selected = selected,
                             onClick = {
-                                navController.navigate(tab.route) {
-                                    popUpTo("home") { saveState = true }
-                                    launchSingleTop = true
-                                    restoreState = true
+                                mobileSelectedTab = tab.route
+                                if (currentRoute != MOBILE_ROOT_ROUTE) {
+                                    navController.navigate(MOBILE_ROOT_ROUTE) {
+                                        launchSingleTop = true
+                                    }
                                 }
                             },
                         )

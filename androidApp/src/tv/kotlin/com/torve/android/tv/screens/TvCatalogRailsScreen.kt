@@ -2,6 +2,7 @@ package com.torve.android.tv.screens
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -11,18 +12,31 @@ import androidx.compose.ui.res.stringResource
 import com.torve.android.R
 import com.torve.android.tv.TvScreenCache
 import com.torve.android.tv.components.TvBrowseLayout
+import com.torve.android.tv.components.TvCardStyle
 import com.torve.android.tv.components.TvContentRail
 import com.torve.android.tv.components.TvMediaContextMenuAction
 import com.torve.android.tv.components.TvMediaRails
 import com.torve.android.tv.components.dedupeAcrossRails
 import com.torve.android.tv.components.rememberTvFocusMemory
+import com.torve.android.tv.toMediaItemOrNull
 import com.torve.data.network.catalogContentLoadErrorMessage
 import com.torve.domain.model.MediaItem
+import com.torve.domain.model.MediaType
 import com.torve.domain.model.ParentalFilter
 import com.torve.domain.model.ContentRating
 import com.torve.domain.repository.MetadataRepository
+import com.torve.domain.repository.PreferencesRepository
+import com.torve.data.mdblist.MdbListApi
+import com.torve.data.mdblist.RatingsEnricher
+import com.torve.domain.integrations.IntegrationSecretKey
+import com.torve.domain.integrations.IntegrationSecretStore
+import com.torve.presentation.home.HomeViewModel
+import com.torve.presentation.settings.SettingsViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.koin.compose.koinInject
 
 private data class CatalogRailsUiState(
@@ -51,6 +65,11 @@ internal fun TvCatalogRailsScreen(
     onContextMenuAction: ((MediaItem, TvMediaContextMenuAction, Float?) -> Unit)? = null,
 ) {
     val metadataRepo: MetadataRepository = koinInject()
+    val ratingsEnricher: RatingsEnricher = koinInject()
+    val prefsRepo: PreferencesRepository = koinInject()
+    val secretStore: IntegrationSecretStore = koinInject()
+    val homeViewModel: HomeViewModel = koinInject()
+    val homeState by homeViewModel.state.collectAsState()
     val focusMemory = rememberTvFocusMemory()
 
     val trendingLabel = if (mediaType == "movie") {
@@ -150,8 +169,59 @@ internal fun TvCatalogRailsScreen(
         }
     }
 
-    val filteredRails = remember(uiState.rails, maxContentRating) {
-        if (maxContentRating == null) {
+    // Background ratings enrichment — populates SQLite cache for all rail items.
+    // Same pattern as HomeViewModel.refreshRatings(). Runs once after rails load.
+    val enrichCacheKey = "enriched_$mediaType"
+    LaunchedEffect(uiState.rails.isNotEmpty()) {
+        if (uiState.rails.isEmpty()) return@LaunchedEffect
+        // Skip if already enriched this session
+        if (TvScreenCache.get<Boolean>(enrichCacheKey) == true) return@LaunchedEffect
+        TvScreenCache.put(enrichCacheKey, true)
+
+        launch(Dispatchers.IO) {
+            val apiKey = runCatching {
+                secretStore.get(IntegrationSecretKey.MDBLIST_API_KEY)
+                    ?: prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY)
+                    ?: MdbListApi.DEFAULT_API_KEY
+            }.getOrDefault(MdbListApi.DEFAULT_API_KEY)
+
+            val enrichedRails = uiState.rails.map { rail ->
+                val enrichedItems = ratingsEnricher.enrichList(rail.items, apiKey)
+                rail.copy(items = enrichedItems)
+            }
+            withContext(Dispatchers.Main) {
+                uiState = uiState.copy(rails = enrichedRails)
+                TvScreenCache.put(cacheKey, uiState)
+            }
+        }
+    }
+
+    val targetMediaType = if (mediaType == "movie") MediaType.MOVIE else MediaType.SERIES
+    val continueWatchingLabel = stringResource(
+        if (mediaType == "movie") R.string.tv_section_continue_watching_movies
+        else R.string.tv_section_continue_watching_shows,
+    )
+    val continueWatchingRail = remember(homeState.continueWatching, targetMediaType) {
+        val items = homeState.continueWatching
+            .filter { it.mediaType == targetMediaType }
+            .sortedByDescending { it.updatedAt }
+            .mapNotNull { it.toMediaItemOrNull() }
+            .filter { it.tmdbId != null }
+            .take(20)
+        if (items.isEmpty()) null
+        else TvContentRail(
+            key = "continue_watching_$mediaType",
+            title = continueWatchingLabel,
+            items = items,
+            cardStyle = TvCardStyle.BACKDROP,
+            progressByMediaId = homeState.continueWatching
+                .filter { it.mediaType == targetMediaType && it.progressPercent > 0f }
+                .associate { it.mediaId to it.progressPercent },
+        )
+    }
+
+    val filteredRails = remember(uiState.rails, maxContentRating, continueWatchingRail) {
+        val catalogRails = if (maxContentRating == null) {
             uiState.rails
         } else {
             uiState.rails.mapNotNull { rail ->
@@ -159,6 +229,8 @@ internal fun TvCatalogRailsScreen(
                 if (filtered.isEmpty()) null else rail.copy(items = filtered)
             }
         }
+        if (continueWatchingRail != null) listOf(continueWatchingRail) + catalogRails
+        else catalogRails
     }
 
     val emptyMessage = uiState.error ?: stringResource(R.string.tv_no_data)
