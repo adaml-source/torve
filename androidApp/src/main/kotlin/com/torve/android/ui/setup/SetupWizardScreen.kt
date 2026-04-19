@@ -1,5 +1,7 @@
 package com.torve.android.ui.setup
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
@@ -53,8 +55,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.torve.android.BuildConfig
 import com.torve.android.R
 import com.torve.domain.model.DebridServiceType
 import com.torve.domain.model.StreamQuality
@@ -305,6 +309,9 @@ private fun TermsStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DebridStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
+    val context = LocalContext.current
+    val pandaSetupUrl = remember { "${BuildConfig.PANDA_BASE_URL.trimEnd('/')}/configure" }
+
     Column {
         Text(stringResource(R.string.settings_cloud_service), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
@@ -314,6 +321,51 @@ private fun DebridStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(24.dp))
+
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
+            ),
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    stringResource(R.string.setup_panda_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    stringResource(R.string.setup_panda_desc),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
+                FilledTonalButton(
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(pandaSetupUrl))
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        context.startActivity(intent)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.setup_panda_open_setup))
+                }
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+        Text(
+            stringResource(R.string.setup_panda_advanced),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            stringResource(R.string.setup_panda_advanced_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(16.dp))
 
         // Provider selector
         var expanded by remember { mutableStateOf(false) }

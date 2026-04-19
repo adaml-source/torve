@@ -13,6 +13,9 @@ plugins {
 android {
     namespace = "com.torve.android"
     compileSdk = 36
+    val pandaBaseUrl = providers.gradleProperty("pandaBaseUrl")
+        .orElse(providers.environmentVariable("TORVE_PANDA_BASE_URL"))
+        .orElse("https://panda.torve.app")
 
     signingConfigs {
         create("release") {
@@ -34,14 +37,14 @@ android {
         }
     }
 
-    val baseVersionCode = 38
+    val baseVersionCode = 46
 
     defaultConfig {
         applicationId = "com.torve.app"
         minSdk = 24
         targetSdk = 36
         versionCode = baseVersionCode
-        versionName = "1.0.29"
+        versionName = "1.0.37"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         multiDexEnabled = true
         multiDexKeepProguard = file("multidex-config.pro")
@@ -60,6 +63,7 @@ android {
         buildConfigField("String", "BUILD_TIMESTAMP", "\"${System.currentTimeMillis()}\"")
         buildConfigField("String", "SYNC_BASE_URL", "\"https://api.torve.app\"")
         buildConfigField("String", "SYNC_WS_URL", "\"wss://api.torve.app/ws\"")
+        buildConfigField("String", "PANDA_BASE_URL", "\"${pandaBaseUrl.get()}\"")
     }
 
     flavorDimensions += listOf("store", "formFactor")

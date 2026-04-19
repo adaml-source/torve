@@ -54,6 +54,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.torve.android.R
+import com.torve.android.BuildConfig
 import com.torve.android.ui.components.BackButton
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Ash
@@ -62,6 +63,7 @@ import com.torve.android.ui.theme.Ruby
 import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Steel
+import com.torve.domain.model.AddonPolicyFlags
 import com.torve.presentation.addon.AddonViewModel
 import org.koin.compose.koinInject
 
@@ -77,9 +79,32 @@ data class PopularAddon(
     val url: String,
     val categories: List<AddonCategory>,
     val logo: String? = null,
+    val action: PopularAddonAction = PopularAddonAction.INSTALL,
+    val actionUrl: String = url,
 )
 
+enum class PopularAddonAction {
+    INSTALL,
+    OPEN_BROWSER,
+}
+
 val POPULAR_ADDONS = listOf(
+    PopularAddon(
+        R.string.addon_popular_panda_name,
+        R.string.addon_popular_panda_desc,
+        "${BuildConfig.PANDA_BASE_URL.trimEnd('/')}/manifest.json",
+        listOf(AddonCategory.STREAMS),
+        "${BuildConfig.PANDA_BASE_URL.trimEnd('/')}/logo.svg",
+        action = PopularAddonAction.OPEN_BROWSER,
+        actionUrl = "${BuildConfig.PANDA_BASE_URL.trimEnd('/')}/configure",
+    ),
+    PopularAddon(
+        R.string.addon_popular_torrentio_name,
+        R.string.addon_popular_torrentio_desc,
+        "https://torrentio.strem.fun/manifest.json",
+        listOf(AddonCategory.STREAMS),
+        "https://torrentio.strem.fun/images/logo_v1.png",
+    ),
     PopularAddon(
         R.string.addon_popular_cinemeta_name,
         R.string.addon_popular_cinemeta_desc,
@@ -156,6 +181,9 @@ fun AddonCatalogScreen(
 
     val availableAddons = remember(filtered, installedUrls) {
         filtered.filter { addon ->
+            if (addon.action != PopularAddonAction.INSTALL) {
+                return@filter true
+            }
             val manifestUrl = addon.url.trimEnd('/')
             val baseUrl = manifestUrl.removeSuffix("/manifest.json")
             manifestUrl !in installedUrls && baseUrl !in installedUrls
@@ -247,6 +275,8 @@ fun AddonCatalogScreen(
                 }
 
                 items(state.addons, key = { it.manifestUrl }) { addon ->
+                    val flags = state.policyFlagsByUrl[AddonViewModel.normalizeManifestUrl(addon.manifestUrl)]
+                    val isRestricted = flags?.installable == false
                     Row(
                         Modifier
                             .fillMaxWidth()
@@ -261,7 +291,7 @@ fun AddonCatalogScreen(
                                 addon.manifest.name,
                                 style = MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.Medium,
-                                color = Snow,
+                                color = if (isRestricted) Ash else Snow,
                             )
                             addon.manifest.description?.let { desc ->
                                 Text(
@@ -271,16 +301,25 @@ fun AddonCatalogScreen(
                                     maxLines = 1,
                                 )
                             }
+                            if (isRestricted) {
+                                Text(
+                                    stringResource(R.string.addon_restricted_label),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Ash,
+                                )
+                            }
                         }
 
-                        Switch(
-                            checked = addon.isEnabled,
-                            onCheckedChange = { viewModel.toggleAddon(addon.manifestUrl, it) },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Amber,
-                                checkedTrackColor = Amber.copy(alpha = 0.3f),
-                            ),
-                        )
+                        if (!isRestricted) {
+                            Switch(
+                                checked = addon.isEnabled,
+                                onCheckedChange = { viewModel.toggleAddon(addon.manifestUrl, it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Amber,
+                                    checkedTrackColor = Amber.copy(alpha = 0.3f),
+                                ),
+                            )
+                        }
 
                         IconButton(onClick = { viewModel.removeAddon(addon.manifestUrl) }) {
                             Icon(
@@ -314,6 +353,8 @@ fun AddonCatalogScreen(
                     val isThisInstalling = state.isInstalling && state.installingUrl == addon.url
                     val addonName = stringResource(addon.nameRes)
                     val addonDescription = stringResource(addon.descriptionRes)
+                    val addonFlags = state.policyFlagsByUrl[AddonViewModel.normalizeManifestUrl(addon.url)]
+                    val addonInstallBlocked = addonFlags?.installable == false
 
                     Row(
                         Modifier
@@ -329,7 +370,7 @@ fun AddonCatalogScreen(
                                 addonName,
                                 style = MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.Medium,
-                                color = Snow,
+                                color = if (addonInstallBlocked) Ash else Snow,
                             )
                             Spacer(Modifier.height(2.dp))
                             Text(
@@ -350,26 +391,45 @@ fun AddonCatalogScreen(
 
                         Spacer(Modifier.width(12.dp))
 
-                        OutlinedButton(
-                            onClick = {
-                                viewModel.setInstallUrl(addon.url)
-                                viewModel.installAddon()
-                            },
-                            enabled = !state.isInstalling,
-                        ) {
-                            if (isThisInstalling) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    color = Amber,
-                                    strokeWidth = 2.dp,
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text(stringResource(R.string.addon_catalog_installing), color = Amber)
-                            } else {
-                                Text(
-                                    stringResource(R.string.addon_catalog_install),
-                                    color = if (state.isInstalling) Steel else Amber,
-                                )
+                        if (addonInstallBlocked) {
+                            Text(
+                                stringResource(R.string.addon_restricted_label),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Ash,
+                            )
+                        } else {
+                            OutlinedButton(
+                                onClick = {
+                                    if (addon.action == PopularAddonAction.OPEN_BROWSER) {
+                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(addon.actionUrl))
+                                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        context.startActivity(intent)
+                                    } else {
+                                        viewModel.setInstallUrl(addon.url)
+                                        viewModel.installAddon()
+                                    }
+                                },
+                                enabled = addon.action == PopularAddonAction.OPEN_BROWSER || !state.isInstalling,
+                            ) {
+                                if (addon.action == PopularAddonAction.OPEN_BROWSER) {
+                                    Text(
+                                        stringResource(R.string.addon_catalog_open_setup),
+                                        color = Amber,
+                                    )
+                                } else if (isThisInstalling) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        color = Amber,
+                                        strokeWidth = 2.dp,
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(stringResource(R.string.addon_catalog_installing), color = Amber)
+                                } else {
+                                    Text(
+                                        stringResource(R.string.addon_catalog_install),
+                                        color = if (state.isInstalling) Steel else Amber,
+                                    )
+                                }
                             }
                         }
                     }
