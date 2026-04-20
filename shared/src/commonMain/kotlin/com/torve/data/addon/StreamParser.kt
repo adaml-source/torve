@@ -37,6 +37,7 @@ object StreamParser {
         val fullText = title
         val hdr = extractHdr(fullText)
         val audioCodec = extractAudioCodec(fullText)
+        val languages = extractLanguages(fullText)
 
         return ParsedStream(
             addonName = addonName,
@@ -51,7 +52,25 @@ object StreamParser {
             source = source,
             hdr = hdr,
             audioCodec = audioCodec,
+            languages = languages,
         )
+    }
+
+    /**
+     * Extract audio-language codes from Panda's `🗣️ DE, EN` badge (or unicode
+     * variant `🗣  DE, EN`). Returns upper-cased, trimmed codes in the order
+     * they appear. Anything that isn't a 2–3 letter code is rejected so
+     * multi-line text or stray punctuation doesn't leak in.
+     */
+    fun extractLanguages(text: String): List<String> {
+        // Match the 🗣 emoji (with or without variation selector) followed by a
+        // run of letters/commas/spaces up to the next non-language character.
+        val badgeRegex = Regex("\uD83D\uDDE3\uFE0F?\\s*([A-Za-z,\\s]+)")
+        val match = badgeRegex.find(text) ?: return emptyList()
+        return match.groupValues[1]
+            .split(',')
+            .map { it.trim().uppercase() }
+            .filter { it.matches(Regex("^[A-Z]{2,3}$")) }
     }
 
     fun extractQuality(text: String): String {

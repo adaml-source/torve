@@ -101,12 +101,21 @@ private struct StreamRow: View {
                     .foregroundColor(qualityColor)
                     .cornerRadius(4)
 
-                // Stream info
+                // Stream info. Stremio Stream.title can be multi-line — Panda
+                // puts resolution/size/codec + 🗣️ language tags on the second
+                // line. Split and render both so the language info stays visible.
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(stream.title)
+                    let titleLines = stream.title.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+                    Text(titleLines.first ?? stream.title)
                         .font(.subheadline)
                         .fontWeight(.medium)
                         .lineLimit(1)
+                    if titleLines.count > 1 {
+                        Text(titleLines.dropFirst().joined(separator: " "))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+                    }
 
                     HStack(spacing: 6) {
                         if let size = stream.size {
@@ -120,6 +129,9 @@ private struct StreamRow: View {
                         }
                         if let audio = stream.audioCodec {
                             MetaChipView(text: audio)
+                        }
+                        if !stream.languages.isEmpty {
+                            MetaChipView(text: "🗣 " + stream.languages.joined(separator: ", "))
                         }
                         if let seeds = stream.seeds {
                             MetaChipView(text: "\(seeds) seeds")

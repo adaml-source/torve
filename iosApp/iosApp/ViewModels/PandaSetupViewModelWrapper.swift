@@ -55,6 +55,24 @@ final class PandaSetupViewModelWrapper: ObservableObject {
     func setNzbIndexer(_ indexer: String) { viewModel.setNzbIndexer(indexer: indexer) }
     func setNzbIndexerUrl(_ url: String) { viewModel.setNzbIndexerUrl(url: url) }
     func setNzbIndexerApiKey(_ key: String) { viewModel.setNzbIndexerApiKey(apiKey: key) }
+    func addIndexer() { viewModel.addIndexer() }
+    func removeIndexer(_ index: Int) { viewModel.removeIndexer(index: Int32(index)) }
+    func setIndexerType(_ index: Int, _ type: String) {
+        viewModel.updateIndexer(index: Int32(index)) { row in
+            NzbIndexerRow(type: type, url: row.url, apiKey: row.apiKey)
+        }
+    }
+    func setIndexerUrl(_ index: Int, _ url: String) {
+        viewModel.updateIndexer(index: Int32(index)) { row in
+            NzbIndexerRow(type: row.type, url: url, apiKey: row.apiKey)
+        }
+    }
+    func setIndexerApiKey(_ index: Int, _ apiKey: String) {
+        viewModel.updateIndexer(index: Int32(index)) { row in
+            NzbIndexerRow(type: row.type, url: row.url, apiKey: apiKey)
+        }
+    }
+    func setBandwidthSaver(_ enabled: Bool) { viewModel.setBandwidthSaver(on: enabled) }
     func setDownloadClient(_ client: String) { viewModel.setDownloadClient(client: client) }
     func setDownloadClientUrl(_ url: String) { viewModel.setDownloadClientUrl(url: url) }
     func setDownloadClientUsername(_ u: String) { viewModel.setDownloadClientUsername(username: u) }
@@ -66,6 +84,9 @@ final class PandaSetupViewModelWrapper: ObservableObject {
     func setMaxQuality(_ q: String) { viewModel.setMaxQuality(quality: q) }
     func setQualityProfile(_ p: String) { viewModel.setQualityProfile(profile: p) }
     func setReleaseLanguage(_ l: String) { viewModel.setReleaseLanguage(language: l) }
+    func toggleLanguage(_ code: String, selected: Bool) {
+        viewModel.toggleLanguage(code: code, selected: selected)
+    }
 
     // MARK: - Save / delete
 

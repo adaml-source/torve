@@ -47,6 +47,8 @@ data class ParsedStream(
     val score: Int = 0,
     val hdr: String? = null,
     val audioCodec: String? = null,
+    /** Language codes parsed from Panda's 🗣️ tag (e.g. ["DE", "EN"]). Empty if none. */
+    val languages: List<String> = emptyList(),
     val recentSuccessCount: Int = 0,
     val lastSuccessfulResolveAt: Long? = null,
     val accelerationSourceKey: String? = null,

@@ -15,12 +15,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
@@ -139,6 +144,21 @@ fun PandaUsenetStep(
         // Credentials
         if (state.usenetProvider == "easynews") {
             EasynewsCredentials(state, viewModel)
+
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider(color = Steel.copy(alpha = 0.15f))
+            Spacer(Modifier.height(16.dp))
+            NzbIndexerSection(state, viewModel)
+
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider(color = Steel.copy(alpha = 0.15f))
+            Spacer(Modifier.height(16.dp))
+            DownloadClientSection(state, viewModel)
+
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider(color = Steel.copy(alpha = 0.15f))
+            Spacer(Modifier.height(16.dp))
+            BandwidthSaverSwitch(state, viewModel)
         } else {
             GenericNntpCredentials(state, viewModel)
 
@@ -151,6 +171,60 @@ fun PandaUsenetStep(
             HorizontalDivider(color = Steel.copy(alpha = 0.15f))
             Spacer(Modifier.height(16.dp))
             DownloadClientSection(state, viewModel)
+        }
+    }
+}
+
+@Composable
+private fun BandwidthSaverSwitch(state: PandaSetupUiState, viewModel: PandaSetupViewModel) {
+    val cloudClients = setOf("premiumize", "torbox", "alldebrid")
+    val hasIndexer = state.nzbIndexers.any { it.type != "none" && it.apiKey.isNotBlank() }
+    val hasCloudClient = state.downloadClient in cloudClients
+    val canEnable = state.enableUsenet && hasIndexer && hasCloudClient
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Gunmetal)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Bandwidth saver — use NZB path when available",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (canEnable) Snow else Silver,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "When the same release is on both Easynews and one of your NZB indexers, route playback through your cloud download service. Saves Easynews data.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Silver,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Switch(
+                checked = canEnable && state.easynewsPreferNzb,
+                onCheckedChange = { viewModel.setBandwidthSaver(it) },
+                enabled = canEnable,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Amber,
+                    checkedTrackColor = Amber.copy(alpha = 0.3f),
+                ),
+            )
+        }
+        if (!canEnable) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Configure at least one NZB indexer with an API key and a cloud download client (Premiumize / TorBox / AllDebrid) to enable.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Amber.copy(alpha = 0.8f),
+            )
         }
     }
 }
@@ -254,27 +328,89 @@ private fun NzbIndexerSection(state: PandaSetupUiState, viewModel: PandaSetupVie
     )
     Spacer(Modifier.height(8.dp))
 
-    UsenetDropdown(
-        value = state.nzbIndexer,
-        options = state.schema.nzbIndexers.map { id -> id to labelForNzbIndexer(id) },
-        onSelect = { viewModel.setNzbIndexer(it) },
-    )
-
-    if (state.nzbIndexer != "none") {
-        Spacer(Modifier.height(10.dp))
-        if (state.nzbIndexer == "custom") {
-            FieldInput(
-                label = stringResource(R.string.panda_setup_usenet_indexer_url),
-                value = state.nzbIndexerUrl,
-                onValueChange = { viewModel.setNzbIndexerUrl(it) },
-            )
-            Spacer(Modifier.height(10.dp))
-        }
-        FieldInput(
-            label = stringResource(R.string.panda_setup_usenet_indexer_key),
-            value = state.nzbIndexerApiKey,
-            onValueChange = { viewModel.setNzbIndexerApiKey(it) },
+    state.nzbIndexers.forEachIndexed { index, row ->
+        if (index > 0) Spacer(Modifier.height(12.dp))
+        NzbIndexerRowCard(
+            row = row,
+            indexerOptions = state.schema.nzbIndexers,
+            onTypeChange = { newType ->
+                viewModel.updateIndexer(index) { it.copy(type = newType) }
+            },
+            onUrlChange = { newUrl ->
+                viewModel.updateIndexer(index) { it.copy(url = newUrl) }
+            },
+            onKeyChange = { newKey ->
+                viewModel.updateIndexer(index) { it.copy(apiKey = newKey) }
+            },
+            onRemove = { viewModel.removeIndexer(index) },
+            canRemove = state.nzbIndexers.size > 1,
         )
+    }
+
+    Spacer(Modifier.height(10.dp))
+    OutlinedButton(
+        onClick = { viewModel.addIndexer() },
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text("Add another indexer", color = Amber)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun NzbIndexerRowCard(
+    row: com.torve.data.panda.NzbIndexerRow,
+    indexerOptions: List<String>,
+    onTypeChange: (String) -> Unit,
+    onUrlChange: (String) -> Unit,
+    onKeyChange: (String) -> Unit,
+    onRemove: () -> Unit,
+    canRemove: Boolean,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Gunmetal)
+            .padding(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.foundation.layout.Box(modifier = Modifier.weight(1f)) {
+                UsenetDropdown(
+                    value = row.type,
+                    options = indexerOptions.map { id -> id to labelForNzbIndexer(id) },
+                    onSelect = onTypeChange,
+                )
+            }
+            if (canRemove) {
+                Spacer(Modifier.width(8.dp))
+                IconButton(onClick = onRemove) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Remove indexer",
+                        tint = Silver,
+                    )
+                }
+            }
+        }
+
+        if (row.type != "none") {
+            if (row.type == "custom") {
+                Spacer(Modifier.height(10.dp))
+                FieldInput(
+                    label = stringResource(R.string.panda_setup_usenet_indexer_url),
+                    value = row.url,
+                    onValueChange = onUrlChange,
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            FieldInput(
+                label = stringResource(R.string.panda_setup_usenet_indexer_key),
+                value = row.apiKey,
+                onValueChange = onKeyChange,
+                isPassword = true,
+            )
+        }
     }
 }
 

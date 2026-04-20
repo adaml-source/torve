@@ -43,6 +43,7 @@ import com.torve.android.ui.theme.Charcoal
 import com.torve.android.ui.theme.Emerald
 import com.torve.android.ui.theme.Graphite
 import com.torve.android.ui.theme.Obsidian
+import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Torve
 import com.torve.data.addon.ParsedStream
@@ -245,13 +246,27 @@ private fun StreamItem(
                     startupCandidate = startupCandidate,
                     modifier = Modifier.padding(bottom = 2.dp),
                 )
+                // Stremio Stream.title may be multi-line. Panda puts resolution,
+                // size, video codec, and audio-language tags (e.g. 🗣️ DE, EN) on
+                // subsequent lines — rendering only the first line drops the
+                // language info entirely.
+                val titleLines = stream.title.split('\n')
                 Text(
-                    text = stream.title,
+                    text = titleLines.first(),
                     style = MaterialTheme.typography.titleSmall,
                     color = Snow,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (titleLines.size > 1) {
+                    Text(
+                        text = titleLines.drop(1).joinToString(" "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Silver,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 Spacer(Modifier.height(3.dp))
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -261,6 +276,9 @@ private fun StreamItem(
                     if (!stream.codec.isNullOrBlank()) MetaChip(stream.codec!!)
                     stream.hdr?.let { MetaChip(it) }
                     stream.audioCodec?.let { MetaChip(it) }
+                    if (stream.languages.isNotEmpty()) {
+                        MetaChip("\uD83D\uDDE3 " + stream.languages.joinToString(", "))
+                    }
                     stream.seeds?.let { MetaChip("$it seeds") }
                 }
                 Spacer(Modifier.height(6.dp))

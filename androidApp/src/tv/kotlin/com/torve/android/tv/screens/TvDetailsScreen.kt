@@ -1199,6 +1199,10 @@ fun TvDetailsScreen(
                                         stream.codec?.let { append(" · $it") }
                                         stream.hdr?.let { append(" · $it") }
                                         stream.size?.let { append(" · $it") }
+                                        if (stream.languages.isNotEmpty()) {
+                                            append(" · \uD83D\uDDE3 ")
+                                            append(stream.languages.joinToString(", "))
+                                        }
                                     },
                                     style = MaterialTheme.typography.bodyLarge,
                                     color = Snow,
@@ -1207,13 +1211,23 @@ fun TvDetailsScreen(
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 if (stream.title.isNotBlank()) {
+                                    val titleLines = stream.title.split('\n')
                                     Text(
-                                        text = stream.title,
+                                        text = titleLines.first(),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = Silver,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
+                                    if (titleLines.size > 1) {
+                                        Text(
+                                            text = titleLines.drop(1).joinToString(" "),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Silver.copy(alpha = 0.75f),
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
                                 }
                                 Text(
                                     text = buildString {

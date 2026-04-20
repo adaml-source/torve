@@ -404,38 +404,30 @@ private fun UsenetStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel)
             }
 
             Spacer(Modifier.height(16.dp))
-            Text("NZB indexer", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                state.schema.nzbIndexers.forEach { id ->
-                    TorveFilterChip(
-                        text = desktopLabelForNzbIndexer(id),
-                        selected = state.nzbIndexer == id,
-                        onClick = { viewModel.setNzbIndexer(id) },
-                    )
-                }
-            }
-            if (state.nzbIndexer != "none") {
-                Spacer(Modifier.height(8.dp))
-                if (state.nzbIndexer == "custom") {
-                    TorveTextField(
-                        value = state.nzbIndexerUrl,
-                        onValueChange = { viewModel.setNzbIndexerUrl(it) },
-                        label = "Indexer URL",
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(Modifier.height(8.dp))
-                }
-                TorveTextField(
-                    value = state.nzbIndexerApiKey,
-                    onValueChange = { viewModel.setNzbIndexerApiKey(it) },
-                    label = "Indexer API key",
-                    modifier = Modifier.fillMaxWidth(),
-                    visualTransformation = PasswordVisualTransformation(),
+            Text("NZB indexers", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            state.nzbIndexers.forEachIndexed { index, row ->
+                if (index > 0) Spacer(Modifier.height(12.dp))
+                NzbIndexerRowEditor(
+                    row = row,
+                    indexerOptions = state.schema.nzbIndexers,
+                    onTypeChange = { newType ->
+                        viewModel.updateIndexer(index) { it.copy(type = newType) }
+                    },
+                    onUrlChange = { newUrl ->
+                        viewModel.updateIndexer(index) { it.copy(url = newUrl) }
+                    },
+                    onKeyChange = { newKey ->
+                        viewModel.updateIndexer(index) { it.copy(apiKey = newKey) }
+                    },
+                    onRemove = { viewModel.removeIndexer(index) },
+                    canRemove = state.nzbIndexers.size > 1,
                 )
             }
+            Spacer(Modifier.height(8.dp))
+            TorveSecondaryButton(
+                text = "+ Add another indexer",
+                onClick = { viewModel.addIndexer() },
+            )
 
             Spacer(Modifier.height(16.dp))
             Text("Download client", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
@@ -452,6 +444,117 @@ private fun UsenetStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel)
                 }
             }
             DownloadClientFields(state, viewModel)
+
+            if (state.usenetProvider == "easynews") {
+                Spacer(Modifier.height(16.dp))
+                BandwidthSaverSection(state, viewModel)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun NzbIndexerRowEditor(
+    row: com.torve.data.panda.NzbIndexerRow,
+    indexerOptions: List<String>,
+    onTypeChange: (String) -> Unit,
+    onUrlChange: (String) -> Unit,
+    onKeyChange: (String) -> Unit,
+    onRemove: () -> Unit,
+    canRemove: Boolean,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(TorveDesktopThemeTokens.colors.fieldSurface)
+            .padding(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            FlowRow(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                indexerOptions.forEach { id ->
+                    TorveFilterChip(
+                        text = desktopLabelForNzbIndexer(id),
+                        selected = row.type == id,
+                        onClick = { onTypeChange(id) },
+                    )
+                }
+            }
+            if (canRemove) {
+                Spacer(Modifier.width(8.dp))
+                TorveGhostButton(text = "Remove", onClick = onRemove)
+            }
+        }
+        if (row.type != "none") {
+            if (row.type == "custom") {
+                Spacer(Modifier.height(8.dp))
+                TorveTextField(
+                    value = row.url,
+                    onValueChange = onUrlChange,
+                    label = "Indexer URL",
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            TorveTextField(
+                value = row.apiKey,
+                onValueChange = onKeyChange,
+                label = "Indexer API key",
+                modifier = Modifier.fillMaxWidth(),
+                visualTransformation = PasswordVisualTransformation(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun BandwidthSaverSection(state: PandaSetupUiState, viewModel: PandaSetupViewModel) {
+    val cloudClients = setOf("premiumize", "torbox", "alldebrid")
+    val hasIndexer = state.nzbIndexers.any { it.type != "none" && it.apiKey.isNotBlank() }
+    val hasCloudClient = state.downloadClient in cloudClients
+    val canEnable = state.enableUsenet && hasIndexer && hasCloudClient
+    val colors = TorveDesktopThemeTokens.colors
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(colors.fieldSurface)
+            .padding(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Bandwidth saver — use NZB path when available",
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "When the same release is on both Easynews and one of your NZB indexers, route playback through your cloud download service. Saves Easynews data.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textMuted,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Switch(
+                checked = canEnable && state.easynewsPreferNzb,
+                onCheckedChange = { viewModel.setBandwidthSaver(it) },
+                enabled = canEnable,
+            )
+        }
+        if (!canEnable) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Configure at least one NZB indexer with an API key and a cloud download client (Premiumize / TorBox / AllDebrid) to enable.",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textMuted,
+            )
         }
     }
 }
@@ -550,12 +653,14 @@ private fun QualityStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel
 
         Spacer(Modifier.height(16.dp))
         Text("Release language", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        val selectedLanguages = state.releaseLanguages.toSet()
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             state.schema.releaseLanguages.forEach { id ->
+                val isSelected = id in selectedLanguages
                 TorveFilterChip(
                     text = desktopLabelForLanguage(id),
-                    selected = state.releaseLanguage == id,
-                    onClick = { viewModel.setReleaseLanguage(id) },
+                    selected = isSelected,
+                    onClick = { viewModel.toggleLanguage(id, !isSelected) },
                 )
             }
         }

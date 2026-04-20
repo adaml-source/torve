@@ -380,7 +380,16 @@ val sharedModule = module {
             // The SettingsViewModel init loads it async and will call onLanguageChanged.
         }
     }
-    factory { AddonViewModel(get(), get(), get(), addonPolicyRepository = get()) }
+    factory {
+        AddonViewModel(
+            get(),
+            get(),
+            get(),
+            addonPolicyRepository = get(),
+            pandaClient = get(),
+            integrationSecretStore = get(),
+        )
+    }
     single { com.torve.data.panda.PandaApiClient(get(), get()) }
     factory { com.torve.presentation.panda.PandaSetupViewModel(get(), get(), get(), get(), get(), get(), get(), get()) }
     single { ChannelsViewModel(get(), get(), get(), backgroundDispatcher = kotlinx.coroutines.Dispatchers.IO, playlistBackup = get(), settingsRefreshNotifier = get()) }

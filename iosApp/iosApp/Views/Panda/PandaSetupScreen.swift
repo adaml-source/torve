@@ -328,27 +328,48 @@ struct PandaSetupScreen: View {
                     }
                 }
 
-                Section(header: Text("NZB indexer")) {
-                    Picker("Indexer", selection: Binding(
-                        get: { wrapper.state.nzbIndexer },
-                        set: { wrapper.setNzbIndexer($0) }
-                    )) {
-                        ForEach(wrapper.state.schema.nzbIndexers, id: \.self) { id in
-                            Text(labelForNzbIndexer(id)).tag(id)
+                ForEach(Array(wrapper.state.nzbIndexers.enumerated()), id: \.offset) { item in
+                    let index = item.offset
+                    let row = item.element
+                    Section(header: Text(wrapper.state.nzbIndexers.count > 1
+                                        ? "NZB indexer #\(index + 1)"
+                                        : "NZB indexer")) {
+                        Picker("Indexer", selection: Binding(
+                            get: { row.type },
+                            set: { wrapper.setIndexerType(index, $0) }
+                        )) {
+                            ForEach(wrapper.state.schema.nzbIndexers, id: \.self) { id in
+                                Text(labelForNzbIndexer(id)).tag(id)
+                            }
+                        }
+
+                        if row.type == "custom" {
+                            TextField("URL", text: Binding(
+                                get: { row.url },
+                                set: { wrapper.setIndexerUrl(index, $0) }
+                            ))
+                        }
+                        if row.type != "none" {
+                            SecureField("API key", text: Binding(
+                                get: { row.apiKey },
+                                set: { wrapper.setIndexerApiKey(index, $0) }
+                            ))
+                        }
+                        if wrapper.state.nzbIndexers.count > 1 {
+                            Button(role: .destructive) {
+                                wrapper.removeIndexer(index)
+                            } label: {
+                                Label("Remove indexer", systemImage: "trash")
+                            }
                         }
                     }
+                }
 
-                    if wrapper.state.nzbIndexer == "custom" {
-                        TextField("URL", text: Binding(
-                            get: { wrapper.state.nzbIndexerUrl },
-                            set: { wrapper.setNzbIndexerUrl($0) }
-                        ))
-                    }
-                    if wrapper.state.nzbIndexer != "none" {
-                        SecureField("API key", text: Binding(
-                            get: { wrapper.state.nzbIndexerApiKey },
-                            set: { wrapper.setNzbIndexerApiKey($0) }
-                        ))
+                Section {
+                    Button {
+                        wrapper.addIndexer()
+                    } label: {
+                        Label("Add another indexer", systemImage: "plus.circle")
                     }
                 }
 
@@ -364,7 +385,32 @@ struct PandaSetupScreen: View {
 
                     downloadClientFieldViews
                 }
+
+                if wrapper.state.usenetProvider == "easynews" {
+                    bandwidthSaverSection
+                }
             }
+        }
+    }
+
+    private var bandwidthSaverSection: some View {
+        let cloudClients: Set<String> = ["premiumize", "torbox", "alldebrid"]
+        let hasIndexer = wrapper.state.nzbIndexers.contains { $0.type != "none" && !$0.apiKey.isEmpty }
+        let hasCloudClient = cloudClients.contains(wrapper.state.downloadClient)
+        let canEnable = wrapper.state.enableUsenet && hasIndexer && hasCloudClient
+
+        return Section(
+            header: Text("Bandwidth saver"),
+            footer: Text(canEnable
+                         ? "When the same release is on both Easynews and one of your NZB indexers, route playback through your cloud download service. Saves Easynews data."
+                         : "Configure at least one NZB indexer with an API key and a cloud download client (Premiumize / TorBox / AllDebrid) to enable.")
+        ) {
+            Toggle("Use NZB path when available", isOn: Binding(
+                get: { canEnable && wrapper.state.easynewsPreferNzb },
+                set: { wrapper.setBandwidthSaver($0) }
+            ))
+            .disabled(!canEnable)
+            .tint(.orange)
         }
     }
 
@@ -455,13 +501,23 @@ struct PandaSetupScreen: View {
                     }
                 }
             }
-            Section(header: Text("Release language")) {
-                Picker("Language", selection: Binding(
-                    get: { wrapper.state.releaseLanguage },
-                    set: { wrapper.setReleaseLanguage($0) }
-                )) {
-                    ForEach(wrapper.state.schema.releaseLanguages, id: \.self) { id in
-                        Text(labelForLanguage(id)).tag(id)
+            Section(
+                header: Text("Release languages"),
+                footer: Text("Pick one or more. \"Any\" clears the filter.")
+            ) {
+                let selected = Set(wrapper.state.releaseLanguages)
+                ForEach(wrapper.state.schema.releaseLanguages, id: \.self) { id in
+                    Button {
+                        wrapper.toggleLanguage(id, selected: !selected.contains(id))
+                    } label: {
+                        HStack {
+                            Text(labelForLanguage(id))
+                                .foregroundColor(.primary)
+                            Spacer()
+                            if selected.contains(id) {
+                                Image(systemName: "checkmark").foregroundColor(.orange)
+                            }
+                        }
                     }
                 }
             }

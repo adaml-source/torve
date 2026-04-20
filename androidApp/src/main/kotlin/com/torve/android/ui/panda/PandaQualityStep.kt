@@ -1,6 +1,9 @@
 package com.torve.android.ui.panda
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,6 +15,8 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -70,13 +75,46 @@ fun PandaQualityStep(
         )
         Spacer(Modifier.height(16.dp))
 
-        // Release language
-        DropdownField(
-            label = stringResource(R.string.panda_setup_quality_language),
-            value = state.releaseLanguage,
-            options = state.schema.releaseLanguages.map { id -> id to labelForLanguage(id) },
-            onSelect = { viewModel.setReleaseLanguage(it) },
+        // Release language — multi-select chips. "any" is exclusive with specific
+        // languages; toggling handled in PandaSetupViewModel.toggleLanguage.
+        Text(
+            stringResource(R.string.panda_setup_quality_language),
+            style = MaterialTheme.typography.bodyMedium,
+            color = Silver,
         )
+        Spacer(Modifier.height(6.dp))
+        LanguageChips(
+            available = state.schema.releaseLanguages,
+            selected = state.releaseLanguages,
+            onToggle = { code, sel -> viewModel.toggleLanguage(code, sel) },
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@Composable
+private fun LanguageChips(
+    available: List<String>,
+    selected: List<String>,
+    onToggle: (String, Boolean) -> Unit,
+) {
+    val selectedSet = selected.toSet()
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        available.forEach { code ->
+            val isSelected = code in selectedSet
+            FilterChip(
+                selected = isSelected,
+                onClick = { onToggle(code, !isSelected) },
+                label = { Text(labelForLanguage(code)) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = Amber.copy(alpha = 0.2f),
+                    selectedLabelColor = Amber,
+                ),
+            )
+        }
     }
 }
 

@@ -21,7 +21,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -225,30 +224,12 @@ fun ManagePandaScreen(
                     )
                 }
 
-                if (!isInstalled) {
-                    // Install Panda addon from manifest
-                    OutlinedButton(
-                        onClick = {
-                            viewModel.setInstallUrl(pandaManifestUrl)
-                            viewModel.installAddon()
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !state.isInstalling,
-                        shape = RoundedCornerShape(12.dp),
-                    ) {
-                        if (isInstalling) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                color = Amber,
-                                strokeWidth = 2.dp,
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(stringResource(R.string.manage_panda_installing), color = Amber)
-                        } else {
-                            Text(stringResource(R.string.manage_panda_install), color = Amber)
-                        }
-                    }
-                }
+                // Bare "Install Panda" button removed: installing the placeholder
+                // manifest at panda.torve.app/manifest.json registers an unconfigured
+                // addon that returns 404 on every /stream request. The only valid
+                // install path is through the setup flow, which POSTs to
+                // /api/v1/configs and installs the returned /u/<token>/manifest.json.
+                // The primary "Open setup" button above already drives that.
 
                 // Web fallback
                 OutlinedButton(

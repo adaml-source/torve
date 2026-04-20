@@ -2,6 +2,9 @@ package com.torve.presentation.addon
 
 import com.torve.data.addon.AddonSyncService
 import com.torve.data.contentpolicy.AddonPolicyRepository
+import com.torve.data.panda.PandaApiClient
+import com.torve.domain.integrations.IntegrationSecretKey
+import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.model.AddonPolicyFlags
 import com.torve.domain.repository.AddonRepository
 import com.torve.presentation.settings.SettingsRefreshNotifier
@@ -20,6 +23,8 @@ class AddonViewModel(
     private val addonSyncService: AddonSyncService,
     settingsRefreshNotifier: SettingsRefreshNotifier,
     private val addonPolicyRepository: AddonPolicyRepository? = null,
+    private val pandaClient: PandaApiClient? = null,
+    private val integrationSecretStore: IntegrationSecretStore? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(AddonUiState())
@@ -71,6 +76,19 @@ class AddonViewModel(
         val url = _state.value.installUrl.trim()
         if (url.isBlank()) return
 
+        // Reject the bare/placeholder Panda manifest. A valid Panda manifest lives at
+        // https://panda.torve.app/u/<token>/manifest.json after the user completes
+        // the setup flow (POST /api/v1/configs). The base URL returns a configurable
+        // placeholder whose /stream routes respond 404, so installing it produces a
+        // broken addon. Any install attempt against that URL is a bug — route users
+        // through the guided Panda setup instead.
+        if (isBarePandaManifest(url)) {
+            _state.update {
+                it.copy(installError = "Run the Panda setup first — the bare Panda URL is a placeholder.")
+            }
+            return
+        }
+
         // Enforce backend installable flag
         if (!isInstallAllowed(url)) {
             _state.update { it.copy(installError = "This addon is not available on this build.") }
@@ -105,11 +123,27 @@ class AddonViewModel(
         scope.launch {
             try {
                 val existingAddon = addonRepo.getAddon(manifestUrl)
+                val wasPanda = existingAddon != null && (
+                    existingAddon.manifest.id == "com.torve.panda" ||
+                        existingAddon.manifestUrl.contains("panda.torve.app")
+                )
                 addonRepo.removeAddon(manifestUrl)
                 val addons = addonRepo.getInstalledAddons()
                 _state.update { it.copy(addons = addons) }
                 scope.launch(Dispatchers.IO) {
                     addonSyncService.onAddonRemoved(existingAddon)
+                    // If the user uninstalled Panda, also purge the per-user config on
+                    // panda.torve.app and the cached PANDA_TOKEN. Otherwise the next
+                    // Panda setup attempt would enter edit mode with a stale token
+                    // and never actually install a new addon row.
+                    if (wasPanda) {
+                        val store = integrationSecretStore ?: return@launch
+                        val token = store.get(IntegrationSecretKey.PANDA_TOKEN)
+                        if (!token.isNullOrBlank()) {
+                            runCatching { pandaClient?.deleteConfig(token) }
+                            store.remove(IntegrationSecretKey.PANDA_TOKEN)
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 _state.update { it.copy(error = com.torve.presentation.error.UserFacingError.ADDON_FAILED.messageKey) }
@@ -165,11 +199,26 @@ class AddonViewModel(
         }
     }
 
+    private fun isBarePandaManifest(url: String): Boolean = isBarePandaManifestUrl(url)
+
     companion object {
         fun normalizeManifestUrl(url: String): String {
             val trimmed = url.trim().trimEnd('/')
             val base = trimmed.removeSuffix("/manifest.json")
             return "$base/manifest.json"
+        }
+
+        /**
+         * True when the URL is the unconfigured Panda placeholder
+         * (panda.torve.app/manifest.json) rather than a per-user manifest
+         * (panda.torve.app/u/<token>/manifest.json). Registering the placeholder
+         * is a bug — every /stream request 404s.
+         */
+        fun isBarePandaManifestUrl(url: String): Boolean {
+            val normalized = normalizeManifestUrl(url).lowercase()
+            if (!normalized.contains("panda.torve.app")) return false
+            // Valid per-user Panda URLs include a "/u/<token>/" segment before manifest.json.
+            return !normalized.contains("/u/")
         }
     }
 }
