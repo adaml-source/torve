@@ -90,6 +90,10 @@ fun PaywallScreen(
 
     LaunchedEffect(Unit) {
         viewModel.refreshAccess()
+        // Defensive: ensure billing is initialized when the paywall opens.
+        // BillingManager.initialize() is idempotent and will re-arm the
+        // connection if the app-wide init failed or the service disconnected.
+        billingManager.initialize()
     }
 
     LaunchedEffect(purchaseResult) {
@@ -188,6 +192,7 @@ fun PaywallScreen(
                     activity?.let { billingManager.launchPurchase(it, productType) }
                 }
             },
+            onRetryBilling = { billingManager.initialize() },
         )
     }
 }
@@ -203,6 +208,7 @@ private fun PaywallContent(
     onRefreshAccess: () -> Unit,
     onRetryVerification: () -> Unit,
     onPurchase: (BillingManager.ProductType) -> Unit,
+    onRetryBilling: () -> Unit,
 ) {
     val billingState by billingManager.billingState.collectAsState()
     val monthlyOffer = remember(billingState) {
@@ -298,68 +304,81 @@ private fun PaywallContent(
 
         if (access.shouldShowBuy) {
             Spacer(Modifier.height(20.dp))
-            if (billingLoading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(28.dp),
-                    strokeWidth = 2.dp,
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = stringResource(R.string.paywall_price_loading),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                if (monthlyOffer != null) {
-                    PricingOptionCard(
-                        title = stringResource(R.string.paywall_monthly_title),
-                        description = stringResource(R.string.paywall_monthly_description),
-                        price = monthlyOffer.formattedPrice ?: stringResource(R.string.paywall_price),
-                        billingDetails = monthlyOffer.billingDetails,
-                        enabled = !state.isPurchasing && !purchaseBlocked,
-                        actionLabel = stringResource(R.string.paywall_choose_monthly),
-                        onClick = { onPurchase(BillingManager.ProductType.MONTHLY) },
-                    )
-                    Spacer(Modifier.height(12.dp))
-                }
-
-                if (lifetimeOffer != null) {
-                    PricingOptionCard(
-                        title = stringResource(R.string.paywall_lifetime_title),
-                        description = stringResource(R.string.paywall_lifetime_description),
-                        price = lifetimeOffer.formattedPrice ?: stringResource(R.string.paywall_price),
-                        billingDetails = lifetimeOffer.billingDetails,
-                        enabled = !state.isPurchasing && !purchaseBlocked,
-                        actionLabel = stringResource(R.string.paywall_choose_lifetime),
-                        onClick = { onPurchase(BillingManager.ProductType.LIFETIME) },
-                    )
-                }
-
-                if (monthlyOffer == null && lifetimeOffer == null && billingReady) {
+            when {
+                billingErrorMessage != null && monthlyOffer == null && lifetimeOffer == null -> {
                     Text(
-                        text = billingErrorMessage ?: stringResource(R.string.paywall_price),
+                        text = billingErrorMessage,
+                        color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = if (billingErrorMessage != null) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
                         textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = onRetryBilling,
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Text(stringResource(R.string.common_retry))
+                    }
+                }
+
+                billingLoading -> {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(28.dp),
+                        strokeWidth = 2.dp,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.paywall_price_loading),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                else -> {
+                    if (monthlyOffer != null) {
+                        PricingOptionCard(
+                            title = stringResource(R.string.paywall_monthly_title),
+                            description = stringResource(R.string.paywall_monthly_description),
+                            price = monthlyOffer.formattedPrice ?: stringResource(R.string.paywall_price),
+                            billingDetails = monthlyOffer.billingDetails,
+                            enabled = !state.isPurchasing && !purchaseBlocked,
+                            actionLabel = stringResource(R.string.paywall_choose_monthly),
+                            onClick = { onPurchase(BillingManager.ProductType.MONTHLY) },
+                        )
+                        Spacer(Modifier.height(12.dp))
+                    }
+
+                    if (lifetimeOffer != null) {
+                        PricingOptionCard(
+                            title = stringResource(R.string.paywall_lifetime_title),
+                            description = stringResource(R.string.paywall_lifetime_description),
+                            price = lifetimeOffer.formattedPrice ?: stringResource(R.string.paywall_price),
+                            billingDetails = lifetimeOffer.billingDetails,
+                            enabled = !state.isPurchasing && !purchaseBlocked,
+                            actionLabel = stringResource(R.string.paywall_choose_lifetime),
+                            onClick = { onPurchase(BillingManager.ProductType.LIFETIME) },
+                        )
+                    }
+
+                    if (monthlyOffer == null && lifetimeOffer == null && billingReady) {
+                        Text(
+                            text = stringResource(R.string.paywall_price),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Button(
+                            onClick = onRetryBilling,
+                            shape = RoundedCornerShape(12.dp),
+                        ) {
+                            Text(stringResource(R.string.common_retry))
+                        }
+                    }
                 }
             }
-        }
-
-        if (access.shouldShowBuy && billingErrorMessage != null && monthlyOffer == null && lifetimeOffer == null) {
-            Spacer(Modifier.height(12.dp))
-            Text(
-                text = billingErrorMessage,
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
-            )
         }
 
         Spacer(Modifier.height(20.dp))

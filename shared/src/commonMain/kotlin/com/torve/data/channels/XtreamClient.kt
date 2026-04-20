@@ -150,6 +150,7 @@ class XtreamClient(
         return streams.map { stream ->
             val categoryName = categoryMap[stream.categoryId]?.categoryName
             val streamUrl = "${server.trimEnd('/')}/live/$username/$password/${stream.streamId}.ts"
+            val hasArchive = (stream.tvArchive ?: 0) > 0
             Channel(
                 name = stream.name ?: "Unknown",
                 url = streamUrl,
@@ -158,6 +159,12 @@ class XtreamClient(
                 tvgLogo = stream.streamIcon,
                 groupTitle = categoryName,
                 channelNumber = stream.num,
+                catchupType = if (hasArchive) "xc" else null,
+                catchupDays = if (hasArchive) {
+                    stream.tvArchiveDuration?.takeIf { it > 0 } ?: 1
+                } else {
+                    null
+                },
                 playlistId = playlistId,
             )
         }

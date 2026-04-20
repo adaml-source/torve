@@ -18,18 +18,21 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
     companion object {
         private const val TAG = "AmazonBilling"
         private const val MONTHLY_SUBSCRIPTION_PARENT = "com.torve.pro.subscription"
-        private const val MONTHLY_SUBSCRIPTION_TERM = "com.torve.pro.monthly"
         private const val LIFETIME_PRODUCT_ID = "com.torve.pro.lifetime"
+        private const val LIFETIME_PRODUCT_ID_AMAZON = "com.torve.pro.lifetime.amazon"
         private const val SAFE_BILLING_INIT_MESSAGE = "Could not connect to the store. Please try again."
         private const val SAFE_PURCHASE_FAILED_MESSAGE = "Purchase could not be completed. Please try again."
         private const val SAFE_PRODUCT_UNAVAILABLE_MESSAGE = "This product is not available right now."
         private val MONTHLY_PRODUCT_IDS = listOf(
-            MONTHLY_SUBSCRIPTION_TERM,
             MONTHLY_SUBSCRIPTION_PARENT,
+        )
+        private val LIFETIME_PRODUCT_IDS = listOf(
+            LIFETIME_PRODUCT_ID,
+            LIFETIME_PRODUCT_ID_AMAZON,
         )
         private val PRODUCT_IDS = setOf(
             *MONTHLY_PRODUCT_IDS.toTypedArray(),
-            LIFETIME_PRODUCT_ID,
+            *LIFETIME_PRODUCT_IDS.toTypedArray(),
         )
     }
 
@@ -73,6 +76,13 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
     private val productIdByType = mutableMapOf<BillingManager.ProductType, String>()
     private var cachedAmazonUserId: String? = null
     private var pendingAmazonPurchase: PendingAmazonPurchase? = null
+    private val productDataRequestPlan = listOf(
+        PRODUCT_IDS,
+        LIFETIME_PRODUCT_IDS.toSet(),
+        setOf(LIFETIME_PRODUCT_ID),
+        setOf(LIFETIME_PRODUCT_ID_AMAZON),
+    )
+    private var productDataRequestIndex = 0
     @Volatile private var isInitialized = false
 
     private fun emitAmazonSuccess(receiptId: String, productId: String, amazonUserId: String) {
@@ -99,18 +109,36 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
         )
     }
 
+    private fun requestCurrentProductDataSet() {
+        val skuSet = productDataRequestPlan[productDataRequestIndex]
+        PurchasingService.getProductData(skuSet)
+        logDebug { "Requested Amazon product data for SKUs=$skuSet attempt=${productDataRequestIndex + 1}/${productDataRequestPlan.size}" }
+    }
+
+    private fun tryNextProductDataFallback(reason: String): Boolean {
+        if (productDataRequestIndex >= productDataRequestPlan.lastIndex) {
+            return false
+        }
+        productDataRequestIndex += 1
+        logWarn {
+            "Amazon product data request fallback after $reason. Retrying with SKUs=${productDataRequestPlan[productDataRequestIndex]}"
+        }
+        requestCurrentProductDataSet()
+        return true
+    }
+
     override fun initialize() {
         // Allow re-init when stuck in Error state (e.g. Amazon SDK returned FAILED
         // during LAT catalog propagation). Skip only if already connecting or ready.
         if (isInitialized && _billingState.value !is BillingManager.BillingState.Error) return
         isInitialized = true
+        productDataRequestIndex = 0
         _billingState.value = BillingManager.BillingState.Connecting
         val init = Runnable {
             try {
                 PurchasingService.registerListener(context, this)
                 runCatching { PurchasingService.getUserData() }
-                PurchasingService.getProductData(PRODUCT_IDS)
-                logDebug { "Registered listener and requested product data for SKUs=$PRODUCT_IDS" }
+                requestCurrentProductDataSet()
             } catch (e: Exception) {
                 logError(e, "Failed to initialize Amazon IAP")
                 _billingState.value = BillingManager.BillingState.Error(
@@ -160,6 +188,10 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
         return MONTHLY_PRODUCT_IDS.firstOrNull { sku -> productData.containsKey(sku) }
     }
 
+    private fun resolveLifetimeSku(productData: Map<String, com.amazon.device.iap.model.Product>): String? {
+        return LIFETIME_PRODUCT_IDS.firstOrNull { sku -> productData.containsKey(sku) }
+    }
+
     override fun clearPurchaseResult() {
         _purchaseResult.value = null
     }
@@ -204,7 +236,7 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
                     productIdByType[BillingManager.ProductType.MONTHLY] = sku
                 }
 
-                val lifetimeSku = if (response.productData.containsKey(LIFETIME_PRODUCT_ID)) LIFETIME_PRODUCT_ID else null
+                val lifetimeSku = resolveLifetimeSku(response.productData)
                 lifetimeSku?.let { sku ->
                     val product = response.productData[sku] ?: return@let
                     offersByType[BillingManager.ProductType.LIFETIME] = BillingManager.BillingOffer(
@@ -219,6 +251,14 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
                 val offers = offersByType.values.toList()
                 if (offers.isEmpty()) {
                     val unavailableSkus = response.unavailableSkus.orEmpty().sorted()
+                    val reason = if (unavailableSkus.isNotEmpty()) {
+                        "no supported SKUs from response unavailable=${unavailableSkus.joinToString(", ")}"
+                    } else {
+                        "empty product data response"
+                    }
+                    if (tryNextProductDataFallback(reason)) {
+                        return
+                    }
                     if (unavailableSkus.isNotEmpty()) {
                         logError(message = "Amazon Appstore did not return product data for: ${unavailableSkus.joinToString(", ")}.")
                     } else {
@@ -233,6 +273,9 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
             ProductDataResponse.RequestStatus.FAILED,
             ProductDataResponse.RequestStatus.NOT_SUPPORTED,
             -> {
+                if (tryNextProductDataFallback("status=${response.requestStatus}")) {
+                    return
+                }
                 logError(message = "Amazon product data request failed: ${response.requestStatus}")
                 _billingState.value = BillingManager.BillingState.Error(SAFE_BILLING_INIT_MESSAGE)
             }
@@ -305,7 +348,7 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
                     }
                     .maxByOrNull { receipt ->
                         when (receipt.sku) {
-                            LIFETIME_PRODUCT_ID -> 2
+                            in LIFETIME_PRODUCT_IDS -> 2
                             in MONTHLY_PRODUCT_IDS -> 1
                             else -> 0
                         }

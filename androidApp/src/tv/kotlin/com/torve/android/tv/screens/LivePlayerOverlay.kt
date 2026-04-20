@@ -16,6 +16,9 @@ enum class LivePlayerOverlay {
     /** Layered playback utility menu opened by the remote Menu key. */
     PLAYBACK_MENU,
 
+    /** Current-channel schedule with replay actions and a path to the full guide. */
+    CURRENT_CHANNEL_GUIDE,
+
     /** Full-screen EPG programme grid. */
     EPG_GUIDE,
 

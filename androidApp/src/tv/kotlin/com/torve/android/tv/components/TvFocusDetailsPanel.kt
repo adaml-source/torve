@@ -103,7 +103,13 @@ fun TvFocusDetailsPanel(
         val item = focusedItem ?: return@LaunchedEffect
         val itemKey = "${item.type}:${item.tmdbId ?: item.id}"
         val tmdbId = item.tmdbId ?: return@LaunchedEffect
+        // Skip if already in static cache
         if (enrichedItemCache.containsKey(itemKey)) return@LaunchedEffect
+        // Skip if the item already has ratings from rail-level enrichment
+        if (item.ratings != null && hasAnyRating(item.ratings!!)) {
+            enrichedItemCache[itemKey] = item
+            return@LaunchedEffect
+        }
 
         enrichScope.launch {
             try {
@@ -275,7 +281,7 @@ private fun FocusPanelContent(
                     lineHeight = 22.sp,
                 ),
                 color = Snow.copy(alpha = 0.8f),
-                maxLines = 8,
+                maxLines = 12,
                 overflow = TextOverflow.Ellipsis,
             )
         }

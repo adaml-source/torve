@@ -28,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
 import com.torve.android.R
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -55,16 +56,30 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.torve.android.tv.components.TvFocusDetailsPanel
+import com.torve.data.mdblist.MdbListApi
+import com.torve.data.mdblist.RatingsEnricher
+import com.torve.domain.integrations.IntegrationSecretKey
+import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.model.MediaItem
+import com.torve.domain.repository.PreferencesRepository
+import com.torve.presentation.settings.SettingsViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.torve.domain.model.MediaType
 import com.torve.domain.repository.MetadataRepository
 import com.torve.domain.repository.WatchProgressRepository
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import com.torve.android.tv.focus.TvFocusTargetId
+import com.torve.android.tv.focus.TvScreenFocusHandle
+import com.torve.android.tv.focus.rememberRegisteredTvFocusRequester
+import com.torve.android.tv.focus.rememberTvModalFocusRestoreController
 import org.koin.compose.koinInject
 
 @Composable
-fun TvSeeAllScreen(
+internal fun TvSeeAllScreen(
     railKey: String,
     mediaType: String,
     title: String,
@@ -73,10 +88,14 @@ fun TvSeeAllScreen(
     onBack: () -> Unit,
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
+    registerFocusHandle: ((TvScreenFocusHandle?) -> Unit)? = null,
 ) {
     val metadataRepo: MetadataRepository = koinInject()
     val watchProgressRepo: WatchProgressRepository = koinInject()
     val libraryOverlayService: LibraryOverlayService = koinInject()
+    val ratingsEnricher: RatingsEnricher = koinInject()
+    val prefsRepo: PreferencesRepository = koinInject()
+    val secretStore: IntegrationSecretStore = koinInject()
     val items = remember { mutableStateListOf<MediaItem>() }
     var currentPage by remember { mutableIntStateOf(1) }
     var totalPages by remember { mutableIntStateOf(Int.MAX_VALUE) }
@@ -84,6 +103,7 @@ fun TvSeeAllScreen(
     var initialLoad by remember { mutableStateOf(true) }
     val gridState = rememberLazyGridState()
     val firstItemFocusRequester = remember { FocusRequester() }
+    val focusRestoreController = rememberTvModalFocusRestoreController(key = "see_all_${railKey}_$mediaType")
     val sortOptions = remember(railKey) { sortOptionsForRail(railKey) }
     var selectedSortKey by remember(railKey) { mutableStateOf(sortOptions.firstOrNull()?.key ?: TvSeeAllSortKey.DEFAULT) }
     val sortRequesters = remember(sortOptions) { List(sortOptions.size) { FocusRequester() } }
@@ -96,8 +116,33 @@ fun TvSeeAllScreen(
         )
     }
     var initialFocusHandled by remember(railKey, mediaType) { mutableStateOf(false) }
+    var focusedMediaItem by remember { mutableStateOf<MediaItem?>(null) }
+    var lastFocusedIndex by remember { mutableIntStateOf(-1) }
+    val focusRequesters = remember { mutableMapOf<Int, FocusRequester>() }
+    val screenId = remember(railKey, mediaType) { "see_all:$railKey:$mediaType" }
 
-    BackHandler(onBack = onBack)
+    DisposableEffect(registerFocusHandle, focusRestoreController, screenId) {
+        registerFocusHandle?.invoke(
+            TvScreenFocusHandle(
+                captureFocusedOrigin = {
+                    focusRestoreController.captureFocusedOrigin(
+                        screenId = screenId,
+                    )
+                },
+                requestRestore = { origin, reason ->
+                    focusRestoreController.requestRestore(origin = origin, reason = reason)
+                },
+            ),
+        )
+        onDispose {
+            registerFocusHandle?.invoke(null)
+        }
+    }
+
+    BackHandler(onBack = {
+        lastFocusedIndex = -1  // Clear so we don't restore when exiting See All itself
+        onBack()
+    })
 
     val shouldLoadMore by remember {
         derivedStateOf {
@@ -213,6 +258,30 @@ fun TvSeeAllScreen(
         }
     }
 
+    // Background ratings enrichment — populates SQLite cache + updates items in place.
+    var enrichedPages by remember { mutableStateOf(setOf<Int>()) }
+    LaunchedEffect(items.size) {
+        if (items.isEmpty()) return@LaunchedEffect
+        val page = currentPage
+        if (page in enrichedPages) return@LaunchedEffect
+        enrichedPages = enrichedPages + page
+        launch(Dispatchers.IO) {
+            val apiKey = runCatching {
+                secretStore.get(IntegrationSecretKey.MDBLIST_API_KEY)
+                    ?: prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY)
+                    ?: MdbListApi.DEFAULT_API_KEY
+            }.getOrDefault(MdbListApi.DEFAULT_API_KEY)
+            val enriched = ratingsEnricher.enrichList(items.toList(), apiKey)
+            withContext(Dispatchers.Main) {
+                enriched.forEachIndexed { index, enrichedItem ->
+                    if (index < items.size && items[index].tmdbId == enrichedItem.tmdbId) {
+                        items[index] = enrichedItem
+                    }
+                }
+            }
+        }
+    }
+
     LaunchedEffect(sortOptions, selectedSortIndex) {
         if (sortOptions.isNotEmpty()) {
             onFirstContentRequester(sortRequesters[selectedSortIndex])
@@ -223,6 +292,29 @@ fun TvSeeAllScreen(
         if (gridState.firstVisibleItemIndex != 0) {
             gridState.scrollToItem(0)
         }
+    }
+
+    LaunchedEffect(focusRestoreController.pendingRestore?.restoreToken) {
+        focusRestoreController.restorePendingFocus(
+            screenId = screenId,
+        )
+    }
+
+    // Restore focus to last focused item when returning from Details sub-route.
+    // Uses Lifecycle ON_RESUME to detect when this composable's NavBackStackEntry
+    // becomes the active destination again after Details is popped.
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && lastFocusedIndex >= 0) {
+                val requester = focusRequesters[lastFocusedIndex]
+                if (requester != null) {
+                    try { requester.requestFocus() } catch (_: Throwable) { }
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     // Auto-focus once content loads so D-pad works immediately.
@@ -239,10 +331,17 @@ fun TvSeeAllScreen(
         }
     }
 
+    Row(modifier = Modifier.fillMaxSize()) {
+        // Info panel — left side
+        TvFocusDetailsPanel(
+            focusedItem = focusedMediaItem,
+            modifier = Modifier.width(340.dp),
+        )
+
     Column(
         modifier = Modifier
-            .fillMaxSize()
-            .padding(start = 40.dp, top = 32.dp, end = 34.dp, bottom = 16.dp),
+            .weight(1f)
+            .padding(start = 16.dp, top = 32.dp, end = 34.dp, bottom = 16.dp),
     ) {
         Text(
             text = title,
@@ -258,11 +357,26 @@ fun TvSeeAllScreen(
                 modifier = Modifier.padding(bottom = 16.dp),
             ) {
                 sortOptions.forEachIndexed { index, option ->
+                    val sortTarget = remember(screenId, index, option.key) {
+                        TvFocusTargetId(
+                            screenId = screenId,
+                            rowKey = "sort_bar",
+                            itemKey = option.key.name,
+                            rowIndex = 0,
+                            itemIndex = index,
+                            targetType = "sort",
+                        )
+                    }
+                    val sortRequester = rememberRegisteredTvFocusRequester(
+                        controller = focusRestoreController,
+                        target = sortTarget,
+                        externalRequester = sortRequesters[index],
+                    )
                     TvSeeAllSortButton(
                         label = option.label,
                         selected = option.key == selectedSortKey,
                         modifier = Modifier
-                            .focusRequester(sortRequesters[index])
+                            .focusRequester(sortRequester)
                             .focusProperties {
                                 if (index == 0) {
                                     left = railFocusRequester
@@ -276,7 +390,10 @@ fun TvSeeAllScreen(
                                     down = firstItemFocusRequester
                                 }
                             },
-                        onFocused = { onContentFocused(sortRequesters[index]) },
+                        onFocused = {
+                            focusRestoreController.markFocused(sortTarget)
+                            onContentFocused(sortRequester)
+                        },
                         onClick = { selectedSortKey = option.key },
                     )
                 }
@@ -308,7 +425,7 @@ fun TvSeeAllScreen(
 
             else -> {
                 LazyVerticalGrid(
-                    columns = GridCells.Fixed(5),
+                    columns = GridCells.Fixed(4),
                     state = gridState,
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -319,8 +436,24 @@ fun TvSeeAllScreen(
                         displayedItems,
                         key = { _, item -> "sa_${item.seeAllStableKey()}" },
                     ) { index, item ->
-                        val requester = if (index == 0) firstItemFocusRequester
-                            else remember(index, item.id) { FocusRequester() }
+                        val baseRequester = focusRequesters.getOrPut(index) {
+                            if (index == 0) firstItemFocusRequester else FocusRequester()
+                        }
+                        val target = remember(screenId, index, item.id, item.tmdbId) {
+                            TvFocusTargetId(
+                                screenId = screenId,
+                                rowKey = "grid",
+                                itemKey = item.seeAllStableKey(),
+                                rowIndex = index / 4,
+                                itemIndex = index,
+                                targetType = "card",
+                            )
+                        }
+                        val requester = rememberRegisteredTvFocusRequester(
+                            controller = focusRestoreController,
+                            target = target,
+                            externalRequester = baseRequester,
+                        )
                         if (index == 0 && sortOptions.isEmpty()) {
                             onFirstContentRequester(requester)
                         }
@@ -328,18 +461,23 @@ fun TvSeeAllScreen(
                         SeeAllPosterCard(
                             item = item,
                             modifier = Modifier
-                                .width(198.dp)
+                                .width(170.dp)
                                 .aspectRatio(2f / 3f)
                                 .focusRequester(requester)
                                 .focusProperties {
-                                    if (index % 5 == 0) {
+                                    if (index % 4 == 0) {
                                         left = railFocusRequester
                                     }
-                                    if (index < 5 && sortOptions.isNotEmpty()) {
+                                    if (index < 4 && sortOptions.isNotEmpty()) {
                                         up = sortRequesters[selectedSortIndex]
                                     }
                                 },
-                            onFocused = { onContentFocused(requester) },
+                            onFocused = {
+                                focusRestoreController.markFocused(target)
+                                onContentFocused(requester)
+                                focusedMediaItem = item
+                                lastFocusedIndex = index
+                            },
                             onClick = { onMediaClick(item) },
                         )
                     }
@@ -363,10 +501,13 @@ fun TvSeeAllScreen(
             }
         }
     }
+    } // Row
+
 }
 
 private enum class TvSeeAllSortKey {
     DEFAULT,
+    RATING_DESC,
     TITLE_ASC,
     TITLE_DESC,
     NEWEST_RELEASE,
@@ -382,6 +523,7 @@ private fun sortOptionsForRail(railKey: String): List<TvSeeAllSortOption> {
     val firstLabel = if (railKey.startsWith("continue_watching")) "Recent Viewed" else "Default"
     return listOf(
         TvSeeAllSortOption(TvSeeAllSortKey.DEFAULT, firstLabel),
+        TvSeeAllSortOption(TvSeeAllSortKey.RATING_DESC, "IMDb Rating"),
         TvSeeAllSortOption(TvSeeAllSortKey.TITLE_ASC, "A-Z"),
         TvSeeAllSortOption(TvSeeAllSortKey.TITLE_DESC, "Z-A"),
         TvSeeAllSortOption(TvSeeAllSortKey.NEWEST_RELEASE, "Newest Release"),
@@ -402,6 +544,11 @@ private fun sortSeeAllItems(
 
     return when (sortKey) {
         TvSeeAllSortKey.DEFAULT -> items
+        TvSeeAllSortKey.RATING_DESC -> items.sortedWith(
+            compareByDescending<MediaItem> {
+                it.ratings?.imdbScore ?: it.rating ?: 0.0
+            }.thenBy { it.normalizedTitle() },
+        )
         TvSeeAllSortKey.TITLE_ASC -> items.sortedWith(compareBy<MediaItem> { it.normalizedTitle() }.thenBy { it.id })
         TvSeeAllSortKey.TITLE_DESC -> items.sortedWith(compareByDescending<MediaItem> { it.normalizedTitle() }.thenBy { it.id })
         TvSeeAllSortKey.NEWEST_RELEASE -> items.sortedWith(
@@ -502,44 +649,5 @@ private fun SeeAllPosterCard(
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize(),
         )
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.BottomCenter)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            Obsidian.copy(alpha = 0.9f),
-                        ),
-                    ),
-                )
-                .padding(horizontal = 10.dp, vertical = 10.dp),
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = item.title,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = Snow,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                val subtitle = buildString {
-                    item.year?.let { append(it) }
-                    if (item.rating != null) {
-                        if (isNotBlank()) append("  ")
-                        append(String.format("%.1f", item.rating))
-                    }
-                }
-                if (subtitle.isNotBlank()) {
-                    Text(
-                        text = subtitle,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Silver,
-                    )
-                }
-            }
-        }
     }
 }

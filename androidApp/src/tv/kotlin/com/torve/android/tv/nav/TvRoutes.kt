@@ -32,6 +32,7 @@ object TvRoutes {
     const val HOME_LAYOUT = "tv_home_layout"
     const val RATINGS_SETTINGS = "tv_ratings_settings"
     const val DEVICE_LIMIT_REACHED = "tv_device_limit_reached"
+    const val PANDA_SETUP = "tv_panda_setup"
 
     const val SEE_ALL = "tv_see_all/{railKey}/{mediaType}/{title}"
     fun seeAll(railKey: String, mediaType: String, title: String): String {

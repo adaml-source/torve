@@ -8,13 +8,17 @@ import com.torve.domain.model.CardStylePreset
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.MediaType
+import com.torve.domain.model.InstalledAddon
 import com.torve.domain.model.ParentalFilter
 import com.torve.domain.model.PersonSummary
 import com.torve.domain.model.ShelfConfig
 import com.torve.domain.model.WatchlistItem
+import com.torve.domain.model.AddonPolicyFlags
 import com.torve.domain.model.collectStableKeys
 import com.torve.domain.model.dedupeAcrossShelves
 import com.torve.domain.model.dedupeByStableKey
+import com.torve.domain.model.extractImdbIdOrNull
+import com.torve.domain.model.extractTmdbIdOrNull
 import com.torve.domain.model.stableKey
 import com.torve.domain.model.updateSectionPresetId
 import com.torve.domain.integrations.IntegrationSecretKey
@@ -31,25 +35,35 @@ import com.torve.domain.repository.WatchHistoryRepository
 import com.torve.domain.repository.WatchProgressRepository
 import com.torve.domain.repository.WatchlistRepository
 import com.torve.data.addon.CatalogAggregator
+import com.torve.data.contentpolicy.AddonPolicyRepository
+import com.torve.data.contentpolicy.ContentPolicyCacheInvalidationCoordinator
+import com.torve.data.contentpolicy.ContentPolicyRepository
 import com.torve.data.mdblist.MdbListApi
 import com.torve.data.mdblist.MdbListRepository
 import com.torve.data.mdblist.RatingsEnricher
 import com.torve.data.network.homeContentLoadErrorMessage
 import com.torve.data.network.sanitizeNetworkDiagnosticText
+import com.torve.domain.model.ContentAccessContext
+import com.torve.domain.model.ContentPolicyState
+import com.torve.domain.model.ContentSourceType
 import com.torve.platform.torveVerboseLog
+import com.torve.presentation.contentpolicy.ContentPolicyFilter
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.settings.SettingsRefreshNotifier
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
@@ -76,6 +90,10 @@ class HomeViewModel(
     private val libraryOverlayService: LibraryOverlayService,
     private val integrationSecretStore: IntegrationSecretStore,
     private val settingsRefreshNotifier: SettingsRefreshNotifier,
+    private val contentPolicyRepository: ContentPolicyRepository? = null,
+    private val contentPolicyFilter: ContentPolicyFilter = ContentPolicyFilter(),
+    private val addonPolicyRepository: AddonPolicyRepository? = null,
+    invalidationCoordinator: ContentPolicyCacheInvalidationCoordinator? = null,
 ) {
     private data class ArtworkBackfillRequest(
         val type: MediaType,
@@ -84,6 +102,7 @@ class HomeViewModel(
 
     private data class HomeLoadInputs(
         val shelves: List<CatalogShelf>,
+        val installedAddons: List<InstalledAddon>,
         val continueWatching: List<com.torve.domain.model.WatchProgress>,
         val overlayContinue: List<com.torve.domain.model.WatchProgress>,
         val recommendations: List<ScoredMediaItem>,
@@ -128,6 +147,7 @@ class HomeViewModel(
 
     // Search
     private val searchQueryFlow = MutableStateFlow("")
+    private var homeLoadJob: Job? = null
 
     init {
         scope.launch {
@@ -143,6 +163,48 @@ class HomeViewModel(
                 _sectionConfigs.value = loadSectionConfigs()
                 _homeLayoutOrder.value = ensureAllSectionsInLayoutOrder(loadHomeLayoutOrder())
                 loadHomeScreen()
+            }
+        }
+        if (invalidationCoordinator != null) {
+            scope.launch {
+                invalidationCoordinator.events.collectLatest {
+                    _state.value = HomeUiState(isLoading = true)
+                    loadHomeScreen()
+                }
+            }
+        }
+        // Relock hardening: observe content policy state directly. When policy
+        // transitions to locked, immediately clear all visible content so that
+        // sensitive material disappears without waiting for the full reload.
+        if (contentPolicyRepository != null) {
+            scope.launch {
+                var wasLocked = contentPolicyRepository.state.value.isLocked
+                contentPolicyRepository.state.collectLatest { policy ->
+                    val nowLocked = policy.isLocked
+                    if (nowLocked && !wasLocked) {
+                        // Transition to locked — clear all content immediately.
+                        // This guarantees no sensitive artwork remains visible while
+                        // the full reload (triggered by cache invalidation) is pending.
+                        _state.update { it.copy(
+                            shelves = emptyList(),
+                            heroItem = null,
+                            continueWatching = emptyList(),
+                            continueWatchingRatings = emptyMap(),
+                            recommendedItems = emptyList(),
+                            watchlistShelf = null,
+                            watchlistItems = emptyList(),
+                            customShelves = emptyMap(),
+                            addonShelves = emptyList(),
+                            mdbListShelves = emptyList(),
+                            becauseYouWatched = emptyList(),
+                            hiddenGemsShelf = null,
+                            recentlyWatched = emptyList(),
+                            searchResults = emptyList(),
+                            isLoading = true,
+                        ) }
+                    }
+                    wasLocked = nowLocked
+                }
             }
         }
         observeSearch()
@@ -221,6 +283,9 @@ class HomeViewModel(
     fun updateSectionOrder(configs: List<HomeSectionConfig>) {
         _sectionConfigs.value = configs
         saveSectionConfigs(configs)
+        // Sync the layout order so TvHomeScreen picks up the new ordering.
+        val order = configs.sortedBy { it.order }.map { "section:${it.section.name}" }
+        updateHomeLayoutOrder(order)
     }
 
     fun toggleSection(section: HomeSection, enabled: Boolean) {
@@ -235,6 +300,7 @@ class HomeViewModel(
         val defaults = defaultSectionConfigs()
         _sectionConfigs.value = defaults
         saveSectionConfigs(defaults)
+        updateHomeLayoutOrder(emptyList())
     }
 
     fun resetSectionToDefault(section: HomeSection) {
@@ -422,14 +488,27 @@ class HomeViewModel(
     }
 
     fun loadHomeScreen() {
-        scope.launch {
+        val keepContentVisible = _state.value.hasRenderableContent()
+        homeLoadJob?.cancel()
+        homeLoadJob = scope.launch {
             torveVerboseLog { "HOME_TAB bootstrap_start" }
-            _state.update { it.copy(isLoading = true, error = null) }
+            if (keepContentVisible) {
+                _state.update { it.copy(isLoading = false, error = null) }
+            } else {
+                _state.update { it.copy(isLoading = true, error = null) }
+            }
             try {
                 val dedupe = shouldDedupe()
                 val loadInputs = supervisorScope {
                     torveVerboseLog { "HOME_TAB repository_fetch_start source=home_shelves" }
                     val shelvesDeferred = async { metadataRepo.getHomeShelves() }
+                    val installedAddonsDeferred = async {
+                        try {
+                            addonRepo.getInstalledAddons()
+                        } catch (_: Exception) {
+                            emptyList()
+                        }
+                    }
                     val continueWatchingDeferred = async { watchProgressRepo.getInProgress(20) }
                     val overlayContinueDeferred = async {
                         try { libraryOverlayService.getContinueWatching(20) } catch (_: Exception) { emptyList() }
@@ -469,15 +548,42 @@ class HomeViewModel(
                     }
                     val recentlyWatchedDeferred = async {
                         try {
-                            watchHistoryRepo.getRecent(20).map { entry ->
-                                MediaItem(
-                                    id = entry.mediaId,
-                                    type = if (entry.mediaType == MediaType.SERIES.name || entry.mediaType == "tv") MediaType.SERIES else MediaType.MOVIE,
-                                    title = entry.title,
+                            val seen = mutableSetOf<String>()
+                            val out = mutableListOf<MediaItem>()
+                            for (entry in watchHistoryRepo.getRecent(80)) {
+                                // DB stores "series" / "movie" (lowercase) — match
+                                // case-insensitively, also tolerate legacy "tv".
+                                val mt = entry.mediaType.lowercase()
+                                val isSeries = mt == "series" || mt == "tv" ||
+                                    entry.seasonNumber != null || entry.episodeNumber != null
+                                val tmdb = entry.mediaId.extractTmdbIdOrNull()
+                                val imdb = entry.mediaId.extractImdbIdOrNull()
+                                // Stable show-level key so multiple episodes of the
+                                // same series collapse into a single card. Never
+                                // surface individual episode posters or titles.
+                                val showKey = tmdb?.toString() ?: imdb ?: entry.mediaId
+                                if (showKey in seen) continue
+                                seen += showKey
+                                // For series, the card MUST reference the show
+                                // (show title + show poster) — never the played
+                                // episode — so "The Boys" is one card, not one per
+                                // episode.
+                                val displayTitle = if (isSeries) {
+                                    entry.showTitle?.takeIf { it.isNotBlank() } ?: entry.title
+                                } else {
+                                    entry.title
+                                }
+                                out += MediaItem(
+                                    id = showKey,
+                                    tmdbId = tmdb,
+                                    imdbId = imdb,
+                                    type = if (isSeries) MediaType.SERIES else MediaType.MOVIE,
+                                    title = displayTitle,
                                     posterUrl = entry.posterUrl,
                                     backdropUrl = entry.backdropUrl,
                                 )
                             }
+                            resolveImdbToTmdb(out)
                         } catch (_: Exception) {
                             emptyList()
                         }
@@ -491,7 +597,7 @@ class HomeViewModel(
                     }
                     val addonShelvesDeferred = async {
                         try {
-                            val addons = addonRepo.getInstalledAddons()
+                            val addons = installedAddonsDeferred.await()
                             if (addons.isEmpty()) emptyList()
                             else {
                                 val movieShelves = catalogAggregator.fetchCatalogs(addons, "movie")
@@ -504,7 +610,9 @@ class HomeViewModel(
                     }
                     val mdbListShelvesDeferred = async {
                         try {
-                            val apiKey = prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY) ?: ""
+                            val apiKey = integrationSecretStore.get(IntegrationSecretKey.MDBLIST_API_KEY)
+                                ?: prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY)
+                                ?: ""
                             if (apiKey.isBlank()) emptyList()
                             else {
                                 val savedLists = mdbListRepo.getSavedLists().filter { it.enabled }
@@ -527,6 +635,7 @@ class HomeViewModel(
                     }
                     HomeLoadInputs(
                         shelves = shelvesDeferred.await(),
+                        installedAddons = installedAddonsDeferred.await(),
                         continueWatching = continueWatchingDeferred.await(),
                         overlayContinue = overlayContinueDeferred.await(),
                         recommendations = recommendationsDeferred.await(),
@@ -563,8 +672,11 @@ class HomeViewModel(
                     }
                     .ifEmpty { popularPeople }
                     .take(20)
+                val installedAddons = loadInputs.installedAddons
                 val addonShelves = loadInputs.addonShelves
                 val mdbListShelves = loadInputs.mdbListShelves
+                val policy = currentPolicy()
+                val addonFlagsByShelfId = addonShelfPolicyFlags(installedAddons)
 
                 // Register addon shelves in layout order for individual customization
                 ensureAddonShelvesInLayout(addonShelves)
@@ -677,7 +789,7 @@ class HomeViewModel(
                 val becauseYouWatched = recentHistory.mapNotNull { entry ->
                     try {
                         val type = if (entry.mediaType == MediaType.SERIES.name || entry.mediaType == "tv") "tv" else "movie"
-                        val tmdbId = entry.mediaId.substringAfterLast("_", entry.mediaId).toIntOrNull() ?: return@mapNotNull null
+                        val tmdbId = entry.mediaId.extractTmdbIdOrNull() ?: return@mapNotNull null
                         val similar = metadataRepo.getSimilar(type, tmdbId).take(15)
                         if (similar.isNotEmpty()) {
                             CatalogShelf(
@@ -720,35 +832,111 @@ class HomeViewModel(
                     }
                 } else recommendations
 
+                val policyFilteredShelves = filterShelves(
+                    policy = policy,
+                    context = ContentAccessContext.DEFAULT_DISCOVERY,
+                    shelves = parentalFilteredShelves,
+                    sourceType = ContentSourceType.TMDB,
+                )
+                val policyFilteredRecommendations = filterRecommendations(
+                    policy = policy,
+                    context = ContentAccessContext.GLOBAL_RECOMMENDATION,
+                    items = filteredRecommendations,
+                    sourceType = ContentSourceType.TMDB,
+                )
+                val policyFilteredWatchProgress = contentPolicyFilter.filterWatchProgress(
+                    policy = policy,
+                    context = ContentAccessContext.HISTORY_DERIVED,
+                    items = mergedContinueWatching,
+                ).items
+                val policyFilteredWatchlist = contentPolicyFilter.filterItems(
+                    policy = policy,
+                    context = ContentAccessContext.LIBRARY_OR_WATCHLIST,
+                    items = watchlistMediaItems,
+                    sourceType = ContentSourceType.LOCAL_LIBRARY,
+                ).items
+                val policyFilteredWatchlistShelf = watchlistShelf
+                    ?.copy(items = policyFilteredWatchlist)
+                    ?.takeIf { it.items.isNotEmpty() }
+                val policyFilteredByw = filterShelves(
+                    policy = policy,
+                    context = ContentAccessContext.HISTORY_DERIVED,
+                    shelves = becauseYouWatched,
+                    sourceType = ContentSourceType.TMDB,
+                )
+                val policyFilteredHiddenGems = hiddenGemsShelf?.copy(
+                    items = contentPolicyFilter.filterItems(
+                        policy = policy,
+                        context = ContentAccessContext.DEFAULT_DISCOVERY,
+                        items = hiddenGemsShelf.items,
+                        sourceType = ContentSourceType.TMDB,
+                    ).items,
+                )?.takeIf { it.items.isNotEmpty() }
+                val policyFilteredRecents = contentPolicyFilter.filterItems(
+                    policy = policy,
+                    context = ContentAccessContext.HISTORY_DERIVED,
+                    items = recentlyWatched,
+                    sourceType = ContentSourceType.LOCAL_LIBRARY,
+                ).items
+                val policyFilteredCustom = customShelves
+                    .mapValues { (_, items) ->
+                        contentPolicyFilter.filterItems(
+                            policy = policy,
+                            context = ContentAccessContext.DEFAULT_DISCOVERY,
+                            items = items,
+                            sourceType = ContentSourceType.TMDB,
+                        ).items
+                    }
+                    .filterValues { it.isNotEmpty() }
+                    .toMutableMap()
+                val policyFilteredAddonShelves = addonShelves
+                    .filter { shelf -> addonFlagsByShelfId[shelf.id]?.shelfEligible != false }
+                    .mapNotNull { shelf ->
+                        val filteredItems = contentPolicyFilter.filterItems(
+                            policy = policy,
+                            context = ContentAccessContext.ADDON_SHELF,
+                            items = shelf.items,
+                            sourceType = ContentSourceType.ADDON,
+                            addonPolicyFlags = addonFlagsByShelfId[shelf.id],
+                        ).items
+                        shelf.copy(items = filteredItems).takeIf { filteredItems.isNotEmpty() }
+                    }
+                val policyFilteredMdbListShelves = filterShelves(
+                    policy = policy,
+                    context = ContentAccessContext.DEFAULT_DISCOVERY,
+                    shelves = mdbListShelves,
+                    sourceType = ContentSourceType.MDBLIST,
+                )
+
                 // Within-shelf dedup first
-                val withinDedupedWatchlist = if (dedupe) watchlistMediaItems.dedupeByStableKey() else watchlistMediaItems
-                val withinDedupedRecents = if (dedupe) recentlyWatched.dedupeByStableKey() else recentlyWatched
-                val withinDedupedHiddenGems = hiddenGemsShelf?.let { shelf ->
+                val withinDedupedWatchlist = if (dedupe) policyFilteredWatchlist.dedupeByStableKey() else policyFilteredWatchlist
+                val withinDedupedRecents = if (dedupe) policyFilteredRecents.dedupeByStableKey() else policyFilteredRecents
+                val withinDedupedHiddenGems = policyFilteredHiddenGems?.let { shelf ->
                     shelf.copy(items = if (dedupe) shelf.items.dedupeByStableKey() else shelf.items)
                 }
                 val withinDedupedByw = if (dedupe) {
-                    becauseYouWatched.map { shelf -> shelf.copy(items = shelf.items.dedupeByStableKey()) }
-                } else becauseYouWatched
+                    policyFilteredByw.map { shelf -> shelf.copy(items = shelf.items.dedupeByStableKey()) }
+                } else policyFilteredByw
                 val withinDedupedAddons = if (dedupe) {
-                    addonShelves.map { shelf -> shelf.copy(items = shelf.items.dedupeByStableKey()) }
-                } else addonShelves
+                    policyFilteredAddonShelves.map { shelf -> shelf.copy(items = shelf.items.dedupeByStableKey()) }
+                } else policyFilteredAddonShelves
                 val withinDedupedMdbList = if (dedupe) {
-                    mdbListShelves.map { shelf -> shelf.copy(items = shelf.items.dedupeByStableKey()) }
-                } else mdbListShelves
+                    policyFilteredMdbListShelves.map { shelf -> shelf.copy(items = shelf.items.dedupeByStableKey()) }
+                } else policyFilteredMdbListShelves
                 val withinDedupedCustom = if (dedupe) {
-                    customShelves.mapValues { (_, items) -> items.dedupeByStableKey() }.toMutableMap()
-                } else customShelves
+                    policyFilteredCustom.mapValues { (_, items) -> items.dedupeByStableKey() }.toMutableMap()
+                } else policyFilteredCustom
 
                 // ── Cross-shelf dedup: each item appears in ONLY the first shelf ──
                 if (dedupe) {
                     // 1. Seed global seen set from protected sources (keep their items intact)
                     val globalSeen = mutableSetOf<String>()
-                    mergedContinueWatching.forEach { wp ->
+                    policyFilteredWatchProgress.forEach { wp ->
                         // WatchProgress items: track by mediaId
                         val key = wp.mediaId
                         if (key.isNotBlank()) globalSeen.add("id:$key")
                         // Also try to extract tmdbId from mediaId (format: "type_tmdbId")
-                        val tmdb = key.substringAfterLast("_", "").toIntOrNull()
+                        val tmdb = key.extractTmdbIdOrNull()
                         if (tmdb != null && tmdb > 0) {
                             globalSeen.add("${wp.mediaType.name}:$tmdb")
                         }
@@ -757,12 +945,12 @@ class HomeViewModel(
                     withinDedupedRecents.collectStableKeys(globalSeen)
 
                     // 2. Cross-dedup main TMDB shelves (Popular, Now Playing, Trending, etc.)
-                    val finalShelves = parentalFilteredShelves.dedupeAcrossShelves(globalSeen)
+                    val finalShelves = policyFilteredShelves.dedupeAcrossShelves(globalSeen)
 
                     // 3. Cross-dedup recommendations against seen items
                     val finalRecommendations = run {
                         val map = LinkedHashMap<String, ScoredMediaItem>()
-                        for (scored in filteredRecommendations) {
+                        for (scored in policyFilteredRecommendations) {
                             val key = scored.item.stableKey()
                             if (key !in globalSeen && !map.containsKey(key)) {
                                 map[key] = scored
@@ -795,24 +983,48 @@ class HomeViewModel(
                             else { globalSeen.add(key); true }
                         }
                     }.filter { it.value.isNotEmpty() }.toMutableMap()
+                    val hydratedShelves = hydrateShelvesFromCache(finalShelves)
+                    val hydratedRecommendations = hydrateRecommendationsFromCache(finalRecommendations)
+                    val hydratedWatchlistItems = hydrateItemsFromCache(withinDedupedWatchlist)
+                    val hydratedWatchlistShelf = policyFilteredWatchlistShelf?.copy(items = hydratedWatchlistItems)
+                    val hydratedByw = hydrateShelvesFromCache(finalByw)
+                    val hydratedHiddenGems = hydrateShelfFromCache(finalHiddenGems)
+                    val hydratedRecents = hydrateItemsFromCache(withinDedupedRecents)
+                    val hydratedCustom = hydrateCustomShelvesFromCache(finalCustom)
+                    val hydratedAddons = hydrateShelvesFromCache(finalAddons)
+                    val hydratedMdbList = hydrateShelvesFromCache(finalMdbList)
+                    val hydratedContinueWatching = hydrateContinueWatchingFromCache(policyFilteredWatchProgress)
+                    val continueWatchingRatings = buildRatingsLookup(
+                        hydratedContinueWatching +
+                        hydratedShelves.flatMap { shelf -> shelf.items } +
+                            hydratedRecommendations.map { scored -> scored.item } +
+                            hydratedWatchlistItems +
+                            hydratedByw.flatMap { shelf -> shelf.items } +
+                            (hydratedHiddenGems?.items ?: emptyList()) +
+                            hydratedRecents +
+                            hydratedCustom.values.flatten() +
+                            hydratedAddons.flatMap { shelf -> shelf.items } +
+                            hydratedMdbList.flatMap { shelf -> shelf.items },
+                    )
 
                     _state.update {
                         it.copy(
-                            shelves = finalShelves,
-                            heroItem = finalShelves.firstOrNull()?.items?.firstOrNull(),
-                    continueWatching = mergedContinueWatching,
-                            recommendedItems = finalRecommendations,
-                            watchlistShelf = watchlistShelf,
-                            watchlistItems = withinDedupedWatchlist,
-                            becauseYouWatched = finalByw,
-                            hiddenGemsShelf = finalHiddenGems,
-                            recentlyWatched = withinDedupedRecents,
+                            shelves = hydratedShelves,
+                            heroItem = hydratedShelves.firstOrNull()?.items?.firstOrNull(),
+                            continueWatching = policyFilteredWatchProgress,
+                            continueWatchingRatings = continueWatchingRatings,
+                            recommendedItems = hydratedRecommendations,
+                            watchlistShelf = hydratedWatchlistShelf,
+                            watchlistItems = hydratedWatchlistItems,
+                            becauseYouWatched = hydratedByw,
+                            hiddenGemsShelf = hydratedHiddenGems,
+                            recentlyWatched = hydratedRecents,
                             popularActors = popularActors,
                             popularDirectors = popularDirectors,
-                            customShelves = finalCustom,
-                            addonShelves = finalAddons,
+                            customShelves = hydratedCustom,
+                            addonShelves = hydratedAddons,
                             addonShelfVisibility = _addonShelfVisibility.value,
-                            mdbListShelves = finalMdbList,
+                            mdbListShelves = hydratedMdbList,
                             isLoading = false,
                         )
                     }
@@ -821,23 +1033,47 @@ class HomeViewModel(
                     }
                 } else {
                     // No dedup — pass through as-is
+                    val hydratedShelves = hydrateShelvesFromCache(policyFilteredShelves)
+                    val hydratedRecommendations = hydrateRecommendationsFromCache(policyFilteredRecommendations)
+                    val hydratedWatchlistItems = hydrateItemsFromCache(policyFilteredWatchlist)
+                    val hydratedWatchlistShelf = policyFilteredWatchlistShelf?.copy(items = hydratedWatchlistItems)
+                    val hydratedByw = hydrateShelvesFromCache(policyFilteredByw)
+                    val hydratedHiddenGems = hydrateShelfFromCache(policyFilteredHiddenGems)
+                    val hydratedRecents = hydrateItemsFromCache(policyFilteredRecents)
+                    val hydratedCustom = hydrateCustomShelvesFromCache(policyFilteredCustom)
+                    val hydratedAddons = hydrateShelvesFromCache(policyFilteredAddonShelves)
+                    val hydratedMdbList = hydrateShelvesFromCache(policyFilteredMdbListShelves)
+                    val hydratedContinueWatching = hydrateContinueWatchingFromCache(policyFilteredWatchProgress)
+                    val continueWatchingRatings = buildRatingsLookup(
+                        hydratedContinueWatching +
+                        hydratedShelves.flatMap { shelf -> shelf.items } +
+                            hydratedRecommendations.map { scored -> scored.item } +
+                            hydratedWatchlistItems +
+                            hydratedByw.flatMap { shelf -> shelf.items } +
+                            (hydratedHiddenGems?.items ?: emptyList()) +
+                            hydratedRecents +
+                            hydratedCustom.values.flatten() +
+                            hydratedAddons.flatMap { shelf -> shelf.items } +
+                            hydratedMdbList.flatMap { shelf -> shelf.items },
+                    )
                     _state.update {
                         it.copy(
-                            shelves = parentalFilteredShelves,
-                            heroItem = parentalFilteredShelves.firstOrNull()?.items?.firstOrNull(),
-                            continueWatching = mergedContinueWatching,
-                            recommendedItems = filteredRecommendations,
-                            watchlistShelf = watchlistShelf,
-                            watchlistItems = watchlistMediaItems,
-                            becauseYouWatched = becauseYouWatched,
-                            hiddenGemsShelf = hiddenGemsShelf,
-                            recentlyWatched = recentlyWatched,
+                            shelves = hydratedShelves,
+                            heroItem = hydratedShelves.firstOrNull()?.items?.firstOrNull(),
+                            continueWatching = policyFilteredWatchProgress,
+                            continueWatchingRatings = continueWatchingRatings,
+                            recommendedItems = hydratedRecommendations,
+                            watchlistShelf = hydratedWatchlistShelf,
+                            watchlistItems = hydratedWatchlistItems,
+                            becauseYouWatched = hydratedByw,
+                            hiddenGemsShelf = hydratedHiddenGems,
+                            recentlyWatched = hydratedRecents,
                             popularActors = popularActors,
                             popularDirectors = popularDirectors,
-                            customShelves = customShelves,
-                            addonShelves = addonShelves,
+                            customShelves = hydratedCustom,
+                            addonShelves = hydratedAddons,
                             addonShelfVisibility = _addonShelfVisibility.value,
-                            mdbListShelves = mdbListShelves,
+                            mdbListShelves = hydratedMdbList,
                             isLoading = false,
                         )
                     }
@@ -851,11 +1087,17 @@ class HomeViewModel(
                 // Background enrichment: add MDBList multi-source ratings
                 launchRatingsEnrichment()
                 launchArtworkBackfill()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 torveVerboseLog {
                     "HOME_TAB state_transition state=error ${e::class.simpleName}: ${sanitizeNetworkDiagnosticText(e.message)}"
                 }
-                _state.update { it.copy(isLoading = false, error = homeContentLoadErrorMessage()) }
+                if (!keepContentVisible) {
+                    _state.update { it.copy(isLoading = false, error = homeContentLoadErrorMessage()) }
+                } else {
+                    _state.update { it.copy(isLoading = false) }
+                }
             }
         }
     }
@@ -876,17 +1118,27 @@ class HomeViewModel(
     private fun observeSearch() {
         scope.launch {
             searchQueryFlow
-                .debounce(300)
+                .debounce(400)
                 .distinctUntilChanged()
                 .collect { query ->
                     if (query.length < 2) {
                         _state.update { it.copy(searchResults = emptyList(), isSearching = false) }
                         return@collect
                     }
-                    _state.update { it.copy(isSearching = true) }
+                    // Only show loading spinner when there are no existing results,
+                    // otherwise keep current results visible to avoid flicker.
+                    if (_state.value.searchResults.isEmpty()) {
+                        _state.update { it.copy(isSearching = true) }
+                    }
                     try {
                         val result = metadataRepo.searchMultiPaged(query, page = 1, type = null)
-                        _state.update { it.copy(searchResults = result.items, isSearching = false) }
+                        val filtered = contentPolicyFilter.filterItems(
+                            policy = currentPolicy(),
+                            context = ContentAccessContext.SEARCH_SUGGESTION,
+                            items = result.items,
+                            sourceType = ContentSourceType.TMDB,
+                        )
+                        _state.update { it.copy(searchResults = filtered.items, isSearching = false) }
                     } catch (_: Exception) {
                         _state.update { it.copy(isSearching = false) }
                     }
@@ -947,7 +1199,10 @@ class HomeViewModel(
     }
 
     fun refreshRatings(apiKey: String) {
-        if (apiKey.isBlank()) return
+        // Even without an MDBList key, the enricher still resolves IMDB + RT +
+        // Metacritic via OMDB and falls back to Trakt for IMDB scores. Bailing
+        // early on a blank key meant NO rail ever got rating pills unless the
+        // user had configured MDBList.
         scope.launch {
             val current = _state.value
             val enrichedShelves = current.shelves.map { shelf ->
@@ -966,12 +1221,22 @@ class HomeViewModel(
                 shelf.copy(items = ratingsEnricher.enrichList(shelf.items, apiKey))
             }
             val enrichedWatchlist = ratingsEnricher.enrichList(current.watchlistItems, apiKey)
+            val enrichedByw = current.becauseYouWatched.map { shelf ->
+                shelf.copy(items = ratingsEnricher.enrichList(shelf.items, apiKey))
+            }
+            val enrichedRecommended = current.recommendedItems.map { scored ->
+                scored.copy(item = ratingsEnricher.enrichSingle(scored.item, apiKey))
+            }
+            val enrichedRecents = ratingsEnricher.enrichList(current.recentlyWatched, apiKey)
             // Build ratings lookup for continue watching from all enriched items
             val allItems = enrichedShelves.flatMap { it.items } +
                 enrichedAddonShelves.flatMap { it.items } +
                 enrichedMdbListShelves.flatMap { it.items } +
                 enrichedCustomShelves.values.flatten() +
                 enrichedWatchlist +
+                enrichedByw.flatMap { it.items } +
+                enrichedRecommended.map { it.item } +
+                enrichedRecents +
                 (enrichedHiddenGems?.items ?: emptyList())
             val ratingsMap = mutableMapOf<String, MediaRatings>()
             allItems.forEach { item ->
@@ -988,6 +1253,9 @@ class HomeViewModel(
                     customShelves = enrichedCustomShelves,
                     hiddenGemsShelf = enrichedHiddenGems,
                     watchlistItems = enrichedWatchlist,
+                    becauseYouWatched = enrichedByw,
+                    recommendedItems = enrichedRecommended,
+                    recentlyWatched = enrichedRecents,
                     continueWatchingRatings = ratingsMap,
                 )
             }
@@ -1053,6 +1321,7 @@ class HomeViewModel(
 
     private fun MediaItem.applyArtworkBackfill(backfilledArtwork: Map<String, MediaItem>): MediaItem {
         val tmdbId = tmdbId ?: return this
+        if (isContentPlaceholder || isStubDetail) return this
         if (!needsArtworkBackfill()) return this
         val detail = backfilledArtwork[artworkBackfillKey(type, tmdbId)] ?: return this
         return copy(
@@ -1063,7 +1332,157 @@ class HomeViewModel(
     }
 
     private fun MediaItem.needsArtworkBackfill(): Boolean {
-        return tmdbId != null && posterUrl.isNullOrBlank() && backdropUrl.isNullOrBlank()
+        return !isContentPlaceholder &&
+            !isStubDetail &&
+            tmdbId != null &&
+            posterUrl.isNullOrBlank() &&
+            backdropUrl.isNullOrBlank()
+    }
+
+    private fun hydrateItemsFromCache(items: List<MediaItem>): List<MediaItem> {
+        return ratingsEnricher.hydrateListFromCache(items)
+    }
+
+    private fun hydrateShelvesFromCache(shelves: List<CatalogShelf>): List<CatalogShelf> {
+        return shelves.map { shelf -> shelf.copy(items = hydrateItemsFromCache(shelf.items)) }
+    }
+
+    private fun hydrateShelfFromCache(shelf: CatalogShelf?): CatalogShelf? {
+        return shelf?.copy(items = hydrateItemsFromCache(shelf.items))
+    }
+
+    private fun hydrateCustomShelvesFromCache(
+        shelves: MutableMap<String, List<MediaItem>>,
+    ): MutableMap<String, List<MediaItem>> {
+        return shelves.mapValues { (_, items) -> hydrateItemsFromCache(items) }.toMutableMap()
+    }
+
+    private fun hydrateRecommendationsFromCache(
+        items: List<ScoredMediaItem>,
+    ): List<ScoredMediaItem> {
+        return items.map { scored -> scored.copy(item = ratingsEnricher.hydrateFromCache(scored.item)) }
+    }
+
+    private fun hydrateContinueWatchingFromCache(
+        items: List<com.torve.domain.model.WatchProgress>,
+    ): List<MediaItem> {
+        return items.mapNotNull { progress ->
+            val tmdbId = progress.mediaId.extractTmdbIdOrNull() ?: return@mapNotNull null
+            ratingsEnricher.hydrateFromCache(
+                MediaItem(
+                    id = progress.mediaId,
+                    tmdbId = tmdbId,
+                    type = progress.mediaType,
+                    title = progress.showTitle ?: progress.title,
+                    posterUrl = progress.posterUrl,
+                    backdropUrl = progress.backdropUrl,
+                ),
+            )
+        }
+    }
+
+    private suspend fun resolveImdbToTmdb(items: List<MediaItem>): List<MediaItem> {
+        val needsResolve = items.filter { it.tmdbId == null && !it.imdbId.isNullOrBlank() }
+        if (needsResolve.isEmpty()) return items
+        val resolved = coroutineScope {
+            needsResolve.map { item ->
+                async {
+                    val imdb = item.imdbId ?: return@async item
+                    runCatching {
+                        metadataRepo.findByImdbId(
+                            imdbId = imdb,
+                            preferredType = if (item.type == MediaType.SERIES) "tv" else "movie",
+                        )
+                    }.getOrNull()?.let { found ->
+                        item.copy(
+                            id = found.tmdbId?.toString() ?: item.id,
+                            tmdbId = found.tmdbId ?: item.tmdbId,
+                            posterUrl = item.posterUrl ?: found.posterUrl,
+                            backdropUrl = item.backdropUrl ?: found.backdropUrl,
+                            year = item.year ?: found.year,
+                            rating = item.rating ?: found.rating,
+                            ratings = item.ratings ?: found.ratings,
+                        )
+                    } ?: item
+                }
+            }.map { it.await() }
+        }
+        val byStableId = resolved.associateBy { it.imdbId ?: it.id }
+        return items.map { item -> byStableId[item.imdbId ?: item.id] ?: item }
+    }
+
+    private fun buildRatingsLookup(items: List<MediaItem>): Map<String, MediaRatings> {
+        val ratingsMap = mutableMapOf<String, MediaRatings>()
+        items.forEach { item ->
+            val ratings = item.ratings ?: return@forEach
+            ratingsMap[item.id] = ratings
+            item.tmdbId?.let { ratingsMap[it.toString()] = ratings }
+            item.imdbId?.let { ratingsMap[it] = ratings }
+        }
+        return ratingsMap
+    }
+
+    private fun currentPolicy(): ContentPolicyState {
+        return contentPolicyRepository?.state?.value ?: ContentPolicyState.unrestricted()
+    }
+
+    private fun filterShelves(
+        policy: ContentPolicyState,
+        context: ContentAccessContext,
+        shelves: List<CatalogShelf>,
+        sourceType: ContentSourceType,
+    ): List<CatalogShelf> {
+        return shelves.mapNotNull { shelf ->
+            val filteredItems = contentPolicyFilter.filterItems(
+                policy = policy,
+                context = context,
+                items = shelf.items,
+                sourceType = sourceType,
+            ).items
+            shelf.copy(items = filteredItems).takeIf { filteredItems.isNotEmpty() }
+        }
+    }
+
+    private fun filterRecommendations(
+        policy: ContentPolicyState,
+        context: ContentAccessContext,
+        items: List<ScoredMediaItem>,
+        sourceType: ContentSourceType,
+    ): List<ScoredMediaItem> {
+        return items.mapNotNull { scored ->
+            val filteredItem = contentPolicyFilter.filterItems(
+                policy = policy,
+                context = context,
+                items = listOf(scored.item),
+                sourceType = sourceType,
+            ).items.firstOrNull()
+            filteredItem?.let { scored.copy(item = it) }
+        }
+    }
+
+    private suspend fun addonShelfPolicyFlags(addons: List<InstalledAddon>): Map<String, AddonPolicyFlags?> {
+        return addons.flatMap { addon ->
+            val flags = addon.policyFlags ?: addonPolicyRepository?.getFlags(addon.manifestUrl)
+            addon.manifest.catalogs.map { catalog ->
+                "${addon.manifest.id}-${catalog.id}" to flags
+            }
+        }.toMap()
+    }
+
+    private fun HomeUiState.hasRenderableContent(): Boolean {
+        return heroItem != null ||
+            shelves.isNotEmpty() ||
+            continueWatching.isNotEmpty() ||
+            recommendedItems.isNotEmpty() ||
+            watchlistItems.isNotEmpty() ||
+            becauseYouWatched.isNotEmpty() ||
+            hiddenGemsShelf != null ||
+            recentlyWatched.isNotEmpty() ||
+            popularActors.isNotEmpty() ||
+            popularDirectors.isNotEmpty() ||
+            customShelves.isNotEmpty() ||
+            addonShelves.isNotEmpty() ||
+            mdbListShelves.isNotEmpty()
     }
 
     private fun MediaType.toMetadataType(): String = when (this) {

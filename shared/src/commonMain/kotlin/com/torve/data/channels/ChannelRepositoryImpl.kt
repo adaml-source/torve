@@ -1,5 +1,6 @@
 package com.torve.data.channels
 
+import com.torve.data.auth.UserIdProvider
 import com.torve.db.TorveDatabase
 import com.torve.domain.model.EnrichedChannel
 import com.torve.domain.model.EpgData
@@ -34,7 +35,10 @@ class ChannelRepositoryImpl(
     private val epgParser: EpgParser,
     private val xtreamClient: XtreamClient,
     private val secureStorage: com.torve.domain.security.SecureStorage,
+    private val userIdProvider: UserIdProvider,
 ) : ChannelRepository {
+
+    private fun uid(): String = userIdProvider.currentUserId()
 
     companion object {
         private const val EPG_CONNECT_TIMEOUT_MS = 20_000L
@@ -91,7 +95,7 @@ class ChannelRepositoryImpl(
 
     /** Migrate any plaintext passwords from SQLite to secure storage. Idempotent. */
     private suspend fun migrateXtreamPasswords() {
-        val playlists = database.torveQueries.getAllPlaylists().executeAsList()
+        val playlists = database.torveQueries.getAllPlaylists(userId = uid()).executeAsList()
         for (row in playlists) {
             if (row.type == "xtream" && !row.password.isNullOrBlank()) {
                 val existing = secureStorage.getString(xtreamPasswordKey(row.id))
@@ -101,6 +105,7 @@ class ChannelRepositoryImpl(
                 }
                 // Null out plaintext password in SQLite
                 database.torveQueries.insertPlaylist(
+                    user_id = uid(),
                     id = row.id,
                     name = row.name,
                     url = row.url,
@@ -240,33 +245,35 @@ class ChannelRepositoryImpl(
 
     override suspend fun removePlaylist(id: String) {
         removeXtreamPassword(id) // clear from secure storage
-        database.torveQueries.deletePlaylist(id)
+        database.torveQueries.deletePlaylist(userId = uid(), playlistId = id)
         database.torveQueries.deleteChannelsForPlaylist(id)
         playlistCache.remove(id)
         epgCache.remove(id)
         epgErrorCache.remove(id)
         epgProgressCache.remove(id)
-        database.torveQueries.deletePreference(epgLoadStatePrefKey(id))
-        database.torveQueries.deletePreference(epgActiveGenerationPrefKey(id))
-        database.torveQueries.deletePreference(channelActiveGenerationPrefKey(id))
-        database.torveQueries.deletePreference(channelLastSyncPrefKey(id))
-        database.torveQueries.deletePreference(channelStagedGenerationPrefKey(id))
+        database.torveQueries.deletePreference(userId = uid(), key = epgLoadStatePrefKey(id))
+        database.torveQueries.deletePreference(userId = uid(), key = epgActiveGenerationPrefKey(id))
+        database.torveQueries.deletePreference(userId = uid(), key = channelActiveGenerationPrefKey(id))
+        database.torveQueries.deletePreference(userId = uid(), key = channelLastSyncPrefKey(id))
+        database.torveQueries.deletePreference(userId = uid(), key = channelStagedGenerationPrefKey(id))
     }
 
     override suspend fun updatePlaylistEpgUrl(playlistId: String, epgUrl: String?) {
-        val playlist = database.torveQueries.getPlaylist(playlistId).executeAsOneOrNull()
+        val playlist = database.torveQueries.getPlaylist(userId = uid(), playlistId = playlistId).executeAsOneOrNull()
             ?: return
         val now = Clock.System.now().toEpochMilliseconds()
         val normalizedEpg = epgUrl?.trim()?.takeIf { it.isNotEmpty() }
         database.torveQueries.updatePlaylistEpgUrl(
             epg_url = normalizedEpg,
             last_updated = now,
-            id = playlistId,
+            userId = uid(),
+            playlistId = playlistId,
         )
         epgCache.remove(playlistId)
         refreshEpgForPlaylist(playlistId, normalizedEpg)
 
         database.torveQueries.insertPlaylist(
+            user_id = uid(),
             id = playlist.id,
             name = playlist.name,
             url = playlist.url,
@@ -288,7 +295,7 @@ class ChannelRepositoryImpl(
             xtreamPasswordsMigrated = true
             runCatching { migrateXtreamPasswords() }
         }
-        return database.torveQueries.getAllPlaylists().executeAsList().map { row ->
+        return database.torveQueries.getAllPlaylists(userId = uid()).executeAsList().map { row ->
             ChannelPlaylist(
                 id = row.id,
                 name = row.name,
@@ -307,7 +314,7 @@ class ChannelRepositoryImpl(
 
     override suspend fun refreshPlaylist(playlistId: String) {
         repairChannelCatalogIfNeeded(playlistId)
-        val playlist = database.torveQueries.getPlaylist(playlistId).executeAsOneOrNull()
+        val playlist = database.torveQueries.getPlaylist(userId = uid(), playlistId = playlistId).executeAsOneOrNull()
             ?: return
 
         val now = Clock.System.now().toEpochMilliseconds()
@@ -382,7 +389,7 @@ class ChannelRepositoryImpl(
     }
 
     override suspend fun refreshEpg(playlistId: String, hiddenChannelIds: Set<String>) {
-        val playlist = database.torveQueries.getPlaylist(playlistId).executeAsOneOrNull()
+        val playlist = database.torveQueries.getPlaylist(userId = uid(), playlistId = playlistId).executeAsOneOrNull()
             ?: return
         val epgXtreamPw = if (playlist.type == "xtream") loadXtreamPassword(playlistId) else null
         val sourceUrl = playlist.epg_url?.trim()?.takeIf { it.isNotEmpty() }
@@ -420,7 +427,7 @@ class ChannelRepositoryImpl(
         val channels = getChannels(playlistId)
 
         // Load favorite IDs to mark channels
-        val favoriteIds = database.torveQueries.getAllFavorites().executeAsList()
+        val favoriteIds = database.torveQueries.getAllFavorites(userId = uid()).executeAsList()
             .map { it.channel_id }
             .toSet()
 
@@ -715,6 +722,7 @@ class ChannelRepositoryImpl(
         val now = Clock.System.now().toEpochMilliseconds()
         val channelId = stableChannelId(channel)
         database.torveQueries.insertFavorite(
+            user_id = uid(),
             channel_id = channelId,
             playlist_id = channel.playlistId,
             name = channel.name,
@@ -725,11 +733,11 @@ class ChannelRepositoryImpl(
     }
 
     override suspend fun removeFavorite(channelId: String) {
-        database.torveQueries.deleteFavorite(channelId)
+        database.torveQueries.deleteFavorite(userId = uid(), channelId = channelId)
     }
 
     override suspend fun getFavorites(): List<Channel> {
-        return database.torveQueries.getAllFavorites().executeAsList().map { row ->
+        return database.torveQueries.getAllFavorites(userId = uid()).executeAsList().map { row ->
             val fullChannel = resolveChannelByStoredId(row.playlist_id, row.channel_id)
             fullChannel?.copy(isFavorite = true) ?: Channel(
                 name = row.name,
@@ -743,13 +751,14 @@ class ChannelRepositoryImpl(
     }
 
     override suspend fun isFavorite(channelId: String): Boolean {
-        return database.torveQueries.isFavorite(channelId).executeAsOne() > 0
+        return database.torveQueries.isFavorite(userId = uid(), channelId = channelId).executeAsOne() > 0
     }
 
     override suspend fun recordChannelViewed(channel: Channel) {
         val now = Clock.System.now().toEpochMilliseconds()
         val channelId = stableChannelId(channel)
         database.torveQueries.insertRecentChannel(
+            user_id = uid(),
             channel_id = channelId,
             playlist_id = channel.playlistId,
             name = channel.name,
@@ -761,7 +770,7 @@ class ChannelRepositoryImpl(
     }
 
     override suspend fun getRecentlyViewedChannels(limit: Long): List<Channel> {
-        return database.torveQueries.getRecentChannels(limit).executeAsList().map { row ->
+        return database.torveQueries.getRecentChannels(userId = uid(), limit = limit).executeAsList().map { row ->
             val fullChannel = resolveChannelByStoredId(row.playlist_id, row.channel_id)
             fullChannel ?: Channel(
                 name = row.name,
@@ -774,21 +783,21 @@ class ChannelRepositoryImpl(
     }
 
     override suspend fun clearRecentlyViewedChannels() {
-        database.torveQueries.clearRecentChannels()
+        database.torveQueries.clearRecentChannels(userId = uid())
     }
 
     override suspend fun clearAll() {
         // Clear Xtream passwords from secure storage before deleting playlists
-        val playlists = database.torveQueries.getAllPlaylists().executeAsList()
+        val playlists = database.torveQueries.getAllPlaylists(userId = uid()).executeAsList()
         for (p in playlists) {
             if (p.type == "xtream") removeXtreamPassword(p.id)
         }
         println("[XtreamCred] Cleared ${playlists.count { it.type == "xtream" }} secure passwords on sign-out")
         database.torveQueries.deleteAllChannels()
-        database.torveQueries.deleteAllFavorites()
-        database.torveQueries.clearRecentChannels()
-        database.torveQueries.deleteAllPlaylists()
-        database.torveQueries.deleteAllDebridAccounts()
+        database.torveQueries.deleteAllFavorites(userId = uid())
+        database.torveQueries.clearRecentChannels(userId = uid())
+        database.torveQueries.deleteAllPlaylists(userId = uid())
+        database.torveQueries.deleteAllDebridAccounts(userId = uid())
         // Clear in-memory caches
         playlistCache.clear()
         epgCache.clear()
@@ -860,6 +869,7 @@ class ChannelRepositoryImpl(
                 )
             }
             database.torveQueries.insertPlaylist(
+                user_id = uid(),
                 id = playlistId,
                 name = playlistName,
                 url = playlistUrl,
@@ -872,7 +882,7 @@ class ChannelRepositoryImpl(
                 password = password,
             )
             setActiveChannelGeneration(playlistId, nextGeneration)
-            database.torveQueries.setPreference(channelLastSyncPrefKey(playlistId), updatedAt.toString())
+            database.torveQueries.setPreference(user_id = uid(), key = channelLastSyncPrefKey(playlistId), value_ = updatedAt.toString())
             database.torveQueries.deleteChannelsOlderGenerations(playlistId, nextGeneration)
         }
         clearStagedChannelGeneration(playlistId)
@@ -1219,7 +1229,7 @@ class ChannelRepositoryImpl(
         min: Int,
         max: Int,
     ): Int {
-        val raw = database.torveQueries.getPreference(key).executeAsOneOrNull()
+        val raw = database.torveQueries.getPreference(userId = uid(), key = key).executeAsOneOrNull()
         return raw?.toIntOrNull()?.coerceIn(min, max) ?: default
     }
 
@@ -1234,47 +1244,47 @@ class ChannelRepositoryImpl(
     private fun channelStagedGenerationPrefKey(playlistId: String): String = "$PREF_CHANNEL_STAGED_GENERATION_PREFIX$playlistId"
 
     private fun setEpgLoadState(playlistId: String, state: String) {
-        database.torveQueries.setPreference(epgLoadStatePrefKey(playlistId), state)
+        database.torveQueries.setPreference(user_id = uid(), key = epgLoadStatePrefKey(playlistId), value_ = state)
     }
 
     private fun getEpgLoadState(playlistId: String): String {
-        return database.torveQueries.getPreference(epgLoadStatePrefKey(playlistId))
+        return database.torveQueries.getPreference(userId = uid(), key = epgLoadStatePrefKey(playlistId))
             .executeAsOneOrNull()
             ?: EPG_STATE_IDLE
     }
 
     private fun setActiveEpgGeneration(playlistId: String, generationId: Long) {
-        database.torveQueries.setPreference(epgActiveGenerationPrefKey(playlistId), generationId.toString())
+        database.torveQueries.setPreference(user_id = uid(), key = epgActiveGenerationPrefKey(playlistId), value_ = generationId.toString())
     }
 
     private fun getActiveEpgGeneration(playlistId: String): Long? {
-        return database.torveQueries.getPreference(epgActiveGenerationPrefKey(playlistId))
+        return database.torveQueries.getPreference(userId = uid(), key = epgActiveGenerationPrefKey(playlistId))
             .executeAsOneOrNull()
             ?.toLongOrNull()
     }
 
     private fun setActiveChannelGeneration(playlistId: String, generationId: Long) {
-        database.torveQueries.setPreference(channelActiveGenerationPrefKey(playlistId), generationId.toString())
+        database.torveQueries.setPreference(user_id = uid(), key = channelActiveGenerationPrefKey(playlistId), value_ = generationId.toString())
     }
 
     private fun getActiveChannelGeneration(playlistId: String): Long? {
-        return database.torveQueries.getPreference(channelActiveGenerationPrefKey(playlistId))
+        return database.torveQueries.getPreference(userId = uid(), key = channelActiveGenerationPrefKey(playlistId))
             .executeAsOneOrNull()
             ?.toLongOrNull()
     }
 
     private fun setStagedChannelGeneration(playlistId: String, generationId: Long) {
-        database.torveQueries.setPreference(channelStagedGenerationPrefKey(playlistId), generationId.toString())
+        database.torveQueries.setPreference(user_id = uid(), key = channelStagedGenerationPrefKey(playlistId), value_ = generationId.toString())
     }
 
     private fun getStagedChannelGeneration(playlistId: String): Long? {
-        return database.torveQueries.getPreference(channelStagedGenerationPrefKey(playlistId))
+        return database.torveQueries.getPreference(userId = uid(), key = channelStagedGenerationPrefKey(playlistId))
             .executeAsOneOrNull()
             ?.toLongOrNull()
     }
 
     private fun clearStagedChannelGeneration(playlistId: String) {
-        database.torveQueries.deletePreference(channelStagedGenerationPrefKey(playlistId))
+        database.torveQueries.deletePreference(userId = uid(), key = channelStagedGenerationPrefKey(playlistId))
     }
 
     private fun repairChannelCatalogIfNeeded(playlistId: String) {

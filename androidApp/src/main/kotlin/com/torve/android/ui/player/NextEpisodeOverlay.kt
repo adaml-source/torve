@@ -25,8 +25,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.focusable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -42,6 +47,11 @@ fun NextEpisodeOverlay(
     onPlayNow: () -> Unit,
     onCancel: () -> Unit,
 ) {
+    // Force focus onto Play Now so D-pad navigation works on TV.
+    val playNowFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        runCatching { playNowFocus.requestFocus() }
+    }
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -82,6 +92,9 @@ fun NextEpisodeOverlay(
                     Button(
                         onClick = onPlayNow,
                         enabled = !isResolving,
+                        modifier = Modifier
+                            .focusRequester(playNowFocus)
+                            .focusable(),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Amber,
                             contentColor = Color.Black,
@@ -106,7 +119,10 @@ fun NextEpisodeOverlay(
                             Text(stringResource(R.string.common_play_now))
                         }
                     }
-                    TextButton(onClick = onCancel) {
+                    TextButton(
+                        onClick = onCancel,
+                        modifier = Modifier.focusable(),
+                    ) {
                         Text(stringResource(R.string.common_cancel), color = Color.White.copy(alpha = 0.7f))
                     }
                     if (!isResolving && countdown > 0) {

@@ -23,6 +23,7 @@ class SubtitleAggregator(
         imdbId: String,
         season: Int? = null,
         episode: Int? = null,
+        addonTimeoutMs: Long = 10_000,
     ): List<StremioSubtitle> = coroutineScope {
         val stremioType = when (type) {
             MediaType.MOVIE -> "movie"
@@ -46,7 +47,7 @@ class SubtitleAggregator(
                     val baseUrl = addon.manifestUrl
                         .removeSuffix("/manifest.json")
                         .removeSuffix("/")
-                    withTimeout(10_000) {
+                    withTimeout(addonTimeoutMs) {
                         addonClient.fetchSubtitles(baseUrl, stremioType, stremioId)
                             .subtitles
                     }

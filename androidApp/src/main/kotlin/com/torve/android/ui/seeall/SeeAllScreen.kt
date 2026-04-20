@@ -35,15 +35,29 @@ import androidx.compose.ui.unit.dp
 import com.torve.android.ui.components.BackButton
 import com.torve.android.ui.components.CardSize
 import com.torve.android.ui.components.LocalCardStyle
+import com.torve.android.ui.components.LocalRatingPrefs
+import com.torve.android.ui.components.MediaSortFilterBar
 import com.torve.android.ui.components.PosterCard
+import com.torve.android.ui.components.SortOption
 import com.torve.android.ui.components.mediaItemLazyKey
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Snow
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.resolveCardStyle
+import com.torve.presentation.seeall.SeeAllSortMode
 import com.torve.presentation.seeall.SeeAllViewModel
 import com.torve.presentation.settings.SettingsViewModel
 import org.koin.compose.koinInject
+
+private val sortOptions = listOf(
+    SortOption(SeeAllSortMode.DEFAULT.name, "Recently watched"),
+    SortOption(SeeAllSortMode.A_Z.name, "A → Z"),
+    SortOption(SeeAllSortMode.Z_A.name, "Z → A"),
+    SortOption(SeeAllSortMode.IMDB_DESC.name, "Highest IMDB Rating"),
+    SortOption(SeeAllSortMode.TMDB_DESC.name, "Highest TMDB Rating"),
+    SortOption(SeeAllSortMode.YEAR_DESC.name, "Newest"),
+    SortOption(SeeAllSortMode.YEAR_ASC.name, "Oldest"),
+)
 
 @Composable
 fun SeeAllScreen(
@@ -75,7 +89,10 @@ fun SeeAllScreen(
         if (shouldLoadMore) viewModel.loadMore()
     }
 
-    CompositionLocalProvider(LocalCardStyle provides defaultCardStyle) {
+    CompositionLocalProvider(
+        LocalCardStyle provides defaultCardStyle,
+        LocalRatingPrefs provides settingsState.ratingPrefs,
+    ) {
         Column(
             Modifier
                 .fillMaxSize()
@@ -100,6 +117,28 @@ fun SeeAllScreen(
             )
         }
 
+        // Sort + filter strip — only show once items have loaded so genres/year
+        // ranges are derivable.
+        if (state.items.isNotEmpty()) {
+            val currentSort = sortOptions.first { it.key == state.sortMode.name }
+            MediaSortFilterBar(
+                currentSort = currentSort,
+                availableSorts = sortOptions,
+                onSortSelected = { opt ->
+                    viewModel.setSortMode(SeeAllSortMode.valueOf(opt.key))
+                },
+                availableGenres = state.availableGenres,
+                selectedGenreIds = state.filterGenreIds,
+                onGenreToggled = viewModel::toggleGenre,
+                availableYearRange = state.availableYearRange,
+                selectedYearFrom = state.filterYearFrom,
+                selectedYearTo = state.filterYearTo,
+                onYearRangeChanged = viewModel::setYearRange,
+                onClearFilters = viewModel::clearFilters,
+            )
+        }
+
+        val displayed = state.displayedItems
         if (state.items.isEmpty() && state.isLoading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = Amber, modifier = Modifier.size(48.dp))
@@ -113,7 +152,7 @@ fun SeeAllScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
-                itemsIndexed(state.items, key = { index, item -> mediaItemLazyKey(item, index) }) { _, item ->
+                itemsIndexed(displayed, key = { index, item -> mediaItemLazyKey(item, index) }) { _, item ->
                     PosterCard(
                         item = item,
                         sizeOverride = CardSize.SMALL,
@@ -121,7 +160,7 @@ fun SeeAllScreen(
                     )
                 }
 
-                if (state.isLoading && state.items.isNotEmpty()) {
+                if (state.isLoading && displayed.isNotEmpty()) {
                     item {
                         Box(
                             Modifier.fillMaxWidth().padding(16.dp),

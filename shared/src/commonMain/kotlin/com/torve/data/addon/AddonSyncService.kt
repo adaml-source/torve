@@ -4,6 +4,7 @@ import com.torve.data.account.AccountSettingsApi
 import com.torve.data.account.AddonDto
 import com.torve.data.account.AddonInstallRequest
 import com.torve.data.account.AddonUpdateRequest
+import com.torve.data.contentpolicy.AddonPolicyRepository
 import com.torve.domain.model.InstalledAddon
 import com.torve.domain.repository.AddonRepository
 import com.torve.domain.repository.PreferencesRepository
@@ -24,6 +25,7 @@ class AddonSyncService(
     private val settingsRefreshNotifier: SettingsRefreshNotifier,
     private val json: Json,
     private val clock: Clock = Clock.System,
+    private val addonPolicyRepository: AddonPolicyRepository? = null,
 ) {
     companion object {
         private const val KEY_LAST_SYNC_AT = "addon_sync_last_at"
@@ -51,6 +53,11 @@ class AddonSyncService(
         }.getOrElse { false }
         torveVerboseLog {
             "ADDON_SERVER_SAVE addon_id=${safeAddonRef(addon)} result=${if (success) "success" else "failure"}"
+        }
+        // If this was Panda, purge any stale Panda rows on the server so the next
+        // sync cycle can't restore them locally.
+        if (isPandaAddon(addon)) {
+            runCatching { collapsePandaDuplicates(token, keepManifestUrl = addon.manifestUrl) }
         }
     }
 
@@ -96,6 +103,7 @@ class AddonSyncService(
         addonRepo.clearSyncMetadata()
         prefsRepo.remove(KEY_LAST_SYNC_AT)
         prefsRepo.remove(KEY_PENDING_REMOVALS)
+        addonPolicyRepository?.clear()
         settingsRefreshNotifier.notifyRefresh(now())
     }
 
@@ -112,7 +120,13 @@ class AddonSyncService(
             if (!force && !isStale(nowMs)) return
 
             try {
+                // Collapse Panda duplicates on the server BEFORE computing the merge plan.
+                // Without this, stale Panda rows (e.g. left over from a failed delete) would
+                // get re-installed locally on every sync, producing duplicates for the user.
+                runCatching { collapsePandaDuplicates(token, keepManifestUrl = null) }
+
                 val serverAddons = accountSettingsApi.getAddons(token)
+                addonPolicyRepository?.updateFromServer(serverAddons)
                 torveVerboseLog { "ADDON_SYNC_STARTED count=${serverAddons.size} reason=$reason" }
 
                 val pendingRemovals = loadPendingRemovals().toMutableList()
@@ -344,6 +358,89 @@ class AddonSyncService(
     private suspend fun isStale(nowMs: Long): Boolean {
         val lastSyncAt = prefsRepo.getString(KEY_LAST_SYNC_AT)?.toLongOrNull() ?: return true
         return nowMs - lastSyncAt >= SYNC_INTERVAL_MS
+    }
+
+    /**
+     * Local-first Panda dedupe. Scans the installed-addons table and, if more than
+     * one Panda row exists, removes the older ones locally. Picks the winner as the
+     * row with the highest priority (sort_order) or falls back to the most recently
+     * installed (latest manifest URL alphabetically as a proxy for newer config id).
+     *
+     * Call this when the user opens the addon catalog to guarantee a clean view
+     * regardless of server sync state.
+     */
+    suspend fun collapseLocalPandaDuplicates() {
+        val locals = runCatching { addonRepo.getInstalledAddons() }.getOrNull().orEmpty()
+        val pandas = locals.filter { isPandaAddon(it) }
+        if (pandas.size <= 1) return
+        // Prefer a row that has a configured URL (contains '/{config_id}/manifest.json')
+        // over the base manifest, then fall back to most-recently-synced.
+        val keep = pandas
+            .sortedWith(
+                compareByDescending<com.torve.domain.model.InstalledAddon> {
+                    // Configured URLs have an extra path segment after the host; the
+                    // base "panda.torve.app/manifest.json" does not. Prefer configured.
+                    it.manifestUrl.removePrefix("https://").removePrefix("http://")
+                        .removeSuffix("/manifest.json")
+                        .count { ch -> ch == '/' } > 0
+                }.thenByDescending { it.syncedAt ?: 0L }
+            )
+            .first()
+        val keepUrl = normalizeManifestUrl(keep.manifestUrl)
+        val token = accessTokenProvider()
+        pandas.filter { normalizeManifestUrl(it.manifestUrl) != keepUrl }.forEach { stale ->
+            runCatching { addonRepo.removeAddon(stale.manifestUrl) }
+            // Best-effort backend cleanup too.
+            if (token != null && stale.serverId != null) {
+                runCatching { accountSettingsApi.removeAddon(token, stale.serverId!!) }
+            }
+        }
+    }
+
+    /**
+     * Remove all-but-one Panda addon rows from the server.
+     *
+     * When [keepManifestUrl] is non-null, that URL is preserved and every other
+     * Panda row is deleted. When null, the most recently updated Panda row wins.
+     *
+     * Panda identity is detected by addon id ("com.torve.panda") or by host
+     * (anything on panda.torve.app). Best-effort — network failures are ignored
+     * so sync keeps running.
+     */
+    private suspend fun collapsePandaDuplicates(token: String, keepManifestUrl: String?) {
+        val serverAddons = runCatching { accountSettingsApi.getAddons(token) }.getOrNull().orEmpty()
+        val pandaAddons = serverAddons.filter { isPandaServerAddon(it) }
+        if (pandaAddons.size <= 1) return
+
+        val normalizedKeep = keepManifestUrl?.let { normalizeManifestUrl(it) }
+        val keep = when {
+            normalizedKeep != null -> pandaAddons.firstOrNull {
+                normalizeManifestUrl(it.manifestUrl) == normalizedKeep
+            } ?: pandaAddons.maxByOrNull { it.updatedAt }
+            else -> pandaAddons.maxByOrNull { it.updatedAt }
+        } ?: return
+
+        pandaAddons.filter { it.id != keep.id }.forEach { stale ->
+            runCatching {
+                accountSettingsApi.removeAddon(token, stale.id)
+                // Also drop any local row pointing at the stale URL so the next merge
+                // pass doesn't try to push it back.
+                addonRepo.removeAddon(stale.manifestUrl)
+            }
+            torveVerboseLog {
+                "ADDON_PANDA_DEDUP removed_id=${stale.id} kept_id=${keep.id}"
+            }
+        }
+    }
+
+    private fun isPandaAddon(addon: InstalledAddon): Boolean {
+        return addon.manifest.id == "com.torve.panda" ||
+            addon.manifestUrl.contains("panda.torve.app")
+    }
+
+    private fun isPandaServerAddon(addon: AddonDto): Boolean {
+        return addon.addonId == "com.torve.panda" ||
+            addon.manifestUrl.contains("panda.torve.app")
     }
 
     private fun normalizeManifestUrl(url: String): String {

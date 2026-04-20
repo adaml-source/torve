@@ -18,6 +18,7 @@ import com.torve.android.tv.components.TvMediaContextMenuAction
 import com.torve.android.tv.components.TvMediaRails
 import com.torve.android.tv.components.dedupeAcrossRails
 import com.torve.android.tv.components.rememberTvFocusMemory
+import com.torve.android.tv.focus.TvScreenFocusHandle
 import com.torve.android.tv.toMediaItemOrNull
 import com.torve.data.network.catalogContentLoadErrorMessage
 import com.torve.domain.model.MediaItem
@@ -63,6 +64,7 @@ internal fun TvCatalogRailsScreen(
     browseLayout: TvBrowseLayout = TvBrowseLayout.INFO_PANEL,
     contextMenuActionsForItem: ((MediaItem, Float?) -> List<TvMediaContextMenuAction>)? = null,
     onContextMenuAction: ((MediaItem, TvMediaContextMenuAction, Float?) -> Unit)? = null,
+    registerFocusHandle: ((TvScreenFocusHandle?) -> Unit)? = null,
 ) {
     val metadataRepo: MetadataRepository = koinInject()
     val ratingsEnricher: RatingsEnricher = koinInject()
@@ -252,5 +254,6 @@ internal fun TvCatalogRailsScreen(
         browseLayout = browseLayout,
         contextMenuActionsForItem = contextMenuActionsForItem,
         onContextMenuAction = onContextMenuAction,
+        registerFocusHandle = registerFocusHandle,
     )
 }

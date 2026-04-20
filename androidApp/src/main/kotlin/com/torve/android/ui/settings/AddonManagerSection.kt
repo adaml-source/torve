@@ -49,6 +49,7 @@ import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Steel
 import com.torve.android.ui.theme.Torve
 import com.torve.presentation.addon.AddonViewModel
+import com.torve.presentation.addon.AddonViewModel.Companion.normalizeManifestUrl
 
 @Composable
 fun AddonManagerSection(
@@ -81,6 +82,8 @@ fun AddonManagerSection(
                 }
 
                 state.addons.forEachIndexed { index, addon ->
+                    val flags = state.policyFlagsByUrl[normalizeManifestUrl(addon.manifestUrl)]
+                    val isRestricted = flags?.installable == false
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -92,11 +95,13 @@ fun AddonManagerSection(
                                 fontWeight = FontWeight.Medium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
+                                color = if (isRestricted) Torve.colors.textSecondary else Torve.colors.textPrimary,
                             )
                             Text(
-                                text = addon.manifest.description.ifBlank {
-                                    addon.manifestUrl.removePrefix("https://").removePrefix("http://")
-                                },
+                                text = if (isRestricted) stringResource(R.string.addon_restricted_label)
+                                    else addon.manifest.description.ifBlank {
+                                        addon.manifestUrl.removePrefix("https://").removePrefix("http://")
+                                    },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Torve.colors.textSecondary,
                                 maxLines = 1,
@@ -104,16 +109,18 @@ fun AddonManagerSection(
                             )
                         }
                         Spacer(Modifier.width(8.dp))
-                        Switch(
-                            checked = addon.isEnabled,
-                            onCheckedChange = { viewModel.toggleAddon(addon.manifestUrl, it) },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Amber,
-                                checkedTrackColor = Amber.copy(alpha = 0.3f),
-                                uncheckedThumbColor = Silver,
-                                uncheckedTrackColor = Gunmetal,
-                            ),
-                        )
+                        if (!isRestricted) {
+                            Switch(
+                                checked = addon.isEnabled,
+                                onCheckedChange = { viewModel.toggleAddon(addon.manifestUrl, it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Amber,
+                                    checkedTrackColor = Amber.copy(alpha = 0.3f),
+                                    uncheckedThumbColor = Silver,
+                                    uncheckedTrackColor = Gunmetal,
+                                ),
+                            )
+                        }
                         IconButton(
                             onClick = { viewModel.removeAddon(addon.manifestUrl) },
                             modifier = Modifier.size(32.dp),

@@ -5,6 +5,8 @@ import com.torve.data.account.AccountAwarePreferencesRepository
 import com.torve.data.account.AccountSettingsApi
 import com.torve.data.account.AccountSettingsRepository
 import com.torve.data.account.AccountSettingsRepositoryImpl
+import com.torve.data.acceleration.AccelerationApi
+import com.torve.data.acceleration.AccelerationInventorySyncService
 import com.torve.data.availability.AvailabilityRepositoryImpl
 import com.torve.data.availability.TmdbAvailabilityProvider
 import com.torve.data.addon.AddonSyncService
@@ -16,8 +18,16 @@ import com.torve.data.addon.StremioAddonClient
 import com.torve.data.addon.SubtitleAggregator
 import com.torve.data.addon.StreamRepositoryImpl
 import com.torve.data.auth.AuthClient
+import com.torve.data.auth.UserIdProvider
 import com.torve.data.ai.AiSuggestClient
 import com.torve.data.ai.KeywordSearchService
+import com.torve.data.contentpolicy.AddonPolicyRepository
+import com.torve.data.contentpolicy.ContentPolicyApi
+import com.torve.data.contentpolicy.ContentPolicyCacheInvalidationCoordinator
+import com.torve.data.contentpolicy.ContentChannelProvider
+import com.torve.data.contentpolicy.ContentPolicyRepository
+import com.torve.data.contentpolicy.ContentPolicyRepositoryImpl
+import com.torve.data.contentpolicy.MutableContentChannelProvider
 import com.torve.data.device.DeviceApi
 import com.torve.data.entitlement.EntitlementApi
 import com.torve.data.debrid.DebridClient
@@ -86,6 +96,8 @@ import com.torve.presentation.detail.PersonViewModel
 import com.torve.presentation.download.DownloadCatalogueViewModel
 import com.torve.presentation.download.DownloadViewModel
 import com.torve.presentation.home.HomeViewModel
+import com.torve.presentation.contentpolicy.ContentPolicyFilter
+import com.torve.presentation.contentpolicy.SensitiveMaterialSettingsViewModel
 import com.torve.presentation.profile.ProfileViewModel
 import com.torve.presentation.channels.ChannelsViewModel
 import com.torve.presentation.search.SearchViewModel
@@ -144,9 +156,19 @@ val sharedModule = module {
     // Stremio Addons
     single { StremioAddonClient(get(), get()) }
 
+    single {
+        AccelerationApi(
+            httpClient = get(),
+            authClient = get(),
+            json = get(),
+            baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
+            channelProvider = get(),
+        )
+    }
+
     // Debrid
     single {
-        val client = DebridClient(get(), get())
+        val client = DebridClient(get(), get(), get())
         val secretStore: com.torve.domain.integrations.IntegrationSecretStore = get()
         val settingsRefreshNotifier: com.torve.presentation.settings.SettingsRefreshNotifier = get()
         client.rdTokenRefresher = com.torve.data.debrid.RdTokenRefresher {
@@ -178,7 +200,7 @@ val sharedModule = module {
     single { TraktTokenStore(get(), get()) }
     single { TraktAuthorizedApi(get(), get()) }
     single<TraktSyncRepository> { TraktSyncRepositoryImpl(get(), get(), get(), get()) }
-    factory { TraktScrobbler(get()) }
+    factory { TraktScrobbler(get(), get()) }
 
     // SIMKL
     single { SimklClient(get()) }
@@ -189,7 +211,7 @@ val sharedModule = module {
     single { RatingsCacheRepository(get()) }
 
     // OMDB + Ratings
-    single { OmdbClient(get(), get()) }
+    single { OmdbClient(get(), get(), get()) }
     single { RatingsEnricher(get(), get(), get(), get(), get()) }
 
     // Kodi
@@ -236,17 +258,54 @@ val sharedModule = module {
     single { StreamAggregator(get(), get(), get()) }
 
     // Stream Repository
-    single<StreamRepository> { StreamRepositoryImpl(get(), get(), get()) }
+    single<StreamRepository> { StreamRepositoryImpl(get(), get(), get(), get()) }
+    single { AccelerationInventorySyncService(get(), get(), get()) }
+
+    // User ID provider for DB scoping. Uses a lazy AuthClient lookup so it can be
+    // wired into PreferencesRepositoryImpl without forming a circular dependency
+    // (AuthClient itself depends on DeviceLocalSettingsRepository).
+    single { UserIdProvider { get() } }
 
     // Watch Progress
-    single<WatchProgressRepository> { WatchProgressRepositoryImpl(get(), get(), get(), get()) }
+    single<WatchProgressRepository> { WatchProgressRepositoryImpl(get(), get(), get(), get(), get(), get(), get()) }
 
     // Preferences / Settings sync
-    single<DeviceLocalSettingsRepository> { PreferencesRepositoryImpl(get()) }
-    single { AccountSettingsApi(get(), baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL }) }
+    single<DeviceLocalSettingsRepository> { PreferencesRepositoryImpl(get(), get()) }
+    single { MutableContentChannelProvider() }
+    single<ContentChannelProvider> { get<MutableContentChannelProvider>() }
+    single { AccountSettingsApi(get(), baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL }, channelProvider = get()) }
     single<AccountSettingsRepository> { AccountSettingsRepositoryImpl(get(), get(), get(), get()) }
     single<PreferencesRepository> { AccountAwarePreferencesRepository(get(), get()) }
     single { SettingsRefreshNotifier() }
+    single { AddonPolicyRepository(get(), get()) }
+    single {
+        ContentPolicyApi(
+            httpClient = get(),
+            authClient = get(),
+            baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
+            channelProvider = get(),
+        )
+    }
+    single {
+        ContentPolicyCacheInvalidationCoordinator(
+            database = get(),
+            ratingsEnricher = get(),
+            prefsRepo = get(),
+            settingsRefreshNotifier = get(),
+            addonPolicyRepository = get(),
+        )
+    }
+    single<ContentPolicyRepository> {
+        ContentPolicyRepositoryImpl(
+            api = get(),
+            authClient = get(),
+            prefsRepo = get(),
+            json = get(),
+            channelProvider = get(),
+            invalidationCoordinator = get(),
+        )
+    }
+    single { ContentPolicyFilter() }
 
     // Addon Repository
     single<AddonRepository> { AddonRepositoryImpl(get(), get(), get()) }
@@ -258,14 +317,15 @@ val sharedModule = module {
             prefsRepo = get(),
             settingsRefreshNotifier = get(),
             json = get(),
+            addonPolicyRepository = get(),
         )
     }
 
     // Channel Repository
-    single<ChannelRepository> { ChannelRepositoryImpl(get(), get(), get(), get(), get(), get()) }
+    single<ChannelRepository> { ChannelRepositoryImpl(get(), get(), get(), get(), get(), get(), get()) }
 
     // Download Repository
-    single<DownloadRepository> { DownloadRepositoryImpl(get()) }
+    single<DownloadRepository> { DownloadRepositoryImpl(get(), get()) }
 
     // Bulk Download Manager
     single { BulkDownloadManager(get(), get(), get(), get()) }
@@ -274,25 +334,25 @@ val sharedModule = module {
     single { DownloadCatalogueBuilder() }
 
     // Profile Repository
-    single<ProfileRepository> { ProfileRepositoryImpl(get()) }
+    single<ProfileRepository> { ProfileRepositoryImpl(get(), get()) }
 
     // Shelf Config Repository
-    single<ShelfConfigRepository> { ShelfConfigRepositoryImpl(get()) }
+    single<ShelfConfigRepository> { ShelfConfigRepositoryImpl(get(), get()) }
 
     // Subscription
     single { RebateCodeApi(get()) }
     single<SubscriptionRepository> { SubscriptionRepositoryImpl(get(), get(), get(), get(), get()) }
 
     // Watchlist Repository
-    single<WatchlistRepository> { WatchlistRepositoryImpl(get(), get(), get(), get(), get(), get(), get()) }
+    single<WatchlistRepository> { WatchlistRepositoryImpl(get(), get(), get(), get(), get(), get(), get(), get()) }
 
     // Watch History Repository
-    single<WatchHistoryRepository> { WatchHistoryRepositoryImpl(get(), get(), get(), get(), get(), get()) }
+    single<WatchHistoryRepository> { WatchHistoryRepositoryImpl(get(), get(), get(), get(), get(), get(), get()) }
 
     // Sync Repository
-    single<SyncRepository> { SyncRepositoryImpl(get(), get(), get()) }
+    single<SyncRepository> { SyncRepositoryImpl(get(), get(), get(), get()) }
     single { PairingApi(get(), baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL }) }
-    single { AccountSessionCoordinator(get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { AccountSessionCoordinator(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
 
     // Use Cases
     factory { GetRecommendationsUseCase(get(), get()) }
@@ -301,12 +361,12 @@ val sharedModule = module {
     // ViewModels — singletons share state across screens (e.g. TvRoot ↔ TvIptvScreen).
     // The database is pre-warmed on a background thread in TorveApp.onCreate so the
     // first koinInject() doesn't block the main thread with schema DDL.
-    single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
-    single { SearchViewModel(get(), get()) }
-    factory { DetailViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { SearchViewModel(get(), get(), get(), get(), get()) }
+    factory { DetailViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     factoryOf(::PersonViewModel)
     single {
-        SettingsViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()).also { vm ->
+        SettingsViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()).also { vm ->
             // Wire integration save callback — breaks circular dep by using lazy resolution.
             vm.onIntegrationSaved = { type, credential, label ->
                 get<AccountSessionCoordinator>().saveIntegrationToBackend(type, credential, label)
@@ -320,22 +380,38 @@ val sharedModule = module {
             // The SettingsViewModel init loads it async and will call onLanguageChanged.
         }
     }
-    factoryOf(::AddonViewModel)
+    factory { AddonViewModel(get(), get(), get(), addonPolicyRepository = get()) }
+    single { com.torve.data.panda.PandaApiClient(get(), get()) }
+    factory { com.torve.presentation.panda.PandaSetupViewModel(get(), get(), get(), get(), get(), get(), get(), get()) }
     single { ChannelsViewModel(get(), get(), get(), backgroundDispatcher = kotlinx.coroutines.Dispatchers.IO, playlistBackup = get(), settingsRefreshNotifier = get()) }
     factory { CalendarViewModel(get(), get()) }
-    factoryOf(::DownloadViewModel)
-    factory { DownloadCatalogueViewModel(get(), get(), get(), get()) }
+    factory { DownloadViewModel(get(), contentPolicyRepository = get(), contentPolicyFilter = ContentPolicyFilter()) }
+    factory { DownloadCatalogueViewModel(get(), get(), get(), get(), contentPolicyRepository = get(), contentPolicyFilter = ContentPolicyFilter()) }
     factoryOf(::ProfileViewModel)
     // Singleton so NavGraph, PaywallScreen, and all other screens share
     // the same premium state — avoids stale locks after purchase/login.
     single { SubscriptionViewModel(get(), get(), get(), get(), get(), get(), get()) }
     factoryOf(::DeviceGovernanceViewModel)
-    factory { SetupWizardViewModel(get(), get(), get(), get(), get()) }
-    single { WatchlistViewModel(get(), get()) }
+    factory { SetupWizardViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { WatchlistViewModel(get(), get(), get(), get(), get()) }
     factory { DiscoverViewModel() }
     factoryOf(::MoodMatcherViewModel)
     factoryOf(::MdbListViewModel)
     factoryOf(::StatsViewModel)
-    factory { SeeAllViewModel(get(), get(), get(), get()) }
+    factory {
+        SeeAllViewModel(
+            metadataRepo = get(),
+            watchHistoryRepo = get(),
+            watchlistRepo = get(),
+            prefsRepo = get(),
+            watchProgressRepo = get(),
+            contentPolicyRepository = get(),
+            contentPolicyFilter = get(),
+            invalidationCoordinator = get(),
+            ratingsEnricher = getOrNull(),
+            integrationSecretStore = getOrNull(),
+        )
+    }
+    factory { SensitiveMaterialSettingsViewModel(get()) }
     factory { com.torve.presentation.jellyfin.JellyfinBrowserViewModel(get()) }
 }

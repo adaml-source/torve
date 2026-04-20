@@ -58,7 +58,7 @@ class CalendarViewModel(
             }
         } catch (e: Exception) {
             _state.update {
-                it.copy(isLoading = false, error = e.message ?: "Failed to load calendar")
+                it.copy(isLoading = false, error = com.torve.presentation.error.UserFacingError.CALENDAR_LOAD_FAILED.messageKey)
             }
         }
     }

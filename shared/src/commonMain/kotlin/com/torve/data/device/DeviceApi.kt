@@ -1,6 +1,7 @@
 package com.torve.data.device
 
 import com.torve.data.auth.DeviceRegistrationDto
+import com.torve.data.error.parseBackendError
 import com.torve.domain.device.DeviceType
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -84,10 +85,8 @@ class DeviceApi(
         }
         val raw = response.bodyAsText()
         if (!response.status.isSuccess()) {
-            val detail = runCatching {
-                json.decodeFromString(ErrorDetailDto.serializer(), raw).detail
-            }.getOrNull()
-            throw IllegalStateException(detail ?: "Failed to fetch devices (${response.status.value})")
+            val parsed = parseBackendError(raw)
+            throw IllegalStateException(parsed.message ?: "Failed to fetch devices (${response.status.value})")
         }
 
         return parseDeviceListPayload(raw, currentInstallationIdProvider())
@@ -112,10 +111,8 @@ class DeviceApi(
                     return parseManagedDevicePayload(raw, currentInstallationIdProvider())
                 }
                 else -> {
-                    val detail = runCatching {
-                        json.decodeFromString(ErrorDetailDto.serializer(), raw).detail
-                    }.getOrNull()
-                    throw IllegalStateException(detail ?: "Failed to register device (${response.status.value})")
+                    val parsed = parseBackendError(raw)
+                    throw IllegalStateException(parsed.message ?: "Failed to register device (${response.status.value})")
                 }
             }
         }

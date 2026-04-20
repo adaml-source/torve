@@ -44,8 +44,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.torve.android.R
+import com.torve.android.error.resolveErrorKey
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Snow
 import com.torve.data.device.ManagedDeviceDto
@@ -60,6 +62,7 @@ fun DeviceLimitReachedScreen(
     viewModel: DeviceGovernanceViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
+    val context = LocalContext.current
 
     LaunchedEffect(Unit) {
         viewModel.fetchDevices()
@@ -121,14 +124,16 @@ fun DeviceLimitReachedScreen(
                 )
             }
 
-            state.error?.let { error ->
-                item {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = error,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+            state.errorKey?.let { key ->
+                resolveErrorKey(context, key)?.let { message ->
+                    item {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = message,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
                 }
             }
 

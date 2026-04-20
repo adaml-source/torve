@@ -9,6 +9,9 @@ import com.torve.data.device.resolvedDeviceBlockReason
 import com.torve.data.device.resolvedHasPremiumEntitlement
 import com.torve.data.device.resolvedIsDeviceActivated
 import com.torve.data.device.resolvedUsablePremiumAccess
+import com.torve.presentation.error.UserFacingError
+import com.torve.presentation.error.backendReasonToUserFacingError
+import com.torve.presentation.error.toUserFacingError
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -20,7 +23,8 @@ import kotlinx.coroutines.launch
 
 data class DeviceGovernanceUiState(
     val isLoading: Boolean = false,
-    val error: String? = null,
+    /** User-facing error key from [UserFacingError.messageKey]. Resolve via string resources. */
+    val errorKey: String? = null,
 
     // Access state
     val hasEntitlement: Boolean = false,
@@ -66,7 +70,7 @@ class DeviceGovernanceViewModel(
      */
     fun fetchAccessState() {
         scope.launch {
-            _state.update { it.copy(isLoading = true, error = null) }
+            _state.update { it.copy(isLoading = true, errorKey = null) }
             try {
                 val token = authClient.getValidAccessToken() ?: run {
                     _state.update { it.copy(isLoading = false, reason = "not_logged_in") }
@@ -79,7 +83,7 @@ class DeviceGovernanceViewModel(
                     _state.update { it.copy(isLoading = false) }
                 }
             } catch (e: Exception) {
-                _state.update { it.copy(isLoading = false, error = "Failed to check access: ${e.message}") }
+                _state.update { it.copy(isLoading = false, errorKey = e.toUserFacingError().messageKey) }
             }
         }
     }
@@ -89,10 +93,10 @@ class DeviceGovernanceViewModel(
      */
     fun fetchDevices() {
         scope.launch {
-            _state.update { it.copy(isLoading = true, error = null) }
+            _state.update { it.copy(isLoading = true, errorKey = null) }
             try {
                 val token = authClient.getValidAccessToken() ?: run {
-                    _state.update { it.copy(isLoading = false, error = "Not logged in") }
+                    _state.update { it.copy(isLoading = false, errorKey = UserFacingError.NOT_LOGGED_IN.messageKey) }
                     return@launch
                 }
                 val list = deviceApi.getDevices(token)
@@ -106,7 +110,7 @@ class DeviceGovernanceViewModel(
                     )
                 }
             } catch (e: Exception) {
-                _state.update { it.copy(isLoading = false, error = e.message) }
+                _state.update { it.copy(isLoading = false, errorKey = UserFacingError.DEVICE_FETCH_FAILED.messageKey) }
             }
         }
     }
@@ -117,10 +121,10 @@ class DeviceGovernanceViewModel(
      */
     fun removeDevice(deviceId: String) {
         scope.launch {
-            _state.update { it.copy(isRemoving = true, error = null, removeSuccess = false) }
+            _state.update { it.copy(isRemoving = true, errorKey = null, removeSuccess = false) }
             try {
                 val token = authClient.getValidAccessToken() ?: run {
-                    _state.update { it.copy(isRemoving = false, error = "Not logged in") }
+                    _state.update { it.copy(isRemoving = false, errorKey = UserFacingError.NOT_LOGGED_IN.messageKey) }
                     return@launch
                 }
                 val result = deviceApi.removeDevice(token, deviceId)
@@ -129,11 +133,7 @@ class DeviceGovernanceViewModel(
                     _state.update {
                         it.copy(
                             isRemoving = false,
-                            error = when (result.reason) {
-                                "swap_limit_reached" -> "You've reached the device swap limit. Try again later."
-                                "already_removed" -> "This device was already removed."
-                                else -> "Could not remove device."
-                            },
+                            errorKey = backendReasonToUserFacingError(result.reason).messageKey,
                             swapsRemaining = result.swaps_remaining,
                         )
                     }
@@ -186,7 +186,7 @@ class DeviceGovernanceViewModel(
                 }
                 fetchAccessState()
             } catch (e: Exception) {
-                _state.update { it.copy(isRemoving = false, error = e.message) }
+                _state.update { it.copy(isRemoving = false, errorKey = UserFacingError.DEVICE_REMOVE_FAILED.messageKey) }
             }
         }
     }
@@ -196,7 +196,7 @@ class DeviceGovernanceViewModel(
      */
     fun activateCurrentDevice() {
         scope.launch {
-            _state.update { it.copy(isActivating = true, error = null, activateSuccess = false) }
+            _state.update { it.copy(isActivating = true, errorKey = null, activateSuccess = false) }
             try {
                 val token = authClient.getValidAccessToken() ?: return@launch
                 val result = deviceApi.activateCurrent(token)
@@ -215,7 +215,7 @@ class DeviceGovernanceViewModel(
                 }
                 fetchAccessState()
             } catch (e: Exception) {
-                _state.update { it.copy(isActivating = false, error = e.message) }
+                _state.update { it.copy(isActivating = false, errorKey = UserFacingError.DEVICE_ACTIVATE_FAILED.messageKey) }
             }
         }
     }
@@ -230,7 +230,7 @@ class DeviceGovernanceViewModel(
                 deviceApi.renameDevice(token, deviceId, newName)
                 fetchDevices()
             } catch (e: Exception) {
-                _state.update { it.copy(error = e.message) }
+                _state.update { it.copy(errorKey = UserFacingError.DEVICE_RENAME_FAILED.messageKey) }
             }
         }
     }
@@ -240,7 +240,7 @@ class DeviceGovernanceViewModel(
     }
 
     fun clearError() {
-        _state.update { it.copy(error = null) }
+        _state.update { it.copy(errorKey = null) }
     }
 
     private fun applyAccessState(access: AccessStateDto) {

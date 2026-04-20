@@ -60,8 +60,6 @@ internal object TvSettingsItemIds {
     const val LIBRARY_ADD_PLAYLIST = "settings/library/add_playlist"
     const val LIBRARY_MANAGE_CHANNELS = "settings/library/manage_channels"
     const val CONNECTIONS_PAIRING = "settings/connections/pairing"
-    const val CONNECTIONS_CLOUD_PROVIDER = "settings/connections/cloud_provider"
-    const val CONNECTIONS_CLOUD_SERVICE = "settings/connections/cloud_service"
     const val CONNECTIONS_TRAKT = "settings/connections/trakt"
     const val CONNECTIONS_SIMKL = "settings/connections/simkl"
     const val ADVANCED_ENTRY = "settings/advanced/entry"

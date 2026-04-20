@@ -46,6 +46,7 @@ import com.torve.android.tv.components.TvContentRail
 import com.torve.android.tv.components.TvMediaContextMenuAction
 import com.torve.android.tv.components.TvMediaRails
 import com.torve.android.tv.components.rememberTvFocusMemory
+import com.torve.android.tv.focus.TvScreenFocusHandle
 import com.torve.android.tv.toMediaItem
 import com.torve.android.ui.theme.*
 import com.torve.domain.model.DownloadMediaType
@@ -67,7 +68,7 @@ private data class TvLibraryUiState(
 private enum class LibraryTab { WATCHLIST, DOWNLOADS, JELLYFIN }
 
 @Composable
-fun TvLibraryScreen(
+internal fun TvLibraryScreen(
     railFocusRequester: FocusRequester,
     headerFocusRequester: FocusRequester,
     onMediaClick: (MediaItem) -> Unit,
@@ -80,6 +81,7 @@ fun TvLibraryScreen(
     contextMenuActionsForItem: ((MediaItem, Float?) -> List<TvMediaContextMenuAction>)? = null,
     onContextMenuAction: ((MediaItem, TvMediaContextMenuAction, Float?) -> Unit)? = null,
     onJellyfinItemPlay: (streamUrl: String, title: String) -> Unit = { _, _ -> },
+    registerFocusHandle: ((TvScreenFocusHandle?) -> Unit)? = null,
 ) {
     // Defer Jellyfin ViewModel creation until the tab is actually selected
     // Verified: rememberSaveable preserves tab selection across navigation (e.g. return from Details)
@@ -141,6 +143,7 @@ fun TvLibraryScreen(
                 shouldAutoFocus = shouldAutoFocus,
                 contextMenuActionsForItem = contextMenuActionsForItem,
                 onContextMenuAction = onContextMenuAction,
+                registerFocusHandle = registerFocusHandle,
             )
             LibraryTab.DOWNLOADS -> { /* Downloads removed from TV — stream-only */ }
             LibraryTab.JELLYFIN -> JellyfinContent(
@@ -151,6 +154,7 @@ fun TvLibraryScreen(
                 onMediaFocused = onMediaFocused,
                 shouldAutoFocus = shouldAutoFocus,
                 onJellyfinItemPlay = onJellyfinItemPlay,
+                registerFocusHandle = registerFocusHandle,
             )
         }
     }
@@ -169,6 +173,7 @@ private fun WatchlistContent(
     shouldAutoFocus: Boolean,
     contextMenuActionsForItem: ((MediaItem, Float?) -> List<TvMediaContextMenuAction>)?,
     onContextMenuAction: ((MediaItem, TvMediaContextMenuAction, Float?) -> Unit)?,
+    registerFocusHandle: ((TvScreenFocusHandle?) -> Unit)?,
 ) {
     val watchlistRepo: WatchlistRepository = koinInject()
     val focusMemory = rememberTvFocusMemory()
@@ -230,6 +235,7 @@ private fun WatchlistContent(
         shouldAutoFocus = shouldAutoFocus,
         contextMenuActionsForItem = contextMenuActionsForItem,
         onContextMenuAction = onContextMenuAction,
+        registerFocusHandle = registerFocusHandle,
     )
 }
 
@@ -329,6 +335,7 @@ private fun JellyfinContent(
     onMediaFocused: ((MediaItem) -> Unit)?,
     shouldAutoFocus: Boolean,
     onJellyfinItemPlay: (streamUrl: String, title: String) -> Unit,
+    registerFocusHandle: ((TvScreenFocusHandle?) -> Unit)?,
 ) {
     val jellyfinBrowserViewModel: JellyfinBrowserViewModel = koinInject()
     val state by jellyfinBrowserViewModel.state.collectAsState()
@@ -382,6 +389,7 @@ private fun JellyfinContent(
         onMediaFocused = onMediaFocused,
         onSeeAll = null,
         shouldAutoFocus = shouldAutoFocus,
+        registerFocusHandle = registerFocusHandle,
     )
 }
 

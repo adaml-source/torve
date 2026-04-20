@@ -1,10 +1,15 @@
 package com.torve.data.debrid
 
+import com.torve.data.acceleration.AccelerationApi
+import com.torve.data.acceleration.HashAvailabilityObservationDto
+import com.torve.data.acceleration.extractInventoryItems
 import com.torve.domain.model.DebridServiceType
 import com.torve.domain.model.ResolvedStream
 import com.torve.domain.model.TranscodeUrls
+import com.torve.domain.model.apiValue
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
+import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.forms.submitForm
 import io.ktor.client.request.get
 import io.ktor.client.request.header
@@ -14,9 +19,11 @@ import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.Parameters
+import io.ktor.http.ParametersBuilder
 import io.ktor.http.contentType
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 
 /**
  * Callback to refresh an expired RD OAuth token.
@@ -31,6 +38,7 @@ fun interface RdTokenRefresher {
 class DebridClient(
     private val httpClient: HttpClient,
     private val json: Json,
+    private val accelerationApi: AccelerationApi? = null,
     var rdTokenRefresher: RdTokenRefresher? = null,
 ) {
     companion object {
@@ -38,10 +46,31 @@ class DebridClient(
         const val RD_OAUTH = "https://api.real-debrid.com/oauth/v2"
         const val AD_BASE = "https://api.alldebrid.com/v4"
         const val PM_BASE = "https://www.premiumize.me/api"
+        const val PM_OAUTH = "https://www.premiumize.me/token"
         const val TB_BASE = "https://api.torbox.app/v1/api"
 
         const val RD_CLIENT_ID = "X245A4XAIBGVM"
         const val AD_AGENT = "torve"
+        const val PM_CLIENT_ID = "888228107"
+        const val PM_OAUTH_PREFIX = "pm-oauth:"
+    }
+
+    private fun pmAccessToken(credential: String): String? =
+        credential.takeIf { it.startsWith(PM_OAUTH_PREFIX) }?.removePrefix(PM_OAUTH_PREFIX)
+
+    private fun HttpRequestBuilder.pmAuthorize(credential: String) {
+        val accessToken = pmAccessToken(credential)
+        if (accessToken != null) {
+            header("Authorization", "Bearer $accessToken")
+        } else {
+            parameter("apikey", credential)
+        }
+    }
+
+    private fun ParametersBuilder.pmAuthorize(credential: String) {
+        if (pmAccessToken(credential) == null) {
+            append("apikey", credential)
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -62,13 +91,16 @@ class DebridClient(
     }
 
     fun supportsDeviceAuth(provider: DebridServiceType): Boolean {
-        return provider == DebridServiceType.REAL_DEBRID || provider == DebridServiceType.ALL_DEBRID
+        return provider == DebridServiceType.REAL_DEBRID ||
+            provider == DebridServiceType.ALL_DEBRID ||
+            provider == DebridServiceType.PREMIUMIZE
     }
 
     suspend fun getDeviceCode(provider: DebridServiceType): DeviceCodeInfo? {
         return when (provider) {
             DebridServiceType.REAL_DEBRID -> rdGetDeviceCode()
             DebridServiceType.ALL_DEBRID -> adGetDeviceCode()
+            DebridServiceType.PREMIUMIZE -> pmGetDeviceCode()
             else -> null
         }
     }
@@ -93,6 +125,11 @@ class DebridClient(
                 if (key != null) DevicePollResult(done = true, apiKey = key)
                 else DevicePollResult(done = false)
             }
+            DebridServiceType.PREMIUMIZE -> {
+                val token = pmPollDeviceCode(deviceCode)
+                if (token != null) DevicePollResult(done = true, apiKey = "$PM_OAUTH_PREFIX$token")
+                else DevicePollResult(done = false)
+            }
             else -> DevicePollResult(done = false)
         }
     }
@@ -108,14 +145,42 @@ class DebridClient(
     ): Map<String, Boolean> {
         if (infoHashes.isEmpty() || apiKey.isBlank()) return emptyMap()
         return try {
-            when (provider) {
+            val result = when (provider) {
                 DebridServiceType.REAL_DEBRID -> rdCheckCache(apiKey, infoHashes)
                 DebridServiceType.ALL_DEBRID -> adCheckCache(apiKey, infoHashes)
                 DebridServiceType.PREMIUMIZE -> pmCheckCache(apiKey, infoHashes)
                 DebridServiceType.TORBOX -> tbCheckCache(apiKey, infoHashes)
             }
+            accelerationApi?.reportHashes(
+                providerType = provider.apiValue,
+                observations = result.map { (infoHash, isCached) ->
+                    HashAvailabilityObservationDto(
+                        infohash = infoHash,
+                        isCached = isCached,
+                    )
+                },
+            )
+            result
         } catch (_: Exception) {
             emptyMap()
+        }
+    }
+
+    suspend fun getInventoryItems(
+        provider: DebridServiceType,
+        apiKey: String,
+    ): List<JsonObject> {
+        if (apiKey.isBlank()) return emptyList()
+        return try {
+            when (provider) {
+                DebridServiceType.REAL_DEBRID -> rdGetInventory(apiKey)
+                DebridServiceType.TORBOX -> tbGetInventory(apiKey)
+                DebridServiceType.ALL_DEBRID,
+                DebridServiceType.PREMIUMIZE,
+                -> emptyList()
+            }
+        } catch (_: Exception) {
+            emptyList()
         }
     }
 
@@ -188,10 +253,12 @@ class DebridClient(
                 val resp: PmDirectDlResponse = httpClient.submitForm(
                     url = "$PM_BASE/transfer/directdl",
                     formParameters = Parameters.build {
-                        append("apikey", apiKey)
+                        pmAuthorize(apiKey)
                         append("src", url)
                     },
-                ).body()
+                ) {
+                    pmAccessToken(apiKey)?.let { header("Authorization", "Bearer $it") }
+                }.body()
                 if (resp.status != "success" || resp.content.isEmpty()) {
                     throw Exception("Failed to unrestrict link")
                 }
@@ -583,7 +650,7 @@ class DebridClient(
     private suspend fun pmVerifyApiKey(apiKey: String): DebridResult {
         return try {
             val resp: PmAccountResponse = httpClient.get("$PM_BASE/account/info") {
-                parameter("apikey", apiKey)
+                pmAuthorize(apiKey)
             }.body()
             if (resp.status == "success") {
                 DebridResult(
@@ -605,6 +672,45 @@ class DebridClient(
         }
     }
 
+    private suspend fun pmGetDeviceCode(): DeviceCodeInfo {
+        val respText = httpClient.submitForm(
+            url = PM_OAUTH,
+            formParameters = Parameters.build {
+                append("response_type", "device_code")
+                append("client_id", PM_CLIENT_ID)
+            },
+        ).bodyAsText()
+        val resp = json.decodeFromString<PmDeviceCodeResponse>(respText)
+        val verificationUrl = resp.verificationUri
+            ?.takeIf { it.isNotBlank() }
+            ?: resp.verificationUrl?.takeIf { it.isNotBlank() }
+            ?: "https://www.premiumize.me/device"
+        return DeviceCodeInfo(
+            deviceCode = resp.deviceCode,
+            userCode = resp.userCode,
+            verificationUrl = verificationUrl,
+            interval = resp.interval,
+            expiresIn = resp.expiresIn,
+        )
+    }
+
+    private suspend fun pmPollDeviceCode(deviceCode: String): String? {
+        return try {
+            val respText = httpClient.submitForm(
+                url = PM_OAUTH,
+                formParameters = Parameters.build {
+                    append("grant_type", "device_code")
+                    append("client_id", PM_CLIENT_ID)
+                    append("code", deviceCode)
+                },
+            ).bodyAsText()
+            val resp = json.decodeFromString<PmDeviceTokenResponse>(respText)
+            resp.accessToken?.takeIf { it.isNotBlank() }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     private suspend fun pmResolveStream(
         apiKey: String,
         infoHash: String,
@@ -615,10 +721,12 @@ class DebridClient(
         val resp: PmDirectDlResponse = httpClient.submitForm(
             url = "$PM_BASE/transfer/directdl",
             formParameters = Parameters.build {
-                append("apikey", apiKey)
+                pmAuthorize(apiKey)
                 append("src", magnet)
             },
-        ).body()
+        ) {
+            pmAccessToken(apiKey)?.let { header("Authorization", "Bearer $it") }
+        }.body()
 
         if (resp.status != "success" || resp.content.isEmpty()) {
             throw Exception("Failed to resolve stream")
@@ -753,6 +861,13 @@ class DebridClient(
         return result
     }
 
+    private suspend fun rdGetInventory(apiKey: String): List<JsonObject> {
+        val raw = httpClient.get("$RD_BASE/torrents") {
+            header("Authorization", "Bearer $apiKey")
+        }.bodyAsText()
+        return extractInventoryItems(json.parseToJsonElement(raw))
+    }
+
     private suspend fun adCheckCache(apiKey: String, hashes: List<String>): Map<String, Boolean> {
         // AD /magnet/instant — magnets[]=hash1&magnets[]=hash2
         val respText = httpClient.get("$AD_BASE/magnet/instant") {
@@ -783,7 +898,7 @@ class DebridClient(
     private suspend fun pmCheckCache(apiKey: String, hashes: List<String>): Map<String, Boolean> {
         // PM /cache/check — items[]=hash1&items[]=hash2
         val resp: PmCacheCheckResponse = httpClient.get("$PM_BASE/cache/check") {
-            parameter("apikey", apiKey)
+            pmAuthorize(apiKey)
             hashes.forEach { parameter("items[]", it) }
         }.body()
 
@@ -820,6 +935,13 @@ class DebridClient(
         return result
     }
 
+    private suspend fun tbGetInventory(apiKey: String): List<JsonObject> {
+        val raw = httpClient.get("$TB_BASE/torrents/mylist") {
+            header("Authorization", "Bearer $apiKey")
+        }.bodyAsText()
+        return extractInventoryItems(json.parseToJsonElement(raw))
+    }
+
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
@@ -827,9 +949,9 @@ class DebridClient(
     private fun extractError(e: Exception, provider: String): String {
         val message = e.message ?: "Unknown error"
         return when {
-            "401" in message || "403" in message -> "Invalid API key — please check your credentials"
-            "timeout" in message.lowercase() -> "Cannot reach streaming service — check your connection"
-            else -> "Streaming service error: $message"
+            "401" in message || "403" in message -> "Invalid API key \u2014 please check your credentials"
+            "timeout" in message.lowercase() -> "Cannot reach streaming service \u2014 check your connection"
+            else -> "Could not connect to the service. Please try again."
         }
     }
 

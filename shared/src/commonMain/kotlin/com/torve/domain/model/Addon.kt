@@ -41,4 +41,5 @@ data class InstalledAddon(
     val serverId: String? = null,
     val syncedAt: Long? = null,
     val installedFrom: String = "app",
+    val policyFlags: AddonPolicyFlags? = null,
 )

@@ -12,4 +12,5 @@ data class WatchHistoryEntry(
     val seasonNumber: Int?,
     val episodeNumber: Int?,
     val showTitle: String?,
+    val isContentPlaceholder: Boolean = false,
 )

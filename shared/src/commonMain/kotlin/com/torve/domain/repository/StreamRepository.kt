@@ -5,8 +5,15 @@ import com.torve.domain.model.DebridServiceType
 import com.torve.domain.model.InstalledAddon
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.ResolvedStream
+import com.torve.domain.model.SourceAccelerationRequest
 import com.torve.domain.model.StreamFetchPolicy
 import com.torve.domain.model.StreamPreferences
+import com.torve.domain.model.ContentWarmupResult
+import com.torve.domain.model.ContentWarmupTrigger
+import com.torve.domain.model.InventoryMatchesSnapshot
+import com.torve.domain.model.KnownHashAvailabilitySnapshot
+import com.torve.domain.model.RecentSuccessfulSourcesSnapshot
+import com.torve.domain.model.StartupCandidatesSnapshot
 
 interface StreamRepository {
     /**
@@ -17,6 +24,8 @@ interface StreamRepository {
     suspend fun fetchStreams(
         type: MediaType,
         imdbId: String,
+        contentId: String? = null,
+        title: String? = null,
         season: Int? = null,
         episode: Int? = null,
         addons: List<InstalledAddon> = emptyList(),
@@ -35,4 +44,28 @@ interface StreamRepository {
         provider: DebridServiceType,
         apiKey: String,
     ): ResolvedStream
+
+    suspend fun reportPlaybackOutcome(
+        stream: ParsedStream,
+        provider: DebridServiceType,
+        success: Boolean,
+    )
+
+    suspend fun getStartupCandidates(request: SourceAccelerationRequest): StartupCandidatesSnapshot
+
+    suspend fun getWarmStartupCandidates(
+        request: SourceAccelerationRequest,
+        maxAgeMs: Long = 60_000L,
+    ): StartupCandidatesSnapshot?
+
+    suspend fun warmupStartupCandidates(
+        request: SourceAccelerationRequest,
+        trigger: ContentWarmupTrigger,
+    ): ContentWarmupResult
+
+    suspend fun getRecentSuccessfulSources(request: SourceAccelerationRequest): RecentSuccessfulSourcesSnapshot
+
+    suspend fun getInventoryMatches(request: SourceAccelerationRequest): InventoryMatchesSnapshot
+
+    suspend fun getKnownHashAvailability(request: SourceAccelerationRequest): KnownHashAvailabilitySnapshot
 }

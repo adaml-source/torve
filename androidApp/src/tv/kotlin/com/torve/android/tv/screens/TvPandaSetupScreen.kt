@@ -1,0 +1,168 @@
+package com.torve.android.tv.screens
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import com.torve.android.R
+import com.torve.android.ui.panda.PandaAuthStep
+import com.torve.android.ui.panda.PandaProviderStep
+import com.torve.android.ui.panda.PandaQualityStep
+import com.torve.android.ui.panda.PandaReviewStep
+import com.torve.android.ui.panda.PandaSourcesStep
+import com.torve.android.ui.panda.PandaUsenetStep
+import com.torve.android.ui.theme.Amber
+import com.torve.android.ui.theme.Obsidian
+import com.torve.android.ui.theme.Snow
+import com.torve.presentation.panda.PandaSetupStep
+import com.torve.presentation.panda.PandaSetupViewModel
+import org.koin.compose.koinInject
+
+@Composable
+fun TvPandaSetupScreen(
+    onBack: () -> Unit,
+    onComplete: () -> Unit,
+    viewModel: PandaSetupViewModel = koinInject(),
+) {
+    val state by viewModel.state.collectAsState()
+
+    BackHandler(enabled = state.currentStep != PandaSetupStep.PROVIDER) {
+        viewModel.previousStep()
+    }
+
+    val stepIndex = PandaSetupStep.entries.indexOf(state.currentStep)
+    val totalSteps = PandaSetupStep.entries.size
+    val contentFocusRequester = remember { FocusRequester() }
+    val nextButtonFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(state.currentStep) {
+        runCatching { contentFocusRequester.requestFocus() }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Obsidian),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 48.dp, vertical = 32.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stringResource(R.string.panda_setup_title),
+                    style = MaterialTheme.typography.displaySmall,
+                    fontWeight = FontWeight.Bold,
+                    color = Snow,
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "${stepIndex + 1} / $totalSteps",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Amber,
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
+            LinearProgressIndicator(
+                progress = { (stepIndex + 1).toFloat() / totalSteps },
+                modifier = Modifier.fillMaxWidth(),
+                color = Amber,
+            )
+            Spacer(Modifier.height(24.dp))
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .focusRequester(contentFocusRequester),
+            ) {
+                when (state.currentStep) {
+                    PandaSetupStep.PROVIDER -> PandaProviderStep(state, viewModel)
+                    PandaSetupStep.AUTH -> PandaAuthStep(state, viewModel)
+                    PandaSetupStep.SOURCES -> PandaSourcesStep(state, viewModel)
+                    PandaSetupStep.USENET -> PandaUsenetStep(state, viewModel)
+                    PandaSetupStep.QUALITY -> PandaQualityStep(state, viewModel)
+                    PandaSetupStep.REVIEW -> PandaReviewStep(state, viewModel, onComplete)
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        if (state.currentStep == PandaSetupStep.PROVIDER) onBack()
+                        else viewModel.previousStep()
+                    },
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, null, Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.common_back))
+                }
+
+                val canAdvance = when (state.currentStep) {
+                    PandaSetupStep.PROVIDER -> state.selectedProvider != null
+                    PandaSetupStep.AUTH -> state.authConnected
+                    PandaSetupStep.SOURCES,
+                    PandaSetupStep.USENET,
+                    PandaSetupStep.QUALITY -> true
+                    PandaSetupStep.REVIEW -> false
+                }
+                if (canAdvance) {
+                    Button(
+                        onClick = { viewModel.nextStep() },
+                        colors = ButtonDefaults.buttonColors(containerColor = Amber),
+                        modifier = Modifier.focusRequester(nextButtonFocusRequester),
+                    ) {
+                        Text(stringResource(R.string.panda_setup_next))
+                        Spacer(Modifier.width(8.dp))
+                        Icon(Icons.AutoMirrored.Filled.ArrowForward, null, Modifier.size(20.dp))
+                    }
+                }
+            }
+        }
+    }
+}

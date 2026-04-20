@@ -4,11 +4,16 @@ import com.torve.data.debrid.DebridClient
 import com.torve.data.trakt.TraktClient
 import com.torve.data.trakt.TraktDeviceCode
 import com.torve.data.trakt.auth.TraktTokenStore
+import com.torve.data.trakt.repo.TraktSyncRepository
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.model.DebridServiceType
 import com.torve.domain.model.StreamQuality
 import com.torve.domain.repository.PreferencesRepository
+import com.torve.domain.repository.WatchHistoryRepository
+import com.torve.domain.repository.WatchProgressRepository
+import com.torve.domain.repository.WatchlistRepository
+import com.torve.presentation.settings.SettingsRefreshNotifier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -18,6 +23,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Clock
 
 enum class SetupStep { WELCOME, TERMS, DEBRID, TRAKT, QUALITY, CHANNELS, DONE }
 
@@ -57,6 +63,11 @@ class SetupWizardViewModel(
     private val traktClient: TraktClient,
     private val tokenStore: TraktTokenStore,
     private val integrationSecretStore: IntegrationSecretStore,
+    private val watchlistRepo: WatchlistRepository,
+    private val watchProgressRepo: WatchProgressRepository,
+    private val watchHistoryRepo: WatchHistoryRepository,
+    private val traktSyncRepo: TraktSyncRepository,
+    private val settingsRefreshNotifier: SettingsRefreshNotifier,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(SetupUiState())
@@ -162,6 +173,9 @@ class SetupWizardViewModel(
                                 traktUsername = username,
                             )
                         }
+                        // Kick off initial Trakt import so watchlist / continue
+                        // watching rails populate without requiring an app restart.
+                        scope.launch { initialTraktImport() }
                         return@launch
                     }
                     is com.torve.data.trakt.TraktPollResult.Pending -> { /* Keep polling */ }
@@ -180,6 +194,18 @@ class SetupWizardViewModel(
             }
             _state.update { it.copy(traktDeviceCode = null, traktError = "Authorization timed out") }
         }
+    }
+
+    private suspend fun initialTraktImport() {
+        runCatching { watchlistRepo.syncFromTrakt() }
+        runCatching { watchProgressRepo.syncFromTrakt() }
+        runCatching { watchHistoryRepo.syncFromTrakt() }
+        runCatching { traktSyncRepo.syncRatingsFromTrakt() }
+        runCatching { traktSyncRepo.flushPendingWrites() }
+        prefsRepo.setString("trakt_last_sync_time", Clock.System.now().toEpochMilliseconds().toString())
+        // Wake up Home / other screens that observe this notifier so the
+        // freshly imported watchlist + continue-watching rails appear.
+        settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
     }
 
     @Suppress("unused")

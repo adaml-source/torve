@@ -93,7 +93,7 @@ class MdbListViewModel(
                 val searchResults = mdbListApi.searchLists(query, apiKey)
                 _state.update { it.copy(searchResults = searchResults, isSearching = false) }
             } catch (e: Exception) {
-                _state.update { it.copy(isSearching = false, error = e.message) }
+                _state.update { it.copy(isSearching = false, error = com.torve.presentation.error.UserFacingError.SEARCH_FAILED.messageKey) }
             }
         }
     }
@@ -107,7 +107,7 @@ class MdbListViewModel(
                 mdbListRepo.addList(listId, name, apiKey)
                 _state.update { it.copy(savedLists = mdbListRepo.getSavedLists()) }
             } catch (e: Exception) {
-                _state.update { it.copy(error = e.message) }
+                _state.update { it.copy(error = com.torve.presentation.error.UserFacingError.CONTENT_LOAD_FAILED.messageKey) }
             }
         }
     }

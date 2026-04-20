@@ -1,5 +1,7 @@
 package com.torve.data.ratings
 
+import com.torve.domain.integrations.IntegrationSecretKey
+import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.model.MediaRatings
 import com.torve.domain.repository.PreferencesRepository
 import io.ktor.client.HttpClient
@@ -12,6 +14,7 @@ import kotlinx.serialization.Serializable
 class OmdbClient(
     private val httpClient: HttpClient,
     private val prefsRepo: PreferencesRepository,
+    private val secretStore: IntegrationSecretStore,
 ) {
     companion object {
         const val KEY_OMDB_API_KEY = "omdb_api_key"
@@ -23,7 +26,8 @@ class OmdbClient(
      * Returns null if OMDB key not configured or request fails.
      */
     suspend fun fetchRatings(imdbId: String): MediaRatings? {
-        val apiKey = prefsRepo.getString(KEY_OMDB_API_KEY)
+        val apiKey = secretStore.get(IntegrationSecretKey.OMDB_API_KEY)
+            ?: prefsRepo.getString(KEY_OMDB_API_KEY)
         if (apiKey.isNullOrBlank()) return null
         if (!imdbId.startsWith("tt")) return null
 

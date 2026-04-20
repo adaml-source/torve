@@ -24,8 +24,10 @@ import androidx.compose.ui.unit.dp
 import com.torve.android.sync.SyncCoordinator
 import com.torve.data.account.AccountSettingsRepository
 import com.torve.data.auth.AuthClient
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.torve.android.R
+import com.torve.android.error.resolveErrorKey
 import com.torve.presentation.subscription.SubscriptionViewModel
 import com.torve.presentation.subscription.accessPresentation
 import org.koin.compose.koinInject
@@ -73,14 +75,16 @@ fun AccountScreen(
                     text = stringResource(R.string.account_this_device, syncCoordinator.installationId()),
                     style = MaterialTheme.typography.bodySmall,
                 )
+                val context = LocalContext.current
+                val syncErrorMessage = accountSettingsState.lastError?.let { resolveErrorKey(context, it) }
                 Text(
-                    text = if (accountSettingsState.lastError.isNullOrBlank()) {
+                    text = if (syncErrorMessage == null) {
                         stringResource(R.string.account_settings_sync_ok)
                     } else {
-                        stringResource(R.string.account_settings_sync_error, accountSettingsState.lastError ?: "")
+                        syncErrorMessage
                     },
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (accountSettingsState.lastError.isNullOrBlank()) {
+                    color = if (syncErrorMessage == null) {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     } else {
                         MaterialTheme.colorScheme.error

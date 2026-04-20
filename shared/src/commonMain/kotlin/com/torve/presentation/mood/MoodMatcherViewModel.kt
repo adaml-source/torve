@@ -25,7 +25,7 @@ class MoodMatcherViewModel(
                 val results = moodMatcher.getRecommendations(mood)
                 _state.update { it.copy(results = results, isLoading = false) }
             } catch (e: Exception) {
-                _state.update { it.copy(isLoading = false, error = e.message ?: "Failed to load") }
+                _state.update { it.copy(isLoading = false, error = com.torve.presentation.error.UserFacingError.CONTENT_LOAD_FAILED.messageKey) }
             }
         }
     }

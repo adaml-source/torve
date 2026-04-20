@@ -2,6 +2,7 @@ package com.torve.data.account
 
 import com.torve.data.auth.AuthClient
 import com.torve.domain.repository.DeviceLocalSettingsRepository
+import com.torve.presentation.error.UserFacingError
 import com.torve.presentation.settings.SettingsRefreshNotifier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -77,11 +78,11 @@ class AccountSettingsRepositoryImpl(
                         lastError = null,
                     )
                 }
-            }.onFailure { error ->
+            }.onFailure { _ ->
                 _state.update {
                     it.copy(
                         hasPendingPush = false,
-                        lastError = error.message ?: "Failed to sync account settings.",
+                        lastError = UserFacingError.SYNC_FAILED.messageKey,
                     )
                 }
             }
@@ -125,14 +126,14 @@ class AccountSettingsRepositoryImpl(
                 )
             }
             AccountSettingsRefreshResult(appliedChanges = applied)
-        }.getOrElse { error ->
+        }.getOrElse { _ ->
             _state.update {
                 it.copy(
                     isRefreshing = false,
-                    lastError = error.message ?: "Failed to refresh account settings.",
+                    lastError = UserFacingError.SYNC_FAILED.messageKey,
                 )
             }
-            AccountSettingsRefreshResult(error = error.message ?: "Failed to refresh account settings.")
+            AccountSettingsRefreshResult(error = UserFacingError.SYNC_FAILED.messageKey)
         }
     }
 

@@ -7,6 +7,8 @@ import com.torve.android.di.storeBillingModule
 import com.torve.android.download.DownloadWorker
 import com.torve.android.notification.EpisodeNotificationWorker
 import com.torve.android.sync.TraktSyncWorker
+import com.torve.data.acceleration.AccelerationInventorySyncService
+import com.torve.data.contentpolicy.MutableContentChannelProvider
 import com.torve.di.sharedModule
 import com.torve.platform.TorveRuntimeDebug
 import com.torve.presentation.session.AccountSessionCoordinator
@@ -20,6 +22,10 @@ import org.koin.core.context.startKoin
 import org.koin.java.KoinJavaComponent.getKoin
 
 class TorveApp : Application() {
+    companion object {
+        private const val NON_CRITICAL_STARTUP_DELAY_MS = 2_000L
+    }
+
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** Signalled once startKoin + DB pre-warm have completed on the background thread. */
@@ -49,6 +55,9 @@ class TorveApp : Application() {
             modules(sharedModule, androidAppModule, storeBillingModule)
         }
         com.torve.android.debug.AnrDebugLogger.log("STARTUP startKoin END")
+        getKoin().get<MutableContentChannelProvider>().update(
+            if (BuildConfig.FLAVOR.contains("google", ignoreCase = true)) "google_play" else null,
+        )
         koinReady.countDown()
         com.torve.android.debug.AnrDebugLogger.log("STARTUP koinReady signalled")
 
@@ -58,13 +67,17 @@ class TorveApp : Application() {
             com.torve.android.debug.AnrDebugLogger.log("STARTUP DB pre-warm END")
 
             // Non-critical deferred work.
+            kotlinx.coroutines.delay(NON_CRITICAL_STARTUP_DELAY_MS)
             launch { runCatching { getKoin().get<BillingManager>().initialize() } }
             launch {
                 EpisodeNotificationWorker.schedule(this@TorveApp)
                 TraktSyncWorker.schedule(this@TorveApp)
                 DownloadWorker.ensureChannel(this@TorveApp)
             }
-            launch { runCatching { getKoin().get<AccountSessionCoordinator>().restoreSession() } }
+            launch {
+                runCatching { getKoin().get<AccountSessionCoordinator>().restoreSession() }
+                runCatching { getKoin().get<AccelerationInventorySyncService>().syncConnectedProviders() }
+            }
             launch { runCatching { androidx.media3.decoder.ffmpeg.FfmpegLibrary.isAvailable() } }
         }
     }

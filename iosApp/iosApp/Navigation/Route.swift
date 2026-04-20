@@ -14,7 +14,7 @@ enum Route: Hashable {
     case provider(providerId: Int32, providerName: String)
     case genreCatalog(mediaType: String, genreId: Int32, genreName: String)
     case settings
-    case debridSettings
+    case pandaSetup
     case traktSettings
     case simklSettings
     case addonManager

@@ -215,6 +215,23 @@ data class PmAccountResponse(
 )
 
 @Serializable
+data class PmDeviceCodeResponse(
+    @SerialName("device_code") val deviceCode: String = "",
+    @SerialName("user_code") val userCode: String = "",
+    @SerialName("verification_uri") val verificationUri: String? = null,
+    @SerialName("verification_url") val verificationUrl: String? = null,
+    val interval: Int = 5,
+    @SerialName("expires_in") val expiresIn: Int = 600,
+)
+
+@Serializable
+data class PmDeviceTokenResponse(
+    @SerialName("access_token") val accessToken: String? = null,
+    val error: String? = null,
+    val message: String? = null,
+)
+
+@Serializable
 data class PmCacheCheckResponse(
     val status: String = "",
     val response: List<Boolean> = emptyList(),

@@ -46,19 +46,23 @@ import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Torve
 import com.torve.data.addon.ParsedStream
+import com.torve.domain.model.StartupCandidate
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StreamPickerSheet(
     streams: List<ParsedStream>,
+    startupCandidates: List<StartupCandidate> = emptyList(),
     isResolving: Boolean,
+    isLoadingMoreSources: Boolean = false,
+    playbackStartupStatus: com.torve.presentation.detail.PlaybackStartupStatus? = null,
     onStreamSelected: (ParsedStream) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    val bestMatch = streams.filter { it.score >= 70 }
-    val other = streams.filter { it.score < 70 }
+    val groups = groupPlaybackOptionStreams(streams, startupCandidates)
+    val startupCandidateMap = startupCandidates.associateBy { it.streamKey }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -109,6 +113,16 @@ fun StreamPickerSheet(
 
             Spacer(Modifier.height(12.dp))
 
+            DetailPlaybackReadinessCard(
+                streams = streams,
+                startupCandidates = startupCandidates,
+                startupStatus = playbackStartupStatus,
+                isLoadingStreams = false,
+                isResolving = isResolving,
+                isLoadingMoreSources = isLoadingMoreSources,
+                modifier = Modifier.padding(bottom = 12.dp),
+            )
+
             if (isResolving) {
                 Box(
                     modifier = Modifier
@@ -136,24 +150,14 @@ fun StreamPickerSheet(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp),
                 ) {
-                    if (bestMatch.isNotEmpty()) {
+                    groups.forEach { group ->
                         item {
-                            GroupHeader(stringResource(R.string.stream_best_match))
+                            GroupHeader(group.title, group.subtitle)
                         }
-                        items(bestMatch) { stream ->
+                        items(group.items) { stream ->
                             StreamItem(
                                 stream = stream,
-                                onClick = { onStreamSelected(stream) },
-                            )
-                        }
-                    }
-                    if (other.isNotEmpty()) {
-                        item {
-                            GroupHeader(if (bestMatch.isNotEmpty()) stringResource(R.string.stream_other_options) else stringResource(R.string.stream_available))
-                        }
-                        items(other) { stream ->
-                            StreamItem(
-                                stream = stream,
+                                startupCandidate = startupCandidateMap[stream.streamUiKey()],
                                 onClick = { onStreamSelected(stream) },
                             )
                         }
@@ -165,19 +169,28 @@ fun StreamPickerSheet(
 }
 
 @Composable
-private fun GroupHeader(title: String) {
-    Text(
-        text = title,
-        style = MaterialTheme.typography.labelMedium,
-        color = Amber,
-        fontWeight = FontWeight.SemiBold,
-        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
-    )
+private fun GroupHeader(title: String, subtitle: String?) {
+    Column(modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelMedium,
+            color = Amber,
+            fontWeight = FontWeight.SemiBold,
+        )
+        subtitle?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.labelSmall,
+                color = Torve.colors.textTertiary,
+            )
+        }
+    }
 }
 
 @Composable
 private fun StreamItem(
     stream: ParsedStream,
+    startupCandidate: StartupCandidate?,
     onClick: () -> Unit,
 ) {
     Surface(
@@ -227,6 +240,11 @@ private fun StreamItem(
 
             // Stream info
             Column(modifier = Modifier.weight(1f)) {
+                StreamReadinessLabel(
+                    stream = stream,
+                    startupCandidate = startupCandidate,
+                    modifier = Modifier.padding(bottom = 2.dp),
+                )
                 Text(
                     text = stream.title,
                     style = MaterialTheme.typography.titleSmall,
@@ -245,6 +263,11 @@ private fun StreamItem(
                     stream.audioCodec?.let { MetaChip(it) }
                     stream.seeds?.let { MetaChip("$it seeds") }
                 }
+                Spacer(Modifier.height(6.dp))
+                StreamExperienceBadges(
+                    stream = stream,
+                    startupCandidate = startupCandidate,
+                )
             }
 
             Spacer(Modifier.width(8.dp))

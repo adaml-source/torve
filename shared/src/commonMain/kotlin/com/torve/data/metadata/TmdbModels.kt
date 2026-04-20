@@ -27,6 +27,7 @@ data class TmdbKeyword(
 data class TmdbMovie(
     val id: Int,
     val title: String = "",
+    val adult: Boolean? = null,
     val overview: String = "",
     @SerialName("poster_path") val posterPath: String? = null,
     @SerialName("backdrop_path") val backdropPath: String? = null,
@@ -51,6 +52,7 @@ data class TmdbMovie(
 data class TmdbTv(
     val id: Int,
     val name: String = "",
+    val adult: Boolean? = null,
     val overview: String = "",
     @SerialName("poster_path") val posterPath: String? = null,
     @SerialName("backdrop_path") val backdropPath: String? = null,
@@ -75,6 +77,7 @@ data class TmdbTv(
 data class TmdbMultiResult(
     val id: Int,
     @SerialName("media_type") val mediaType: String = "",
+    val adult: Boolean? = null,
     val title: String? = null,
     val name: String? = null,
     val overview: String? = null,

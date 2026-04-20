@@ -1,6 +1,7 @@
 package com.torve.presentation.stats
 
 import com.torve.domain.model.MediaType
+import com.torve.domain.model.extractTmdbIdOrNull
 import com.torve.domain.repository.MetadataRepository
 import com.torve.domain.repository.WatchHistoryRepository
 import kotlinx.coroutines.CoroutineScope
@@ -79,7 +80,7 @@ class StatsViewModel(
                     )
                 }
             } catch (e: Exception) {
-                _state.update { it.copy(isLoading = false, error = e.message ?: "Failed to load stats") }
+                _state.update { it.copy(isLoading = false, error = com.torve.presentation.error.UserFacingError.STATS_LOAD_FAILED.messageKey) }
             }
         }
     }
@@ -89,7 +90,7 @@ class StatsViewModel(
 
         val counts = mutableMapOf<String, Int>()
         for (entry in history) {
-            val tmdbId = entry.mediaId.toIntOrNull() ?: continue
+            val tmdbId = entry.mediaId.extractTmdbIdOrNull() ?: continue
             val type = entry.mediaType.toMetadataType() ?: continue
             val key = "$type:$tmdbId"
 

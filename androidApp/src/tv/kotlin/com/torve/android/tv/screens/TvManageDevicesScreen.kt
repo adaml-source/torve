@@ -71,6 +71,7 @@ fun TvManageDevicesScreen(
     onContentFocused: (FocusRequester) -> Unit = {},
     viewModel: DeviceGovernanceViewModel = koinInject(),
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val state by viewModel.state.collectAsState()
     val firstDeviceRequester = remember { FocusRequester() }
     var closeArmed by remember { mutableStateOf(false) }
@@ -168,9 +169,11 @@ fun TvManageDevicesScreen(
             }
         }
 
-        state.error?.let { error ->
-            Spacer(Modifier.height(16.dp))
-            Text(text = error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        state.errorKey?.let { key ->
+            com.torve.android.error.resolveErrorKey(context, key)?.let { message ->
+                Spacer(Modifier.height(16.dp))
+                Text(text = message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
         }
 
         Spacer(Modifier.height(24.dp))
@@ -190,6 +193,7 @@ fun TvPairedDevicesScreen(
     onContentFocused: (FocusRequester) -> Unit = {},
     syncCoordinator: SyncCoordinator = koinInject(),
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val state by syncCoordinator.state.collectAsState()
     val firstDeviceRequester = remember { FocusRequester() }
     var closeArmed by remember { mutableStateOf(false) }
@@ -275,9 +279,13 @@ fun TvPairedDevicesScreen(
             }
         }
 
-        state.error?.let { error ->
+        state.error?.let {
             Spacer(Modifier.height(16.dp))
-            Text(text = error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            Text(
+                text = com.torve.android.error.resolveErrorKey(context, it) ?: stringResource(R.string.error_unknown),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
 
         Spacer(Modifier.height(24.dp))
@@ -295,6 +303,7 @@ fun TvDeviceLimitReachedScreen(
     onActivated: () -> Unit,
     viewModel: DeviceGovernanceViewModel = koinInject(),
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val state by viewModel.state.collectAsState()
     val firstCardRequester = remember { FocusRequester() }
 
@@ -356,9 +365,11 @@ fun TvDeviceLimitReachedScreen(
             }
         }
 
-        state.error?.let { error ->
-            Spacer(Modifier.height(16.dp))
-            Text(text = error, color = MaterialTheme.colorScheme.error)
+        state.errorKey?.let { key ->
+            com.torve.android.error.resolveErrorKey(context, key)?.let { message ->
+                Spacer(Modifier.height(16.dp))
+                Text(text = message, color = MaterialTheme.colorScheme.error)
+            }
         }
     }
 }

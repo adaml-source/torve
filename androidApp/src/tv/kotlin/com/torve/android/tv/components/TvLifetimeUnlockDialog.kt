@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
@@ -24,15 +25,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -42,6 +46,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.res.stringResource
 import com.torve.android.R
+import com.torve.android.billing.BillingManager
 import com.torve.android.tv.premium.TvEntitledFeature
 import com.torve.android.tv.premium.TvPremiumAccess
 import com.torve.android.ui.theme.Amber
@@ -51,20 +56,54 @@ import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Steel
+import org.koin.compose.koinInject
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun TvLifetimeUnlockDialog(
     feature: TvEntitledFeature,
     onUnlock: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val billingManager: BillingManager = koinInject()
+    val billingState by billingManager.billingState.collectAsState()
     val unlockRequester = remember(feature) { FocusRequester() }
+    val dismissRequester = remember(feature) { FocusRequester() }
+    val monthlyOffer = remember(billingState) {
+        billingManager.getOffer(BillingManager.ProductType.MONTHLY)
+    }
+    val lifetimeOffer = remember(billingState) {
+        billingManager.getOffer(BillingManager.ProductType.LIFETIME)
+    }
+    val billingErrorMessage = (billingState as? BillingManager.BillingState.Error)?.message
+    val monthlyPrice = when {
+        monthlyOffer?.formattedPrice != null -> monthlyOffer.formattedPrice
+        billingState is BillingManager.BillingState.Connecting ||
+            billingState is BillingManager.BillingState.Disconnected ->
+            stringResource(R.string.paywall_price_loading)
+        else -> stringResource(R.string.paywall_monthly_description)
+    }
+    val lifetimePrice = when {
+        lifetimeOffer?.formattedPrice != null -> lifetimeOffer.formattedPrice
+        billingState is BillingManager.BillingState.Connecting ||
+            billingState is BillingManager.BillingState.Disconnected ->
+            stringResource(R.string.paywall_price_loading)
+        else -> stringResource(R.string.paywall_lifetime_description)
+    }
 
     BackHandler(onBack = onDismiss)
 
-    LaunchedEffect(feature) {
+    val hasAnyOfferForFocus = monthlyOffer != null || lifetimeOffer != null
+    LaunchedEffect(feature, hasAnyOfferForFocus) {
         kotlinx.coroutines.delay(24)
-        runCatching { unlockRequester.requestFocus() }
+        runCatching {
+            if (hasAnyOfferForFocus) unlockRequester.requestFocus()
+            else dismissRequester.requestFocus()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        billingManager.initialize()
     }
 
     Popup(
@@ -143,6 +182,48 @@ fun TvLifetimeUnlockDialog(
                     fontWeight = FontWeight.Medium,
                 )
 
+                val hasAnyOffer = monthlyOffer != null || lifetimeOffer != null
+                if (billingState is BillingManager.BillingState.Connecting ||
+                    billingState is BillingManager.BillingState.Disconnected
+                ) {
+                    Text(
+                        text = stringResource(R.string.paywall_price_loading),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Silver,
+                    )
+                } else if (hasAnyOffer) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Graphite.copy(alpha = 0.55f))
+                            .border(1.dp, Steel.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+                            .padding(horizontal = 18.dp, vertical = 14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        if (monthlyOffer != null) {
+                            TvUnlockPlanRow(
+                                label = stringResource(R.string.tv_settings_monthly_access),
+                                price = monthlyPrice,
+                                details = monthlyOffer.billingDetails,
+                            )
+                        }
+                        if (lifetimeOffer != null) {
+                            TvUnlockPlanRow(
+                                label = stringResource(R.string.tv_settings_lifetime_access),
+                                price = lifetimePrice,
+                                details = lifetimeOffer.billingDetails,
+                            )
+                        }
+                    }
+                } else {
+                    Text(
+                        text = billingErrorMessage ?: stringResource(R.string.paywall_price),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (billingErrorMessage != null) MaterialTheme.colorScheme.error else Silver,
+                    )
+                }
+
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     TvPremiumAccess.lifetimeBenefits.forEach { benefit ->
                         Row(
@@ -168,16 +249,32 @@ fun TvLifetimeUnlockDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    TvUnlockDialogButton(
-                        title = TvPremiumAccess.UNLOCK_WITH_LIFETIME_LABEL,
-                        modifier = Modifier
-                            .weight(1f)
-                            .focusRequester(unlockRequester),
-                        onClick = onUnlock,
-                    )
+                    if (hasAnyOffer) {
+                        TvUnlockDialogButton(
+                            title = TvPremiumAccess.UNLOCK_WITH_LIFETIME_LABEL,
+                            modifier = Modifier
+                                .weight(1f)
+                                .focusRequester(unlockRequester)
+                                .focusProperties {
+                                    left = dismissRequester
+                                    right = dismissRequester
+                                    up = FocusRequester.Cancel
+                                    down = FocusRequester.Cancel
+                                },
+                            onClick = onUnlock,
+                        )
+                    }
                     TvUnlockDialogButton(
                         title = stringResource(R.string.tv_settings_not_now),
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusRequester(dismissRequester)
+                            .focusProperties {
+                                left = if (hasAnyOffer) unlockRequester else FocusRequester.Cancel
+                                right = if (hasAnyOffer) unlockRequester else FocusRequester.Cancel
+                                up = FocusRequester.Cancel
+                                down = FocusRequester.Cancel
+                            },
                         secondary = true,
                         onClick = onDismiss,
                     )
@@ -187,6 +284,7 @@ fun TvLifetimeUnlockDialog(
     }
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun TvUnlockDialogButton(
     title: String,
@@ -230,6 +328,46 @@ private fun TvUnlockDialogButton(
             text = title,
             style = MaterialTheme.typography.titleMedium,
             color = if (secondary) Snow else Obsidian,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+@Composable
+private fun TvUnlockPlanRow(
+    label: String,
+    price: String,
+    details: String?,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 34.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleSmall,
+                color = Snow,
+                fontWeight = FontWeight.Medium,
+            )
+            if (!details.isNullOrBlank()) {
+                Text(
+                    text = details,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Silver,
+                )
+            }
+        }
+        Text(
+            text = price,
+            style = MaterialTheme.typography.titleMedium,
+            color = Amber,
             fontWeight = FontWeight.SemiBold,
         )
     }

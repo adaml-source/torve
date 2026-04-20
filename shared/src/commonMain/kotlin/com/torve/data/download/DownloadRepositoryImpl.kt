@@ -1,5 +1,6 @@
 package com.torve.data.download
 
+import com.torve.data.auth.UserIdProvider
 import com.torve.db.TorveDatabase
 import com.torve.domain.model.Download
 import com.torve.domain.model.DownloadStatus
@@ -9,11 +10,13 @@ import kotlinx.datetime.Clock
 
 class DownloadRepositoryImpl(
     private val database: TorveDatabase,
+    private val userIdProvider: UserIdProvider,
 ) : DownloadRepository {
 
     override suspend fun enqueueDownload(download: Download): Download {
         val now = Clock.System.now().toEpochMilliseconds()
         database.torveQueries.insertDownload(
+            user_id = userIdProvider.currentUserId(),
             id = download.id,
             media_id = download.mediaId,
             media_type = download.mediaType.name.lowercase(),
@@ -34,30 +37,40 @@ class DownloadRepositoryImpl(
     }
 
     override suspend fun getAllDownloads(): List<Download> {
-        return database.torveQueries.getAllDownloads().executeAsList().map { it.toDomain() }
+        return database.torveQueries.getAllDownloads(userId = userIdProvider.currentUserId())
+            .executeAsList().map { it.toDomain() }
     }
 
     override suspend fun getPendingDownloads(): List<Download> {
-        return database.torveQueries.getPendingDownloads().executeAsList().map { it.toDomain() }
+        return database.torveQueries.getPendingDownloads(userId = userIdProvider.currentUserId())
+            .executeAsList().map { it.toDomain() }
     }
 
     override suspend fun getCompletedDownloads(): List<Download> {
-        return database.torveQueries.getCompletedDownloads().executeAsList().map { it.toDomain() }
+        return database.torveQueries.getCompletedDownloads(userId = userIdProvider.currentUserId())
+            .executeAsList().map { it.toDomain() }
     }
 
     override suspend fun getDownload(id: String): Download? {
-        return database.torveQueries.getDownload(id).executeAsOneOrNull()?.toDomain()
+        return database.torveQueries.getDownload(
+            userId = userIdProvider.currentUserId(),
+            downloadId = id,
+        ).executeAsOneOrNull()?.toDomain()
     }
 
     override suspend fun getDownloadByMediaId(mediaId: String): Download? {
-        return database.torveQueries.getDownloadByMediaId(mediaId).executeAsOneOrNull()?.toDomain()
+        return database.torveQueries.getDownloadByMediaId(
+            userId = userIdProvider.currentUserId(),
+            mediaId = mediaId,
+        ).executeAsOneOrNull()?.toDomain()
     }
 
     override suspend fun updateProgress(id: String, downloadedBytes: Long, status: DownloadStatus) {
         database.torveQueries.updateDownloadProgress(
             downloaded_bytes = downloadedBytes,
             status = status.name.lowercase(),
-            id = id,
+            userId = userIdProvider.currentUserId(),
+            downloadId = id,
         )
     }
 
@@ -66,16 +79,24 @@ class DownloadRepositoryImpl(
         database.torveQueries.updateDownloadCompleted(
             file_path = filePath,
             completed_at = now,
-            id = id,
+            userId = userIdProvider.currentUserId(),
+            downloadId = id,
         )
     }
 
     override suspend fun updateFileSize(id: String, fileSizeBytes: Long) {
-        database.torveQueries.updateDownloadFileSize(fileSizeBytes, id)
+        database.torveQueries.updateDownloadFileSize(
+            file_size_bytes = fileSizeBytes,
+            userId = userIdProvider.currentUserId(),
+            downloadId = id,
+        )
     }
 
     override suspend fun deleteDownload(id: String) {
-        database.torveQueries.deleteDownload(id)
+        database.torveQueries.deleteDownload(
+            userId = userIdProvider.currentUserId(),
+            downloadId = id,
+        )
     }
 
     override suspend fun pauseDownload(id: String) {

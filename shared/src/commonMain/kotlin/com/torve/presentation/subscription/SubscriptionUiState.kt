@@ -228,6 +228,9 @@ private fun deviceBlockMessage(reason: String?, strings: PurchaseStringResolver)
         "activation_slot_exhausted",
         "no_activation_slots",
         -> strings.deviceNeedsSlot()
+        "premium_required",
+        "no_entitlement",
+        -> strings.premiumRequired()
         else -> strings.deviceNeedsActivation()
     }
 }

@@ -6,6 +6,7 @@ import com.torve.domain.model.Episode
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.ResolvedStream
 import com.torve.domain.model.Season
+import com.torve.domain.model.StartupCandidate
 import com.torve.domain.model.WatchProgress
 
 /** Canonical key for episode tracking — single source of truth. */
@@ -45,8 +46,11 @@ data class DetailUiState(
     val error: String? = null,
     // Streams
     val streams: List<ParsedStream> = emptyList(),
+    val startupCandidates: List<StartupCandidate> = emptyList(),
     val isLoadingStreams: Boolean = false,
+    val isLoadingMoreSources: Boolean = false,
     val streamsError: String? = null,
+    val playbackStartupStatus: PlaybackStartupStatus = PlaybackStartupStatus(),
     // Resolved playback URL
     val resolvedStream: ResolvedStream? = null,
     val isResolving: Boolean = false,

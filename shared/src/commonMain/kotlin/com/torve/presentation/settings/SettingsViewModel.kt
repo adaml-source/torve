@@ -1,11 +1,14 @@
 package com.torve.presentation.settings
 
+import com.torve.presentation.error.defaultMessage
 import com.torve.data.ai.AiProvider
+import com.torve.data.ai.AiSuggestClient
 import com.torve.data.debrid.DebridClient
 import com.torve.data.kodi.KodiClient
 import com.torve.data.kodi.KodiHost
 import com.torve.data.simkl.SimklClient
 import com.torve.data.trakt.TraktClient
+import com.torve.data.trakt.TraktTokens
 import com.torve.data.trakt.auth.TraktTokenStore
 import com.torve.data.trakt.repo.TraktSyncRepository
 import com.torve.db.TorveDatabase
@@ -70,6 +73,7 @@ class SettingsViewModel(
     private val integrationSecretStore: IntegrationSecretStore,
     private val libraryOverlayService: LibraryOverlayService,
     private val omdbClient: OmdbClient,
+    private val aiSuggestClient: AiSuggestClient,
     private val settingsRefreshNotifier: SettingsRefreshNotifier,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -125,6 +129,15 @@ class SettingsViewModel(
         const val KEY_TV_PROGRESSIVE_SKIP_ENABLED = "tv_progressive_skip_enabled"
         const val KEY_TV_SKIP_RESET_WINDOW_MS = "tv_skip_reset_window_ms"
         const val KEY_TV_EXPLICIT_TIMELINE_SCRUB_ENABLED = "tv_explicit_timeline_scrub_enabled"
+        const val KEY_SEEK_STEP_SECONDS = "seek_step_seconds"
+        const val KEY_SUBTITLES_ENABLED_DEFAULT = "subtitles_enabled_default"
+        const val KEY_PREFERRED_SUBTITLE_LANGUAGE = "preferred_subtitle_language"
+        const val KEY_PREFERRED_AUDIO_LANGUAGE = "preferred_audio_language"
+        const val KEY_REMEMBER_VOLUME = "remember_volume"
+        const val KEY_LAST_VOLUME = "last_volume"
+        const val KEY_MOVIE_DOWNLOAD_PATH = "movie_download_path"
+        const val KEY_SHOW_DOWNLOAD_PATH = "show_download_path"
+        const val KEY_DOWNLOAD_SCAN_FOLDERS = "download_scan_folders"
         const val KEY_LAST_SYNC_TIME = "last_sync_time"
         const val KEY_REGEX_PATTERNS = "regex_patterns"
         const val KEY_STREAM_GROUPS = "stream_groups"
@@ -245,6 +258,16 @@ class SettingsViewModel(
                 ?: integrationSecretStore.get(IntegrationSecretKey.TRAKT_ACCESS_TOKEN) ?: ""
             val traktRefreshToken = traktTokens?.refreshToken
                 ?: integrationSecretStore.get(IntegrationSecretKey.TRAKT_REFRESH_TOKEN) ?: ""
+            if (traktTokens == null && traktAccessToken.isNotBlank() && traktRefreshToken.isNotBlank()) {
+                traktTokenStore.write(
+                    TraktTokens(
+                        accessToken = traktAccessToken,
+                        refreshToken = traktRefreshToken,
+                        expiresIn = 0,
+                        createdAt = Clock.System.now().toEpochMilliseconds(),
+                    ),
+                )
+            }
 
             val maxQuality = prefsRepo.getString(KEY_MAX_QUALITY)?.let {
                 try { StreamQuality.valueOf(it) } catch (_: Exception) { null }
@@ -295,6 +318,23 @@ class SettingsViewModel(
                 ?: 1_500
             val tvExplicitTimelineScrubEnabled =
                 prefsRepo.getString(KEY_TV_EXPLICIT_TIMELINE_SCRUB_ENABLED)?.toBooleanStrictOrNull() ?: true
+            val seekStepSeconds = prefsRepo.getString(KEY_SEEK_STEP_SECONDS)
+                ?.toIntOrNull()?.coerceIn(5, 60) ?: 10
+            val subtitlesEnabledByDefault =
+                prefsRepo.getString(KEY_SUBTITLES_ENABLED_DEFAULT)?.toBooleanStrictOrNull() ?: false
+            val preferredSubtitleLanguage =
+                prefsRepo.getString(KEY_PREFERRED_SUBTITLE_LANGUAGE) ?: ""
+            val preferredAudioLanguage =
+                prefsRepo.getString(KEY_PREFERRED_AUDIO_LANGUAGE) ?: ""
+            val rememberVolume =
+                prefsRepo.getString(KEY_REMEMBER_VOLUME)?.toBooleanStrictOrNull() ?: true
+            val lastVolume = prefsRepo.getString(KEY_LAST_VOLUME)
+                ?.toIntOrNull()?.coerceIn(0, 100) ?: 100
+            val movieDownloadPath = prefsRepo.getString(KEY_MOVIE_DOWNLOAD_PATH) ?: ""
+            val showDownloadPath = prefsRepo.getString(KEY_SHOW_DOWNLOAD_PATH) ?: ""
+            val downloadScanFolders = prefsRepo.getString(KEY_DOWNLOAD_SCAN_FOLDERS)?.let {
+                try { jsonParser.decodeFromString<List<String>>(it) } catch (_: Exception) { emptyList() }
+            } ?: emptyList()
             val lastSyncTime = prefsRepo.getString(KEY_LAST_SYNC_TIME)?.toLongOrNull()
             val traktLastSyncTime = prefsRepo.getString(KEY_TRAKT_LAST_SYNC_TIME)?.toLongOrNull()
             val availabilityLastSyncTime = prefsRepo.getString(KEY_AVAILABILITY_LAST_SYNC_TIME)?.toLongOrNull()
@@ -393,6 +433,15 @@ class SettingsViewModel(
                     tvProgressiveSkipEnabled = tvProgressiveSkipEnabled,
                     tvSkipResetWindowMs = tvSkipResetWindowMs,
                     tvExplicitTimelineScrubEnabled = tvExplicitTimelineScrubEnabled,
+                    seekStepSeconds = seekStepSeconds,
+                    subtitlesEnabledByDefault = subtitlesEnabledByDefault,
+                    preferredSubtitleLanguage = preferredSubtitleLanguage,
+                    preferredAudioLanguage = preferredAudioLanguage,
+                    rememberVolume = rememberVolume,
+                    lastVolume = lastVolume,
+                    movieDownloadPath = movieDownloadPath,
+                    showDownloadPath = showDownloadPath,
+                    downloadScanFolders = downloadScanFolders,
                     codecPreference = codecPreference,
                     hdrMode = hdrMode,
                     lastSyncTime = lastSyncTime,
@@ -433,7 +482,7 @@ class SettingsViewModel(
                 verifyDebridConnection()
             }
             if (traktAccessToken.isNotBlank()) {
-                verifyTraktConnection()
+                ensureTraktSessionReady(syncOnSuccess = true)
             }
         }
     }
@@ -515,7 +564,7 @@ class SettingsViewModel(
                 if (code != null) pollDebridDevice(code)
             } catch (e: Exception) {
                 _state.update {
-                    it.copy(debridLoading = false, debridError = e.message)
+                    it.copy(debridLoading = false, debridError = com.torve.presentation.error.UserFacingError.INTEGRATION_CONNECT_FAILED.defaultMessage())
                 }
             }
         }
@@ -566,7 +615,7 @@ class SettingsViewModel(
                 }
             }
             _state.update {
-                it.copy(isPollingDebrid = false, debridError = "Device auth timed out")
+                it.copy(isPollingDebrid = false, debridError = com.torve.presentation.error.UserFacingError.INTEGRATION_AUTH_TIMEOUT.defaultMessage())
             }
         }
     }
@@ -642,7 +691,10 @@ class SettingsViewModel(
                 _state.update { it.copy(traktDeviceCode = code, traktLoading = false) }
                 pollTraktDevice(code)
             } catch (e: Exception) {
-                _state.update { it.copy(traktLoading = false, traktError = e.message) }
+                // Surface the actual failure so "invalid_client" vs network errors are distinguishable.
+                val detail = e.message?.takeIf { it.isNotBlank() }
+                    ?: com.torve.presentation.error.UserFacingError.INTEGRATION_CONNECT_FAILED.defaultMessage()
+                _state.update { it.copy(traktLoading = false, traktError = "Trakt: $detail") }
             }
         }
     }
@@ -687,25 +739,25 @@ class SettingsViewModel(
                     is com.torve.data.trakt.TraktPollResult.Pending -> { /* Keep polling */ }
                     is com.torve.data.trakt.TraktPollResult.SlowDown -> { interval += 1 }
                     is com.torve.data.trakt.TraktPollResult.Expired -> {
-                        _state.update { it.copy(isPollingTrakt = false, traktDeviceCode = null, traktError = "Code expired. Try again.") }
+                        _state.update { it.copy(isPollingTrakt = false, traktDeviceCode = null, traktError = com.torve.presentation.error.UserFacingError.INTEGRATION_AUTH_EXPIRED.defaultMessage()) }
                         return@launch
                     }
                     is com.torve.data.trakt.TraktPollResult.Denied -> {
-                        _state.update { it.copy(isPollingTrakt = false, traktDeviceCode = null, traktError = "Authorization denied.") }
+                        _state.update { it.copy(isPollingTrakt = false, traktDeviceCode = null, traktError = com.torve.presentation.error.UserFacingError.INTEGRATION_AUTH_DENIED.defaultMessage()) }
                         return@launch
                     }
                     is com.torve.data.trakt.TraktPollResult.AlreadyUsed -> {
-                        _state.update { it.copy(isPollingTrakt = false, traktDeviceCode = null, traktError = "Code already used. Try again.") }
+                        _state.update { it.copy(isPollingTrakt = false, traktDeviceCode = null, traktError = com.torve.presentation.error.UserFacingError.INTEGRATION_AUTH_USED.defaultMessage()) }
                         return@launch
                     }
                     is com.torve.data.trakt.TraktPollResult.Error -> {
-                        _state.update { it.copy(isPollingTrakt = false, traktDeviceCode = null, traktError = result.message) }
+                        _state.update { it.copy(isPollingTrakt = false, traktDeviceCode = null, traktError = com.torve.presentation.error.UserFacingError.INTEGRATION_CONNECT_FAILED.defaultMessage()) }
                         return@launch
                     }
                 }
             }
             _state.update {
-                it.copy(isPollingTrakt = false, traktError = "Device auth timed out")
+                it.copy(isPollingTrakt = false, traktError = com.torve.presentation.error.UserFacingError.INTEGRATION_AUTH_TIMEOUT.defaultMessage())
             }
         }
     }
@@ -717,39 +769,124 @@ class SettingsViewModel(
     private val TRAKT_VALIDATION_COOLDOWN_MS = 30_000L
 
     private suspend fun verifyTraktConnection() {
+        ensureTraktSessionReady(syncOnSuccess = false)
+    }
+
+    private suspend fun ensureTraktSessionReady(syncOnSuccess: Boolean): Boolean {
         val now = Clock.System.now().toEpochMilliseconds()
         if (traktValidationRunning) {
             println("[TraktInit] Validation skipped (already running)")
-            return
+            return _state.value.traktConnected
         }
         if (now - traktLastValidatedAt < TRAKT_VALIDATION_COOLDOWN_MS && _state.value.traktUser != null) {
             println("[TraktInit] Validation skipped (cooldown active, already validated)")
-            return
+            return true
         }
         traktValidationRunning = true
         println("[TraktInit] Validation started")
         try {
-            val user = traktClient.getUser(_state.value.traktAccessToken)
-            _state.update { it.copy(traktUser = user, traktConnected = true, traktApiStatus = "Online") }
+            val activeAccessToken = resolveUsableTraktAccessToken()
+            if (activeAccessToken.isBlank()) {
+                _state.update {
+                    it.copy(
+                        traktConnected = false,
+                        traktUser = null,
+                        traktApiStatus = "Not connected",
+                    )
+                }
+                return false
+            }
+
+            val user = traktClient.getUser(activeAccessToken)
+            _state.update {
+                it.copy(
+                    traktAccessToken = activeAccessToken,
+                    traktConnected = true,
+                    traktUser = user,
+                    traktError = null,
+                    traktApiStatus = "Online",
+                )
+            }
             traktLastValidatedAt = now
             println("[TraktInit] Validation success")
             loadTraktStats()
+            if (syncOnSuccess) {
+                initialTraktImport()
+            }
+            return true
         } catch (e: Exception) {
             val is429 = e.message?.contains("429") == true || e.message?.contains("rate") == true
             if (is429) {
                 // Don't disconnect on rate limit — tokens are likely valid
                 traktLastValidatedAt = now // prevent immediate retry
-                _state.update { it.copy(traktApiStatus = "Rate limited — will retry later") }
-                println("[TraktInit] Rate limited, cooldown until ${now + TRAKT_VALIDATION_COOLDOWN_MS}")
-            } else {
                 _state.update {
-                    it.copy(traktConnected = false, traktError = e.message, traktApiStatus = "Error")
+                    it.copy(
+                        traktConnected = true,
+                        traktError = null,
+                        traktApiStatus = com.torve.presentation.error.UserFacingError.INTEGRATION_RATE_LIMITED.defaultMessage(),
+                    )
+                }
+                println("[TraktInit] Rate limited, cooldown until ${now + TRAKT_VALIDATION_COOLDOWN_MS}")
+                if (syncOnSuccess) {
+                    initialTraktImport()
+                }
+                return true
+            } else {
+                val authFailure = isUnauthorizedTraktError(e)
+                _state.update {
+                    it.copy(
+                        traktConnected = !authFailure && _state.value.traktAccessToken.isNotBlank(),
+                        traktError = com.torve.presentation.error.UserFacingError.INTEGRATION_CONNECT_FAILED.defaultMessage(),
+                        traktApiStatus = "Error",
+                    )
                 }
                 println("[TraktInit] Validation failed: ${e.message}")
+                return !authFailure
             }
         } finally {
             traktValidationRunning = false
         }
+    }
+
+    private suspend fun resolveUsableTraktAccessToken(): String {
+        val storedTokens = traktTokenStore.read()
+        if (storedTokens?.accessToken?.isNotBlank() == true) {
+            return storedTokens.accessToken
+        }
+
+        val stateAccessToken = _state.value.traktAccessToken
+        if (stateAccessToken.isBlank()) return ""
+
+        val refreshToken = storedTokens?.refreshToken
+            ?: _state.value.traktRefreshToken
+            ?: integrationSecretStore.get(IntegrationSecretKey.TRAKT_REFRESH_TOKEN)
+            .orEmpty()
+        if (refreshToken.isBlank()) {
+            return stateAccessToken
+        }
+
+        return runCatching {
+            val refreshed = traktClient.refreshToken(refreshToken)
+            traktTokenStore.write(refreshed)
+            prefsRepo.remove(KEY_TRAKT_ACCESS_TOKEN)
+            prefsRepo.remove(KEY_TRAKT_REFRESH_TOKEN)
+            _state.update {
+                it.copy(
+                    traktAccessToken = refreshed.accessToken,
+                    traktRefreshToken = refreshed.refreshToken,
+                    traktConnected = true,
+                    traktError = null,
+                )
+            }
+            refreshed.accessToken
+        }.getOrElse {
+            stateAccessToken
+        }
+    }
+
+    private fun isUnauthorizedTraktError(error: Throwable): Boolean {
+        val message = error.message.orEmpty()
+        return "401" in message || "Unauthorized" in message
     }
 
     fun setTraktScrobbleEnabled(enabled: Boolean) {
@@ -824,14 +961,55 @@ class SettingsViewModel(
     }
 
     private suspend fun initialTraktImport() {
-        runCatching { watchlistRepo.syncFromTrakt() }
-        runCatching { watchProgressRepo.syncFromTrakt() }
-        runCatching { watchHistoryRepo.syncFromTrakt() }
-        runCatching { traktSyncRepo.syncRatingsFromTrakt() }
-        runCatching { traktSyncRepo.flushPendingWrites() }
+        retryTraktStartupSync("watchlist") { watchlistRepo.syncFromTrakt() }
+        retryTraktStartupSync("progress") { watchProgressRepo.syncFromTrakt() }
+        retryTraktStartupSync("history") { watchHistoryRepo.syncFromTrakt() }
+        retryTraktStartupSync("ratings") { traktSyncRepo.syncRatingsFromTrakt() }
+        retryTraktStartupSync("queue_flush") { traktSyncRepo.flushPendingWrites() }
+        syncTraktTokensFromStore()
         val now = Clock.System.now().toEpochMilliseconds()
         prefsRepo.setString(KEY_TRAKT_LAST_SYNC_TIME, now.toString())
         _state.update { it.copy(traktLastSyncTime = now) }
+        settingsRefreshNotifier.notifyRefresh(now)
+    }
+
+    private suspend fun syncTraktTokensFromStore() {
+        val tokens = traktTokenStore.read() ?: return
+        _state.update {
+            it.copy(
+                traktAccessToken = tokens.accessToken,
+                traktRefreshToken = tokens.refreshToken,
+                traktConnected = tokens.accessToken.isNotBlank(),
+            )
+        }
+    }
+
+    private suspend fun <T> retryTraktStartupSync(
+        label: String,
+        attempts: Int = 3,
+        block: suspend () -> T,
+    ): T? {
+        var lastError: Throwable? = null
+        repeat(attempts) { attempt ->
+            try {
+                return block()
+            } catch (error: Throwable) {
+                lastError = error
+                val finalAttempt = attempt == attempts - 1
+                println("[TraktInit] Startup sync failed label=$label attempt=${attempt + 1}/$attempts error=${error.message}")
+                if (!finalAttempt) {
+                    delay((attempt + 1) * 1_500L)
+                }
+            }
+        }
+        if (lastError != null) {
+            _state.update {
+                it.copy(
+                    traktError = com.torve.presentation.error.UserFacingError.INTEGRATION_CONNECT_FAILED.defaultMessage(),
+                )
+            }
+        }
+        return null
     }
 
     private suspend fun clearTraktCache() {
@@ -969,11 +1147,15 @@ class SettingsViewModel(
             _state.update { it.copy(aiKeyValidationResult = "Enter an API key first") }
             return
         }
-        _state.update {
-            it.copy(
-                aiKeyValidating = false,
-                aiKeyValidationResult = "AI validation is unavailable in this build",
-            )
+        _state.update { it.copy(aiKeyValidating = true, aiKeyValidationResult = null) }
+        scope.launch {
+            try {
+                aiSuggestClient.suggest(provider, key, "best sci-fi movies")
+                _state.update { it.copy(aiKeyValidating = false, aiKeyValidationResult = "valid") }
+            } catch (e: Exception) {
+                val msg = e.message?.take(120) ?: "Validation failed"
+                _state.update { it.copy(aiKeyValidating = false, aiKeyValidationResult = msg) }
+            }
         }
     }
 
@@ -1102,11 +1284,11 @@ class SettingsViewModel(
         val url = _state.value.plexServerUrl
         val token = _state.value.plexAccessToken
         if (url.isBlank() || token.isBlank()) {
-            _state.update { it.copy(plexError = "Server URL and access token are required") }
+            _state.update { it.copy(plexError = com.torve.presentation.error.UserFacingError.INTEGRATION_CONFIG_MISSING.defaultMessage()) }
             return
         }
         val service = plexService ?: run {
-            _state.update { it.copy(plexError = "Plex service not available") }
+            _state.update { it.copy(plexError = com.torve.presentation.error.UserFacingError.INTEGRATION_SERVICE_UNAVAILABLE.defaultMessage()) }
             return
         }
         _state.update { it.copy(plexLoading = true, plexError = null) }
@@ -1116,7 +1298,7 @@ class SettingsViewModel(
                 it.copy(
                     plexLoading = false,
                     plexConnected = success,
-                    plexError = if (success) null else "Could not connect. Check URL and token.",
+                    plexError = if (success) null else com.torve.presentation.error.UserFacingError.INTEGRATION_CONNECT_CHECK.defaultMessage(),
                 )
             }
         }
@@ -1281,7 +1463,7 @@ class SettingsViewModel(
                 _state.update { it.copy(simklDeviceCode = code, simklLoading = false) }
                 pollSimklDevice(code)
             } catch (e: Exception) {
-                _state.update { it.copy(simklLoading = false, simklError = e.message) }
+                _state.update { it.copy(simklLoading = false, simklError = com.torve.presentation.error.UserFacingError.INTEGRATION_CONNECT_FAILED.defaultMessage()) }
             }
         }
     }
@@ -1320,7 +1502,7 @@ class SettingsViewModel(
                     return@launch
                 }
             }
-            _state.update { it.copy(isPollingSimkl = false, simklError = "Device auth timed out") }
+            _state.update { it.copy(isPollingSimkl = false, simklError = com.torve.presentation.error.UserFacingError.INTEGRATION_AUTH_TIMEOUT.defaultMessage()) }
         }
     }
 
@@ -1429,6 +1611,78 @@ class SettingsViewModel(
     fun setTvExplicitTimelineScrubEnabled(enabled: Boolean) {
         _state.update { it.copy(tvExplicitTimelineScrubEnabled = enabled) }
         scope.launch { prefsRepo.setString(KEY_TV_EXPLICIT_TIMELINE_SCRUB_ENABLED, enabled.toString()) }
+    }
+
+    fun setSeekStepSeconds(seconds: Int) {
+        val sanitized = seconds.coerceIn(5, 60)
+        _state.update { it.copy(seekStepSeconds = sanitized) }
+        scope.launch { prefsRepo.setString(KEY_SEEK_STEP_SECONDS, sanitized.toString()) }
+    }
+
+    fun setSubtitlesEnabledByDefault(enabled: Boolean) {
+        _state.update { it.copy(subtitlesEnabledByDefault = enabled) }
+        scope.launch { prefsRepo.setString(KEY_SUBTITLES_ENABLED_DEFAULT, enabled.toString()) }
+    }
+
+    fun setPreferredSubtitleLanguage(language: String) {
+        _state.update { it.copy(preferredSubtitleLanguage = language) }
+        scope.launch { prefsRepo.setString(KEY_PREFERRED_SUBTITLE_LANGUAGE, language) }
+    }
+
+    fun setPreferredAudioLanguage(language: String) {
+        _state.update { it.copy(preferredAudioLanguage = language) }
+        scope.launch { prefsRepo.setString(KEY_PREFERRED_AUDIO_LANGUAGE, language) }
+    }
+
+    fun setRememberVolume(enabled: Boolean) {
+        _state.update { it.copy(rememberVolume = enabled) }
+        scope.launch { prefsRepo.setString(KEY_REMEMBER_VOLUME, enabled.toString()) }
+    }
+
+    fun setLastVolume(volume: Int) {
+        val sanitized = volume.coerceIn(0, 100)
+        _state.update { it.copy(lastVolume = sanitized) }
+        scope.launch { prefsRepo.setString(KEY_LAST_VOLUME, sanitized.toString()) }
+    }
+
+    fun setMovieDownloadPath(path: String) {
+        val sanitized = path.trim()
+        _state.update { it.copy(movieDownloadPath = sanitized) }
+        scope.launch { prefsRepo.setString(KEY_MOVIE_DOWNLOAD_PATH, sanitized) }
+    }
+
+    fun setShowDownloadPath(path: String) {
+        val sanitized = path.trim()
+        _state.update { it.copy(showDownloadPath = sanitized) }
+        scope.launch { prefsRepo.setString(KEY_SHOW_DOWNLOAD_PATH, sanitized) }
+    }
+
+    fun setDownloadScanFoldersText(text: String) {
+        val folders = text.lines()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+        setDownloadScanFolders(folders)
+    }
+
+    fun setDownloadScanFolders(folders: List<String>) {
+        val clean = folders.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+        _state.update { it.copy(downloadScanFolders = clean) }
+        scope.launch {
+            prefsRepo.setString(KEY_DOWNLOAD_SCAN_FOLDERS, jsonParser.encodeToString(clean))
+        }
+    }
+
+    fun addDownloadScanFolder(path: String) {
+        val trimmed = path.trim()
+        if (trimmed.isBlank()) return
+        val current = _state.value.downloadScanFolders
+        if (trimmed in current) return
+        setDownloadScanFolders(current + trimmed)
+    }
+
+    fun removeDownloadScanFolder(path: String) {
+        setDownloadScanFolders(_state.value.downloadScanFolders - path)
     }
 
     fun buildStreamPreferences(): StreamPreferences {

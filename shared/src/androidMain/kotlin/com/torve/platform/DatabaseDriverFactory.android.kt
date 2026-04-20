@@ -34,6 +34,31 @@ actual class DatabaseDriverFactory(private val context: Context) {
                             hidden_id TEXT NOT NULL PRIMARY KEY
                         )""",
                     )
+                    db.execSQL(
+                        """CREATE TABLE IF NOT EXISTS stream_resolve_memory (
+                            content_key TEXT NOT NULL,
+                            stream_key TEXT NOT NULL,
+                            media_type TEXT NOT NULL,
+                            imdb_id TEXT NOT NULL,
+                            season_number INTEGER,
+                            episode_number INTEGER,
+                            addon_name TEXT NOT NULL,
+                            stream_title TEXT NOT NULL,
+                            info_hash TEXT,
+                            direct_url TEXT,
+                            quality TEXT NOT NULL,
+                            source_name TEXT,
+                            is_cached INTEGER NOT NULL DEFAULT 0,
+                            resolved_provider TEXT,
+                            success_count INTEGER NOT NULL DEFAULT 0,
+                            last_success_at INTEGER NOT NULL,
+                            PRIMARY KEY (content_key, stream_key)
+                        )""",
+                    )
+                    db.execSQL(
+                        """CREATE INDEX IF NOT EXISTS idx_stream_resolve_memory_content_recent
+                            ON stream_resolve_memory(content_key, last_success_at DESC)""",
+                    )
                     runCatching { db.execSQL("ALTER TABLE addon ADD COLUMN server_id TEXT") }
                     runCatching { db.execSQL("ALTER TABLE addon ADD COLUMN synced_at INTEGER") }
                     runCatching { db.execSQL("ALTER TABLE addon ADD COLUMN installed_from TEXT NOT NULL DEFAULT 'app'") }
@@ -310,6 +335,31 @@ actual class DatabaseDriverFactory(private val context: Context) {
                 rated_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             )""",
+        )
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS stream_resolve_memory (
+                content_key TEXT NOT NULL,
+                stream_key TEXT NOT NULL,
+                media_type TEXT NOT NULL,
+                imdb_id TEXT NOT NULL,
+                season_number INTEGER,
+                episode_number INTEGER,
+                addon_name TEXT NOT NULL,
+                stream_title TEXT NOT NULL,
+                info_hash TEXT,
+                direct_url TEXT,
+                quality TEXT NOT NULL,
+                source_name TEXT,
+                is_cached INTEGER NOT NULL DEFAULT 0,
+                resolved_provider TEXT,
+                success_count INTEGER NOT NULL DEFAULT 0,
+                last_success_at INTEGER NOT NULL,
+                PRIMARY KEY (content_key, stream_key)
+            )""",
+        )
+        db.execSQL(
+            """CREATE INDEX IF NOT EXISTS idx_stream_resolve_memory_content_recent
+                ON stream_resolve_memory(content_key, last_success_at DESC)""",
         )
         db.execSQL(
             """CREATE TABLE IF NOT EXISTS trakt_sync_state (

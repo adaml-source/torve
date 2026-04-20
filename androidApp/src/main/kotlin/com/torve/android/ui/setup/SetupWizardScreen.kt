@@ -60,7 +60,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.torve.android.BuildConfig
 import com.torve.android.R
-import com.torve.domain.model.DebridServiceType
 import com.torve.domain.model.StreamQuality
 import com.torve.presentation.setup.SetupStep
 import com.torve.presentation.setup.SetupUiState
@@ -70,6 +69,7 @@ import com.torve.presentation.setup.SetupWizardViewModel
 fun SetupWizardScreen(
     viewModel: SetupWizardViewModel,
     onComplete: () -> Unit,
+    onPandaSetupClick: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
 
@@ -113,7 +113,7 @@ fun SetupWizardScreen(
                 when (step) {
                     SetupStep.WELCOME -> WelcomeStep()
                     SetupStep.TERMS -> TermsStep(state, viewModel)
-                    SetupStep.DEBRID -> DebridStep(state, viewModel)
+                    SetupStep.DEBRID -> DebridStep(state, viewModel, onPandaSetupClick)
                     SetupStep.TRAKT -> TraktStep(state, viewModel)
                     SetupStep.QUALITY -> QualityStep(state, viewModel)
                     SetupStep.CHANNELS -> ChannelsStep(state, viewModel)
@@ -306,12 +306,8 @@ private fun TermsStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DebridStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
-    val context = LocalContext.current
-    val pandaSetupUrl = remember { "${BuildConfig.PANDA_BASE_URL.trimEnd('/')}/configure" }
-
+private fun DebridStep(state: SetupUiState, viewModel: SetupWizardViewModel, onPandaSetupClick: () -> Unit = {}) {
     Column {
         Text(stringResource(R.string.settings_cloud_service), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
@@ -341,11 +337,7 @@ private fun DebridStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
                 )
                 Spacer(Modifier.height(12.dp))
                 FilledTonalButton(
-                    onClick = {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(pandaSetupUrl))
-                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        context.startActivity(intent)
-                    },
+                    onClick = onPandaSetupClick,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(stringResource(R.string.setup_panda_open_setup))
@@ -353,63 +345,8 @@ private fun DebridStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
             }
         }
 
-        Spacer(Modifier.height(20.dp))
-        Text(
-            stringResource(R.string.setup_panda_advanced),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            stringResource(R.string.setup_panda_advanced_desc),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(16.dp))
-
-        // Provider selector
-        var expanded by remember { mutableStateOf(false) }
-        ExposedDropdownMenuBox(
-            expanded = expanded,
-            onExpandedChange = { expanded = !expanded },
-        ) {
-            OutlinedTextField(
-                value = state.debridProvider.label,
-                onValueChange = {},
-                readOnly = true,
-                label = { Text(stringResource(R.string.settings_provider)) },
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-                modifier = Modifier.fillMaxWidth().menuAnchor(),
-            )
-            ExposedDropdownMenu(
-                expanded = expanded,
-                onDismissRequest = { expanded = false },
-            ) {
-                DebridServiceType.entries.forEach { provider ->
-                    DropdownMenuItem(
-                        text = { Text(provider.label) },
-                        onClick = {
-                            viewModel.setDebridProvider(provider)
-                            expanded = false
-                        },
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-
-        OutlinedTextField(
-            value = state.debridApiKey,
-            onValueChange = { viewModel.setDebridApiKey(it) },
-            label = { Text(stringResource(R.string.settings_api_key)) },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-        )
-
-        Spacer(Modifier.height(16.dp))
-
-        if (state.debridConnected) {
+        state.debridConnected.takeIf { it }?.let {
+            Spacer(Modifier.height(16.dp))
             Card(
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -424,23 +361,6 @@ private fun DebridStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
                     Text(stringResource(R.string.setup_connected_success), fontWeight = FontWeight.Medium)
                 }
             }
-        } else {
-            FilledTonalButton(
-                onClick = { viewModel.connectDebrid() },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = state.debridApiKey.isNotBlank() && !state.debridLoading,
-            ) {
-                if (state.debridLoading) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(8.dp))
-                }
-                Text(stringResource(R.string.setup_verify_connect))
-            }
-        }
-
-        state.debridError?.let { error ->
-            Spacer(Modifier.height(8.dp))
-            Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
         }
     }
 }

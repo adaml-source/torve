@@ -137,8 +137,8 @@ struct ContentView: View {
             PaywallScreen()
         case .login:
             LoginScreen()
-        case .debridSettings:
-            DebridSettingsScreen()
+        case .pandaSetup:
+            PandaSetupScreen()
         case .traktSettings:
             TraktSettingsScreen()
         case .simklSettings:

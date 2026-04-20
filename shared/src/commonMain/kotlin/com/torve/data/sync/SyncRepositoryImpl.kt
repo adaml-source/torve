@@ -1,5 +1,6 @@
 package com.torve.data.sync
 
+import com.torve.data.auth.UserIdProvider
 import com.torve.db.TorveDatabase
 import com.torve.domain.model.CardOrientation
 import com.torve.domain.model.CardSizePreset
@@ -40,9 +41,11 @@ internal fun isSensitivePreferenceKey(key: String): Boolean {
 class SyncRepositoryImpl(
     private val database: TorveDatabase,
     private val json: Json,
+    private val userIdProvider: UserIdProvider,
     private val secretStore: IntegrationSecretStore? = null,
 ) : SyncRepository {
     private val tolerantJson = Json { ignoreUnknownKeys = true }
+    private fun uid(): String = userIdProvider.currentUserId()
 
     companion object {
         /** Keys that contain credentials/tokens — never exported as preferences.
@@ -68,7 +71,10 @@ class SyncRepositoryImpl(
         // Security: secrets are excluded from default export (backup, backend sync).
         // For explicit local device-to-device transfer, use exportForLocalTransfer()
         // which includes secrets via LOCAL_TRANSFER_SECRET_KEYS.
-        val SYNCABLE_SECRET_KEYS = emptyList<IntegrationSecretKey>()
+        val SYNCABLE_SECRET_KEYS = listOf(
+            IntegrationSecretKey.MDBLIST_API_KEY,
+            IntegrationSecretKey.OMDB_API_KEY,
+        )
 
         /** Keys included only in explicit local device-to-device transfer. */
         val LOCAL_TRANSFER_SECRET_KEYS = listOf(
@@ -110,11 +116,11 @@ class SyncRepositoryImpl(
             )
         }
 
-        val preferences = queries.getAllPreferences().executeAsList()
+        val preferences = queries.getAllPreferences(userId = uid()).executeAsList()
             .filter { !isSensitive(it.key) }
             .map { SyncPreference(key = it.key, value = it.value_) }
 
-        val progress = queries.getAllProgress().executeAsList().map { row ->
+        val progress = queries.getAllProgress(userId = uid()).executeAsList().map { row ->
             SyncProgress(
                 mediaId = row.media_id,
                 mediaType = row.media_type,
@@ -130,7 +136,7 @@ class SyncRepositoryImpl(
             )
         }
 
-        val playlists = queries.getAllPlaylists().executeAsList().map { row ->
+        val playlists = queries.getAllPlaylists(userId = uid()).executeAsList().map { row ->
             SyncPlaylist(
                 id = row.id,
                 name = row.name,
@@ -143,7 +149,7 @@ class SyncRepositoryImpl(
             )
         }
 
-        val favorites = queries.getAllFavorites().executeAsList().map { row ->
+        val favorites = queries.getAllFavorites(userId = uid()).executeAsList().map { row ->
             SyncFavorite(
                 channelId = row.channel_id,
                 playlistId = row.playlist_id,
@@ -239,13 +245,13 @@ class SyncRepositoryImpl(
         for (pref in payload.preferences) {
             if (isSensitive(pref.key)) continue
             val safeValue = sanitizePreferenceValue(pref.key, pref.value)
-            queries.setPreference(pref.key, safeValue)
+            queries.setPreference(user_id = uid(), key = pref.key, value_ = safeValue)
             prefsImported++
         }
 
         // Watch progress: prefer recency, but never let stale progress roll back playback.
         for (wp in payload.watchProgress) {
-            val local = queries.getProgress(wp.mediaId).executeAsOneOrNull()
+            val local = queries.getProgress(userId = uid(), mediaId = wp.mediaId).executeAsOneOrNull()
             val resolved = if (local == null) {
                 wp
             } else {
@@ -301,6 +307,7 @@ class SyncRepositoryImpl(
 
             if (resolved == null) continue
             queries.upsertProgress(
+                user_id = uid(),
                 media_id = resolved.mediaId,
                 media_type = resolved.mediaType,
                 title = resolved.title,
@@ -316,7 +323,7 @@ class SyncRepositoryImpl(
             progressImported++
         }
         // Channel playlists: insert if URL not already present (match by URL for m3u, by server+username for xtream)
-        val existingPlaylists = queries.getAllPlaylists().executeAsList()
+        val existingPlaylists = queries.getAllPlaylists(userId = uid()).executeAsList()
         val existingUrls = existingPlaylists.map { it.url }.toSet()
         val existingXtream = existingPlaylists
             .filter { (it.type ?: "m3u") == "xtream" }
@@ -334,6 +341,7 @@ class SyncRepositoryImpl(
                 continue
             }
             queries.insertPlaylist(
+                user_id = uid(),
                 id = pl.id,
                 name = pl.name,
                 url = pl.url,
@@ -351,6 +359,7 @@ class SyncRepositoryImpl(
         // Channel favorites: upsert by channelId
         for (fav in payload.channelFavorites) {
             queries.insertFavorite(
+                user_id = uid(),
                 channel_id = fav.channelId,
                 playlist_id = fav.playlistId,
                 name = fav.name,
@@ -373,7 +382,7 @@ class SyncRepositoryImpl(
                 secretsImported++
                 // OmdbClient reads from preferences table — mirror the key there
                 if (key == IntegrationSecretKey.OMDB_API_KEY) {
-                    queries.setPreference("omdb_api_key", secret.value)
+                    queries.setPreference(user_id = uid(), key = "omdb_api_key", value_ = secret.value)
                 }
             }
         }

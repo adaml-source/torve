@@ -52,6 +52,14 @@ class BulkDownloadManager(
         val enqueuedIds = mutableListOf<String>()
         val addons = addonRepo.getInstalledAddons()
         val imdbId = mediaItem.imdbId ?: return emptyList()
+        val existingKeys = downloadRepo.getAllDownloads()
+            .filter { it.mediaId == mediaItem.id && it.status != DownloadStatus.FAILED }
+            .mapNotNull { existing ->
+                val seasonNumber = existing.seasonNumber ?: return@mapNotNull null
+                val episodeNumber = existing.episodeNumber ?: return@mapNotNull null
+                seasonNumber to episodeNumber
+            }
+            .toSet()
 
         _progress.value = BulkDownloadProgress(
             isActive = true,
@@ -67,6 +75,10 @@ class BulkDownloadManager(
                 completedEpisodes = index,
                 currentEpisodeLabel = label,
             )
+
+            if ((target.seasonNumber to target.episodeNumber) in existingKeys) {
+                continue
+            }
 
             try {
                 // 1. Fetch streams for this specific episode

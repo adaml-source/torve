@@ -35,6 +35,17 @@ data class MediaRatings(
     val malScore: Float? = null,
 )
 
+fun MediaRatings?.withFallbackTmdbScore(tmdbRating: Double?): MediaRatings? {
+    val fallbackScore = tmdbRating?.takeIf { it > 0 }?.toFloat()
+    return this?.let { ratings ->
+        if (ratings.tmdbScore == null && fallbackScore != null) {
+            ratings.copy(tmdbScore = fallbackScore)
+        } else {
+            ratings
+        }
+    } ?: fallbackScore?.let { MediaRatings(tmdbScore = it) }
+}
+
 @Serializable
 enum class RatingPillStyle {
     ICON,
@@ -90,6 +101,31 @@ fun defaultTorveWeights(): Map<RatingSource, Int> = mapOf(
     RatingSource.ROTTEN_TOMATOES to 20,
     RatingSource.METACRITIC to 20,
 )
+
+fun MediaRatings.hasValueFor(source: RatingSource): Boolean = when (source) {
+    RatingSource.TORVE -> false
+    RatingSource.IMDB -> imdbScore != null
+    RatingSource.ROTTEN_TOMATOES -> rottenTomatoesScore != null
+    RatingSource.RT_AUDIENCE -> rtAudienceScore != null
+    RatingSource.TMDB -> tmdbScore != null
+    RatingSource.METACRITIC -> metacriticScore != null
+    RatingSource.LETTERBOXD -> letterboxdScore != null
+    RatingSource.TRAKT -> traktScore != null
+    RatingSource.MDBLIST -> mdblistScore != null
+    RatingSource.MAL -> malScore != null
+}
+
+fun MediaRatings.hasAnyEnabledDisplayValue(
+    prefs: RatingDisplayPrefs,
+    includeTorve: Boolean = false,
+): Boolean {
+    return prefs.enabledProviders.any { source ->
+        when {
+            source == RatingSource.TORVE -> includeTorve && calculateTorveScore(this, prefs.torveWeights) != null
+            else -> hasValueFor(source)
+        }
+    }
+}
 
 fun MediaRatings.valueForTorve(source: RatingSource): Float? = when (source) {
     RatingSource.TORVE -> null

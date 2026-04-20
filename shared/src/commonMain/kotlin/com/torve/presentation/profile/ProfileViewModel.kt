@@ -58,7 +58,7 @@ class ProfileViewModel(
                     }
                 }
             } catch (e: Exception) {
-                _state.update { it.copy(isLoading = false, error = e.message) }
+                _state.update { it.copy(isLoading = false, error = com.torve.presentation.error.UserFacingError.PROFILE_FAILED.messageKey) }
             }
         }
     }
@@ -76,7 +76,7 @@ class ProfileViewModel(
                 profileRepo.createProfile(profile)
                 loadProfiles()
             } catch (e: Exception) {
-                _state.update { it.copy(error = e.message) }
+                _state.update { it.copy(error = com.torve.presentation.error.UserFacingError.PROFILE_FAILED.messageKey) }
             }
         }
     }
@@ -93,7 +93,7 @@ class ProfileViewModel(
                 profileRepo.setActiveProfile(id)
                 loadProfiles()
             } catch (e: Exception) {
-                _state.update { it.copy(error = e.message) }
+                _state.update { it.copy(error = com.torve.presentation.error.UserFacingError.PROFILE_FAILED.messageKey) }
             }
         }
     }
@@ -110,7 +110,7 @@ class ProfileViewModel(
                     _state.update { it.copy(pinError = "Incorrect PIN") }
                 }
             } catch (e: Exception) {
-                _state.update { it.copy(error = e.message) }
+                _state.update { it.copy(error = com.torve.presentation.error.UserFacingError.PROFILE_FAILED.messageKey) }
             }
         }
     }
@@ -125,7 +125,7 @@ class ProfileViewModel(
                 profileRepo.updateName(id, name)
                 loadProfiles()
             } catch (e: Exception) {
-                _state.update { it.copy(error = e.message) }
+                _state.update { it.copy(error = com.torve.presentation.error.UserFacingError.PROFILE_FAILED.messageKey) }
             }
         }
     }
@@ -136,7 +136,7 @@ class ProfileViewModel(
                 profileRepo.updatePin(id, pin?.takeIf { it.isNotBlank() })
                 loadProfiles()
             } catch (e: Exception) {
-                _state.update { it.copy(error = e.message) }
+                _state.update { it.copy(error = com.torve.presentation.error.UserFacingError.PROFILE_FAILED.messageKey) }
             }
         }
     }
@@ -147,7 +147,7 @@ class ProfileViewModel(
                 profileRepo.updateContentRating(id, rating)
                 loadProfiles()
             } catch (e: Exception) {
-                _state.update { it.copy(error = e.message) }
+                _state.update { it.copy(error = com.torve.presentation.error.UserFacingError.PROFILE_FAILED.messageKey) }
             }
         }
     }
@@ -167,7 +167,7 @@ class ProfileViewModel(
                 }
                 loadProfiles()
             } catch (e: Exception) {
-                _state.update { it.copy(error = e.message) }
+                _state.update { it.copy(error = com.torve.presentation.error.UserFacingError.PROFILE_FAILED.messageKey) }
             }
         }
     }

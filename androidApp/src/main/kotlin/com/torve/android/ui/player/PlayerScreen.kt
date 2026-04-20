@@ -135,12 +135,21 @@ import com.torve.data.trakt.TraktHistoryBody
 import com.torve.data.trakt.TraktHistoryMovie
 import com.torve.data.trakt.TraktHistoryShow
 import com.torve.data.trakt.TraktIds
+import com.torve.domain.model.ContentWarmupTrigger
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.Season
+import com.torve.domain.model.SourceAccelerationContext
+import com.torve.domain.model.SourceAccelerationRequest
+import com.torve.domain.model.StartupCandidatesSnapshot
+import com.torve.domain.model.StreamFetchPolicy
+import com.torve.domain.model.WatchHistoryEntry
 import com.torve.domain.model.WatchProgress
+import com.torve.domain.model.extractImdbIdOrNull
+import com.torve.domain.model.extractTmdbIdOrNull
 import com.torve.domain.player.NextEpisodeHelper
 import com.torve.domain.player.NextEpisodeInfo
 import com.torve.domain.player.PlayerEngine
+import com.torve.domain.player.StartupPlaybackPolicy
 import com.torve.domain.player.SkipSegment
 import com.torve.domain.player.SkipSegmentDetector
 import com.torve.domain.player.PlayerListener
@@ -150,6 +159,7 @@ import com.torve.domain.repository.AddonRepository
 import com.torve.domain.repository.MetadataRepository
 import com.torve.domain.repository.StreamRepository
 import com.torve.domain.repository.PreferencesRepository
+import com.torve.domain.repository.WatchHistoryRepository
 import com.torve.domain.repository.WatchProgressRepository
 import com.torve.presentation.channels.ChannelsViewModel
 import com.torve.presentation.player.TraktScrobbler
@@ -180,6 +190,7 @@ fun PlayerScreen(
     onVoiceSearchCommand: ((String) -> Unit)? = null,
     onBack: () -> Unit,
     watchProgressRepo: WatchProgressRepository = koinInject(),
+    watchHistoryRepo: WatchHistoryRepository = koinInject(),
     metadataRepo: MetadataRepository = koinInject(),
     streamRepo: StreamRepository = koinInject(),
     streamSelector: StreamSelector = koinInject(),
@@ -197,7 +208,10 @@ fun PlayerScreen(
     val configuration = LocalConfiguration.current
     val isTv = remember(context) { DeviceFormFactor.isTv(context) }
     val enablePhoneAutoRotation = !isTv && configuration.smallestScreenWidthDp < 600
-    val forceExoPlayerOnMobileDebug = BuildConfig.DEBUG && !isTv
+    // MPV remains unstable on Samsung/Android mobile teardown paths and can still
+    // SIGABRT inside vo_mediacodec_embed when the window surface disappears.
+    // Prefer ExoPlayer on phones/tablets to avoid the native WinID crash class.
+    val forceExoPlayerOnMobile = !isTv
     val isLiveChannelPlayback = mediaType.equals("live", ignoreCase = true)
 
     // Google Cast (injected; no-op on Amazon builds)
@@ -263,9 +277,13 @@ fun PlayerScreen(
     var audioTracks by remember { mutableStateOf<List<TrackDescription>>(emptyList()) }
     var useMpv by remember { mutableStateOf(false) }
     var mpvSurfaceReady by remember { mutableStateOf(false) }
+    var mpvView by remember { mutableStateOf<MPVView?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var codecFallbackUsed by remember { mutableStateOf(false) }
     var codecFallbackInProgress by remember { mutableStateOf(false) }
+    var playerExitInFlight by remember { mutableStateOf(false) }
+    var exitSnapshotPositionMs by remember { mutableLongStateOf(-1L) }
+    var exitSnapshotDurationMs by remember { mutableLongStateOf(-1L) }
     var audioDelayMs by remember { mutableIntStateOf(0) }
     var showEqualizerSheet by remember { mutableStateOf(false) }
     var showDevicePicker by remember { mutableStateOf(false) }
@@ -331,7 +349,7 @@ fun PlayerScreen(
     val earlyRebufferDurationThresholdMs = 6_000L
 
     fun streamKey(stream: ParsedStream): String {
-        return stream.infoHash ?: stream.directUrl ?: "${stream.addonName}:${stream.title}"
+        return playerStreamKey(stream)
     }
 
     fun resetPlaybackHealthWindow() {
@@ -387,7 +405,26 @@ fun PlayerScreen(
     val settingsState by settingsViewModel.state.collectAsState()
     val traktAccessToken = settingsState.traktAccessToken
     val traktScrobbleEnabled = settingsState.traktScrobbleEnabled
-    val tmdbId = mediaId.toIntOrNull() ?: 0
+    // Resolve the TMDB id for this play session. For IMDB-only addons the
+    // mediaId is e.g. "tt31810018" which has no embedded TMDB id — without
+    // resolution, Trakt scrobble would silently no-op (canScrobble stays false)
+    // and the title never appears in Trakt history. We call TMDB /find and
+    // patch the tmdb id as soon as it lands.
+    val rawTmdbFromMediaId = mediaId.extractTmdbIdOrNull() ?: 0
+    var resolvedTmdbId by remember(mediaId, showTmdbId, showImdbId) {
+        mutableStateOf(showTmdbId?.takeIf { it > 0 } ?: rawTmdbFromMediaId)
+    }
+    LaunchedEffect(mediaId, showTmdbId, showImdbId, mediaType) {
+        if (resolvedTmdbId > 0) return@LaunchedEffect
+        val imdb = showImdbId?.takeIf { it.startsWith("tt") }
+            ?: mediaId.extractImdbIdOrNull()
+            ?: return@LaunchedEffect
+        runCatching {
+            val preferredType = if (mediaType.equals("series", true) || mediaType.equals("tv", true)) "tv" else "movie"
+            metadataRepo.findByImdbId(imdb, preferredType)
+        }.getOrNull()?.tmdbId?.takeIf { it > 0 }?.let { resolvedTmdbId = it }
+    }
+    val tmdbId = resolvedTmdbId
     val parsedMediaType = MediaType.fromString(mediaType)
     var hasMarkedWatched by remember { mutableStateOf(false) }
     val voiceCommandNotRecognizedLabel = "Voice command not recognized"
@@ -442,8 +479,8 @@ fun PlayerScreen(
     // Create the player engine once (not keyed on URL for in-place swaps).
     // On TV: always use ExoPlayer — MPV's vo_mediacodec_embed SIGABRTs when
     // the Compose AndroidView hasn't attached a surface yet (WinID == 0).
-    val engine = remember(forceExoPlayerOnMobileDebug) {
-        if (isTv || forceExoPlayerOnMobileDebug) {
+    val engine = remember(forceExoPlayerOnMobile) {
+        if (isTv || forceExoPlayerOnMobile) {
             val exoEngine = ExoPlayerEngine(context)
             exoEngine.initialize()
             exoEngine as PlayerEngine
@@ -464,6 +501,18 @@ fun PlayerScreen(
                 exoEngine.initialize()
                 exoEngine as PlayerEngine
             }
+        }
+    }
+
+    fun requestPlayback(url: String) {
+        if (url.isBlank()) return
+        currentUrl = url
+        if (useMpv) {
+            if (mpvSurfaceReady) {
+                engine.play(url)
+            }
+        } else {
+            engine.play(url)
         }
     }
 
@@ -505,14 +554,96 @@ fun PlayerScreen(
             val debridAccounts = settingsViewModel.getDebridAccounts()
             val deviceCaps = DeviceCodecProbe.probe()
 
+            val startupSelection = loadStartupPlaybackSelection(
+                type = parsedMediaType,
+                imdbId = imdbId,
+                tmdbId = showTmdbId,
+                contentTitle = title,
+                season = currentSeasonNumber,
+                episode = currentEpisodeNumber,
+                streamRepo = streamRepo,
+                streamSelector = streamSelector,
+                addons = addons,
+                debridAccounts = debridAccounts,
+                preferences = preferences,
+                deviceCaps = deviceCaps,
+            )
+            val rankedStartup = startupSelection.autoplayCandidates
+            if (rankedStartup.isNotEmpty()) {
+                android.util.Log.i(
+                    "Player",
+                    "startup_autoplay_candidates_available context=stability_fallback count=${rankedStartup.size}",
+                )
+            }
+
+            for (candidate in rankedStartup) {
+                val key = streamKey(candidate)
+                if (key in attemptedAutoStreamKeys) continue
+                attemptedAutoStreamKeys = attemptedAutoStreamKeys + key
+
+                val hostKey = StreamRuntimeTelemetry.keyForStream(candidate)
+                StreamRuntimeTelemetry.recordPlayAttempt(hostKey)
+
+                val resolved = withTimeoutOrNull(45_000L) {
+                    streamRepo.resolveStream(candidate, provider, apiKey)
+                }
+                if (resolved == null) {
+                    android.util.Log.w(
+                        "Player",
+                        "startup_candidate_failed context=stability_fallback key=$key reason=timeout",
+                    )
+                    StreamRuntimeTelemetry.recordStartupTimeout(hostKey, 45_000L)
+                    streamRepo.reportPlaybackOutcome(candidate, provider, success = false)
+                    continue
+                }
+
+                val nextUrl = resolved.transcodeUrls?.mp4
+                    ?: resolved.transcodeUrls?.hls
+                    ?: resolved.url
+                if (nextUrl.isBlank() || nextUrl == currentUrl) {
+                    android.util.Log.w(
+                        "Player",
+                        "startup_candidate_failed context=stability_fallback key=$key reason=invalid_url",
+                    )
+                    streamRepo.reportPlaybackOutcome(candidate, provider, success = false)
+                    continue
+                }
+
+                val resumePositionMs = maxOf(engine.state.positionMs, currentPosition).coerceAtLeast(0L)
+                currentStreamHostKey = StreamRuntimeTelemetry.keyForUrl(nextUrl)
+                errorMessage = null
+                codecFallbackUsed = false
+                currentUrl = nextUrl
+                resetPlaybackHealthWindow()
+                if (resumePositionMs > 0L) {
+                    pendingAutoFallbackResumePositionMs = resumePositionMs
+                    pendingAutoFallbackResumeDeadlineMs = SystemClock.elapsedRealtime() + 30_000L
+                }
+                engine.stop()
+                requestPlayback(nextUrl)
+                android.util.Log.i(
+                    "Player",
+                    "startup_candidate_used context=stability_fallback key=$key host=$hostKey",
+                )
+                Toast.makeText(context, context.getString(R.string.player_switched_source), Toast.LENGTH_SHORT).show()
+                return true
+            }
+
+            android.util.Log.i(
+                "Player",
+                "fallback_to_full_fetch context=stability_fallback startupCount=${rankedStartup.size}",
+            )
             val candidates = streamRepo.fetchStreams(
                 type = parsedMediaType,
                 imdbId = imdbId,
+                contentId = showTmdbId?.let { "tmdb:$it" },
+                title = title,
                 season = currentSeasonNumber,
                 episode = currentEpisodeNumber,
                 addons = addons,
                 debridAccounts = debridAccounts,
                 preferences = preferences,
+                fetchPolicy = StreamFetchPolicy.FULL,
             )
             val ranked = streamSelector.rankPlayableVariants(
                 streams = candidates,
@@ -534,13 +665,17 @@ fun PlayerScreen(
                 }
                 if (resolved == null) {
                     StreamRuntimeTelemetry.recordStartupTimeout(hostKey, 45_000L)
+                    streamRepo.reportPlaybackOutcome(candidate, provider, success = false)
                     continue
                 }
 
                 val nextUrl = resolved.transcodeUrls?.mp4
                     ?: resolved.transcodeUrls?.hls
                     ?: resolved.url
-                if (nextUrl.isBlank() || nextUrl == currentUrl) continue
+                if (nextUrl.isBlank() || nextUrl == currentUrl) {
+                    streamRepo.reportPlaybackOutcome(candidate, provider, success = false)
+                    continue
+                }
 
                 val resumePositionMs = maxOf(engine.state.positionMs, currentPosition).coerceAtLeast(0L)
                 currentStreamHostKey = StreamRuntimeTelemetry.keyForUrl(nextUrl)
@@ -553,7 +688,11 @@ fun PlayerScreen(
                     pendingAutoFallbackResumeDeadlineMs = SystemClock.elapsedRealtime() + 30_000L
                 }
                 engine.stop()
-                engine.play(nextUrl)
+                requestPlayback(nextUrl)
+                android.util.Log.i(
+                    "Player",
+                    "full_fetch_winner_used context=stability_fallback key=$key host=$hostKey",
+                )
                 Toast.makeText(context, context.getString(R.string.player_switched_source), Toast.LENGTH_SHORT).show()
                 return true
             }
@@ -671,8 +810,8 @@ fun PlayerScreen(
                         tmdbId,
                         parsedMediaType,
                         progress,
-                        currentSeasonNumber,
-                        currentEpisodeNumber,
+                        season = currentSeasonNumber,
+                        episode = currentEpisodeNumber,
                     )
                 }
             }
@@ -688,8 +827,8 @@ fun PlayerScreen(
                         tmdbId,
                         parsedMediaType,
                         progress,
-                        currentSeasonNumber,
-                        currentEpisodeNumber,
+                        season = currentSeasonNumber,
+                        episode = currentEpisodeNumber,
                     )
                 }
             }
@@ -886,9 +1025,28 @@ fun PlayerScreen(
         }
     }
 
+    fun requestExitPlayer() {
+        if (playerExitInFlight) return
+        playerExitInFlight = true
+        exitSnapshotPositionMs = maxOf(engine.state.positionMs, currentPosition).coerceAtLeast(0L)
+        exitSnapshotDurationMs = duration.coerceAtLeast(0L)
+        if (!useMpv) {
+            onBack()
+            return
+        }
+        scope.launch {
+            runCatching { engine.stop() }
+            delay(80)
+            mpvSurfaceReady = false
+            mpvView?.releaseSurface("player_back_exit")
+            withFrameNanos { }
+            onBack()
+        }
+    }
+
     BackHandler {
         if (!handleBackAction()) {
-            onBack()
+            requestExitPlayer()
         }
     }
 
@@ -1013,6 +1171,8 @@ fun PlayerScreen(
                 }
             }
             loadedSeasons = loaded
+        } catch (cancellationException: kotlinx.coroutines.CancellationException) {
+            throw cancellationException
         } catch (_: Exception) { }
     }
 
@@ -1044,6 +1204,36 @@ fun PlayerScreen(
         }
     }
 
+    LaunchedEffect(nextEpisodeInfo?.seasonNumber, nextEpisodeInfo?.episodeNumber, showImdbId) {
+        val nextEp = nextEpisodeInfo ?: return@LaunchedEffect
+        val imdbId = showImdbId?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
+        val prefs = settingsViewModel.buildStreamPreferences()
+        if (!prefs.autoPlayNextEpisodeEnabled) return@LaunchedEffect
+
+        try {
+            val addons = try { addonRepo.getInstalledAddons() } catch (_: Exception) { emptyList() }
+            val debridAccounts = settingsViewModel.getDebridAccounts()
+            val request = SourceAccelerationRequest(
+                mediaType = MediaType.SERIES,
+                imdbId = imdbId,
+                contentId = showTmdbId?.let { "tmdb:$it" },
+                title = title,
+                seasonNumber = nextEp.seasonNumber,
+                episodeNumber = nextEp.episodeNumber,
+                context = SourceAccelerationContext(
+                    addons = addons,
+                    debridAccounts = debridAccounts,
+                    preferences = prefs,
+                    startupFetchPolicy = StreamFetchPolicy.PLAYBACK_STARTUP,
+                ),
+            )
+            streamRepo.warmupStartupCandidates(
+                request = request,
+                trigger = ContentWarmupTrigger.NEXT_EPISODE_AUTOPLAY,
+            )
+        } catch (_: Exception) { }
+    }
+
     // Countdown timer for next episode overlay
     LaunchedEffect(showNextEpisodeOverlay) {
         if (!showNextEpisodeOverlay) return@LaunchedEffect
@@ -1056,7 +1246,9 @@ fun PlayerScreen(
         // Auto-trigger next episode
         resolveAndPlayNextEpisode(
             nextEpisodeInfo = nextEpisodeInfo,
+            showTmdbId = showTmdbId,
             showImdbId = showImdbId,
+            seriesTitle = title,
             engine = engine,
             streamRepo = streamRepo,
             streamSelector = streamSelector,
@@ -1072,6 +1264,7 @@ fun PlayerScreen(
             duration = duration,
             currentSeasonNumber = currentSeasonNumber,
             currentEpisodeNumber = currentEpisodeNumber,
+            requestPlayback = ::requestPlayback,
             onStateUpdate = { newSeason, newEpisode, newUrl, newTitle ->
                 currentSeasonNumber = newSeason
                 currentEpisodeNumber = newEpisode
@@ -1219,7 +1412,9 @@ fun PlayerScreen(
                     scope.launch {
                         resolveAndPlayNextEpisode(
                             nextEpisodeInfo = nextEpisodeInfo,
+                            showTmdbId = showTmdbId,
                             showImdbId = showImdbId,
+                            seriesTitle = title,
                             engine = engine,
                             streamRepo = streamRepo,
                             streamSelector = streamSelector,
@@ -1235,6 +1430,7 @@ fun PlayerScreen(
                             duration = duration,
                             currentSeasonNumber = currentSeasonNumber,
                             currentEpisodeNumber = currentEpisodeNumber,
+                            requestPlayback = ::requestPlayback,
                             onStateUpdate = { newSeason, newEpisode, newUrl, newTitle ->
                                 currentSeasonNumber = newSeason
                                 currentEpisodeNumber = newEpisode
@@ -1319,7 +1515,7 @@ fun PlayerScreen(
                             pendingAutoFallbackResumeDeadlineMs = SystemClock.elapsedRealtime() + 30_000L
                         }
                         engine.stop()
-                        engine.play(fallbackUrl)
+                        requestPlayback(fallbackUrl)
                         true
                     } else if (autoSourceSelection) {
                         trySwitchToStableSource("codec_error")
@@ -1328,7 +1524,7 @@ fun PlayerScreen(
                     }
                     if (!switched) {
                         // No fallback available — silently go back
-                        onBack()
+                        requestExitPlayer()
                     }
                     // Allow errors again after a short delay for the new stream to start
                     kotlinx.coroutines.delay(3000)
@@ -1354,15 +1550,65 @@ fun PlayerScreen(
             scope.launch {
                 traktScrobbler.start(
                     traktAccessToken, tmdbId, parsedMediaType, 0.0,
-                    currentSeasonNumber, currentEpisodeNumber,
+                    season = currentSeasonNumber, episode = currentEpisodeNumber,
+                )
+            }
+        }
+
+        // Record a watch_history entry so the "Recently Watched" rail captures
+        // this play. For episodes we key by the SHOW's TMDB id (never the episode
+        // id) so the rail collapses every watched episode of a series into a
+        // single show card, and so DetailScreen.refreshWatchState() sees the
+        // episode as watched (marks it ✓ and advances Play → next episode).
+        scope.launch {
+            val isSeries = parsedMediaType == MediaType.SERIES
+            val historyMediaId = if (isSeries) {
+                showTmdbId?.toString()
+                    ?: showImdbId
+                    ?: tmdbId.takeIf { it > 0 }?.toString()
+                    ?: mediaId
+            } else {
+                mediaId.ifBlank { tmdbId.takeIf { it > 0 }?.toString().orEmpty() }
+            }
+            if (historyMediaId.isBlank()) return@launch
+            val nowMs = System.currentTimeMillis()
+            val epSuffix = if (isSeries && currentSeasonNumber != null && currentEpisodeNumber != null) {
+                "_s${currentSeasonNumber}e${currentEpisodeNumber}"
+            } else ""
+            // For series, the incoming `title` param is the show name; currentTitle
+            // may have drifted to an episode name on auto-advance. Preserve the
+            // show name in show_title so the rail renders "The Boys" (not "Pilot").
+            val resolvedShowTitle = if (isSeries) title.ifBlank { currentTitle } else null
+            runCatching {
+                watchHistoryRepo.record(
+                    WatchHistoryEntry(
+                        id = "${historyMediaId}${epSuffix}_${nowMs}",
+                        mediaId = historyMediaId,
+                        mediaType = if (isSeries) MediaType.SERIES.name else "movie",
+                        title = currentTitle,
+                        posterUrl = posterUrl.takeIf { it.isNotBlank() },
+                        backdropUrl = backdropUrl.takeIf { it.isNotBlank() },
+                        watchedAt = nowMs,
+                        durationWatchedMs = 0L,
+                        seasonNumber = currentSeasonNumber,
+                        episodeNumber = currentEpisodeNumber,
+                        showTitle = resolvedShowTitle,
+                    ),
                 )
             }
         }
 
         onDispose {
+            val finalPosition = exitSnapshotPositionMs.takeIf { it >= 0L } ?: engine.state.positionMs
+            val finalDuration = exitSnapshotDurationMs.takeIf { it >= 0L } ?: duration
+            if (useMpv) {
+                mpvSurfaceReady = false
+                if (!playerExitInFlight) {
+                    runCatching { engine.stop() }
+                }
+                mpvView?.releaseSurface("player_dispose")
+            }
             // Save final progress on dispose
-            val finalPosition = engine.state.positionMs
-            val finalDuration = duration
             val finalContentId = mediaId.ifBlank { showTmdbId?.toString().orEmpty() }
             if (finalDuration > 0 && finalPosition >= (finalDuration * 0.9f).toLong()) {
                 currentStreamHostKey?.let { StreamRuntimeTelemetry.recordCompletion(it) }
@@ -1401,13 +1647,14 @@ fun PlayerScreen(
                 scope.launch {
                     traktScrobbler.stop(
                         traktAccessToken, tmdbId, parsedMediaType, progress,
-                        currentSeasonNumber, currentEpisodeNumber,
+                        season = currentSeasonNumber, episode = currentEpisodeNumber,
                     )
                 }
             }
             ActivePlaybackState.isPlaying = false
             engine.removeListener(listener)
             audioEqualizer?.release()
+            mpvView = null
             engine.release()
         }
     }
@@ -1749,7 +1996,7 @@ fun PlayerScreen(
         currentStreamHostKey = StreamRuntimeTelemetry.keyForUrl(channel.url)
         (engine as? ExoPlayerEngine)?.setLiveBufferSize(liveBufferDurationMs)
         engine.stop()
-        engine.play(channel.url)
+        requestPlayback(channel.url)
     }
 
     fun canReplayProgramme(channel: com.torve.domain.model.Channel, programme: com.torve.domain.model.EpgProgramme): Boolean {
@@ -1788,7 +2035,7 @@ fun PlayerScreen(
         currentStreamHostKey = StreamRuntimeTelemetry.keyForUrl(replayUrl)
         (engine as? ExoPlayerEngine)?.setLiveBufferSize(liveBufferDurationMs)
         engine.stop()
-        engine.play(replayUrl)
+        requestPlayback(replayUrl)
     }
 
     LaunchedEffect(
@@ -1933,7 +2180,7 @@ fun PlayerScreen(
                     Key.Back -> {
                         resetSeekAcceleration()
                         if (!handleBackAction()) {
-                            onBack()
+                            requestExitPlayer()
                         }
                         true
                     }
@@ -2007,6 +2254,7 @@ fun PlayerScreen(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT,
                         )
+                        mpvView = this
                         onSurfaceAttachedStateChanged = { attached ->
                             mpvSurfaceReady = attached
                         }
@@ -2018,6 +2266,9 @@ fun PlayerScreen(
                 onRelease = { view ->
                     mpvSurfaceReady = false
                     view.releaseSurface("mobile_compose_release")
+                    if (mpvView === view) {
+                        mpvView = null
+                    }
                 },
                 modifier = Modifier.fillMaxSize(),
             )
@@ -2055,7 +2306,7 @@ fun PlayerScreen(
                     message = msg,
                     onRetry = {
                         errorMessage = null
-                        engine.play(currentUrl)
+                        requestPlayback(currentUrl)
                     },
                     onDismiss = {
                         errorMessage = null
@@ -2107,7 +2358,7 @@ fun PlayerScreen(
                             Button(
                                 onClick = {
                                     errorMessage = null
-                                    engine.play(currentUrl)
+                                    requestPlayback(currentUrl)
                                 },
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = Color(0xFFE8A838),
@@ -2118,7 +2369,7 @@ fun PlayerScreen(
                                 Text(stringResource(R.string.player_retry))
                             }
                             Button(
-                                onClick = onBack,
+                                onClick = ::requestExitPlayer,
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = Color(0xFF2E2E40),
                                     contentColor = Color.White,
@@ -2280,6 +2531,8 @@ fun PlayerScreen(
 
         // Skip Intro/Credits button
         activeSkipSegment?.let { segment ->
+            val skipFocus = remember(segment.type) { androidx.compose.ui.focus.FocusRequester() }
+            LaunchedEffect(segment.type) { runCatching { skipFocus.requestFocus() } }
             Button(
                 onClick = {
                     val deltaMs = segment.endMs - currentPosition
@@ -2294,7 +2547,9 @@ fun PlayerScreen(
                 },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(end = 24.dp, bottom = 80.dp),
+                    .padding(end = 24.dp, bottom = 80.dp)
+                    .focusRequester(skipFocus)
+                    .focusable(),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color.White.copy(alpha = 0.9f),
                     contentColor = Color.Black,
@@ -2319,7 +2574,9 @@ fun PlayerScreen(
                     scope.launch {
                         resolveAndPlayNextEpisode(
                             nextEpisodeInfo = nextEpisodeInfo,
+                            showTmdbId = showTmdbId,
                             showImdbId = showImdbId,
+                            seriesTitle = title,
                             engine = engine,
                             streamRepo = streamRepo,
                             streamSelector = streamSelector,
@@ -2335,6 +2592,7 @@ fun PlayerScreen(
                             duration = duration,
                             currentSeasonNumber = currentSeasonNumber,
                             currentEpisodeNumber = currentEpisodeNumber,
+                            requestPlayback = ::requestPlayback,
                             onStateUpdate = { newSeason, newEpisode, newUrl, newTitle ->
                                 currentSeasonNumber = newSeason
                                 currentEpisodeNumber = newEpisode
@@ -2530,7 +2788,7 @@ fun PlayerScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     FocusableIconButton(
-                        onClick = onBack,
+                        onClick = ::requestExitPlayer,
                         modifier = topMenuItemModifier(TopMenuFocusTarget.BACK),
                         onFocused = {
                             lastTopMenuFocusTarget = TopMenuFocusTarget.BACK
@@ -3243,9 +3501,146 @@ private fun FocusableIconButton(
     }
 }
 
+private data class PlayerStartupSelection(
+    val snapshot: StartupCandidatesSnapshot,
+    val startupCandidates: List<ParsedStream>,
+    val autoplayCandidates: List<ParsedStream>,
+) {
+    val autoplayKeys: Set<String>
+        get() = autoplayCandidates.mapTo(linkedSetOf()) { playerStreamKey(it) }
+}
+
+private suspend fun loadStartupPlaybackSelection(
+    type: MediaType,
+    imdbId: String,
+    tmdbId: Int? = null,
+    contentTitle: String? = null,
+    season: Int?,
+    episode: Int?,
+    streamRepo: StreamRepository,
+    streamSelector: StreamSelector,
+    addons: List<com.torve.domain.model.InstalledAddon>,
+    debridAccounts: Map<com.torve.domain.model.DebridServiceType, String>,
+    preferences: com.torve.domain.model.StreamPreferences,
+    deviceCaps: com.torve.domain.model.DeviceCodecCaps,
+): PlayerStartupSelection {
+    val request = SourceAccelerationRequest(
+        mediaType = type,
+        imdbId = imdbId,
+        contentId = tmdbId?.let { "tmdb:$it" },
+        title = contentTitle,
+        seasonNumber = season,
+        episodeNumber = episode,
+        context = SourceAccelerationContext(
+            addons = addons,
+            debridAccounts = debridAccounts,
+            preferences = preferences,
+            startupFetchPolicy = StreamFetchPolicy.PLAYBACK_STARTUP,
+        ),
+    )
+    val snapshot = runCatching {
+        streamRepo.getWarmStartupCandidates(request)
+            ?: streamRepo.getStartupCandidates(request)
+    }.getOrDefault(
+        StartupCandidatesSnapshot(
+            request = request,
+            readinessState = com.torve.domain.model.ReadinessState.EMPTY,
+            candidates = emptyList(),
+        ),
+    )
+    val startupStreams = runCatching {
+        streamRepo.fetchStreams(
+            type = type,
+            imdbId = imdbId,
+            contentId = request.resolvedContentId,
+            title = request.title,
+            season = season,
+            episode = episode,
+            addons = addons,
+            debridAccounts = debridAccounts,
+            preferences = preferences,
+            fetchPolicy = StreamFetchPolicy.PLAYBACK_STARTUP,
+        )
+    }.getOrDefault(emptyList())
+    if (startupStreams.isEmpty()) {
+        return PlayerStartupSelection(
+            snapshot = snapshot,
+            startupCandidates = emptyList(),
+            autoplayCandidates = emptyList(),
+        )
+    }
+
+    val rankedStartup = streamSelector.rankPlayableVariants(
+        streams = startupStreams,
+        preferences = preferences,
+        deviceCaps = deviceCaps,
+    )
+    val highConfidenceKeys = StartupPlaybackPolicy.highConfidenceCandidateKeys(snapshot.candidates)
+    val autoplayCandidates = if (highConfidenceKeys.isEmpty()) {
+        emptyList()
+    } else {
+        rankedStartup.filter { playerStreamKey(it) in highConfidenceKeys }
+    }
+    return PlayerStartupSelection(
+        snapshot = snapshot,
+        startupCandidates = rankedStartup,
+        autoplayCandidates = autoplayCandidates,
+    )
+}
+
+private suspend fun List<ParsedStream>.firstResolvedOrNull(
+    streamRepo: StreamRepository,
+    provider: com.torve.domain.model.DebridServiceType,
+    apiKey: String,
+    timeoutMs: Long,
+    contextLabel: String,
+    eventLabel: String,
+    onCandidateUsed: (ParsedStream) -> Unit = {},
+): com.torve.domain.model.ResolvedStream? {
+    for (candidate in this) {
+        val key = playerStreamKey(candidate)
+        val hostKey = StreamRuntimeTelemetry.keyForStream(candidate)
+        StreamRuntimeTelemetry.recordPlayAttempt(hostKey)
+        val resolved = try {
+            withTimeoutOrNull(timeoutMs) {
+                streamRepo.resolveStream(candidate, provider, apiKey)
+            }
+        } catch (_: Exception) {
+            null
+        }
+        if (resolved == null) {
+            android.util.Log.w(
+                "Player",
+                "${eventLabel}_failed context=$contextLabel key=$key reason=resolve_failed",
+            )
+            StreamRuntimeTelemetry.recordStartupTimeout(hostKey, timeoutMs)
+            streamRepo.reportPlaybackOutcome(candidate, provider, success = false)
+            continue
+        }
+        val nextUrl = resolved.transcodeUrls?.mp4 ?: resolved.transcodeUrls?.hls ?: resolved.url
+        if (nextUrl.isBlank()) {
+            android.util.Log.w(
+                "Player",
+                "${eventLabel}_failed context=$contextLabel key=$key reason=blank_url",
+            )
+            streamRepo.reportPlaybackOutcome(candidate, provider, success = false)
+            continue
+        }
+        onCandidateUsed(candidate)
+        return resolved
+    }
+    return null
+}
+
+private fun playerStreamKey(stream: ParsedStream): String {
+    return stream.accelerationSourceKey ?: stream.infoHash ?: stream.directUrl ?: "${stream.addonName}:${stream.title}"
+}
+
 private suspend fun resolveAndPlayNextEpisode(
     nextEpisodeInfo: NextEpisodeInfo?,
+    showTmdbId: Int?,
     showImdbId: String?,
+    seriesTitle: String,
     engine: PlayerEngine,
     streamRepo: StreamRepository,
     streamSelector: StreamSelector,
@@ -3261,6 +3656,7 @@ private suspend fun resolveAndPlayNextEpisode(
     duration: Long,
     currentSeasonNumber: Int?,
     currentEpisodeNumber: Int?,
+    requestPlayback: (String) -> Unit,
     onStateUpdate: (newSeason: Int, newEpisode: Int, newUrl: String, newTitle: String) -> Unit,
     onResolvingChange: (Boolean) -> Unit,
     onFailed: () -> Unit,
@@ -3276,35 +3672,92 @@ private suspend fun resolveAndPlayNextEpisode(
         val preferences = settingsViewModel.buildStreamPreferences()
         val addons = try { addonRepo.getInstalledAddons() } catch (_: Exception) { emptyList() }
         val debridAccounts = settingsViewModel.getDebridAccounts()
-
-        val streams = streamRepo.fetchStreams(
+        val provider = settingsViewModel.getDebridProvider()
+        val apiKey = settingsViewModel.getDebridApiKey()
+        val deviceCaps = DeviceCodecProbe.probe()
+        val startupSelection = loadStartupPlaybackSelection(
             type = MediaType.SERIES,
             imdbId = imdbId,
+            tmdbId = showTmdbId,
+            contentTitle = seriesTitle,
             season = nextEp.seasonNumber,
             episode = nextEp.episodeNumber,
+            streamRepo = streamRepo,
+            streamSelector = streamSelector,
             addons = addons,
             debridAccounts = debridAccounts,
             preferences = preferences,
+            deviceCaps = deviceCaps,
+        )
+        if (startupSelection.autoplayCandidates.isNotEmpty()) {
+            android.util.Log.i(
+                "Player",
+                "startup_autoplay_candidates_available context=next_episode count=${startupSelection.autoplayCandidates.size}",
+            )
+        }
+
+        var selected: ParsedStream? = null
+        var resolved = startupSelection.autoplayCandidates.firstResolvedOrNull(
+            streamRepo = streamRepo,
+            provider = provider,
+            apiKey = apiKey,
+            timeoutMs = 45_000L,
+            contextLabel = "next_episode",
+            eventLabel = "startup_candidate",
+            onCandidateUsed = { candidate ->
+                selected = candidate
+            },
         )
 
-        if (streams.isEmpty()) {
+        if (resolved == null) {
+            android.util.Log.i(
+                "Player",
+                "fallback_to_full_fetch context=next_episode startupCount=${startupSelection.autoplayCandidates.size}",
+            )
+            val fullStreams = streamRepo.fetchStreams(
+                type = MediaType.SERIES,
+                imdbId = imdbId,
+                contentId = showTmdbId?.let { "tmdb:$it" },
+                title = seriesTitle,
+                season = nextEp.seasonNumber,
+                episode = nextEp.episodeNumber,
+                addons = addons,
+                debridAccounts = debridAccounts,
+                preferences = preferences,
+                fetchPolicy = StreamFetchPolicy.FULL,
+            )
+            if (fullStreams.isEmpty()) {
+                onFailed()
+                return
+            }
+            val ranked = streamSelector.rankPlayableVariants(
+                streams = fullStreams,
+                preferences = preferences,
+                deviceCaps = deviceCaps,
+            )
+            val fallbackSelected = ranked.firstOrNull() ?: run {
+                onFailed()
+                return
+            }
+            selected = fallbackSelected
+            resolved = withTimeoutOrNull(90_000L) {
+                streamRepo.resolveStream(fallbackSelected, provider, apiKey)
+            }
+            if (resolved == null) {
+                streamRepo.reportPlaybackOutcome(fallbackSelected, provider, success = false)
+                onFailed()
+                return
+            }
+            android.util.Log.i(
+                "Player",
+                "full_fetch_winner_used context=next_episode key=${playerStreamKey(fallbackSelected)} host=${StreamRuntimeTelemetry.keyForStream(fallbackSelected)}",
+            )
+        }
+
+        val selectedStream = selected ?: run {
             onFailed()
             return
         }
-
-        val ranked = streamSelector.rankPlayableVariants(
-            streams = streams,
-            preferences = preferences,
-            deviceCaps = DeviceCodecProbe.probe(),
-        )
-        val selected = ranked.firstOrNull() ?: run {
-            onFailed()
-            return
-        }
-
-        val provider = settingsViewModel.getDebridProvider()
-        val apiKey = settingsViewModel.getDebridApiKey()
-        val resolved = streamRepo.resolveStream(selected, provider, apiKey)
         val playUrl = resolved.transcodeUrls?.mp4
             ?: resolved.transcodeUrls?.hls
             ?: resolved.url
@@ -3340,7 +3793,7 @@ private suspend fun resolveAndPlayNextEpisode(
             try {
                 traktScrobbler.stop(
                     traktAccessToken, tmdbId, MediaType.SERIES, 100.0,
-                    currentSeasonNumber, currentEpisodeNumber,
+                    season = currentSeasonNumber, episode = currentEpisodeNumber,
                 )
             } catch (_: Exception) {}
         }
@@ -3348,14 +3801,20 @@ private suspend fun resolveAndPlayNextEpisode(
         // Stop current and play new
         engine.stop()
         onStateUpdate(nextEp.seasonNumber, nextEp.episodeNumber, playUrl, newTitle)
-        engine.play(playUrl)
+        requestPlayback(playUrl)
+        if (startupSelection.autoplayKeys.contains(playerStreamKey(selectedStream))) {
+            android.util.Log.i(
+                "Player",
+                "startup_candidate_used context=next_episode key=${playerStreamKey(selectedStream)} host=${StreamRuntimeTelemetry.keyForStream(selectedStream)}",
+            )
+        }
 
         // Scrobble start for new episode
         if (traktScrobbler != null && traktAccessToken.isNotBlank() && tmdbId > 0) {
             try {
                 traktScrobbler.start(
                     traktAccessToken, tmdbId, MediaType.SERIES, 0.0,
-                    nextEp.seasonNumber, nextEp.episodeNumber,
+                    season = nextEp.seasonNumber, episode = nextEp.episodeNumber,
                 )
             } catch (_: Exception) {}
         }

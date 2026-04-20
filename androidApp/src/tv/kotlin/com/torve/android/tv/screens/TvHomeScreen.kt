@@ -14,6 +14,7 @@ import com.torve.android.tv.components.TvMediaContextMenuAction
 import com.torve.android.tv.components.TvMediaRails
 import com.torve.android.tv.components.dedupeAcrossRails
 import com.torve.android.tv.components.rememberTvFocusMemory
+import com.torve.android.tv.focus.TvScreenFocusHandle
 import com.torve.android.tv.toMediaItemOrNull
 import com.torve.domain.model.CatalogShelf
 import com.torve.domain.model.CustomSection
@@ -47,7 +48,7 @@ private data class AddonShelfHomeItem(
 ) : TvHomeRenderItem
 
 @Composable
-fun TvHomeScreen(
+internal fun TvHomeScreen(
     railFocusRequester: FocusRequester,
     headerFocusRequester: FocusRequester,
     onMediaClick: (MediaItem) -> Unit,
@@ -60,6 +61,7 @@ fun TvHomeScreen(
     browseLayout: TvBrowseLayout = TvBrowseLayout.INFO_PANEL,
     contextMenuActionsForItem: ((MediaItem, Float?) -> List<TvMediaContextMenuAction>)? = null,
     onContextMenuAction: ((MediaItem, TvMediaContextMenuAction, Float?) -> Unit)? = null,
+    registerFocusHandle: ((TvScreenFocusHandle?) -> Unit)? = null,
 ) {
     val homeViewModel: HomeViewModel = koinInject()
     val state by homeViewModel.state.collectAsState()
@@ -101,6 +103,7 @@ fun TvHomeScreen(
         browseLayout = browseLayout,
         contextMenuActionsForItem = contextMenuActionsForItem,
         onContextMenuAction = onContextMenuAction,
+        registerFocusHandle = registerFocusHandle,
     )
 }
 

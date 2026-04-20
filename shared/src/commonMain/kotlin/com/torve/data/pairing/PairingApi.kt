@@ -1,6 +1,7 @@
 package com.torve.data.pairing
 
 import com.torve.data.auth.DeviceRegistrationDto
+import com.torve.data.error.parseBackendError
 import com.torve.domain.device.DeviceType
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -121,9 +122,8 @@ class PairingApi(
         return response.status.value != 404
     }
 
-    private fun parseErrorDetail(raw: String): String? = runCatching {
-        json.decodeFromString(PairingErrorDto.serializer(), raw).detail
-    }.getOrNull()
+    private fun parseErrorDetail(raw: String): String? =
+        parseBackendError(raw).message
 }
 
 internal fun parsePairingListPayload(raw: String): PairingListDto {

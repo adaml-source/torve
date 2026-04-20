@@ -414,8 +414,6 @@ fun RatingSettingsScreen(
                     Column(Modifier.padding(16.dp)) {
                         Text(stringResource(R.string.ratings_preview), color = Snow, fontWeight = FontWeight.SemiBold)
                         Text(stringResource(R.string.ratings_preview_desc), color = Silver, fontSize = 12.sp)
-                        Spacer(Modifier.height(12.dp))
-                        RatingsPreviewRow(prefs = prefs, baseStyle = defaultCardStyle)
                     }
                 }
             }

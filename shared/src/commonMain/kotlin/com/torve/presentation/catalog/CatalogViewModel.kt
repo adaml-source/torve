@@ -2,20 +2,27 @@ package com.torve.presentation.catalog
 
 import com.torve.data.ai.AiProvider
 import com.torve.data.ai.KeywordSearchService
+import com.torve.data.contentpolicy.ContentPolicyCacheInvalidationCoordinator
+import com.torve.data.contentpolicy.ContentPolicyRepository
 import com.torve.data.mdblist.MdbListApi
 import com.torve.data.mdblist.RatingsEnricher
 import com.torve.data.network.catalogContentLoadErrorMessage
 import com.torve.data.network.sanitizeNetworkDiagnosticText
+import com.torve.domain.model.ContentAccessContext
+import com.torve.domain.model.ContentPolicyState
+import com.torve.domain.model.ContentSourceType
 import com.torve.domain.model.MediaItem
-import com.torve.domain.model.dedupeByStableKey
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.PagedResult
+import com.torve.domain.model.dedupeByStableKey
+import com.torve.domain.model.extractTmdbIdOrNull
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.repository.MetadataRepository
 import com.torve.domain.repository.PreferencesRepository
 import com.torve.domain.repository.WatchProgressRepository
 import com.torve.platform.torveVerboseLog
+import com.torve.presentation.contentpolicy.ContentPolicyFilter
 import com.torve.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -23,6 +30,7 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -44,6 +52,9 @@ class CatalogViewModel(
     private val prefsRepo: PreferencesRepository? = null,
     private val ratingsEnricher: RatingsEnricher? = null,
     private val integrationSecretStore: IntegrationSecretStore? = null,
+    private val contentPolicyRepository: ContentPolicyRepository? = null,
+    private val contentPolicyFilter: ContentPolicyFilter = ContentPolicyFilter(),
+    invalidationCoordinator: ContentPolicyCacheInvalidationCoordinator? = null,
     initialProviderId: Int? = null,
 ) {
     private data class CatalogShelvesLoad(
@@ -63,6 +74,15 @@ class CatalogViewModel(
         loadCatalog()
         loadShelves()
         observeSearch()
+        if (invalidationCoordinator != null) {
+            scope.launch {
+                invalidationCoordinator.events.collectLatest {
+                    _state.value = CatalogUiState(providerId = _state.value.providerId)
+                    loadCatalog()
+                    loadShelves()
+                }
+            }
+        }
     }
 
     private fun loadShelves() {
@@ -83,28 +103,34 @@ class CatalogViewModel(
                         topRated = topRatedDeferred.await(),
                     )
                 }
+                val cachedTrending = hydrateCachedRatings(shelvesLoad.trending)
+                val cachedPopular = hydrateCachedRatings(shelvesLoad.popular)
+                val cachedTopRated = hydrateCachedRatings(shelvesLoad.topRated)
 
                 _state.update {
-                    it.copy(
-                        continueWatching = shelvesLoad.continueWatching,
-                        trendingItems = shelvesLoad.trending,
-                        popularItems = shelvesLoad.popular,
-                        topRatedItems = shelvesLoad.topRated,
-                        shelvesLoaded = true,
+                    applyContentPolicy(
+                        it.copy(
+                            continueWatching = shelvesLoad.continueWatching,
+                            trendingItems = cachedTrending,
+                            popularItems = cachedPopular,
+                            topRatedItems = cachedTopRated,
+                            shelvesLoaded = true,
+                        ),
                     )
                 }
                 torveVerboseLog {
-                    "CATALOG_TAB shelves_fetch_success mediaType=$mediaType trending=${shelvesLoad.trending.size} popular=${shelvesLoad.popular.size} topRated=${shelvesLoad.topRated.size}"
+                    "CATALOG_TAB shelves_fetch_success mediaType=$mediaType trending=${cachedTrending.size} popular=${cachedPopular.size} topRated=${cachedTopRated.size}"
                 }
-                enrichAndUpdateItems(shelvesLoad.trending) { items ->
-                    _state.update { it.copy(trendingItems = items) }
+                enrichAndUpdateItems(cachedTrending) { items ->
+                    _state.update { current -> applyContentPolicy(current.copy(trendingItems = items)) }
                 }
-                enrichAndUpdateItems(shelvesLoad.popular) { items ->
-                    _state.update { it.copy(popularItems = items) }
+                enrichAndUpdateItems(cachedPopular) { items ->
+                    _state.update { current -> applyContentPolicy(current.copy(popularItems = items)) }
                 }
-                enrichAndUpdateItems(shelvesLoad.topRated) { items ->
-                    _state.update { it.copy(topRatedItems = items) }
+                enrichAndUpdateItems(cachedTopRated) { items ->
+                    _state.update { current -> applyContentPolicy(current.copy(topRatedItems = items)) }
                 }
+                launchHeroArtworkBackfill()
             } catch (e: Exception) {
                 torveVerboseLog {
                     "CATALOG_TAB shelves_fetch_failure mediaType=$mediaType ${e::class.simpleName}: ${e.message}"
@@ -170,21 +196,24 @@ class CatalogViewModel(
                 }
 
                 val finalItems = if (shouldDedupe()) result.items.dedupeByStableKey() else result.items
+                val cachedItems = hydrateCachedRatings(finalItems)
                 _state.update {
-                    it.copy(
-                        items = finalItems,
-                        isLoading = false,
-                        currentPage = result.page,
-                        totalPages = result.totalPages,
-                        hasMore = result.page < result.totalPages,
-                        activeFilterCount = filter.activeCount + (if (genreId != null) 1 else 0),
+                    applyContentPolicy(
+                        it.copy(
+                            items = cachedItems,
+                            isLoading = false,
+                            currentPage = result.page,
+                            totalPages = result.totalPages,
+                            hasMore = result.page < result.totalPages,
+                            activeFilterCount = filter.activeCount + (if (genreId != null) 1 else 0),
+                        ),
                     )
                 }
                 torveVerboseLog {
-                    "CATALOG_TAB state_transition state=success mediaType=$mediaType category=$category items=${finalItems.size} page=${result.page}/${result.totalPages}"
+                    "CATALOG_TAB state_transition state=success mediaType=$mediaType category=$category items=${cachedItems.size} page=${result.page}/${result.totalPages}"
                 }
-                enrichAndUpdateItems(finalItems) { items ->
-                    _state.update { it.copy(items = items) }
+                enrichAndUpdateItems(cachedItems) { items ->
+                    _state.update { current -> applyContentPolicy(current.copy(items = items)) }
                 }
             } catch (e: Exception) {
                 torveVerboseLog {
@@ -216,7 +245,7 @@ class CatalogViewModel(
         val items = progressItems
             .filter { it.mediaType == targetType }
             .mapNotNull { wp ->
-                val tmdbId = wp.mediaId.toIntOrNull() ?: return@mapNotNull null
+                val tmdbId = wp.mediaId.extractTmdbIdOrNull() ?: return@mapNotNull null
                 MediaItem(
                     id = wp.mediaId,
                     tmdbId = tmdbId,
@@ -292,17 +321,20 @@ class CatalogViewModel(
 
                 val combined = _state.value.items + result.items
                 val newItems = if (shouldDedupe()) combined.dedupeByStableKey() else combined
+                val cachedItems = hydrateCachedRatings(newItems)
                 _state.update {
-                    it.copy(
-                        items = newItems,
-                        isLoadingMore = false,
-                        currentPage = result.page,
-                        totalPages = result.totalPages,
-                        hasMore = result.page < result.totalPages,
+                    applyContentPolicy(
+                        it.copy(
+                            items = cachedItems,
+                            isLoadingMore = false,
+                            currentPage = result.page,
+                            totalPages = result.totalPages,
+                            hasMore = result.page < result.totalPages,
+                        ),
                     )
                 }
-                enrichAndUpdateItems(newItems) { items ->
-                    _state.update { it.copy(items = items) }
+                enrichAndUpdateItems(cachedItems) { items ->
+                    _state.update { current -> applyContentPolicy(current.copy(items = items)) }
                 }
             } catch (_: Exception) {
                 torveVerboseLog {
@@ -324,16 +356,19 @@ class CatalogViewModel(
                 val result = metadataRepo.searchMultiPaged(s.searchQuery, nextPage, mediaType)
                 val combined = _state.value.searchResults + result.items
                 val newItems = if (shouldDedupe()) combined.dedupeByStableKey() else combined
+                val cachedItems = hydrateCachedRatings(newItems)
                 _state.update {
-                    it.copy(
-                        searchResults = newItems,
-                        isSearchingMore = false,
-                        searchPage = result.page,
-                        searchHasMore = result.page < result.totalPages,
+                    applyContentPolicy(
+                        it.copy(
+                            searchResults = cachedItems,
+                            isSearchingMore = false,
+                            searchPage = result.page,
+                            searchHasMore = result.page < result.totalPages,
+                        ),
                     )
                 }
-                enrichAndUpdateItems(newItems) { items ->
-                    _state.update { it.copy(searchResults = items) }
+                enrichAndUpdateItems(cachedItems) { items ->
+                    _state.update { current -> applyContentPolicy(current.copy(searchResults = items)) }
                 }
             } catch (_: Exception) {
                 torveVerboseLog {
@@ -403,17 +438,20 @@ class CatalogViewModel(
                     try {
                         val result = metadataRepo.searchMultiPaged(query, 1, mediaType)
                         val finalResults = if (shouldDedupe()) result.items.dedupeByStableKey() else result.items
+                        val cachedResults = hydrateCachedRatings(finalResults)
                         _state.update {
-                            it.copy(
-                                searchResults = finalResults,
-                                isSearching = false,
-                                searchPage = result.page,
-                                searchHasMore = result.page < result.totalPages,
-                                hasActiveSearch = true,
+                            applyContentPolicy(
+                                it.copy(
+                                    searchResults = cachedResults,
+                                    isSearching = false,
+                                    searchPage = result.page,
+                                    searchHasMore = result.page < result.totalPages,
+                                    hasActiveSearch = true,
+                                ),
                             )
                         }
-                        enrichAndUpdateItems(finalResults) { items ->
-                            _state.update { it.copy(searchResults = items) }
+                        enrichAndUpdateItems(cachedResults) { items ->
+                            _state.update { current -> applyContentPolicy(current.copy(searchResults = items)) }
                         }
                     } catch (_: Exception) {
                         torveVerboseLog {
@@ -497,15 +535,18 @@ class CatalogViewModel(
                 }
 
                 val finalItems = if (shouldDedupe()) items.dedupeByStableKey() else items
+                val cachedItems = hydrateCachedRatings(finalItems)
                 _state.update {
-                    it.copy(
-                        searchResults = finalItems,
-                        isAiSearching = false,
-                        aiSearchLabel = result.title,
-                        aiSearchError = null,
-                        isSearching = false,
-                        searchHasMore = false,
-                        hasActiveSearch = true,
+                    applyContentPolicy(
+                        it.copy(
+                            searchResults = cachedItems,
+                            isAiSearching = false,
+                            aiSearchLabel = result.title,
+                            aiSearchError = null,
+                            isSearching = false,
+                            searchHasMore = false,
+                            hasActiveSearch = true,
+                        ),
                     )
                 }
             } catch (e: Exception) {
@@ -536,6 +577,17 @@ class CatalogViewModel(
         return prefsRepo?.getString(SettingsViewModel.KEY_DEDUPE_RESULTS)?.toBooleanStrictOrNull() ?: true
     }
 
+    private fun hydrateCachedRatings(items: List<MediaItem>): List<MediaItem> {
+        val enricher = ratingsEnricher ?: return items
+        val hydrated = enricher.hydrateListFromCache(items)
+        // Apply the user's sort client-side immediately using cached ratings so
+        // the first paint already reflects the chosen order — waiting for the
+        // full enrichment round-trip would flash items into place after the fact.
+        return if (_state.value.filter.sortBy == SortOption.IMDB_SCORE_DESC) {
+            hydrated.sortedByDescending { it.ratings?.imdbScore ?: -1f }
+        } else hydrated
+    }
+
     private fun enrichAndUpdateItems(
         items: List<MediaItem>,
         update: (List<MediaItem>) -> Unit,
@@ -547,9 +599,104 @@ class CatalogViewModel(
                     ?: prefsRepo?.getString(SettingsViewModel.KEY_MDBLIST_API_KEY)
                     ?: MdbListApi.DEFAULT_API_KEY
             } catch (_: Exception) { MdbListApi.DEFAULT_API_KEY }
-            if (apiKey.isBlank()) return@launch
+            // Enrich even without an MDBList key — OMDB/Trakt fallbacks still provide
+            // IMDB ratings so pills render on every card.
             val enriched = enricher.enrichList(items, apiKey)
-            update(enriched)
+            val sorted = if (_state.value.filter.sortBy == SortOption.IMDB_SCORE_DESC) {
+                enriched.sortedByDescending { it.ratings?.imdbScore ?: -1f }
+            } else enriched
+            update(sorted)
         }
+    }
+
+    /**
+     * Shelf items come from TMDB list endpoints, which omit logo/image data.
+     * Fetch full details for the top items of each shelf so the hero banner
+     * can render a logo instead of plain title text.
+     */
+    private fun launchHeroArtworkBackfill() {
+        scope.launch {
+            val snapshot = _state.value
+            val candidates = buildList {
+                addAll(snapshot.trendingItems.take(3))
+                addAll(snapshot.popularItems.take(2))
+                addAll(snapshot.topRatedItems.take(2))
+            }.mapNotNull { it.tmdbId?.let { id -> id to it } }
+                .distinctBy { it.first }
+                .take(8)
+            if (candidates.isEmpty()) return@launch
+
+            val backfilled: Map<Int, MediaItem> = supervisorScope {
+                candidates.map { (id, _) ->
+                    async {
+                        runCatching { id to metadataRepo.getDetail(mediaType, id) }.getOrNull()
+                    }
+                }.mapNotNull { it.await() }.toMap()
+            }
+            if (backfilled.isEmpty()) return@launch
+
+            fun List<MediaItem>.apply(): List<MediaItem> = map { item ->
+                val detail = item.tmdbId?.let { backfilled[it] } ?: return@map item
+                item.copy(
+                    posterUrl = item.posterUrl?.takeIf { it.isNotBlank() } ?: detail.posterUrl,
+                    backdropUrl = item.backdropUrl?.takeIf { it.isNotBlank() } ?: detail.backdropUrl,
+                    logoUrl = item.logoUrl?.takeIf { it.isNotBlank() } ?: detail.logoUrl,
+                )
+            }
+
+            _state.update { current ->
+                current.copy(
+                    trendingItems = current.trendingItems.apply(),
+                    popularItems = current.popularItems.apply(),
+                    topRatedItems = current.topRatedItems.apply(),
+                )
+            }
+        }
+    }
+
+    private fun currentPolicy(): ContentPolicyState {
+        return contentPolicyRepository?.state?.value ?: ContentPolicyState.unrestricted()
+    }
+
+    private fun applyContentPolicy(state: CatalogUiState): CatalogUiState {
+        val policy = currentPolicy()
+        if (!policy.enforcementEnabled) return state
+        return state.copy(
+            items = contentPolicyFilter.filterItems(
+                policy = policy,
+                context = ContentAccessContext.DEFAULT_DISCOVERY,
+                items = state.items,
+                sourceType = ContentSourceType.TMDB,
+            ).items,
+            searchResults = contentPolicyFilter.filterItems(
+                policy = policy,
+                context = ContentAccessContext.DIRECT_SEARCH,
+                items = state.searchResults,
+                sourceType = ContentSourceType.TMDB,
+            ).items,
+            continueWatching = contentPolicyFilter.filterWatchProgress(
+                policy = policy,
+                context = ContentAccessContext.HISTORY_DERIVED,
+                items = state.continueWatching,
+            ).items,
+            trendingItems = contentPolicyFilter.filterItems(
+                policy = policy,
+                context = ContentAccessContext.DEFAULT_DISCOVERY,
+                items = state.trendingItems,
+                sourceType = ContentSourceType.TMDB,
+            ).items,
+            popularItems = contentPolicyFilter.filterItems(
+                policy = policy,
+                context = ContentAccessContext.DEFAULT_DISCOVERY,
+                items = state.popularItems,
+                sourceType = ContentSourceType.TMDB,
+            ).items,
+            topRatedItems = contentPolicyFilter.filterItems(
+                policy = policy,
+                context = ContentAccessContext.DEFAULT_DISCOVERY,
+                items = state.topRatedItems,
+                sourceType = ContentSourceType.TMDB,
+            ).items,
+        )
     }
 }

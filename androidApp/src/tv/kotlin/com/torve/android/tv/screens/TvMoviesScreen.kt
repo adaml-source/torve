@@ -4,10 +4,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.focus.FocusRequester
 import com.torve.android.tv.components.TvBrowseLayout
 import com.torve.android.tv.components.TvMediaContextMenuAction
+import com.torve.android.tv.focus.TvScreenFocusHandle
 import com.torve.domain.model.MediaItem
 
 @Composable
-fun TvMoviesScreen(
+internal fun TvMoviesScreen(
     railFocusRequester: FocusRequester,
     headerFocusRequester: FocusRequester,
     heroOverlay: (@Composable () -> Unit)? = null,
@@ -20,6 +21,7 @@ fun TvMoviesScreen(
     browseLayout: TvBrowseLayout = TvBrowseLayout.INFO_PANEL,
     contextMenuActionsForItem: ((MediaItem, Float?) -> List<TvMediaContextMenuAction>)? = null,
     onContextMenuAction: ((MediaItem, TvMediaContextMenuAction, Float?) -> Unit)? = null,
+    registerFocusHandle: ((TvScreenFocusHandle?) -> Unit)? = null,
 ) {
     TvCatalogRailsScreen(
         mediaType = "movie",
@@ -35,5 +37,6 @@ fun TvMoviesScreen(
         browseLayout = browseLayout,
         contextMenuActionsForItem = contextMenuActionsForItem,
         onContextMenuAction = onContextMenuAction,
+        registerFocusHandle = registerFocusHandle,
     )
 }

@@ -4,6 +4,7 @@ import com.torve.data.debrid.DebridClient
 import com.torve.domain.model.DebridServiceType
 import com.torve.domain.model.InstalledAddon
 import com.torve.domain.model.MediaType
+import com.torve.domain.model.StreamFetchPolicy
 import com.torve.domain.model.StreamPreferences
 import com.torve.domain.model.StreamQuality
 import kotlinx.coroutines.async
@@ -44,30 +45,21 @@ class StreamAggregator(
         episode: Int? = null,
         debridAccounts: Map<DebridServiceType, String> = emptyMap(),
         preferences: StreamPreferences = StreamPreferences(),
+        fetchPolicy: StreamFetchPolicy = StreamFetchPolicy.FULL,
     ): List<ParsedStream> = coroutineScope {
         val addonUrls = resolveStreamAddonBaseUrls(addons)
 
-        // 1. Fan out to all addons in parallel (single retry on failure)
+        // 1. Fan out to all addons in parallel using the selected startup policy
         val rawStreams = addonUrls.map { url ->
             async {
-                try {
-                    withTimeout(10_000) {
-                        addonClient.getStreams(url, type, imdbId, season, episode)
-                    }
-                } catch (e: Exception) {
-                    // Single retry after 3s for transient failures
-                    try {
-                        delay(3_000)
-                        withTimeout(10_000) {
-                            addonClient.getStreams(url, type, imdbId, season, episode)
-                        }
-                    } catch (_: Exception) {
-                        val msg = e.message ?: "Unknown error"
-                        // println("StreamAggregator: addon $url failed after retry: $msg")
-                        addonFailures[url] = msg
-                        emptyList()
-                    }
-                }
+                fetchFromAddon(
+                    url = url,
+                    type = type,
+                    imdbId = imdbId,
+                    season = season,
+                    episode = episode,
+                    fetchPolicy = fetchPolicy,
+                )
             }
         }.awaitAll().flatten()
 
@@ -127,6 +119,32 @@ class StreamAggregator(
 
         // 6. Score and sort
         scorer.scoreAll(filtered, preferences)
+    }
+
+    private suspend fun fetchFromAddon(
+        url: String,
+        type: MediaType,
+        imdbId: String,
+        season: Int?,
+        episode: Int?,
+        fetchPolicy: StreamFetchPolicy,
+    ): List<ParsedStream> {
+        var lastError: Exception? = null
+        repeat(fetchPolicy.retryCount + 1) { attempt ->
+            try {
+                return withTimeout(fetchPolicy.addonTimeoutMs) {
+                    addonClient.getStreams(url, type, imdbId, season, episode)
+                }
+            } catch (e: Exception) {
+                lastError = e
+                if (attempt < fetchPolicy.retryCount && fetchPolicy.retryDelayMs > 0) {
+                    delay(fetchPolicy.retryDelayMs)
+                }
+            }
+        }
+
+        addonFailures[url] = lastError?.message ?: "Unknown error"
+        return emptyList()
     }
 
     companion object {

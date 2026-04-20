@@ -109,6 +109,7 @@ import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Smoke
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.components.LocalCardStyle
+import com.torve.android.ui.components.LocalRatingPrefs
 import com.torve.android.ui.components.MultiRatingPills
 import com.torve.data.mdblist.RatingsEnricher
 import com.torve.data.download.DownloadCatalogueBuilder
@@ -221,6 +222,7 @@ fun DownloadCatalogueScreen(
     )
     CompositionLocalProvider(
         LocalCardStyle provides defaultCardStyle,
+        LocalRatingPrefs provides settingsState.ratingPrefs,
     ) {
     Column(
         Modifier

@@ -110,7 +110,7 @@ fun CalendarScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
-                        text = state.error ?: stringResource(R.string.calendar_error),
+                        text = com.torve.android.error.resolveErrorKey(androidx.compose.ui.platform.LocalContext.current, state.error) ?: stringResource(R.string.calendar_error),
                         color = Ruby,
                         style = MaterialTheme.typography.bodyMedium,
                     )

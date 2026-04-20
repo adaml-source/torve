@@ -221,7 +221,7 @@ class SyncCoordinator(
             lanDiscovery.restartDiscovery()
             delay(1500)
             runCatching { loadDevices() }.onFailure {
-                _state.value = _state.value.copy(isLoading = false, error = it.message ?: "Failed to load paired devices.", blockedFeature = null)
+                _state.value = _state.value.copy(isLoading = false, error = "Could not load paired devices. Please try again.", blockedFeature = null)
             }
         }
     }
@@ -247,7 +247,7 @@ class SyncCoordinator(
                     loadDevices()
                 }
                 .onFailure {
-                    _state.value = _state.value.copy(isLoading = false, error = it.message ?: "Failed to revoke pairing.", blockedFeature = null)
+                    _state.value = _state.value.copy(isLoading = false, error = "Could not remove pairing. Please try again.", blockedFeature = null)
                 }
         }
     }
@@ -606,7 +606,7 @@ class SyncCoordinator(
                     _state.value = _state.value.copy(
                         isLoading = false,
                         pairingCodeFlowSupported = pairingSupported,
-                        error = it.message ?: "Failed to complete pairing.",
+                        error = "Could not complete pairing. Please try again.",
                         blockedFeature = null,
                     )
                 }
@@ -674,7 +674,7 @@ class SyncCoordinator(
                 _state.value = _state.value.copy(
                     isLoading = false,
                     pairingCodeFlowSupported = pairingSupported,
-                    error = it.message ?: "Failed to generate pairing code.",
+                    error = "Could not generate pairing code. Please try again.",
                     blockedFeature = null,
                 )
             }
@@ -784,7 +784,8 @@ class SyncCoordinator(
     }
 
     private fun onLanError(message: String) {
-        _state.value = _state.value.copy(error = message, wsStatus = onlineTransportStatus(), reachableInstallationIds = currentReachableIds(), secureChannelStates = computeSecureChannelStates())
+        android.util.Log.w(TAG, "LAN error: $message")
+        _state.value = _state.value.copy(error = "Network discovery encountered an issue.", wsStatus = onlineTransportStatus(), reachableInstallationIds = currentReachableIds(), secureChannelStates = computeSecureChannelStates())
     }
 
     private suspend fun refreshKnownPeers() {
@@ -1219,12 +1220,19 @@ class SyncCoordinator(
 
     private suspend fun authDeviceRegistration(): DeviceRegistrationDto {
         val isTv = isTv()
+        val stableId = try {
+            android.provider.Settings.Secure.getString(
+                context.contentResolver,
+                android.provider.Settings.Secure.ANDROID_ID,
+            )?.takeIf { it.isNotBlank() }
+        } catch (_: Exception) { null }
         return DeviceRegistrationDto(
             device_id = authClient.getServerDeviceId() ?: installationId(),
             installation_id = installationId(),
             device_name = Build.MODEL ?: if (isTv) "Torve TV" else "Android Device",
             device_type = if (isTv) "tv" else "phone",
             platform = if (isTv) "android_tv" else "android",
+            stable_device_id = stableId,
         )
     }
 

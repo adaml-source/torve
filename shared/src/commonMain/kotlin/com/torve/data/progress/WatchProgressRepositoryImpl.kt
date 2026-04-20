@@ -1,12 +1,21 @@
 package com.torve.data.progress
 
+import com.torve.data.auth.UserIdProvider
 import com.torve.data.metadata.TmdbApiClient
 import com.torve.data.metadata.TmdbMappers
+import com.torve.data.simkl.SimklClient
+import com.torve.data.simkl.SimklIds
+import com.torve.data.simkl.SimklSyncBody
+import com.torve.data.simkl.SimklSyncItem
 import com.torve.data.trakt.api.TraktAuthorizedApi
 import com.torve.data.trakt.repo.TraktSyncRepository
 import com.torve.db.TorveDatabase
+import com.torve.domain.integrations.IntegrationSecretKey
+import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.WatchProgress
+import com.torve.domain.model.extractImdbIdOrNull
+import com.torve.domain.model.extractTmdbIdOrNull
 import com.torve.domain.repository.WatchProgressRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -18,10 +27,14 @@ class WatchProgressRepositoryImpl(
     private val traktApi: TraktAuthorizedApi,
     private val tmdbClient: TmdbApiClient,
     private val traktSyncRepo: TraktSyncRepository,
+    private val simklClient: SimklClient,
+    private val integrationSecretStore: IntegrationSecretStore,
+    private val userIdProvider: UserIdProvider,
 ) : WatchProgressRepository {
 
     override suspend fun getInProgress(limit: Long): List<WatchProgress> {
-        val rows = database.torveQueries.getInProgress(limit).executeAsList()
+        val userId = userIdProvider.currentUserId()
+        val rows = database.torveQueries.getInProgress(userId = userId, limit = limit).executeAsList()
         // Return local data immediately — don't block on TMDB calls.
         val result = rows.map { row ->
             WatchProgress(
@@ -44,7 +57,7 @@ class WatchProgressRepositoryImpl(
         if (needsEnrichment.isNotEmpty()) {
             kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
                 for (row in needsEnrichment) {
-                    val tmdbId = row.media_id.toIntOrNull() ?: continue
+                    val tmdbId = row.media_id.extractTmdbIdOrNull() ?: continue
                     val isMovie = row.media_type == "movie"
                     runCatching {
                         val (poster, backdrop) = if (isMovie) {
@@ -56,6 +69,7 @@ class WatchProgressRepositoryImpl(
                         }
                         if (poster != null || backdrop != null) {
                             database.torveQueries.upsertProgress(
+                                user_id = row.user_id,
                                 media_id = row.media_id,
                                 media_type = row.media_type,
                                 title = row.title,
@@ -77,7 +91,8 @@ class WatchProgressRepositoryImpl(
     }
 
     override suspend fun getProgress(mediaId: String): WatchProgress? {
-        return database.torveQueries.getProgress(mediaId).executeAsOneOrNull()?.let { row ->
+        val userId = userIdProvider.currentUserId()
+        return database.torveQueries.getProgress(userId = userId, mediaId = mediaId).executeAsOneOrNull()?.let { row ->
             WatchProgress(
                 mediaId = row.media_id,
                 mediaType = MediaType.fromString(row.media_type),
@@ -95,12 +110,14 @@ class WatchProgressRepositoryImpl(
     }
 
     override suspend fun saveProgress(progress: WatchProgress) {
+        val userId = userIdProvider.currentUserId()
         // Preserve existing poster/backdrop URLs if the new values are null,
         // so a failed TMDB lookup or Trakt sync doesn't overwrite good data.
-        val existing = runCatching { database.torveQueries.getProgress(progress.mediaId).executeAsOneOrNull() }.getOrNull()
+        val existing = runCatching { database.torveQueries.getProgress(userId = userId, mediaId = progress.mediaId).executeAsOneOrNull() }.getOrNull()
         val posterUrl = progress.posterUrl ?: existing?.poster_url
         val backdropUrl = progress.backdropUrl ?: existing?.backdrop_url
         database.torveQueries.upsertProgress(
+            user_id = userId,
             media_id = progress.mediaId,
             media_type = when (progress.mediaType) {
                 MediaType.MOVIE -> "movie"
@@ -118,25 +135,43 @@ class WatchProgressRepositoryImpl(
         )
 
         // Treat near-complete playback as watched; enqueue for eventual Trakt sync.
+        // Threshold matches Trakt's "scrobble stop" behavior at 80%+ — we use 85%
+        // so a viewer who finishes the episode but skips outro credits still gets
+        // marked watched and pushed to Trakt + Simkl.
         val ratio = if (progress.durationMs > 0) {
             progress.positionMs.toDouble() / progress.durationMs.toDouble()
         } else {
             0.0
         }
-        if (ratio >= 0.9) {
-            val tmdbId = progress.mediaId.toIntOrNull() ?: return
+        if (ratio >= 0.85) {
+            val tmdbId = progress.mediaId.extractTmdbIdOrNull() ?: return
+            val imdbId = resolveImdbId(progress.mediaId, progress.mediaType, tmdbId)
             runCatching {
                 traktSyncRepo.enqueueHistoryAdd(
                     tmdbId = tmdbId,
                     mediaType = progress.mediaType,
-                    imdbId = null,
+                    imdbId = imdbId,
                 )
+            }
+            runCatching { traktSyncRepo.flushPendingWrites() }
+            runCatching {
+                val token = integrationSecretStore.get(IntegrationSecretKey.SIMKL_ACCESS_TOKEN)
+                if (!token.isNullOrBlank()) {
+                    val ids = SimklIds(tmdb = tmdbId, imdb = imdbId)
+                    val body = if (progress.mediaType == MediaType.MOVIE) {
+                        SimklSyncBody(movies = listOf(SimklSyncItem(ids)))
+                    } else {
+                        SimklSyncBody(shows = listOf(SimklSyncItem(ids)))
+                    }
+                    simklClient.addToHistory(token, body)
+                }
             }
         }
     }
 
     override suspend fun getAllProgress(): List<WatchProgress> {
-        return database.torveQueries.getAllProgress().executeAsList().map { row ->
+        val userId = userIdProvider.currentUserId()
+        return database.torveQueries.getAllProgress(userId = userId).executeAsList().map { row ->
             WatchProgress(
                 mediaId = row.media_id,
                 mediaType = MediaType.fromString(row.media_type),
@@ -154,11 +189,14 @@ class WatchProgressRepositoryImpl(
     }
 
     override suspend fun deleteProgress(mediaId: String) {
-        database.torveQueries.deleteProgressByMediaId(mediaId)
+        database.torveQueries.deleteProgressByMediaId(
+            userId = userIdProvider.currentUserId(),
+            mediaId = mediaId,
+        )
     }
 
     override suspend fun clearAllProgress() {
-        database.torveQueries.clearAllProgress()
+        database.torveQueries.clearAllProgress(userId = userIdProvider.currentUserId())
     }
 
     override suspend fun syncFromTrakt() {
@@ -166,7 +204,8 @@ class WatchProgressRepositoryImpl(
             val playbackItems = traktApi.getPlaybackProgress()
             if (playbackItems.isEmpty()) return
 
-            val localIds = database.torveQueries.getAllProgress().executeAsList()
+            val userId = userIdProvider.currentUserId()
+            val localIds = database.torveQueries.getAllProgress(userId = userId).executeAsList()
                 .map { it.media_id }
                 .toSet()
 
@@ -207,6 +246,7 @@ class WatchProgressRepositoryImpl(
 
                 val mediaType = if (isMovie) "movie" else "series"
                 database.torveQueries.upsertProgress(
+                    user_id = userId,
                     media_id = mediaId,
                     media_type = mediaType,
                     title = media.title,
@@ -223,5 +263,19 @@ class WatchProgressRepositoryImpl(
         } catch (_: Exception) {
             // Non-critical — don't block UI
         }
+    }
+
+    private suspend fun resolveImdbId(
+        mediaId: String,
+        mediaType: MediaType,
+        tmdbId: Int,
+    ): String? {
+        mediaId.extractImdbIdOrNull()?.let { return it }
+        return runCatching {
+            when (mediaType) {
+                MediaType.MOVIE -> tmdbClient.getMovieDetail(tmdbId).imdbId
+                MediaType.SERIES -> tmdbClient.getTvDetail(tmdbId).externalIds?.imdbId
+            }
+        }.getOrNull()
     }
 }

@@ -139,7 +139,7 @@ class MPVPlayerEngine(
             reason = "play_start",
             expectedToken = livePlaybackToken,
         )
-        _state = _state.copy(isIdle = false, isBuffering = true)
+        _state = _state.copy(isPlaying = true, isIdle = false, isBuffering = true)
         notifyStateChanged()
         Log.i(
             TAG,
@@ -157,11 +157,15 @@ class MPVPlayerEngine(
     override fun pause() {
         if (!initialized) return
         MPVLib.pause()
+        _state = _state.copy(isPlaying = false, isIdle = false)
+        notifyStateChanged()
     }
 
     override fun resume() {
         if (!initialized) return
         MPVLib.play()
+        _state = _state.copy(isPlaying = true, isIdle = false)
+        notifyStateChanged()
     }
 
     override fun stop() {
@@ -541,7 +545,11 @@ class MPVPlayerEngine(
             }
             "time-pos" -> {
                 val seconds = (value as? Double) ?: return
-                _state = _state.copy(positionMs = (seconds * 1000).toLong())
+                _state = _state.copy(
+                    positionMs = (seconds * 1000).toLong(),
+                    isPlaying = true,
+                    isIdle = false,
+                )
                 if (seconds > 0.5) {
                     confirmSuccessfulRecoveryIfNeeded()
                 }

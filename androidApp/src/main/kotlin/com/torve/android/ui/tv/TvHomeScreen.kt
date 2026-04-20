@@ -223,9 +223,10 @@ private fun TvMediaCard(
             .clip(MaterialTheme.shapes.medium),
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
+            // Content-policy hardening: locked/placeholder items get no real artwork
             AsyncImage(
-                model = item.posterUrl,
-                contentDescription = item.title,
+                model = if (item.isContentPlaceholder || item.isStubDetail) null else item.posterUrl,
+                contentDescription = if (item.isContentPlaceholder || item.isStubDetail) null else item.title,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )

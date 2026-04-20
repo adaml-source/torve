@@ -23,6 +23,7 @@ data class MediaItem(
     val imdbId: String? = null,
     val type: MediaType,
     val title: String,
+    val adult: Boolean? = null,
     val year: Int? = null,
     val overview: String? = null,
     val posterUrl: String? = null,
@@ -44,6 +45,8 @@ data class MediaItem(
     val tagline: String? = null,
     val popularity: Double? = null,
     val ratings: MediaRatings? = null,
+    val isContentPlaceholder: Boolean = false,
+    val isStubDetail: Boolean = false,
 )
 
 @Serializable
@@ -112,6 +115,7 @@ private fun mergeMediaItems(primary: MediaItem, other: MediaItem): MediaItem {
         tmdbId = primary.tmdbId ?: other.tmdbId,
         imdbId = preferString(primary.imdbId, other.imdbId),
         title = if (primary.title.isNotBlank()) primary.title else other.title,
+        adult = primary.adult ?: other.adult,
         year = preferInt(primary.year, other.year),
         overview = preferString(primary.overview, other.overview),
         posterUrl = preferString(primary.posterUrl, other.posterUrl),
@@ -133,6 +137,8 @@ private fun mergeMediaItems(primary: MediaItem, other: MediaItem): MediaItem {
         tagline = preferString(primary.tagline, other.tagline),
         popularity = preferDouble(primary.popularity, other.popularity),
         ratings = primary.ratings ?: other.ratings,
+        isContentPlaceholder = primary.isContentPlaceholder || other.isContentPlaceholder,
+        isStubDetail = primary.isStubDetail || other.isStubDetail,
     )
 }
 

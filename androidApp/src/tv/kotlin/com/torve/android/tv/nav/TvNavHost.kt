@@ -8,10 +8,12 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import com.torve.android.tv.focus.TvScreenFocusHandle
 import com.torve.android.tv.screens.TvDetailsScreen
 import com.torve.android.tv.screens.TvDeviceLimitReachedScreen
 import com.torve.android.tv.screens.TvHomeLayoutScreen
 import com.torve.android.tv.screens.TvLivePlayerScreen
+import com.torve.android.tv.screens.TvPandaSetupScreen
 import com.torve.android.tv.screens.TvRatingsSettingsScreen
 import com.torve.android.tv.screens.TvSeeAllScreen
 import com.torve.android.tv.premium.TvEntitledFeature
@@ -32,7 +34,7 @@ private fun NavHostController.navigateToTvDetails(item: MediaItem, autoPlay: Boo
  * NOT part of this NavHost.
  */
 @Composable
-fun TvNavHost(
+internal fun TvNavHost(
     navController: NavHostController,
     railFocusRequester: FocusRequester,
     onVoiceSearchQuery: (String) -> Unit,
@@ -41,10 +43,14 @@ fun TvNavHost(
     onHomeLayoutBack: () -> Unit = { navController.popBackStack() },
     // Focus state cleanup handled in TvRoot via isSubRouteActive LaunchedEffect
     onRatingsBack: () -> Unit = { navController.popBackStack() },
+    onSeeAllBack: () -> Unit = { navController.popBackStack() },
+    onDetailsBack: () -> Unit = { navController.popBackStack() },
+    onBeforeDetailsNavigateFromSeeAll: () -> Unit = {},
     onRequestLifetimeUnlock: (TvEntitledFeature) -> Unit = {},
     isStreamPlaybackLocked: Boolean = false,
     onFirstContentRequester: (FocusRequester) -> Unit = {},
     onContentFocused: (FocusRequester) -> Unit = {},
+    registerSeeAllFocusHandle: ((TvScreenFocusHandle?) -> Unit)? = null,
     homeLayoutEntryFocusRequester: FocusRequester,
     onHomeLayoutEntryReadyChanged: (Boolean) -> Unit = {},
     onHomeLayoutEntryFocused: () -> Unit = {},
@@ -92,6 +98,13 @@ fun TvNavHost(
             )
         }
 
+        composable(TvRoutes.PANDA_SETUP) {
+            TvPandaSetupScreen(
+                onBack = { navController.popBackStack() },
+                onComplete = { navController.popBackStack() },
+            )
+        }
+
         composable(
             route = TvRoutes.SEE_ALL,
             arguments = listOf(
@@ -108,11 +121,14 @@ fun TvNavHost(
                 mediaType = mediaType,
                 title = title,
                 railFocusRequester = railFocusRequester,
-                onMediaClick = { item -> navController.navigateToTvDetails(item) },
-                // Focus state cleanup handled in TvRoot via isSubRouteActive LaunchedEffect
-                onBack = { navController.popBackStack() },
+                onMediaClick = { item ->
+                    onBeforeDetailsNavigateFromSeeAll()
+                    navController.navigateToTvDetails(item)
+                },
+                onBack = onSeeAllBack,
                 onFirstContentRequester = onFirstContentRequester,
                 onContentFocused = onContentFocused,
+                registerFocusHandle = registerSeeAllFocusHandle,
             )
         }
 
@@ -134,8 +150,7 @@ fun TvNavHost(
                 id = detailId,
                 autoPlay = autoPlay,
                 railFocusRequester = railFocusRequester,
-                // Focus state cleanup handled in TvRoot via isSubRouteActive LaunchedEffect
-                onBack = { navController.popBackStack() },
+                onBack = onDetailsBack,
                 onFirstContentRequester = onFirstContentRequester,
                 onContentFocused = onContentFocused,
                 onMediaClick = { item -> navController.navigateToTvDetails(item) },

@@ -20,6 +20,7 @@ settings = get_settings()
 PRODUCT_TO_ENTITLEMENT = {
     "com.torve.pro.lifetime": ("torve_pro_lifetime", "lifetime"),
     "com.torve.pro.monthly": ("torve_pro_monthly", "subscription"),
+    "com.torve.pro.subscription": ("torve_pro_monthly", "subscription"),
     "com.torve.pro.lifetime.amazon": ("torve_pro_lifetime", "lifetime"),
 }
 

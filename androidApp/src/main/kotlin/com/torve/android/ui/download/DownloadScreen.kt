@@ -269,9 +269,11 @@ private fun DownloadCard(
                         } else Modifier
                     ),
             ) {
+                // Content-policy: no real artwork for locked download items
+                val isLockedItem = download.title == com.torve.domain.model.LOCKED_CONTENT_TITLE
                 AsyncImage(
-                    model = download.posterUrl,
-                    contentDescription = download.title,
+                    model = if (isLockedItem) null else download.posterUrl,
+                    contentDescription = if (isLockedItem) null else download.title,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,
                 )

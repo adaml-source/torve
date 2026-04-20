@@ -3,10 +3,12 @@ package com.torve.android.billing
 import android.app.Activity
 import android.content.Context
 import com.android.billingclient.api.AcknowledgePurchaseParams
+import android.util.Log
 import com.android.billingclient.api.BillingClient
 import com.android.billingclient.api.BillingClientStateListener
 import com.android.billingclient.api.BillingFlowParams
 import com.android.billingclient.api.BillingResult
+import com.android.billingclient.api.PendingPurchasesParams
 import com.android.billingclient.api.ProductDetails
 import com.android.billingclient.api.Purchase
 import com.android.billingclient.api.PurchasesUpdatedListener
@@ -19,14 +21,22 @@ import kotlinx.coroutines.flow.asStateFlow
 class GooglePlayBillingManager(context: Context) : BillingManager, PurchasesUpdatedListener {
 
     companion object {
+        private const val TAG = "Billing"
         private const val MONTHLY_PRODUCT_ID = "com.torve.pro.monthly"
         private const val MONTHLY_PRODUCT_ID_SUBSCRIPTION = "com.torve.pro.subscription"
         private const val LIFETIME_PRODUCT_ID = "com.torve.pro.lifetime"
+        private const val SETUP_TIMEOUT_MS = 15_000L
+        private const val RECONNECT_DELAY_MS = 2_000L
+        private const val MAX_RECONNECT_ATTEMPTS = 3
         private val MONTHLY_PRODUCT_IDS = listOf(
             MONTHLY_PRODUCT_ID_SUBSCRIPTION,
             MONTHLY_PRODUCT_ID,
         )
     }
+
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var setupTimeoutRunnable: Runnable? = null
+    private var reconnectAttempts = 0
 
     private data class GooglePlayOffer(
         val productType: BillingManager.ProductType,
@@ -40,7 +50,12 @@ class GooglePlayBillingManager(context: Context) : BillingManager, PurchasesUpda
 
     private val billingClient = BillingClient.newBuilder(context)
         .setListener(this)
-        .enablePendingPurchases()
+        .enablePendingPurchases(
+            PendingPurchasesParams.newBuilder()
+                .enableOneTimeProducts()
+                .enablePrepaidPlans()
+                .build(),
+        )
         .build()
 
     private val _billingState = MutableStateFlow<BillingManager.BillingState>(BillingManager.BillingState.Disconnected)
@@ -53,57 +68,128 @@ class GooglePlayBillingManager(context: Context) : BillingManager, PurchasesUpda
     @Volatile private var isInitialized = false
 
     override fun initialize() {
-        if (isInitialized) return
+        // Allow re-init when stuck in Disconnected or Error — only short-circuit
+        // while actively Connecting / Connected / Ready so we don't double-start.
+        val current = _billingState.value
+        if (isInitialized &&
+            current !is BillingManager.BillingState.Disconnected &&
+            current !is BillingManager.BillingState.Error
+        ) return
         isInitialized = true
         _billingState.value = BillingManager.BillingState.Connecting
-        billingClient.startConnection(object : BillingClientStateListener {
-            override fun onBillingSetupFinished(result: BillingResult) {
-                if (result.responseCode == BillingClient.BillingResponseCode.OK) {
-                    _billingState.value = BillingManager.BillingState.Connected
-                    queryProductDetails()
-                } else {
-                    _billingState.value = BillingManager.BillingState.Error(
-                        result.debugMessage ?: "Billing setup failed",
-                    )
+        Log.d(TAG, "initialize: starting BillingClient connection (ready=${billingClient.isReady})")
+        scheduleSetupTimeout()
+        try {
+            billingClient.startConnection(object : BillingClientStateListener {
+                override fun onBillingSetupFinished(result: BillingResult) {
+                    if (result.responseCode == BillingClient.BillingResponseCode.OK) {
+                        reconnectAttempts = 0
+                        _billingState.value = BillingManager.BillingState.Connected
+                        queryProductDetails()
+                    } else {
+                        Log.w(TAG, "onBillingSetupFinished failed: code=${result.responseCode} msg=${result.debugMessage}")
+                        clearSetupTimeout()
+                        isInitialized = false
+                        _billingState.value = BillingManager.BillingState.Error(
+                            safeBillingMessage(result.responseCode),
+                        )
+                    }
                 }
-            }
 
-            override fun onBillingServiceDisconnected() {
+                override fun onBillingServiceDisconnected() {
+                    Log.w(TAG, "onBillingServiceDisconnected")
+                    clearSetupTimeout()
+                    isInitialized = false
+                    _billingState.value = BillingManager.BillingState.Disconnected
+                    scheduleReconnect()
+                }
+            })
+        } catch (t: Throwable) {
+            Log.e(TAG, "startConnection threw", t)
+            clearSetupTimeout()
+            isInitialized = false
+            _billingState.value = BillingManager.BillingState.Error(
+                "Could not connect to the store. Please try again.",
+            )
+        }
+    }
+
+    private fun scheduleSetupTimeout() {
+        setupTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+        val r = Runnable {
+            val state = _billingState.value
+            if (state is BillingManager.BillingState.Connecting ||
+                state is BillingManager.BillingState.Connected
+            ) {
+                Log.w(TAG, "Billing setup timed out after ${SETUP_TIMEOUT_MS}ms in state=$state")
                 isInitialized = false
-                _billingState.value = BillingManager.BillingState.Disconnected
+                _billingState.value = BillingManager.BillingState.Error(
+                    "Could not connect to the store. Please try again.",
+                )
             }
-        })
+        }
+        setupTimeoutRunnable = r
+        mainHandler.postDelayed(r, SETUP_TIMEOUT_MS)
+    }
+
+    private fun clearSetupTimeout() {
+        setupTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+        setupTimeoutRunnable = null
+    }
+
+    private fun scheduleReconnect() {
+        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+            Log.w(TAG, "Max reconnect attempts reached; leaving state=Disconnected")
+            return
+        }
+        reconnectAttempts += 1
+        val delay = RECONNECT_DELAY_MS * reconnectAttempts
+        Log.d(TAG, "Scheduling reconnect attempt $reconnectAttempts in ${delay}ms")
+        mainHandler.postDelayed({ initialize() }, delay)
     }
 
     private fun queryProductDetails() {
-        val params = QueryProductDetailsParams.newBuilder()
+        // Play Billing Library 7+ requires every queryProductDetailsAsync call
+        // to contain products of a single type. We query SUBS and INAPP
+        // separately and only emit Ready once both have completed.
+        offersByType.clear()
+        var subsDone = false
+        var inappDone = false
+
+        fun maybeEmitReady() {
+            if (!subsDone || !inappDone) return
+            clearSetupTimeout()
+            _billingState.value = BillingManager.BillingState.Ready(
+                offers = offersByType.values.map { offer ->
+                    BillingManager.BillingOffer(
+                        productType = offer.productType,
+                        productId = offer.productId,
+                        formattedPrice = offer.formattedPrice,
+                        billingDetails = offer.billingDetails,
+                    )
+                },
+            )
+        }
+
+        val subsParams = QueryProductDetailsParams.newBuilder()
             .setProductList(
-                listOf(
-                    *MONTHLY_PRODUCT_IDS.map { sku ->
-                        QueryProductDetailsParams.Product.newBuilder()
-                            .setProductId(sku)
-                            .setProductType(BillingClient.ProductType.SUBS)
-                            .build()
-                    }.toTypedArray(),
+                MONTHLY_PRODUCT_IDS.map { sku ->
                     QueryProductDetailsParams.Product.newBuilder()
-                        .setProductId(LIFETIME_PRODUCT_ID)
-                        .setProductType(BillingClient.ProductType.INAPP)
-                        .build(),
-                ),
+                        .setProductId(sku)
+                        .setProductType(BillingClient.ProductType.SUBS)
+                        .build()
+                },
             )
             .build()
 
-        billingClient.queryProductDetailsAsync(params) { result: BillingResult, detailsList: List<ProductDetails> ->
+        billingClient.queryProductDetailsAsync(subsParams) { result, detailsList ->
             if (result.responseCode != BillingClient.BillingResponseCode.OK) {
-                _billingState.value = BillingManager.BillingState.Ready(offers = emptyList())
-                return@queryProductDetailsAsync
-            }
-
-            offersByType.clear()
-            detailsList.forEach { details ->
-                when (details.productId) {
-                    in MONTHLY_PRODUCT_IDS -> {
-                        val offer = details.subscriptionOfferDetails
+                Log.w(TAG, "queryProductDetails(SUBS) failed: code=${result.responseCode} msg=${result.debugMessage}")
+            } else {
+                Log.d(TAG, "queryProductDetails(SUBS) OK: ${detailsList.size} products (${detailsList.map { it.productId }})")
+                detailsList.forEach { details ->
+                    if (details.productId in MONTHLY_PRODUCT_IDS) {
+                        val phase = details.subscriptionOfferDetails
                             ?.firstOrNull()
                             ?.pricingPhases
                             ?.pricingPhaseList
@@ -114,12 +200,34 @@ class GooglePlayBillingManager(context: Context) : BillingManager, PurchasesUpda
                             billingProductType = BillingClient.ProductType.SUBS,
                             productDetails = details,
                             offerToken = details.subscriptionOfferDetails?.firstOrNull()?.offerToken,
-                            formattedPrice = offer?.formattedPrice,
+                            formattedPrice = phase?.formattedPrice,
                             billingDetails = "Recurring billing",
                         )
                     }
+                }
+            }
+            subsDone = true
+            maybeEmitReady()
+        }
 
-                    LIFETIME_PRODUCT_ID -> {
+        val inappParams = QueryProductDetailsParams.newBuilder()
+            .setProductList(
+                listOf(
+                    QueryProductDetailsParams.Product.newBuilder()
+                        .setProductId(LIFETIME_PRODUCT_ID)
+                        .setProductType(BillingClient.ProductType.INAPP)
+                        .build(),
+                ),
+            )
+            .build()
+
+        billingClient.queryProductDetailsAsync(inappParams) { result, detailsList ->
+            if (result.responseCode != BillingClient.BillingResponseCode.OK) {
+                Log.w(TAG, "queryProductDetails(INAPP) failed: code=${result.responseCode} msg=${result.debugMessage}")
+            } else {
+                Log.d(TAG, "queryProductDetails(INAPP) OK: ${detailsList.size} products (${detailsList.map { it.productId }})")
+                detailsList.forEach { details ->
+                    if (details.productId == LIFETIME_PRODUCT_ID) {
                         offersByType[BillingManager.ProductType.LIFETIME] = GooglePlayOffer(
                             productType = BillingManager.ProductType.LIFETIME,
                             productId = LIFETIME_PRODUCT_ID,
@@ -131,16 +239,8 @@ class GooglePlayBillingManager(context: Context) : BillingManager, PurchasesUpda
                     }
                 }
             }
-            _billingState.value = BillingManager.BillingState.Ready(
-                offers = offersByType.values.map { offer ->
-                    BillingManager.BillingOffer(
-                        productType = offer.productType,
-                        productId = offer.productId,
-                        formattedPrice = offer.formattedPrice,
-                        billingDetails = offer.billingDetails,
-                    )
-                },
-            )
+            inappDone = true
+            maybeEmitReady()
         }
     }
 
@@ -161,7 +261,7 @@ class GooglePlayBillingManager(context: Context) : BillingManager, PurchasesUpda
         val result = billingClient.launchBillingFlow(activity, flowParams)
         if (result.responseCode != BillingClient.BillingResponseCode.OK) {
             _purchaseResult.value = BillingManager.PurchaseResult.Error(
-                result.debugMessage ?: "Failed to launch billing flow",
+                safeBillingMessage(result.responseCode),
             )
         }
     }
@@ -256,10 +356,26 @@ class GooglePlayBillingManager(context: Context) : BillingManager, PurchasesUpda
 
             else -> {
                 _purchaseResult.value = BillingManager.PurchaseResult.Error(
-                    result.debugMessage ?: "Purchase failed",
+                    safeBillingMessage(result.responseCode),
                 )
             }
         }
+    }
+
+    private fun safeBillingMessage(responseCode: Int): String = when (responseCode) {
+        BillingClient.BillingResponseCode.BILLING_UNAVAILABLE ->
+            "In-app purchases are not available right now."
+        BillingClient.BillingResponseCode.SERVICE_UNAVAILABLE,
+        BillingClient.BillingResponseCode.SERVICE_DISCONNECTED ->
+            "Could not connect to the store. Please try again."
+        BillingClient.BillingResponseCode.ITEM_UNAVAILABLE ->
+            "This product is not available right now."
+        BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED ->
+            "You already own this product."
+        BillingClient.BillingResponseCode.NETWORK_ERROR ->
+            "Could not connect. Please check your internet connection."
+        else ->
+            "Purchase could not be completed. Please try again."
     }
 
     private fun acknowledgePurchase(purchase: Purchase) {

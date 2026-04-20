@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
@@ -75,6 +76,7 @@ fun TvHomeLayoutScreen(
     settingsViewModel: SettingsViewModel = koinInject(),
     keywordSearchService: KeywordSearchService = koinInject(),
 ) {
+    BackHandler { onBack() }
     val configs by homeViewModel.sectionConfigs.collectAsState()
     val customSections by homeViewModel.customSections.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()

@@ -222,6 +222,22 @@ fun IntegrationsScreen(
                     userCode = code.userCode,
                     verificationUrl = code.verificationUrl,
                 )
+                if (state.isPollingTrakt) {
+                    Spacer(Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            color = Amber,
+                            strokeWidth = 2.dp,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            stringResource(R.string.settings_waiting_auth),
+                            color = Silver,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
             }
             Spacer(Modifier.height(8.dp))
             Row {

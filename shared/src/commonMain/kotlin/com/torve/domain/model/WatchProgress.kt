@@ -15,6 +15,7 @@ data class WatchProgress(
     val episodeNumber: Int? = null,
     val showTitle: String? = null,
     val updatedAt: Long = 0,
+    val isContentPlaceholder: Boolean = false,
 ) {
     val progressPercent: Float
         get() = if (durationMs > 0) (positionMs.toFloat() / durationMs) else 0f

@@ -78,4 +78,5 @@ class AndroidPurchaseStringResolver(private val context: Context) : PurchaseStri
     override fun premiumOnAccountHelper(blockMessage: String) = s(R.string.access_premium_on_account_helper, blockMessage)
     override fun deviceNeedsSlot() = s(R.string.access_device_needs_slot)
     override fun deviceNeedsActivation() = s(R.string.access_device_needs_activation)
+    override fun premiumRequired() = s(R.string.error_premium_required)
 }

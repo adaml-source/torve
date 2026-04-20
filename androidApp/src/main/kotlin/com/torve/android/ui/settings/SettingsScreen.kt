@@ -1,13 +1,10 @@
 package com.torve.android.ui.settings
 
 import com.torve.android.BuildConfig
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
-import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -27,7 +24,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -35,10 +31,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.foundation.text.KeyboardOptions
@@ -82,7 +76,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
@@ -90,7 +84,7 @@ import com.torve.android.R
 import com.torve.android.premium.AccessTier
 import com.torve.android.premium.PremiumAccess
 import com.torve.android.premium.PremiumFeature
-import com.torve.domain.model.DebridServiceType
+import com.torve.android.util.findActivity
 import com.torve.domain.model.StreamQuality
 import com.torve.data.auth.AuthClient
 import com.torve.data.auth.AuthUser
@@ -146,6 +140,7 @@ fun SettingsScreen(
     onStreamGroupsClick: () -> Unit = {},
     onHomeLayoutClick: () -> Unit = {},
     onMdbListClick: () -> Unit = {},
+    onSensitiveMaterialClick: () -> Unit = {},
     onRatingSettingsClick: () -> Unit = {},
     onCardStyleClick: () -> Unit = {},
     onIntegrationsClick: () -> Unit = {},
@@ -188,7 +183,6 @@ fun SettingsScreen(
     }
     val deviceLinkingLocked = isLocked(PremiumFeature.DEVICE_LINKING)
     val pairingLocked = isLocked(PremiumFeature.PHONE_PAIRING)
-    val cloudProviderLocked = isLocked(PremiumFeature.CLOUD_PROVIDER_SETUP)
     val customSourcesLocked = isLocked(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT)
     val addonLocked = isLocked(PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT)
     val mdbListLocked = isLocked(PremiumFeature.MDBLIST_SETUP)
@@ -200,6 +194,7 @@ fun SettingsScreen(
     val customLayoutLocked = isLocked(PremiumFeature.SYNC_CUSTOM_LAYOUTS)
     val backupLocked = isLocked(PremiumFeature.CLOUD_BACKUP_RESTORE)
     val canOpenManageDevices = subscriptionState.hasEntitlement || !deviceLinkingLocked
+    val activity = LocalContext.current.findActivity()
     // Observe the authoritative auth user flow — reacts immediately to
     // login, logout, and verification status changes without manual refresh.
     val authUser by authClient.authUserFlow.collectAsState()
@@ -209,7 +204,6 @@ fun SettingsScreen(
     // User can opt out to DEVICE_ONLY if they prefer local-only storage.
     val defaultStorageMode = if (authUser != null) com.torve.domain.integrations.IntegrationStorageMode.ACCOUNT
         else com.torve.domain.integrations.IntegrationStorageMode.DEVICE_ONLY
-    var debridStorageMode by remember(defaultStorageMode) { mutableStateOf(defaultStorageMode) }
     var aiKeyStorageMode by remember(defaultStorageMode) { mutableStateOf(defaultStorageMode) }
 
     // Seed the flow on first composition if it's null (e.g. cold start).
@@ -449,7 +443,7 @@ fun SettingsScreen(
                             contentColor = Obsidian,
                         ),
                     ) {
-                        Text(stringResource(R.string.settings_sign_in_create))
+                        ButtonLabel(stringResource(R.string.settings_sign_in_create))
                     }
                 }
             }
@@ -468,7 +462,7 @@ fun SettingsScreen(
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
                 ) {
-                    Text(stringResource(R.string.settings_subscription))
+                    ButtonLabel(stringResource(R.string.settings_subscription))
                 }
             }
             OutlinedButton(
@@ -476,7 +470,7 @@ fun SettingsScreen(
                 modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
             ) {
-                Text(stringResource(R.string.settings_profiles))
+                ButtonLabel(stringResource(R.string.settings_profiles))
             }
         }
         if (BuildConfig.HAS_BILLING) {
@@ -511,7 +505,7 @@ fun SettingsScreen(
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
                     ) {
-                        Text(stringResource(R.string.manage_devices_title))
+                        ButtonLabel(stringResource(R.string.manage_devices_title))
                     }
                 }
                 if (subscriptionState.isLoggedIn) {
@@ -520,7 +514,7 @@ fun SettingsScreen(
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
                     ) {
-                        Text(stringResource(R.string.premium_refresh_access))
+                        ButtonLabel(stringResource(R.string.premium_refresh_access))
                     }
                 }
             }
@@ -531,189 +525,8 @@ fun SettingsScreen(
             modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
         ) {
-            Text(stringResource(R.string.settings_calendar))
+            ButtonLabel(stringResource(R.string.settings_calendar))
         }
-
-        Spacer(Modifier.height(24.dp))
-
-        // ── Cloud Service Section ──
-        SectionHeader(title = stringResource(R.string.settings_cloud_service))
-        Spacer(Modifier.height(8.dp))
-
-        if (cloudProviderLocked) {
-            LockedSettingsCard(
-                title = stringResource(R.string.settings_cloud_service),
-                description = stringResource(R.string.settings_cloud_desc),
-                onUnlock = { onLockedFeatureClick(PremiumFeature.CLOUD_PROVIDER_SETUP) },
-            )
-        } else {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Charcoal),
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                // Provider selector
-                var providerExpanded by remember { mutableStateOf(false) }
-                ExposedDropdownMenuBox(
-                    expanded = providerExpanded,
-                    onExpandedChange = { providerExpanded = !providerExpanded },
-                ) {
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .menuAnchor(),
-                        shape = RoundedCornerShape(8.dp),
-                        color = Gunmetal,
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(stringResource(R.string.settings_provider), style = MaterialTheme.typography.bodySmall, color = Torve.colors.textSecondary)
-                                Spacer(Modifier.height(2.dp))
-                                Text(state.debridProvider.label, style = MaterialTheme.typography.bodyMedium, color = Snow)
-                            }
-                            Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = Torve.colors.textSecondary, modifier = Modifier.size(20.dp))
-                        }
-                    }
-                    ExposedDropdownMenu(
-                        expanded = providerExpanded,
-                        onDismissRequest = { providerExpanded = false },
-                    ) {
-                        DebridServiceType.entries.forEach { provider ->
-                            DropdownMenuItem(
-                                text = { Text(provider.label) },
-                                onClick = {
-                                    viewModel.setDebridProvider(provider)
-                                    providerExpanded = false
-                                },
-                            )
-                        }
-                    }
-                }
-
-                // Show connected provider badges
-                if (state.connectedDebridProviders.size > 1) {
-                    Spacer(Modifier.height(6.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        state.connectedDebridProviders.keys.forEach { p ->
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = if (p == state.debridProvider) Amber.copy(alpha = 0.2f) else Gunmetal,
-                            ) {
-                                Text(
-                                    p.label,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (p == state.debridProvider) Amber else Silver,
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(12.dp))
-
-                if (state.debridConnected) {
-                    ConnectionStatus(
-                        connected = true,
-                        label = state.debridUser?.username ?: stringResource(R.string.settings_connected),
-                        sublabel = state.debridUser?.expiresAt?.let { stringResource(R.string.settings_premium_until, it) },
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = { viewModel.disconnectDebrid() },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Ruby),
-                    ) {
-                        Text(stringResource(R.string.common_disconnect))
-                    }
-                } else if (state.debridDeviceCode != null) {
-                    DebridDeviceCodeSection(
-                        userCode = state.debridDeviceCode!!.userCode,
-                        verificationUrl = state.debridDeviceCode!!.verificationUrl,
-                        isPolling = state.isPollingDebrid,
-                    )
-                } else {
-                    SettingsTextField(
-                        value = state.debridApiKey,
-                        onValueChange = { viewModel.setDebridApiKey(it) },
-                        label = stringResource(R.string.settings_api_key),
-                        isSensitive = true,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    com.torve.android.ui.components.StorageModeSelector(
-                        selected = debridStorageMode,
-                        onModeSelected = { debridStorageMode = it },
-                        isSignedIn = authUser != null,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Button(
-                            onClick = {
-                                viewModel.connectDebridWithApiKey()
-                                println("[DebridSave] storageMode=$debridStorageMode authUser=${authUser?.email}")
-                                if (debridStorageMode == com.torve.domain.integrations.IntegrationStorageMode.ACCOUNT) {
-                                    println("[DebridSave] Pushing to backend...")
-                                    scope.launch {
-                                        accountSessionCoordinator.saveIntegrationToBackend(
-                                            integrationType = "DEBRID_API_KEY_${state.debridProvider.name}",
-                                            credentials = mapOf("api_key" to state.debridApiKey),
-                                            displayIdentifier = state.debridProvider.name,
-                                        )
-                                    }
-                                }
-                            },
-                            modifier = Modifier.weight(1f),
-                            enabled = !state.debridLoading,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Amber,
-                                contentColor = Obsidian,
-                            ),
-                        ) {
-                            if (state.debridLoading) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    strokeWidth = 2.dp,
-                                    color = Obsidian,
-                                )
-                            } else {
-                                Text(stringResource(R.string.common_connect))
-                            }
-                        }
-                        if (state.debridProvider == DebridServiceType.REAL_DEBRID ||
-                            state.debridProvider == DebridServiceType.ALL_DEBRID
-                        ) {
-                            OutlinedButton(
-                                onClick = { viewModel.startDebridDeviceAuth() },
-                                modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
-                            ) {
-                                Text(stringResource(R.string.settings_device_auth))
-                            }
-                        }
-                    }
-                }
-
-                state.debridError?.let { error ->
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = error,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Ruby,
-                    )
-                }
-            }
-        }
-        }
-
-        // Trakt & SIMKL management moved to Integrations screen
 
         Spacer(Modifier.height(24.dp))
 
@@ -756,7 +569,13 @@ fun SettingsScreen(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(stringResource(R.string.settings_max_quality), style = MaterialTheme.typography.bodySmall, color = Torve.colors.textSecondary)
                                 Spacer(Modifier.height(2.dp))
-                                Text(state.maxQuality.label, style = MaterialTheme.typography.bodyMedium, color = Snow)
+                                Text(
+                                    state.maxQuality.label,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Snow,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
                             }
                             Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = Torve.colors.textSecondary, modifier = Modifier.size(20.dp))
                         }
@@ -767,7 +586,7 @@ fun SettingsScreen(
                     ) {
                         StreamQuality.selectable.forEach { quality ->
                             DropdownMenuItem(
-                                text = { Text(quality.label) },
+                                text = { MenuItemLabel(quality.label) },
                                 onClick = {
                                     viewModel.setMaxQuality(quality)
                                     maxQualityExpanded = false
@@ -801,7 +620,13 @@ fun SettingsScreen(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(stringResource(R.string.settings_min_quality), style = MaterialTheme.typography.bodySmall, color = Torve.colors.textSecondary)
                                 Spacer(Modifier.height(2.dp))
-                                Text(state.minQuality.label, style = MaterialTheme.typography.bodyMedium, color = Snow)
+                                Text(
+                                    state.minQuality.label,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Snow,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
                             }
                             Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = Torve.colors.textSecondary, modifier = Modifier.size(20.dp))
                         }
@@ -812,7 +637,7 @@ fun SettingsScreen(
                     ) {
                         StreamQuality.selectable.forEach { quality ->
                             DropdownMenuItem(
-                                text = { Text(quality.label) },
+                                text = { MenuItemLabel(quality.label) },
                                 onClick = {
                                     viewModel.setMinQuality(quality)
                                     minQualityExpanded = false
@@ -1011,7 +836,13 @@ fun SettingsScreen(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(stringResource(R.string.settings_codec_preference), style = MaterialTheme.typography.bodySmall, color = Torve.colors.textSecondary)
                                 Spacer(Modifier.height(2.dp))
-                                Text(state.codecPreference.label, style = MaterialTheme.typography.bodyMedium, color = Snow)
+                                Text(
+                                    state.codecPreference.label,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Snow,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
                             }
                             Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = Torve.colors.textSecondary, modifier = Modifier.size(20.dp))
                         }
@@ -1022,7 +853,7 @@ fun SettingsScreen(
                     ) {
                         CodecPreference.entries.forEach { pref ->
                             DropdownMenuItem(
-                                text = { Text(pref.label) },
+                                text = { MenuItemLabel(pref.label) },
                                 onClick = {
                                     viewModel.setCodecPreference(pref)
                                     codecExpanded = false
@@ -1056,7 +887,13 @@ fun SettingsScreen(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(stringResource(R.string.settings_hdr_mode), style = MaterialTheme.typography.bodySmall, color = Torve.colors.textSecondary)
                                 Spacer(Modifier.height(2.dp))
-                                Text(state.hdrMode.label, style = MaterialTheme.typography.bodyMedium, color = Snow)
+                                Text(
+                                    state.hdrMode.label,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Snow,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
                             }
                             Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = Torve.colors.textSecondary, modifier = Modifier.size(20.dp))
                         }
@@ -1067,7 +904,7 @@ fun SettingsScreen(
                     ) {
                         HdrMode.entries.forEach { mode ->
                             DropdownMenuItem(
-                                text = { Text(mode.label) },
+                                text = { MenuItemLabel(mode.label) },
                                 onClick = {
                                     viewModel.setHdrMode(mode)
                                     hdrModeExpanded = false
@@ -1100,6 +937,14 @@ fun SettingsScreen(
                         onPremiumAction(PremiumFeature.SYNC_CUSTOM_LAYOUTS) { onHomeLayoutClick() }
                     },
                 )
+                if (BuildConfig.FLAVOR.contains("google", ignoreCase = true)) {
+                    HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
+                    SettingsNavRow(
+                        title = stringResource(R.string.settings_sensitive_material),
+                        subtitle = stringResource(R.string.settings_sensitive_material_sub),
+                        onClick = onSensitiveMaterialClick,
+                    )
+                }
                 HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
                 SettingsNavRow(
                     title = stringResource(R.string.settings_card_style),
@@ -1215,7 +1060,7 @@ fun SettingsScreen(
                                 Spacer(Modifier.width(4.dp))
                             }
                             TextButton(onClick = { viewModel.testKodiHost(host) }) {
-                                Text(stringResource(R.string.common_test), color = Amber)
+                                ButtonLabel(stringResource(R.string.common_test), color = Amber)
                             }
                             IconButton(onClick = { viewModel.removeKodiHost(host) }) {
                                 Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.common_remove), modifier = Modifier.size(18.dp), tint = Ruby)
@@ -1270,13 +1115,13 @@ fun SettingsScreen(
                                 contentColor = Obsidian,
                             ),
                         ) {
-                            Text(stringResource(R.string.common_add))
+                            ButtonLabel(stringResource(R.string.common_add))
                         }
                         OutlinedButton(
                             onClick = { showAddKodi = false },
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
                         ) {
-                            Text(stringResource(R.string.common_cancel))
+                            ButtonLabel(stringResource(R.string.common_cancel))
                         }
                     }
                 } else {
@@ -1287,7 +1132,7 @@ fun SettingsScreen(
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text(stringResource(R.string.settings_add_kodi_host))
+                        ButtonLabel(stringResource(R.string.settings_add_kodi_host))
                     }
                 }
             }
@@ -1341,7 +1186,13 @@ fun SettingsScreen(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(stringResource(R.string.settings_ai_provider), style = MaterialTheme.typography.bodySmall, color = Torve.colors.textSecondary)
                                 Spacer(Modifier.height(2.dp))
-                                Text(state.aiProvider.label, style = MaterialTheme.typography.bodyMedium, color = Snow)
+                                Text(
+                                    state.aiProvider.label,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Snow,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
                             }
                             Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = Torve.colors.textSecondary, modifier = Modifier.size(20.dp))
                         }
@@ -1352,7 +1203,7 @@ fun SettingsScreen(
                     ) {
                         com.torve.data.ai.AiProvider.entries.forEach { provider ->
                             DropdownMenuItem(
-                                text = { Text(provider.label) },
+                                text = { MenuItemLabel(provider.label) },
                                 onClick = {
                                     viewModel.setAiProvider(provider)
                                     aiProviderExpanded = false
@@ -1404,7 +1255,7 @@ fun SettingsScreen(
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Obsidian, strokeWidth = 2.dp)
                             Spacer(Modifier.width(6.dp))
                         }
-                        Text(if (state.aiKeyValidating) "Saving..." else "Save & Test")
+                        ButtonLabel(if (state.aiKeyValidating) "Saving..." else "Save & Test")
                     }
                     state.aiKeyValidationResult?.let { result ->
                         when (result) {
@@ -1471,6 +1322,8 @@ fun SettingsScreen(
                                     state.appLanguage.displayName,
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = Snow,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
                             }
                             Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = Torve.colors.textSecondary, modifier = Modifier.size(20.dp))
@@ -1479,13 +1332,14 @@ fun SettingsScreen(
                     ExposedDropdownMenu(expanded = languageExpanded, onDismissRequest = { languageExpanded = false }) {
                         AppLanguage.entries.forEach { lang ->
                             DropdownMenuItem(
-                                text = { Text(lang.displayName) },
+                                text = { MenuItemLabel(lang.displayName) },
                                 onClick = {
                                     viewModel.setAppLanguage(lang)
                                     languageExpanded = false
                                     AppCompatDelegate.setApplicationLocales(
                                         LocaleListCompat.forLanguageTags(lang.code),
                                     )
+                                    activity?.recreate()
                                 },
                             )
                         }
@@ -1526,7 +1380,7 @@ fun SettingsScreen(
                             onClick = { showClearConfirm = true },
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
                         ) {
-                            Text(stringResource(R.string.common_clear))
+                            ButtonLabel(stringResource(R.string.common_clear))
                         }
                     }
                 }
@@ -1545,7 +1399,7 @@ fun SettingsScreen(
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = Ruby, contentColor = Snow),
                             ) {
-                                Text(stringResource(R.string.common_clear))
+                                ButtonLabel(stringResource(R.string.common_clear))
                             }
                         },
                         dismissButton = {
@@ -1643,7 +1497,7 @@ fun SettingsScreen(
                             color = Obsidian,
                         )
                     } else {
-                        Text(stringResource(R.string.settings_export_backup))
+                        ButtonLabel(stringResource(R.string.settings_export_backup))
                     }
                 }
 
@@ -1656,7 +1510,7 @@ fun SettingsScreen(
                     enabled = !state.isSyncing,
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
                 ) {
-                    Text(stringResource(R.string.settings_import_backup))
+                    ButtonLabel(stringResource(R.string.settings_import_backup))
                 }
 
                 // Success message
@@ -1781,7 +1635,7 @@ fun SettingsScreen(
             colors = ButtonDefaults.outlinedButtonColors(contentColor = Ruby),
             border = androidx.compose.foundation.BorderStroke(1.dp, Ruby.copy(alpha = 0.5f)),
         ) {
-            Text(stringResource(R.string.settings_reset_appearance))
+            ButtonLabel(stringResource(R.string.settings_reset_appearance))
         }
         Text(
             text = stringResource(R.string.settings_reset_appearance_desc),
@@ -1804,7 +1658,7 @@ fun SettingsScreen(
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Ruby),
                     ) {
-                        Text(stringResource(R.string.common_reset))
+                        ButtonLabel(stringResource(R.string.common_reset))
                     }
                 },
                 dismissButton = {
@@ -1852,6 +1706,34 @@ private fun SectionHeader(title: String) {
         style = MaterialTheme.typography.titleMedium,
         color = Amber,
         fontWeight = FontWeight.SemiBold,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+@Composable
+private fun ButtonLabel(
+    text: String,
+    color: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified,
+    fontWeight: FontWeight? = null,
+) {
+    Text(
+        text = text,
+        color = color,
+        fontWeight = fontWeight,
+        maxLines = 1,
+        softWrap = false,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+@Composable
+private fun MenuItemLabel(text: String) {
+    Text(
+        text = text,
+        maxLines = 1,
+        softWrap = false,
+        overflow = TextOverflow.Ellipsis,
     )
 }
 
@@ -1879,6 +1761,8 @@ private fun LockedSettingsCard(
                     style = MaterialTheme.typography.titleSmall,
                     color = Snow,
                     fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             Spacer(Modifier.height(8.dp))
@@ -1892,7 +1776,7 @@ private fun LockedSettingsCard(
                 onClick = onUnlock,
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
             ) {
-                Text(stringResource(R.string.premium_unlock_with_lifetime))
+                ButtonLabel(stringResource(R.string.premium_unlock_with_lifetime))
             }
         }
     }
@@ -1919,6 +1803,9 @@ private fun SettingsLinkItem(
                 text = title,
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (locked) Amber else Torve.colors.textPrimary,
+                modifier = Modifier.weight(1f, fill = false),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             if (locked) {
                 Spacer(Modifier.width(6.dp))
@@ -1935,37 +1822,6 @@ private fun SettingsLinkItem(
             style = MaterialTheme.typography.bodyMedium,
             color = Torve.colors.textTertiary,
         )
-    }
-}
-
-@Composable
-private fun ConnectionStatus(
-    connected: Boolean,
-    label: String,
-    sublabel: String? = null,
-) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(
-            imageVector = if (connected) Icons.Default.Check else Icons.Default.Close,
-            contentDescription = null,
-            modifier = Modifier.size(20.dp),
-            tint = if (connected) Emerald else Ruby,
-        )
-        Spacer(Modifier.width(8.dp))
-        Column {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-            )
-            sublabel?.let {
-                Text(
-                    text = it,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Torve.colors.textSecondary,
-                )
-            }
-        }
     }
 }
 
@@ -2080,6 +1936,9 @@ private fun SettingsNavRow(
                     style = MaterialTheme.typography.bodyMedium,
                     color = Snow,
                     fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f, fill = false),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 if (locked) {
                     Spacer(Modifier.width(6.dp))
@@ -2099,6 +1958,8 @@ private fun SettingsNavRow(
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = if (locked) Amber.copy(alpha = 0.9f) else Torve.colors.textSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         Text(">", style = MaterialTheme.typography.bodyMedium, color = Torve.colors.textTertiary)
@@ -2185,7 +2046,7 @@ private fun LiveTvSettingsSection(
             ) {
                 Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text(stringResource(R.string.settings_add_playlist), fontWeight = FontWeight.SemiBold)
+                ButtonLabel(stringResource(R.string.settings_add_playlist), fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -2211,94 +2072,5 @@ private fun LiveTvSettingsSection(
             onConfirm = { channelsViewModel.addPlaylist() },
             onDismiss = { channelsViewModel.dismissAddPlaylistDialog() },
         )
-    }
-}
-
-/** Device-code auth section with clickable URL, copyable code, and open-in-browser button. */
-@Composable
-private fun DebridDeviceCodeSection(
-    userCode: String,
-    verificationUrl: String,
-    isPolling: Boolean,
-) {
-    val context = LocalContext.current
-    val codeCopiedMessage = stringResource(R.string.settings_code_copied)
-
-    // Clickable verification URL
-    Text(
-        text = verificationUrl,
-        color = Amber,
-        style = MaterialTheme.typography.bodyMedium,
-        fontWeight = FontWeight.SemiBold,
-        textDecoration = TextDecoration.Underline,
-        modifier = Modifier.clickable {
-            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(verificationUrl)))
-        },
-    )
-
-    Spacer(Modifier.height(8.dp))
-
-    // Code with copy button
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Gunmetal, RoundedCornerShape(8.dp))
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Column {
-            Text(stringResource(R.string.settings_your_code), style = MaterialTheme.typography.bodySmall, color = Silver)
-            Text(
-                text = userCode,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = Snow,
-            )
-        }
-        IconButton(
-            onClick = {
-                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                clipboard.setPrimaryClip(ClipData.newPlainText("Device Code", userCode))
-                Toast.makeText(context, codeCopiedMessage, Toast.LENGTH_SHORT).show()
-            },
-        ) {
-            Icon(
-                Icons.Default.ContentCopy,
-                contentDescription = stringResource(R.string.diagnostics_copy),
-                tint = Amber,
-                modifier = Modifier.size(20.dp),
-            )
-        }
-    }
-
-    Spacer(Modifier.height(8.dp))
-
-    // Open in browser button
-    Button(
-        onClick = {
-            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(verificationUrl)))
-        },
-        modifier = Modifier.fillMaxWidth(),
-        colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
-    ) {
-        Icon(
-            Icons.Default.OpenInBrowser,
-            contentDescription = null,
-            modifier = Modifier.size(18.dp),
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(stringResource(R.string.settings_open_browser))
-    }
-
-    if (isPolling) {
-        Spacer(Modifier.height(8.dp))
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Amber)
-            Text(stringResource(R.string.settings_waiting_auth), style = MaterialTheme.typography.bodySmall, color = Silver)
-        }
     }
 }

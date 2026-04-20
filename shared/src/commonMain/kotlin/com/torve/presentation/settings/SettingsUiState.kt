@@ -101,6 +101,16 @@ data class SettingsUiState(
     val tvProgressiveSkipEnabled: Boolean = true,
     val tvSkipResetWindowMs: Int = 1500,
     val tvExplicitTimelineScrubEnabled: Boolean = true,
+    // Desktop playback
+    val seekStepSeconds: Int = 10,
+    val subtitlesEnabledByDefault: Boolean = false,
+    val preferredSubtitleLanguage: String = "",
+    val preferredAudioLanguage: String = "",
+    val rememberVolume: Boolean = true,
+    val lastVolume: Int = 100,
+    val movieDownloadPath: String = "",
+    val showDownloadPath: String = "",
+    val downloadScanFolders: List<String> = emptyList(),
     // Kodi
     val kodiHosts: List<KodiHost> = emptyList(),
     val kodiTestResult: Map<String, Boolean?> = emptyMap(),

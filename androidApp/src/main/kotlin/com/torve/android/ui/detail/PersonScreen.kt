@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.torve.android.ui.components.CardSize
 import com.torve.android.ui.components.LocalCardStyle
+import com.torve.android.ui.components.LocalRatingPrefs
 import com.torve.android.ui.components.PosterCard
 import com.torve.android.ui.components.mediaItemLazyKey
 import com.torve.android.ui.theme.Amber
@@ -79,7 +80,10 @@ fun PersonScreen(
 
     LaunchedEffect(personId) { viewModel.loadPerson(personId) }
 
-    CompositionLocalProvider(LocalCardStyle provides defaultCardStyle) {
+    CompositionLocalProvider(
+        LocalCardStyle provides defaultCardStyle,
+        LocalRatingPrefs provides settingsState.ratingPrefs,
+    ) {
         Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier
@@ -115,7 +119,7 @@ fun PersonScreen(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = state.error ?: "Error",
+                        text = com.torve.android.error.resolveErrorKey(androidx.compose.ui.platform.LocalContext.current, state.error) ?: stringResource(R.string.error_unknown),
                         color = MaterialTheme.colorScheme.error,
                     )
                 }

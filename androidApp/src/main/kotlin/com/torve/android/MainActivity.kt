@@ -1,6 +1,7 @@
 package com.torve.android
 
 import android.app.PictureInPictureParams
+import android.content.Intent
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
@@ -17,6 +18,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.core.os.LocaleListCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import com.torve.android.deeplink.TorveAppLink
+import com.torve.android.deeplink.TorveAppLinkParser
 import com.torve.android.ui.navigation.TorveNavGraph
 import com.torve.android.ui.player.ActivePlaybackState
 import com.torve.android.ui.splash.TorveEyeSplashScreen
@@ -41,6 +44,9 @@ class MainActivity : AppCompatActivity() {
     private var keepSplash = true
     private var hasResumedBefore = false
     private val activityScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var pendingAppLink by mutableStateOf<TorveAppLink?>(null)
+
+    private fun localeTagsFor(language: AppLanguage): String = language.code
 
     // ── Picture-in-Picture ──────────────────────────────────────
     // Enter PiP when user presses Home while video is actively playing.
@@ -94,6 +100,7 @@ class MainActivity : AppCompatActivity() {
         splashScreen.setKeepOnScreenCondition { keepSplash }
 
         super.onCreate(savedInstanceState)
+        pendingAppLink = TorveAppLinkParser.parse(intent?.data)
         configureTorveEdgeToEdge()
         requestNotificationPermission()
         val authClient: AuthClient = getKoin().get()
@@ -114,11 +121,9 @@ class MainActivity : AppCompatActivity() {
         val currentAppLocales = AppCompatDelegate.getApplicationLocales()
         if (currentAppLocales.isEmpty) {
             val saved = settingsViewModel.state.value.appLanguage
-            if (saved != AppLanguage.ENGLISH) {
-                AppCompatDelegate.setApplicationLocales(
-                    LocaleListCompat.forLanguageTags(saved.code),
-                )
-            }
+            AppCompatDelegate.setApplicationLocales(
+                LocaleListCompat.forLanguageTags(localeTagsFor(saved)),
+            )
         }
 
         setContent {
@@ -126,11 +131,9 @@ class MainActivity : AppCompatActivity() {
             var showSplash by rememberSaveable { mutableStateOf(true) }
 
             LaunchedEffect(settingsState.appLanguage) {
-                val languageTags = when (settingsState.appLanguage) {
-                    AppLanguage.ENGLISH -> ""
-                    else -> settingsState.appLanguage.code
-                }
-                AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(languageTags))
+                AppCompatDelegate.setApplicationLocales(
+                    LocaleListCompat.forLanguageTags(localeTagsFor(settingsState.appLanguage)),
+                )
             }
 
             TorveTheme(themeMode = settingsState.themeMode) {
@@ -144,10 +147,19 @@ class MainActivity : AppCompatActivity() {
                         onSplashComplete = { showSplash = false },
                     )
                 } else {
-                    TorveNavGraph()
+                    TorveNavGraph(
+                        appLink = pendingAppLink,
+                        onAppLinkConsumed = { pendingAppLink = null },
+                    )
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        pendingAppLink = TorveAppLinkParser.parse(intent.data)
     }
 
     override fun onDestroy() {

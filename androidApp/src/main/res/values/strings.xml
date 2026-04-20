@@ -47,6 +47,7 @@
 
     <!-- Detail Screen -->
     <string name="detail_connect_cloud">Connect streaming service in Settings</string>
+    <string name="detail_install_addon">Install an addon to play</string>
     <string name="detail_finding_streams">Finding sources…</string>
     <string name="detail_resolving">Resolving…</string>
     <string name="detail_watchlist">Watchlist</string>
@@ -666,6 +667,89 @@
     <string name="addon_category_streams">Sources</string>
     <string name="addon_category_catalogs">Catalogs</string>
     <string name="addon_category_subtitles">Subtitles</string>
+
+    <!-- Manage Panda Screen -->
+    <string name="manage_panda_title">Panda</string>
+    <string name="manage_panda_not_installed">Panda is not installed yet. Install it to get guided streaming setup with server-side configuration.</string>
+    <string name="manage_panda_install">Install Panda</string>
+    <string name="manage_panda_remove">Remove Panda</string>
+    <string name="manage_panda_open_config">Open Configuration</string>
+    <string name="manage_panda_enabled">Enabled</string>
+    <string name="manage_panda_version">Version %1$s</string>
+    <string name="manage_panda_installing">Installing…</string>
+    <string name="manage_panda_manage">Manage</string>
+
+    <!-- Panda Native Setup -->
+    <string name="panda_setup_title">Set up Panda</string>
+    <string name="panda_setup_provider_title">Choose your provider</string>
+    <string name="panda_setup_provider_desc">Select the debrid service you want to use with Panda.</string>
+    <string name="panda_setup_auth_title">Connect %1$s</string>
+    <string name="panda_setup_auth_oauth">Sign in with browser</string>
+    <string name="panda_setup_auth_apikey">Enter API key</string>
+    <string name="panda_setup_auth_enter_key">Paste your API key</string>
+    <string name="panda_setup_auth_validate">Validate</string>
+    <string name="panda_setup_auth_validating">Validating…</string>
+    <string name="panda_setup_auth_connected">Connected</string>
+    <string name="panda_setup_auth_open_browser">Open in browser</string>
+    <string name="panda_setup_auth_enter_code">Enter this code:</string>
+    <string name="panda_setup_auth_waiting">Waiting for authorization…</string>
+    <string name="panda_setup_auth_oauth_unsupported">%1$s does not support browser sign-in. Enter your API key instead.</string>
+    <string name="panda_setup_sources_title">Torrent sources</string>
+    <string name="panda_setup_sources_desc">Choose which torrent sources Panda should search. The defaults work well for most users.</string>
+    <string name="panda_setup_quality_title">Quality preferences</string>
+    <string name="panda_setup_quality_max">Maximum quality</string>
+    <string name="panda_setup_quality_profile">Quality profile</string>
+    <string name="panda_setup_quality_language">Release language</string>
+    <string name="panda_setup_review_title">Review &amp; save</string>
+    <string name="panda_setup_review_provider">Provider</string>
+    <string name="panda_setup_review_auth">Authentication</string>
+    <string name="panda_setup_review_save">Save &amp; Install</string>
+    <string name="panda_setup_review_update">Update Configuration</string>
+    <string name="panda_setup_review_saving">Saving…</string>
+    <string name="panda_setup_review_success">Panda installed and ready.</string>
+    <string name="panda_setup_review_done">Done</string>
+    <string name="panda_setup_web_fallback">Set up on web instead</string>
+    <string name="panda_setup_reconfigure">Reconfigure</string>
+    <string name="panda_setup_editing">Editing existing configuration</string>
+    <string name="panda_setup_next">Next</string>
+    <string name="panda_setup_retry">Retry</string>
+    <string name="panda_quality_balanced">Balanced</string>
+    <string name="panda_quality_best">Best Quality</string>
+    <string name="panda_quality_fast">Fast Start</string>
+    <string name="panda_quality_saver">Data Saver</string>
+    <string name="panda_language_any">Any</string>
+
+    <!-- Panda Usenet Setup -->
+    <string name="panda_setup_usenet_title">Usenet</string>
+    <string name="panda_setup_usenet_desc">Configure Usenet for additional streaming sources. Easynews provides the simplest setup with direct HTTP streaming.</string>
+    <string name="panda_setup_usenet_enable">Enable Usenet</string>
+    <string name="panda_setup_usenet_provider">Usenet provider</string>
+    <string name="panda_setup_usenet_easynews">Easynews</string>
+    <string name="panda_setup_usenet_easynews_desc">Direct HTTP streaming with built-in search. No indexer needed.</string>
+    <string name="panda_setup_usenet_generic">Generic NNTP</string>
+    <string name="panda_setup_usenet_generic_desc">Any Usenet provider. Requires an NZB indexer and download client.</string>
+    <string name="panda_setup_usenet_host">NNTP host</string>
+    <string name="panda_setup_usenet_port">Port</string>
+    <string name="panda_setup_usenet_username">Username</string>
+    <string name="panda_setup_usenet_password">Password</string>
+    <string name="panda_setup_usenet_ssl">Use SSL</string>
+    <string name="panda_setup_usenet_connections">Connections</string>
+    <string name="panda_setup_usenet_indexer">NZB indexer</string>
+    <string name="panda_setup_usenet_indexer_key">Indexer API key</string>
+    <string name="panda_setup_usenet_indexer_url">Custom indexer URL</string>
+    <string name="panda_setup_usenet_indexer_none">None</string>
+    <string name="panda_setup_usenet_indexer_custom">Custom URL</string>
+    <string name="panda_setup_usenet_client">Download client</string>
+    <string name="panda_setup_usenet_client_none">None</string>
+    <string name="panda_provider_usenet_only_title">Use Usenet only (skip debrid)</string>
+    <string name="panda_provider_usenet_only_subtitle">No debrid — configure Usenet on the next steps</string>
+    <string name="panda_setup_usenet_client_url">Client URL</string>
+    <string name="panda_setup_usenet_client_user">Client username</string>
+    <string name="panda_setup_usenet_client_pass">Client password</string>
+    <string name="panda_setup_usenet_client_key">Client API key</string>
+    <string name="panda_setup_review_usenet">Usenet</string>
+    <string name="panda_setup_review_indexer">NZB indexer</string>
+    <string name="panda_setup_review_client">Download client</string>
 
     <!-- Category Manager Sheet -->
     <string name="categories_subtitle">Select countries and categories you want to see</string>

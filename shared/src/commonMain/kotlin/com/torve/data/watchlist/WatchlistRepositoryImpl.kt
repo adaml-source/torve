@@ -1,5 +1,6 @@
 package com.torve.data.watchlist
 
+import com.torve.data.auth.UserIdProvider
 import com.torve.data.metadata.TmdbApiClient
 import com.torve.data.metadata.TmdbMappers
 import com.torve.data.simkl.SimklClient
@@ -35,12 +36,14 @@ class WatchlistRepositoryImpl(
     private val tmdbClient: TmdbApiClient,
     private val simklClient: SimklClient,
     private val integrationSecretStore: IntegrationSecretStore,
+    private val userIdProvider: UserIdProvider,
 ) : WatchlistRepository {
 
     private val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override suspend fun getAll(): List<WatchlistItem> {
-        return database.torveQueries.getAllWatchlist().executeAsList().map { row ->
+        val userId = userIdProvider.currentUserId()
+        return database.torveQueries.getAllWatchlist(userId = userId).executeAsList().map { row ->
             WatchlistItem(
                 mediaId = row.media_id,
                 mediaType = MediaType.fromString(row.media_type),
@@ -59,7 +62,8 @@ class WatchlistRepositoryImpl(
     }
 
     override suspend fun getByType(mediaType: String): List<WatchlistItem> {
-        return database.torveQueries.getWatchlistByType(mediaType).executeAsList().map { row ->
+        val userId = userIdProvider.currentUserId()
+        return database.torveQueries.getWatchlistByType(userId = userId, mediaType = mediaType).executeAsList().map { row ->
             WatchlistItem(
                 mediaId = row.media_id,
                 mediaType = MediaType.fromString(row.media_type),
@@ -78,11 +82,16 @@ class WatchlistRepositoryImpl(
     }
 
     override suspend fun isInWatchlist(mediaId: String): Boolean {
-        return database.torveQueries.isInWatchlist(mediaId).executeAsOne() > 0
+        return database.torveQueries.isInWatchlist(
+            userId = userIdProvider.currentUserId(),
+            mediaId = mediaId,
+        ).executeAsOne() > 0
     }
 
     override suspend fun add(item: WatchlistItem) {
+        val userId = userIdProvider.currentUserId()
         database.torveQueries.insertWatchlistItem(
+            user_id = userId,
             media_id = item.mediaId,
             media_type = when (item.mediaType) {
                 MediaType.MOVIE -> "movie"
@@ -104,7 +113,9 @@ class WatchlistRepositoryImpl(
     }
 
     override suspend fun add(item: WatchlistItem, syncTrakt: Boolean, syncSimkl: Boolean) {
+        val userId = userIdProvider.currentUserId()
         database.torveQueries.insertWatchlistItem(
+            user_id = userId,
             media_id = item.mediaId,
             media_type = when (item.mediaType) {
                 MediaType.MOVIE -> "movie"
@@ -126,10 +137,11 @@ class WatchlistRepositoryImpl(
     }
 
     override suspend fun remove(mediaId: String) {
+        val userId = userIdProvider.currentUserId()
         // Read item before deleting so we can sync to Trakt/Simkl
-        val item = database.torveQueries.getAllWatchlist().executeAsList()
+        val item = database.torveQueries.getAllWatchlist(userId = userId).executeAsList()
             .firstOrNull { it.media_id == mediaId }
-        database.torveQueries.removeFromWatchlist(mediaId)
+        database.torveQueries.removeFromWatchlist(userId = userId, mediaId = mediaId)
         item?.let {
             syncTraktRemove(
                 tmdbId = it.tmdb_id.toInt(),
@@ -145,10 +157,11 @@ class WatchlistRepositoryImpl(
     }
 
     override suspend fun clear() {
-        database.torveQueries.clearWatchlist()
+        database.torveQueries.clearWatchlist(userId = userIdProvider.currentUserId())
     }
 
     override suspend fun syncFromTrakt() {
+        val userId = userIdProvider.currentUserId()
         try {
             val traktItems = traktApi.getWatchlist()
             val traktIds = traktItems.mapNotNull { item ->
@@ -157,7 +170,7 @@ class WatchlistRepositoryImpl(
             }.toSet()
 
             // Get existing local IDs to avoid duplicating
-            val localIds = database.torveQueries.getAllWatchlist().executeAsList()
+            val localIds = database.torveQueries.getAllWatchlist(userId = userId).executeAsList()
                 .map { it.media_id }
                 .toSet()
             val mergePlan = deriveWatchlistMerge(localIds, traktIds)
@@ -179,6 +192,7 @@ class WatchlistRepositoryImpl(
                 }
 
                 database.torveQueries.insertWatchlistItem(
+                    user_id = userId,
                     media_id = mediaId,
                     media_type = mediaType,
                     tmdb_id = tmdbId.toLong(),
@@ -196,7 +210,7 @@ class WatchlistRepositoryImpl(
 
             // Remove local items that no longer exist in Trakt
             mergePlan.toRemove.forEach { mediaId ->
-                database.torveQueries.removeFromWatchlist(mediaId)
+                database.torveQueries.removeFromWatchlist(userId = userId, mediaId = mediaId)
             }
         } catch (_: Exception) {
             // Non-critical - don't block UI if sync fails
@@ -208,7 +222,8 @@ class WatchlistRepositoryImpl(
 
     private suspend fun enrichMissingPosters() {
         try {
-            val itemsNeedingPosters = database.torveQueries.getAllWatchlist()
+            val userId = userIdProvider.currentUserId()
+            val itemsNeedingPosters = database.torveQueries.getAllWatchlist(userId = userId)
                 .executeAsList()
                 .filter { it.poster_url == null }
 
@@ -223,7 +238,8 @@ class WatchlistRepositoryImpl(
                             backdrop_url = TmdbMappers.backdropUrl(detail.backdropPath),
                             rating = detail.voteAverage,
                             genres = detail.genres?.joinToString(", ") { it.name },
-                            media_id = row.media_id,
+                            userId = userId,
+                            mediaId = row.media_id,
                         )
                     } else {
                         val detail = tmdbClient.getTvDetail(tmdbId)
@@ -232,7 +248,8 @@ class WatchlistRepositoryImpl(
                             backdrop_url = TmdbMappers.backdropUrl(detail.backdropPath),
                             rating = detail.voteAverage,
                             genres = detail.genres?.joinToString(", ") { it.name },
-                            media_id = row.media_id,
+                            userId = userId,
+                            mediaId = row.media_id,
                         )
                     }
                 } catch (_: Exception) {

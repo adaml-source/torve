@@ -124,6 +124,7 @@ interface PurchaseStringResolver {
         "Torve is free to download. Choose monthly or lifetime access."
     fun deviceNeedsSlot(): String = "This device needs an available activation slot."
     fun deviceNeedsActivation(): String = "This device needs activation."
+    fun premiumRequired(): String = "This feature requires Torve Pro."
 }
 
 /** Default implementation using English strings. Used by desktop and as fallback. */

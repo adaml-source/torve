@@ -6,6 +6,7 @@ import com.torve.data.trakt.TraktClient
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.MediaType
+import kotlinx.datetime.Clock
 
 class RatingsEnricher(
     private val api: MdbListApi,
@@ -16,10 +17,25 @@ class RatingsEnricher(
 ) {
 
     private val imdbCache = mutableMapOf<String, String?>()
-    /** Set to true when we get a 429 — skip all further MDBList requests until next app session. */
+
+    /**
+     * When MDBList returns 429 we back off for a cooldown window rather than sticking
+     * the flag for the whole session — a rate limit on one rail shouldn't wipe ratings
+     * off every later rail.
+     */
     @Volatile
-    var rateLimited: Boolean = false
-        private set
+    private var rateLimitExpiresAt: Long = 0L
+
+    val rateLimited: Boolean
+        get() = Clock.System.now().toEpochMilliseconds() < rateLimitExpiresAt
+
+    private fun markRateLimited() {
+        rateLimitExpiresAt = Clock.System.now().toEpochMilliseconds() + RATE_LIMIT_COOLDOWN_MS
+    }
+
+    companion object {
+        private const val RATE_LIMIT_COOLDOWN_MS = 60_000L
+    }
 
     /**
      * Enriches a single MediaItem with ratings from all available tiers:
@@ -78,7 +94,7 @@ class RatingsEnricher(
                     else -> null
                 }
             } catch (e: MdbListApi.RateLimitException) {
-                rateLimited = true
+                markRateLimited()
                 null
             } catch (_: Exception) {
                 null
@@ -135,8 +151,15 @@ class RatingsEnricher(
             if (traktRating != null && traktRating.rating > 0f) {
                 accumulated = mergeRatings(accumulated, MediaRatings(
                     traktScore = traktRating.rating * 10f, // Trakt 0-10 → percentage
+                    // Trakt ratings are user-voted on an IMDB-aligned 0-10 scale.
+                    // If OMDB/MDBList gave us nothing, surface Trakt's score as
+                    // the IMDB pill too, so every enriched card consistently has
+                    // at least IMDB + TMDB + Trakt pills rather than Trakt only.
+                    imdbScore = traktRating.rating,
                 ))
-                // Don't persist Trakt-only fallback — partial data would poison cache
+                // Do NOT cache partial Trakt-only data: for unreleased titles
+                // this could pin the card to just-Trakt for 30 days (cache TTL),
+                // blocking the fuller OMDB/MDBList result once the film releases.
                 return item.copy(
                     imdbId = imdbId,
                     ratings = mergeRatings(existing, accumulated),
@@ -144,12 +167,33 @@ class RatingsEnricher(
             }
         }
 
-        // 6. Fallback: item unchanged (TMDB score from item.rating still shows)
-        return item.copy(imdbId = imdbId ?: item.imdbId)
+        // 6. Fallback: item unchanged (TMDB score from item.rating still shows).
+        // Do NOT cache here — we got no extra signal beyond the TMDB baseline
+        // the item already had, and caching would block a later MDBList/OMDB
+        // hit for up to 30 days (the cache TTL).
+        return item.copy(
+            imdbId = imdbId ?: item.imdbId,
+            ratings = mergeRatings(existing, accumulated),
+        )
     }
 
     suspend fun enrichList(items: List<MediaItem>, apiKey: String): List<MediaItem> {
         return items.map { enrichSingle(it, apiKey) }
+    }
+
+    /**
+     * Restores persisted ratings without doing network work.
+     * This is used when screens rebuild content after navigation or refresh.
+     */
+    fun hydrateFromCache(item: MediaItem): MediaItem {
+        val tmdbId = item.tmdbId ?: return item
+        val cacheKey = "${item.type.name}:$tmdbId"
+        val cached = cacheRepo.getCached(cacheKey) ?: return item
+        return item.copy(ratings = mergeRatings(item.ratings, cached))
+    }
+
+    fun hydrateListFromCache(items: List<MediaItem>): List<MediaItem> {
+        return items.map(::hydrateFromCache)
     }
 
     fun clearPersistentCache() {

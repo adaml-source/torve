@@ -36,6 +36,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -90,10 +91,12 @@ import com.torve.domain.model.CardTitlePosition
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.MediaType
+import com.torve.domain.model.hasAnyEnabledDisplayValue
 import com.torve.domain.model.isOutside
 import com.torve.domain.model.resolvedAspectRatio
 import com.torve.domain.model.resolvedWidthDp
 import com.torve.domain.model.WatchState
+import com.torve.domain.model.withFallbackTmdbScore
 
 val LocalCardStyle = compositionLocalOf { CardStyle() }
 
@@ -149,7 +152,7 @@ fun PosterCard(
     val hoverPrefs = cardStyle.hover
     val appearance = cardStyle.appearance
     val cornerRadius = appearance.cornerRadiusDp.dp
-    val ratingPrefs = cardStyle.ratingPrefs
+    val ratingPrefs = LocalRatingPrefs.current
     val layoutSpec = resolveCardLayoutSpec(sizeOverride, cardStyle)
     val isLandscapeCard = layoutSpec.useBackdrop
 
@@ -181,9 +184,10 @@ fun PosterCard(
             (!isLandscapeCard || ratingPrefs.allowRatingsOnLandscapeCards) &&
             ratingPrefs.enabledProviders.isNotEmpty() &&
             ratingPrefs.maxRatingsOnCard > 0
-        val showFallbackRating = showCardRatings
-        val showInsideRatings = showCardRatings && !ratingPrefs.pillPosition.isOutside()
-        val showOutsideRatings = showCardRatings && ratingPrefs.pillPosition.isOutside()
+        val effectiveRatings = item.ratings.withFallbackTmdbScore(item.rating)
+        // Let MultiRatingPills handle empty-pill gracefully; avoid extra gating
+        val showInsideRatings = showCardRatings && effectiveRatings != null && !ratingPrefs.pillPosition.isOutside()
+        val showOutsideRatings = showCardRatings && effectiveRatings != null && ratingPrefs.pillPosition.isOutside()
         // Poster image
         Box(
             modifier = Modifier
@@ -208,9 +212,20 @@ fun PosterCard(
                     )
                 },
         ) {
+            // Content-policy hardening: locked/placeholder items get neutral art immediately.
+            // This prevents any real poster/backdrop request and avoids brief leakage from
+            // recycled rows, cache hits, or recomposition lag.
+            val imageModel = if (item.isContentPlaceholder || item.isStubDetail) {
+                null
+            } else if (isLandscapeCard) {
+                item.backdropUrl ?: item.posterUrl
+            } else {
+                item.posterUrl
+            }
+
             SubcomposeAsyncImage(
-                model = if (isLandscapeCard) item.backdropUrl ?: item.posterUrl else item.posterUrl,
-                contentDescription = item.title,
+                model = imageModel,
+                contentDescription = if (item.isContentPlaceholder || item.isStubDetail) null else item.title,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
                 loading = { ShimmerBox(modifier = Modifier.fillMaxSize()) },
@@ -222,7 +237,7 @@ fun PosterCard(
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            text = item.title.take(2).uppercase(),
+                            text = if (item.isContentPlaceholder || item.isStubDetail) "" else item.title.take(2).uppercase(),
                             style = MaterialTheme.typography.titleLarge,
                             color = Torve.colors.textTertiary,
                         )
@@ -242,14 +257,6 @@ fun PosterCard(
             }
 
             // Rating badge — inside overlay
-            val itemRating = item.rating
-            val effectiveRatings = item.ratings?.let { r ->
-                if (r.tmdbScore == null && itemRating != null && itemRating > 0) {
-                    r.copy(tmdbScore = itemRating.toFloat())
-                } else r
-            } ?: itemRating?.takeIf { it > 0 }?.let {
-                MediaRatings(tmdbScore = it.toFloat())
-            }
             if (showInsideRatings && effectiveRatings != null) {
                 MultiRatingPills(
                     ratings = effectiveRatings,
@@ -259,17 +266,6 @@ fun PosterCard(
                         .align(Alignment.TopEnd)
                         .padding(6.dp),
                 )
-            } else if (!showOutsideRatings && showFallbackRating) {
-                item.rating?.let { rating ->
-                    if (rating > 0) {
-                        RatingPill(
-                            rating = rating,
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(6.dp),
-                        )
-                    }
-                }
             }
 
             // Downloaded badge — top left
@@ -390,30 +386,15 @@ fun PosterCard(
         }
 
         // Ratings outside poster image
-        val outsideItemRating = item.rating
-        val outsideRatings = item.ratings?.let { r ->
-            if (r.tmdbScore == null && outsideItemRating != null && outsideItemRating > 0) {
-                r.copy(tmdbScore = outsideItemRating.toFloat())
-            } else r
-        } ?: outsideItemRating?.takeIf { it > 0 }?.let {
-            MediaRatings(tmdbScore = it.toFloat())
-        }
-        if (showOutsideRatings && outsideRatings != null) {
+        if (showOutsideRatings && effectiveRatings != null) {
             Spacer(Modifier.height(6.dp))
             MultiRatingPills(
-                ratings = outsideRatings,
+                ratings = effectiveRatings,
                 prefs = ratingPrefs,
                 modifier = Modifier
                     .testTag("poster_ratings_outside")
                     .fillMaxWidth(),
             )
-        } else if (showFallbackRating && ratingPrefs.pillPosition.isOutside()) {
-            item.rating?.let { rating ->
-                if (rating > 0) {
-                    Spacer(Modifier.height(6.dp))
-                    RatingPill(rating = rating)
-                }
-            }
         }
 
         // Title below poster (not inside card) — only when BELOW

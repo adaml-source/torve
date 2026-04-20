@@ -64,12 +64,7 @@ class CatchupResolver {
                 }
             }
             "xc" -> {
-                // Xtream Codes catchup: replace /live/ with /timeshift/ and append duration/start
-                val base = channel.url
-                    .replace("/live/", "/timeshift/")
-                    .replace(".ts", "")
-                    .replace(".m3u8", "")
-                "$base/$durationSec/$startSec"
+                resolveXtreamCatchup(channel, startSec, durationSec)
             }
             else -> {
                 // Try catchup-source as full template
@@ -103,5 +98,61 @@ class CatchupResolver {
             .replace("{H}", utc.hour.toString().padStart(2, '0'))
             .replace("{M}", utc.minute.toString().padStart(2, '0'))
             .replace("{S}", utc.second.toString().padStart(2, '0'))
+    }
+
+    private fun resolveXtreamCatchup(
+        channel: Channel,
+        startSec: Long,
+        durationSec: Long,
+    ): String {
+        val liveUrl = channel.url
+        val parsed = XtreamLiveUrlParts.parse(liveUrl)
+        if (parsed != null) {
+            val instant = Instant.fromEpochSeconds(startSec)
+            val utc = instant.toLocalDateTime(TimeZone.UTC)
+            val startLabel = buildString {
+                append(utc.year.toString().padStart(4, '0'))
+                append('-')
+                append(utc.monthNumber.toString().padStart(2, '0'))
+                append('-')
+                append(utc.dayOfMonth.toString().padStart(2, '0'))
+                append(':')
+                append(utc.hour.toString().padStart(2, '0'))
+                append('-')
+                append(utc.minute.toString().padStart(2, '0'))
+            }
+            val durationMinutes = ((durationSec + 59) / 60).coerceAtLeast(1)
+            return "${parsed.serverBase}/timeshift/${parsed.username}/${parsed.password}/$durationMinutes/$startLabel/${parsed.streamId}.${parsed.extension}"
+        }
+
+        // Preserve the legacy fallback for non-standard provider URLs.
+        val base = liveUrl
+            .replace("/live/", "/timeshift/")
+            .replace(".ts", "")
+            .replace(".m3u8", "")
+        return "$base/$durationSec/$startSec"
+    }
+}
+
+private data class XtreamLiveUrlParts(
+    val serverBase: String,
+    val username: String,
+    val password: String,
+    val streamId: String,
+    val extension: String,
+) {
+    companion object {
+        private val LIVE_URL_PATTERN = Regex("""^(https?://.+?)/live/([^/]+)/([^/]+)/([^/.]+)\.([A-Za-z0-9]+)(?:\?.*)?$""")
+
+        fun parse(url: String): XtreamLiveUrlParts? {
+            val match = LIVE_URL_PATTERN.matchEntire(url) ?: return null
+            return XtreamLiveUrlParts(
+                serverBase = match.groupValues[1],
+                username = match.groupValues[2],
+                password = match.groupValues[3],
+                streamId = match.groupValues[4],
+                extension = match.groupValues[5],
+            )
+        }
     }
 }

@@ -35,6 +35,7 @@ fun StremioMeta.toMediaItem(): MediaItem {
         posterUrl = poster,
         backdropUrl = background ?: poster,
         rating = parsedRating,
+        ratings = parsedRating?.let { com.torve.domain.model.MediaRatings(imdbScore = it.toFloat()) },
         genres = genreObjects,
         releaseDate = releaseInfo,
         director = director.firstOrNull(),

@@ -1,16 +1,23 @@
 package com.torve.presentation.search
 
+import com.torve.data.contentpolicy.ContentPolicyCacheInvalidationCoordinator
+import com.torve.data.contentpolicy.ContentPolicyRepository
+import com.torve.domain.model.ContentAccessContext
+import com.torve.domain.model.ContentPolicyState
+import com.torve.domain.model.ContentSourceType
 import com.torve.domain.model.dedupeByStableKey
 import com.torve.domain.model.calculateTorveScore
 import com.torve.domain.model.defaultTorveWeights
 import com.torve.domain.repository.MetadataRepository
 import com.torve.domain.repository.PreferencesRepository
 import com.torve.presentation.catalog.SortOption
+import com.torve.presentation.contentpolicy.ContentPolicyFilter
 import com.torve.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,6 +30,9 @@ import kotlinx.coroutines.launch
 class SearchViewModel(
     private val metadataRepo: MetadataRepository,
     private val prefsRepo: PreferencesRepository,
+    private val contentPolicyRepository: ContentPolicyRepository? = null,
+    private val contentPolicyFilter: ContentPolicyFilter = ContentPolicyFilter(),
+    invalidationCoordinator: ContentPolicyCacheInvalidationCoordinator? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(SearchUiState())
@@ -32,6 +42,17 @@ class SearchViewModel(
 
     init {
         observeQuery()
+        if (invalidationCoordinator != null) {
+            scope.launch {
+                invalidationCoordinator.events.collectLatest {
+                    val query = _state.value.query
+                    _state.update { it.copy(results = emptyList(), hiddenResultsCount = 0) }
+                    if (query.length >= 2) {
+                        performSearch(query)
+                    }
+                }
+            }
+        }
     }
 
     fun updateQuery(query: String) {
@@ -89,9 +110,16 @@ class SearchViewModel(
                 }
                 else -> deduped
             }
+            val policyResult = contentPolicyFilter.filterItems(
+                policy = currentPolicy(),
+                context = ContentAccessContext.DIRECT_SEARCH,
+                items = finalResults,
+                sourceType = ContentSourceType.TMDB,
+            )
             _state.update {
                 it.copy(
-                    results = finalResults,
+                    results = policyResult.items,
+                    hiddenResultsCount = policyResult.hiddenCount,
                     peopleResults = people,
                     userLists = buildUserListPlaceholders(query),
                     isSearching = false,
@@ -99,7 +127,7 @@ class SearchViewModel(
                 )
             }
         } catch (e: Exception) {
-            _state.update { it.copy(isSearching = false, error = e.message) }
+            _state.update { it.copy(isSearching = false, error = com.torve.presentation.error.UserFacingError.SEARCH_FAILED.messageKey) }
         }
     }
 
@@ -146,15 +174,21 @@ class SearchViewModel(
                     }
                     else -> deduped
                 }
+                val policyResult = contentPolicyFilter.filterItems(
+                    policy = currentPolicy(),
+                    context = ContentAccessContext.DEFAULT_DISCOVERY,
+                    items = finalResults,
+                    sourceType = ContentSourceType.TMDB,
+                )
                 _state.update {
                     it.copy(
-                        discoverResults = finalResults,
+                        discoverResults = policyResult.items,
                         isDiscovering = false,
                         hasActiveSearch = true,
                     )
                 }
             } catch (e: Exception) {
-                _state.update { it.copy(isDiscovering = false, error = e.message) }
+                _state.update { it.copy(isDiscovering = false, error = com.torve.presentation.error.UserFacingError.SEARCH_FAILED.messageKey) }
             }
         }
     }
@@ -181,6 +215,10 @@ class SearchViewModel(
 
     private suspend fun shouldDedupe(): Boolean {
         return prefsRepo.getString(SettingsViewModel.KEY_DEDUPE_RESULTS)?.toBooleanStrictOrNull() ?: true
+    }
+
+    private fun currentPolicy(): ContentPolicyState {
+        return contentPolicyRepository?.state?.value ?: ContentPolicyState.unrestricted()
     }
 
     private fun buildUserListPlaceholders(query: String): List<String> = listOf(

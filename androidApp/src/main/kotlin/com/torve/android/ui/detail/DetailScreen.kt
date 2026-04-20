@@ -75,6 +75,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -83,6 +84,7 @@ import coil3.compose.AsyncImage
 import com.torve.android.ui.components.CastAvatar
 import com.torve.android.ui.components.CardSize
 import com.torve.android.ui.components.LocalCardStyle
+import com.torve.android.ui.components.LocalRatingPrefs
 import com.torve.android.ui.components.MultiRatingPills
 import com.torve.android.ui.components.PosterCard
 import com.torve.android.ui.components.SectionHeader
@@ -105,8 +107,10 @@ import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.AvailabilityOffer
 import com.torve.domain.model.AvailabilityOfferType
+import com.torve.domain.model.hasAnyEnabledDisplayValue
 import com.torve.domain.model.resolveCardStyle
 import com.torve.domain.model.calculateTorveScore
+import com.torve.domain.model.withFallbackTmdbScore
 import com.torve.android.player.DeviceCodecProbe
 import kotlinx.coroutines.launch
 import com.torve.presentation.detail.DetailViewModel
@@ -128,10 +132,12 @@ fun DetailScreen(
     onMediaClick: (MediaItem) -> Unit,
     onPersonClick: ((Int) -> Unit)? = null,
     onSettingsClick: (() -> Unit)? = null,
+    onOpenAddonCatalog: (() -> Unit)? = null,
     viewModel: DetailViewModel = koinInject(),
     settingsViewModel: SettingsViewModel = koinInject(),
     downloadViewModel: DownloadViewModel = koinInject(),
     watchlistViewModel: WatchlistViewModel = koinInject(),
+    addonViewModel: com.torve.presentation.addon.AddonViewModel = koinInject(),
 ) {
     val bulkDownloadManager: BulkDownloadManager = koinInject()
     val bulkProgress by bulkDownloadManager.progress.collectAsState()
@@ -139,6 +145,8 @@ fun DetailScreen(
     val state by viewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
     val watchlistState by watchlistViewModel.state.collectAsState()
+    val addonState by addonViewModel.state.collectAsState()
+    val hasAnyAddon = addonState.addons.isNotEmpty()
     val isLocked: (PremiumFeature) -> Boolean = remember(accessTier) {
         { feature -> PremiumAccess.isPremiumLocked(feature, accessTier) }
     }
@@ -255,7 +263,10 @@ fun DetailScreen(
         globalDefaultPresetId = settingsState.globalDefaultPresetId,
     )
 
-    CompositionLocalProvider(LocalCardStyle provides defaultCardStyle) {
+    CompositionLocalProvider(
+        LocalCardStyle provides defaultCardStyle,
+        LocalRatingPrefs provides settingsState.ratingPrefs,
+    ) {
         Box(modifier = Modifier.fillMaxSize()) {
         when {
             state.isLoading -> {
@@ -267,7 +278,7 @@ fun DetailScreen(
 
             state.error != null -> {
                 Text(
-                    text = state.error ?: "Error",
+                    text = com.torve.android.error.resolveErrorKey(androidx.compose.ui.platform.LocalContext.current, state.error) ?: stringResource(R.string.error_unknown),
                     modifier = Modifier.align(Alignment.Center),
                     color = MaterialTheme.colorScheme.error,
                 )
@@ -275,6 +286,22 @@ fun DetailScreen(
 
             state.mediaItem != null -> {
                 val item = state.mediaItem!!
+                if (item.isStubDetail) {
+                    LockedStubDetail(
+                        title = stringResource(R.string.detail_stub_title),
+                        body = stringResource(R.string.detail_stub_body),
+                        modifier = Modifier.align(Alignment.Center),
+                    )
+                    return@Box
+                }
+                val detailRatings = remember(item.ratings, item.rating) {
+                    item.ratings.withFallbackTmdbScore(item.rating)
+                }
+                val hasRenderableDetailProviders = detailRatings != null
+                val torveDetailScore = remember(detailRatings, settingsState.ratingPrefs) {
+                    detailRatings?.takeIf { settingsState.ratingPrefs.showTorveScoreOnDetailPage }
+                        ?.let { calculateTorveScore(it, settingsState.ratingPrefs.torveWeights) }
+                }
 
                 Column(
                     modifier = Modifier
@@ -288,9 +315,12 @@ fun DetailScreen(
                             .fillMaxWidth()
                             .height(360.dp),
                     ) {
+                        // Content-policy hardening: never request real artwork for locked items
+                        val detailImageModel = if (item.isContentPlaceholder || item.isStubDetail) null
+                            else item.backdropUrl ?: item.posterUrl
                         AsyncImage(
-                            model = item.backdropUrl ?: item.posterUrl,
-                            contentDescription = item.title,
+                            model = detailImageModel,
+                            contentDescription = if (item.isContentPlaceholder || item.isStubDetail) null else item.title,
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop,
                         )
@@ -345,38 +375,14 @@ fun DetailScreen(
                                     MetadataText(FormatUtil.formatRuntime(runtime))
                                 }
                             }
-                            if (settingsState.ratingPrefs.showRatingsOnDetailPage) {
-                                item.rating?.let { rating ->
-                                    if (rating > 0) {
-                                        Spacer(Modifier.width(6.dp))
-                                        Icon(
-                                            Icons.Rounded.Star,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(14.dp),
-                                            tint = Amber,
-                                        )
-                                        Text(
-                                            text = "%.1f".format(rating),
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = Amber,
-                                            fontWeight = FontWeight.Medium,
-                                        )
-                                    }
-                                }
-                            }
-                            if (settingsState.ratingPrefs.showTorveScoreOnDetailPage) {
-                                val torve = item.ratings?.let {
-                                    calculateTorveScore(it, settingsState.ratingPrefs.torveWeights)
-                                }
-                                torve?.let {
-                                    MetadataText("•")
-                                    Text(
-                                        text = "Torve ${"%.0f".format(it)}",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = Amber,
-                                        fontWeight = FontWeight.SemiBold,
-                                    )
-                                }
+                            torveDetailScore?.let {
+                                MetadataText("•")
+                                Text(
+                                    text = "Torve ${"%.0f".format(it)}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Amber,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
                             }
                         }
 
@@ -394,22 +400,21 @@ fun DetailScreen(
                         }
 
                         // Multi-source rating pills
-                        if (settingsState.ratingPrefs.showRatingsOnDetailPage) {
-                            val itemRating = item.rating
-                            val detailRatings = item.ratings?.let { r ->
-                                if (r.tmdbScore == null && itemRating != null && itemRating > 0) {
-                                    r.copy(tmdbScore = itemRating.toFloat())
-                                } else r
-                            } ?: itemRating?.takeIf { it > 0 }?.let {
-                                MediaRatings(tmdbScore = it.toFloat())
-                            }
-                            if (detailRatings != null) {
+                        if (settingsState.ratingPrefs.showRatingsOnDetailPage && detailRatings != null) {
+                            if (hasRenderableDetailProviders) {
                                 Spacer(Modifier.height(12.dp))
                                 MultiRatingPills(
                                     ratings = detailRatings,
                                     prefs = settingsState.ratingPrefs.copy(
                                         maxRatingsOnCard = settingsState.ratingPrefs.enabledProviders.size,
                                     ),
+                                )
+                                Spacer(Modifier.height(10.dp))
+                            }
+                            if (hasRenderableDetailProviders || torveDetailScore != null) {
+                                DetailRatingsAttribution(
+                                    ratings = detailRatings,
+                                    prefs = settingsState.ratingPrefs,
                                 )
                             }
                         }
@@ -423,10 +428,14 @@ fun DetailScreen(
                                 onClick = {
                                     if (streamPlaybackLocked) {
                                         onLockedFeatureClick(PremiumFeature.STREAM_PLAYBACK)
-                                    } else if (settingsState.debridConnected) {
+                                    } else if (!hasAnyAddon) {
+                                        // No addons installed → nothing can resolve streams.
+                                        // Send the user to the addon catalog to install one (e.g. Panda).
+                                        onOpenAddonCatalog?.invoke()
+                                    } else {
+                                        // Let the addon layer decide between debrid/Usenet/etc. Panda
+                                        // handles its own routing based on its saved config.
                                         if (item.type == MediaType.SERIES) {
-                                            // If the user already selected a specific episode,
-                                            // play that one. Otherwise auto-resolve next unwatched.
                                             val ctxS = state.streamContextSeason
                                             val ctxE = state.streamContextEpisode
                                             if (ctxS != null && ctxE != null) {
@@ -437,8 +446,6 @@ fun DetailScreen(
                                         } else {
                                             viewModel.fetchStreams()
                                         }
-                                    } else {
-                                        onSettingsClick?.invoke()
                                     }
                                 },
                                 modifier = Modifier
@@ -473,7 +480,7 @@ fun DetailScreen(
                                     Spacer(Modifier.width(8.dp))
                                     val playLabel = when {
                                         streamPlaybackLocked -> stringResource(R.string.premium_unlock_with_lifetime)
-                                        !settingsState.debridConnected -> stringResource(R.string.detail_connect_cloud)
+                                        !hasAnyAddon -> stringResource(R.string.detail_install_addon)
                                         item.type == MediaType.SERIES && state.streamContextSeason != null && state.streamContextEpisode != null ->
                                             "S${state.streamContextSeason.toString().padStart(2, '0')}E${state.streamContextEpisode.toString().padStart(2, '0')}"
                                         else -> state.primaryPlayLabel
@@ -484,6 +491,39 @@ fun DetailScreen(
                                         fontWeight = FontWeight.Bold,
                                     )
                                 }
+                            }
+
+                            // Watch Trailer button
+                            state.mediaItem?.trailerKey?.let {
+                                Spacer(Modifier.height(10.dp))
+                                OutlinedButton(
+                                    onClick = { showTrailer = true },
+                                    modifier = Modifier.fillMaxWidth().height(44.dp),
+                                    shape = RoundedCornerShape(10.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.Movie,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        stringResource(R.string.detail_watch_trailer),
+                                        style = MaterialTheme.typography.labelLarge,
+                                    )
+                                }
+                            }
+
+                            if (state.isLoadingStreams || state.isResolving || state.streams.isNotEmpty()) {
+                                Spacer(Modifier.height(10.dp))
+                                DetailPlaybackReadinessCard(
+                                    streams = state.streams,
+                                    startupCandidates = state.startupCandidates,
+                                    startupStatus = state.playbackStartupStatus,
+                                    isLoadingStreams = state.isLoadingStreams,
+                                    isResolving = state.isResolving,
+                                    isLoadingMoreSources = state.isLoadingMoreSources,
+                                )
                             }
 
                             // Secondary actions row (adaptive columns to avoid cramped labels on narrow phones)
@@ -587,27 +627,6 @@ fun DetailScreen(
                                 actions = secondaryActions,
                                 modifier = Modifier.fillMaxWidth(),
                             )
-
-                            // Watch Trailer button
-                            state.mediaItem?.trailerKey?.let {
-                                Spacer(Modifier.height(10.dp))
-                                OutlinedButton(
-                                    onClick = { showTrailer = true },
-                                    modifier = Modifier.fillMaxWidth().height(44.dp),
-                                    shape = RoundedCornerShape(10.dp),
-                                ) {
-                                    Icon(
-                                        Icons.Rounded.Movie,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp),
-                                    )
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        stringResource(R.string.detail_watch_trailer),
-                                        style = MaterialTheme.typography.labelLarge,
-                                    )
-                                }
-                            }
 
                             // Errors
                             state.streamsError?.let { error ->
@@ -718,7 +737,9 @@ fun DetailScreen(
                                     }
                                 },
                                 onEpisodePlay = { season, episode ->
-                                    if (settingsState.debridConnected) {
+                                    if (!hasAnyAddon) {
+                                        onOpenAddonCatalog?.invoke()
+                                    } else {
                                         viewModel.fetchStreams(season = season, episode = episode)
                                     }
                                 },
@@ -891,7 +912,10 @@ fun DetailScreen(
                 if (state.showStreamPicker && state.streams.isNotEmpty()) {
                     StreamPickerSheet(
                         streams = state.streams,
+                        startupCandidates = state.startupCandidates,
                         isResolving = state.isResolving,
+                        isLoadingMoreSources = state.isLoadingMoreSources,
+                        playbackStartupStatus = state.playbackStartupStatus,
                         onStreamSelected = { stream ->
                             viewModel.resolveStream(
                                 stream = stream,
@@ -963,6 +987,7 @@ fun DetailScreen(
             com.torve.android.ui.components.BackButton(
                 onClick = onBack,
                 modifier = Modifier
+                    .zIndex(2f)
                     .align(Alignment.TopStart)
                     .statusBarsPadding()
                     .padding(start = 12.dp, top = 8.dp),
@@ -1139,6 +1164,37 @@ private fun launchTrailer(context: android.content.Context, youtubeKey: String) 
         context.startActivity(youtubeIntent)
     } catch (_: Exception) {
         context.startActivity(webIntent)
+    }
+}
+
+@Composable
+private fun LockedStubDetail(
+    title: String,
+    body: String,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.padding(horizontal = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.Lock,
+            contentDescription = null,
+            tint = Amber,
+            modifier = Modifier.size(32.dp),
+        )
+        Text(
+            text = title,
+            style = MaterialTheme.typography.headlineSmall,
+            color = Snow,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = body,
+            style = MaterialTheme.typography.bodyMedium,
+            color = Torve.colors.textSecondary,
+        )
     }
 }
 

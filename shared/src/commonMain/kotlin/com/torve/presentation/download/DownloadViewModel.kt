@@ -1,19 +1,26 @@
 package com.torve.presentation.download
 
+import com.torve.data.contentpolicy.ContentPolicyRepository
+import com.torve.domain.model.ContentAccessContext
+import com.torve.domain.model.ContentPolicyState
 import com.torve.domain.model.Download
 import com.torve.domain.model.DownloadStatus
 import com.torve.domain.repository.DownloadRepository
+import com.torve.presentation.contentpolicy.ContentPolicyFilter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class DownloadViewModel(
     private val downloadRepo: DownloadRepository,
+    private val contentPolicyRepository: ContentPolicyRepository? = null,
+    private val contentPolicyFilter: ContentPolicyFilter = ContentPolicyFilter(),
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(DownloadUiState())
@@ -26,6 +33,23 @@ class DownloadViewModel(
 
     init {
         loadDownloads()
+        // Relock hardening: observe content policy state directly.
+        if (contentPolicyRepository != null) {
+            scope.launch {
+                var wasLocked = contentPolicyRepository.state.value.isLocked
+                contentPolicyRepository.state.collectLatest { policy ->
+                    val nowLocked = policy.isLocked
+                    if (nowLocked && !wasLocked) {
+                        loadDownloads()
+                    }
+                    wasLocked = nowLocked
+                }
+            }
+        }
+    }
+
+    private fun currentPolicy(): ContentPolicyState {
+        return contentPolicyRepository?.state?.value ?: ContentPolicyState.unrestricted()
     }
 
     fun loadDownloads() {
@@ -33,18 +57,23 @@ class DownloadViewModel(
             _state.update { it.copy(isLoading = true, error = null) }
             try {
                 val all = downloadRepo.getAllDownloads()
-                val active = all.filter { it.status in listOf(DownloadStatus.PENDING, DownloadStatus.DOWNLOADING, DownloadStatus.PAUSED) }
-                val completed = all.filter { it.status == DownloadStatus.COMPLETED }
+                val policy = currentPolicy()
+
+                // Apply content policy to display metadata
+                val filteredAll = contentPolicyFilter.filterDownloads(policy, ContentAccessContext.LIBRARY_OR_WATCHLIST, all)
+                val active = filteredAll.filter { it.status in listOf(DownloadStatus.PENDING, DownloadStatus.DOWNLOADING, DownloadStatus.PAUSED) }
+                val completed = filteredAll.filter { it.status == DownloadStatus.COMPLETED }
+
                 _state.update {
                     it.copy(
-                        downloads = all,
+                        downloads = filteredAll,
                         activeDownloads = active,
                         completedDownloads = completed,
                         isLoading = false,
                     )
                 }
             } catch (e: Exception) {
-                _state.update { it.copy(isLoading = false, error = e.message) }
+                _state.update { it.copy(isLoading = false, error = com.torve.presentation.error.UserFacingError.DOWNLOAD_FAILED.messageKey) }
             }
         }
     }
@@ -56,7 +85,7 @@ class DownloadViewModel(
                 onDownloadEnqueued?.invoke(saved.id)
                 loadDownloads()
             } catch (e: Exception) {
-                _state.update { it.copy(error = e.message) }
+                _state.update { it.copy(error = com.torve.presentation.error.UserFacingError.DOWNLOAD_FAILED.messageKey) }
             }
         }
     }
@@ -68,7 +97,7 @@ class DownloadViewModel(
                 onDownloadCancelled?.invoke(id)
                 loadDownloads()
             } catch (e: Exception) {
-                _state.update { it.copy(error = e.message) }
+                _state.update { it.copy(error = com.torve.presentation.error.UserFacingError.DOWNLOAD_FAILED.messageKey) }
             }
         }
     }
@@ -80,7 +109,7 @@ class DownloadViewModel(
                 onDownloadEnqueued?.invoke(id)
                 loadDownloads()
             } catch (e: Exception) {
-                _state.update { it.copy(error = e.message) }
+                _state.update { it.copy(error = com.torve.presentation.error.UserFacingError.DOWNLOAD_FAILED.messageKey) }
             }
         }
     }
@@ -94,7 +123,7 @@ class DownloadViewModel(
                 download?.filePath?.let { onFileDelete?.invoke(it) }
                 loadDownloads()
             } catch (e: Exception) {
-                _state.update { it.copy(error = e.message) }
+                _state.update { it.copy(error = com.torve.presentation.error.UserFacingError.DOWNLOAD_FAILED.messageKey) }
             }
         }
     }

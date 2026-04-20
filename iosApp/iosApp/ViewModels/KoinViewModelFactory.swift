@@ -96,4 +96,8 @@ enum KoinViewModelFactory {
     static func deviceGovernanceViewModel() -> DeviceGovernanceViewModel {
         resolve(DeviceGovernanceViewModel.self)
     }
+
+    static func pandaSetupViewModel() -> PandaSetupViewModel {
+        resolve(PandaSetupViewModel.self)
+    }
 }

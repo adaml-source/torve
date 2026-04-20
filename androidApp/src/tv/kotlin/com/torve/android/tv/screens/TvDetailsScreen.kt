@@ -491,6 +491,21 @@ fun TvDetailsScreen(
                                 },
                             )
 
+                            if (!item.trailerKey.isNullOrBlank()) {
+                                TvActionButton(
+                                    text = stringResource(R.string.tv_action_trailer),
+                                    modifier = Modifier.focusRequester(trailerFocusRequester),
+                                    onFocused = { onContentFocused(trailerFocusRequester) },
+                                    onClick = {
+                                        val intent = Intent(
+                                            Intent.ACTION_VIEW,
+                                            Uri.parse("https://www.youtube.com/watch?v=${item.trailerKey}"),
+                                        )
+                                        runCatching { context.startActivity(intent) }
+                                    },
+                                )
+                            }
+
                             val watchlistLocked = isLockedFeature(TvEntitledFeature.WATCHLIST_EDIT)
                             TvActionButton(
                                 text = if (isInWatchlist) {
@@ -571,21 +586,6 @@ fun TvDetailsScreen(
                                             }
                                             detailViewModel.setUserRating(next)
                                         }
-                                    },
-                                )
-                            }
-
-                            if (!item.trailerKey.isNullOrBlank()) {
-                                TvActionButton(
-                                    text = stringResource(R.string.tv_action_trailer),
-                                    modifier = Modifier.focusRequester(trailerFocusRequester),
-                                    onFocused = { onContentFocused(trailerFocusRequester) },
-                                    onClick = {
-                                        val intent = Intent(
-                                            Intent.ACTION_VIEW,
-                                            Uri.parse("https://www.youtube.com/watch?v=${item.trailerKey}"),
-                                        )
-                                        runCatching { context.startActivity(intent) }
                                     },
                                 )
                             }

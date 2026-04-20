@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -39,6 +40,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -94,7 +96,7 @@ val POPULAR_ADDONS = listOf(
         R.string.addon_popular_panda_desc,
         "${BuildConfig.PANDA_BASE_URL.trimEnd('/')}/manifest.json",
         listOf(AddonCategory.STREAMS),
-        "${BuildConfig.PANDA_BASE_URL.trimEnd('/')}/logo.svg",
+        "${BuildConfig.PANDA_BASE_URL.trimEnd('/')}/logo.png",
         action = PopularAddonAction.OPEN_BROWSER,
         actionUrl = "${BuildConfig.PANDA_BASE_URL.trimEnd('/')}/configure",
     ),
@@ -152,12 +154,24 @@ val POPULAR_ADDONS = listOf(
 @Composable
 fun AddonCatalogScreen(
     onBack: () -> Unit,
+    onManagePandaClick: () -> Unit = {},
     viewModel: AddonViewModel = koinInject(),
+    addonSyncService: com.torve.data.addon.AddonSyncService = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     var searchQuery by remember { mutableStateOf("") }
+
+    // Force a sync on screen entry so any stale duplicates (Panda in particular)
+    // are collapsed before the user sees the list.
+    LaunchedEffect(Unit) {
+        // Scrub any local Panda duplicates first, then force-sync so the catalog
+        // never displays two copies of the same addon.
+        runCatching { addonSyncService.collapseLocalPandaDuplicates() }
+        runCatching { addonSyncService.syncIfStale(reason = "addon_catalog_open", force = true) }
+        viewModel.loadAddons()
+    }
 
     val installedUrls = remember(state.addons) {
         state.addons
@@ -179,10 +193,18 @@ fun AddonCatalogScreen(
         }
     }
 
-    val availableAddons = remember(filtered, installedUrls) {
+    val pandaBaseUrl = remember { BuildConfig.PANDA_BASE_URL.trimEnd('/') }
+    val hasPandaInstalled = remember(state.addons) {
+        state.addons.any {
+            it.manifest.id == "com.torve.panda" ||
+                it.manifestUrl.contains(pandaBaseUrl)
+        }
+    }
+
+    val availableAddons = remember(filtered, installedUrls, hasPandaInstalled) {
         filtered.filter { addon ->
-            if (addon.action != PopularAddonAction.INSTALL) {
-                return@filter true
+            if (addon.action == PopularAddonAction.OPEN_BROWSER) {
+                return@filter !hasPandaInstalled
             }
             val manifestUrl = addon.url.trimEnd('/')
             val baseUrl = manifestUrl.removeSuffix("/manifest.json")
@@ -277,9 +299,14 @@ fun AddonCatalogScreen(
                 items(state.addons, key = { it.manifestUrl }) { addon ->
                     val flags = state.policyFlagsByUrl[AddonViewModel.normalizeManifestUrl(addon.manifestUrl)]
                     val isRestricted = flags?.installable == false
+                    val isPanda = addon.manifest.id == "com.torve.panda" ||
+                        addon.manifestUrl.contains(pandaBaseUrl)
                     Row(
                         Modifier
                             .fillMaxWidth()
+                            .then(
+                                if (isPanda) Modifier.clickable { onManagePandaClick() } else Modifier
+                            )
                             .padding(vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -319,6 +346,17 @@ fun AddonCatalogScreen(
                                     checkedTrackColor = Amber.copy(alpha = 0.3f),
                                 ),
                             )
+                        }
+
+                        if (isPanda) {
+                            IconButton(onClick = { onManagePandaClick() }) {
+                                Icon(
+                                    Icons.Default.Settings,
+                                    stringResource(R.string.panda_setup_reconfigure),
+                                    tint = Amber,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
                         }
 
                         IconButton(onClick = { viewModel.removeAddon(addon.manifestUrl) }) {
@@ -401,9 +439,7 @@ fun AddonCatalogScreen(
                             OutlinedButton(
                                 onClick = {
                                     if (addon.action == PopularAddonAction.OPEN_BROWSER) {
-                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(addon.actionUrl))
-                                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        context.startActivity(intent)
+                                        onManagePandaClick()
                                     } else {
                                         viewModel.setInstallUrl(addon.url)
                                         viewModel.installAddon()
@@ -413,7 +449,7 @@ fun AddonCatalogScreen(
                             ) {
                                 if (addon.action == PopularAddonAction.OPEN_BROWSER) {
                                     Text(
-                                        stringResource(R.string.addon_catalog_open_setup),
+                                        stringResource(R.string.manage_panda_manage),
                                         color = Amber,
                                     )
                                 } else if (isThisInstalling) {

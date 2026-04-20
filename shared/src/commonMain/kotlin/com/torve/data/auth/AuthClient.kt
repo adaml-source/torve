@@ -573,6 +573,7 @@ data class DeviceRegistrationDto(
     val device_type: String,
     val platform: String,
     val app_version: String? = null,
+    val stable_device_id: String? = null,
 )
 
 @Serializable
@@ -617,7 +618,16 @@ private object DetailSerializer : KSerializer<String?> {
                 (item as? JsonObject)?.get("msg")?.jsonPrimitive?.contentOrNull
             }.joinToString("; ").ifEmpty { "Validation error" }
 
-            else -> element.toString()
+            is JsonObject -> {
+                // Structured error: {"code": "...", "message": "..."} — extract human message,
+                // never return raw JSON object string to prevent [object Object]-style leakage.
+                element["message"]?.jsonPrimitive?.contentOrNull
+                    ?: element["msg"]?.jsonPrimitive?.contentOrNull
+                    ?: element["code"]?.jsonPrimitive?.contentOrNull
+                    ?: "Request failed"
+            }
+
+            else -> "Request failed"
         }
     }
 

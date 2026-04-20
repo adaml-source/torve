@@ -441,6 +441,89 @@
     <string name="addon_category_catalogs">Kataloglar</string>
     <string name="addon_category_subtitles">Altyazılar</string>
 
+    <!-- Manage Panda Screen -->
+    <string name="manage_panda_title">Panda</string>
+    <string name="manage_panda_not_installed">Panda henüz yüklenmedi. Sunucu taraflı yapılandırma ile rehberli akış kurulumu için yükleyin.</string>
+    <string name="manage_panda_install">Panda Yükle</string>
+    <string name="manage_panda_remove">Panda Kaldır</string>
+    <string name="manage_panda_open_config">Yapılandırmayı Aç</string>
+    <string name="manage_panda_enabled">Etkin</string>
+    <string name="manage_panda_version">Sürüm %1$s</string>
+    <string name="manage_panda_installing">Yükleniyor…</string>
+    <string name="manage_panda_manage">Yönet</string>
+
+    <!-- Panda Native Setup -->
+    <string name="panda_setup_title">Panda Kurulumu</string>
+    <string name="panda_setup_provider_title">Sağlayıcınızı seçin</string>
+    <string name="panda_setup_provider_desc">Panda ile kullanmak istediğiniz debrid hizmetini seçin.</string>
+    <string name="panda_setup_auth_title">%1$s Bağlan</string>
+    <string name="panda_setup_auth_oauth">Tarayıcı ile giriş yap</string>
+    <string name="panda_setup_auth_apikey">API anahtarı gir</string>
+    <string name="panda_setup_auth_enter_key">API anahtarınızı yapıştırın</string>
+    <string name="panda_setup_auth_validate">Doğrula</string>
+    <string name="panda_setup_auth_validating">Doğrulanıyor…</string>
+    <string name="panda_setup_auth_connected">Bağlandı</string>
+    <string name="panda_setup_auth_open_browser">Tarayıcıda aç</string>
+    <string name="panda_setup_auth_enter_code">Bu kodu girin:</string>
+    <string name="panda_setup_auth_waiting">Yetkilendirme bekleniyor…</string>
+    <string name="panda_setup_auth_oauth_unsupported">%1$s tarayıcı ile girişi desteklemiyor. Bunun yerine API anahtarınızı girin.</string>
+    <string name="panda_setup_quality_title">Kalite tercihleri</string>
+    <string name="panda_setup_quality_max">Maksimum kalite</string>
+    <string name="panda_setup_quality_profile">Kalite profili</string>
+    <string name="panda_setup_quality_language">Yayın dili</string>
+    <string name="panda_setup_review_title">İncele &amp; kaydet</string>
+    <string name="panda_setup_review_provider">Sağlayıcı</string>
+    <string name="panda_setup_review_auth">Kimlik doğrulama</string>
+    <string name="panda_setup_review_save">Kaydet &amp; Kur</string>
+    <string name="panda_setup_review_update">Yapılandırmayı güncelle</string>
+    <string name="panda_setup_review_saving">Kaydediliyor…</string>
+    <string name="panda_setup_review_success">Panda kuruldu ve hazır.</string>
+    <string name="panda_setup_review_done">Tamam</string>
+    <string name="panda_setup_web_fallback">Bunun yerine web üzerinden kur</string>
+    <string name="panda_setup_reconfigure">Yeniden yapılandır</string>
+    <string name="panda_setup_editing">Mevcut yapılandırma düzenleniyor</string>
+    <string name="panda_setup_next">İleri</string>
+    <string name="panda_setup_retry">Tekrar dene</string>
+    <string name="panda_quality_balanced">Dengeli</string>
+    <string name="panda_quality_best">En iyi kalite</string>
+    <string name="panda_quality_fast">Hızlı başlangıç</string>
+    <string name="panda_quality_saver">Veri tasarrufu</string>
+    <string name="panda_language_any">Herhangi biri</string>
+
+    <!-- Panda Usenet Setup -->
+    <string name="panda_setup_usenet_title">Usenet</string>
+    <string name="panda_setup_usenet_desc">Ek streaming kaynakları için Usenet yapılandırın. Easynews, doğrudan HTTP streaming ile en basit kurulumu sunar.</string>
+    <string name="panda_setup_usenet_enable">Usenet etkinleştir</string>
+    <string name="panda_setup_usenet_provider">Usenet sağlayıcısı</string>
+    <string name="panda_setup_usenet_easynews">Easynews</string>
+    <string name="panda_setup_usenet_easynews_desc">Yerleşik arama ile doğrudan HTTP streaming. Indexer gerekmez.</string>
+    <string name="panda_setup_usenet_generic">Genel NNTP</string>
+    <string name="panda_setup_usenet_generic_desc">Herhangi bir Usenet sağlayıcısı. NZB indexer ve indirme istemcisi gerektirir.</string>
+    <string name="panda_setup_usenet_host">NNTP sunucusu</string>
+    <string name="panda_setup_usenet_port">Port</string>
+    <string name="panda_setup_usenet_username">Kullanıcı adı</string>
+    <string name="panda_setup_usenet_password">Şifre</string>
+    <string name="panda_setup_usenet_ssl">SSL kullan</string>
+    <string name="panda_setup_usenet_connections">Bağlantılar</string>
+    <string name="panda_setup_usenet_indexer">NZB indexer</string>
+    <string name="panda_setup_usenet_indexer_key">Indexer API anahtarı</string>
+    <string name="panda_setup_usenet_indexer_url">Özel indexer URL</string>
+    <string name="panda_setup_usenet_client">İndirme istemcisi</string>
+    <string name="panda_setup_sources_title">Torrent kaynakları</string>
+    <string name="panda_setup_sources_desc">Panda\'nın arayacağı torrent kaynaklarını seç. Varsayılanlar çoğu kullanıcı için iyi çalışır.</string>
+    <string name="panda_setup_usenet_indexer_none">Yok</string>
+    <string name="panda_setup_usenet_indexer_custom">Özel URL</string>
+    <string name="panda_setup_usenet_client_none">Yok</string>
+    <string name="panda_provider_usenet_only_title">Yalnızca Usenet kullan (debrid\'i atla)</string>
+    <string name="panda_provider_usenet_only_subtitle">Debrid yok — Usenet\'i sonraki adımlarda yapılandır</string>
+    <string name="panda_setup_usenet_client_url">İstemci URL</string>
+    <string name="panda_setup_usenet_client_user">İstemci kullanıcı adı</string>
+    <string name="panda_setup_usenet_client_pass">İstemci şifresi</string>
+    <string name="panda_setup_usenet_client_key">İstemci API anahtarı</string>
+    <string name="panda_setup_review_usenet">Usenet</string>
+    <string name="panda_setup_review_indexer">NZB indexer</string>
+    <string name="panda_setup_review_client">İndirme istemcisi</string>
+
     <!-- Category Manager Sheet -->
     <string name="categories_subtitle">Görmek istediğiniz ülkeleri ve kategorileri seçin</string>
     <string name="categories_select_all">Tümünü Seç</string>
@@ -1455,6 +1538,7 @@
     <string name="nav_library">Kütüphane</string>
     <string name="home_search_hint">Film &amp; dizi ara…</string>
     <string name="detail_connect_cloud">Ayarlarda yayın servisini bağla</string>
+    <string name="detail_install_addon">Oynatmak için bir eklenti yükle</string>
     <string name="detail_finding_streams">Kaynaklar aranıyor…</string>
     <string name="settings_cloud_service">Yayın servisi</string>
     <string name="settings_no_playlists">Yapılandırılmış kanal kaynağı yok</string>

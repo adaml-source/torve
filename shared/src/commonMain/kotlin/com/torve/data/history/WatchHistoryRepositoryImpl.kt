@@ -1,5 +1,6 @@
 package com.torve.data.history
 
+import com.torve.data.auth.UserIdProvider
 import com.torve.data.metadata.TmdbApiClient
 import com.torve.data.metadata.TmdbMappers
 import com.torve.data.simkl.SimklClient
@@ -13,6 +14,8 @@ import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.WatchHistoryEntry
+import com.torve.domain.model.extractImdbIdOrNull
+import com.torve.domain.model.extractTmdbIdOrNull
 import com.torve.domain.repository.WatchHistoryRepository
 import kotlinx.datetime.Instant
 
@@ -23,27 +26,40 @@ class WatchHistoryRepositoryImpl(
     private val traktSyncRepo: TraktSyncRepository,
     private val simklClient: SimklClient,
     private val integrationSecretStore: IntegrationSecretStore,
+    private val userIdProvider: UserIdProvider,
 ) : WatchHistoryRepository {
     private val queries get() = database.torveQueries
 
     override suspend fun getRecent(limit: Int): List<WatchHistoryEntry> {
-        return queries.getRecentHistory(limit.toLong()).executeAsList().map { it.toDomain() }
+        return queries.getRecentHistory(
+            userId = userIdProvider.currentUserId(),
+            limit = limit.toLong(),
+        ).executeAsList().map { it.toDomain() }
     }
 
     override suspend fun getByDateRange(startMs: Long, endMs: Long): List<WatchHistoryEntry> {
-        return queries.getHistoryByDate(startMs, endMs).executeAsList().map { it.toDomain() }
+        return queries.getHistoryByDate(
+            userId = userIdProvider.currentUserId(),
+            startMs = startMs,
+            endMs = endMs,
+        ).executeAsList().map { it.toDomain() }
     }
 
     override suspend fun getAll(): List<WatchHistoryEntry> {
-        return queries.getAllHistory().executeAsList().map { it.toDomain() }
+        return queries.getAllHistory(userId = userIdProvider.currentUserId())
+            .executeAsList().map { it.toDomain() }
     }
 
     override suspend fun getForMedia(mediaId: String): List<WatchHistoryEntry> {
-        return queries.getHistoryForMedia(mediaId).executeAsList().map { it.toDomain() }
+        return queries.getHistoryForMedia(
+            userId = userIdProvider.currentUserId(),
+            mediaId = mediaId,
+        ).executeAsList().map { it.toDomain() }
     }
 
     override suspend fun record(entry: WatchHistoryEntry) {
         queries.insertHistory(
+            user_id = userIdProvider.currentUserId(),
             id = entry.id,
             media_id = entry.mediaId,
             media_type = entry.mediaType,
@@ -56,19 +72,21 @@ class WatchHistoryRepositoryImpl(
             episode_number = entry.episodeNumber?.toLong(),
             show_title = entry.showTitle,
         )
-        val tmdbId = entry.mediaId.toIntOrNull() ?: return
+        val tmdbId = entry.mediaId.extractTmdbIdOrNull() ?: return
         val isMovie = entry.mediaType.equals("movie", ignoreCase = true)
+        val imdbId = resolveImdbId(entry.mediaId, isMovie, tmdbId)
         runCatching {
             traktSyncRepo.enqueueHistoryAdd(
                 tmdbId = tmdbId,
                 mediaType = if (isMovie) MediaType.MOVIE else MediaType.SERIES,
-                imdbId = null,
+                imdbId = imdbId,
             )
         }
+        runCatching { traktSyncRepo.flushPendingWrites() }
         runCatching {
             val token = integrationSecretStore.get(IntegrationSecretKey.SIMKL_ACCESS_TOKEN)
             if (!token.isNullOrBlank()) {
-                val ids = SimklIds(tmdb = tmdbId)
+                val ids = SimklIds(tmdb = tmdbId, imdb = imdbId)
                 val body = if (isMovie) {
                     SimklSyncBody(movies = listOf(SimklSyncItem(ids)))
                 } else {
@@ -80,15 +98,18 @@ class WatchHistoryRepositoryImpl(
     }
 
     override suspend fun delete(id: String) {
-        queries.deleteHistory(id)
+        queries.deleteHistory(
+            userId = userIdProvider.currentUserId(),
+            historyId = id,
+        )
     }
 
     override suspend fun clearAll() {
-        queries.clearAllHistory()
+        queries.clearAllHistory(userId = userIdProvider.currentUserId())
     }
 
     override suspend fun getCount(): Long {
-        return queries.getHistoryCount().executeAsOne()
+        return queries.getHistoryCount(userId = userIdProvider.currentUserId()).executeAsOne()
     }
 
     override suspend fun syncFromTrakt() {
@@ -96,7 +117,8 @@ class WatchHistoryRepositoryImpl(
             val historyItems = traktApi.getHistory(limit = 100)
             if (historyItems.isEmpty()) return
 
-            val localIds = queries.getAllHistory().executeAsList()
+            val userId = userIdProvider.currentUserId()
+            val localIds = queries.getAllHistory(userId = userId).executeAsList()
                 .map { it.id }
                 .toSet()
 
@@ -133,6 +155,7 @@ class WatchHistoryRepositoryImpl(
                 } catch (_: Exception) { /* non-critical */ }
 
                 queries.insertHistory(
+                    user_id = userId,
                     id = traktId,
                     media_id = mediaId,
                     media_type = mediaType,
@@ -164,4 +187,19 @@ class WatchHistoryRepositoryImpl(
         episodeNumber = episode_number?.toInt(),
         showTitle = show_title,
     )
+
+    private suspend fun resolveImdbId(
+        mediaId: String,
+        isMovie: Boolean,
+        tmdbId: Int,
+    ): String? {
+        mediaId.extractImdbIdOrNull()?.let { return it }
+        return runCatching {
+            if (isMovie) {
+                tmdbClient.getMovieDetail(tmdbId).imdbId
+            } else {
+                tmdbClient.getTvDetail(tmdbId).externalIds?.imdbId
+            }
+        }.getOrNull()
+    }
 }

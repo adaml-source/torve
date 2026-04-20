@@ -1,10 +1,12 @@
 package com.torve.data.account
 
+import com.torve.data.contentpolicy.ContentChannelProvider
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.delete
 import io.ktor.client.request.get
+import io.ktor.client.request.header
 import io.ktor.client.request.patch
 import io.ktor.client.request.post
 import io.ktor.client.request.put
@@ -33,12 +35,14 @@ private val lenientJson = Json {
 class AccountSettingsApi(
     private val httpClient: HttpClient,
     private val baseUrlProvider: () -> String,
+    private val channelProvider: ContentChannelProvider? = null,
 ) {
     private fun baseUrl() = baseUrlProvider().trimEnd('/')
 
     suspend fun getAccountSettings(accessToken: String): AccountSettingsDto {
         val raw = httpClient.get("${baseUrl()}/me/account-settings") {
             bearerAuth(accessToken)
+            appendChannelHeader()
         }.bodyAsText()
         return parseAccountSettingsResponse(raw)
     }
@@ -51,6 +55,7 @@ class AccountSettingsApi(
         return try {
             httpClient.get("${baseUrl()}/me/integrations") {
                 bearerAuth(accessToken)
+                appendChannelHeader()
             }.body()
         } catch (_: Exception) {
             emptyList()
@@ -71,19 +76,53 @@ class AccountSettingsApi(
         accessToken: String,
         integrationType: String,
     ): Map<String, String>? {
-        return try {
-            val raw = httpClient.get(
-                "${baseUrl()}/me/integrations/$integrationType/credentials",
-            ) {
-                bearerAuth(accessToken)
-            }.bodyAsText()
-            torveVerboseLog { "[IntegrationAPI] GET credentials for $integrationType: ${raw.take(100)}" }
-            val dto: IntegrationCredentialsDto = lenientJson.decodeFromString(raw)
-            dto.credentials
-        } catch (e: Exception) {
-            torveVerboseLog { "[IntegrationAPI] GET credentials FAILED for $integrationType: ${e.message}" }
-            null
+        // Retry transient failures (HTML error page, 5xx, network blip) with
+        // backoff. The backend was observed returning HTML 401 pages right after
+        // login while the auth context warmed up — without retries we'd silently
+        // drop Trakt/Simkl/OMDB credentials and they wouldn't restore until the
+        // next foreground refresh.
+        val backoffsMs = longArrayOf(0L, 800L, 2_500L, 6_000L)
+        var lastError: Throwable? = null
+        for ((attempt, delayMs) in backoffsMs.withIndex()) {
+            if (delayMs > 0) delay(delayMs)
+            try {
+                val response = httpClient.get(
+                    "${baseUrl()}/me/integrations/$integrationType/credentials",
+                ) {
+                    bearerAuth(accessToken)
+                    appendChannelHeader()
+                }
+                val raw = response.bodyAsText()
+                torveVerboseLog {
+                    "[IntegrationAPI] GET credentials for $integrationType (attempt ${attempt + 1}): " +
+                        "status=${response.status.value} body=${raw.take(80)}"
+                }
+                if (!response.status.isSuccess()) {
+                    if (response.status.value == 404) return null
+                    lastError = RuntimeException("HTTP ${response.status.value}")
+                    continue
+                }
+                val trimmed = raw.trimStart()
+                if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+                    // Non-JSON body (HTML error page from a proxy, etc.) — treat as transient.
+                    lastError = RuntimeException("non-JSON body")
+                    continue
+                }
+                val dto: IntegrationCredentialsDto = lenientJson.decodeFromString(raw)
+                return dto.credentials
+            } catch (e: Exception) {
+                lastError = e
+                torveVerboseLog {
+                    "[IntegrationAPI] GET credentials FAILED for $integrationType " +
+                        "(attempt ${attempt + 1}): ${e.message}"
+                }
+            }
         }
+        torveVerboseLog {
+            "[IntegrationAPI] GET credentials gave up for $integrationType after ${backoffsMs.size} attempts: " +
+                "${lastError?.message}"
+        }
+        return null
     }
 
     /**
@@ -102,6 +141,7 @@ class AccountSettingsApi(
             val resp = httpClient.put(url) {
                 bearerAuth(accessToken)
                 contentType(ContentType.Application.Json)
+                appendChannelHeader()
                 setBody(request)
             }
             val ok = resp.status.isSuccess()
@@ -122,6 +162,7 @@ class AccountSettingsApi(
         return try {
             val response = httpClient.get("${baseUrl()}/me/playlists") {
                 bearerAuth(accessToken)
+                appendChannelHeader()
             }
             if (!response.status.isSuccess()) {
                 torveVerboseLog { "[PlaylistAPI] GET playlists FAILED: ${response.status.value}" }
@@ -148,6 +189,7 @@ class AccountSettingsApi(
             val resp = httpClient.put("${baseUrl()}/me/playlists/$playlistId") {
                 bearerAuth(accessToken)
                 contentType(ContentType.Application.Json)
+                appendChannelHeader()
                 setBody(request)
             }
             resp.status.isSuccess()
@@ -160,6 +202,7 @@ class AccountSettingsApi(
         return try {
             httpClient.delete("${baseUrl()}/me/playlists/$playlistId") {
                 bearerAuth(accessToken)
+                appendChannelHeader()
             }.status.isSuccess()
         } catch (_: Exception) {
             false
@@ -174,6 +217,7 @@ class AccountSettingsApi(
             try {
                 val response = httpClient.get("${baseUrl()}/me/playlists/$playlistId/credentials") {
                     bearerAuth(accessToken)
+                    appendChannelHeader()
                 }
                 if (response.status.isSuccess()) {
                     return response.body()
@@ -214,6 +258,7 @@ class AccountSettingsApi(
     ): AccountSettingsDto {
         val raw = httpClient.patch("${baseUrl()}/me/account-settings") {
             bearerAuth(accessToken)
+            appendChannelHeader()
             setBody(AccountSettingsPatchRequest(settings))
         }.bodyAsText()
         return parseAccountSettingsResponse(raw)
@@ -222,6 +267,7 @@ class AccountSettingsApi(
     suspend fun getAddons(accessToken: String): List<AddonDto> {
         val response = httpClient.get("${baseUrl()}/me/addons") {
             bearerAuth(accessToken)
+            appendChannelHeader()
         }
         if (!response.status.isSuccess()) {
             error("GET /me/addons failed (${response.status.value})")
@@ -236,6 +282,7 @@ class AccountSettingsApi(
         val response = httpClient.post("${baseUrl()}/me/addons") {
             bearerAuth(accessToken)
             contentType(ContentType.Application.Json)
+            appendChannelHeader()
             setBody(request)
         }
         if (!response.status.isSuccess()) {
@@ -247,6 +294,7 @@ class AccountSettingsApi(
     suspend fun removeAddon(accessToken: String, serverId: String) {
         val response = httpClient.delete("${baseUrl()}/me/addons/$serverId") {
             bearerAuth(accessToken)
+            appendChannelHeader()
         }
         if (!response.status.isSuccess()) {
             error("DELETE /me/addons/$serverId failed (${response.status.value})")
@@ -256,6 +304,7 @@ class AccountSettingsApi(
     suspend fun toggleAddon(accessToken: String, serverId: String): AddonDto {
         val response = httpClient.post("${baseUrl()}/me/addons/$serverId/toggle") {
             bearerAuth(accessToken)
+            appendChannelHeader()
         }
         if (!response.status.isSuccess()) {
             error("POST /me/addons/$serverId/toggle failed (${response.status.value})")
@@ -271,12 +320,17 @@ class AccountSettingsApi(
         val response = httpClient.patch("${baseUrl()}/me/addons/$serverId") {
             bearerAuth(accessToken)
             contentType(ContentType.Application.Json)
+            appendChannelHeader()
             setBody(request)
         }
         if (!response.status.isSuccess()) {
             error("PATCH /me/addons/$serverId failed (${response.status.value})")
         }
         return response.body()
+    }
+
+    private fun io.ktor.client.request.HttpRequestBuilder.appendChannelHeader() {
+        channelProvider?.channel?.let { header("X-Torve-Channel", it) }
     }
 }
 
@@ -440,6 +494,11 @@ data class AddonDto(
     val sortOrder: Int = 0,
     @SerialName("installed_from")
     val installedFrom: String = "app",
+    val installable: Boolean? = null,
+    @SerialName("shelf_eligible")
+    val shelfEligible: Boolean? = null,
+    @SerialName("catalog_queryable")
+    val catalogQueryable: Boolean? = null,
     @SerialName("created_at")
     val createdAt: String,
     @SerialName("updated_at")

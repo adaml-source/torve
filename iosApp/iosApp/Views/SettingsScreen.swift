@@ -119,12 +119,8 @@ struct SettingsScreen: View {
 
     private var servicesSection: some View {
         Section("Services") {
-            NavigationLink(value: Route.debridSettings) {
-                HStack {
-                    Label("Cloud Service", systemImage: "server.rack")
-                    Spacer()
-                    statusDot(wrapper.state.debridConnected)
-                }
+            NavigationLink(value: Route.pandaSetup) {
+                Label("Panda (guided setup)", systemImage: "wand.and.stars")
             }
             NavigationLink(value: Route.traktSettings) {
                 HStack {

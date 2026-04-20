@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.items
@@ -50,6 +51,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -92,12 +94,14 @@ import com.torve.domain.model.HomeSectionConfig
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.PersonSummary
 import com.torve.domain.model.MediaType
+import com.torve.domain.model.RatingSource
 import com.torve.domain.model.ShelfType
 import com.torve.domain.model.WatchProgress
 import com.torve.domain.model.matchesSection
 import com.torve.domain.model.resolveCardStyle
 import com.torve.domain.model.resolvedWidthDp
 import com.torve.domain.recommendation.ScoredMediaItem
+import com.torve.data.auth.AuthClient
 import com.torve.presentation.home.HomeViewModel
 import com.torve.presentation.seeall.SeeAllViewModel
 import com.torve.presentation.watchlist.WatchlistViewModel
@@ -123,10 +127,13 @@ fun HomeScreen(
     viewModel: HomeViewModel = koinInject(),
     watchlistViewModel: WatchlistViewModel = koinInject(),
     settingsViewModel: com.torve.presentation.settings.SettingsViewModel = koinInject(),
+    authClient: AuthClient = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
     val watchlistState by watchlistViewModel.state.collectAsState()
+    val authUser by authClient.authUserFlow.collectAsState()
+    val isSignedIn = authUser != null
     val sectionConfigs by viewModel.sectionConfigs.collectAsState()
     val enabledServiceIds by viewModel.enabledServiceIds.collectAsState()
     val customSections by viewModel.customSections.collectAsState()
@@ -139,6 +146,7 @@ fun HomeScreen(
     val watchlistLocked = remember(accessTier) {
         PremiumAccess.isPremiumLocked(PremiumFeature.WATCHLIST_EDIT, accessTier)
     }
+    val homeListState = rememberLazyListState()
 
     // Filter by media type for TV Shows / Movies tab reuse
     val filteredShelves = remember(state.shelves, mediaType) {
@@ -209,7 +217,7 @@ fun HomeScreen(
     )
     androidx.compose.runtime.CompositionLocalProvider(
         LocalCardStyle provides defaultCardStyle,
-        LocalRatingPrefs provides defaultCardStyle.ratingPrefs,
+        LocalRatingPrefs provides settingsState.ratingPrefs,
     ) {
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         when {
@@ -272,6 +280,7 @@ fun HomeScreen(
 
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
+                    state = homeListState,
                     contentPadding = PaddingValues(bottom = 24.dp),
                 ) {
                     enabledItems.forEach { item ->
@@ -313,7 +322,7 @@ fun HomeScreen(
                                 }
                             }
 
-                            HomeSection.CONTINUE_WATCHING -> {
+                            HomeSection.CONTINUE_WATCHING -> if (isSignedIn) {
                                 if (filteredContinueWatching.isNotEmpty()) {
                                     item(key = "continue_watching") {
                                         androidx.compose.runtime.CompositionLocalProvider(
@@ -351,7 +360,7 @@ fun HomeScreen(
                                 }
                             }
 
-                            HomeSection.WATCHLIST -> {
+                            HomeSection.WATCHLIST -> if (isSignedIn) {
                                 item(key = "watchlist") {
                                     androidx.compose.runtime.CompositionLocalProvider(
                                         LocalCardStyle provides sectionStyle,
@@ -386,7 +395,7 @@ fun HomeScreen(
                                 }
                             }
 
-                            HomeSection.WATCHLIST_MOVIES -> {
+                            HomeSection.WATCHLIST_MOVIES -> if (isSignedIn) {
                                 if (watchlistMovies.isNotEmpty()) {
                                     item(key = "watchlist_movies") {
                                         androidx.compose.runtime.CompositionLocalProvider(
@@ -416,7 +425,7 @@ fun HomeScreen(
                                 }
                             }
 
-                            HomeSection.WATCHLIST_TV -> {
+                            HomeSection.WATCHLIST_TV -> if (isSignedIn) {
                                 if (watchlistTv.isNotEmpty()) {
                                     item(key = "watchlist_tv") {
                                         androidx.compose.runtime.CompositionLocalProvider(
@@ -731,6 +740,18 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                // Show existing results while loading new ones to avoid flicker
+                items(
+                    state.searchResults.size,
+                    key = { index -> "${state.searchResults[index].id}_$index" },
+                ) { index ->
+                    val item = state.searchResults[index]
+                    PosterCard(
+                        item = item,
+                        sizeOverride = CardSize.MEDIUM,
+                        onClick = { onMediaClick(item) },
+                    )
+                }
                 if (state.isSearching) {
                     item(
                         key = "loading",
@@ -745,35 +766,22 @@ fun HomeScreen(
                             CircularProgressIndicator(color = Amber, modifier = Modifier.size(24.dp))
                         }
                     }
-                } else {
-                    items(
-                        state.searchResults.size,
-                        key = { index -> "${state.searchResults[index].id}_$index" },
-                    ) { index ->
-                        val item = state.searchResults[index]
-                        PosterCard(
-                            item = item,
-                            sizeOverride = CardSize.MEDIUM,
-                            onClick = { onMediaClick(item) },
-                        )
-                    }
-                    if (state.searchResults.isEmpty()) {
-                        item(
-                            key = "empty",
-                            span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) },
+                } else if (state.searchResults.isEmpty()) {
+                    item(
+                        key = "empty",
+                        span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) },
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(48.dp),
+                            contentAlignment = Alignment.Center,
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(48.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    text = stringResource(R.string.search_no_results),
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = Torve.colors.textSecondary,
-                                )
-                            }
+                            Text(
+                                text = stringResource(R.string.search_no_results),
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = Torve.colors.textSecondary,
+                            )
                         }
                     }
                 }
@@ -883,6 +891,7 @@ private fun HeroSlide(
     onWatchlistClick: () -> Unit = {},
 ) {
     val screenHeight = LocalConfiguration.current.screenHeightDp
+    val ratingPrefs = LocalRatingPrefs.current
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -890,9 +899,12 @@ private fun HeroSlide(
             .clickable(onClick = onClick),
     ) {
         // Backdrop image — full bleed
+        // Content-policy hardening: locked items never request real artwork
+        val heroImageModel = if (item.isContentPlaceholder || item.isStubDetail) null
+            else item.backdropUrl ?: item.posterUrl
         AsyncImage(
-            model = item.backdropUrl ?: item.posterUrl,
-            contentDescription = item.title,
+            model = heroImageModel,
+            contentDescription = if (item.isContentPlaceholder || item.isStubDetail) null else item.title,
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop,
         )
@@ -940,13 +952,15 @@ private fun HeroSlide(
                         color = Snow.copy(alpha = 0.7f),
                     )
                 }
-                item.rating?.let { rating ->
-                    if (rating > 0) {
-                        Text(
-                            text = "  \u2022  \u2605 ${"%.1f".format(rating)}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Amber.copy(alpha = 0.9f),
-                        )
+                if (RatingSource.TMDB in ratingPrefs.enabledProviders) {
+                    item.rating?.let { rating ->
+                        if (rating > 0) {
+                            Text(
+                                text = "  \u2022  \u2605 ${"%.1f".format(rating)}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Amber.copy(alpha = 0.9f),
+                            )
+                        }
                     }
                 }
             }
@@ -1062,9 +1076,12 @@ fun ContinueWatchingCard(
                 .height(124.dp)
                 .clip(RoundedCornerShape(8.dp)),
         ) {
+            // Content-policy hardening: placeholder items get no real image
+            val cwImageModel = if (progress.isContentPlaceholder) null
+                else progress.backdropUrl ?: progress.posterUrl
             AsyncImage(
-                model = progress.backdropUrl ?: progress.posterUrl,
-                contentDescription = progress.title,
+                model = cwImageModel,
+                contentDescription = if (progress.isContentPlaceholder) null else progress.title,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
             )
@@ -1155,6 +1172,7 @@ fun CatalogShelf(
     modifier: Modifier = Modifier,
 ) {
     val baseStyle = cardStyleOverride ?: LocalCardStyle.current
+    val shelfListState = rememberLazyListState()
     val shelfSizeOverride = if (cardStyleOverride == null) {
         when (shelfType) {
             ShelfType.LANDSCAPE, ShelfType.WIDE -> CardSize.LANDSCAPE
@@ -1171,6 +1189,7 @@ fun CatalogShelf(
             )
 
             LazyRow(
+                state = shelfListState,
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {

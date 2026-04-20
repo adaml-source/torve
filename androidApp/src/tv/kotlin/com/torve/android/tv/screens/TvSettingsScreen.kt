@@ -62,6 +62,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.torve.android.ui.theme.*
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -85,7 +86,6 @@ import com.torve.android.tv.premium.TvEntitledFeature
 import com.torve.android.tv.premium.TvPremiumAccess
 import com.torve.android.ui.settings.POPULAR_ADDONS
 import com.torve.data.ai.AiProvider
-import com.torve.domain.model.DebridServiceType
 import com.torve.domain.model.StreamQuality
 import com.torve.domain.player.LiveAudioOutputMode
 import com.torve.presentation.addon.AddonViewModel
@@ -109,6 +109,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import kotlinx.coroutines.launch
 import com.torve.android.premium.rememberEffectivePremiumAccessTier
+import com.torve.android.util.findActivity
 import org.koin.compose.koinInject
 
 enum class TvSetupMode { ANDROID_PHONE, IOS_PHONE, TV_ONLY }
@@ -225,6 +226,7 @@ internal fun TvSettingsScreen(
     ratingsFocusRequester: FocusRequester? = null,
     onNavigateToHomeLayout: () -> Unit = {},
     onNavigateToRatings: () -> Unit = {},
+    onNavigateToPandaSetup: () -> Unit = {},
     onNavigateToPairedDevices: (String) -> Unit = {},
     onNavigateToActivatedDevices: (String) -> Unit = {},
     onAuthSuccess: () -> Unit = {},
@@ -588,8 +590,6 @@ internal fun TvSettingsScreen(
     val authEmailRequester = remember { FocusRequester() }
     val accountSyncStatusCardRequester = remember { FocusRequester() }
     val accountSyncErrorCardRequester = remember { FocusRequester() }
-    val cloudProviderCardRequester = remember { FocusRequester() }
-    val cloudServiceCardRequester = remember { FocusRequester() }
 
     // Restore focus after addon list changes (install or uninstall).
     // Observe both isInstalling and addon count. When either transitions and a card
@@ -1048,22 +1048,6 @@ internal fun TvSettingsScreen(
             focusTargetType = "navigation",
         )
     }
-    val connectionsCloudProviderTarget = remember {
-        TvSettingsFocusTarget(
-            itemId = TvSettingsItemIds.CONNECTIONS_CLOUD_PROVIDER,
-            category = TvSettingsCategory.CONNECTIONS,
-            listIndex = 10,
-            focusTargetType = "selector",
-        )
-    }
-    val connectionsCloudServiceTarget = remember {
-        TvSettingsFocusTarget(
-            itemId = TvSettingsItemIds.CONNECTIONS_CLOUD_SERVICE,
-            category = TvSettingsCategory.CONNECTIONS,
-            listIndex = 11,
-            focusTargetType = "action",
-        )
-    }
     val connectionsTraktTarget = remember {
         TvSettingsFocusTarget(
             itemId = TvSettingsItemIds.CONNECTIONS_TRAKT,
@@ -1388,7 +1372,6 @@ internal fun TvSettingsScreen(
     }
 
     // String resources captured in composition scope
-    val cloudServiceLabel = stringResource(R.string.tv_settings_cloud_service)
     val traktLabel = stringResource(R.string.tv_settings_trakt)
     val simklLabel = stringResource(R.string.tv_settings_simkl)
     val languageLabel = stringResource(R.string.tv_settings_language)
@@ -1413,16 +1396,6 @@ internal fun TvSettingsScreen(
         else -> notPairedLabel
     }
     val qualitySubtitle = "${settingsState.minQuality.name} – ${settingsState.maxQuality.name}"
-
-    // Debrid subtitle for TV-only mode
-    val debridSubtitle = when {
-        settingsState.isPollingDebrid || settingsState.debridDeviceCode != null -> {
-            val code = settingsState.debridDeviceCode
-            if (code != null) "Visit ${code.verificationUrl}\nCode: ${code.userCode}" else "Starting…"
-        }
-        settingsState.debridConnected -> "${settingsState.debridProvider.label} — $connectedLabel"
-        else -> "${settingsState.debridProvider.label} — $notConnectedLabel"
-    }
 
     // Trakt subtitle
     val traktSubtitle = when {
@@ -2950,36 +2923,18 @@ internal fun TvSettingsScreen(
                         description = stringResource(R.string.tv_settings_linked_services_desc),
                     )
                 }
-                item(key = "cloud_service") {
-                    val requester = rememberSettingsRowRequester(
-                        target = connectionsCloudServiceTarget,
-                        externalRequester = cloudServiceCardRequester,
-                    )
-                    val sub = if (settingsState.debridConnected) {
-                        "${settingsState.debridProvider.label} — $connectedLabel"
-                    } else notConnectedLabel
+                item(key = "panda_setup") {
+                    val requester = remember("panda_setup") { FocusRequester() }
                     TvSettingCard(
-                        title = cloudServiceLabel,
-                        subtitle = sub,
-                        modifier = Modifier.fillMaxWidth().focusProperties {
-                            left = railFocusRequester
-                            up = if (accountSettingsState.lastError != null) {
-                                accountSyncErrorCardRequester
-                            } else {
-                                accountSyncStatusCardRequester
-                            }
-                        },
+                        title = stringResource(R.string.panda_setup_title),
+                        subtitle = stringResource(R.string.setup_panda_desc),
+                        modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                         focusRequester = requester,
-                        onFocused = { onSettingsRowFocused(connectionsCloudServiceTarget, requester) },
-                        onClick = {
-                            onRequestLifetimeUnlock(TvEntitledFeature.CLOUD_PROVIDER_SETUP)
-                        },
+                        onFocused = { },
+                        onClick = { onNavigateToPandaSetup() },
                         rowType = TvSettingRowType.ACTION,
-                        emphasis = TvSettingEmphasis.SECONDARY,
-                        premiumLocked = isLockedFeature(TvEntitledFeature.CLOUD_PROVIDER_SETUP),
                     )
                 }
-
                 item(key = "trakt") {
                     val requester = remember("trakt") { FocusRequester() }
                     val sub = if (settingsState.traktConnected) {
@@ -3106,8 +3061,6 @@ internal fun TvSettingsScreen(
 
             TvSetupMode.TV_ONLY -> {
                 // TV-only: self-service device code auth
-
-                // Cloud Provider (cycle)
                 if (selectedCategory == TvSettingsCategory.CONNECTIONS) {
                     item(key = "section_connections_tv_accounts") {
                         TvSectionHeader(
@@ -3115,67 +3068,19 @@ internal fun TvSettingsScreen(
                             description = stringResource(R.string.tv_settings_streaming_accounts_desc),
                         )
                     }
-                    item(key = "cloud_provider") {
-                    val requester = rememberSettingsRowRequester(
-                        target = connectionsCloudProviderTarget,
-                        externalRequester = cloudProviderCardRequester,
-                    )
-                    val providers = remember { DebridServiceType.entries.toList() }
-                    val currentIdx = remember(settingsState.debridProvider) {
-                        providers.indexOf(settingsState.debridProvider).coerceAtLeast(0)
+                    item(key = "panda_setup") {
+                        val requester = remember("panda_setup_tvonly") { FocusRequester() }
+                        TvSettingCard(
+                            title = stringResource(R.string.panda_setup_title),
+                            subtitle = stringResource(R.string.setup_panda_desc),
+                            modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                            focusRequester = requester,
+                            onFocused = { },
+                            onClick = { onNavigateToPandaSetup() },
+                            rowType = TvSettingRowType.ACTION,
+                        )
                     }
-                    TvSettingCard(
-                        title = stringResource(R.string.tv_settings_change_provider),
-                        subtitle = settingsState.debridProvider.label,
-                        modifier = Modifier.fillMaxWidth().focusProperties {
-                            left = railFocusRequester
-                            up = if (accountSettingsState.lastError != null) {
-                                accountSyncErrorCardRequester
-                            } else {
-                                accountSyncStatusCardRequester
-                            }
-                        },
-                        focusRequester = requester,
-                        onFocused = { onSettingsRowFocused(connectionsCloudProviderTarget, requester) },
-                        onClick = {
-                            runPremiumAction(TvEntitledFeature.CLOUD_PROVIDER_SETUP) {
-                                val next = (currentIdx + 1) % providers.size
-                                settingsViewModel.setDebridProvider(providers[next])
-                            }
-                        },
-                        rowType = TvSettingRowType.SELECTOR,
-                        premiumLocked = isLockedFeature(TvEntitledFeature.CLOUD_PROVIDER_SETUP),
-                    )
-                }
-
-                // Cloud Service (device code auth)
-                item(key = "cloud_service") {
-                    val requester = rememberSettingsRowRequester(
-                        target = connectionsCloudServiceTarget,
-                        externalRequester = cloudServiceCardRequester,
-                    )
-                    TvSettingCard(
-                        title = cloudServiceLabel,
-                        subtitle = debridSubtitle,
-                        modifier = Modifier.fillMaxWidth().focusProperties {
-                            left = railFocusRequester
-                            up = cloudProviderCardRequester
-                        },
-                        focusRequester = requester,
-                        onFocused = { onSettingsRowFocused(connectionsCloudServiceTarget, requester) },
-                        onClick = {
-                            runPremiumAction(TvEntitledFeature.CLOUD_PROVIDER_SETUP) {
-                                if (!settingsState.debridConnected && !settingsState.isPollingDebrid) {
-                                    settingsViewModel.startDebridDeviceAuth()
-                                }
-                            }
-                        },
-                        rowType = TvSettingRowType.ACTION,
-                        premiumLocked = isLockedFeature(TvEntitledFeature.CLOUD_PROVIDER_SETUP),
-                    )
-                }
-
-                // Trakt (device code auth)
+                    // Trakt (device code auth)
                 item(key = "trakt") {
                     val requester = rememberSettingsRowRequester(
                         target = connectionsTraktTarget,
@@ -5419,6 +5324,7 @@ internal fun TvSettingsScreen(
                 AppCompatDelegate.setApplicationLocales(
                     LocaleListCompat.forLanguageTags(lang.code),
                 )
+                context.findActivity()?.recreate()
                 logSettingsFocus("language_applied code=${lang.code} display=${lang.tvDisplayName()}")
                 settingsFocusController.selectedCategory = TvSettingsCategory.APPEARANCE
                 showLanguagePicker = false
@@ -5606,6 +5512,9 @@ private fun TvSettingsTopCategoryChip(
             style = MaterialTheme.typography.titleMedium,
             color = if (focused || selected) Snow else Silver,
             fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f, fill = false),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
         if (isLocked) {
             Icon(
@@ -5620,6 +5529,8 @@ private fun TvSettingsTopCategoryChip(
                 text = value,
                 style = MaterialTheme.typography.labelSmall,
                 color = Ash,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .clip(RoundedCornerShape(999.dp))
                     .background(Color.Black.copy(alpha = 0.25f))
@@ -5759,6 +5670,8 @@ private fun TvListPickerOverlay(
                             style = MaterialTheme.typography.titleMedium,
                             color = if (isSelected || focused) Snow else Silver,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
@@ -6074,6 +5987,8 @@ internal fun TvSettingCard(
                 },
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             if (premiumLocked) {
                 TvPremiumLockChip(focused = focused)
@@ -6085,7 +6000,8 @@ internal fun TvSettingCard(
                 text = subtitle,
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (focused) Snow else Silver,
-                maxLines = if (focused) 3 else 1,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(top = 6.dp),
             )
         }

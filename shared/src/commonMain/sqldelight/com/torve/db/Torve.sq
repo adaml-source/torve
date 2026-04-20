@@ -18,9 +18,10 @@ DELETE FROM metadata_cache WHERE cached_at < ?;
 deleteAllMetadataCache:
 DELETE FROM metadata_cache;
 
--- Watch progress tracking
+-- Watch progress tracking (user-scoped)
 CREATE TABLE watch_progress (
-    media_id TEXT NOT NULL PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT '',
+    media_id TEXT NOT NULL,
     media_type TEXT NOT NULL,
     title TEXT NOT NULL,
     poster_url TEXT,
@@ -30,44 +31,47 @@ CREATE TABLE watch_progress (
     season_number INTEGER,
     episode_number INTEGER,
     show_title TEXT,
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, media_id)
 );
 
 getInProgress:
-SELECT * FROM watch_progress WHERE position_ms > 0 AND (CAST(position_ms AS REAL) / duration_ms) < 0.9 ORDER BY updated_at DESC LIMIT ?;
+SELECT * FROM watch_progress WHERE user_id = :userId AND position_ms > 0 AND (CAST(position_ms AS REAL) / duration_ms) < 0.85 ORDER BY updated_at DESC LIMIT :limit;
 
 getAllProgress:
-SELECT * FROM watch_progress ORDER BY updated_at DESC;
+SELECT * FROM watch_progress WHERE user_id = :userId ORDER BY updated_at DESC;
 
 getProgress:
-SELECT * FROM watch_progress WHERE media_id = ?;
+SELECT * FROM watch_progress WHERE user_id = :userId AND media_id = :mediaId;
 
 upsertProgress:
-INSERT OR REPLACE INTO watch_progress (media_id, media_type, title, poster_url, backdrop_url, position_ms, duration_ms, season_number, episode_number, show_title, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO watch_progress (user_id, media_id, media_type, title, poster_url, backdrop_url, position_ms, duration_ms, season_number, episode_number, show_title, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 deleteProgressByMediaId:
-DELETE FROM watch_progress WHERE media_id = ?;
+DELETE FROM watch_progress WHERE user_id = :userId AND media_id = :mediaId;
 
 clearAllProgress:
-DELETE FROM watch_progress;
+DELETE FROM watch_progress WHERE user_id = :userId;
 
--- User preferences key-value store
+-- User preferences key-value store (user-scoped)
 CREATE TABLE preference (
-    key TEXT NOT NULL PRIMARY KEY,
-    value TEXT NOT NULL
+    user_id TEXT NOT NULL DEFAULT '',
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY (user_id, key)
 );
 
 getPreference:
-SELECT value FROM preference WHERE key = ?;
+SELECT value FROM preference WHERE user_id = :userId AND key = :key;
 
 setPreference:
-INSERT OR REPLACE INTO preference (key, value) VALUES (?, ?);
+INSERT OR REPLACE INTO preference (user_id, key, value) VALUES (?, ?, ?);
 
 getAllPreferences:
-SELECT * FROM preference;
+SELECT * FROM preference WHERE user_id = :userId;
 
 deletePreference:
-DELETE FROM preference WHERE key = ?;
+DELETE FROM preference WHERE user_id = :userId AND key = :key;
 
 -- Installed addons
 CREATE TABLE addon (
@@ -121,34 +125,37 @@ SET server_id = NULL, synced_at = NULL;
 deleteAddon:
 DELETE FROM addon WHERE manifest_url = ?;
 
--- Debrid accounts
+-- Debrid accounts (user-scoped)
 CREATE TABLE debrid_account (
-    service TEXT NOT NULL PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT '',
+    service TEXT NOT NULL,
     api_key TEXT NOT NULL,
     username TEXT,
     email TEXT,
     premium_until TEXT,
-    is_active INTEGER NOT NULL DEFAULT 1
+    is_active INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (user_id, service)
 );
 
 getActiveDebridAccounts:
-SELECT * FROM debrid_account WHERE is_active = 1;
+SELECT * FROM debrid_account WHERE user_id = :userId AND is_active = 1;
 
 getDebridAccount:
-SELECT * FROM debrid_account WHERE service = ?;
+SELECT * FROM debrid_account WHERE user_id = :userId AND service = :service;
 
 insertDebridAccount:
-INSERT OR REPLACE INTO debrid_account (service, api_key, username, email, premium_until, is_active) VALUES (?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO debrid_account (user_id, service, api_key, username, email, premium_until, is_active) VALUES (?, ?, ?, ?, ?, ?, ?);
 
 deleteDebridAccount:
-DELETE FROM debrid_account WHERE service = ?;
+DELETE FROM debrid_account WHERE user_id = :userId AND service = :service;
 
 deleteAllDebridAccounts:
-DELETE FROM debrid_account;
+DELETE FROM debrid_account WHERE user_id = :userId;
 
--- IPTV playlists
+-- IPTV playlists (user-scoped)
 CREATE TABLE iptv_playlist (
-    id TEXT NOT NULL PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT '',
+    id TEXT NOT NULL,
     name TEXT NOT NULL,
     url TEXT NOT NULL,
     epg_url TEXT,
@@ -157,28 +164,29 @@ CREATE TABLE iptv_playlist (
     type TEXT NOT NULL DEFAULT 'm3u',
     server TEXT,
     username TEXT,
-    password TEXT
+    password TEXT,
+    PRIMARY KEY (user_id, id)
 );
 
 getAllPlaylists:
-SELECT * FROM iptv_playlist ORDER BY name ASC;
+SELECT * FROM iptv_playlist WHERE user_id = :userId ORDER BY name ASC;
 
 getPlaylist:
-SELECT * FROM iptv_playlist WHERE id = ?;
+SELECT * FROM iptv_playlist WHERE user_id = :userId AND id = :playlistId;
 
 insertPlaylist:
-INSERT OR REPLACE INTO iptv_playlist (id, name, url, epg_url, channel_count, last_updated, type, server, username, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO iptv_playlist (user_id, id, name, url, epg_url, channel_count, last_updated, type, server, username, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 updatePlaylistEpgUrl:
 UPDATE iptv_playlist
 SET epg_url = ?, last_updated = ?
-WHERE id = ?;
+WHERE user_id = :userId AND id = :playlistId;
 
 deletePlaylist:
-DELETE FROM iptv_playlist WHERE id = ?;
+DELETE FROM iptv_playlist WHERE user_id = :userId AND id = :playlistId;
 
 deleteAllPlaylists:
-DELETE FROM iptv_playlist;
+DELETE FROM iptv_playlist WHERE user_id = :userId;
 
 -- Persisted IPTV channel catalog snapshots
 CREATE TABLE iptv_channel (
@@ -317,53 +325,57 @@ DELETE FROM iptv_channel WHERE playlist_id = ?;
 deleteAllChannels:
 DELETE FROM iptv_channel;
 
--- IPTV favorite channels
+-- IPTV favorite channels (user-scoped)
 CREATE TABLE iptv_favorite (
-    channel_id TEXT NOT NULL PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT '',
+    channel_id TEXT NOT NULL,
     playlist_id TEXT NOT NULL,
     name TEXT NOT NULL,
     logo_url TEXT,
     group_title TEXT,
-    added_at INTEGER NOT NULL
+    added_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, channel_id)
 );
 
 getAllFavorites:
-SELECT * FROM iptv_favorite ORDER BY name ASC;
+SELECT * FROM iptv_favorite WHERE user_id = :userId ORDER BY name ASC;
 
 insertFavorite:
-INSERT OR REPLACE INTO iptv_favorite (channel_id, playlist_id, name, logo_url, group_title, added_at) VALUES (?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO iptv_favorite (user_id, channel_id, playlist_id, name, logo_url, group_title, added_at) VALUES (?, ?, ?, ?, ?, ?, ?);
 
 deleteFavorite:
-DELETE FROM iptv_favorite WHERE channel_id = ?;
+DELETE FROM iptv_favorite WHERE user_id = :userId AND channel_id = :channelId;
 
 isFavorite:
-SELECT COUNT(*) FROM iptv_favorite WHERE channel_id = ?;
+SELECT COUNT(*) FROM iptv_favorite WHERE user_id = :userId AND channel_id = :channelId;
 
 deleteAllFavorites:
-DELETE FROM iptv_favorite;
+DELETE FROM iptv_favorite WHERE user_id = :userId;
 
--- Recently viewed IPTV channels
+-- Recently viewed IPTV channels (user-scoped)
 CREATE TABLE iptv_recent (
-    channel_id TEXT NOT NULL PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT '',
+    channel_id TEXT NOT NULL,
     playlist_id TEXT NOT NULL,
     name TEXT NOT NULL,
     logo_url TEXT,
     group_title TEXT,
     stream_url TEXT NOT NULL,
-    viewed_at INTEGER NOT NULL
+    viewed_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, channel_id)
 );
 
 getRecentChannels:
-SELECT * FROM iptv_recent ORDER BY viewed_at DESC LIMIT ?;
+SELECT * FROM iptv_recent WHERE user_id = :userId ORDER BY viewed_at DESC LIMIT :limit;
 
 insertRecentChannel:
-INSERT OR REPLACE INTO iptv_recent (channel_id, playlist_id, name, logo_url, group_title, stream_url, viewed_at) VALUES (?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO iptv_recent (user_id, channel_id, playlist_id, name, logo_url, group_title, stream_url, viewed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 
 deleteOldRecentChannels:
-DELETE FROM iptv_recent WHERE viewed_at < ?;
+DELETE FROM iptv_recent WHERE user_id = :userId AND viewed_at < :cutoffMs;
 
 clearRecentChannels:
-DELETE FROM iptv_recent;
+DELETE FROM iptv_recent WHERE user_id = :userId;
 
 -- IPTV category visibility and order
 CREATE TABLE iptv_category_config (
@@ -501,9 +513,10 @@ DELETE FROM iptv_epg_programme WHERE playlist_id = ? AND generation_id = ?;
 deleteEpgProgrammesOlderGenerations:
 DELETE FROM iptv_epg_programme WHERE playlist_id = ? AND generation_id != ?;
 
--- Download queue
+-- Download queue (user-scoped)
 CREATE TABLE download_queue (
-    id TEXT NOT NULL PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT '',
+    id TEXT NOT NULL,
     media_id TEXT NOT NULL,
     media_type TEXT NOT NULL,
     title TEXT NOT NULL,
@@ -517,38 +530,39 @@ CREATE TABLE download_queue (
     episode_number INTEGER,
     created_at INTEGER NOT NULL,
     completed_at INTEGER,
-    bulk_group_id TEXT
+    bulk_group_id TEXT,
+    PRIMARY KEY (user_id, id)
 );
 
 getAllDownloads:
-SELECT * FROM download_queue ORDER BY created_at DESC;
+SELECT * FROM download_queue WHERE user_id = :userId ORDER BY created_at DESC;
 
 getPendingDownloads:
-SELECT * FROM download_queue WHERE status = 'pending' OR status = 'downloading' ORDER BY created_at ASC;
+SELECT * FROM download_queue WHERE user_id = :userId AND (status = 'pending' OR status = 'downloading') ORDER BY created_at ASC;
 
 getCompletedDownloads:
-SELECT * FROM download_queue WHERE status = 'completed' ORDER BY completed_at DESC;
+SELECT * FROM download_queue WHERE user_id = :userId AND status = 'completed' ORDER BY completed_at DESC;
 
 getDownload:
-SELECT * FROM download_queue WHERE id = ?;
+SELECT * FROM download_queue WHERE user_id = :userId AND id = :downloadId;
 
 getDownloadByMediaId:
-SELECT * FROM download_queue WHERE media_id = ?;
+SELECT * FROM download_queue WHERE user_id = :userId AND media_id = :mediaId;
 
 insertDownload:
-INSERT OR REPLACE INTO download_queue (id, media_id, media_type, title, poster_url, stream_url, file_path, file_size_bytes, downloaded_bytes, status, season_number, episode_number, created_at, completed_at, bulk_group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO download_queue (user_id, id, media_id, media_type, title, poster_url, stream_url, file_path, file_size_bytes, downloaded_bytes, status, season_number, episode_number, created_at, completed_at, bulk_group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 updateDownloadProgress:
-UPDATE download_queue SET downloaded_bytes = ?, status = ? WHERE id = ?;
+UPDATE download_queue SET downloaded_bytes = ?, status = ? WHERE user_id = :userId AND id = :downloadId;
 
 updateDownloadCompleted:
-UPDATE download_queue SET status = 'completed', file_path = ?, completed_at = ? WHERE id = ?;
+UPDATE download_queue SET status = 'completed', file_path = ?, completed_at = ? WHERE user_id = :userId AND id = :downloadId;
 
 updateDownloadFileSize:
-UPDATE download_queue SET file_size_bytes = ? WHERE id = ?;
+UPDATE download_queue SET file_size_bytes = ? WHERE user_id = :userId AND id = :downloadId;
 
 deleteDownload:
-DELETE FROM download_queue WHERE id = ?;
+DELETE FROM download_queue WHERE user_id = :userId AND id = :downloadId;
 
 -- Subscription
 CREATE TABLE subscription (
@@ -570,63 +584,68 @@ INSERT OR REPLACE INTO subscription (id, tier, purchase_token, expires_at, is_ac
 deactivateAllSubscriptions:
 UPDATE subscription SET is_active = 0;
 
--- User Profiles
+-- User Profiles (user-scoped — each Torve account has its own set of profiles)
 CREATE TABLE user_profile (
-    id TEXT NOT NULL PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT '',
+    id TEXT NOT NULL,
     name TEXT NOT NULL,
     avatar_index INTEGER NOT NULL DEFAULT 0,
     is_active INTEGER NOT NULL DEFAULT 0,
     pin TEXT,
     max_content_rating TEXT,
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, id)
 );
 
 getAllProfiles:
-SELECT * FROM user_profile ORDER BY created_at ASC;
+SELECT * FROM user_profile WHERE user_id = :userId ORDER BY created_at ASC;
 
 getActiveProfile:
-SELECT * FROM user_profile WHERE is_active = 1 LIMIT 1;
+SELECT * FROM user_profile WHERE user_id = :userId AND is_active = 1 LIMIT 1;
 
 getProfile:
-SELECT * FROM user_profile WHERE id = ?;
+SELECT * FROM user_profile WHERE user_id = :userId AND id = :profileId;
 
 insertProfile:
-INSERT OR REPLACE INTO user_profile (id, name, avatar_index, is_active, pin, max_content_rating, created_at) VALUES (?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO user_profile (user_id, id, name, avatar_index, is_active, pin, max_content_rating, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 
 setActiveProfile:
-UPDATE user_profile SET is_active = CASE WHEN id = ? THEN 1 ELSE 0 END;
+UPDATE user_profile SET is_active = CASE WHEN id = :profileId THEN 1 ELSE 0 END WHERE user_id = :userId;
 
 updateProfileName:
-UPDATE user_profile SET name = ? WHERE id = ?;
+UPDATE user_profile SET name = ? WHERE user_id = :userId AND id = :profileId;
 
 updateProfilePin:
-UPDATE user_profile SET pin = ? WHERE id = ?;
+UPDATE user_profile SET pin = ? WHERE user_id = :userId AND id = :profileId;
 
 updateProfileRating:
-UPDATE user_profile SET max_content_rating = ? WHERE id = ?;
+UPDATE user_profile SET max_content_rating = ? WHERE user_id = :userId AND id = :profileId;
 
 deleteProfile:
-DELETE FROM user_profile WHERE id = ?;
+DELETE FROM user_profile WHERE user_id = :userId AND id = :profileId;
 
--- Home Shelf Config
+-- Home Shelf Config (user-scoped)
 CREATE TABLE home_shelf_config (
-    shelf_id TEXT NOT NULL PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT '',
+    shelf_id TEXT NOT NULL,
     is_visible INTEGER NOT NULL DEFAULT 1,
-    sort_order INTEGER NOT NULL DEFAULT 0
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, shelf_id)
 );
 
 getAllShelfConfigs:
-SELECT * FROM home_shelf_config ORDER BY sort_order ASC;
+SELECT * FROM home_shelf_config WHERE user_id = :userId ORDER BY sort_order ASC;
 
 getShelfConfig:
-SELECT * FROM home_shelf_config WHERE shelf_id = ?;
+SELECT * FROM home_shelf_config WHERE user_id = :userId AND shelf_id = :shelfId;
 
 upsertShelfConfig:
-INSERT OR REPLACE INTO home_shelf_config (shelf_id, is_visible, sort_order) VALUES (?, ?, ?);
+INSERT OR REPLACE INTO home_shelf_config (user_id, shelf_id, is_visible, sort_order) VALUES (?, ?, ?, ?);
 
--- Watchlist
+-- Watchlist (user-scoped)
 CREATE TABLE watchlist (
-    media_id TEXT NOT NULL PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT '',
+    media_id TEXT NOT NULL,
     media_type TEXT NOT NULL,
     tmdb_id INTEGER NOT NULL,
     imdb_id TEXT,
@@ -637,36 +656,38 @@ CREATE TABLE watchlist (
     year INTEGER,
     genres TEXT,
     added_at INTEGER NOT NULL,
-    sort_order INTEGER NOT NULL DEFAULT 0
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, media_id)
 );
 
 getAllWatchlist:
-SELECT * FROM watchlist ORDER BY added_at DESC;
+SELECT * FROM watchlist WHERE user_id = :userId ORDER BY added_at DESC;
 
 getWatchlistByType:
-SELECT * FROM watchlist WHERE media_type = ? ORDER BY added_at DESC;
+SELECT * FROM watchlist WHERE user_id = :userId AND media_type = :mediaType ORDER BY added_at DESC;
 
 isInWatchlist:
-SELECT COUNT(*) FROM watchlist WHERE media_id = ?;
+SELECT COUNT(*) FROM watchlist WHERE user_id = :userId AND media_id = :mediaId;
 
 insertWatchlistItem:
-INSERT OR REPLACE INTO watchlist (media_id, media_type, tmdb_id, imdb_id, title, poster_url, backdrop_url, rating, year, genres, added_at, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO watchlist (user_id, media_id, media_type, tmdb_id, imdb_id, title, poster_url, backdrop_url, rating, year, genres, added_at, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 updateWatchlistMeta:
-UPDATE watchlist SET poster_url = ?, backdrop_url = ?, rating = ?, genres = ? WHERE media_id = ?;
+UPDATE watchlist SET poster_url = ?, backdrop_url = ?, rating = ?, genres = ? WHERE user_id = :userId AND media_id = :mediaId;
 
 removeFromWatchlist:
-DELETE FROM watchlist WHERE media_id = ?;
+DELETE FROM watchlist WHERE user_id = :userId AND media_id = :mediaId;
 
 clearWatchlist:
-DELETE FROM watchlist;
+DELETE FROM watchlist WHERE user_id = :userId;
 
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- Watch History
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 CREATE TABLE IF NOT EXISTS watch_history (
-    id TEXT NOT NULL PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT '',
+    id TEXT NOT NULL,
     media_id TEXT NOT NULL,
     media_type TEXT NOT NULL,
     title TEXT NOT NULL,
@@ -676,33 +697,90 @@ CREATE TABLE IF NOT EXISTS watch_history (
     duration_watched_ms INTEGER NOT NULL DEFAULT 0,
     season_number INTEGER,
     episode_number INTEGER,
-    show_title TEXT
+    show_title TEXT,
+    PRIMARY KEY (user_id, id)
 );
 
 getRecentHistory:
-SELECT * FROM watch_history ORDER BY watched_at DESC LIMIT :limit;
+SELECT * FROM watch_history WHERE user_id = :userId ORDER BY watched_at DESC LIMIT :limit;
 
 getHistoryByDate:
-SELECT * FROM watch_history WHERE watched_at >= :startMs AND watched_at <= :endMs ORDER BY watched_at DESC;
+SELECT * FROM watch_history WHERE user_id = :userId AND watched_at >= :startMs AND watched_at <= :endMs ORDER BY watched_at DESC;
 
 getAllHistory:
-SELECT * FROM watch_history ORDER BY watched_at DESC;
+SELECT * FROM watch_history WHERE user_id = :userId ORDER BY watched_at DESC;
 
 insertHistory:
-INSERT OR REPLACE INTO watch_history (id, media_id, media_type, title, poster_url, backdrop_url, watched_at, duration_watched_ms, season_number, episode_number, show_title)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO watch_history (user_id, id, media_id, media_type, title, poster_url, backdrop_url, watched_at, duration_watched_ms, season_number, episode_number, show_title)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 getHistoryForMedia:
-SELECT * FROM watch_history WHERE media_id = ? ORDER BY watched_at DESC;
+SELECT * FROM watch_history WHERE user_id = :userId AND media_id = :mediaId ORDER BY watched_at DESC;
 
 deleteHistory:
-DELETE FROM watch_history WHERE id = ?;
+DELETE FROM watch_history WHERE user_id = :userId AND id = :historyId;
 
 clearAllHistory:
-DELETE FROM watch_history;
+DELETE FROM watch_history WHERE user_id = :userId;
 
 getHistoryCount:
-SELECT COUNT(*) FROM watch_history;
+SELECT COUNT(*) FROM watch_history WHERE user_id = :userId;
+
+-- Stream resolve memory
+CREATE TABLE IF NOT EXISTS stream_resolve_memory (
+    content_key TEXT NOT NULL,
+    stream_key TEXT NOT NULL,
+    media_type TEXT NOT NULL,
+    imdb_id TEXT NOT NULL,
+    season_number INTEGER,
+    episode_number INTEGER,
+    addon_name TEXT NOT NULL,
+    stream_title TEXT NOT NULL,
+    info_hash TEXT,
+    direct_url TEXT,
+    quality TEXT NOT NULL,
+    source_name TEXT,
+    is_cached INTEGER NOT NULL DEFAULT 0,
+    resolved_provider TEXT,
+    success_count INTEGER NOT NULL DEFAULT 0,
+    last_success_at INTEGER NOT NULL,
+    PRIMARY KEY (content_key, stream_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_stream_resolve_memory_content_recent
+    ON stream_resolve_memory(content_key, last_success_at DESC);
+
+getResolveMemoryForContent:
+SELECT *
+FROM stream_resolve_memory
+WHERE content_key = ?
+ORDER BY last_success_at DESC;
+
+getResolveMemoryEntry:
+SELECT *
+FROM stream_resolve_memory
+WHERE content_key = ? AND stream_key = ?
+LIMIT 1;
+
+upsertResolveMemory:
+INSERT OR REPLACE INTO stream_resolve_memory (
+    content_key,
+    stream_key,
+    media_type,
+    imdb_id,
+    season_number,
+    episode_number,
+    addon_name,
+    stream_title,
+    info_hash,
+    direct_url,
+    quality,
+    source_name,
+    is_cached,
+    resolved_provider,
+    success_count,
+    last_success_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- Trakt ratings cache
 CREATE TABLE IF NOT EXISTS trakt_rating (

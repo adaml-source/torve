@@ -36,6 +36,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -79,6 +80,7 @@ import com.torve.android.R
 import com.torve.android.tv.focus.TvFocusTargetId
 import com.torve.android.tv.focus.rememberRegisteredTvFocusRequester
 import com.torve.android.tv.focus.rememberTvModalFocusRestoreController
+import com.torve.android.tv.focus.TvScreenFocusHandle
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.AmberLight
 import com.torve.android.ui.theme.Charcoal
@@ -121,14 +123,20 @@ private data class TvMediaContextMenuState(
  * where it was found. Uses tmdbId as the primary key, falling back
  * to "${type}:${id}". Empty rails are removed.
  */
-fun List<TvContentRail>.dedupeAcrossRails(): List<TvContentRail> {
+fun List<TvContentRail>.dedupeAcrossRails(minItemsPerRail: Int = 20): List<TvContentRail> {
     val seen = mutableSetOf<String>()
     return mapNotNull { rail ->
         val filtered = rail.items.filter { item ->
             val key = item.tmdbId?.let { "${item.type}:$it" } ?: "${item.type}:${item.id}"
-            seen.add(key) // returns true if element was added (not already present)
+            seen.add(key)
         }
-        if (filtered.isEmpty()) null else rail.copy(items = filtered)
+        // Keep original items if deduping would drop below the minimum
+        val result = if (filtered.size < minItemsPerRail) rail.items else filtered
+        result.forEach { item ->
+            val key = item.tmdbId?.let { "${item.type}:$it" } ?: "${item.type}:${item.id}"
+            seen.add(key)
+        }
+        if (result.isEmpty()) null else rail.copy(items = result)
     }
 }
 
@@ -141,7 +149,7 @@ class TvFocusMemory {
 fun rememberTvFocusMemory(): TvFocusMemory = remember { TvFocusMemory() }
 
 @Composable
-fun TvMediaRails(
+internal fun TvMediaRails(
     rails: List<TvContentRail>,
     railFocusRequester: FocusRequester,
     onMediaClick: (MediaItem) -> Unit,
@@ -160,6 +168,7 @@ fun TvMediaRails(
     browseLayout: TvBrowseLayout = TvBrowseLayout.INFO_PANEL,
     contextMenuActionsForItem: ((MediaItem, Float?) -> List<TvMediaContextMenuAction>)? = null,
     onContextMenuAction: ((MediaItem, TvMediaContextMenuAction, Float?) -> Unit)? = null,
+    registerFocusHandle: ((TvScreenFocusHandle?) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val tvPrefs = remember { context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE) }
@@ -172,6 +181,26 @@ fun TvMediaRails(
     val columnListState = rememberLazyListState()
     val signature = remember(rails) { rails.joinToString("|") { r -> "${r.key}:${r.items.size}:${r.items.take(5).joinToString(",") { it.id }}" } }
     var contextMenuState by remember { mutableStateOf<TvMediaContextMenuState?>(null) }
+
+    DisposableEffect(registerFocusHandle, modalFocusRestoreController, screenId) {
+        registerFocusHandle?.invoke(
+            TvScreenFocusHandle(
+                captureFocusedOrigin = {
+                    modalFocusRestoreController.captureFocusedOrigin(
+                        screenId = screenId,
+                        outerListState = columnListState,
+                        innerListStateForRowKey = { rowKey -> rowListStateByKey[rowKey] },
+                    )
+                },
+                requestRestore = { origin, reason ->
+                    modalFocusRestoreController.requestRestore(origin = origin, reason = reason)
+                },
+            ),
+        )
+        onDispose {
+            registerFocusHandle?.invoke(null)
+        }
+    }
 
     fun openContextMenu(
         item: MediaItem,

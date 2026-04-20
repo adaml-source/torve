@@ -65,6 +65,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.torve.android.R
+import com.torve.android.deeplink.TorveAppLink
+import com.torve.android.deeplink.TorveAppLinkTarget
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -93,6 +95,8 @@ import com.torve.android.ui.profile.ProfileScreen
 import com.torve.android.ui.search.SearchScreen
 import com.torve.android.ui.seeall.SeeAllScreen
 import com.torve.android.ui.settings.AddonCatalogScreen
+import com.torve.android.ui.panda.PandaSetupScreen
+import com.torve.android.ui.settings.ManagePandaScreen
 import com.torve.android.ui.settings.RegexPatternsScreen
 import com.torve.android.ui.settings.SettingsScreen
 import com.torve.android.ui.sync.AccountScreen
@@ -105,6 +109,7 @@ import com.torve.android.ui.settings.HomeLayoutScreen
 import com.torve.android.ui.settings.MdbListSettingsScreen
 import com.torve.android.ui.settings.CardStyleSettingsScreen
 import com.torve.android.ui.settings.RatingSettingsScreen
+import com.torve.android.ui.settings.SensitiveMaterialSettingsScreen
 import com.torve.android.ui.settings.StreamingServicesSettingsScreen
 import com.torve.android.ui.stats.StatsScreen
 import com.torve.android.ui.watchlist.WatchlistScreen
@@ -123,10 +128,13 @@ import com.torve.android.ui.theme.Torve
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.extractTmdbIdOrNull
 import com.torve.data.ai.KeywordSearchService
+import com.torve.data.contentpolicy.ContentPolicyCacheInvalidationCoordinator
+import com.torve.data.contentpolicy.ContentPolicyRepository
 import com.torve.data.mdblist.RatingsEnricher
 import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.repository.MetadataRepository
 import com.torve.presentation.catalog.CatalogViewModel
+import com.torve.presentation.contentpolicy.ContentPolicyFilter
 import com.torve.presentation.setup.SetupWizardViewModel
 import com.torve.presentation.search.SearchViewModel
 import com.torve.presentation.subscription.SubscriptionViewModel
@@ -273,6 +281,8 @@ private val tvNavTabDefs = listOf(
 fun TorveNavGraph(
     navController: NavHostController = rememberNavController(),
     isTvMode: Boolean = false,
+    appLink: TorveAppLink? = null,
+    onAppLinkConsumed: () -> Unit = {},
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -317,12 +327,18 @@ fun TorveNavGraph(
     val prefsRepo: com.torve.domain.repository.PreferencesRepository = koinInject()
     val ratingsEnricher: RatingsEnricher = koinInject()
     val integrationSecretStore: IntegrationSecretStore = koinInject()
+    val contentPolicyRepository: ContentPolicyRepository = koinInject()
+    val contentPolicyFilter: ContentPolicyFilter = koinInject()
+    val invalidationCoordinator: ContentPolicyCacheInvalidationCoordinator = koinInject()
     val movieCatalogViewModel = remember(
         metadataRepo,
         keywordSearchService,
         prefsRepo,
         ratingsEnricher,
         integrationSecretStore,
+        contentPolicyRepository,
+        contentPolicyFilter,
+        invalidationCoordinator,
     ) {
         CatalogViewModel(
             metadataRepo,
@@ -331,6 +347,9 @@ fun TorveNavGraph(
             prefsRepo = prefsRepo,
             ratingsEnricher = ratingsEnricher,
             integrationSecretStore = integrationSecretStore,
+            contentPolicyRepository = contentPolicyRepository,
+            contentPolicyFilter = contentPolicyFilter,
+            invalidationCoordinator = invalidationCoordinator,
         )
     }
     val tvCatalogViewModel = remember(
@@ -339,6 +358,9 @@ fun TorveNavGraph(
         prefsRepo,
         ratingsEnricher,
         integrationSecretStore,
+        contentPolicyRepository,
+        contentPolicyFilter,
+        invalidationCoordinator,
     ) {
         CatalogViewModel(
             metadataRepo,
@@ -347,6 +369,9 @@ fun TorveNavGraph(
             prefsRepo = prefsRepo,
             ratingsEnricher = ratingsEnricher,
             integrationSecretStore = integrationSecretStore,
+            contentPolicyRepository = contentPolicyRepository,
+            contentPolicyFilter = contentPolicyFilter,
+            invalidationCoordinator = invalidationCoordinator,
         )
     }
 
@@ -361,6 +386,43 @@ fun TorveNavGraph(
         }
     }
 
+    LaunchedEffect(appLink, isTvMode) {
+        val link = appLink ?: return@LaunchedEffect
+        if (isTvMode) {
+            onAppLinkConsumed()
+            return@LaunchedEffect
+        }
+        when (link.target) {
+            TorveAppLinkTarget.HOME -> {
+                mobileSelectedTab = MOBILE_HOME_ROUTE
+                navController.navigate(MOBILE_ROOT_ROUTE) {
+                    popUpTo(navController.graph.startDestinationId) { saveState = true }
+                    launchSingleTop = true
+                    restoreState = true
+                }
+            }
+
+            TorveAppLinkTarget.HELP -> {
+                navController.navigate("legal/help") {
+                    launchSingleTop = true
+                }
+            }
+
+            TorveAppLinkTarget.SETUP -> {
+                navController.navigate("setup") {
+                    launchSingleTop = true
+                }
+            }
+
+            TorveAppLinkTarget.ACCOUNT -> {
+                navController.navigate("sync_account") {
+                    launchSingleTop = true
+                }
+            }
+        }
+        onAppLinkConsumed()
+    }
+
     // Content padding: the nav bar Row applies navigationBarsPadding() internally,
     // so its total rendered height = row content + system nav inset.
     // Content must clear: 56dp (row) + nav inset. The 12dp scrim overlaps content intentionally.
@@ -371,6 +433,37 @@ fun TorveNavGraph(
         // ── Restore progress ──
         val accountSessionCoordinator: com.torve.presentation.session.AccountSessionCoordinator = koinInject()
         val restoreProgress by accountSessionCoordinator.restoreProgress.collectAsState()
+
+        // Non-blocking sync indicator during early bootstrap phase
+        val accountSessionState by accountSessionCoordinator.state.collectAsState()
+        if (accountSessionState.isBootstrapping) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.TopCenter)
+                    .zIndex(100f)
+                    .statusBarsPadding()
+                    .background(com.torve.android.ui.theme.Charcoal),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    androidx.compose.material3.CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        color = com.torve.android.ui.theme.Amber,
+                        strokeWidth = 2.dp,
+                    )
+                    Text(
+                        text = "Syncing account…",
+                        style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+                        color = com.torve.android.ui.theme.Snow,
+                    )
+                }
+            }
+        }
 
         // Blocking overlay during heavy import (playlist channel loading)
         if (restoreProgress.isImporting) {
@@ -467,6 +560,7 @@ fun TorveNavGraph(
                             popUpTo("setup") { inclusive = true }
                         }
                     },
+                    onPandaSetupClick = { navController.navigate("panda_setup") },
                 )
             }
 
@@ -634,6 +728,7 @@ fun TorveNavGraph(
                                     navController.navigate("mdblist_settings")
                                 }
                             },
+                            onSensitiveMaterialClick = { navController.navigate("sensitive_material_settings") },
                             onRatingSettingsClick = { navController.navigate("rating_settings") },
                             onCardStyleClick = { navController.navigate("card_style_settings") },
                             onIntegrationsClick = {
@@ -905,6 +1000,7 @@ fun TorveNavGraph(
                             navController.navigate("mdblist_settings")
                         }
                     },
+                    onSensitiveMaterialClick = { navController.navigate("sensitive_material_settings") },
                     onRatingSettingsClick = { navController.navigate("rating_settings") },
                     onCardStyleClick = { navController.navigate("card_style_settings") },
                     onIntegrationsClick = {
@@ -988,6 +1084,13 @@ fun TorveNavGraph(
                             requestLifetimeUnlock(PremiumFeature.CLOUD_PROVIDER_SETUP)
                         } else {
                             navController.navigate("settings")
+                        }
+                    },
+                    onOpenAddonCatalog = {
+                        if (isLocked(PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT)) {
+                            requestLifetimeUnlock(PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT)
+                        } else {
+                            navController.navigate("addon_catalog")
                         }
                     },
                 )
@@ -1177,7 +1280,16 @@ fun TorveNavGraph(
             composable("device_limit_reached") {
                 DeviceLimitReachedScreen(
                     onBack = { navController.popBackStack() },
-                    onActivated = { navController.popBackStack() },
+                    onActivated = {
+                        // After successful device activation, go straight to the main app
+                        // (not back to login). The user is already authenticated.
+                        subscriptionViewModel.loadSubscription()
+                        homeViewModel.refresh()
+                        navController.navigate(MOBILE_ROOT_ROUTE) {
+                            popUpTo(MOBILE_ROOT_ROUTE) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    },
                 )
             }
 
@@ -1232,8 +1344,33 @@ fun TorveNavGraph(
                 } else {
                     AddonCatalogScreen(
                         onBack = { navController.popBackStack() },
+                        onManagePandaClick = { navController.navigate("manage_panda") },
                     )
                 }
+            }
+
+            // Manage Panda
+            composable("manage_panda") {
+                if (isLocked(PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT)) {
+                    PaywallScreen(
+                        onBack = { navController.popBackStack() },
+                        onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        lockedFeature = PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT,
+                    )
+                } else {
+                    ManagePandaScreen(
+                        onBack = { navController.popBackStack() },
+                        onSetupClick = { navController.navigate("panda_setup") },
+                    )
+                }
+            }
+
+            // Panda Native Setup
+            composable("panda_setup") {
+                PandaSetupScreen(
+                    onBack = { navController.popBackStack() },
+                    onComplete = { navController.popBackStack() },
+                )
             }
 
             // Regex Patterns
@@ -1279,6 +1416,12 @@ fun TorveNavGraph(
                         onBack = { navController.popBackStack() },
                     )
                 }
+            }
+
+            composable("sensitive_material_settings") {
+                SensitiveMaterialSettingsScreen(
+                    onBack = { navController.popBackStack() },
+                )
             }
 
             // Rating Settings

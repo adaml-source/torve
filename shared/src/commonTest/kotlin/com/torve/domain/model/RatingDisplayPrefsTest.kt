@@ -3,6 +3,7 @@ package com.torve.domain.model
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class RatingDisplayPrefsTest {
@@ -60,5 +61,42 @@ class RatingDisplayPrefsTest {
         )
 
         assertEquals(listOf(RatingSource.IMDB), result)
+    }
+
+    @Test
+    fun withFallbackTmdbScore_onlyAddsTmdbWhenMissing() {
+        val fromBaseline = null.withFallbackTmdbScore(7.4)
+        assertEquals(7.4f, fromBaseline?.tmdbScore)
+
+        val preserved = MediaRatings(imdbScore = 8.1f, tmdbScore = 6.9f).withFallbackTmdbScore(7.4)
+        assertEquals(6.9f, preserved?.tmdbScore)
+        assertEquals(8.1f, preserved?.imdbScore)
+
+        assertNull(null.withFallbackTmdbScore(null))
+    }
+
+    @Test
+    fun hasAnyEnabledDisplayValue_respectsEnabledProviders() {
+        val ratings = MediaRatings(imdbScore = 8.0f, tmdbScore = 7.2f)
+
+        assertFalse(
+            ratings.hasAnyEnabledDisplayValue(
+                RatingDisplayPrefs(enabledProviders = listOf(RatingSource.ROTTEN_TOMATOES)),
+            ),
+        )
+        assertTrue(
+            ratings.hasAnyEnabledDisplayValue(
+                RatingDisplayPrefs(enabledProviders = listOf(RatingSource.IMDB)),
+            ),
+        )
+        assertFalse(
+            ratings.hasAnyEnabledDisplayValue(
+                RatingDisplayPrefs(
+                    enabledProviders = listOf(RatingSource.TORVE),
+                    showTorveScoreOnCards = false,
+                ),
+                includeTorve = false,
+            ),
+        )
     }
 }

@@ -2,6 +2,7 @@ package com.torve.domain.recommendation
 
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
+import com.torve.domain.model.extractTmdbIdOrNull
 import com.torve.domain.repository.MetadataRepository
 import com.torve.domain.repository.WatchProgressRepository
 import kotlinx.coroutines.async
@@ -34,7 +35,7 @@ class GetRecommendationsUseCase(
                             MediaType.SERIES -> "tv"
                             else -> "movie"
                         }
-                        metadataRepo.getDetail(type, progress.mediaId.toIntOrNull() ?: return@async null)
+                        metadataRepo.getDetail(type, progress.mediaId.extractTmdbIdOrNull() ?: return@async null)
                     } catch (_: Exception) {
                         null
                     }

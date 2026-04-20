@@ -42,6 +42,11 @@ internal data class TvFocusOrigin(
     val reason: String,
 )
 
+internal data class TvScreenFocusHandle(
+    val captureFocusedOrigin: () -> TvFocusOrigin?,
+    val requestRestore: (TvFocusOrigin, String) -> Unit,
+)
+
 internal class TvModalFocusRestoreController {
     private val logTag = "TvSettingsFocus"
     private val requesterByTarget = mutableMapOf<TvFocusTargetId, FocusRequester>()

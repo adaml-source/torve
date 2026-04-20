@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
@@ -34,6 +35,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.produceState
@@ -49,6 +51,7 @@ import coil3.compose.AsyncImage
 import com.torve.android.R
 import com.torve.android.ui.components.CardSize
 import com.torve.android.ui.components.LocalCardStyle
+import com.torve.android.ui.components.LocalRatingPrefs
 import com.torve.android.ui.components.PosterCard
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Gunmetal
@@ -61,9 +64,12 @@ import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.WatchHistoryEntry
 import com.torve.domain.model.WatchProgress
+import com.torve.domain.model.ContentAccessContext
 import com.torve.domain.repository.WatchHistoryRepository
 import com.torve.domain.repository.WatchProgressRepository
+import com.torve.data.contentpolicy.ContentPolicyRepository
 import com.torve.data.mdblist.RatingsEnricher
+import com.torve.presentation.contentpolicy.ContentPolicyFilter
 import com.torve.presentation.jellyfin.JellyfinBrowserViewModel
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.watchlist.WatchlistViewModel
@@ -85,10 +91,11 @@ fun WatchlistScreen(
     settingsViewModel: SettingsViewModel = koinInject(),
     ratingsEnricher: RatingsEnricher = koinInject(),
     jellyfinBrowserViewModel: JellyfinBrowserViewModel = koinInject(),
+    contentPolicyRepository: ContentPolicyRepository = koinInject(),
 ) {
     val watchlistState by watchlistViewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
-    var selectedTab by remember { mutableIntStateOf(0) }
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
 
     val isJellyfinConnected by produceState(false) {
         value = jellyfinBrowserViewModel.isConnected()
@@ -127,9 +134,16 @@ fun WatchlistScreen(
         if (selectedTab == 2 && !historyLoaded) {
             withContext(Dispatchers.Default) {
                 watchHistoryRepo.syncFromTrakt()
-                val items = watchHistoryRepo.getRecent(100)
+                val rawItems = watchHistoryRepo.getRecent(100)
+                // Apply content policy filtering to watch history
+                val policyFilter = ContentPolicyFilter()
+                val filtered = policyFilter.filterWatchHistory(
+                    policy = contentPolicyRepository.state.value,
+                    context = ContentAccessContext.HISTORY_DERIVED,
+                    items = rawItems,
+                )
                 historyItems.clear()
-                historyItems.addAll(items)
+                historyItems.addAll(filtered)
                 historyLoaded = true
             }
         }
@@ -150,10 +164,13 @@ fun WatchlistScreen(
                 type = wlItem.mediaType,
             )
         }
+        // Always enrich — the enricher falls back to OMDB and Trakt tiers when
+        // no MDBList key is configured, so IMDB ratings (needed by the "Highest
+        // IMDB Rating" sort) still populate without a paid key.
         val apiKey = settingsState.mdblistApiKey
-        enrichedWatchlist = if (apiKey.isNotBlank()) {
-            withContext(Dispatchers.Default) { ratingsEnricher.enrichList(baseItems, apiKey) }
-        } else baseItems
+        enrichedWatchlist = withContext(Dispatchers.Default) {
+            ratingsEnricher.enrichList(baseItems, apiKey)
+        }
     }
 
     val defaultCardStyle = resolveCardStyle(
@@ -163,6 +180,7 @@ fun WatchlistScreen(
     )
     CompositionLocalProvider(
         LocalCardStyle provides defaultCardStyle,
+        LocalRatingPrefs provides settingsState.ratingPrefs,
     ) {
     Column(
         modifier = Modifier
@@ -236,6 +254,11 @@ private fun WatchlistTab(
     isLoading: Boolean,
     onMediaClick: (MediaItem) -> Unit,
 ) {
+    var sortMode by remember { mutableStateOf(com.torve.presentation.seeall.SeeAllSortMode.DEFAULT) }
+    var yearFrom by remember { mutableStateOf<Int?>(null) }
+    var yearTo by remember { mutableStateOf<Int?>(null) }
+    var genreIds by remember { mutableStateOf<Set<Int>>(emptySet()) }
+
     if (isLoading) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(color = Amber, modifier = Modifier.size(40.dp))
@@ -244,31 +267,91 @@ private fun WatchlistTab(
     }
 
     if (items.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp),
+            contentAlignment = Alignment.Center,
+        ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     stringResource(R.string.watchlist_empty),
                     style = MaterialTheme.typography.titleMedium,
                     color = Torve.colors.textSecondary,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
                     stringResource(R.string.watchlist_empty_desc),
                     style = MaterialTheme.typography.bodyMedium,
                     color = Torve.colors.textTertiary,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 )
             }
         }
         return
     }
 
-    val movies = items.filter { it.type == MediaType.MOVIE }
-    val shows = items.filter { it.type == MediaType.SERIES }
+    val displayed = com.torve.presentation.seeall.applySortAndFilter(
+        items = items,
+        sortMode = sortMode,
+        yearFrom = yearFrom,
+        yearTo = yearTo,
+        genreIds = genreIds,
+    )
+    val movies = displayed.filter { it.type == MediaType.MOVIE }
+    val shows = displayed.filter { it.type == MediaType.SERIES }
+
+    val sortOptions = remember {
+        listOf(
+            com.torve.android.ui.components.SortOption(com.torve.presentation.seeall.SeeAllSortMode.DEFAULT.name, "Recently watched"),
+            com.torve.android.ui.components.SortOption(com.torve.presentation.seeall.SeeAllSortMode.A_Z.name, "A → Z"),
+            com.torve.android.ui.components.SortOption(com.torve.presentation.seeall.SeeAllSortMode.Z_A.name, "Z → A"),
+            com.torve.android.ui.components.SortOption(com.torve.presentation.seeall.SeeAllSortMode.IMDB_DESC.name, "Highest IMDB Rating"),
+            com.torve.android.ui.components.SortOption(com.torve.presentation.seeall.SeeAllSortMode.TMDB_DESC.name, "Highest TMDB Rating"),
+            com.torve.android.ui.components.SortOption(com.torve.presentation.seeall.SeeAllSortMode.YEAR_DESC.name, "Newest"),
+            com.torve.android.ui.components.SortOption(com.torve.presentation.seeall.SeeAllSortMode.YEAR_ASC.name, "Oldest"),
+        )
+    }
+    val availableGenres = items.flatMap { it.genres.map { g -> g.id to g.name } }
+        .groupingBy { it }.eachCount()
+        .entries.sortedByDescending { it.value }
+        .map { it.key }
+    val years = items.mapNotNull { it.year }.filter { it in 1900..2100 }
+    val yearRange = if (years.isEmpty()) null else years.min()..years.max()
+
+    // After any sort / filter change, snap both horizontal rows back to the
+    // first card so the user sees the newly-sorted top item — the LazyRow
+    // preserves its scroll offset by default, which meant the top-rated pick
+    // ended up off-screen after picking "Highest IMDB Rating".
+    val moviesRowState = rememberLazyListState()
+    val showsRowState = rememberLazyListState()
+    LaunchedEffect(sortMode, yearFrom, yearTo, genreIds) {
+        moviesRowState.scrollToItem(0)
+        showsRowState.scrollToItem(0)
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 24.dp),
     ) {
+        item {
+            com.torve.android.ui.components.MediaSortFilterBar(
+                currentSort = sortOptions.first { it.key == sortMode.name },
+                availableSorts = sortOptions,
+                onSortSelected = { opt -> sortMode = com.torve.presentation.seeall.SeeAllSortMode.valueOf(opt.key) },
+                availableGenres = availableGenres,
+                selectedGenreIds = genreIds,
+                onGenreToggled = { id ->
+                    genreIds = if (id in genreIds) genreIds - id else genreIds + id
+                },
+                availableYearRange = yearRange,
+                selectedYearFrom = yearFrom,
+                selectedYearTo = yearTo,
+                onYearRangeChanged = { from, to -> yearFrom = from; yearTo = to },
+                onClearFilters = { yearFrom = null; yearTo = null; genreIds = emptySet() },
+            )
+        }
         if (movies.isNotEmpty()) {
             item {
                 Text(
@@ -281,6 +364,7 @@ private fun WatchlistTab(
             }
             item {
                 LazyRow(
+                    state = moviesRowState,
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
@@ -308,6 +392,7 @@ private fun WatchlistTab(
             }
             item {
                 LazyRow(
+                    state = showsRowState,
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
@@ -384,10 +469,10 @@ private fun ContinueWatchingCard(
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Poster
+        // Poster — content-policy: no real artwork for placeholder items
         AsyncImage(
-            model = progress.posterUrl,
-            contentDescription = progress.title,
+            model = if (progress.isContentPlaceholder) null else progress.posterUrl,
+            contentDescription = if (progress.isContentPlaceholder) null else progress.title,
             modifier = Modifier
                 .width(70.dp)
                 .aspectRatio(2f / 3f)
@@ -498,9 +583,10 @@ private fun HistoryEntryCard(
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // Content-policy: no real artwork for placeholder history entries
         AsyncImage(
-            model = entry.posterUrl,
-            contentDescription = entry.title,
+            model = if (entry.isContentPlaceholder) null else entry.posterUrl,
+            contentDescription = if (entry.isContentPlaceholder) null else entry.title,
             modifier = Modifier
                 .width(50.dp)
                 .aspectRatio(2f / 3f)

@@ -102,7 +102,12 @@ fun DevicesScreen(
             )
         }
 
-        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        state.error?.let {
+            Text(
+                com.torve.android.error.resolveErrorKey(LocalContext.current, it) ?: stringResource(R.string.error_unknown),
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
         state.pairingStatus?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
         if (state.isAuthenticated && state.devices.isEmpty()) {
             Text(
@@ -131,8 +136,8 @@ fun DevicesScreen(
                             val result = syncCoordinator.bootstrapSecureChannel(device.id)
                             result.onSuccess {
                                 Toast.makeText(context, context.getString(R.string.devices_secure_channel_ok, device.deviceName), Toast.LENGTH_SHORT).show()
-                            }.onFailure { error ->
-                                Toast.makeText(context, error.message ?: context.getString(R.string.devices_secure_channel_fail), Toast.LENGTH_LONG).show()
+                            }.onFailure { _ ->
+                                Toast.makeText(context, context.getString(R.string.devices_secure_channel_fail), Toast.LENGTH_LONG).show()
                             }
                         }
                     },
@@ -146,8 +151,8 @@ fun DevicesScreen(
                             )
                             result.onSuccess {
                                 Toast.makeText(context, context.getString(R.string.devices_setup_sent, device.deviceName), Toast.LENGTH_SHORT).show()
-                            }.onFailure { error ->
-                                Toast.makeText(context, error.message ?: context.getString(R.string.devices_setup_fail), Toast.LENGTH_LONG).show()
+                            }.onFailure { _ ->
+                                Toast.makeText(context, context.getString(R.string.devices_setup_fail), Toast.LENGTH_LONG).show()
                             }
                         }
                     },

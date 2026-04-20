@@ -100,7 +100,9 @@ import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Torve
+import com.torve.android.ui.components.LocalRatingPrefs
 import com.torve.domain.model.MediaItem
+import com.torve.domain.model.RatingSource
 import com.torve.domain.model.resolveCardStyle
 import com.torve.presentation.catalog.CatalogCategory
 import com.torve.presentation.catalog.CatalogFilter
@@ -111,6 +113,9 @@ import com.torve.presentation.catalog.RuntimeFilter
 import com.torve.presentation.catalog.SortOption
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 
 private val MOVIE_GENRES = listOf(
     28 to "Action", 12 to "Adventure", 16 to "Animation", 35 to "Comedy",
@@ -166,6 +171,24 @@ fun CatalogScreen(
         if (mdblistApiKey.isNotBlank()) viewModel.refresh()
     }
 
+    // After any sort change, jump the grid back to the first card so the user
+    // sees the top of the newly-sorted list. The API reload is async, so we
+    // watch sortBy for changes, then wait for the next "loaded with items"
+    // signal (isLoading flips false and items.size > 0) before scrolling —
+    // otherwise scrollToItem(0) fires on the OLD list and the fresh list
+    // renders wherever the grid's saved position lands.
+    LaunchedEffect(viewModel) {
+        snapshotFlow { state.filter.sortBy }
+            .distinctUntilChanged()
+            .drop(1)
+            .collect {
+                snapshotFlow { state.isLoading to state.items.size }
+                    .filter { (loading, size) -> !loading && size > 0 }
+                    .first()
+                gridState.scrollToItem(0)
+            }
+    }
+
     // Infinite scroll: trigger loadMore when near the bottom
     // Key includes viewModel so it restarts when VM changes (provider Movies→TV switch)
     LaunchedEffect(gridState, viewModel) {
@@ -218,6 +241,7 @@ fun CatalogScreen(
     )
     CompositionLocalProvider(
         LocalCardStyle provides defaultCardStyle,
+        LocalRatingPrefs provides settingsState.ratingPrefs,
     ) {
     Box(modifier = Modifier.fillMaxSize()) {
         when {
@@ -628,6 +652,8 @@ private fun CatalogHeroSlide(
     item: MediaItem,
     onClick: () -> Unit,
 ) {
+    val ratingPrefs = LocalRatingPrefs.current
+    val tmdbTextRating = if (RatingSource.TMDB in ratingPrefs.enabledProviders) item.rating else null
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -635,10 +661,10 @@ private fun CatalogHeroSlide(
             .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick),
     ) {
-        // Backdrop image
+        // Backdrop image — content-policy: no real artwork for locked items
         AsyncImage(
-            model = item.backdropUrl ?: item.posterUrl,
-            contentDescription = item.title,
+            model = if (item.isContentPlaceholder || item.isStubDetail) null else item.backdropUrl ?: item.posterUrl,
+            contentDescription = if (item.isContentPlaceholder || item.isStubDetail) null else item.title,
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop,
         )
@@ -694,7 +720,7 @@ private fun CatalogHeroSlide(
                         color = Snow.copy(alpha = 0.7f),
                     )
                 }
-                item.rating?.let { rating ->
+                tmdbTextRating?.let { rating ->
                     if (rating > 0) {
                         Text(
                             text = "  •  ★ ${"%.1f".format(rating)}",

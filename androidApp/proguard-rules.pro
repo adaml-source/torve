@@ -68,8 +68,19 @@
     volatile <fields>;
 }
 
+# ── Amazon IAP ──
+-keep class com.amazon.device.iap.** { *; }
+-keep class com.amazon.a.** { *; }
+-dontwarn com.amazon.device.iap.**
+
 # ── General ──
 -keepattributes Signature
 -keepattributes Exceptions
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
+
+# MPV JNI bridge: libplayer.so resolves these callback entry points by exact
+# class and method signature, so release shrinking must not rename or strip them.
+-keep class is.xyz.mpv.MPVLib { *; }
+-keep class is.xyz.mpv.MPVLib$EventObserver { *; }
+-keep class is.xyz.mpv.MPVLib$LogObserver { *; }

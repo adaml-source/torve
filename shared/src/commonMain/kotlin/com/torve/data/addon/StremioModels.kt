@@ -1,5 +1,7 @@
 package com.torve.data.addon
 
+import com.torve.domain.model.CandidateProvenanceKind
+import com.torve.domain.model.StartupConfidenceReasonCode
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -45,6 +47,14 @@ data class ParsedStream(
     val score: Int = 0,
     val hdr: String? = null,
     val audioCodec: String? = null,
+    val recentSuccessCount: Int = 0,
+    val lastSuccessfulResolveAt: Long? = null,
+    val accelerationSourceKey: String? = null,
+    val accelerationProviderType: String? = null,
+    val accelerationProvenanceKind: CandidateProvenanceKind? = null,
+    val accelerationConfidenceReasons: List<StartupConfidenceReasonCode> = emptyList(),
+    val accelerationScore: Double? = null,
+    val accelerationScoreBreakdown: Map<String, Double> = emptyMap(),
 )
 
 // ── Manifest Models ──

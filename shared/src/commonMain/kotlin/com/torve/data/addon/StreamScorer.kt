@@ -91,6 +91,19 @@ class StreamScorer {
 
         if (stream.isCached) score += 12
         if (stream.infoHash == null && stream.directUrl != null) score += 5
+        if (stream.recentSuccessCount > 0) {
+            score += minOf(8, 3 + (stream.recentSuccessCount * 2))
+        }
+        stream.lastSuccessfulResolveAt?.let { lastSuccessAt ->
+            val ageMs = kotlinx.datetime.Clock.System.now().toEpochMilliseconds() - lastSuccessAt
+            score += when {
+                ageMs <= 6 * 60 * 60 * 1000L -> 5
+                ageMs <= 24 * 60 * 60 * 1000L -> 4
+                ageMs <= 3 * 24 * 60 * 60 * 1000L -> 3
+                ageMs <= 7 * 24 * 60 * 60 * 1000L -> 2
+                else -> 1
+            }
+        }
 
         score += when (val seeds = stream.seeds ?: -1) {
             in 120..Int.MAX_VALUE -> 8

@@ -14,11 +14,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Dvr
-import androidx.compose.material.icons.filled.FeaturedVideo
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PictureInPicture
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -49,8 +49,8 @@ fun LiveMenuBarOverlay(
     audioCodec: String,
     onSearch: () -> Unit,
     onChannelList: () -> Unit,
-    onRecordings: () -> Unit,
-    onMultiview: () -> Unit,
+    onGuide: () -> Unit,
+    onPlaybackOptions: () -> Unit,
     onPip: () -> Unit,
 ) {
     val firstFocus = remember { FocusRequester() }
@@ -110,14 +110,14 @@ fun LiveMenuBarOverlay(
                     onClick = onChannelList,
                 )
                 MenuBarButton(
-                    icon = Icons.Filled.Dvr,
-                    label = stringResource(R.string.tv_live_recordings),
-                    onClick = onRecordings,
+                    icon = Icons.Filled.CalendarMonth,
+                    label = stringResource(R.string.tv_live_tv_guide),
+                    onClick = onGuide,
                 )
                 MenuBarButton(
-                    icon = Icons.Filled.FeaturedVideo,
-                    label = stringResource(R.string.tv_live_multiview),
-                    onClick = onMultiview,
+                    icon = Icons.Filled.Settings,
+                    label = stringResource(R.string.tv_live_settings),
+                    onClick = onPlaybackOptions,
                 )
                 MenuBarButton(
                     icon = Icons.Filled.PictureInPicture,

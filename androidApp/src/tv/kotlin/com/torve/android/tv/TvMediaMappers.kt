@@ -3,9 +3,10 @@ package com.torve.android.tv
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.WatchProgress
 import com.torve.domain.model.WatchlistItem
+import com.torve.domain.model.extractTmdbIdOrNull
 
 fun WatchProgress.toMediaItemOrNull(): MediaItem? {
-    val tmdbId = mediaId.substringAfterLast("_", mediaId).toIntOrNull() ?: mediaId.toIntOrNull()
+    val tmdbId = mediaId.extractTmdbIdOrNull()
     return MediaItem(
         id = mediaId,
         tmdbId = tmdbId,

@@ -84,6 +84,8 @@ import com.torve.android.tv.screens.buildTvLiveTerminalFailurePresentation
 import com.torve.android.tv.screens.shouldShowTvLiveTuneProgress
 import com.torve.domain.model.Channel
 import com.torve.domain.model.EnrichedChannel
+import com.torve.domain.model.EpgProgramme
+import com.torve.domain.model.canonicalEpgChannelKey
 import com.torve.domain.player.LiveAudioOutputMode
 import com.torve.domain.player.LiveTuneState
 import com.torve.domain.player.PlayerEngine
@@ -248,6 +250,8 @@ fun TvLivePlayerScreen(
     var currentChannel by remember { mutableStateOf<Channel?>(null) }
     var currentGroupName by remember { mutableStateOf(groupName) }
     var channelNumber by remember { mutableIntStateOf(1) }
+    var activeReplayProgramme by remember { mutableStateOf<EpgProgramme?>(null) }
+    var playbackUrlOverride by remember { mutableStateOf<String?>(null) }
     var reloadNonce by remember { mutableIntStateOf(0) }
     var playbackLaunchGeneration by remember { mutableIntStateOf(0) }
     var pendingPlaybackUrl by remember { mutableStateOf<String?>(null) }
@@ -350,11 +354,12 @@ fun TvLivePlayerScreen(
         session: LivePlayerEngineSession,
         channel: Channel,
     ) {
+        val playbackUrl = playbackUrlOverride ?: channel.url
         if (session.id == LivePlayerEngineId.MPV) {
-            pendingPlaybackUrl = channel.url
+            pendingPlaybackUrl = playbackUrl
         } else {
             pendingPlaybackUrl = null
-            session.engine.play(channel.url)
+            session.engine.play(playbackUrl)
         }
         viewModel.recordChannelViewed(channel)
     }
@@ -561,6 +566,59 @@ fun TvLivePlayerScreen(
         overlayTimestamp = System.currentTimeMillis()
     }
 
+    fun selectLiveChannel(
+        channel: Channel,
+        group: String,
+        index: Int,
+        dismissOverlays: Boolean = false,
+    ) {
+        playbackUrlOverride = null
+        activeReplayProgramme = null
+        currentChannel = channel
+        currentGroupName = group
+        channelNumber = index + 1
+        overlayTimestamp = System.currentTimeMillis()
+        if (dismissOverlays) {
+            closeAllOverlays()
+        }
+    }
+
+    fun canReplayProgramme(channel: Channel, programme: EpgProgramme): Boolean {
+        if (!viewModel.canCatchup(channel)) return false
+        if (programme.endTime > System.currentTimeMillis()) return false
+        return viewModel.resolveCatchupUrl(channel, programme) != null
+    }
+
+    fun replayProgramme(channel: Channel, programme: EpgProgramme) {
+        val replayUrl = viewModel.resolveCatchupUrl(channel, programme)
+        if (replayUrl.isNullOrBlank()) {
+            errorBannerMessage = "Replay is unavailable for this programme."
+            return
+        }
+        playbackUrlOverride = replayUrl
+        activeReplayProgramme = programme
+        pendingEngineRecovery = null
+        pendingTrackRecovery = null
+        pendingFirstPassFailureReason = null
+        engineFallbackAttemptedForChannel = false
+        silentSessionRecoveryAttempted = false
+        mobileReferenceRetryAttempted = false
+        closeAllOverlays()
+    }
+
+    fun resumeLiveProgramme() {
+        if (playbackUrlOverride == null && activeReplayProgramme == null) return
+        playbackUrlOverride = null
+        activeReplayProgramme = null
+        pendingEngineRecovery = null
+        pendingTrackRecovery = null
+        pendingFirstPassFailureReason = null
+        engineFallbackAttemptedForChannel = false
+        silentSessionRecoveryAttempted = false
+        mobileReferenceRetryAttempted = false
+        closeAllOverlays()
+    }
+
     // ── Resolve the initial channel from ViewModel state ──
     LaunchedEffect(channelUrl, state.categories) {
         if (currentChannel == null) {
@@ -590,7 +648,7 @@ fun TvLivePlayerScreen(
     // are reserved for explicit recovery/fallback paths — never during a normal
     // zap.  This keeps the surface alive and avoids the black-flash / race
     // conditions that come with tearing down and rebuilding the player.
-    LaunchedEffect(currentChannel?.url, reloadNonce) {
+    LaunchedEffect(currentChannel?.url, playbackUrlOverride, reloadNonce) {
         playbackLaunchGeneration += 1
         val launchGeneration = playbackLaunchGeneration
         val ch = currentChannel ?: return@LaunchedEffect
@@ -1180,11 +1238,12 @@ fun TvLivePlayerScreen(
         val newIdx = (currentIdx + delta).mod(allZapChannels.size)
         val newEnriched = allZapChannels[newIdx]
         com.torve.android.debug.AnrDebugLogger.logZapChannel(delta, newEnriched.channel.name)
-        currentChannel = newEnriched.channel
         val (group, idx) = findChannelGroupAndIndex(newEnriched.channel, state.categories)
-        currentGroupName = group ?: currentGroupName
-        channelNumber = idx + 1
-        overlayTimestamp = System.currentTimeMillis()
+        selectLiveChannel(
+            channel = newEnriched.channel,
+            group = group ?: currentGroupName,
+            index = idx,
+        )
     }
 
     fun reloadCurrentChannel() {
@@ -1245,6 +1304,27 @@ fun TvLivePlayerScreen(
             findChannelByUrl(ch.url, state.categories.flatMap { it.channels })
                 ?: EnrichedChannel(channel = ch, currentProgramme = null, nextProgramme = null)
         }
+    }
+    val displayCurrentChannel = remember(enrichedCurrentChannel, activeReplayProgramme) {
+        val enriched = enrichedCurrentChannel ?: return@remember null
+        if (activeReplayProgramme == null) {
+            enriched
+        } else {
+            enriched.copy(
+                currentProgramme = activeReplayProgramme,
+                nextProgramme = null,
+            )
+        }
+    }
+    val currentChannelProgrammes = remember(enrichedCurrentChannel, state.guideProgrammes) {
+        val enriched = enrichedCurrentChannel ?: return@remember emptyList()
+        val epgKey = canonicalEpgChannelKey(
+            playlistId = enriched.channel.playlistId,
+            channel = enriched.channel,
+        ) ?: return@remember emptyList()
+        state.guideProgrammes[epgKey]
+            .orEmpty()
+            .sortedBy(EpgProgramme::startTime)
     }
 
     // ── UI ──
@@ -1492,7 +1572,7 @@ fun TvLivePlayerScreen(
             enter = fadeIn(),
             exit = fadeOut(),
         ) {
-            enrichedCurrentChannel?.let { ec ->
+            displayCurrentChannel?.let { ec ->
                 LiveChannelInfoOverlay(
                     currentChannel = ec,
                     groupName = currentGroupName,
@@ -1500,17 +1580,19 @@ fun TvLivePlayerScreen(
                     recentChannels = state.recentlyViewedChannels,
                     favoriteChannels = state.favorites,
                     onOpenEpgGuide = {
-                        openOverlay(LivePlayerOverlay.EPG_GUIDE)
+                        openOverlay(LivePlayerOverlay.CURRENT_CHANNEL_GUIDE)
                     },
                     onOpenHistory = {
                         openOverlay(LivePlayerOverlay.CHANNEL_LIST)
                     },
                     onTuneChannel = { ch ->
                         tuneToChannel(ch, state.categories) { newCh, group, idx ->
-                            currentChannel = newCh
-                            currentGroupName = group
-                            channelNumber = idx + 1
-                            closeAllOverlays()
+                            selectLiveChannel(
+                                channel = newCh,
+                                group = group,
+                                index = idx,
+                                dismissOverlays = true,
+                            )
                         }
                     },
                     onClearRecent = {
@@ -1551,11 +1633,11 @@ fun TvLivePlayerScreen(
                 onChannelList = {
                     openOverlay(LivePlayerOverlay.CHANNEL_LIST)
                 },
-                onRecordings = {
-                    openOverlay(LivePlayerOverlay.EPG_GUIDE)
+                onGuide = {
+                    openOverlay(LivePlayerOverlay.CURRENT_CHANNEL_GUIDE)
                 },
-                onMultiview = {
-                    openOverlay(LivePlayerOverlay.CHANNEL_LIST)
+                onPlaybackOptions = {
+                    openOverlay(LivePlayerOverlay.PLAYBACK_MENU)
                 },
                 onPip = {
                     if (enterPipMode()) {
@@ -1590,7 +1672,7 @@ fun TvLivePlayerScreen(
                 selectedBufferPreset = selectedBufferPreset,
                 onDismiss = { closeOverlayOrReturnToPrevious() },
                 onOpenChannelList = { openOverlay(LivePlayerOverlay.CHANNEL_LIST) },
-                onOpenGuide = { openOverlay(LivePlayerOverlay.EPG_GUIDE) },
+                onOpenGuide = { openOverlay(LivePlayerOverlay.CURRENT_CHANNEL_GUIDE) },
                 onOpenChannelInfo = { openOverlay(LivePlayerOverlay.CHANNEL_INFO) },
                 onToggleFavorite = { currentChannel?.let(viewModel::toggleFavorite) },
                 onReloadStream = { reloadCurrentChannel() },
@@ -1627,6 +1709,28 @@ fun TvLivePlayerScreen(
             )
         }
 
+        AnimatedVisibility(
+            visible = activeOverlay == LivePlayerOverlay.CURRENT_CHANNEL_GUIDE,
+            enter = fadeIn(),
+            exit = fadeOut(),
+        ) {
+            displayCurrentChannel?.let { ec ->
+                LiveCurrentChannelGuideOverlay(
+                    channel = ec,
+                    programmes = currentChannelProgrammes,
+                    activeReplayProgramme = activeReplayProgramme,
+                    canReplayProgramme = ::canReplayProgramme,
+                    onReplayProgramme = ::replayProgramme,
+                    onOpenFullGuide = { openOverlay(LivePlayerOverlay.EPG_GUIDE) },
+                    onWatchLive = if (activeReplayProgramme != null) {
+                        { resumeLiveProgramme() }
+                    } else {
+                        null
+                    },
+                )
+            }
+        }
+
         // ── EPG Guide Overlay ──
         AnimatedVisibility(
             visible = activeOverlay == LivePlayerOverlay.EPG_GUIDE,
@@ -1639,10 +1743,12 @@ fun TvLivePlayerScreen(
                 currentChannelUrl = currentChannel?.url ?: "",
                 onTuneChannel = { ch ->
                     tuneToChannel(ch, state.categories) { newCh, group, idx ->
-                        currentChannel = newCh
-                        currentGroupName = group
-                        channelNumber = idx + 1
-                        closeAllOverlays()
+                        selectLiveChannel(
+                            channel = newCh,
+                            group = group,
+                            index = idx,
+                            dismissOverlays = true,
+                        )
                     }
                 },
                 onShowChannelList = {
@@ -1664,10 +1770,12 @@ fun TvLivePlayerScreen(
                 favoriteChannels = state.favorites,
                 onTuneChannel = { ch, selectedGroupName ->
                     tuneToChannel(ch, state.categories, selectedGroupName) { newCh, group, idx ->
-                        currentChannel = newCh
-                        currentGroupName = group
-                        channelNumber = idx + 1
-                        closeAllOverlays()
+                        selectLiveChannel(
+                            channel = newCh,
+                            group = group,
+                            index = idx,
+                            dismissOverlays = true,
+                        )
                     }
                 },
                 onToggleFavorite = { viewModel.toggleFavorite(it) },

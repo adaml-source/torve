@@ -3,6 +3,7 @@ package com.torve.presentation.session
 import com.torve.data.account.AccountSettingsApi
 import com.torve.data.account.AccountSettingsRefreshResult
 import com.torve.data.account.AccountSettingsRepository
+import com.torve.data.account.RemotePlaylistDto
 import com.torve.data.account.isXtreamPlaylist
 import com.torve.data.addon.AddonSyncService
 import com.torve.data.auth.AuthClient
@@ -11,8 +12,15 @@ import com.torve.data.device.DeviceApi
 import com.torve.data.device.DeviceListDto
 import com.torve.data.device.ManagedDeviceDto
 import com.torve.data.subscription.SubscriptionEntitlementCacheKeys
+import com.torve.data.trakt.repo.TraktSyncRepository
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationStorageMode
+import com.torve.domain.model.ChannelPlaylist
+import com.torve.domain.model.PlaylistType
+import com.torve.domain.repository.WatchHistoryRepository
+import com.torve.domain.repository.WatchProgressRepository
+import com.torve.domain.repository.WatchlistRepository
+import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.settings.SettingsRefreshNotifier
 import com.torve.platform.torveVerboseLog
 import kotlinx.coroutines.CoroutineScope
@@ -63,6 +71,15 @@ data class RestoreProgress(
     val isImporting: Boolean = false,
 )
 
+private data class PlaylistSyncResult(
+    val added: Int = 0,
+    val updated: Int = 0,
+    val failed: Int = 0,
+) {
+    val hasChanges: Boolean
+        get() = added > 0 || updated > 0
+}
+
 class AccountSessionCoordinator(
     private val authClient: AuthClient,
     private val deviceApi: DeviceApi,
@@ -73,6 +90,10 @@ class AccountSessionCoordinator(
     private val prefsRepo: com.torve.domain.repository.PreferencesRepository,
     private val channelRepo: com.torve.domain.repository.ChannelRepository,
     private val addonSyncService: AddonSyncService,
+    private val watchlistRepo: WatchlistRepository,
+    private val watchProgressRepo: WatchProgressRepository,
+    private val watchHistoryRepo: WatchHistoryRepository,
+    private val traktSyncRepo: TraktSyncRepository,
 ) {
     companion object {
         private const val DEFAULT_MAX_ACTIVE_DEVICES = 5
@@ -263,7 +284,54 @@ class AccountSessionCoordinator(
                 }
             } else if (forceStaleRefresh) {
                 backgroundScope.launch {
-                    runCatching { accountSettingsRepository.refreshIfStale(force = true) }
+                    val settingsResult = runCatching {
+                        accountSettingsRepository.refreshIfStale(force = true)
+                    }.getOrNull()
+                    val restoredIntegrations = runCatching {
+                        restoreIntegrations(token, forceCredentials = true)
+                    }.getOrDefault(0)
+                    val traktSynced = runCatching {
+                        syncTraktFromAccountIfConnected()
+                    }.getOrElse {
+                        torveVerboseLog { "[TraktSync] Foreground force refresh FAILED: ${it.message}" }
+                        false
+                    }
+                    val playlistSync = runCatching {
+                        syncPlaylistsFromAccount(token)
+                    }.getOrElse {
+                        torveVerboseLog { "[PlaylistSync] Foreground force refresh FAILED: ${it.message}" }
+                        PlaylistSyncResult()
+                    }
+                    if (settingsResult?.appliedChanges == true || restoredIntegrations > 0 || traktSynced || playlistSync.hasChanges) {
+                        settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
+                    }
+                }
+            } else {
+                backgroundScope.launch {
+                    val settingsResult = runCatching {
+                        accountSettingsRepository.refreshIfStale(force = false)
+                    }.getOrNull()
+                    val restoredIntegrations = runCatching {
+                        restoreIntegrations(
+                            token = token,
+                            forceCredentials = settingsResult?.appliedChanges == true,
+                        )
+                    }.getOrDefault(0)
+                    val traktSynced = runCatching {
+                        if (restoredIntegrations > 0) syncTraktFromAccountIfConnected() else false
+                    }.getOrElse {
+                        torveVerboseLog { "[TraktSync] Foreground refresh FAILED: ${it.message}" }
+                        false
+                    }
+                    val playlistSync = runCatching {
+                        syncPlaylistsFromAccount(token)
+                    }.getOrElse {
+                        torveVerboseLog { "[PlaylistSync] Foreground refresh FAILED: ${it.message}" }
+                        PlaylistSyncResult()
+                    }
+                    if (settingsResult?.appliedChanges == true || restoredIntegrations > 0 || traktSynced || playlistSync.hasChanges) {
+                        settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
+                    }
                 }
             }
             backgroundScope.launch {
@@ -329,9 +397,25 @@ class AccountSessionCoordinator(
         val hasLocalData = localPlaylists.isNotEmpty()
         if (hasLocalData) {
             torveVerboseLog { "[Restore] Local data exists (${localPlaylists.size} playlists) — skipping heavy restore" }
-            // Still sync settings (lightweight)
-            runCatching { accountSettingsRepository.syncAfterSignIn() }
-            settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
+            val settingsResult = runCatching { accountSettingsRepository.syncAfterSignIn() }.getOrNull()
+            val restoredIntegrations = runCatching {
+                restoreIntegrations(token, forceCredentials = true)
+            }.getOrDefault(0)
+            val traktSynced = runCatching {
+                syncTraktFromAccountIfConnected()
+            }.getOrElse {
+                torveVerboseLog { "[TraktSync] Sign-in restore FAILED: ${it.message}" }
+                false
+            }
+            val playlistSync = runCatching {
+                syncPlaylistsFromAccount(token)
+            }.getOrElse {
+                torveVerboseLog { "[PlaylistSync] Sign-in restore FAILED: ${it.message}" }
+                PlaylistSyncResult()
+            }
+            if (settingsResult?.appliedChanges == true || restoredIntegrations > 0 || traktSynced || playlistSync.hasChanges) {
+                settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
+            }
             return
         }
 
@@ -357,11 +441,15 @@ class AccountSessionCoordinator(
         // Step 2: Integrations
         _restoreProgress.update { it.copy(message = "Restoring integrations…") }
         val integrationsRestored = runCatching {
-            restoreIntegrations(token)
+            restoreIntegrations(token, forceCredentials = true)
         }.getOrElse {
             errors++
             torveVerboseLog { "[Restore] Integrations restore FAILED: ${it.message}" }
             0
+        }
+        runCatching { syncTraktFromAccountIfConnected() }.onFailure {
+            errors++
+            torveVerboseLog { "[Restore] Trakt sync FAILED: ${it.message}" }
         }
         settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
 
@@ -401,7 +489,10 @@ class AccountSessionCoordinator(
     // ── Integration restore ─────────────────────────────────────
 
     /** Returns number of integrations restored. */
-    private suspend fun restoreIntegrations(token: String): Int {
+    private suspend fun restoreIntegrations(
+        token: String,
+        forceCredentials: Boolean = false,
+    ): Int {
         val integrations = accountSettingsApi.getIntegrations(token)
         torveVerboseLog { "[IntegrationRestore] Found ${integrations.size} integrations on backend" }
         var restored = 0
@@ -427,6 +518,31 @@ class AccountSessionCoordinator(
             }
 
             if (mode == IntegrationStorageMode.ACCOUNT && integration.hasCredentials) {
+                val hasLocalSecret = when (secretKey) {
+                    IntegrationSecretKey.TRAKT_TOKENS -> {
+                        // Don't trust the raw blob — a stub payload with empty accessToken
+                        // can exist from earlier runs. Parse and check the actual token.
+                        val access = runCatching {
+                            com.torve.data.trakt.auth.TraktTokenStore(
+                                integrationSecretStore,
+                                kotlinx.serialization.json.Json { ignoreUnknownKeys = true },
+                            ).read()?.accessToken.orEmpty()
+                        }.getOrDefault("")
+                        if (access.isBlank()) {
+                            // Stale or missing — clear stub so backend fetch rewrites cleanly.
+                            integrationSecretStore.remove(IntegrationSecretKey.TRAKT_TOKENS)
+                            false
+                        } else {
+                            true
+                        }
+                    }
+                    IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID -> integrationSecretStore.hasSecret(IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID)
+                    else -> integrationSecretStore.hasSecret(secretKey)
+                }
+                if (hasLocalSecret && !forceCredentials) {
+                    torveVerboseLog { "[IntegrationRestore] ${integration.integrationType} â†’ local secret already present, skipping credential fetch" }
+                    continue
+                }
                 torveVerboseLog { "[IntegrationRestore] Fetching credentials for ${integration.integrationType}..." }
                 val credsMap = accountSettingsApi.getIntegrationCredentials(
                     accessToken = token,
@@ -477,6 +593,11 @@ class AccountSessionCoordinator(
                         val value = credsMap.values.firstOrNull()
                         if (!value.isNullOrBlank()) {
                             integrationSecretStore.put(secretKey, value)
+                            when (secretKey) {
+                                IntegrationSecretKey.OMDB_API_KEY -> prefsRepo.setString(SettingsViewModel.KEY_OMDB_API_KEY, value)
+                                IntegrationSecretKey.MDBLIST_API_KEY -> prefsRepo.setString(SettingsViewModel.KEY_MDBLIST_API_KEY, value)
+                                else -> Unit
+                            }
                             restored++
                             torveVerboseLog { "[IntegrationRestore] ${integration.integrationType} → restored OK" }
                         }
@@ -556,5 +677,153 @@ class AccountSessionCoordinator(
         }
         torveVerboseLog { "[PlaylistRestore] Done: $restored restored, $failed failed" }
         return restored to failed
+    }
+
+    private suspend fun syncPlaylistsFromAccount(token: String): PlaylistSyncResult {
+        val remotePlaylists = accountSettingsApi.getPlaylists(token)
+        if (remotePlaylists.isEmpty()) {
+            torveVerboseLog { "[PlaylistSync] No remote playlists found — leaving local catalog unchanged" }
+            return PlaylistSyncResult()
+        }
+
+        val localById = channelRepo.getPlaylists().associateBy { it.id }
+        var added = 0
+        var updated = 0
+        var failed = 0
+
+        for (remote in remotePlaylists) {
+            val playlistId = remote.playlistId.ifBlank { remote.id }.trim()
+            if (playlistId.isBlank()) continue
+            val local = localById[playlistId]
+            try {
+                val changed = syncPlaylistFromAccount(token, remote, local, playlistId)
+                if (changed) {
+                    if (local == null) added++ else updated++
+                }
+            } catch (e: Exception) {
+                failed++
+                torveVerboseLog {
+                    "[PlaylistSync] FAILED for '$playlistId' (${remote.name}): ${e.message}"
+                }
+            }
+        }
+
+        torveVerboseLog {
+            "[PlaylistSync] Completed: added=$added updated=$updated failed=$failed remote=${remotePlaylists.size}"
+        }
+        return PlaylistSyncResult(added = added, updated = updated, failed = failed)
+    }
+
+    private suspend fun syncPlaylistFromAccount(
+        token: String,
+        remote: RemotePlaylistDto,
+        local: ChannelPlaylist?,
+        playlistId: String,
+    ): Boolean {
+        return if (remote.isXtreamPlaylist(playlistId)) {
+            syncXtreamPlaylistFromAccount(token, remote, local, playlistId)
+        } else {
+            syncM3uPlaylistFromAccount(remote, local, playlistId)
+        }
+    }
+
+    private suspend fun syncM3uPlaylistFromAccount(
+        remote: RemotePlaylistDto,
+        local: ChannelPlaylist?,
+        playlistId: String,
+    ): Boolean {
+        val remoteUrl = remote.url?.trim()?.takeIf { it.isNotEmpty() } ?: return false
+        val remoteEpgUrl = remote.epgUrl.normalizedRemoteValue()
+        if (local == null) {
+            channelRepo.addPlaylist(
+                name = remote.name,
+                url = remoteUrl,
+                epgUrl = remoteEpgUrl,
+                id = playlistId,
+            )
+            return true
+        }
+
+        val localUrl = local.url.normalizedRemoteValue()
+        val localEpgUrl = local.epgUrl.normalizedRemoteValue()
+        val typeChanged = local.type != PlaylistType.M3U
+        val urlChanged = localUrl != remoteUrl
+        val epgChanged = localEpgUrl != remoteEpgUrl
+        if (!typeChanged && !urlChanged && !epgChanged) {
+            return false
+        }
+
+        if (typeChanged) {
+            channelRepo.removePlaylist(playlistId)
+        }
+
+        if (!typeChanged && !urlChanged && epgChanged) {
+            channelRepo.updatePlaylistEpgUrl(playlistId, remoteEpgUrl)
+        } else {
+            channelRepo.addPlaylist(
+                name = remote.name,
+                url = remoteUrl,
+                epgUrl = remoteEpgUrl,
+                id = playlistId,
+            )
+        }
+        return true
+    }
+
+    private suspend fun syncXtreamPlaylistFromAccount(
+        token: String,
+        remote: RemotePlaylistDto,
+        local: ChannelPlaylist?,
+        playlistId: String,
+    ): Boolean {
+        val creds = accountSettingsApi.getPlaylistCredentials(token, playlistId)
+        val server = remote.server.normalizedServerValue() ?: return false
+        val username = creds?.username.normalizedRemoteValue()
+            ?: remote.username.normalizedRemoteValue()
+            ?: return false
+        val password = creds?.password.normalizedRemoteValue() ?: return false
+
+        if (local != null) {
+            val sameType = local.type == PlaylistType.XTREAM
+            val sameServer = local.server.normalizedServerValue() == server
+            val sameUsername = local.username.normalizedRemoteValue() == username
+            val samePassword = local.password.normalizedRemoteValue() == password
+            if (sameType && sameServer && sameUsername && samePassword) {
+                return false
+            }
+            if (!sameType) {
+                channelRepo.removePlaylist(playlistId)
+            }
+        }
+
+        channelRepo.addXtreamPlaylist(
+            name = remote.name,
+            server = server,
+            username = username,
+            password = password,
+            id = playlistId,
+        )
+        return true
+    }
+
+    private fun String?.normalizedRemoteValue(): String? =
+        this?.trim()?.takeIf { it.isNotEmpty() }
+
+    private fun String?.normalizedServerValue(): String? =
+        normalizedRemoteValue()?.trimEnd('/')
+
+    private suspend fun syncTraktFromAccountIfConnected(): Boolean {
+        val hasTraktTokens = integrationSecretStore.hasSecret(IntegrationSecretKey.TRAKT_TOKENS)
+        if (!hasTraktTokens) {
+            return false
+        }
+
+        runCatching { watchlistRepo.syncFromTrakt() }
+        runCatching { watchProgressRepo.syncFromTrakt() }
+        runCatching { watchHistoryRepo.syncFromTrakt() }
+        runCatching { traktSyncRepo.syncRatingsFromTrakt() }
+        runCatching { traktSyncRepo.flushPendingWrites() }
+        torveVerboseLog { "[TraktSync] Synced account-backed Trakt data" }
+        return true
     }
 }

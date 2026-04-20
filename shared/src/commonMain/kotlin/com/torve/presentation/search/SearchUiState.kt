@@ -47,6 +47,7 @@ data class SearchFilter(
 data class SearchUiState(
     val query: String = "",
     val results: List<MediaItem> = emptyList(),
+    val hiddenResultsCount: Int = 0,
     val isSearching: Boolean = false,
     val error: String? = null,
     val filter: SearchFilter = SearchFilter(),

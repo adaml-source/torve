@@ -39,6 +39,7 @@ import com.torve.android.R
 import com.torve.android.ui.components.BackButton
 import com.torve.android.ui.components.CardSize
 import com.torve.android.ui.components.LocalCardStyle
+import com.torve.android.ui.components.LocalRatingPrefs
 import com.torve.android.ui.components.PosterCard
 import com.torve.android.ui.components.mediaItemLazyKey
 import com.torve.android.ui.theme.Amber
@@ -71,7 +72,10 @@ fun MoodMatcherScreen(
         globalDefaultPresetId = settingsState.globalDefaultPresetId,
     )
 
-    CompositionLocalProvider(LocalCardStyle provides defaultCardStyle) {
+    CompositionLocalProvider(
+        LocalCardStyle provides defaultCardStyle,
+        LocalRatingPrefs provides settingsState.ratingPrefs,
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -212,7 +216,7 @@ fun MoodMatcherScreen(
             if (state.error != null) {
                 item(key = "error") {
                     Text(
-                        text = state.error ?: "",
+                        text = com.torve.android.error.resolveErrorKey(androidx.compose.ui.platform.LocalContext.current, state.error) ?: stringResource(R.string.error_unknown),
                         style = MaterialTheme.typography.bodyMedium,
                         color = Torve.colors.textTertiary,
                         modifier = Modifier.padding(vertical = 16.dp),

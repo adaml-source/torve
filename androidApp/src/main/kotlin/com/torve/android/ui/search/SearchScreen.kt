@@ -70,6 +70,7 @@ import com.torve.android.voice.VoiceInputPhase
 import com.torve.android.voice.VoiceInputUiState
 import com.torve.android.ui.components.CardSize
 import com.torve.android.ui.components.LocalCardStyle
+import com.torve.android.ui.components.LocalRatingPrefs
 import com.torve.android.ui.components.PosterCard
 import com.torve.android.ui.components.mediaItemLazyKey
 import com.torve.android.ui.sync.SyncDevicePickerDialog
@@ -121,7 +122,10 @@ fun SearchScreen(
         globalDefaultPresetId = settingsState.globalDefaultPresetId,
     )
 
-    CompositionLocalProvider(LocalCardStyle provides defaultCardStyle) {
+    CompositionLocalProvider(
+        LocalCardStyle provides defaultCardStyle,
+        LocalRatingPrefs provides settingsState.ratingPrefs,
+    ) {
         val tvTargets = syncCoordinator.targetDevices()
             .filter { it.deviceType.contains("tv", ignoreCase = true) }
 
@@ -456,6 +460,14 @@ fun SearchScreen(
         }
 
         // ── Results ──
+        if (state.hiddenResultsCount > 0) {
+            Text(
+                text = stringResource(R.string.search_hidden_results_notice),
+                color = Torve.colors.textSecondary,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+        }
         if (state.hasActiveSearch && (state.peopleResults.isNotEmpty() || state.userLists.isNotEmpty())) {
             Column(
                 modifier = Modifier

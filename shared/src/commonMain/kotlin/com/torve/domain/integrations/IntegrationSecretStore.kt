@@ -23,6 +23,7 @@ enum class IntegrationSecretKey {
     DEEPSEEK_API_KEY,
     MDBLIST_API_KEY,
     OMDB_API_KEY,
+    PANDA_TOKEN,
 }
 
 /**
