@@ -434,6 +434,31 @@ class CatalogViewModel(
                 .distinctUntilChanged()
                 .filter { it.length >= 2 }
                 .collect { query ->
+                    // Sensitive-query gate. When the policy is locked AND the
+                    // typed query itself contains an explicit keyword
+                    // (e.g. "porn"), commit empty results instead of fetching.
+                    // TMDB's `/search/multi` returns non-adult-flagged
+                    // documentaries with explicit titles/posters for these
+                    // queries; per-item classify() can't catch them because
+                    // their `adult=false` and titles don't trip the keyword
+                    // list. Pre-empting at the query level is the only way to
+                    // prevent leakage. Single atomic empty commit also stops
+                    // the visible flicker between fetch + enrichment passes.
+                    val policy = currentPolicy()
+                    if (policy.enforcementEnabled && policy.isLocked &&
+                        contentPolicyFilter.isSensitiveQuery(query)
+                    ) {
+                        _state.update {
+                            it.copy(
+                                searchResults = emptyList(),
+                                isSearching = false,
+                                searchPage = 1,
+                                searchHasMore = false,
+                                hasActiveSearch = true,
+                            )
+                        }
+                        return@collect
+                    }
                     _state.update { it.copy(isSearching = true, searchPage = 1) }
                     try {
                         val result = metadataRepo.searchMultiPaged(query, 1, mediaType)
@@ -470,6 +495,26 @@ class CatalogViewModel(
         if (apiKey.isBlank()) {
             _state.update {
                 it.copy(aiSearchError = "Set a ${provider.label} API key in Settings to use AI search")
+            }
+            return
+        }
+
+        // Mirror the sensitive-query gate from observeSearch — block AI
+        // search of explicitly-sensitive queries when the policy is locked.
+        val policy = currentPolicy()
+        if (policy.enforcementEnabled && policy.isLocked &&
+            contentPolicyFilter.isSensitiveQuery(query)
+        ) {
+            _state.update {
+                it.copy(
+                    searchResults = emptyList(),
+                    isAiSearching = false,
+                    aiSearchLabel = null,
+                    aiSearchError = null,
+                    isSearching = false,
+                    searchHasMore = false,
+                    hasActiveSearch = true,
+                )
             }
             return
         }
@@ -673,6 +718,11 @@ class CatalogViewModel(
                 context = ContentAccessContext.DIRECT_SEARCH,
                 items = state.searchResults,
                 sourceType = ContentSourceType.TMDB,
+                // Search is the highest-leak surface — TMDB returns
+                // adult==null items for explicit queries that classify as
+                // SAFE under the permissive default. Strict mode pushes
+                // those into UNKNOWN → HIDE.
+                strictUnknown = true,
             ).items,
             continueWatching = contentPolicyFilter.filterWatchProgress(
                 policy = policy,
