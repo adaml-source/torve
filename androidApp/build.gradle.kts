@@ -37,14 +37,14 @@ android {
         }
     }
 
-    val baseVersionCode = 49
+    val baseVersionCode = 50
 
     defaultConfig {
         applicationId = "com.torve.app"
         minSdk = 24
         targetSdk = 36
         versionCode = baseVersionCode
-        versionName = "1.0.40"
+        versionName = "1.0.41"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         multiDexEnabled = true
         multiDexKeepProguard = file("multidex-config.pro")
@@ -103,6 +103,14 @@ android {
             signingConfig = signingConfigs.getByName("release")
             buildConfigField("Boolean", "ALLOW_DEBUG_PREMIUM_BYPASS", "false")
             manifestPlaceholders["torveAllowBackup"] = "false"
+            // Bundle native debug symbols (libmpv, FFmpeg) so Play Console
+            // can symbolicate native crashes and ANRs. FULL includes full
+            // DWARF info (~50–200 MB extra in the AAB but stripped from
+            // the installed APK); SYMBOL_TABLE is smaller but only gives
+            // function names with no source mapping.
+            ndk {
+                debugSymbolLevel = "FULL"
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
