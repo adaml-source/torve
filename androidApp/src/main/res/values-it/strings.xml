@@ -76,6 +76,14 @@
     <string name="settings_provider">Provider</string>
     <string name="settings_connected">Connesso</string>
     <string name="settings_premium_until">Premium fino al %1$s</string>
+    <string name="settings_subscription_card_title">Abbonamento</string>
+    <string name="settings_subscription_upgrade_cta">Passa a Premium</string>
+    <string name="settings_subscription_manage_cta">Gestisci abbonamento</string>
+    <string name="settings_subscription_signed_out_prompt">Accedi per vedere il tuo abbonamento e sbloccare Premium su questo dispositivo.</string>
+    <string name="settings_subscription_sign_in_cta">Accedi o crea un account</string>
+    <string name="paywall_sign_in_action_hint">Tocca qui per accedere</string>
+    <string name="paywall_lifetime_upgrade_hint">Hai il Mensile — paga una volta e dimenticatene</string>
+    <string name="paywall_upgrade_to_lifetime">Passa a Lifetime</string>
     <string name="settings_go_to">Vai a:</string>
     <string name="settings_enter_code">Inserisci il codice:</string>
     <string name="settings_waiting_auth">In attesa di autorizzazione…</string>
@@ -1710,4 +1718,37 @@
     <string name="help_support_label">Hai bisogno di ulteriore assistenza?</string>
     <string name="help_support_email">support@torve.app</string>
     <string name="help_support_body">Contattaci a</string>
+    <string name="stream_preparing_title">Stiamo preparando il tuo stream</string>
+    <string name="stream_preparing_body">%1$s sta recuperando questa release da Usenet. In genere ci vogliono un paio di minuti.</string>
+    <string name="stream_preparing_elapsed">In attesa %1$s</string>
+    <string name="stream_preparing_subnote">Avvieremo la riproduzione automaticamente non appena sarà pronta. Puoi uscire da questa schermata — il tuo posto è tenuto.</string>
+    <string name="stream_preparing_cancel">Annulla</string>
+    <string name="error_stream_preparing_timeout">Il tuo servizio di download cloud ci sta ancora lavorando. Prova un\'altra fonte o torna tra qualche minuto.</string>
+
+    <!-- Usenet source sheet -->
+    <string name="usenet_row_ready_now">Pronto ora</string>
+    <string name="usenet_row_preparing">In preparazione</string>
+    <string name="usenet_row_unavailable">Non disponibile</string>
+    <string name="usenet_trying_next_source">Provo la fonte successiva</string>
+    <string name="usenet_playback_link_expired">Link di riproduzione scaduto, aggiornamento in corso</string>
+
+    <!-- NzbDAV integration card -->
+    <string name="integrations_nzbdav_title">NzbDAV</string>
+    <string name="integrations_nzbdav_desc">Torve utilizza la tua istanza NzbDAV per trasmettere fonti Usenet. La connessione è gestita dal backend Torve.</string>
+    <string name="integrations_nzbdav_base_url">URL di base</string>
+    <string name="integrations_nzbdav_api_key">Chiave API</string>
+    <string name="integrations_nzbdav_test">Prova connessione</string>
+    <string name="integrations_nzbdav_save">Salva</string>
+    <string name="integrations_nzbdav_remove">Rimuovi</string>
+    <string name="integrations_nzbdav_status_loading">Controllo stato…</string>
+    <string name="integrations_nzbdav_status_not_configured">Non configurato</string>
+    <string name="integrations_nzbdav_status_connected">Connesso</string>
+    <string name="integrations_nzbdav_status_connected_degraded">Connesso, ma il backend ha segnalato uno stato degradato</string>
+    <string name="integrations_nzbdav_status_failed">Connessione fallita</string>
+    <string name="integrations_nzbdav_action_test_ok">Test di connessione riuscito</string>
+    <string name="integrations_nzbdav_action_test_degraded">Test di connessione riuscito, il backend ha segnalato uno stato degradato</string>
+    <string name="integrations_nzbdav_action_test_failed">Test di connessione fallito</string>
+    <string name="integrations_nzbdav_action_missing_fields">URL di base e chiave API sono obbligatori</string>
+    <string name="integrations_nzbdav_action_saved">Salvato</string>
+    <string name="integrations_nzbdav_action_removed">Rimosso</string>
 </resources>

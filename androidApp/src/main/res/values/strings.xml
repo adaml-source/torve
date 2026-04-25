@@ -86,6 +86,14 @@
     <string name="settings_sensitive_material">Sensitive material</string>
     <string name="settings_sensitive_material_sub">Review this account setting and update access if eligible</string>
     <string name="settings_premium_until">Premium until %1$s</string>
+    <string name="settings_subscription_card_title">Subscription</string>
+    <string name="settings_subscription_upgrade_cta">Upgrade to Premium</string>
+    <string name="settings_subscription_manage_cta">Manage Subscription</string>
+    <string name="settings_subscription_signed_out_prompt">Sign in to see your subscription and unlock Premium on this device.</string>
+    <string name="settings_subscription_sign_in_cta">Sign in or create account</string>
+    <string name="paywall_sign_in_action_hint">Tap here to sign in</string>
+    <string name="paywall_lifetime_upgrade_hint">You\'re on Monthly — upgrade once and never pay again</string>
+    <string name="paywall_upgrade_to_lifetime">Upgrade to Lifetime</string>
     <string name="settings_go_to">Go to:</string>
     <string name="settings_enter_code">Enter code:</string>
     <string name="settings_waiting_auth">Waiting for authorization…</string>
@@ -1846,6 +1854,12 @@
     <string name="error_streams_load_failed">Could not load streams. Please try again.</string>
     <string name="error_stream_resolve_failed">Could not resolve stream. Try another source.</string>
     <string name="error_stream_resolve_timeout">Stream resolution timed out. Try another source.</string>
+    <string name="stream_preparing_title">Preparing your stream</string>
+    <string name="stream_preparing_body">%1$s is fetching this release from Usenet. This usually takes a minute or two.</string>
+    <string name="stream_preparing_elapsed">Waiting %1$s</string>
+    <string name="stream_preparing_subnote">We\'ll start playback automatically as soon as it\'s ready. Leaving this screen is safe — your place is held.</string>
+    <string name="stream_preparing_cancel">Cancel</string>
+    <string name="error_stream_preparing_timeout">Your cloud download service is still working on this. Try a different source or check back in a few minutes.</string>
     <string name="error_watchlist_failed">Watchlist update failed. Please try again.</string>
     <string name="error_download_failed">Download action failed. Please try again.</string>
     <string name="error_channel_load_failed">Could not load channels. Please try again.</string>
@@ -1855,5 +1869,35 @@
     <string name="error_addon_install_failed">Could not install add-on. Check the URL and try again.</string>
     <string name="error_calendar_load_failed">Could not load calendar. Please try again.</string>
     <string name="error_unknown">Something went wrong. Please try again.</string>
+
+    <!-- Usenet source sheet — the only five strings the mapper layer is
+         allowed to produce. See UsenetUserMessageKey in the shared module. -->
+    <string name="usenet_row_ready_now">Ready now</string>
+    <string name="usenet_row_preparing">Preparing</string>
+    <string name="usenet_row_unavailable">Unavailable</string>
+    <string name="usenet_trying_next_source">Trying next source</string>
+    <string name="usenet_playback_link_expired">Playback link expired, refreshing</string>
+
+    <!-- NzbDAV integration card. Copy is deliberately neutral — the
+         card is backend-owned and must not expose NzbDAV internals,
+         version strings, or transport details. -->
+    <string name="integrations_nzbdav_title">NzbDAV</string>
+    <string name="integrations_nzbdav_desc">Torve uses your NzbDAV instance to stream Usenet sources. Connection is managed by the Torve backend.</string>
+    <string name="integrations_nzbdav_base_url">Base URL</string>
+    <string name="integrations_nzbdav_api_key">API key</string>
+    <string name="integrations_nzbdav_test">Test connection</string>
+    <string name="integrations_nzbdav_save">Save</string>
+    <string name="integrations_nzbdav_remove">Remove</string>
+    <string name="integrations_nzbdav_status_loading">Checking status…</string>
+    <string name="integrations_nzbdav_status_not_configured">Not configured</string>
+    <string name="integrations_nzbdav_status_connected">Connected</string>
+    <string name="integrations_nzbdav_status_connected_degraded">Connected, but backend reported degraded status</string>
+    <string name="integrations_nzbdav_status_failed">Connection failed</string>
+    <string name="integrations_nzbdav_action_test_ok">Connection test succeeded</string>
+    <string name="integrations_nzbdav_action_test_degraded">Connection test succeeded, backend reported degraded status</string>
+    <string name="integrations_nzbdav_action_test_failed">Connection test failed</string>
+    <string name="integrations_nzbdav_action_missing_fields">Base URL and API key are required</string>
+    <string name="integrations_nzbdav_action_saved">Saved</string>
+    <string name="integrations_nzbdav_action_removed">Removed</string>
 </resources>
 

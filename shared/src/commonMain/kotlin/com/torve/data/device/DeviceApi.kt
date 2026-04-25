@@ -319,6 +319,13 @@ data class AccessStateDto(
     val source: String? = null,
     @SerialName("auto_renew")
     val auto_renew: Boolean? = null,
+    // Backend returns the subscription expiry as a flat ISO-8601 string
+    // alongside `access_tier`. Without this binding the date never
+    // reaches the UI even though it's right there in the response.
+    @SerialName("expires_at")
+    val expires_at: String? = null,
+    @SerialName("granted_at")
+    val granted_at: String? = null,
 )
 
 fun AccessStateDto.resolvedHasPremiumEntitlement(): Boolean {
@@ -332,6 +339,17 @@ fun AccessStateDto.resolvedHasPremiumEntitlement(): Boolean {
 
 fun AccessStateDto.resolvedAccessTier(): SubscriptionTier? {
     return parseAccessTier(access_tier)
+}
+
+/**
+ * Parse the flat top-level `expires_at` ISO-8601 string into epoch ms.
+ * The backend uses this for admin-granted entitlements where no
+ * per-purchase entitlement record exists, so it's the only path the
+ * subscription expiry can arrive through for those users.
+ */
+fun AccessStateDto.resolvedExpiresAtEpochMs(): Long? {
+    val raw = expires_at?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    return runCatching { kotlinx.datetime.Instant.parse(raw).toEpochMilliseconds() }.getOrNull()
 }
 
 fun AccessStateDto.resolvedIsDeviceActivated(): Boolean {
@@ -362,6 +380,8 @@ internal fun parseAccessTier(raw: String?): SubscriptionTier? {
         "free" -> SubscriptionTier.FREE
         "monthly",
         "premium_monthly",
+        "premium_subscription",
+        "subscription",
         -> SubscriptionTier.MONTHLY
         "lifetime",
         "premium_lifetime",

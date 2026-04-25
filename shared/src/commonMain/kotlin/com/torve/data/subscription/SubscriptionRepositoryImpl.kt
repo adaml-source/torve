@@ -3,6 +3,7 @@ package com.torve.data.subscription
 import com.torve.data.auth.AuthClient
 import com.torve.data.device.DeviceApi
 import com.torve.data.device.resolvedAccessTier
+import com.torve.data.device.resolvedExpiresAtEpochMs
 import com.torve.data.device.resolvedDeviceBlockReason
 import com.torve.data.device.resolvedHasPremiumEntitlement
 import com.torve.data.device.resolvedIsDeviceActivated
@@ -152,9 +153,16 @@ class SubscriptionRepositoryImpl(
             val usablePremium = hasEntitlement && isDeviceActivated
             val reason = accessState.resolvedDeviceBlockReason()
             val resolvedTier = accessState.resolvedAccessTier() ?: resolvedEntitlement.tier
+            // Prefer the flat top-level `expires_at` from the access-state
+            // response when present — admin-granted subscriptions don't
+            // create per-purchase entitlement records, so the resolver
+            // would otherwise have no expiry to surface.
+            val resolvedExpiresAt = accessState.resolvedExpiresAtEpochMs()
+                ?: resolvedEntitlement.expiresAtEpochMs
             val entitlementForPersistence = resolvedEntitlement.copy(
                 tier = if (hasEntitlement) resolvedTier else SubscriptionTier.FREE,
                 hasEntitlement = hasEntitlement,
+                expiresAtEpochMs = resolvedExpiresAt,
             )
             when {
                 usablePremium -> {
@@ -165,7 +173,7 @@ class SubscriptionRepositoryImpl(
                     )
                     persistResolvedTier(entitlementForPersistence)
                     torveVerboseLog {
-                        "SUBSCRIPTION_BACKEND refresh_result status=active tier=${entitlementForPersistence.tier}"
+                        "SUBSCRIPTION_BACKEND refresh_result status=active tier=${entitlementForPersistence.tier} expiresAt=${entitlementForPersistence.expiresAtEpochMs}"
                     }
                     BackendPremiumResult.Active
                 }

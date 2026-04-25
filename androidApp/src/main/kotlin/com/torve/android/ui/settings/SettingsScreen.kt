@@ -243,6 +243,71 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(16.dp))
 
+        // Prominent subscription summary card. Only rendered when the user
+        // is signed in — for signed-out users the existing account card
+        // already provides the sign-in CTA, and rendering this card on top
+        // would duplicate it. When signed in this card is the single
+        // source of truth for "which plan do I have and when does it
+        // expire", so the duplicate status text in the account-card-
+        // adjacent block below is suppressed accordingly.
+        if (BuildConfig.HAS_BILLING && authUser != null) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Charcoal),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = stringResource(R.string.settings_subscription_card_title),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Amber,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = subscriptionAccess.accessStatusLabel,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Snow,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    if (subscriptionAccess.accessHelperText.isNotBlank()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = subscriptionAccess.accessHelperText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Torve.colors.textSecondary,
+                        )
+                    }
+                    subscriptionMarketplaceLabel(subscriptionState.subscription?.platform)?.let { label ->
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = "Managed through $label",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Torve.colors.textTertiary,
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    if (subscriptionAccess.shouldShowBuy) {
+                        Button(
+                            onClick = onSubscriptionClick,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
+                        ) {
+                            ButtonLabel(stringResource(R.string.settings_subscription_upgrade_cta))
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = onSubscriptionClick,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
+                        ) {
+                            ButtonLabel(stringResource(R.string.settings_subscription_manage_cta))
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+
         // Account & Sync card (top of settings)
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -451,12 +516,16 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(12.dp))
 
-        // Quick links
+        // Quick links. The dedicated Subscription button is no longer
+        // shown for signed-in users on billing-enabled builds — the top
+        // Subscription card already exposes Manage Subscription / Upgrade
+        // to Premium. For signed-out users we still surface a path into
+        // the paywall here so they can browse plans without signing in.
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (BuildConfig.HAS_BILLING) {
+            if (BuildConfig.HAS_BILLING && authUser == null) {
                 OutlinedButton(
                     onClick = onSubscriptionClick,
                     modifier = Modifier.weight(1f),
@@ -474,25 +543,30 @@ fun SettingsScreen(
             }
         }
         if (BuildConfig.HAS_BILLING) {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = premiumStatusLabel,
-                style = MaterialTheme.typography.bodySmall,
-                color = Torve.colors.textSecondary,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = subscriptionAccess.accessHelperText,
-                style = MaterialTheme.typography.bodySmall,
-                color = Torve.colors.textSecondary,
-            )
-            subscriptionMarketplaceLabel(subscriptionState.subscription?.platform)?.let { label ->
-                Spacer(Modifier.height(2.dp))
+            // Status text only shown when the top subscription card is NOT
+            // present (i.e. signed-out users) to avoid duplicating
+            // "Premium active / Premium is active on this device" twice.
+            if (authUser == null) {
+                Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "Managed through $label",
+                    text = premiumStatusLabel,
                     style = MaterialTheme.typography.bodySmall,
                     color = Torve.colors.textSecondary,
                 )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = subscriptionAccess.accessHelperText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Torve.colors.textSecondary,
+                )
+                subscriptionMarketplaceLabel(subscriptionState.subscription?.platform)?.let { label ->
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = "Managed through $label",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Torve.colors.textSecondary,
+                    )
+                }
             }
             Spacer(Modifier.height(8.dp))
             Row(

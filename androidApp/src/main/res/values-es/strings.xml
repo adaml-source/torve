@@ -68,6 +68,14 @@
     <string name="settings_provider">Proveedor</string>
     <string name="settings_connected">Conectado</string>
     <string name="settings_premium_until">Premium hasta %1$s</string>
+    <string name="settings_subscription_card_title">Suscripción</string>
+    <string name="settings_subscription_upgrade_cta">Actualizar a Premium</string>
+    <string name="settings_subscription_manage_cta">Gestionar suscripción</string>
+    <string name="settings_subscription_signed_out_prompt">Inicia sesión para ver tu suscripción y desbloquear Premium en este dispositivo.</string>
+    <string name="settings_subscription_sign_in_cta">Iniciar sesión o crear cuenta</string>
+    <string name="paywall_sign_in_action_hint">Pulsa aquí para iniciar sesión</string>
+    <string name="paywall_lifetime_upgrade_hint">Tienes Mensual — paga una vez y olvídate</string>
+    <string name="paywall_upgrade_to_lifetime">Pasar a Lifetime</string>
     <string name="settings_go_to">Ir a:</string>
     <string name="settings_enter_code">Introduce el código:</string>
     <string name="settings_waiting_auth">Esperando autorización…</string>
@@ -1682,4 +1690,37 @@
     <string name="help_support_label">¿Necesitas más ayuda?</string>
     <string name="help_support_email">support@torve.app</string>
     <string name="help_support_body">Contáctanos en</string>
+    <string name="stream_preparing_title">Preparando tu transmisión</string>
+    <string name="stream_preparing_body">%1$s está obteniendo este lanzamiento de Usenet. Normalmente tarda un par de minutos.</string>
+    <string name="stream_preparing_elapsed">Esperando %1$s</string>
+    <string name="stream_preparing_subnote">Iniciaremos la reproducción automáticamente en cuanto esté lista. Puedes salir de esta pantalla — tu lugar está guardado.</string>
+    <string name="stream_preparing_cancel">Cancelar</string>
+    <string name="error_stream_preparing_timeout">Tu servicio de descarga en la nube sigue trabajando en esto. Prueba otra fuente o vuelve en unos minutos.</string>
+
+    <!-- Usenet source sheet -->
+    <string name="usenet_row_ready_now">Listo ahora</string>
+    <string name="usenet_row_preparing">Preparando</string>
+    <string name="usenet_row_unavailable">No disponible</string>
+    <string name="usenet_trying_next_source">Probando la siguiente fuente</string>
+    <string name="usenet_playback_link_expired">Enlace de reproducción caducado, actualizando</string>
+
+    <!-- NzbDAV integration card -->
+    <string name="integrations_nzbdav_title">NzbDAV</string>
+    <string name="integrations_nzbdav_desc">Torve usa tu instancia de NzbDAV para transmitir fuentes de Usenet. La conexión la gestiona el backend de Torve.</string>
+    <string name="integrations_nzbdav_base_url">URL base</string>
+    <string name="integrations_nzbdav_api_key">Clave API</string>
+    <string name="integrations_nzbdav_test">Probar conexión</string>
+    <string name="integrations_nzbdav_save">Guardar</string>
+    <string name="integrations_nzbdav_remove">Eliminar</string>
+    <string name="integrations_nzbdav_status_loading">Comprobando estado…</string>
+    <string name="integrations_nzbdav_status_not_configured">No configurado</string>
+    <string name="integrations_nzbdav_status_connected">Conectado</string>
+    <string name="integrations_nzbdav_status_connected_degraded">Conectado, pero el backend informó estado degradado</string>
+    <string name="integrations_nzbdav_status_failed">Conexión fallida</string>
+    <string name="integrations_nzbdav_action_test_ok">Prueba de conexión correcta</string>
+    <string name="integrations_nzbdav_action_test_degraded">Prueba de conexión correcta, el backend informó estado degradado</string>
+    <string name="integrations_nzbdav_action_test_failed">Prueba de conexión fallida</string>
+    <string name="integrations_nzbdav_action_missing_fields">La URL base y la clave API son obligatorias</string>
+    <string name="integrations_nzbdav_action_saved">Guardado</string>
+    <string name="integrations_nzbdav_action_removed">Eliminado</string>
 </resources>

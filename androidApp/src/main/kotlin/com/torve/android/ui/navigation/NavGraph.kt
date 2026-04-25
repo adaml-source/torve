@@ -127,6 +127,7 @@ import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Torve
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.extractTmdbIdOrNull
+import com.torve.domain.model.extractImdbIdOrNull
 import com.torve.data.ai.KeywordSearchService
 import com.torve.data.contentpolicy.ContentPolicyCacheInvalidationCoordinator
 import com.torve.data.contentpolicy.ContentPolicyRepository
@@ -148,10 +149,15 @@ import org.koin.compose.koinInject
 
 private fun NavHostController.navigateToDetail(item: com.torve.domain.model.MediaItem) {
     val type = if (item.type == MediaType.SERIES) "tv" else "movie"
-    val tmdbId = item.tmdbId ?: item.id.toIntOrNull()
+    // Addon items arrive with namespaced ids like "tmdb:1523145" or "tt0111161"
+    // but leave `tmdbId`/`imdbId` unset. Parse them out of `id` so those
+    // catalog shelves (Trending, Latest Releases, Popular, Language, Year,
+    // etc.) are clickable.
+    val tmdbId = item.tmdbId ?: item.id.extractTmdbIdOrNull()
+    val imdbId = item.imdbId?.takeIf { it.isNotBlank() } ?: item.id.extractImdbIdOrNull()
     when {
         tmdbId != null -> navigate("detail/$type/$tmdbId")
-        !item.imdbId.isNullOrBlank() -> navigate("detail_imdb/$type/${Uri.encode(item.imdbId)}")
+        imdbId != null -> navigate("detail_imdb/$type/${Uri.encode(imdbId)}")
         else -> return
     }
 }
@@ -631,6 +637,7 @@ fun TorveNavGraph(
                             PaywallScreen(
                                 onBack = { navController.popBackStack() },
                                 onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                                onLogin = { navController.navigate("login") },
                                 lockedFeature = PremiumFeature.WATCHLIST_EDIT,
                             )
                         } else {
@@ -1136,6 +1143,7 @@ fun TorveNavGraph(
                     PaywallScreen(
                         onBack = { navController.popBackStack() },
                         onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        onLogin = { navController.navigate("login") },
                         lockedFeature = PremiumFeature.STREAM_PLAYBACK,
                     )
                 } else {
@@ -1171,6 +1179,7 @@ fun TorveNavGraph(
                     PaywallScreen(
                         onBack = { navController.popBackStack() },
                         onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        onLogin = { navController.navigate("login") },
                         lockedFeature = PremiumFeature.DOWNLOADS,
                     )
                 } else {
@@ -1207,6 +1216,7 @@ fun TorveNavGraph(
                     PaywallScreen(
                         onBack = { navController.popBackStack() },
                         onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        onLogin = { navController.navigate("login") },
                         lockedFeature = PremiumFeature.DOWNLOADS,
                     )
                 } else {
@@ -1268,6 +1278,7 @@ fun TorveNavGraph(
                 PaywallScreen(
                     onBack = { navController.popBackStack() },
                     onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                    onLogin = { navController.navigate("login") },
                     onManageDevices = { navController.navigate("manage_devices") },
                     lockedFeature = lockedFeature,
                 )
@@ -1324,6 +1335,7 @@ fun TorveNavGraph(
                     PaywallScreen(
                         onBack = { navController.popBackStack() },
                         onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        onLogin = { navController.navigate("login") },
                         lockedFeature = PremiumFeature.CUSTOM_SOURCE_MANAGEMENT,
                     )
                 } else {
@@ -1339,6 +1351,7 @@ fun TorveNavGraph(
                     PaywallScreen(
                         onBack = { navController.popBackStack() },
                         onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        onLogin = { navController.navigate("login") },
                         lockedFeature = PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT,
                     )
                 } else {
@@ -1355,6 +1368,7 @@ fun TorveNavGraph(
                     PaywallScreen(
                         onBack = { navController.popBackStack() },
                         onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        onLogin = { navController.navigate("login") },
                         lockedFeature = PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT,
                     )
                 } else {
@@ -1379,6 +1393,7 @@ fun TorveNavGraph(
                     PaywallScreen(
                         onBack = { navController.popBackStack() },
                         onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        onLogin = { navController.navigate("login") },
                         lockedFeature = PremiumFeature.ADVANCED_CONNECTION_CONFIGURATION,
                     )
                 } else {
@@ -1394,6 +1409,7 @@ fun TorveNavGraph(
                     PaywallScreen(
                         onBack = { navController.popBackStack() },
                         onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        onLogin = { navController.navigate("login") },
                         lockedFeature = PremiumFeature.CUSTOM_SOURCE_MANAGEMENT,
                     )
                 } else {
@@ -1409,6 +1425,7 @@ fun TorveNavGraph(
                     PaywallScreen(
                         onBack = { navController.popBackStack() },
                         onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        onLogin = { navController.navigate("login") },
                         lockedFeature = PremiumFeature.MDBLIST_SETUP,
                     )
                 } else {
@@ -1444,6 +1461,7 @@ fun TorveNavGraph(
                     PaywallScreen(
                         onBack = { navController.popBackStack() },
                         onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        onLogin = { navController.navigate("login") },
                         lockedFeature = PremiumFeature.SYNC_CUSTOM_LAYOUTS,
                     )
                 } else {
@@ -1463,6 +1481,7 @@ fun TorveNavGraph(
                     PaywallScreen(
                         onBack = { navController.popBackStack() },
                         onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        onLogin = { navController.navigate("login") },
                         lockedFeature = PremiumFeature.TRAKT_CONNECT,
                     )
                 } else {
@@ -1477,6 +1496,7 @@ fun TorveNavGraph(
                     PaywallScreen(
                         onBack = { navController.popBackStack() },
                         onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        onLogin = { navController.navigate("login") },
                         lockedFeature = PremiumFeature.DIAGNOSTICS,
                     )
                 } else {
@@ -1500,6 +1520,7 @@ fun TorveNavGraph(
                     PaywallScreen(
                         onBack = { navController.popBackStack() },
                         onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                        onLogin = { navController.navigate("login") },
                         lockedFeature = PremiumFeature.SYNC_CUSTOM_LAYOUTS,
                     )
                 } else {

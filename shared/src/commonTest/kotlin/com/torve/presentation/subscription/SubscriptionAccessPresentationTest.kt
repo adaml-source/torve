@@ -21,6 +21,8 @@ class SubscriptionAccessPresentationTest {
 
         assertFalse(access.hasPremiumEntitlement)
         assertTrue(access.shouldShowBuy)
+        assertTrue(access.shouldShowBuyMonthly)
+        assertTrue(access.shouldShowBuyLifetime)
         assertTrue(access.shouldShowRestore)
         assertFalse(access.shouldShowManageDevices)
         assertEquals(
@@ -35,7 +37,10 @@ class SubscriptionAccessPresentationTest {
     }
 
     @Test
-    fun activePremiumStateResolvesToUsablePremium() {
+    fun activeMonthlyCanStillUpgradeToLifetime() {
+        // Monthly subscribers must keep the lifetime buy button visible —
+        // it's a legitimate upgrade path. The monthly button is hidden
+        // (re-buying monthly is meaningless) but lifetime stays.
         val state = SubscriptionUiState(
             subscription = subscription(
                 tier = SubscriptionTier.MONTHLY,
@@ -48,15 +53,43 @@ class SubscriptionAccessPresentationTest {
         )
 
         val access = state.accessPresentation()
+        val actions = state.recommendedPremiumActions()
 
         assertTrue(access.isUsablePremiumOnThisDevice)
-        assertFalse(access.shouldShowBuy)
+        assertFalse(access.shouldShowBuyMonthly)
+        assertTrue(access.shouldShowBuyLifetime)
+        assertTrue(access.shouldShowBuy, "Buy section must remain visible so monthly users can upgrade")
         assertFalse(access.shouldShowManageDevices)
         assertTrue(access.accessStatusLabel.startsWith("Premium Monthly active"))
+        assertTrue(actions.contains(PremiumSurfaceAction.BUY_LIFETIME))
+        assertFalse(actions.contains(PremiumSurfaceAction.BUY_MONTHLY))
     }
 
     @Test
-    fun blockedPremiumStateDirectsUserToManageDevicesFirst() {
+    fun activeLifetimeHidesAllBuyButtons() {
+        // Already-lifetime users have nothing to upgrade to — both buy
+        // buttons hide.
+        val state = SubscriptionUiState(
+            subscription = subscription(tier = SubscriptionTier.LIFETIME),
+            isPro = true,
+            hasEntitlement = true,
+            isDeviceActivated = true,
+            isLoggedIn = true,
+        )
+
+        val access = state.accessPresentation()
+        val actions = state.recommendedPremiumActions()
+
+        assertTrue(access.isUsablePremiumOnThisDevice)
+        assertFalse(access.shouldShowBuyMonthly)
+        assertFalse(access.shouldShowBuyLifetime)
+        assertFalse(access.shouldShowBuy)
+        assertFalse(actions.contains(PremiumSurfaceAction.BUY_MONTHLY))
+        assertFalse(actions.contains(PremiumSurfaceAction.BUY_LIFETIME))
+    }
+
+    @Test
+    fun blockedLifetimeDirectsUserToManageDevicesFirst() {
         val state = SubscriptionUiState(
             subscription = subscription(tier = SubscriptionTier.LIFETIME),
             hasEntitlement = true,

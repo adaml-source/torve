@@ -76,6 +76,14 @@
     <string name="settings_provider">Provedor</string>
     <string name="settings_connected">Conectado</string>
     <string name="settings_premium_until">Premium até %1$s</string>
+    <string name="settings_subscription_card_title">Assinatura</string>
+    <string name="settings_subscription_upgrade_cta">Atualizar para Premium</string>
+    <string name="settings_subscription_manage_cta">Gerenciar assinatura</string>
+    <string name="settings_subscription_signed_out_prompt">Entre para ver sua assinatura e desbloquear Premium neste dispositivo.</string>
+    <string name="settings_subscription_sign_in_cta">Entrar ou criar conta</string>
+    <string name="paywall_sign_in_action_hint">Toque aqui para entrar</string>
+    <string name="paywall_lifetime_upgrade_hint">Você tem o Mensal — pague uma vez e nunca mais</string>
+    <string name="paywall_upgrade_to_lifetime">Mudar para Lifetime</string>
     <string name="settings_go_to">Acesse:</string>
     <string name="settings_enter_code">Insira o código:</string>
     <string name="settings_waiting_auth">Aguardando autorização…</string>
@@ -1710,4 +1718,37 @@
     <string name="help_support_label">Precisa de mais ajuda?</string>
     <string name="help_support_email">support@torve.app</string>
     <string name="help_support_body">Entre em contato conosco em</string>
+    <string name="stream_preparing_title">Preparando sua transmissão</string>
+    <string name="stream_preparing_body">%1$s está buscando este lançamento no Usenet. Normalmente leva um ou dois minutos.</string>
+    <string name="stream_preparing_elapsed">Aguardando %1$s</string>
+    <string name="stream_preparing_subnote">Iniciaremos a reprodução automaticamente assim que estiver pronta. Você pode sair desta tela — sua vez está reservada.</string>
+    <string name="stream_preparing_cancel">Cancelar</string>
+    <string name="error_stream_preparing_timeout">Seu serviço de download em nuvem ainda está trabalhando nisso. Tente outra fonte ou volte em alguns minutos.</string>
+
+    <!-- Usenet source sheet -->
+    <string name="usenet_row_ready_now">Pronto agora</string>
+    <string name="usenet_row_preparing">Preparando</string>
+    <string name="usenet_row_unavailable">Indisponível</string>
+    <string name="usenet_trying_next_source">Tentando a próxima fonte</string>
+    <string name="usenet_playback_link_expired">Link de reprodução expirado, atualizando</string>
+
+    <!-- NzbDAV integration card -->
+    <string name="integrations_nzbdav_title">NzbDAV</string>
+    <string name="integrations_nzbdav_desc">O Torve usa sua instância NzbDAV para transmitir fontes Usenet. A conexão é gerenciada pelo backend do Torve.</string>
+    <string name="integrations_nzbdav_base_url">URL base</string>
+    <string name="integrations_nzbdav_api_key">Chave de API</string>
+    <string name="integrations_nzbdav_test">Testar conexão</string>
+    <string name="integrations_nzbdav_save">Salvar</string>
+    <string name="integrations_nzbdav_remove">Remover</string>
+    <string name="integrations_nzbdav_status_loading">Verificando status…</string>
+    <string name="integrations_nzbdav_status_not_configured">Não configurado</string>
+    <string name="integrations_nzbdav_status_connected">Conectado</string>
+    <string name="integrations_nzbdav_status_connected_degraded">Conectado, mas o backend reportou status degradado</string>
+    <string name="integrations_nzbdav_status_failed">Falha na conexão</string>
+    <string name="integrations_nzbdav_action_test_ok">Teste de conexão bem-sucedido</string>
+    <string name="integrations_nzbdav_action_test_degraded">Teste de conexão bem-sucedido, o backend reportou status degradado</string>
+    <string name="integrations_nzbdav_action_test_failed">Falha no teste de conexão</string>
+    <string name="integrations_nzbdav_action_missing_fields">A URL base e a chave de API são obrigatórias</string>
+    <string name="integrations_nzbdav_action_saved">Salvo</string>
+    <string name="integrations_nzbdav_action_removed">Removido</string>
 </resources>

@@ -74,6 +74,14 @@
     <string name="settings_provider">Anbieter</string>
     <string name="settings_connected">Verbunden</string>
     <string name="settings_premium_until">Premium bis %1$s</string>
+    <string name="settings_subscription_card_title">Abonnement</string>
+    <string name="settings_subscription_upgrade_cta">Auf Premium upgraden</string>
+    <string name="settings_subscription_manage_cta">Abonnement verwalten</string>
+    <string name="settings_subscription_signed_out_prompt">Melde dich an, um dein Abonnement zu sehen und Premium auf diesem Gerät freizuschalten.</string>
+    <string name="settings_subscription_sign_in_cta">Anmelden oder Konto erstellen</string>
+    <string name="paywall_sign_in_action_hint">Hier tippen, um dich anzumelden</string>
+    <string name="paywall_lifetime_upgrade_hint">Du hast Monatlich — einmal upgraden und nie wieder zahlen</string>
+    <string name="paywall_upgrade_to_lifetime">Auf Lifetime upgraden</string>
     <string name="settings_go_to">Gehe zu:</string>
     <string name="settings_enter_code">Code eingeben:</string>
     <string name="settings_waiting_auth">Warte auf Autorisierung…</string>
@@ -1710,4 +1718,37 @@
     <string name="help_support_label">Weitere Hilfe benötigt?</string>
     <string name="help_support_email">support@torve.app</string>
     <string name="help_support_body">Kontaktiere uns unter</string>
+    <string name="stream_preparing_title">Stream wird vorbereitet</string>
+    <string name="stream_preparing_body">%1$s lädt diese Veröffentlichung aus dem Usenet. Das dauert normalerweise ein bis zwei Minuten.</string>
+    <string name="stream_preparing_elapsed">Warte %1$s</string>
+    <string name="stream_preparing_subnote">Wir starten die Wiedergabe automatisch, sobald sie bereit ist. Du kannst den Bildschirm verlassen — dein Platz wird gehalten.</string>
+    <string name="stream_preparing_cancel">Abbrechen</string>
+    <string name="error_stream_preparing_timeout">Dein Cloud-Downloaddienst arbeitet noch daran. Wähle eine andere Quelle oder versuche es in ein paar Minuten erneut.</string>
+
+    <!-- Usenet source sheet -->
+    <string name="usenet_row_ready_now">Jetzt bereit</string>
+    <string name="usenet_row_preparing">Wird vorbereitet</string>
+    <string name="usenet_row_unavailable">Nicht verfügbar</string>
+    <string name="usenet_trying_next_source">Nächste Quelle wird versucht</string>
+    <string name="usenet_playback_link_expired">Wiedergabelink abgelaufen, wird aktualisiert</string>
+
+    <!-- NzbDAV integration card -->
+    <string name="integrations_nzbdav_title">NzbDAV</string>
+    <string name="integrations_nzbdav_desc">Torve nutzt deine NzbDAV-Instanz, um Usenet-Quellen zu streamen. Die Verbindung wird vom Torve-Backend verwaltet.</string>
+    <string name="integrations_nzbdav_base_url">Basis-URL</string>
+    <string name="integrations_nzbdav_api_key">API-Schlüssel</string>
+    <string name="integrations_nzbdav_test">Verbindung testen</string>
+    <string name="integrations_nzbdav_save">Speichern</string>
+    <string name="integrations_nzbdav_remove">Entfernen</string>
+    <string name="integrations_nzbdav_status_loading">Status wird geprüft…</string>
+    <string name="integrations_nzbdav_status_not_configured">Nicht konfiguriert</string>
+    <string name="integrations_nzbdav_status_connected">Verbunden</string>
+    <string name="integrations_nzbdav_status_connected_degraded">Verbunden, aber das Backend meldet eingeschränkten Status</string>
+    <string name="integrations_nzbdav_status_failed">Verbindung fehlgeschlagen</string>
+    <string name="integrations_nzbdav_action_test_ok">Verbindungstest erfolgreich</string>
+    <string name="integrations_nzbdav_action_test_degraded">Verbindungstest erfolgreich, Backend meldet eingeschränkten Status</string>
+    <string name="integrations_nzbdav_action_test_failed">Verbindungstest fehlgeschlagen</string>
+    <string name="integrations_nzbdav_action_missing_fields">Basis-URL und API-Schlüssel sind erforderlich</string>
+    <string name="integrations_nzbdav_action_saved">Gespeichert</string>
+    <string name="integrations_nzbdav_action_removed">Entfernt</string>
 </resources>

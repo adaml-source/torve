@@ -135,7 +135,23 @@ data class SubscriptionAccessPresentation(
     val isDeviceActivated: Boolean,
     val isUsablePremiumOnThisDevice: Boolean,
     val isPremiumButBlockedOnThisDevice: Boolean,
+    /**
+     * True when the buy section should render at all — i.e. there is at
+     * least one product the user can still purchase. Equal to
+     * [shouldShowBuyMonthly] OR [shouldShowBuyLifetime].
+     */
     val shouldShowBuy: Boolean,
+    /**
+     * Show the monthly buy button. Hidden once the user has any active
+     * entitlement (re-buying monthly when already premium is pointless).
+     */
+    val shouldShowBuyMonthly: Boolean,
+    /**
+     * Show the lifetime buy button. Hidden ONLY when the user already
+     * owns lifetime — a monthly subscriber can (and should) be able to
+     * upgrade to lifetime at any time.
+     */
+    val shouldShowBuyLifetime: Boolean,
     val shouldShowRestore: Boolean,
     val shouldShowManageDevices: Boolean,
     val accessStatusLabel: String,
@@ -155,9 +171,15 @@ fun SubscriptionUiState.accessPresentation(
     val blockMessage = deviceBlockMessage(deviceBlockReason, strings)
 
     val accessStatusLabel = when {
+        isUsablePremiumOnThisDevice && tier == SubscriptionTier.LIFETIME -> strings.lifetimeActive()
         isUsablePremiumOnThisDevice && tier == SubscriptionTier.MONTHLY ->
             expiryText?.let { strings.monthlyActiveUntil(it) } ?: strings.monthlyActive()
-        isUsablePremiumOnThisDevice && tier == SubscriptionTier.LIFETIME -> strings.lifetimeActive()
+        // Tier didn't classify (backend returned premium_access=true but no
+        // recognised entitlement key / access_tier), but we DO have an
+        // expiry — surface that to the user as "active until <date>"
+        // instead of the bare "Premium active" catch-all.
+        isUsablePremiumOnThisDevice && expiryText != null ->
+            strings.monthlyActiveUntil(expiryText)
         isUsablePremiumOnThisDevice -> strings.premiumActive()
         isPremiumButBlockedOnThisDevice && tier == SubscriptionTier.MONTHLY -> strings.monthlyOnAccount()
         isPremiumButBlockedOnThisDevice && tier == SubscriptionTier.LIFETIME -> strings.lifetimeOnAccount()
@@ -166,10 +188,12 @@ fun SubscriptionUiState.accessPresentation(
     }
 
     val accessHelperText = when {
-        isUsablePremiumOnThisDevice && tier == SubscriptionTier.MONTHLY ->
-            strings.monthlyActiveOnDevice(expiryText)
         isUsablePremiumOnThisDevice && tier == SubscriptionTier.LIFETIME ->
             strings.lifetimeActiveOnDevice()
+        isUsablePremiumOnThisDevice && tier == SubscriptionTier.MONTHLY ->
+            strings.monthlyActiveOnDevice(expiryText)
+        isUsablePremiumOnThisDevice && expiryText != null ->
+            strings.monthlyActiveOnDevice(expiryText)
         isUsablePremiumOnThisDevice ->
             strings.premiumActiveOnDevice()
         isPremiumButBlockedOnThisDevice && tier == SubscriptionTier.MONTHLY ->
@@ -182,12 +206,21 @@ fun SubscriptionUiState.accessPresentation(
             strings.freeHelperText()
     }
 
+    val isAlreadyLifetime = tier == SubscriptionTier.LIFETIME && hasPremiumEntitlement
+    val showBuyMonthly = !hasPremiumEntitlement
+    // Lifetime is the only product that meaningfully upgrades over an
+    // existing monthly entitlement, so show its button whenever the user
+    // doesn't already own lifetime.
+    val showBuyLifetime = !isAlreadyLifetime
+
     return SubscriptionAccessPresentation(
         hasPremiumEntitlement = hasPremiumEntitlement,
         isDeviceActivated = deviceActivated,
         isUsablePremiumOnThisDevice = isUsablePremiumOnThisDevice,
         isPremiumButBlockedOnThisDevice = isPremiumButBlockedOnThisDevice,
-        shouldShowBuy = !hasPremiumEntitlement,
+        shouldShowBuy = showBuyMonthly || showBuyLifetime,
+        shouldShowBuyMonthly = showBuyMonthly,
+        shouldShowBuyLifetime = showBuyLifetime,
         shouldShowRestore = true,
         shouldShowManageDevices = isPremiumButBlockedOnThisDevice,
         accessStatusLabel = accessStatusLabel,
@@ -200,10 +233,13 @@ fun SubscriptionUiState.recommendedPremiumActions(): List<PremiumSurfaceAction> 
     val access = accessPresentation()
     val actions = mutableListOf<PremiumSurfaceAction>()
 
-    if (access.shouldShowBuy) {
+    if (access.shouldShowBuyMonthly) {
         actions += PremiumSurfaceAction.BUY_MONTHLY
+    }
+    if (access.shouldShowBuyLifetime) {
         actions += PremiumSurfaceAction.BUY_LIFETIME
-    } else if (access.shouldShowManageDevices) {
+    }
+    if (!access.shouldShowBuy && access.shouldShowManageDevices) {
         actions += PremiumSurfaceAction.MANAGE_DEVICES
     }
 

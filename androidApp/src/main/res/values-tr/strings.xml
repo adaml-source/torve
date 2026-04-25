@@ -76,6 +76,14 @@
     <string name="settings_provider">Sağlayıcı</string>
     <string name="settings_connected">Bağlı</string>
     <string name="settings_premium_until">%1$s tarihine kadar Premium</string>
+    <string name="settings_subscription_card_title">Abonelik</string>
+    <string name="settings_subscription_upgrade_cta">Premium\'a yükselt</string>
+    <string name="settings_subscription_manage_cta">Aboneliği yönet</string>
+    <string name="settings_subscription_signed_out_prompt">Aboneliğinizi görmek ve bu cihazda Premium\'u açmak için giriş yapın.</string>
+    <string name="settings_subscription_sign_in_cta">Giriş yap veya hesap oluştur</string>
+    <string name="paywall_sign_in_action_hint">Giriş yapmak için buraya dokunun</string>
+    <string name="paywall_lifetime_upgrade_hint">Aylık kullanıyorsunuz — bir kez ödeyip bir daha ödemeyin</string>
+    <string name="paywall_upgrade_to_lifetime">Lifetime\'a yükselt</string>
     <string name="settings_go_to">Şuraya git:</string>
     <string name="settings_enter_code">Kodu girin:</string>
     <string name="settings_waiting_auth">Yetkilendirme bekleniyor…</string>
@@ -1710,4 +1718,37 @@
     <string name="help_support_label">Daha fazla yardıma mı ihtiyacınız var?</string>
     <string name="help_support_email">support@torve.app</string>
     <string name="help_support_body">Bize ulaşın:</string>
+    <string name="stream_preparing_title">Yayınınız hazırlanıyor</string>
+    <string name="stream_preparing_body">%1$s bu sürümü Usenet\'ten alıyor. Genellikle bir iki dakika sürer.</string>
+    <string name="stream_preparing_elapsed">Bekleniyor %1$s</string>
+    <string name="stream_preparing_subnote">Hazır olur olmaz oynatmayı otomatik olarak başlatacağız. Bu ekrandan çıkabilirsin — yerin saklı tutuluyor.</string>
+    <string name="stream_preparing_cancel">İptal</string>
+    <string name="error_stream_preparing_timeout">Bulut indirme hizmetiniz hâlâ bununla uğraşıyor. Başka bir kaynak deneyin veya birkaç dakika sonra tekrar gelin.</string>
+
+    <!-- Usenet source sheet -->
+    <string name="usenet_row_ready_now">Şimdi hazır</string>
+    <string name="usenet_row_preparing">Hazırlanıyor</string>
+    <string name="usenet_row_unavailable">Kullanılamıyor</string>
+    <string name="usenet_trying_next_source">Sonraki kaynak deneniyor</string>
+    <string name="usenet_playback_link_expired">Oynatma bağlantısının süresi doldu, yenileniyor</string>
+
+    <!-- NzbDAV integration card -->
+    <string name="integrations_nzbdav_title">NzbDAV</string>
+    <string name="integrations_nzbdav_desc">Torve, Usenet kaynaklarını yayınlamak için NzbDAV örneğinizi kullanır. Bağlantı Torve arka ucu tarafından yönetilir.</string>
+    <string name="integrations_nzbdav_base_url">Temel URL</string>
+    <string name="integrations_nzbdav_api_key">API anahtarı</string>
+    <string name="integrations_nzbdav_test">Bağlantıyı test et</string>
+    <string name="integrations_nzbdav_save">Kaydet</string>
+    <string name="integrations_nzbdav_remove">Kaldır</string>
+    <string name="integrations_nzbdav_status_loading">Durum kontrol ediliyor…</string>
+    <string name="integrations_nzbdav_status_not_configured">Yapılandırılmadı</string>
+    <string name="integrations_nzbdav_status_connected">Bağlandı</string>
+    <string name="integrations_nzbdav_status_connected_degraded">Bağlandı ancak arka uç düşük performans bildirdi</string>
+    <string name="integrations_nzbdav_status_failed">Bağlantı başarısız</string>
+    <string name="integrations_nzbdav_action_test_ok">Bağlantı testi başarılı</string>
+    <string name="integrations_nzbdav_action_test_degraded">Bağlantı testi başarılı, arka uç düşük performans bildirdi</string>
+    <string name="integrations_nzbdav_action_test_failed">Bağlantı testi başarısız</string>
+    <string name="integrations_nzbdav_action_missing_fields">Temel URL ve API anahtarı gereklidir</string>
+    <string name="integrations_nzbdav_action_saved">Kaydedildi</string>
+    <string name="integrations_nzbdav_action_removed">Kaldırıldı</string>
 </resources>

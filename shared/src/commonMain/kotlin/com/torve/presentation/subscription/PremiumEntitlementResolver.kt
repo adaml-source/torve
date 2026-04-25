@@ -52,6 +52,30 @@ fun resolvePremiumEntitlement(
         )
     }
 
+    // Fallback for active entitlement records we don't recognise (admin
+    // grants, future product ids, rebate codes the client hasn't been
+    // taught about, etc.). Without this branch the UI falls through to
+    // the bare "Premium active" catch-all and never surfaces the
+    // ends_at date the backend did provide. Defaulting to MONTHLY when
+    // an expiry exists / LIFETIME when it doesn't keeps the displayed
+    // expiry honest while still admitting the user to premium.
+    val unrecognised = activeRecords
+        .mapNotNull { record ->
+            val endsAtEpochMs = record.endsAt?.let(::parseIsoToEpochMillis)
+            if (endsAtEpochMs != null && endsAtEpochMs <= nowEpochMs) null
+            else record to endsAtEpochMs
+        }
+        .maxByOrNull { (_, endsAtEpochMs) -> endsAtEpochMs ?: Long.MAX_VALUE }
+    if (unrecognised != null) {
+        val (record, endsAtEpochMs) = unrecognised
+        return ResolvedPremiumEntitlement(
+            tier = if (endsAtEpochMs == null) SubscriptionTier.LIFETIME else SubscriptionTier.MONTHLY,
+            hasEntitlement = true,
+            expiresAtEpochMs = endsAtEpochMs,
+            sourceStore = record.sourceStore,
+        )
+    }
+
     return ResolvedPremiumEntitlement(
         tier = SubscriptionTier.FREE,
         hasEntitlement = false,

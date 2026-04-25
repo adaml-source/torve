@@ -2,6 +2,7 @@ package com.torve.android.ui.subscription
 
 import android.app.Activity
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -69,6 +70,7 @@ fun PaywallScreen(
     onBack: () -> Unit,
     onDeviceLimitReached: () -> Unit = {},
     onManageDevices: () -> Unit = {},
+    onLogin: () -> Unit = {},
     lockedFeature: PremiumFeature? = null,
     viewModel: SubscriptionViewModel = koinInject(),
     billingManager: BillingManager = koinInject(),
@@ -193,6 +195,7 @@ fun PaywallScreen(
                 }
             },
             onRetryBilling = { billingManager.initialize() },
+            onLogin = onLogin,
         )
     }
 }
@@ -209,6 +212,7 @@ private fun PaywallContent(
     onRetryVerification: () -> Unit,
     onPurchase: (BillingManager.ProductType) -> Unit,
     onRetryBilling: () -> Unit,
+    onLogin: () -> Unit,
 ) {
     val billingState by billingManager.billingState.collectAsState()
     val monthlyOffer = remember(billingState) {
@@ -299,7 +303,10 @@ private fun PaywallContent(
 
         state.purchaseStatus?.let { status ->
             Spacer(Modifier.height(16.dp))
-            PurchaseStatusCard(status = status)
+            PurchaseStatusCard(
+                status = status,
+                onClick = if (status.kind == com.torve.presentation.subscription.PurchaseStatusKind.SIGN_IN_REQUIRED) onLogin else null,
+            )
         }
 
         if (access.shouldShowBuy) {
@@ -336,7 +343,12 @@ private fun PaywallContent(
                 }
 
                 else -> {
-                    if (monthlyOffer != null) {
+                    // Per-product gates so a monthly subscriber can still
+                    // upgrade to lifetime. shouldShowBuyMonthly hides the
+                    // monthly button once any entitlement is active;
+                    // shouldShowBuyLifetime hides the lifetime button only
+                    // when the user already owns lifetime.
+                    if (monthlyOffer != null && access.shouldShowBuyMonthly) {
                         PricingOptionCard(
                             title = stringResource(R.string.paywall_monthly_title),
                             description = stringResource(R.string.paywall_monthly_description),
@@ -349,14 +361,32 @@ private fun PaywallContent(
                         Spacer(Modifier.height(12.dp))
                     }
 
-                    if (lifetimeOffer != null) {
+                    if (lifetimeOffer != null && access.shouldShowBuyLifetime) {
+                        // When the user already has monthly, surface the
+                        // lifetime offer as an explicit upgrade so they
+                        // know they're not double-paying.
+                        val isMonthlyToLifetimeUpgrade = access.hasPremiumEntitlement
+                        if (isMonthlyToLifetimeUpgrade) {
+                            Text(
+                                text = stringResource(R.string.paywall_lifetime_upgrade_hint),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Amber,
+                                modifier = Modifier.fillMaxWidth(),
+                                textAlign = TextAlign.Center,
+                            )
+                            Spacer(Modifier.height(6.dp))
+                        }
                         PricingOptionCard(
                             title = stringResource(R.string.paywall_lifetime_title),
                             description = stringResource(R.string.paywall_lifetime_description),
                             price = lifetimeOffer.formattedPrice ?: stringResource(R.string.paywall_price),
                             billingDetails = lifetimeOffer.billingDetails,
                             enabled = !state.isPurchasing && !purchaseBlocked,
-                            actionLabel = stringResource(R.string.paywall_choose_lifetime),
+                            actionLabel = if (isMonthlyToLifetimeUpgrade) {
+                                stringResource(R.string.paywall_upgrade_to_lifetime)
+                            } else {
+                                stringResource(R.string.paywall_choose_lifetime)
+                            },
                             onClick = { onPurchase(BillingManager.ProductType.LIFETIME) },
                         )
                     }
@@ -543,14 +573,23 @@ private fun PricingOptionCard(
 }
 
 @Composable
-private fun PurchaseStatusCard(status: PurchaseStatusMessage) {
+private fun PurchaseStatusCard(
+    status: PurchaseStatusMessage,
+    onClick: (() -> Unit)? = null,
+) {
     val accent = when (status.tone) {
         PurchaseStatusTone.INFO -> Amber
         PurchaseStatusTone.SUCCESS -> Color(0xFF22C55E)
         PurchaseStatusTone.ERROR -> MaterialTheme.colorScheme.error
     }
+    val baseModifier = Modifier.fillMaxWidth()
+    val cardModifier = if (onClick != null) {
+        baseModifier.then(Modifier.clickable { onClick() })
+    } else {
+        baseModifier
+    }
     OutlinedCard(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = cardModifier,
         shape = RoundedCornerShape(14.dp),
         border = BorderStroke(1.dp, accent.copy(alpha = 0.5f)),
     ) {
@@ -567,6 +606,15 @@ private fun PurchaseStatusCard(status: PurchaseStatusMessage) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (onClick != null) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.paywall_sign_in_action_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = accent,
+                )
+            }
         }
     }
 }
