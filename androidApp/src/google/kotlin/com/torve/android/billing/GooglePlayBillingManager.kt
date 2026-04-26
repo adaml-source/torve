@@ -15,6 +15,8 @@ import com.android.billingclient.api.PurchasesUpdatedListener
 import com.android.billingclient.api.QueryProductDetailsParams
 import com.android.billingclient.api.QueryPurchasesParams
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
@@ -269,6 +271,45 @@ class GooglePlayBillingManager(context: Context) : BillingManager, PurchasesUpda
     override fun queryExistingPurchases() {
         queryExistingPurchasesFor(BillingClient.ProductType.SUBS)
         queryExistingPurchasesFor(BillingClient.ProductType.INAPP)
+    }
+
+    override suspend fun queryActivePurchases(): List<BillingManager.ActivePurchase> {
+        // Both product types must be queried independently — Play's API
+        // returns one or the other per call, never both. We collect each
+        // and merge into a single list of purchase tokens for the
+        // backend's per-token verify step.
+        val subs = queryActiveOfType(BillingClient.ProductType.SUBS)
+        val inapp = queryActiveOfType(BillingClient.ProductType.INAPP)
+        return subs + inapp
+    }
+
+    private suspend fun queryActiveOfType(productType: String): List<BillingManager.ActivePurchase> {
+        val params = QueryPurchasesParams.newBuilder()
+            .setProductType(productType)
+            .build()
+        return suspendCancellableCoroutine { cont ->
+            billingClient.queryPurchasesAsync(params) { result: BillingResult, purchases: List<Purchase> ->
+                if (result.responseCode != BillingClient.BillingResponseCode.OK) {
+                    cont.resume(emptyList())
+                    return@queryPurchasesAsync
+                }
+                val active = purchases
+                    .filter { it.purchaseState == Purchase.PurchaseState.PURCHASED }
+                    .filter { purchase ->
+                        purchase.products.any {
+                            it in MONTHLY_PRODUCT_IDS || it == LIFETIME_PRODUCT_ID
+                        }
+                    }
+                    .map { purchase ->
+                        BillingManager.ActivePurchase(
+                            productId = purchase.products.firstOrNull().orEmpty(),
+                            purchaseToken = purchase.purchaseToken,
+                            isAcknowledged = purchase.isAcknowledged,
+                        )
+                    }
+                cont.resume(active)
+            }
+        }
     }
 
     private fun queryExistingPurchasesFor(productType: String) {

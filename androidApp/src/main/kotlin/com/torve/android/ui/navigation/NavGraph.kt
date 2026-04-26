@@ -315,8 +315,43 @@ fun TorveNavGraph(
     val isLocked: (PremiumFeature) -> Boolean = remember(accessTier) {
         { feature -> PremiumAccess.isPremiumLocked(feature, accessTier) }
     }
-    val requestLifetimeUnlock: (PremiumFeature) -> Unit = remember(navController) {
-        { feature -> navController.navigateToLifetimeUnlock(feature) }
+    val requestLifetimeUnlock: (PremiumFeature) -> Unit = remember(
+        navController,
+        subscriptionState.hasEntitlement,
+        subscriptionState.isDeviceActivated,
+        subscriptionState.deviceBlockReason,
+        subscriptionState.deviceCapReached,
+    ) {
+        { feature ->
+            val state = subscriptionState
+            when {
+                // Fresh-install race: the very first /me/access-state call
+                // beat device registration to the backend, so we cached
+                // device_not_registered for an account that genuinely has
+                // an entitlement. Refreshing now will pick up the post-
+                // registration state and the gate will lift on the next
+                // tap. Routing to the paywall here is misleading — the
+                // user is already premium.
+                state.hasEntitlement && state.deviceBlockReason == "device_not_registered" -> {
+                    subscriptionViewModel.refreshAccess()
+                }
+                // User has the entitlement but their device-cap is full —
+                // managing devices is the actual path forward, not buying.
+                state.hasEntitlement && state.deviceCapReached -> {
+                    navController.navigate("device_limit_reached")
+                }
+                // User has entitlement but this device isn't activated for
+                // any other reason (e.g. activation_slot_exhausted) — send
+                // them to the device manager.
+                state.hasEntitlement && !state.isDeviceActivated -> {
+                    navController.navigate("manage_devices")
+                }
+                // Genuinely no entitlement — paywall is the right surface.
+                else -> {
+                    navController.navigateToLifetimeUnlock(feature)
+                }
+            }
+        }
     }
     val canAccessManageDevicesSurface = subscriptionState.isLoggedIn
 

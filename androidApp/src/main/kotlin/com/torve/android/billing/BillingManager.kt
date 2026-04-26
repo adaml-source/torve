@@ -47,12 +47,35 @@ interface BillingManager {
         data class Error(val message: String) : PurchaseResult()
     }
 
+    /**
+     * One owned purchase as reported by the store. Used by the
+     * client-driven restore flow to feed each token to the backend
+     * verify endpoint before recomputing premium flags.
+     */
+    data class ActivePurchase(
+        val productId: String,
+        val purchaseToken: String,
+        val isAcknowledged: Boolean,
+    )
+
     val billingState: StateFlow<BillingState>
     val purchaseResult: StateFlow<PurchaseResult?>
 
     fun initialize()
     fun launchPurchase(activity: Activity, productType: ProductType)
     fun queryExistingPurchases()
+    /**
+     * Suspend query of all active (PURCHASED) purchases the store knows
+     * about for this user — both subscriptions (SUBS) and one-time
+     * purchases (INAPP). Returns an empty list if billing isn't ready
+     * or the store reports no purchases. Never throws.
+     *
+     * Restore flow: client iterates these, POSTs each token to
+     * /me/purchases/google-play/verify, then calls
+     * /me/purchases/restore on the backend, then refreshes
+     * /me/access-state.
+     */
+    suspend fun queryActivePurchases(): List<ActivePurchase>
     fun getOffer(productType: ProductType): BillingOffer?
     fun clearPurchaseResult()
 }

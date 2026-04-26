@@ -103,6 +103,7 @@ import com.torve.presentation.channels.ChannelsViewModel
 import com.torve.presentation.search.SearchViewModel
 import com.torve.presentation.session.AccountSessionCoordinator
 import com.torve.presentation.settings.SettingsViewModel
+import com.torve.presentation.session.DeviceRegistrationNotifier
 import com.torve.presentation.settings.SettingsRefreshNotifier
 import com.torve.presentation.setup.SetupWizardViewModel
 import com.torve.presentation.discover.DiscoverViewModel
@@ -258,7 +259,7 @@ val sharedModule = module {
     single { StreamAggregator(get(), get(), get()) }
 
     // Stream Repository
-    single<StreamRepository> { StreamRepositoryImpl(get(), get(), get(), get()) }
+    single<StreamRepository> { StreamRepositoryImpl(get(), get(), get(), get(), get()) }
     single { AccelerationInventorySyncService(get(), get(), get()) }
 
     // User ID provider for DB scoping. Uses a lazy AuthClient lookup so it can be
@@ -277,6 +278,7 @@ val sharedModule = module {
     single<AccountSettingsRepository> { AccountSettingsRepositoryImpl(get(), get(), get(), get()) }
     single<PreferencesRepository> { AccountAwarePreferencesRepository(get(), get()) }
     single { SettingsRefreshNotifier() }
+    single { DeviceRegistrationNotifier() }
     single { AddonPolicyRepository(get(), get()) }
     single {
         ContentPolicyApi(
@@ -352,7 +354,7 @@ val sharedModule = module {
     // Sync Repository
     single<SyncRepository> { SyncRepositoryImpl(get(), get(), get(), get()) }
     single { PairingApi(get(), baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL }) }
-    single { AccountSessionCoordinator(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { AccountSessionCoordinator(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
 
     // Use Cases
     factory { GetRecommendationsUseCase(get(), get()) }
@@ -362,11 +364,21 @@ val sharedModule = module {
     // The database is pre-warmed on a background thread in TorveApp.onCreate so the
     // first koinInject() doesn't block the main thread with schema DDL.
     single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
-    single { SearchViewModel(get(), get(), get(), get(), get()) }
-    factory { DetailViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { SearchViewModel(get(), get(), get(), get(), get(), get(), get()) }
+    factory {
+        DetailViewModel(
+            get(), get(), get(), get(), get(), get(), get(), get(), get(),
+            get(), get(), get(), get(), get(), get(), get(), get(),
+            usenetWarmCoordinator = get(),
+            usenetResolveCoordinator = get(),
+            usenetJobPoller = get(),
+            telemetry = get(),
+            watchStateRemoteSource = getOrNull(),
+        )
+    }
     factoryOf(::PersonViewModel)
     single {
-        SettingsViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()).also { vm ->
+        SettingsViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()).also { vm ->
             // Wire integration save callback — breaks circular dep by using lazy resolution.
             vm.onIntegrationSaved = { type, credential, label ->
                 get<AccountSessionCoordinator>().saveIntegrationToBackend(type, credential, label)
@@ -392,6 +404,37 @@ val sharedModule = module {
     }
     single { com.torve.data.panda.PandaApiClient(get(), get()) }
     factory { com.torve.presentation.panda.PandaSetupViewModel(get(), get(), get(), get(), get(), get(), get(), get()) }
+    // NzbDAV / Usenet-resolver data layer. Talks only to the Torve backend;
+    // never speaks raw NzbDAV/WebDAV/SABnzbd. Settings VM + warm/resolve
+    // coordinators land in later prompts and inject UsenetRepository.
+    single {
+        com.torve.data.usenet.UsenetApi(
+            httpClient = get(),
+            authClient = get(),
+            baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
+        )
+    }
+    single<com.torve.data.usenet.UsenetRepository> {
+        com.torve.data.usenet.UsenetRepositoryImpl(
+            api = get(),
+            secretStore = get(),
+        )
+    }
+    // Analytics surface. Default is a no-op sink — feature code can emit
+    // safely and a real backend integration can swap this without VM or
+    // coordinator changes. See com.torve.domain.telemetry.TelemetryEmitter.
+    single<com.torve.domain.telemetry.TelemetryEmitter> {
+        com.torve.domain.telemetry.NoOpTelemetryEmitter()
+    }
+    factory {
+        com.torve.presentation.usenet.NzbdavSetupViewModel(
+            repository = get(),
+            secretStore = get(),
+        )
+    }
+    single { com.torve.domain.streams.UsenetWarmCoordinator(repository = get(), telemetry = get()) }
+    single { com.torve.domain.streams.UsenetResolveCoordinator(repository = get(), telemetry = get()) }
+    single { com.torve.domain.streams.UsenetJobPoller(repository = get()) }
     single { ChannelsViewModel(get(), get(), get(), backgroundDispatcher = kotlinx.coroutines.Dispatchers.IO, playlistBackup = get(), settingsRefreshNotifier = get()) }
     factory { CalendarViewModel(get(), get()) }
     factory { DownloadViewModel(get(), contentPolicyRepository = get(), contentPolicyFilter = ContentPolicyFilter()) }
@@ -399,7 +442,18 @@ val sharedModule = module {
     factoryOf(::ProfileViewModel)
     // Singleton so NavGraph, PaywallScreen, and all other screens share
     // the same premium state — avoids stale locks after purchase/login.
-    single { SubscriptionViewModel(get(), get(), get(), get(), get(), get(), get()) }
+    single {
+        SubscriptionViewModel(
+            subscriptionRepo = get(),
+            rebateCodeApi = get(),
+            deviceIdProvider = get(),
+            authClient = get(),
+            entitlementApi = get(),
+            prefsRepo = get(),
+            strings = get(),
+            deviceRegistrationNotifier = get(),
+        )
+    }
     factoryOf(::DeviceGovernanceViewModel)
     factory { SetupWizardViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     single { WatchlistViewModel(get(), get(), get(), get(), get()) }

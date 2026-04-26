@@ -2,7 +2,9 @@ package com.torve.presentation.subscription
 
 import com.torve.presentation.error.defaultMessage
 import com.torve.data.auth.AuthClient
+import com.torve.data.auth.AuthResult
 import com.torve.data.entitlement.EntitlementApi
+import com.torve.data.entitlement.PurchaseVerifyErrorCode
 import com.torve.data.subscription.RebateCodeApi
 import com.torve.data.subscription.RebateResult
 import com.torve.domain.device.DeviceIdProvider
@@ -41,6 +43,7 @@ internal data class SubscriptionEntitlementUiDecision(
     val isDeviceActivated: Boolean,
     val deviceBlockReason: String?,
     val deviceCapReached: Boolean,
+    val needsVerification: Boolean,
 )
 
 internal fun resolveSubscriptionEntitlementUiDecision(
@@ -53,13 +56,15 @@ internal fun resolveSubscriptionEntitlementUiDecision(
             isDeviceActivated = true,
             deviceBlockReason = null,
             deviceCapReached = false,
+            needsVerification = false,
         )
         is BackendPremiumResult.DeviceBlocked -> SubscriptionEntitlementUiDecision(
             isPro = false,
             hasEntitlement = true,
             isDeviceActivated = false,
             deviceBlockReason = backendResult.reason,
-            deviceCapReached = true,
+            deviceCapReached = backendResult.reason.isDeviceCapBlockReason(),
+            needsVerification = backendResult.needsVerification,
         )
         BackendPremiumResult.NoEntitlement -> SubscriptionEntitlementUiDecision(
             isPro = false,
@@ -67,6 +72,7 @@ internal fun resolveSubscriptionEntitlementUiDecision(
             isDeviceActivated = false,
             deviceBlockReason = null,
             deviceCapReached = false,
+            needsVerification = false,
         )
         is BackendPremiumResult.Offline -> SubscriptionEntitlementUiDecision(
             // Fail-closed: offline users do not get premium UI access.
@@ -76,6 +82,7 @@ internal fun resolveSubscriptionEntitlementUiDecision(
             isDeviceActivated = false,
             deviceBlockReason = null,
             deviceCapReached = false,
+            needsVerification = false,
         )
         null -> SubscriptionEntitlementUiDecision(
             isPro = false,
@@ -83,12 +90,23 @@ internal fun resolveSubscriptionEntitlementUiDecision(
             isDeviceActivated = false,
             deviceBlockReason = null,
             deviceCapReached = false,
+            needsVerification = false,
         )
     }
     com.torve.platform.torveVerboseLog {
         "ENTITLEMENT_DECISION: backend=${backendResult?.let { it::class.simpleName } ?: "null"} → isPro=${decision.isPro} hasEntitlement=${decision.hasEntitlement} isDeviceActivated=${decision.isDeviceActivated} deviceBlock=${decision.deviceBlockReason}"
     }
     return decision
+}
+
+private fun String?.isDeviceCapBlockReason(): Boolean {
+    return when (this?.trim()?.lowercase()) {
+        "device_cap_reached",
+        "activation_slot_exhausted",
+        "no_activation_slots",
+        -> true
+        else -> false
+    }
 }
 
 class SubscriptionViewModel(
@@ -99,8 +117,11 @@ class SubscriptionViewModel(
     private val entitlementApi: EntitlementApi,
     private val prefsRepo: PreferencesRepository,
     private val strings: PurchaseStringResolver = DefaultPurchaseStringResolver(),
+    coroutineScope: CoroutineScope? = null,
+    private val resendVerificationEmail: suspend (String) -> AuthResult = authClient::resendVerification,
+    private val deviceRegistrationNotifier: com.torve.presentation.session.DeviceRegistrationNotifier? = null,
 ) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = coroutineScope ?: CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(SubscriptionUiState())
     val state: StateFlow<SubscriptionUiState> = _state.asStateFlow()
     private val json = Json { ignoreUnknownKeys = true }
@@ -113,11 +134,31 @@ class SubscriptionViewModel(
                 loadSubscription()
             }
         }
+        // Re-fetch /me/access-state after the current device registers
+        // with the backend. Without this the first access-state call on a
+        // fresh install (which races registration) would pin a stale
+        // device_not_registered snapshot and the user would land on the
+        // paywall when they try to play premium content despite having a
+        // valid entitlement.
+        deviceRegistrationNotifier?.let { notifier ->
+            scope.launch {
+                notifier.events.collect {
+                    torveVerboseLog { "SUBSCRIPTION: device-registration event — refreshing access state" }
+                    loadSubscription()
+                }
+            }
+        }
     }
 
     private fun maskToken(token: String, visiblePrefix: Int = 8): String {
         if (token.isBlank()) return "<empty>"
         return "${token.take(visiblePrefix)}..."
+    }
+
+    private fun currentInstallationIdOrNull(): String? {
+        return runCatching {
+            deviceIdProvider.getDeviceId().takeIf { it.isNotBlank() }
+        }.getOrNull()
     }
 
     private fun logPurchaseMilestone(
@@ -414,6 +455,80 @@ class SubscriptionViewModel(
         return jsonDetail?.ifBlank { null } ?: body.trim().ifBlank { null }
     }
 
+    /**
+     * Parse a standardized `error_code` out of a JSON error body. Returns
+     * null when the response isn't JSON, doesn't have the field, or the
+     * body can't be read. The raw body is never surfaced to the UI — it
+     * may contain backend internals (file paths, stack traces) that must
+     * not reach end users.
+     */
+    private suspend fun extractErrorCode(error: ResponseException): String? {
+        val body = runCatching { error.response.bodyAsText() }.getOrNull().orEmpty()
+        if (body.isBlank()) return null
+        val match = Regex("\"error_code\"\\s*:\\s*\"([a-zA-Z_]+)\"").find(body)
+        return match?.groupValues?.getOrNull(1)?.ifBlank { null }
+    }
+
+    /**
+     * Map a Google Play verify error_code to a sanitized [PurchaseStatusMessage].
+     * All messages are pre-translated string-resolver output — no raw
+     * backend text is interpolated. The distinction between "temporary
+     * backend problem" and "purchase can't be matched" drives which tone
+     * the UI shows (BACKEND_UNAVAILABLE vs VERIFICATION_FAILED_TEMPORARILY).
+     */
+    private fun buildGoogleVerifyStatus(errorCode: String?): PurchaseStatusMessage {
+        return when (errorCode) {
+            PurchaseVerifyErrorCode.CONFIG_MISSING,
+            PurchaseVerifyErrorCode.SERVICE_ACCOUNT_FAILURE -> purchaseStatus(
+                // Operator-owned issues that the user cannot act on and
+                // that should never leak ops detail into the UI.
+                kind = PurchaseStatusKind.BACKEND_UNAVAILABLE,
+                title = if (errorCode == PurchaseVerifyErrorCode.CONFIG_MISSING) {
+                    strings.googleVerifyConfigMissingTitle()
+                } else {
+                    strings.googleVerifyServiceAccountFailureTitle()
+                },
+                message = if (errorCode == PurchaseVerifyErrorCode.CONFIG_MISSING) {
+                    strings.googleVerifyConfigMissing()
+                } else {
+                    strings.googleVerifyServiceAccountFailure()
+                },
+                tone = PurchaseStatusTone.ERROR,
+                showRetryVerification = false,
+            )
+            PurchaseVerifyErrorCode.UPSTREAM_UNREACHABLE -> purchaseStatus(
+                kind = PurchaseStatusKind.BACKEND_UNAVAILABLE,
+                title = strings.googleVerifyUpstreamUnreachableTitle(),
+                message = strings.googleVerifyUpstreamUnreachable(),
+                tone = PurchaseStatusTone.ERROR,
+                showRetryVerification = false,
+            )
+            PurchaseVerifyErrorCode.PRODUCT_MISMATCH -> purchaseStatus(
+                kind = PurchaseStatusKind.VERIFICATION_FAILED_TEMPORARILY,
+                title = strings.googleVerifyProductMismatchTitle(),
+                message = strings.googleVerifyProductMismatch(),
+                tone = PurchaseStatusTone.ERROR,
+                showRetryVerification = false,
+            )
+            PurchaseVerifyErrorCode.NOT_VERIFIED -> purchaseStatus(
+                kind = PurchaseStatusKind.VERIFICATION_FAILED_TEMPORARILY,
+                title = strings.googleVerifyNotVerifiedTitle(),
+                message = strings.googleVerifyNotVerified(),
+                tone = PurchaseStatusTone.ERROR,
+                showRetryVerification = false,
+            )
+            // Unknown error_code or null → fall back to the existing
+            // generic message. Still pre-translated, never raw.
+            else -> purchaseStatus(
+                kind = PurchaseStatusKind.VERIFICATION_FAILED_TEMPORARILY,
+                title = strings.verificationNotFinishedTitle(),
+                message = strings.googleVerifyFailed(),
+                tone = PurchaseStatusTone.ERROR,
+                showRetryVerification = false,
+            )
+        }
+    }
+
     private fun isProbablyBackendUnavailable(error: Throwable): Boolean {
         if (error is ServerResponseException) return true
         val message = error.message.orEmpty().lowercase()
@@ -486,7 +601,7 @@ class SubscriptionViewModel(
                 )
 
                 torveVerboseLog {
-                    "SUBSCRIPTION_GATE decision backendResult=${backendResult?.let { it::class.simpleName } ?: "none"} isPro=${entitlementDecision.isPro} hasEntitlement=${entitlementDecision.hasEntitlement} isDeviceActivated=${entitlementDecision.isDeviceActivated}"
+                    "SUBSCRIPTION_GATE decision backendResult=${backendResult?.let { it::class.simpleName } ?: "none"} isPro=${entitlementDecision.isPro} hasEntitlement=${entitlementDecision.hasEntitlement} isDeviceActivated=${entitlementDecision.isDeviceActivated} needsVerification=${entitlementDecision.needsVerification}"
                 }
                 _state.update { current ->
                     val pendingStatus = current.pendingAmazonVerification?.toPurchaseStatusMessage(isLoggedIn, strings)
@@ -499,6 +614,7 @@ class SubscriptionViewModel(
                         isDeviceActivated = entitlementDecision.isDeviceActivated,
                         deviceBlockReason = entitlementDecision.deviceBlockReason,
                         deviceCapReached = entitlementDecision.deviceCapReached,
+                        needsVerification = entitlementDecision.needsVerification,
                         showDeviceLimitReached = entitlementDecision.deviceCapReached,
                         purchaseVerificationState = if (current.pendingAmazonVerification != null) {
                             PurchaseVerificationState.PENDING
@@ -514,7 +630,7 @@ class SubscriptionViewModel(
                     )
                 }
                 torveVerboseLog {
-                    "SUBSCRIPTION: Entitlement refresh result isPro=${entitlementDecision.isPro} hasEntitlement=${entitlementDecision.hasEntitlement} isDeviceActivated=${entitlementDecision.isDeviceActivated} deviceBlockReason=${entitlementDecision.deviceBlockReason} loggedIn=$isLoggedIn"
+                    "SUBSCRIPTION: Entitlement refresh result isPro=${entitlementDecision.isPro} hasEntitlement=${entitlementDecision.hasEntitlement} isDeviceActivated=${entitlementDecision.isDeviceActivated} needsVerification=${entitlementDecision.needsVerification} deviceBlockReason=${entitlementDecision.deviceBlockReason} loggedIn=$isLoggedIn"
                 }
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = com.torve.presentation.error.UserFacingError.UNKNOWN.defaultMessage()) }
@@ -552,47 +668,94 @@ class SubscriptionViewModel(
                     productId = productId,
                     purchaseToken = purchaseToken,
                     platform = platform,
+                    installationId = currentInstallationIdOrNull(),
                 )
                 torveVerboseLog {
-                    "SUBSCRIPTION: Google verify response received premiumAccess=${result.premium_access} entitlements=${result.entitlements.size}"
+                    "SUBSCRIPTION: Google verify response received verified=${result.verified} entitlementGranted=${result.entitlement_granted} premiumAccess=${result.premium_access} entitlements=${result.entitlements.size} errorCode=${result.error_code ?: "none"}"
                 }
-                val resolvedEntitlement = resolveEntitlement(
-                    result.entitlements.map { entitlement ->
-                        PremiumEntitlementRecord(
-                            key = entitlement.key,
-                            status = entitlement.status,
-                            sourceStore = entitlement.source_store,
-                            endsAt = entitlement.ends_at,
+                // Authoritative success criterion: backend says verified
+                // == true, OR error_code == already_verified (idempotent
+                // replay — still a success). Anything else is a real
+                // failure that should surface a typed error message.
+                val errorCode = result.error_code
+                val isVerified = result.verified == true ||
+                    errorCode == PurchaseVerifyErrorCode.ALREADY_VERIFIED
+                if (!isVerified) {
+                    _state.update {
+                        it.copy(
+                            isPurchasing = false,
+                            error = null,
+                            purchaseStatus = buildGoogleVerifyStatus(errorCode),
+                            purchaseVerificationState = PurchaseVerificationState.FAILED,
                         )
-                    },
-                )
-                val hasEntitlement = result.entitlements.isNotEmpty()
-                val deviceAccess = result.premium_access
-                if (deviceAccess) {
-                    subscriptionRepo.onBackendEntitlementGranted(true)
+                    }
+                    return@launch
                 }
-                loadSubscription()
-                _state.update {
-                    it.copy(
-                        isPurchasing = false,
-                        showPaywall = false,
-                        hasEntitlement = hasEntitlement,
-                        isDeviceActivated = deviceAccess,
-                        deviceBlockReason = null,
-                        deviceCapReached = hasEntitlement && !deviceAccess,
-                        showDeviceLimitReached = hasEntitlement && !deviceAccess,
-                        purchaseVerificationState = PurchaseVerificationState.VERIFIED,
-                        purchaseStatus = buildVerifiedStatus(resolvedEntitlement, deviceAccess),
-                    )
-                }
+                handleVerifySuccess()
             } catch (e: Exception) {
+                // Backend returned non-2xx OR the response body didn't
+                // match our DTO. ClientRequestException wraps the 4xx body
+                // which may carry error_code; we still extract it so an
+                // already_verified replay returned via an unexpected
+                // status (or a deserialiser-rejected shape) reads as
+                // success and triggers the same access-state refresh as
+                // the happy path. Real failures fall through to the
+                // sanitised status message.
+                val errorCode = if (e is ResponseException) extractErrorCode(e) else null
+                if (errorCode == PurchaseVerifyErrorCode.ALREADY_VERIFIED) {
+                    torveVerboseLog { "SUBSCRIPTION: verify body indicated already_verified — treating as success" }
+                    handleVerifySuccess()
+                    return@launch
+                }
+                val statusMessage = buildGoogleVerifyStatus(errorCode)
                 _state.update {
                     it.copy(
                         isPurchasing = false,
-                        error = strings.googleVerifyFailed(),
+                        error = null,
+                        purchaseStatus = statusMessage,
                         purchaseVerificationState = PurchaseVerificationState.FAILED,
                     )
                 }
+            }
+        }
+    }
+
+    /**
+     * Common post-success path for both fresh-verify and idempotent
+     * already_verified replays. Triggers a /me/access-state refresh —
+     * which is the *only* authoritative source for premium UI flags.
+     * The verify response's per-entitlement fields are unreliable now
+     * that the backend's verify body is just {verified, message,
+     * error_code}: the entitlement list and premium_access flag may be
+     * absent, so we MUST read the server's recomputed access state.
+     */
+    private fun handleVerifySuccess() {
+        scope.launch {
+            // Eagerly persist a backend-granted snapshot so any reads
+            // before the access-state refetch returns aren't stuck on
+            // a stale "no entitlement" snapshot.
+            subscriptionRepo.onBackendEntitlementGranted(true)
+            // Refresh state from /me/access-state — replaces purchaseStatus,
+            // hasEntitlement, isDeviceActivated, etc. with whatever the
+            // server actually says.
+            loadSubscription()
+            _state.update {
+                it.copy(
+                    isPurchasing = false,
+                    showPaywall = false,
+                    deviceBlockReason = null,
+                    purchaseVerificationState = PurchaseVerificationState.VERIFIED,
+                    purchaseStatus = purchaseStatus(
+                        kind = PurchaseStatusKind.VERIFIED,
+                        title = strings.purchaseVerifiedTitle(),
+                        // Generic celebratory copy — the specific tier and
+                        // expiry are shown by the access-status label,
+                        // which loadSubscription() refreshes from the
+                        // server's recomputed access state.
+                        message = strings.activeOnDevice(strings.premiumGeneric()),
+                        tone = PurchaseStatusTone.SUCCESS,
+                    ),
+                )
             }
         }
     }
@@ -768,6 +931,7 @@ class SubscriptionViewModel(
                     amazonUserId = sanitizedUserId,
                     productId = sanitizedProductId,
                     platform = platform,
+                    installationId = currentInstallationIdOrNull(),
                 )
                 val resolvedEntitlement = resolveEntitlement(
                     result.entitlements.map { entitlement ->
@@ -1105,6 +1269,136 @@ class SubscriptionViewModel(
     }
 
     /**
+     * Client-driven Google Play restore. The user taps "Restore Purchases".
+     *
+     * Flow (matches the production backend's expectation, 2026-04-26):
+     *  1. Caller passes the result of `BillingClient.queryPurchasesAsync`
+     *     for SUBS + INAPP — every active Play purchase the device knows
+     *     about.
+     *  2. We POST each token to `/me/purchases/google-play/verify`.
+     *     Backend treats already-verified replays as success (returns
+     *     `error_code: "already_verified"`). Verify failures are
+     *     surfaced and abort.
+     *  3. POST `/me/purchases/restore` (canonical, NOT the legacy
+     *     `/purchases/restore`) so the backend recomputes premium flags
+     *     and includes any ledger-only lifetime grant (admin grants,
+     *     rebate codes).
+     *  4. `loadSubscription()` refreshes /me/access-state — the
+     *     authoritative source of premium UI flags.
+     *
+     * If [activePlayPurchases] is empty AND no ledger-only grant exists
+     * server-side, `restored=false` comes back and we surface
+     * "nothing to restore". Lifetime ledger grants survive this path
+     * because step 3 doesn't depend on Play tokens.
+     */
+    fun restoreGooglePlayPurchases(
+        activePlayPurchases: List<GooglePlayActivePurchase>,
+        platform: String,
+        storeLabel: String,
+    ) {
+        scope.launch {
+            _state.update {
+                it.copy(
+                    isLoading = true,
+                    error = null,
+                    purchaseStatus = null,
+                )
+            }
+            val accessToken = authClient.getValidAccessToken()
+            if (accessToken.isNullOrBlank()) {
+                setSignInRequiredStatus(buildRestoreSignInRequiredStatus(storeLabel))
+                return@launch
+            }
+
+            // ── Step 1+2: per-token verify ───────────────────────────
+            // Each token POSTs to /me/purchases/google-play/verify. The
+            // backend handles idempotency via error_code=already_verified;
+            // we treat that as success and continue. Any non-success code
+            // aborts with the typed error message — do not silently
+            // swallow because that's how users miss real billing config
+            // failures (config_missing, service_account_failure).
+            for (purchase in activePlayPurchases) {
+                val verifyResult = runCatching {
+                    entitlementApi.verifyGooglePurchase(
+                        accessToken = accessToken,
+                        productId = purchase.productId,
+                        purchaseToken = purchase.purchaseToken,
+                        platform = platform,
+                        installationId = currentInstallationIdOrNull(),
+                    )
+                }
+                val verified = verifyResult.getOrNull()
+                val errorCode = verified?.error_code
+                    ?: (verifyResult.exceptionOrNull() as? ResponseException)?.let { extractErrorCode(it) }
+                val isOk = verified?.verified == true ||
+                    errorCode == PurchaseVerifyErrorCode.ALREADY_VERIFIED
+                if (!isOk) {
+                    torveVerboseLog {
+                        "SUBSCRIPTION: restore verify failed productId=${purchase.productId} errorCode=${errorCode ?: "unknown"}"
+                    }
+                    _state.update {
+                        it.copy(
+                            isLoading = false,
+                            error = null,
+                            purchaseStatus = buildGoogleVerifyStatus(errorCode),
+                            purchaseVerificationState = PurchaseVerificationState.FAILED,
+                        )
+                    }
+                    return@launch
+                }
+                torveVerboseLog {
+                    "SUBSCRIPTION: restore verify ok productId=${purchase.productId} errorCode=${errorCode ?: "fresh"}"
+                }
+            }
+
+            // ── Step 3: canonical recompute ──────────────────────────
+            // /me/purchases/restore picks up ledger-only lifetime grants
+            // that Play doesn't know about (admin grants, rebate codes).
+            // Always called even when activePlayPurchases was empty.
+            val restoreResult = runCatching {
+                entitlementApi.restorePurchasesCanonical(accessToken)
+            }.getOrNull()
+
+            // ── Step 4: refresh /me/access-state — source of truth ──
+            subscriptionRepo.onBackendEntitlementGranted(
+                restoreResult?.has_premium_access == true,
+            )
+            loadSubscription()
+
+            val anythingRestored = restoreResult?.restored == true ||
+                restoreResult?.has_premium_access == true ||
+                activePlayPurchases.isNotEmpty()
+            _state.update {
+                it.copy(
+                    isLoading = false,
+                    error = null,
+                    showPaywall = false,
+                    purchaseVerificationState = if (anythingRestored) {
+                        PurchaseVerificationState.RESTORED
+                    } else {
+                        PurchaseVerificationState.FAILED
+                    },
+                    purchaseStatus = if (anythingRestored) {
+                        purchaseStatus(
+                            kind = PurchaseStatusKind.RESTORED,
+                            title = strings.purchaseRestoredTitle(),
+                            message = strings.restoredActiveOnDevice(strings.premiumGeneric()),
+                            tone = PurchaseStatusTone.SUCCESS,
+                        )
+                    } else {
+                        purchaseStatus(
+                            kind = PurchaseStatusKind.RESTORE_FOUND_NOTHING,
+                            title = strings.nothingToRestoreTitle(),
+                            message = strings.nothingToRestoreStore(storeLabel),
+                            tone = PurchaseStatusTone.INFO,
+                        )
+                    },
+                )
+            }
+        }
+    }
+
+    /**
      * Legacy: local-only purchase activation.
      * Use verifyGooglePurchase / verifyApplePurchase for backend-verified flow.
      */
@@ -1215,6 +1509,50 @@ class SubscriptionViewModel(
 
     fun dismissDeviceLimitReached() {
         _state.update { it.copy(showDeviceLimitReached = false) }
+    }
+
+    fun sendVerificationEmail() {
+        var shouldSend = false
+        _state.update {
+            if (it.isSendingVerificationEmail) {
+                it
+            } else {
+                shouldSend = true
+                it.copy(
+                    isSendingVerificationEmail = true,
+                    verificationEmailMessage = null,
+                )
+            }
+        }
+        if (!shouldSend) return
+        scope.launch {
+            val user = authClient.getCurrentUser()
+            if (user == null) {
+                _state.update {
+                    it.copy(
+                        isSendingVerificationEmail = false,
+                        verificationEmailMessage = strings.verificationSignInRequired(),
+                    )
+                }
+                return@launch
+            }
+            val result = resendVerificationEmail(user.email)
+            _state.update {
+                it.copy(
+                    isSendingVerificationEmail = false,
+                    verificationEmailMessage = when {
+                        result.success -> strings.verificationEmailSent()
+                        result.error?.contains("wait", ignoreCase = true) == true ->
+                            strings.verificationEmailWaitBeforeResend()
+                        else -> result.error ?: strings.verificationEmailSendFailed()
+                    },
+                )
+            }
+        }
+    }
+
+    fun consumeVerificationEmailMessage() {
+        _state.update { it.copy(verificationEmailMessage = null) }
     }
 
     fun refreshAccess() {

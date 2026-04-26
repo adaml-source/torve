@@ -94,6 +94,7 @@ class AccountSessionCoordinator(
     private val watchProgressRepo: WatchProgressRepository,
     private val watchHistoryRepo: WatchHistoryRepository,
     private val traktSyncRepo: TraktSyncRepository,
+    private val deviceRegistrationNotifier: DeviceRegistrationNotifier,
 ) {
     companion object {
         private const val DEFAULT_MAX_ACTIVE_DEVICES = 5
@@ -262,9 +263,19 @@ class AccountSessionCoordinator(
         return runCatching {
             // ── Phase A: Critical path (fast) ─────────────────────
             torveVerboseLog { "[Login] Phase A: registering device..." }
-            val registrationError = runCatching {
+            val registrationResult = runCatching {
                 deviceApi.registerDevice(token, authClient.currentDeviceRegistration())
-            }.exceptionOrNull()?.message
+            }
+            val registrationError = registrationResult.exceptionOrNull()?.message
+            if (registrationError == null) {
+                // Notify subscribers (in particular SubscriptionViewModel)
+                // that the device now has a backend Device row. The very
+                // first /me/access-state call on a fresh install races
+                // registration and would otherwise pin a stale
+                // device_not_registered snapshot until the user manually
+                // re-triggers a refresh — this signal is the cure.
+                deviceRegistrationNotifier.notifyRegistered(Clock.System.now().toEpochMilliseconds())
+            }
 
             torveVerboseLog { "[Login] Phase A: device registered, entering app" }
             _state.update { it.copy(isBootstrapping = false) }
@@ -537,10 +548,21 @@ class AccountSessionCoordinator(
                         }
                     }
                     IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID -> integrationSecretStore.hasSecret(IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID)
+                    IntegrationSecretKey.PANDA_TOKEN -> {
+                        // Always re-fetch on restore. The synced bundle
+                        // {token, manifest_url, config_id, management_token} only
+                        // populates the management-token-under-config_id slot via
+                        // a fresh fetch — and we can't cheaply detect from the
+                        // local store whether that slot is filled, since
+                        // PANDA_MANAGEMENT_TOKEN is keyed by a per-config subKey
+                        // and IntegrationSecretStore doesn't expose enumeration.
+                        // The cost is a single GET per sign-in.
+                        false
+                    }
                     else -> integrationSecretStore.hasSecret(secretKey)
                 }
                 if (hasLocalSecret && !forceCredentials) {
-                    torveVerboseLog { "[IntegrationRestore] ${integration.integrationType} â†’ local secret already present, skipping credential fetch" }
+                    torveVerboseLog { "[IntegrationRestore] ${integration.integrationType} → local secret already present, skipping credential fetch" }
                     continue
                 }
                 torveVerboseLog { "[IntegrationRestore] Fetching credentials for ${integration.integrationType}..." }
@@ -587,6 +609,31 @@ class AccountSessionCoordinator(
                             restored++
                             torveVerboseLog {
                                 "[IntegrationRestore] ${integration.integrationType} â†’ restored OK (api_key=${apiKey.isNotBlank()} refresh=${refreshToken.isNotBlank()} client=${clientId.isNotBlank()} secret=${clientSecret.isNotBlank()})"
+                            }
+                        }
+                    } else if (secretKey == IntegrationSecretKey.PANDA_TOKEN) {
+                        // Panda's synced credential bundle: {token, manifest_url,
+                        // config_id, management_token}. Older payloads had only
+                        // "token" — the missing-field path is fine (rest stay null).
+                        val pandaToken = credsMap["token"].orEmpty()
+                        val configId = credsMap["config_id"].orEmpty()
+                        val managementToken = credsMap["management_token"].orEmpty()
+                        if (pandaToken.isNotBlank()) {
+                            integrationSecretStore.put(IntegrationSecretKey.PANDA_TOKEN, pandaToken)
+                            // Stash the management token under its config_id subKey
+                            // so PandaSetupViewModel can authenticate edit/PATCH calls.
+                            // Addon-row config_id is back-filled lazily by PandaSetupViewModel
+                            // on first open (it resolves config_id from Panda if missing).
+                            if (configId.isNotBlank() && managementToken.isNotBlank()) {
+                                integrationSecretStore.put(
+                                    key = IntegrationSecretKey.PANDA_MANAGEMENT_TOKEN,
+                                    value = managementToken,
+                                    subKey = configId,
+                                )
+                            }
+                            restored++
+                            torveVerboseLog {
+                                "[IntegrationRestore] PANDA_TOKEN → restored OK (token=present config=${configId.isNotBlank()} mgmt=${managementToken.isNotBlank()})"
                             }
                         }
                     } else {

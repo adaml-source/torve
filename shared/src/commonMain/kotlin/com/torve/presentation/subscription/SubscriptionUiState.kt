@@ -22,6 +22,19 @@ enum class PurchaseStatusTone {
     ERROR,
 }
 
+/**
+ * Single Google Play purchase token surfaced from BillingClient for the
+ * client-driven restore flow. The Android `BillingManager.ActivePurchase`
+ * type is mapped into this shared shape before hitting
+ * [SubscriptionViewModel.restoreGooglePlayPurchases] so the view-model
+ * stays platform-agnostic (no androidx.billingclient import in commonMain).
+ */
+data class GooglePlayActivePurchase(
+    val productId: String,
+    val purchaseToken: String,
+    val isAcknowledged: Boolean,
+)
+
 enum class PurchaseStatusKind {
     PENDING_VERIFICATION,
     SIGN_IN_REQUIRED,
@@ -115,6 +128,9 @@ data class SubscriptionUiState(
     val isDeviceActivated: Boolean = false,
     val deviceBlockReason: String? = null,
     val deviceCapReached: Boolean = false,
+    val needsVerification: Boolean = false,
+    val isSendingVerificationEmail: Boolean = false,
+    val verificationEmailMessage: String? = null,
     val showDeviceLimitReached: Boolean = false,
     val purchaseVerificationState: PurchaseVerificationState = PurchaseVerificationState.IDLE,
     val purchaseStatus: PurchaseStatusMessage? = null,
@@ -156,6 +172,7 @@ data class SubscriptionAccessPresentation(
     val shouldShowManageDevices: Boolean,
     val accessStatusLabel: String,
     val accessHelperText: String,
+    val needsVerification: Boolean = false,
     val deviceBlockReason: String? = null,
 )
 
@@ -207,11 +224,13 @@ fun SubscriptionUiState.accessPresentation(
     }
 
     val isAlreadyLifetime = tier == SubscriptionTier.LIFETIME && hasPremiumEntitlement
+    val isKnownMonthly = tier == SubscriptionTier.MONTHLY && hasPremiumEntitlement
     val showBuyMonthly = !hasPremiumEntitlement
     // Lifetime is the only product that meaningfully upgrades over an
     // existing monthly entitlement, so show its button whenever the user
-    // doesn't already own lifetime.
-    val showBuyLifetime = !isAlreadyLifetime
+    // is known to have monthly. Unknown premium entitlement states hide
+    // buy buttons to avoid prompting already-paying users to re-buy.
+    val showBuyLifetime = !hasPremiumEntitlement || (isKnownMonthly && !isAlreadyLifetime)
 
     return SubscriptionAccessPresentation(
         hasPremiumEntitlement = hasPremiumEntitlement,
@@ -222,9 +241,10 @@ fun SubscriptionUiState.accessPresentation(
         shouldShowBuyMonthly = showBuyMonthly,
         shouldShowBuyLifetime = showBuyLifetime,
         shouldShowRestore = true,
-        shouldShowManageDevices = isPremiumButBlockedOnThisDevice,
+        shouldShowManageDevices = isPremiumButBlockedOnThisDevice && !needsVerification,
         accessStatusLabel = accessStatusLabel,
         accessHelperText = accessHelperText,
+        needsVerification = needsVerification,
         deviceBlockReason = deviceBlockReason,
     )
 }

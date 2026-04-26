@@ -180,6 +180,17 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
         }
     }
 
+    /**
+     * Amazon's Appstore SDK uses an event-callback model rather than a
+     * suspend-friendly query, so this surface — used by the Google Play
+     * client-driven restore flow — is intentionally a no-op for the
+     * Amazon variant. The Amazon restore path stays on
+     * [com.torve.presentation.subscription.SubscriptionViewModel.restoreAmazonPurchases]
+     * which already drives PurchasingService.getPurchaseUpdates and
+     * routes responses through the receipt callback.
+     */
+    override suspend fun queryActivePurchases(): List<BillingManager.ActivePurchase> = emptyList()
+
     override fun getOffer(productType: BillingManager.ProductType): BillingManager.BillingOffer? {
         return offersByType[productType]
     }

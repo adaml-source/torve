@@ -49,11 +49,16 @@ class EntitlementApi(
         productId: String,
         purchaseToken: String,
         platform: String = "google_play_mobile",
+        installationId: String? = null,
     ): PurchaseVerifyDto {
-        return httpClient.post("${baseUrl()}/purchases/google/verify") {
+        // Prod routing uses the /me/ prefix for authenticated purchase
+        // verification and the "google-play" slug (not "google").
+        // Evidence: Sentry transaction id
+        // "/me/purchases/google-play/verify" on commit 063c936.
+        return httpClient.post("${baseUrl()}/me/purchases/google-play/verify") {
             bearerAuth(accessToken)
             contentType(ContentType.Application.Json)
-            setBody(GoogleVerifyDto(productId, purchaseToken, platform))
+            setBody(GooglePlayVerifyRequest(productId, purchaseToken, platform, installationId))
         }.body()
     }
 
@@ -63,11 +68,12 @@ class EntitlementApi(
         amazonUserId: String,
         productId: String,
         platform: String = "amazon_fire_tv",
+        installationId: String? = null,
     ): PurchaseVerifyDto {
-        return httpClient.post("${baseUrl()}/purchases/amazon/verify") {
+        return httpClient.post("${baseUrl()}/me/purchases/amazon/verify") {
             bearerAuth(accessToken)
             contentType(ContentType.Application.Json)
-            setBody(AmazonVerifyDto(receiptId, amazonUserId, productId, platform))
+            setBody(AmazonVerifyRequest(receiptId, amazonUserId, productId, platform, installationId))
         }.body()
     }
 
@@ -82,7 +88,31 @@ class EntitlementApi(
             setBody(RestoreDto(store, platform))
         }.body()
     }
+
+    /**
+     * Canonical "recompute premium flags" endpoint. The backend pulls
+     * the current entitlement set, plus any ledger-only lifetime grants
+     * (admin-issued, rebate codes, etc.), and updates the user's
+     * premium booleans. Does NOT re-verify any Play tokens — that's
+     * the client's job (call [verifyGooglePurchase] for each owned
+     * token first, then this).
+     */
+    suspend fun restorePurchasesCanonical(accessToken: String): RestorePurchasesDto {
+        return httpClient.post("${baseUrl()}/me/purchases/restore") {
+            bearerAuth(accessToken)
+        }.body()
+    }
 }
+
+@Serializable
+data class RestorePurchasesDto(
+    val restored: Boolean = false,
+    val has_premium_access: Boolean = false,
+    val has_lifetime_access: Boolean = false,
+    val is_verified: Boolean = false,
+    val active_entitlements: Int = 0,
+    val message: String? = null,
+)
 
 // ── DTOs ──
 
@@ -119,11 +149,64 @@ data class PurchaseDto(
 
 @Serializable
 data class PurchaseVerifyDto(
-    val status: String,
-    val purchase: PurchaseDto,
-    val entitlements: List<EntitlementDto>,
-    val premium_access: Boolean,
+    /**
+     * Authoritative success flag from the new backend (2026-04-26).
+     * `true` means the purchase is recorded and entitlement is granted —
+     * including idempotent replays (in which case [error_code] will be
+     * "already_verified"). The client MUST treat verified == true as
+     * success regardless of error_code.
+     */
+    val verified: Boolean? = null,
+    /**
+     * Whether the verification call resulted in a new entitlement grant
+     * (vs an idempotent no-op replay of a prior verify).
+     */
+    val entitlement_granted: Boolean? = null,
+    /** Human-readable summary; safe to log, NOT to render to the user. */
+    val message: String? = null,
+    /**
+     * Standardized error code from the backend verify response. Null on
+     * fresh-verify success paths; "already_verified" on idempotent
+     * replays (still a SUCCESS — see [verified]). Other known values
+     * (see [PurchaseVerifyErrorCode]): `config_missing`,
+     * `product_mismatch`, `service_account_failure`,
+     * `upstream_unreachable`, `not_verified`.
+     */
+    val error_code: String? = null,
+    // ── Legacy fields (older backend versions) — kept optional so the
+    // client deserialises whichever shape the server actually sends.
+    // Authoritative success/refresh logic must use the fields above plus
+    // a follow-up /me/access-state fetch, NOT these.
+    val status: String? = null,
+    val purchase: PurchaseDto? = null,
+    val entitlements: List<EntitlementDto> = emptyList(),
+    val premium_access: Boolean = false,
 )
+
+/**
+ * Stable set of error codes the production backend returns in
+ * [PurchaseVerifyDto.error_code]. The client never shows the raw code to
+ * users — it's used only to pick which sanitized message to display.
+ */
+object PurchaseVerifyErrorCode {
+    /** Purchase has already been verified previously; treat as success. */
+    const val ALREADY_VERIFIED = "already_verified"
+
+    /** Backend missing required configuration (service account JSON etc). */
+    const val CONFIG_MISSING = "config_missing"
+
+    /** Product ID does not map to a known Torve entitlement. */
+    const val PRODUCT_MISMATCH = "product_mismatch"
+
+    /** Service account present but can't authenticate with Google. */
+    const val SERVICE_ACCOUNT_FAILURE = "service_account_failure"
+
+    /** Upstream store reachable-but-returning-errors or unreachable. */
+    const val UPSTREAM_UNREACHABLE = "upstream_unreachable"
+
+    /** Verification ran and returned a negative result. */
+    const val NOT_VERIFIED = "not_verified"
+}
 
 @Serializable
 private data class AppleVerifyDto(
@@ -133,18 +216,20 @@ private data class AppleVerifyDto(
 )
 
 @Serializable
-private data class GoogleVerifyDto(
+private data class GooglePlayVerifyRequest(
     val product_id: String,
     val purchase_token: String,
     val platform: String,
+    val installation_id: String? = null,
 )
 
 @Serializable
-private data class AmazonVerifyDto(
+private data class AmazonVerifyRequest(
     val receipt_id: String,
     val amazon_user_id: String,
     val product_id: String,
     val platform: String,
+    val installation_id: String? = null,
 )
 
 @Serializable

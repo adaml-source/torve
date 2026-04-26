@@ -36,6 +36,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -78,6 +80,7 @@ fun PaywallScreen(
     val state by viewModel.state.collectAsState()
     val purchaseResult by billingManager.purchaseResult.collectAsState()
     val activity = LocalContext.current as? Activity
+    val scope = rememberCoroutineScope()
 
     val isAmazonBuild = BuildConfig.FLAVOR.contains("amazon", ignoreCase = true)
     val isTvBuild = BuildConfig.FLAVOR.contains("tv", ignoreCase = true)
@@ -154,6 +157,11 @@ fun PaywallScreen(
         }
     }
 
+    NeedsVerificationToastEffect(
+        message = state.verificationEmailMessage,
+        onConsumed = viewModel::consumeVerificationEmailMessage,
+    )
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -178,15 +186,35 @@ fun PaywallScreen(
                     if (isAmazonBuild) {
                         viewModel.restoreAmazonPurchases(platform = if (isTvBuild) "amazon_fire_tv" else "amazon_appstore_mobile")
                     } else {
-                        viewModel.restoreStorePurchases(
-                            store = "google_play",
-                            platform = platform,
-                            storeLabel = purchaseStoreLabel,
-                        )
+                        // Client-driven Google Play restore. Suspend-query
+                        // BillingClient for every active SUBS+INAPP token,
+                        // map to the shared DTO, hand off to the VM which
+                        // verifies each then hits /me/purchases/restore +
+                        // /me/access-state. Without the per-token verify
+                        // the backend wouldn't know about purchases made
+                        // on a different device that were never recorded
+                        // server-side.
+                        scope.launch {
+                            val activePlay = runCatching { billingManager.queryActivePurchases() }
+                                .getOrDefault(emptyList())
+                                .map { active ->
+                                    com.torve.presentation.subscription.GooglePlayActivePurchase(
+                                        productId = active.productId,
+                                        purchaseToken = active.purchaseToken,
+                                        isAcknowledged = active.isAcknowledged,
+                                    )
+                                }
+                            viewModel.restoreGooglePlayPurchases(
+                                activePlayPurchases = activePlay,
+                                platform = platform,
+                                storeLabel = purchaseStoreLabel,
+                            )
+                        }
                     }
                 }
             },
             onManageDevices = onManageDevices,
+            onSendVerificationEmail = viewModel::sendVerificationEmail,
             onRefreshAccess = viewModel::refreshAccess,
             onRetryVerification = viewModel::retryPendingAmazonVerification,
             onPurchase = { productType ->
@@ -208,6 +236,7 @@ private fun PaywallContent(
     billingManager: BillingManager,
     onRestore: () -> Unit,
     onManageDevices: () -> Unit,
+    onSendVerificationEmail: () -> Unit,
     onRefreshAccess: () -> Unit,
     onRetryVerification: () -> Unit,
     onPurchase: (BillingManager.ProductType) -> Unit,
@@ -241,6 +270,16 @@ private fun PaywallContent(
         )
 
         Spacer(Modifier.height(8.dp))
+
+        if (state.needsVerification) {
+            NeedsVerificationBanner(
+                isSending = state.isSendingVerificationEmail,
+                onSendVerificationEmail = onSendVerificationEmail,
+                onRefreshAccess = onRefreshAccess,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            Spacer(Modifier.height(16.dp))
+        }
 
         Text(
             text = stringResource(R.string.paywall_upgrade_title),
