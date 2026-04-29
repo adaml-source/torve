@@ -12,6 +12,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,7 +22,7 @@ import kotlinx.coroutines.launch
 class AddonViewModel(
     private val addonRepo: AddonRepository,
     private val addonSyncService: AddonSyncService,
-    settingsRefreshNotifier: SettingsRefreshNotifier,
+    private val settingsRefreshNotifier: SettingsRefreshNotifier,
     private val addonPolicyRepository: AddonPolicyRepository? = null,
     private val pandaClient: PandaApiClient? = null,
     private val integrationSecretStore: IntegrationSecretStore? = null,
@@ -33,10 +34,27 @@ class AddonViewModel(
     init {
         loadAddons()
         scope.launch {
-            settingsRefreshNotifier.events.collectLatest {
-                loadAddons()
-            }
+            @OptIn(kotlinx.coroutines.FlowPreview::class)
+            settingsRefreshNotifier.events
+                // Debounce: the notifier fires several times in quick
+                // succession during startup and after each install/remove.
+                // Collapse the burst so loadAddons() runs once, not 3-5×.
+                .debounce(500L)
+                .collectLatest {
+                    loadAddons()
+                }
         }
+    }
+
+    /**
+     * Broadcast that the addon set has changed so downstream VMs (notably
+     * [com.torve.presentation.settings.SettingsViewModel.hasStreamAddon])
+     * recompute their gates without polling.
+     */
+    private fun pokeSettingsRefresh() {
+        settingsRefreshNotifier.notifyRefresh(
+            kotlinx.datetime.Clock.System.now().toEpochMilliseconds(),
+        )
     }
 
     fun loadAddons() {
@@ -113,6 +131,7 @@ class AddonViewModel(
                 scope.launch(Dispatchers.IO) {
                     addonSyncService.onAddonInstalled(installedAddon)
                 }
+                pokeSettingsRefresh()
             } catch (e: Exception) {
                 _state.update { it.copy(isInstalling = false, installingUrl = "", installError = com.torve.presentation.error.UserFacingError.ADDON_INSTALL_FAILED.messageKey) }
             }
@@ -130,6 +149,7 @@ class AddonViewModel(
                 addonRepo.removeAddon(manifestUrl)
                 val addons = addonRepo.getInstalledAddons()
                 _state.update { it.copy(addons = addons) }
+                pokeSettingsRefresh()
                 scope.launch(Dispatchers.IO) {
                     addonSyncService.onAddonRemoved(existingAddon)
                     // If the user uninstalled Panda, also purge the per-user config on
@@ -138,11 +158,25 @@ class AddonViewModel(
                     // and never actually install a new addon row.
                     if (wasPanda) {
                         val store = integrationSecretStore ?: return@launch
-                        val token = store.get(IntegrationSecretKey.PANDA_TOKEN)
-                        if (!token.isNullOrBlank()) {
-                            runCatching { pandaClient?.deleteConfig(token) }
-                            store.remove(IntegrationSecretKey.PANDA_TOKEN)
+                        // Tear down server-side with the per-config management token
+                        // if we still have it. The manifest-only path can't mutate
+                        // since the contract update, so without a management token
+                        // the server config survives as an orphan until its TTL.
+                        val configId = existingAddon?.configId
+                        if (!configId.isNullOrBlank()) {
+                            val mgmt = store.get(
+                                IntegrationSecretKey.PANDA_MANAGEMENT_TOKEN,
+                                subKey = configId,
+                            )
+                            if (!mgmt.isNullOrBlank()) {
+                                runCatching { pandaClient?.deleteConfig(configId, mgmt) }
+                            }
+                            store.remove(
+                                IntegrationSecretKey.PANDA_MANAGEMENT_TOKEN,
+                                subKey = configId,
+                            )
                         }
+                        store.remove(IntegrationSecretKey.PANDA_TOKEN)
                     }
                 }
             } catch (e: Exception) {

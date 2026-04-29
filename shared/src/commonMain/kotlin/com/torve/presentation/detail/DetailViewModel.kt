@@ -2,6 +2,7 @@ package com.torve.presentation.detail
 
 import com.torve.data.addon.ParsedStream
 import com.torve.data.addon.StreamSelector
+import com.torve.data.addon.isAddonHostedUrl
 import com.torve.data.contentpolicy.ContentPolicyCacheInvalidationCoordinator
 import com.torve.data.contentpolicy.ContentPolicyRepository
 import com.torve.data.kodi.KodiClient
@@ -43,6 +44,26 @@ import com.torve.data.mdblist.MdbListApi
 import com.torve.data.mdblist.RatingsEnricher
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
+import com.torve.data.usenet.UsenetMapper
+import com.torve.data.usenet.model.UsenetCandidatePayload
+import com.torve.data.usenet.model.UsenetCandidateStates
+import com.torve.data.usenet.model.UsenetCandidateUiModel
+import com.torve.data.usenet.model.UsenetUserMessageKey
+import com.torve.domain.streams.PollOutcome
+import com.torve.domain.streams.ResolveOutcome
+import com.torve.domain.streams.UsenetJobPoller
+import com.torve.domain.streams.UsenetResolveCoordinator
+import com.torve.domain.streams.UsenetWarmCoordinator
+import com.torve.domain.streams.formatUsenetContentId
+import com.torve.domain.streams.usenetCandidateIdOrNull
+import com.torve.domain.streams.usenetCandidatePayloadOrNull
+import com.torve.domain.telemetry.TelemetryEmitter
+import com.torve.domain.telemetry.UsenetFallbackReason
+import com.torve.domain.telemetry.UsenetTelemetryEvents
+import com.torve.domain.telemetry.UsenetTelemetryKeys
+import com.torve.domain.telemetry.UsenetTelemetryState
+import com.torve.domain.telemetry.contentCandidateAttrs
+import com.torve.domain.telemetry.timeBucket
 import com.torve.presentation.contentpolicy.ContentPolicyFilter
 import com.torve.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.CoroutineScope
@@ -55,6 +76,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.min
@@ -78,6 +100,25 @@ class DetailViewModel(
     private val contentPolicyRepository: ContentPolicyRepository? = null,
     private val contentPolicyFilter: ContentPolicyFilter = ContentPolicyFilter(),
     invalidationCoordinator: ContentPolicyCacheInvalidationCoordinator? = null,
+    /**
+     * Optional so the existing test fixtures that build DetailViewModel with
+     * positional args don't have to plumb a new dep in this sprint. A null
+     * coordinator means no prewarm is fired — same as if no Usenet
+     * candidates were present. Koin wires the real instance (see
+     * [com.torve.di.SharedModule]).
+     */
+    private val usenetWarmCoordinator: UsenetWarmCoordinator? = null,
+    private val usenetResolveCoordinator: UsenetResolveCoordinator? = null,
+    private val usenetJobPoller: UsenetJobPoller? = null,
+    private val telemetry: TelemetryEmitter? = null,
+    /**
+     * Cross-device resume source. When non-null, `loadDetail` queries the
+     * backend for the most recent watch-state report across all the user's
+     * devices and merges it with the local SQLDelight row, preferring
+     * whichever has the newer timestamp. Nullable so existing test fixtures
+     * keep compiling; Koin wires the real implementation on Android.
+     */
+    private val watchStateRemoteSource: com.torve.domain.integrations.WatchStateRemoteSource? = null,
 ) {
     private data class StreamPresentationResult(
         val ordered: List<ParsedStream>,
@@ -95,11 +136,54 @@ class DetailViewModel(
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    private companion object {
+        // Preparing loop budget — matches Panda's 5-minute background poll
+        // window. 20 attempts × 15s = 300s. If the cloud client hasn't
+        // resolved by then, the user is far better served by picking an
+        // alternate source than by watching a spinner indefinitely.
+        const val PREPARING_PROBE_INTERVAL_MS = 15_000L
+        const val PREPARING_MAX_ATTEMPTS = 20
+    }
     private val _state = MutableStateFlow(DetailUiState())
     val state: StateFlow<DetailUiState> = _state.asStateFlow()
     private var warmupJob: Job? = null
     private var currentType: String? = null
     private var currentId: Int? = null
+    /**
+     * Tracks the in-flight Usenet resolve chain so a fresh user tap can
+     * pre-empt a stale one. Cancelled on content switch / VM clear.
+     */
+    private var currentUsenetResolveJob: Job? = null
+
+    /**
+     * Candidate the user last tapped through the Usenet resolver.
+     * Poll-tick results that don't match this id are dropped as stale —
+     * if the user moved to another row while a poll was in flight, we
+     * MUST NOT auto-play the old candidate. Also cleared on content
+     * switch, sheet dismiss, and VM clear.
+     */
+    private var activeUsenetCandidateId: String? = null
+
+    /**
+     * Timestamp of the most recent [selectUsenetSource] call. Drives
+     * the `time_to_play_bucket` attribute on `usenet_playback_started`.
+     */
+    private var activeUsenetSelectionStartedAt: Long? = null
+
+    /**
+     * Zero-based index of the current fallback attempt within one user
+     * tap. `0` = the row the user tapped; `1+` = auto-advanced
+     * candidates. Used by [UsenetTelemetryKeys.FALLBACK_ATTEMPT_INDEX].
+     */
+    private var activeUsenetFallbackIndex: Int = 0
+
+    /**
+     * Initial candidate for the current resolve chain (the row the user
+     * actually tapped). Used on fallback_succeeded so the telemetry
+     * attribute reflects "user picked X, we eventually played Y."
+     */
+    private var initialUsenetCandidateId: String? = null
 
     init {
         if (invalidationCoordinator != null) {
@@ -155,6 +239,24 @@ class DetailViewModel(
 
     fun loadDetail(type: String, id: Int) {
         warmupJob?.cancel()
+        // Content-switch cleanup: drop any Usenet prewarm state for the
+        // outgoing content so a later revisit can re-warm, and ask the
+        // backend to cancel outstanding warm jobs for that content.
+        // Best-effort — no-op if the coordinator isn't wired or the
+        // previous content identity can't be formatted.
+        val prevType = currentType
+        val prevId = currentId
+        if (prevType != null && prevId != null && (prevType != type || prevId != id)) {
+            val coordinator = usenetWarmCoordinator
+            val prevContentId = formatUsenetContentId(type = prevType, tmdbId = prevId)
+            if (coordinator != null && prevContentId != null) {
+                scope.launch { coordinator.clearForContent(prevContentId) }
+            }
+            // Also tear down any in-flight resolve/poll for the outgoing
+            // content. The poller's internal cancel also calls the
+            // backend cancel endpoint for the old jobId.
+            cancelUsenetResolveAndPoll()
+        }
         currentType = type
         currentId = id
         scope.launch {
@@ -192,13 +294,25 @@ class DetailViewModel(
                 ).items
                 _state.update { it.copy(similar = filteredSimilar) }
 
-                // Load watch progress
+                // Load watch progress — merge local SQLDelight row with the
+                // backend's latest report (cross-device resume). Whichever has
+                // the newer timestamp wins. Remote fetch is best-effort; if
+                // it's null/fails we fall through to local-only behavior, so
+                // users without an account or with flaky connectivity see no
+                // regression.
                 if (item != null) {
-                    val progress = watchProgressRepo.getProgress(item.id)
+                    val local = watchProgressRepo.getProgress(item.id)
+                    val remote = watchStateRemoteSource?.getLatest(item.id)
+                    val merged = mergeWatchProgress(local = local, remote = remote, item = item)
+                    // If remote wins, persist to local DB so the next cold
+                    // start shows the right Resume position even offline.
+                    if (merged != null && merged !== local) {
+                        runCatching { watchProgressRepo.saveProgress(merged) }
+                    }
                     val rating = item.tmdbId?.let { tmdbId ->
                         runCatching { traktSyncRepo.getUserRating(tmdbId, item.type) }.getOrNull()
                     }
-                    _state.update { it.copy(watchProgress = progress, userRating = rating) }
+                    _state.update { it.copy(watchProgress = merged, userRating = rating) }
                 }
 
                 // Auto-load first season for TV shows
@@ -299,6 +413,36 @@ class DetailViewModel(
                 _state.update { it.copy(isLoadingSeasonDetail = false) }
             }
         }
+    }
+
+    /**
+     * Merge the local SQLDelight row with the backend's latest watch-state
+     * report. Whichever has the newer timestamp wins. If only local exists,
+     * returns local unchanged. If only remote exists, synthesizes a
+     * [WatchProgress] from it using metadata from [item] (title/poster/etc.
+     * which aren't stored server-side).
+     */
+    private fun mergeWatchProgress(
+        local: com.torve.domain.model.WatchProgress?,
+        remote: com.torve.domain.integrations.RemoteWatchState?,
+        item: com.torve.domain.model.MediaItem,
+    ): com.torve.domain.model.WatchProgress? {
+        if (remote == null) return local
+        if (local != null && local.updatedAt >= remote.reportedAtMs) return local
+        // Remote wins. Keep metadata from the item (the backend doesn't
+        // round-trip title/poster) and position/timestamp from remote.
+        val base = local ?: com.torve.domain.model.WatchProgress(
+            mediaId = item.id,
+            mediaType = item.type,
+            title = item.title,
+            posterUrl = item.posterUrl,
+            backdropUrl = item.backdropUrl,
+            durationMs = 0L,
+        )
+        return base.copy(
+            positionMs = remote.positionMs,
+            updatedAt = remote.reportedAtMs,
+        )
     }
 
     /**
@@ -688,7 +832,405 @@ class DetailViewModel(
                         streamsError = com.torve.presentation.error.UserFacingError.STREAMS_LOAD_FAILED.messageKey,
                     )
                 }
+            } finally {
+                // Finally — not an else — because several startup-path
+                // branches `return@launch` before reaching the full-fetch
+                // update and we still want to warm whatever Usenet rows
+                // the startup snapshot surfaced. No-op when no Usenet
+                // candidates are present.
+                maybePrewarmUsenetCandidates(season = season, episode = episode)
             }
+        }
+    }
+
+    /**
+     * UI hook — call when the source sheet is explicitly opened (not
+     * merely when `showStreamPicker = true` flips via the auto-resolve
+     * error path, though wiring both is safe; the coordinator dedupes).
+     *
+     * Fires an expanded warmup for the top 3–5 Usenet candidates in the
+     * current stream list and merges the response into the sidecar
+     * `usenetCandidates` map so the source sheet can render Ready /
+     * Preparing / Unavailable pills per row. Fire-and-forget on [scope];
+     * the sheet opens immediately with whatever sidecar state already
+     * exists, and rows update incrementally as the warm resolves.
+     *
+     * No-op when: no Usenet candidates, no content identity, no coordinator
+     * wired. No resolve, no polling — those land in Prompts 5–6.
+     */
+    fun onSourceSheetOpened() {
+        val coordinator = usenetWarmCoordinator ?: return
+        val type = currentType ?: return
+        val tmdbId = currentId ?: return
+        val contentId = formatUsenetContentId(
+            type = type,
+            tmdbId = tmdbId,
+            season = _state.value.streamContextSeason,
+            episode = _state.value.streamContextEpisode,
+        ) ?: return
+        val candidates = _state.value.streams
+            .asSequence()
+            .mapNotNull { it.usenetCandidatePayloadOrNull() }
+            .distinctBy { it.candidateId }
+            .take(UsenetWarmCoordinator.MAX_SHEET_WARM_CANDIDATES)
+            .toList()
+        emitUsenetTelemetry(
+            event = UsenetTelemetryEvents.SOURCE_SHEET_OPENED,
+            attributes = contentCandidateAttrs(contentId, null) + mapOf(
+                UsenetTelemetryKeys.CANDIDATE_COUNT to candidates.size.toString(),
+            ),
+        )
+        if (candidates.isEmpty()) return
+        scope.launch {
+            val response = coordinator.prewarmForSheet(
+                contentId = contentId,
+                candidates = candidates,
+            ) ?: return@launch
+            val now = Clock.System.now().toEpochMilliseconds()
+            _state.update { state ->
+                state.copy(
+                    usenetCandidates = UsenetMapper.mergeWarmResponse(
+                        existing = state.usenetCandidates,
+                        response = response,
+                        now = now,
+                    ),
+                )
+            }
+        }
+    }
+
+    /**
+     * User-initiated resolve for a Usenet source row.
+     *
+     * Routing contract:
+     *  - **Ready** → populate [DetailUiState.usenetPlaybackIntent]; the UI
+     *    layer observes it, stages the handoff headers, and launches the
+     *    existing `onPlayClick(url, …)` path with the handoff URL
+     *    byte-for-byte.
+     *  - **Warming** → sidecar row flips to Preparing + jobId captured.
+     *    Sheet stays open. No poller yet (Prompt 6).
+     *  - **Failed** → sidecar row flips to Unavailable and the VM auto-
+     *    advances to the next-best Usenet candidate in the ranked
+     *    `streams` list. The failed row's copy briefly shows
+     *    "Trying next source" when a next candidate exists.
+     *
+     * Non-Usenet rows must NOT be routed here — the existing
+     * `resolveStream(...)` path handles them. The UI layer enforces the
+     * split by switching on [ParsedStream.accelerationProvenanceKind].
+     */
+    fun selectUsenetSource(stream: ParsedStream) {
+        val coordinator = usenetResolveCoordinator ?: return
+        val tappedPayload = stream.usenetCandidatePayloadOrNull() ?: return
+        val candidateId = tappedPayload.candidateId
+        val type = currentType ?: return
+        val tmdbId = currentId ?: return
+        val contentId = formatUsenetContentId(
+            type = type,
+            tmdbId = tmdbId,
+            season = _state.value.streamContextSeason,
+            episode = _state.value.streamContextEpisode,
+        ) ?: return
+
+        // Pre-empt any in-flight chain + any active poll. A fresh user
+        // tap is the single most authoritative signal; nothing the
+        // backend says about the previous candidate matters after this.
+        currentUsenetResolveJob?.cancel()
+        scope.launch { usenetJobPoller?.cancelActive() }
+
+        activeUsenetSelectionStartedAt = Clock.System.now().toEpochMilliseconds()
+        initialUsenetCandidateId = candidateId
+        activeUsenetFallbackIndex = 0
+
+        val selectionInitialState = UsenetTelemetryState.from(
+            _state.value.usenetCandidates[candidateId]?.availabilityState,
+        )
+        emitUsenetTelemetry(
+            event = UsenetTelemetryEvents.SOURCE_SELECTED,
+            attributes = contentCandidateAttrs(contentId, candidateId) + mapOf(
+                UsenetTelemetryKeys.INITIAL_STATE to selectionInitialState.name,
+            ),
+        )
+
+        currentUsenetResolveJob = scope.launch {
+            val orderedCandidates = _state.value.streams
+                .asSequence()
+                .mapNotNull { it.usenetCandidatePayloadOrNull() }
+                .distinctBy { it.candidateId }
+                .toList()
+            val attempted = mutableSetOf<String>()
+            var nextToTry: UsenetCandidatePayload? = tappedPayload
+            while (nextToTry != null) {
+                val tryingThis = nextToTry
+                attempted += tryingThis.candidateId
+                activeUsenetCandidateId = tryingThis.candidateId
+
+                // Resolve once. If backend returns warming, the helper
+                // below awaits poll terminal and collapses it back into
+                // the same Ready/Failed shape the outer loop expects.
+                val terminal = resolveAndMaybePoll(
+                    coordinator = coordinator,
+                    contentId = contentId,
+                    candidate = tryingThis,
+                )
+
+                when (terminal) {
+                    is ResolveOutcome.Ready -> {
+                        // Stale-tick guard: if the user tapped another
+                        // row while we were polling, a late Ready must
+                        // NOT auto-play. activeUsenetCandidateId is
+                        // updated by every iteration of this loop and
+                        // also by fresh taps; if it's drifted, drop.
+                        if (activeUsenetCandidateId == tryingThis.candidateId) {
+                            _state.update { it.copy(usenetPlaybackIntent = terminal.stream) }
+                            // If we got here via fallback (not the row
+                            // the user originally tapped), emit the
+                            // paired "fallback_succeeded" event.
+                            if (activeUsenetFallbackIndex > 0) {
+                                emitUsenetTelemetry(
+                                    event = UsenetTelemetryEvents.FALLBACK_SUCCEEDED,
+                                    attributes = contentCandidateAttrs(contentId, tryingThis.candidateId) + mapOf(
+                                        UsenetTelemetryKeys.FALLBACK_ATTEMPT_INDEX to
+                                            activeUsenetFallbackIndex.toString(),
+                                    ),
+                                )
+                            }
+                        }
+                        return@launch
+                    }
+                    is ResolveOutcome.Warming -> {
+                        // Exit path: initial resolve returned warming AND
+                        // no jobId / poller was available. Row is already
+                        // PREPARING via the mapper; the user re-taps to
+                        // retry. Not an auto-advance case.
+                        return@launch
+                    }
+                    is ResolveOutcome.Failed -> {
+                        val failedId = tryingThis.candidateId
+                        nextToTry = orderedCandidates.firstOrNull { it.candidateId !in attempted }
+                        if (nextToTry != null) {
+                            activeUsenetFallbackIndex += 1
+                            emitUsenetTelemetry(
+                                event = UsenetTelemetryEvents.FALLBACK_ATTEMPTED,
+                                attributes = contentCandidateAttrs(contentId, nextToTry.candidateId) + mapOf(
+                                    UsenetTelemetryKeys.FALLBACK_ATTEMPT_INDEX to
+                                        activeUsenetFallbackIndex.toString(),
+                                    UsenetTelemetryKeys.FALLBACK_REASON to
+                                        UsenetFallbackReason.RESOLVE_FAILED.value,
+                                ),
+                            )
+                            _state.update { state ->
+                                val failed = state.usenetCandidates[failedId] ?: return@update state
+                                state.copy(
+                                    usenetCandidates = mergeSidecarRow(
+                                        state.usenetCandidates,
+                                        failed.copy(
+                                            displayMessageKey = UsenetUserMessageKey.TRYING_NEXT_SOURCE,
+                                        ),
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Resolve [candidateId] and, if the backend says warming, await the
+     * bounded poller until a terminal outcome. Normalized return: a
+     * resolve-flavored Ready or Failed (never Warming) so the chain
+     * outside doesn't have to distinguish "didn't poll" from "polled
+     * and got answer."
+     *
+     * When the poller is wired, the initial Warming response's `jobId`
+     * is captured and the poller is handed the row as the seed snapshot
+     * for subsequent tick applications.
+     */
+    private suspend fun resolveAndMaybePoll(
+        coordinator: UsenetResolveCoordinator,
+        contentId: String,
+        candidate: UsenetCandidatePayload,
+    ): ResolveOutcome {
+        val outcome = coordinator.resolve(
+            contentId = contentId,
+            candidate = candidate,
+            existingSidecar = _state.value.usenetCandidates,
+        )
+        _state.update { state ->
+            state.copy(usenetCandidates = mergeSidecarRow(state.usenetCandidates, outcome.row))
+        }
+        if (outcome !is ResolveOutcome.Warming) return outcome
+        val jobId = outcome.jobId ?: return outcome
+        val poller = usenetJobPoller ?: return outcome
+
+        val terminal = awaitPollTerminal(
+            poller = poller,
+            contentId = contentId,
+            candidate = candidate,
+            jobId = jobId,
+            seedRow = outcome.row,
+        )
+        _state.update { state ->
+            state.copy(usenetCandidates = mergeSidecarRow(state.usenetCandidates, terminal.row))
+        }
+        return when (terminal) {
+            is PollOutcome.Ready -> ResolveOutcome.Ready(row = terminal.row, stream = terminal.stream)
+            is PollOutcome.Failed, is PollOutcome.TimedOut -> ResolveOutcome.Failed(row = terminal.row)
+            // StillWarming isn't terminal; awaitPollTerminal filters it
+            // out before returning. Defensive branch only.
+            is PollOutcome.StillWarming -> ResolveOutcome.Failed(row = terminal.row)
+        }
+    }
+
+    /**
+     * Bridge between the callback-driven poller and the suspend-based
+     * chain loop. Sidecar is updated on every tick (including
+     * StillWarming). Only terminal ticks complete the deferred.
+     *
+     * Stale-tick guard: if the user has moved to a different candidate,
+     * the tick is dropped without updating state or completing. The
+     * chain's own cancellation handles cleanup.
+     */
+    private suspend fun awaitPollTerminal(
+        poller: UsenetJobPoller,
+        contentId: String,
+        candidate: UsenetCandidatePayload,
+        jobId: String,
+        seedRow: UsenetCandidateUiModel,
+    ): PollOutcome {
+        val deferred = kotlinx.coroutines.CompletableDeferred<PollOutcome>()
+        val pollJob = poller.startPolling(
+            contentId = contentId,
+            candidate = candidate,
+            jobId = jobId,
+            scope = scope,
+            seedRow = seedRow,
+            onOutcome = { outcome ->
+                if (activeUsenetCandidateId != outcome.row.candidateId) {
+                    // User has moved on; suppress every emission for
+                    // this stale candidate, including StillWarming so
+                    // the sidecar doesn't churn pointlessly.
+                    return@startPolling
+                }
+                _state.update { s ->
+                    s.copy(usenetCandidates = mergeSidecarRow(s.usenetCandidates, outcome.row))
+                }
+                if (outcome !is PollOutcome.StillWarming && !deferred.isCompleted) {
+                    deferred.complete(outcome)
+                }
+            },
+        )
+        return try {
+            deferred.await()
+        } finally {
+            pollJob.cancel()
+        }
+    }
+
+    /**
+     * UI layer calls this after it has staged [usenetPlaybackIntent]'s
+     * headers + handed the opaque URL to the player. Resetting the field
+     * prevents a recomposition from re-launching the player for the same
+     * intent. Also tears down the resolve chain / any active poll — the
+     * user is leaving the sheet for playback, so nothing on the sheet
+     * still needs polling work.
+     */
+    fun consumeUsenetPlaybackIntent() {
+        val hadIntent = _state.value.usenetPlaybackIntent != null
+        if (hadIntent) {
+            val contentId = currentUsenetContentIdOrNull()
+            val candidateId = activeUsenetCandidateId
+            val startedAt = activeUsenetSelectionStartedAt
+            val timeToPlayMs = if (startedAt != null) {
+                Clock.System.now().toEpochMilliseconds() - startedAt
+            } else -1L
+            emitUsenetTelemetry(
+                event = UsenetTelemetryEvents.PLAYBACK_STARTED,
+                attributes = contentCandidateAttrs(contentId, candidateId) + mapOf(
+                    UsenetTelemetryKeys.TIME_TO_PLAY_BUCKET to timeBucket(timeToPlayMs),
+                ),
+            )
+        }
+        _state.update { if (it.usenetPlaybackIntent == null) it else it.copy(usenetPlaybackIntent = null) }
+        if (hadIntent) cancelUsenetResolveAndPoll(cancelBackend = false)
+    }
+
+    /**
+     * Explicit VM-clear hook for platforms/call-sites that can invoke
+     * it on screen destroy (Android: `DisposableEffect`, iOS: the
+     * wrapper's deinit path). No existing lifecycle-adjacent signature
+     * is widened — this is a standalone method call-sites can opt into.
+     *
+     * Cancels any active Usenet work on the backend and locally. Does
+     * not touch other VM state so the method is safe to invoke multiple
+     * times.
+     */
+    fun clear() {
+        cancelUsenetResolveAndPoll()
+    }
+
+    private fun cancelUsenetResolveAndPoll(cancelBackend: Boolean = true) {
+        currentUsenetResolveJob?.cancel()
+        currentUsenetResolveJob = null
+        activeUsenetCandidateId = null
+        activeUsenetSelectionStartedAt = null
+        activeUsenetFallbackIndex = 0
+        initialUsenetCandidateId = null
+        if (usenetJobPoller != null) {
+            scope.launch { usenetJobPoller.cancelActive(cancelOnBackend = cancelBackend) }
+        }
+    }
+
+    private fun currentUsenetContentIdOrNull(): String? {
+        val type = currentType ?: return null
+        val tmdbId = currentId ?: return null
+        return formatUsenetContentId(
+            type = type,
+            tmdbId = tmdbId,
+            season = _state.value.streamContextSeason,
+            episode = _state.value.streamContextEpisode,
+        )
+    }
+
+    private fun emitUsenetTelemetry(event: String, attributes: Map<String, String>) {
+        val sink = telemetry ?: return
+        runCatching { sink.emit(event, attributes) }
+    }
+
+    private fun mergeSidecarRow(
+        existing: UsenetCandidateStates,
+        row: UsenetCandidateUiModel,
+    ): UsenetCandidateStates {
+        if (existing[row.candidateId] === row) return existing
+        return existing + (row.candidateId to row)
+    }
+
+    /**
+     * Fire a single-shot prewarm for the top Usenet candidates currently
+     * in state. Dedup lives inside [UsenetWarmCoordinator]; this function
+     * can safely be called from multiple paths within fetchStreams. Runs
+     * as fire-and-forget on [scope] so it never blocks the stream flow.
+     */
+    private fun maybePrewarmUsenetCandidates(season: Int?, episode: Int?) {
+        val coordinator = usenetWarmCoordinator ?: return
+        val type = currentType ?: return
+        val tmdbId = currentId ?: return
+        val contentId = formatUsenetContentId(
+            type = type,
+            tmdbId = tmdbId,
+            season = season,
+            episode = episode,
+        ) ?: return
+        val candidates = _state.value.streams
+            .asSequence()
+            .mapNotNull { it.usenetCandidatePayloadOrNull() }
+            .distinctBy { it.candidateId }
+            .take(UsenetWarmCoordinator.MAX_PREWARM_CANDIDATES)
+            .toList()
+        if (candidates.isEmpty()) return
+        scope.launch {
+            coordinator.prewarm(contentId = contentId, candidates = candidates)
         }
     }
 
@@ -782,20 +1324,12 @@ class DetailViewModel(
         val hostKey = com.torve.data.addon.StreamRuntimeTelemetry.keyForStream(stream)
         com.torve.data.addon.StreamRuntimeTelemetry.recordPlayAttempt(hostKey)
         val settings = settingsProvider?.invoke()
-        val provider = settings?.getDebridProvider() ?: DebridServiceType.REAL_DEBRID
         val apiKey = settings?.getDebridApiKey() ?: ""
-
-        if (apiKey.isBlank()) {
-            _state.update {
-                it.copy(
-                    autoPlayFailed = true,
-                    autoPlayMessage = null,
-                    isResolving = false,
-                    streamsError = "No cloud service configured",
-                )
-            }
-            return
-        }
+        // Nullable provider: addon-hosted streams (Panda + cloud download
+        // client) play without any local debrid key. The stream repo decides
+        // whether a provider is required based on the stream shape and
+        // throws if one is missing for a hoster URL or torrent.
+        val provider: DebridServiceType? = if (apiKey.isBlank()) null else settings?.getDebridProvider()
 
         _state.update {
             it.copy(
@@ -811,9 +1345,25 @@ class DetailViewModel(
             val resolved = withTimeoutOrNull(90_000L) {
                 streamRepo.resolveStream(stream, provider, apiKey)
             }
-            if (resolved != null) {
-                println("TORVE_AUTORESOLVE: Success url=${resolved.url?.take(80)}")
-                com.torve.data.addon.StreamRuntimeTelemetry.recordStartupSuccess(hostKey, 0L)
+            if (resolved == null) {
+                com.torve.data.addon.StreamRuntimeTelemetry.recordStartupTimeout(hostKey, 90_000L)
+                streamRepo.reportPlaybackOutcome(stream, provider, success = false)
+                _state.update {
+                    it.copy(
+                        autoPlayMessage = "Stream timed out, trying next...",
+                        fallbackAttempt = attemptIndex + 1,
+                    )
+                }
+                autoResolveStream(streams, attemptIndex + 1, preferences)
+                return
+            }
+            println("TORVE_AUTORESOLVE: Success url=${resolved.url?.take(80)}")
+            com.torve.data.addon.StreamRuntimeTelemetry.recordStartupSuccess(hostKey, 0L)
+            val url = resolved.url.orEmpty()
+            // Non-addon URLs are playable immediately — same as the fast
+            // path below. Addon URLs go through probe; Ready plays, Preparing
+            // locks in on this stream (no fallback), Failed falls through.
+            if (!stream.isAddonHostedUrl() || url.isBlank()) {
                 _state.update {
                     it.copy(
                         resolvedStream = resolved,
@@ -826,16 +1376,37 @@ class DetailViewModel(
                         },
                     )
                 }
-            } else {
-                com.torve.data.addon.StreamRuntimeTelemetry.recordStartupTimeout(hostKey, 90_000L)
-                streamRepo.reportPlaybackOutcome(stream, provider, success = false)
-                _state.update {
-                    it.copy(
-                        autoPlayMessage = "Stream timed out, trying next...",
-                        fallbackAttempt = attemptIndex + 1,
-                    )
+                return
+            }
+            when (val readiness = streamRepo.probeStreamReadiness(url)) {
+                is com.torve.domain.repository.StreamReadiness.Ready -> {
+                    _state.update {
+                        it.copy(
+                            resolvedStream = resolved.copy(url = readiness.finalUrl),
+                            isResolving = false,
+                            showStreamPicker = false,
+                            autoPlayMessage = if (attemptIndex > 0) {
+                                "Switched to a more stable source"
+                            } else {
+                                buildAutoPlayMessage(stream)
+                            },
+                        )
+                    }
                 }
-                autoResolveStream(streams, attemptIndex + 1, preferences)
+                com.torve.domain.repository.StreamReadiness.Preparing -> {
+                    _state.update { it.copy(autoPlayMessage = null) }
+                    startPreparingLoop(stream, url, resolved)
+                }
+                is com.torve.domain.repository.StreamReadiness.Failed -> {
+                    streamRepo.reportPlaybackOutcome(stream, provider, success = false)
+                    _state.update {
+                        it.copy(
+                            autoPlayMessage = "Stream failed, trying next...",
+                            fallbackAttempt = attemptIndex + 1,
+                        )
+                    }
+                    autoResolveStream(streams, attemptIndex + 1, preferences)
+                }
             }
         } catch (e: Exception) {
             com.torve.data.addon.StreamRuntimeTelemetry.recordFatalError(hostKey)
@@ -888,23 +1459,9 @@ class DetailViewModel(
         val hostKey = com.torve.data.addon.StreamRuntimeTelemetry.keyForStream(stream)
         com.torve.data.addon.StreamRuntimeTelemetry.recordPlayAttempt(hostKey)
         val settings = settingsProvider?.invoke()
-        val provider = settings?.getDebridProvider() ?: DebridServiceType.REAL_DEBRID
         val apiKey = settings?.getDebridApiKey() ?: ""
-
-        if (apiKey.isBlank()) {
-            _state.update {
-                it.copy(
-                    autoPlayFailed = true,
-                    autoPlayMessage = null,
-                    isResolving = false,
-                    streamsError = "No cloud service configured",
-                )
-            }
-            return AutoResolveResult(
-                resolved = false,
-                attemptedKeys = currentAttemptedKeys,
-            )
-        }
+        // Nullable provider — addon-hosted streams resolve without a local key.
+        val provider: DebridServiceType? = if (apiKey.isBlank()) null else settings?.getDebridProvider()
 
         _state.update {
             it.copy(
@@ -919,8 +1476,26 @@ class DetailViewModel(
             val resolved = withTimeoutOrNull(90_000L) {
                 streamRepo.resolveStream(stream, provider, apiKey)
             }
-            if (resolved != null) {
-                com.torve.data.addon.StreamRuntimeTelemetry.recordStartupSuccess(hostKey, 0L)
+            if (resolved == null) {
+                com.torve.data.addon.StreamRuntimeTelemetry.recordStartupTimeout(hostKey, 90_000L)
+                streamRepo.reportPlaybackOutcome(stream, provider, success = false)
+                _state.update {
+                    it.copy(
+                        autoPlayMessage = "Stream timed out, trying next...",
+                        fallbackAttempt = attemptIndex + 1,
+                    )
+                }
+                return autoResolveStreamProgressive(
+                    streams = streams,
+                    attemptIndex = attemptIndex + 1,
+                    preferences = preferences,
+                    failureBehavior = failureBehavior,
+                    attemptedKeys = currentAttemptedKeys,
+                )
+            }
+            com.torve.data.addon.StreamRuntimeTelemetry.recordStartupSuccess(hostKey, 0L)
+            val url = resolved.url.orEmpty()
+            if (!stream.isAddonHostedUrl() || url.isBlank()) {
                 _state.update {
                     it.copy(
                         resolvedStream = resolved,
@@ -933,26 +1508,45 @@ class DetailViewModel(
                         },
                     )
                 }
-                AutoResolveResult(
-                    resolved = true,
-                    attemptedKeys = currentAttemptedKeys,
-                )
-            } else {
-                com.torve.data.addon.StreamRuntimeTelemetry.recordStartupTimeout(hostKey, 90_000L)
-                streamRepo.reportPlaybackOutcome(stream, provider, success = false)
-                _state.update {
-                    it.copy(
-                        autoPlayMessage = "Stream timed out, trying next...",
-                        fallbackAttempt = attemptIndex + 1,
+                return AutoResolveResult(resolved = true, attemptedKeys = currentAttemptedKeys)
+            }
+            when (val readiness = streamRepo.probeStreamReadiness(url)) {
+                is com.torve.domain.repository.StreamReadiness.Ready -> {
+                    _state.update {
+                        it.copy(
+                            resolvedStream = resolved.copy(url = readiness.finalUrl),
+                            isResolving = false,
+                            showStreamPicker = false,
+                            autoPlayMessage = if (attemptIndex > 0) {
+                                "Switched to a more stable source"
+                            } else {
+                                buildAutoPlayMessage(stream)
+                            },
+                        )
+                    }
+                    AutoResolveResult(resolved = true, attemptedKeys = currentAttemptedKeys)
+                }
+                com.torve.domain.repository.StreamReadiness.Preparing -> {
+                    _state.update { it.copy(autoPlayMessage = null) }
+                    startPreparingLoop(stream, url, resolved)
+                    AutoResolveResult(resolved = false, attemptedKeys = currentAttemptedKeys)
+                }
+                is com.torve.domain.repository.StreamReadiness.Failed -> {
+                    streamRepo.reportPlaybackOutcome(stream, provider, success = false)
+                    _state.update {
+                        it.copy(
+                            autoPlayMessage = "Stream failed, trying next...",
+                            fallbackAttempt = attemptIndex + 1,
+                        )
+                    }
+                    autoResolveStreamProgressive(
+                        streams = streams,
+                        attemptIndex = attemptIndex + 1,
+                        preferences = preferences,
+                        failureBehavior = failureBehavior,
+                        attemptedKeys = currentAttemptedKeys,
                     )
                 }
-                autoResolveStreamProgressive(
-                    streams = streams,
-                    attemptIndex = attemptIndex + 1,
-                    preferences = preferences,
-                    failureBehavior = failureBehavior,
-                    attemptedKeys = currentAttemptedKeys,
-                )
             }
         } catch (_: Exception) {
             com.torve.data.addon.StreamRuntimeTelemetry.recordFatalError(hostKey)
@@ -982,30 +1576,30 @@ class DetailViewModel(
         return "Playing: ${parts.joinToString(" · ")}"
     }
 
-    fun resolveStream(stream: ParsedStream, provider: DebridServiceType, apiKey: String) {
+    fun resolveStream(stream: ParsedStream, provider: DebridServiceType?, apiKey: String) {
         scope.launch {
-            _state.update { it.copy(isResolving = true, resolveError = null) }
+            cancelPreparingLoop()
+            _state.update {
+                it.copy(
+                    isResolving = true,
+                    resolveError = null,
+                    preparing = null,
+                )
+            }
             println("TORVE_RESOLVE: Starting resolve hash=${stream.infoHash} url=${stream.directUrl} provider=$provider keyLen=${apiKey.length}")
             try {
                 val resolved = withTimeoutOrNull(90_000L) {
                     streamRepo.resolveStream(stream, provider, apiKey)
                 }
-                if (resolved != null) {
-                    println("TORVE_RESOLVE: Success url=${resolved.url?.take(80)}")
-                    _state.update {
-                        it.copy(
-                            resolvedStream = resolved,
-                            isResolving = false,
-                            showStreamPicker = false,
-                        )
-                    }
-                } else {
+                if (resolved == null) {
                     println("TORVE_RESOLVE: Timed out after 90s")
                     streamRepo.reportPlaybackOutcome(stream, provider, success = false)
                     _state.update {
                         it.copy(isResolving = false, resolveError = com.torve.presentation.error.UserFacingError.STREAM_RESOLVE_TIMEOUT.messageKey)
                     }
+                    return@launch
                 }
+                dispatchResolved(stream, provider, apiKey, resolved)
             } catch (e: Exception) {
                 println("TORVE_RESOLVE: Exception ${e::class.simpleName}: ${e.message}")
                 streamRepo.reportPlaybackOutcome(stream, provider, success = false)
@@ -1014,6 +1608,176 @@ class DetailViewModel(
                 }
             }
         }
+    }
+
+    /**
+     * Route a freshly-resolved stream based on whether it needs a readiness
+     * probe. Addon-hosted URLs (Panda's `/u/<token>/…`) go through the
+     * probe; torrent/debrid URLs launch the player immediately — they're
+     * already playable the moment the debrid client hands them back.
+     *
+     * Must NEVER set [DetailUiState.resolvedStream] before the probe says
+     * Ready. That's the invariant that keeps ExoPlayer from ever seeing
+     * Panda's 504 nzb_not_ready response.
+     */
+    private suspend fun dispatchResolved(
+        stream: ParsedStream,
+        provider: DebridServiceType?,
+        apiKey: String,
+        resolved: com.torve.domain.model.ResolvedStream,
+    ) {
+        val url = resolved.url.orEmpty()
+        if (url.isBlank()) {
+            _state.update {
+                it.copy(
+                    isResolving = false,
+                    resolveError = com.torve.presentation.error.UserFacingError.STREAM_RESOLVE_FAILED.messageKey,
+                )
+            }
+            return
+        }
+        if (!stream.isAddonHostedUrl()) {
+            _state.update {
+                it.copy(
+                    resolvedStream = resolved,
+                    isResolving = false,
+                    showStreamPicker = false,
+                    preparing = null,
+                )
+            }
+            return
+        }
+        when (val readiness = streamRepo.probeStreamReadiness(url)) {
+            is com.torve.domain.repository.StreamReadiness.Ready -> {
+                _state.update {
+                    it.copy(
+                        resolvedStream = resolved.copy(url = readiness.finalUrl),
+                        isResolving = false,
+                        showStreamPicker = false,
+                        preparing = null,
+                    )
+                }
+            }
+            com.torve.domain.repository.StreamReadiness.Preparing -> {
+                _state.update { it.copy(isResolving = false) }
+                startPreparingLoop(stream, url, resolved)
+            }
+            is com.torve.domain.repository.StreamReadiness.Failed -> {
+                streamRepo.reportPlaybackOutcome(stream, provider, success = false)
+                _state.update {
+                    it.copy(
+                        isResolving = false,
+                        resolveError = readiness.reason,
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Coroutine that re-probes the same stream URL every 15s until it's
+     * ready, fails, or the 5-minute budget is exhausted. Stored as a Job
+     * so [cancelPreparingLoop] can interrupt it mid-delay — which is the
+     * mechanism behind the overlay's Cancel button and any re-entry
+     * (e.g. the user picks a different stream while the loop is running).
+     */
+    private var preparingJob: Job? = null
+
+    private fun startPreparingLoop(
+        stream: ParsedStream,
+        url: String,
+        resolved: com.torve.domain.model.ResolvedStream,
+    ) {
+        preparingJob?.cancel()
+        val startedAt = Clock.System.now().toEpochMilliseconds()
+        // Best-effort display name. ResolvedStream.service carries the
+        // DebridServiceType enum when unrestrict ran, but for Panda addon-
+        // hosted URLs it's null — fall back to the stream's source label
+        // (Panda writes the indexer name there) or a generic string. The
+        // body copy reads fine either way.
+        val serviceName = resolved.service?.label?.takeIf { it.isNotBlank() }
+            ?: stream.source?.takeIf { it.isNotBlank() }
+            ?: "Your cloud service"
+        _state.update {
+            it.copy(
+                preparing = PreparingStreamState(
+                    title = stream.title,
+                    startedAt = startedAt,
+                    attempt = 1,
+                    serviceName = serviceName,
+                    canCancel = true,
+                ),
+                resolveError = null,
+                // Close the source picker so the user doesn't accidentally
+                // pick a different stream while the current one is warming
+                // up. The preparing overlay is the full-screen surface now.
+                showStreamPicker = false,
+            )
+        }
+        preparingJob = scope.launch {
+            repeat(PREPARING_MAX_ATTEMPTS) { attemptIdx ->
+                delay(PREPARING_PROBE_INTERVAL_MS)
+                // Re-read latest PreparingStreamState each tick so the attempt
+                // counter can advance independently of the loop's local idx.
+                val result = try {
+                    streamRepo.probeStreamReadiness(url)
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (e: Exception) {
+                    com.torve.domain.repository.StreamReadiness.Failed(
+                        "${e::class.simpleName}: ${e.message ?: "probe failed"}",
+                    )
+                }
+                when (result) {
+                    is com.torve.domain.repository.StreamReadiness.Ready -> {
+                        _state.update {
+                            it.copy(
+                                preparing = null,
+                                resolvedStream = resolved.copy(url = result.finalUrl),
+                                showStreamPicker = false,
+                                resolveError = null,
+                            )
+                        }
+                        return@launch
+                    }
+                    com.torve.domain.repository.StreamReadiness.Preparing -> {
+                        _state.update { s ->
+                            val current = s.preparing ?: return@update s
+                            s.copy(preparing = current.copy(attempt = attemptIdx + 2))
+                        }
+                    }
+                    is com.torve.domain.repository.StreamReadiness.Failed -> {
+                        _state.update {
+                            it.copy(
+                                preparing = null,
+                                resolveError = result.reason,
+                            )
+                        }
+                        return@launch
+                    }
+                }
+            }
+            // Budget exhausted — the cloud client hasn't produced a URL in
+            // 5 min. Clear preparing, surface a specific timeout message so
+            // the user can pick an alternate source.
+            _state.update {
+                it.copy(
+                    preparing = null,
+                    resolveError = "error_stream_preparing_timeout",
+                )
+            }
+        }
+    }
+
+    /** Overlay Cancel / back navigation entry point. Safe to call when idle. */
+    fun cancelPreparing() {
+        cancelPreparingLoop()
+        _state.update { it.copy(preparing = null) }
+    }
+
+    private fun cancelPreparingLoop() {
+        preparingJob?.cancel()
+        preparingJob = null
     }
 
     /**
@@ -1034,8 +1798,9 @@ class DetailViewModel(
         ) ?: return null
 
         val settings = settingsProvider?.invoke()
-        val provider = settings?.getDebridProvider() ?: DebridServiceType.REAL_DEBRID
         val apiKey = settings?.getDebridApiKey() ?: ""
+        // Nullable provider — addon-hosted streams resolve without a local key.
+        val provider: DebridServiceType? = if (apiKey.isBlank()) null else settings?.getDebridProvider()
         val hostKey = com.torve.data.addon.StreamRuntimeTelemetry.keyForStream(fallback)
         com.torve.data.addon.StreamRuntimeTelemetry.recordPlayAttempt(hostKey)
 
@@ -1084,6 +1849,29 @@ class DetailViewModel(
 
     fun dismissStreamPicker() {
         _state.update { it.copy(showStreamPicker = false) }
+        // If a Usenet row was mid-resolve (PREPARING / never reached
+        // Ready) when the user dismissed, emit the abandon event. Play
+        // already fires via consumeUsenetPlaybackIntent; no Ready →
+        // no abandon.
+        val active = activeUsenetCandidateId
+        if (active != null) {
+            val row = _state.value.usenetCandidates[active]
+            if (row?.availabilityState != com.torve.data.usenet.model.UsenetAvailability.READY) {
+                val contentId = currentUsenetContentIdOrNull()
+                emitUsenetTelemetry(
+                    event = UsenetTelemetryEvents.USER_ABANDONED_BEFORE_READY,
+                    attributes = contentCandidateAttrs(contentId, active) + mapOf(
+                        UsenetTelemetryKeys.ABANDON_STATE to
+                            UsenetTelemetryState.from(row?.availabilityState).name,
+                    ),
+                )
+            }
+        }
+        // Sheet dismiss is an unambiguous "done" — stop any active
+        // Usenet poll and cancel the resolve chain. Active selection is
+        // cleared so a stale poll tick can't re-enter the VM via the
+        // sidecar update path.
+        cancelUsenetResolveAndPoll()
     }
 
     fun clearResolvedStream() {

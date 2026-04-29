@@ -24,6 +24,7 @@ import com.torve.domain.model.updateSectionPresetId
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.integrations.LibraryOverlayService
+import com.torve.domain.home.HomeLayoutSourceSelector
 import com.torve.domain.recommendation.ScoredMediaItem
 import com.torve.domain.recommendation.GetRecommendationsUseCase
 import com.torve.domain.repository.MetadataRepository
@@ -74,6 +75,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.builtins.SetSerializer
 import kotlinx.serialization.builtins.serializer
 
+@OptIn(FlowPreview::class)
 class HomeViewModel(
     private val metadataRepo: MetadataRepository,
     private val watchProgressRepo: WatchProgressRepository,
@@ -94,6 +96,7 @@ class HomeViewModel(
     private val contentPolicyFilter: ContentPolicyFilter = ContentPolicyFilter(),
     private val addonPolicyRepository: AddonPolicyRepository? = null,
     invalidationCoordinator: ContentPolicyCacheInvalidationCoordinator? = null,
+    private val layoutSourceSelector: HomeLayoutSourceSelector = HomeLayoutSourceSelector(prefsRepo),
 ) {
     private data class ArtworkBackfillRequest(
         val type: MediaType,
@@ -159,18 +162,27 @@ class HomeViewModel(
             loadHomeScreen()
         }
         scope.launch {
-            settingsRefreshNotifier.events.collect {
-                _sectionConfigs.value = loadSectionConfigs()
-                _homeLayoutOrder.value = ensureAllSectionsInLayoutOrder(loadHomeLayoutOrder())
-                loadHomeScreen()
-            }
+            // Debounce: on app start the settings-refresh notifier fires
+            // 3-5 times in quick succession (account coordinator, panda
+            // onboarding check, addon sync). Without debouncing, each one
+            // re-runs loadHomeScreen() → re-enriches ratings → hits the
+            // MDBList 429 rate limit → pills vanish for a minute.
+            settingsRefreshNotifier.events
+                .debounce(500L)
+                .collect {
+                    _sectionConfigs.value = loadSectionConfigs()
+                    _homeLayoutOrder.value = ensureAllSectionsInLayoutOrder(loadHomeLayoutOrder())
+                    loadHomeScreen()
+                }
         }
         if (invalidationCoordinator != null) {
             scope.launch {
-                invalidationCoordinator.events.collectLatest {
-                    _state.value = HomeUiState(isLoading = true)
-                    loadHomeScreen()
-                }
+                invalidationCoordinator.events
+                    .debounce(500L)
+                    .collectLatest {
+                        _state.value = HomeUiState(isLoading = true)
+                        loadHomeScreen()
+                    }
             }
         }
         // Relock hardening: observe content policy state directly. When policy
@@ -247,7 +259,8 @@ class HomeViewModel(
     }
 
     private suspend fun loadSectionConfigs(): List<HomeSectionConfig> {
-        val saved = try { prefsRepo.getString("home_section_configs") } catch (_: Exception) { null }
+        val key = layoutSourceSelector.sectionConfigsKey()
+        val saved = try { prefsRepo.getString(key) } catch (_: Exception) { null }
         return if (saved != null) {
             try {
                 val decoded = json.decodeFromString<List<HomeSectionConfig>>(saved)
@@ -322,7 +335,8 @@ class HomeViewModel(
     private fun saveSectionConfigs(configs: List<HomeSectionConfig>) {
         scope.launch {
             try {
-                prefsRepo.setString("home_section_configs", json.encodeToString(configs))
+                val key = layoutSourceSelector.sectionConfigsKey()
+                prefsRepo.setString(key, json.encodeToString(configs))
             } catch (_: Exception) { /* ignore */ }
         }
     }
@@ -370,7 +384,8 @@ class HomeViewModel(
     }
 
     private suspend fun loadHomeLayoutOrder(): List<String> {
-        val saved = try { prefsRepo.getString("home_layout_order") } catch (_: Exception) { null }
+        val key = layoutSourceSelector.homeLayoutOrderKey()
+        val saved = try { prefsRepo.getString(key) } catch (_: Exception) { null }
         return if (saved != null) {
             try {
                 json.decodeFromString<List<String>>(saved)
@@ -383,8 +398,10 @@ class HomeViewModel(
     fun updateHomeLayoutOrder(order: List<String>) {
         _homeLayoutOrder.value = order
         scope.launch {
-            try { prefsRepo.setString("home_layout_order", json.encodeToString(order)) }
-            catch (_: Exception) { /* ignore */ }
+            try {
+                val key = layoutSourceSelector.homeLayoutOrderKey()
+                prefsRepo.setString(key, json.encodeToString(order))
+            } catch (_: Exception) { /* ignore */ }
         }
     }
 
@@ -529,7 +546,11 @@ class HomeViewModel(
                     }
                     val historyDeferred = async {
                         try {
-                            watchHistoryRepo.getRecent(3)
+                            // Pull a wide window so dedup-by-show has material to
+                            // collapse across. The Because-You-Watched shelf caps
+                            // at one rail after dedup (see below); the window also
+                            // feeds the recently-watched dedup loop.
+                            watchHistoryRepo.getRecent(40)
                         } catch (_: Exception) {
                             emptyList()
                         }
@@ -551,6 +572,11 @@ class HomeViewModel(
                             val seen = mutableSetOf<String>()
                             val out = mutableListOf<MediaItem>()
                             for (entry in watchHistoryRepo.getRecent(80)) {
+                                // Synthetic mediaIds from openPreResolvedStream
+                                // (NZB-sourced playbacks) carry no catalog
+                                // metadata; Adult/Sports are also excluded
+                                // by product policy. Drop them from history.
+                                if (entry.mediaId.startsWith("direct:")) continue
                                 // DB stores "series" / "movie" (lowercase) — match
                                 // case-insensitively, also tolerate legacy "tv".
                                 val mt = entry.mediaType.lowercase()
@@ -653,6 +679,13 @@ class HomeViewModel(
                 val continueWatching = loadInputs.continueWatching
                 val overlayContinue = loadInputs.overlayContinue
                 val mergedContinueWatching = (continueWatching + overlayContinue)
+                    // Synthetic mediaIds emitted by openPreResolvedStream
+                    // (NZB-sourced playbacks from the Adult / Sports /
+                    // Movies-via-Usenet tabs) carry no catalog metadata
+                    // and would render as posterless rows. Adult & Sports
+                    // are also excluded by product policy. Drop all
+                    // `direct:*` entries from the rail.
+                    .filterNot { it.mediaId.startsWith("direct:") }
                     .groupBy { "${it.mediaType.name}:${it.mediaId}" }
                     .mapNotNull { (_, entries) -> entries.maxByOrNull { it.updatedAt } }
                     .sortedByDescending { it.updatedAt }
@@ -785,22 +818,43 @@ class HomeViewModel(
                     )
                 } else null
 
-                // Build "Because You Watched" shelves from recent history
-                val becauseYouWatched = recentHistory.mapNotNull { entry ->
-                    try {
-                        val type = if (entry.mediaType == MediaType.SERIES.name || entry.mediaType == "tv") "tv" else "movie"
-                        val tmdbId = entry.mediaId.extractTmdbIdOrNull() ?: return@mapNotNull null
-                        val similar = metadataRepo.getSimilar(type, tmdbId).take(15)
-                        if (similar.isNotEmpty()) {
+                // Build a single "Because You Watched" shelf from the most
+                // recently watched show/movie. Deduping by show means binging
+                // three episodes of one series no longer stacks three near-
+                // identical rails — we pick the first distinct title and stop.
+                // For series, the display name and TMDB lookup both target the
+                // show (not the individual episode), matching the recently-
+                // watched card policy a few blocks above.
+                val becauseYouWatched = run {
+                    val seenShowKeys = mutableSetOf<String>()
+                    for (entry in recentHistory) {
+                        val mt = entry.mediaType.lowercase()
+                        val isSeries = mt == "series" || mt == "tv" ||
+                            entry.seasonNumber != null || entry.episodeNumber != null
+                        val tmdbId = entry.mediaId.extractTmdbIdOrNull() ?: continue
+                        val showKey = tmdbId.toString()
+                        if (!seenShowKeys.add(showKey)) continue
+                        val displayTitle = if (isSeries) {
+                            entry.showTitle?.takeIf { it.isNotBlank() } ?: entry.title
+                        } else {
+                            entry.title
+                        }
+                        val type = if (isSeries) "tv" else "movie"
+                        val similar = try {
+                            metadataRepo.getSimilar(type, tmdbId).take(15)
+                        } catch (_: Exception) {
+                            continue
+                        }
+                        if (similar.isEmpty()) continue
+                        return@run listOf(
                             CatalogShelf(
-                                id = "because_${entry.mediaId}",
-                                title = "Because You Watched ${entry.title}",
+                                id = "because_$showKey",
+                                title = "Because You Watched $displayTitle",
                                 items = similar,
-                            )
-                        } else null
-                    } catch (_: Exception) {
-                        null
+                            ),
+                        )
                     }
+                    emptyList<CatalogShelf>()
                 }
 
                 // Build hidden gems shelf
@@ -1085,11 +1139,17 @@ class HomeViewModel(
                 loadProviderLogos()
 
                 // Background enrichment: add MDBList multi-source ratings
+                println(
+                    "[HomeVM] loadHomeScreen success — launching ratings enrichment. shelves=${_state.value.shelves.size} " +
+                        "watchlist=${_state.value.watchlistItems.size} recommended=${_state.value.recommendedItems.size} " +
+                        "addonShelves=${_state.value.addonShelves.size}",
+                )
                 launchRatingsEnrichment()
                 launchArtworkBackfill()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                println("[HomeVM] loadHomeScreen failed: ${e::class.simpleName}: ${e.message}")
                 torveVerboseLog {
                     "HOME_TAB state_transition state=error ${e::class.simpleName}: ${sanitizeNetworkDiagnosticText(e.message)}"
                 }
@@ -1189,77 +1249,197 @@ class HomeViewModel(
             // Purge expired cache entries (older than 30 days)
             try { ratingsEnricher.clearExpiredCache() } catch (_: Exception) { }
 
+            // One-time cache invalidation when enrichment semantics change.
+            // Bump RATINGS_CACHE_VERSION in the companion object when the
+            // enricher starts sourcing a new provider, changes which pills
+            // are populated for a given input, or otherwise would leave
+            // stale pre-change entries visually inconsistent with freshly
+            // enriched items. Users upgrading to the new build pay one
+            // re-enrichment storm; after that, the cache behaves normally.
+            try {
+                val stored = prefsRepo.getString(KEY_RATINGS_CACHE_VERSION)?.toIntOrNull() ?: 0
+                if (stored < RATINGS_CACHE_VERSION) {
+                    ratingsEnricher.clearPersistentCache()
+                    prefsRepo.setString(KEY_RATINGS_CACHE_VERSION, RATINGS_CACHE_VERSION.toString())
+                }
+            } catch (_: Exception) { }
+
             val apiKey = try {
                 integrationSecretStore.get(IntegrationSecretKey.MDBLIST_API_KEY)
                     ?: prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY)
                     ?: MdbListApi.DEFAULT_API_KEY
             } catch (_: Exception) { MdbListApi.DEFAULT_API_KEY }
-            refreshRatings(apiKey)
+
+            // Run enrichment; if MDBList hit its rate limit mid-pass, wait
+            // out the cooldown and run again so the items that got skipped
+            // can pick up their MDBList-exclusive fields (Letterboxd, MAL,
+            // RT-audience, MDBList score). enrichSingle leaves those items
+            // uncached on the first pass so the retry actually re-runs.
+            // Capped at 5 iterations to avoid indefinite loops if MDBList
+            // is returning 429s for an unrelated reason.
+            var iteration = 0
+            while (iteration < MAX_RATINGS_ENRICHMENT_ITERATIONS) {
+                iteration++
+                doRefreshRatings(apiKey)
+                val remainingMs = ratingsEnricher.rateLimitRemainingMs()
+                if (remainingMs <= 0L) break
+                // + buffer so we're comfortably past the cooldown when we retry
+                kotlinx.coroutines.delay(remainingMs + 2_000L)
+            }
         }
     }
 
     fun refreshRatings(apiKey: String) {
+        scope.launch { doRefreshRatings(apiKey) }
+    }
+
+    private suspend fun doRefreshRatings(apiKey: String) {
         // Even without an MDBList key, the enricher still resolves IMDB + RT +
         // Metacritic via OMDB and falls back to Trakt for IMDB scores. Bailing
         // early on a blank key meant NO rail ever got rating pills unless the
         // user had configured MDBList.
-        scope.launch {
-            val current = _state.value
-            val enrichedShelves = current.shelves.map { shelf ->
-                shelf.copy(items = ratingsEnricher.enrichList(shelf.items, apiKey))
+        //
+        // Rails are processed sequentially so state updates (one per rail)
+        // arrive paced rather than in a burst. We also skip the _state.update
+        // entirely when enrichment didn't change any ratings (e.g. every item
+        // hit the cache) — emitting a new list reference forces a LazyRow
+        // recomposition that can cancel an in-flight `pointerInput` coroutine
+        // on a poster card, causing taps to be dropped.
+        val current = _state.value
+
+        // Catalog-shelf groups: shelves, addonShelves, mdbListShelves, becauseYouWatched
+        current.shelves.forEach { shelf ->
+            enrichShelfAndApply(apiKey, shelf) { state, updated ->
+                state.copy(shelves = state.shelves.replaceById(updated))
             }
-            val enrichedAddonShelves = current.addonShelves.map { shelf ->
-                shelf.copy(items = ratingsEnricher.enrichList(shelf.items, apiKey))
+        }
+        current.addonShelves.forEach { shelf ->
+            enrichShelfAndApply(apiKey, shelf) { state, updated ->
+                state.copy(addonShelves = state.addonShelves.replaceById(updated))
             }
-            val enrichedMdbListShelves = current.mdbListShelves.map { shelf ->
-                shelf.copy(items = ratingsEnricher.enrichList(shelf.items, apiKey))
+        }
+        current.mdbListShelves.forEach { shelf ->
+            enrichShelfAndApply(apiKey, shelf) { state, updated ->
+                state.copy(mdbListShelves = state.mdbListShelves.replaceById(updated))
             }
-            val enrichedCustomShelves = current.customShelves.mapValues { (_, items) ->
-                ratingsEnricher.enrichList(items, apiKey)
-            }.toMutableMap()
-            val enrichedHiddenGems = current.hiddenGemsShelf?.let { shelf ->
-                shelf.copy(items = ratingsEnricher.enrichList(shelf.items, apiKey))
+        }
+        current.becauseYouWatched.forEach { shelf ->
+            enrichShelfAndApply(apiKey, shelf) { state, updated ->
+                state.copy(becauseYouWatched = state.becauseYouWatched.replaceById(updated))
             }
-            val enrichedWatchlist = ratingsEnricher.enrichList(current.watchlistItems, apiKey)
-            val enrichedByw = current.becauseYouWatched.map { shelf ->
-                shelf.copy(items = ratingsEnricher.enrichList(shelf.items, apiKey))
+        }
+
+        // Optional shelf
+        current.hiddenGemsShelf?.let { shelf ->
+            enrichShelfAndApply(apiKey, shelf) { state, updated ->
+                if (state.hiddenGemsShelf?.id == updated.id) {
+                    state.copy(hiddenGemsShelf = updated)
+                } else state
             }
-            val enrichedRecommended = current.recommendedItems.map { scored ->
-                scored.copy(item = ratingsEnricher.enrichSingle(scored.item, apiKey))
+        }
+
+        // Custom shelves keyed by section id
+        current.customShelves.forEach { (sectionId, items) ->
+            runCatching {
+                val enriched = ratingsEnricher.enrichList(items, apiKey)
+                if (!ratingsChanged(items, enriched)) return@runCatching
+                _state.update { state ->
+                    if (!state.customShelves.containsKey(sectionId)) return@update state
+                    state.copy(
+                        customShelves = state.customShelves + (sectionId to enriched),
+                        continueWatchingRatings = state.continueWatchingRatings.mergeRatingsFor(enriched),
+                    )
+                }
             }
-            val enrichedRecents = ratingsEnricher.enrichList(current.recentlyWatched, apiKey)
-            // Build ratings lookup for continue watching from all enriched items
-            val allItems = enrichedShelves.flatMap { it.items } +
-                enrichedAddonShelves.flatMap { it.items } +
-                enrichedMdbListShelves.flatMap { it.items } +
-                enrichedCustomShelves.values.flatten() +
-                enrichedWatchlist +
-                enrichedByw.flatMap { it.items } +
-                enrichedRecommended.map { it.item } +
-                enrichedRecents +
-                (enrichedHiddenGems?.items ?: emptyList())
-            val ratingsMap = mutableMapOf<String, MediaRatings>()
-            allItems.forEach { item ->
-                val r = item.ratings ?: return@forEach
-                ratingsMap[item.id] = r
-                item.tmdbId?.let { ratingsMap[it.toString()] = r }
-                item.imdbId?.let { ratingsMap[it] = r }
-            }
-            _state.update {
-                it.copy(
-                    shelves = enrichedShelves,
-                    addonShelves = enrichedAddonShelves,
-                    mdbListShelves = enrichedMdbListShelves,
-                    customShelves = enrichedCustomShelves,
-                    hiddenGemsShelf = enrichedHiddenGems,
-                    watchlistItems = enrichedWatchlist,
-                    becauseYouWatched = enrichedByw,
-                    recommendedItems = enrichedRecommended,
-                    recentlyWatched = enrichedRecents,
-                    continueWatchingRatings = ratingsMap,
+        }
+
+        // Loose lists (no shelf id — just replace whole list)
+        runCatching {
+            val enriched = ratingsEnricher.enrichList(current.watchlistItems, apiKey)
+            if (!ratingsChanged(current.watchlistItems, enriched)) return@runCatching
+            _state.update { state ->
+                state.copy(
+                    watchlistItems = enriched,
+                    continueWatchingRatings = state.continueWatchingRatings.mergeRatingsFor(enriched),
                 )
             }
         }
+        runCatching {
+            val enriched = ratingsEnricher.enrichList(current.recentlyWatched, apiKey)
+            if (!ratingsChanged(current.recentlyWatched, enriched)) return@runCatching
+            _state.update { state ->
+                state.copy(
+                    recentlyWatched = enriched,
+                    continueWatchingRatings = state.continueWatchingRatings.mergeRatingsFor(enriched),
+                )
+            }
+        }
+        runCatching {
+            val baseItems = current.recommendedItems.map { it.item }
+            val enriched = ratingsEnricher.enrichList(baseItems, apiKey)
+            if (!ratingsChanged(baseItems, enriched)) return@runCatching
+            val byKey = enriched.associateBy { it.id }
+            _state.update { state ->
+                val merged = state.recommendedItems.map { scored ->
+                    byKey[scored.item.id]?.let { scored.copy(item = it) } ?: scored
+                }
+                state.copy(
+                    recommendedItems = merged,
+                    continueWatchingRatings = state.continueWatchingRatings.mergeRatingsFor(enriched),
+                )
+            }
+        }
+    }
+
+    private suspend fun enrichShelfAndApply(
+        apiKey: String,
+        shelf: CatalogShelf,
+        applyToState: (HomeUiState, CatalogShelf) -> HomeUiState,
+    ) {
+        runCatching {
+            val enriched = ratingsEnricher.enrichList(shelf.items, apiKey)
+            if (!ratingsChanged(shelf.items, enriched)) return@runCatching
+            val updated = shelf.copy(items = enriched)
+            _state.update { state ->
+                val next = applyToState(state, updated)
+                next.copy(
+                    continueWatchingRatings = next.continueWatchingRatings.mergeRatingsFor(enriched),
+                )
+            }
+        }
+    }
+
+    /**
+     * Returns true iff enrichment actually produced new rating data vs the
+     * input list. When false, updating state would only force a LazyRow to
+     * recompose with structurally-equal items — wasted work that can cancel
+     * in-flight pointer-input coroutines on poster cards (dropping taps).
+     */
+    private fun ratingsChanged(before: List<MediaItem>, after: List<MediaItem>): Boolean {
+        if (before.size != after.size) return true
+        for (i in before.indices) {
+            if (before[i].ratings != after[i].ratings) return true
+            if (before[i].imdbId != after[i].imdbId) return true
+        }
+        return false
+    }
+
+    private fun List<CatalogShelf>.replaceById(updated: CatalogShelf): List<CatalogShelf> {
+        val idx = indexOfFirst { it.id == updated.id }
+        if (idx < 0) return this
+        return toMutableList().apply { this[idx] = updated }
+    }
+
+    private fun Map<String, MediaRatings>.mergeRatingsFor(items: List<MediaItem>): Map<String, MediaRatings> {
+        if (items.isEmpty()) return this
+        val out = toMutableMap()
+        items.forEach { item ->
+            val r = item.ratings ?: return@forEach
+            out[item.id] = r
+            item.tmdbId?.let { out[it.toString()] = r }
+            item.imdbId?.let { out[it] = r }
+        }
+        return out
     }
 
     private fun collectArtworkBackfillRequests(state: HomeUiState): List<ArtworkBackfillRequest> {
@@ -1510,5 +1690,24 @@ class HomeViewModel(
             shelfConfigRepo.upsertConfig(config)
             loadHomeScreen()
         }
+    }
+
+    companion object {
+        private const val KEY_RATINGS_CACHE_VERSION = "ratings_cache_version"
+
+        // Bump when enrichment semantics change in a way that should
+        // invalidate the persistent ratings cache on existing installs.
+        //  v1: initial release
+        //  v2: Trakt augments MDBList-sourced entries that were missing a
+        //      trakt score; need to flush v1 entries so Trakt pill appears.
+        //  v3: MDBList-rate-limited items are no longer cached as partial
+        //      OMDB-only. Retry loop in launchRatingsEnrichment fills them
+        //      in after cooldown. Existing v2 entries may have been cached
+        //      during rate-limit storms and lack MDBList-exclusive fields.
+        private const val RATINGS_CACHE_VERSION = 3
+
+        // Hard cap on the rate-limit retry loop so a broken MDBList endpoint
+        // can't keep the coroutine alive forever. 5 × 60s = 5 min worst case.
+        private const val MAX_RATINGS_ENRICHMENT_ITERATIONS = 5
     }
 }

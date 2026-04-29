@@ -66,7 +66,7 @@ class StremioAddonClient(
             } catch (_: Exception) {
                 baseUrl.substringAfter("://").substringBefore("/")
             }
-            response.streams.map { StreamParser.parse(it, addonName) }
+            response.streams.map { StreamParser.parse(it, addonName, addonBaseUrl = baseUrl) }
         } catch (e: Exception) {
             emptyList()
         }

@@ -34,4 +34,11 @@ interface AddonRepository {
         installedFrom: String,
     )
     suspend fun clearSyncMetadata()
+
+    /**
+     * Persist the server-issued Panda config_id for an already-installed addon.
+     * Called immediately after Panda onboarding so subsequent management-token
+     * calls know which config they address. Non-Panda addons never set this.
+     */
+    suspend fun setAddonConfigId(manifestUrl: String, configId: String?)
 }

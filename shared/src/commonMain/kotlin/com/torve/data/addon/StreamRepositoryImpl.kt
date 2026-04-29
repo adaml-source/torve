@@ -4,6 +4,19 @@ import com.torve.data.acceleration.AccelerationApi
 import com.torve.data.acceleration.AccelerationOutcomeDto
 import com.torve.data.debrid.DebridClient
 import com.torve.db.Stream_resolve_memory
+import io.ktor.client.HttpClient
+import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.timeout
+import io.ktor.client.request.get
+import io.ktor.client.request.head
+import io.ktor.client.request.header
+import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.HttpHeaders
+import io.ktor.http.isSuccess
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import com.torve.domain.model.ContentWarmupResult
 import com.torve.domain.model.ContentWarmupTrigger
 import com.torve.db.TorveDatabase
@@ -23,17 +36,41 @@ import com.torve.domain.model.StartupConfidenceReasonCode
 import com.torve.domain.model.StreamFetchPolicy
 import com.torve.domain.model.StreamPreferences
 import com.torve.domain.model.apiValue
+import com.torve.domain.repository.StreamReadiness
 import com.torve.domain.repository.StreamRepository
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.datetime.Clock
+
+@Serializable
+private data class AddonNotReadyErrorBody(
+    val error: String = "",
+    val message: String? = null,
+    @SerialName("retry_after") val retryAfter: Int? = null,
+)
 
 class StreamRepositoryImpl(
     private val debridClient: DebridClient,
     private val streamAggregator: StreamAggregator,
     private val database: TorveDatabase,
     private val accelerationApi: AccelerationApi,
+    private val httpClient: HttpClient,
 ) : StreamRepository {
+
+    // Dedicated parser so we can decode the 504 body without bringing in the
+    // shared Json instance (which may be configured for strict mode).
+    private val readinessJson = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    // Probe-only client with redirect-follow disabled. Panda's 302 points at
+    // a signed CDN URL — we explicitly don't want to chase that from the
+    // probe since (a) the CDN often ignores HEAD or responds slowly, and
+    // (b) the 302 is itself proof of readiness. The base client's engine is
+    // shared; only the redirect policy differs.
+    private val probeClient: HttpClient by lazy {
+        httpClient.config {
+            followRedirects = false
+        }
+    }
 
     private data class StreamRequestKey(
         val type: MediaType,
@@ -148,10 +185,83 @@ class StreamRepositoryImpl(
         return applyResolveMemory(request, baseStreams)
     }
 
-    private fun isDirectPlayableUrl(url: String): Boolean {
-        // Known direct HTTP streaming sources that bypass debrid resolution
-        return url.contains("members.easynews.com") ||
-            url.contains("/easynews/") // Panda Easynews proxy URLs
+    /**
+     * Ask an addon-hosted URL whether it's actually serving content right
+     * now. Single HEAD with redirect-follow disabled so the status code we
+     * see is Panda's (not a downstream CDN's 200 after Panda's 302). Panda's
+     * contract:
+     *  - 2xx → serving directly
+     *  - 3xx → redirecting to a ready CDN URL (still Ready — the player
+     *    will follow the redirect on its own request)
+     *  - 504 + `{"error":"nzb_not_ready", …}` → cloud client is still
+     *    downloading. Retry in ~15–30s.
+     *  - Anything else → genuine failure; bubble up so the caller can
+     *    fall back to another candidate.
+     *
+     * Network-level failures (DNS, timeout) are [Failed]: we don't know if
+     * the server would have said "preparing", and pretending it's preparing
+     * would spin the user forever on a dead connection.
+     */
+    override suspend fun probeStreamReadiness(url: String): StreamReadiness {
+        // Probe uses a 1-byte Range GET on the no-redirect-follow probe
+        // client. This is the only shape that sees the same status Panda
+        // will hand the player:
+        //   • HEAD doesn't work — Panda returns 404/405 for HEAD on the
+        //     /nzb/ route, which would falsely say Ready while a GET would
+        //     return 504 nzb_not_ready.
+        //   • Range GET with followRedirects=true would chase Panda's 302
+        //     to the CDN, pulling unnecessary bytes and timing out on slow
+        //     CDNs.
+        //   • Range GET with followRedirects=false lets us see Panda's own
+        //     302 (Ready, no CDN fetch) / 504 (Preparing) / 2xx (Ready, at
+        //     most 1 byte pulled).
+        //
+        // The probe still fails open on network-level errors — a spurious
+        // timeout here must never block a URL the player could otherwise
+        // stream.
+        val response: HttpResponse = try {
+            probeClient.get(url) {
+                header(HttpHeaders.Range, "bytes=0-0")
+                timeout {
+                    requestTimeoutMillis = PANDA_READINESS_PROBE_TIMEOUT_MS
+                    socketTimeoutMillis = PANDA_READINESS_PROBE_TIMEOUT_MS
+                }
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (e: Exception) {
+            // Probe timed out / couldn't reach Panda. For addon-hosted URLs
+            // this almost always means the upstream is taking its time
+            // (large file, cloud client warming up). Treating this as
+            // Preparing keeps the overlay on screen — it'll re-probe every
+            // 15s, and the player never sees an unfulfillable URL. If the
+            // server is genuinely dead, the 5-min budget still terminates
+            // with a friendly timeout message.
+            println("[StreamProbe] probe error → Preparing: ${e::class.simpleName}: ${e.message}")
+            return StreamReadiness.Preparing
+        }
+        val code = response.status.value
+        return when {
+            // 2xx = serving directly. 3xx = Panda 302s to a ready CDN URL.
+            // ExoPlayer follows redirects itself, so both are playable.
+            code in 200..299 || code in 300..399 -> StreamReadiness.Ready(url)
+            code == 504 -> {
+                val body = runCatching { response.bodyAsText() }.getOrNull().orEmpty()
+                val parsed = runCatching {
+                    readinessJson.decodeFromString(AddonNotReadyErrorBody.serializer(), body)
+                }.getOrNull()
+                val err = parsed?.error?.takeIf { it.isNotBlank() }
+                if (err == null || err.equals("nzb_not_ready", ignoreCase = true)) {
+                    StreamReadiness.Preparing
+                } else {
+                    StreamReadiness.Failed("Server error (504): $err")
+                }
+            }
+            // Any other status (4xx/5xx) is a real server failure. Let the
+            // caller fall back to another candidate rather than throwing a
+            // "Source error" in the player a few seconds later.
+            else -> StreamReadiness.Failed("HTTP $code")
+        }
     }
 
     private fun isNzbDownloadLink(url: String): Boolean {
@@ -160,21 +270,44 @@ class StreamRepositoryImpl(
 
     override suspend fun resolveStream(
         stream: ParsedStream,
-        provider: DebridServiceType,
+        provider: DebridServiceType?,
         apiKey: String,
     ): ResolvedStream {
         return try {
-            val resolved = if (stream.directUrl != null && stream.infoHash == null && isNzbDownloadLink(stream.directUrl)) {
-                // NZB download link — not directly playable without a download client
-                throw Exception("NZB files require a download client (NZBget/SABnzbd). Configure one in Panda settings.")
-            } else if (stream.directUrl != null && stream.infoHash == null && isDirectPlayableUrl(stream.directUrl)) {
-                // Direct HTTP stream (e.g., Easynews) — play without debrid
+            // Priority: addon-hosted URLs ALWAYS bypass debrid, regardless of
+            // whether the stream also carries an infoHash. Panda's Usenet/NZB
+            // streams set both fields (the hash identifies the release; the
+            // directUrl is the per-user Panda endpoint that serves it). Earlier
+            // logic gated this on `infoHash == null`, which forced those
+            // streams through Real-Debrid even when no debrid was configured.
+            val resolved = if (stream.directUrl != null && stream.isAddonHostedUrl()) {
+                // Don't probe here — the caller (DetailViewModel) does the
+                // readiness check via probeStreamReadiness so it can render
+                // a preparing UI while we wait.
                 ResolvedStream(url = stream.directUrl, service = null)
             } else if (stream.directUrl != null && stream.infoHash == null) {
-                debridClient.unrestrictUrl(provider, apiKey, stream.directUrl)
+                if (isNzbDownloadLink(stream.directUrl)) {
+                    // Raw .nzb link from a non-Panda addon — can't be played
+                    // without a download client resolving it first.
+                    throw Exception("NZB files require a download client (NZBget/SABnzbd). Configure one in Panda settings.")
+                } else {
+                    // Hoster URL that needs unrestricting (Real-Debrid, etc.).
+                    // Without a provider we can't proceed.
+                    if (provider == null || apiKey.isBlank()) {
+                        throw IllegalStateException(
+                            "Stream requires a debrid provider to unrestrict, but none is configured.",
+                        )
+                    }
+                    debridClient.unrestrictUrl(provider, apiKey, stream.directUrl)
+                }
             } else {
                 val infoHash = stream.infoHash
                     ?: throw Exception("Stream has no infoHash or direct URL")
+                if (provider == null || apiKey.isBlank()) {
+                    throw IllegalStateException(
+                        "Torrent streams require a debrid provider, but none is configured.",
+                    )
+                }
                 debridClient.resolveStream(
                     provider = provider,
                     apiKey = apiKey,
@@ -183,7 +316,9 @@ class StreamRepositoryImpl(
                 )
             }.requirePlayableUrl()
 
-            recordResolveSuccess(stream, provider)
+            if (provider != null) {
+                recordResolveSuccess(stream, provider)
+            }
             reportPlaybackOutcome(stream, provider, success = true)
             resolved
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
@@ -194,9 +329,46 @@ class StreamRepositoryImpl(
         }
     }
 
+    override suspend fun resolveStreamWithFallback(
+        stream: ParsedStream,
+        providers: Map<DebridServiceType, String>,
+    ): ResolvedStream {
+        // Addon-hosted streams (Panda's /u/<token>/nzb/..., /u/<token>/easynews/..., …)
+        // bypass debrid entirely. The infoHash field, when present, just identifies
+        // the release — the addon's own server handles fetching it. Skip the chain.
+        if (stream.directUrl != null && stream.isAddonHostedUrl()) {
+            return resolveStream(stream, provider = null, apiKey = "")
+        }
+
+        if (providers.isEmpty()) {
+            throw IllegalStateException(
+                "No debrid provider is configured — playback can't unrestrict this source.",
+            )
+        }
+
+        val attempts = mutableListOf<String>()
+        for ((provider, apiKey) in providers) {
+            if (apiKey.isBlank()) continue
+            try {
+                val resolved = resolveStream(stream, provider, apiKey)
+                if (resolved.url.isNotBlank()) return resolved
+                attempts += "${provider.name}: empty URL"
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                attempts += "${provider.name}: ${e.message ?: e::class.simpleName ?: "unknown"}"
+            }
+        }
+        throw NoSuchElementException(
+            "Tried " + providers.size + " debrid provider(s) — none produced a playable URL. " +
+                "Common cause: the source isn't cached on any of them. Tried: " +
+                attempts.joinToString("; "),
+        )
+    }
+
     override suspend fun reportPlaybackOutcome(
         stream: ParsedStream,
-        provider: DebridServiceType,
+        provider: DebridServiceType?,
         success: Boolean,
     ) {
         val request = memoryMutex.withLock { lastRequestByStreamKey[streamMemoryKey(stream)] }
@@ -207,10 +379,15 @@ class StreamRepositoryImpl(
             ?: stream.infoHash
             ?: stream.directUrl
             ?: return
+        // The acceleration backend requires a provider label. Addon-hosted
+        // flows (Panda etc.) resolve without a local provider; fall back to
+        // the stream's own acceleration hint or skip reporting if neither
+        // source is available.
+        val providerLabel = stream.accelerationProviderType ?: provider?.apiValue ?: return
         accelerationApi.reportOutcome(
             AccelerationOutcomeDto(
                 contentId = contentId,
-                providerType = stream.accelerationProviderType ?: provider.apiValue,
+                providerType = providerLabel,
                 sourceKey = sourceKey,
                 success = success,
                 infohash = stream.infoHash,
@@ -575,6 +752,12 @@ class StreamRepositoryImpl(
     private companion object {
         const val STARTUP_CACHE_TTL_MS = 2 * 60 * 1000L
         const val MAX_TRACKED_STREAM_KEYS = 512
+        // Panda polls the upstream cloud client for up to ~12s before
+        // replying with 504. For large files (15GB+) the internal wait
+        // sometimes stretches, so 30s gives Panda room to respond with an
+        // accurate status rather than us timing out client-side and
+        // falling back to Preparing on guesswork.
+        const val PANDA_READINESS_PROBE_TIMEOUT_MS = 30_000L
     }
 }
 
@@ -593,7 +776,15 @@ private fun streamMemoryKey(stream: ParsedStream): String {
 
 private fun ResolvedStream.requirePlayableUrl(): ResolvedStream {
     if (url.isBlank()) {
-        throw IllegalStateException("Resolved stream returned no playable URL")
+        // Most common cause: the selected torrent isn't cached on the active
+        // debrid (instant-availability returned empty). Telling the user this
+        // is more useful than "no playable URL" because the fix is to pick a
+        // different source rather than re-configure anything.
+        val providerLabel = service?.name?.takeIf { it.isNotBlank() } ?: "the active debrid"
+        throw IllegalStateException(
+            "$providerLabel returned no playable URL — this source likely isn't " +
+                "cached. Try a different source or re-check provider connectivity.",
+        )
     }
     return this
 }

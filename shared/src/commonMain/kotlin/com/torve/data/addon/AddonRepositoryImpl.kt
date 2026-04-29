@@ -38,6 +38,13 @@ class AddonRepositoryImpl(
         val storedPriority = priority ?: (maxPriority + 1).toInt()
         val storedInstalledFrom = normalizeInstallSource(installedFrom)
 
+        // Preserve any config_id already on disk. Install-flow paths (e.g. the
+        // addon catalog "Install" button) don't know the Panda config_id; the
+        // Panda onboarding VM persists it via setAddonConfigId immediately
+        // after install. Re-installing must not wipe that pointer.
+        val existingConfigId = database.torveQueries.getAddonByUrl(manifestUrl)
+            .executeAsOneOrNull()?.config_id
+
         database.torveQueries.insertAddon(
             manifest_url = manifestUrl,
             id = manifest.id,
@@ -52,6 +59,7 @@ class AddonRepositoryImpl(
             server_id = serverId,
             synced_at = syncedAt,
             installed_from = storedInstalledFrom,
+            config_id = existingConfigId,
         )
 
         return InstalledAddon(
@@ -63,6 +71,14 @@ class AddonRepositoryImpl(
             serverId = serverId,
             syncedAt = syncedAt,
             installedFrom = storedInstalledFrom,
+            configId = existingConfigId,
+        )
+    }
+
+    override suspend fun setAddonConfigId(manifestUrl: String, configId: String?) {
+        database.torveQueries.updateAddonConfigId(
+            config_id = configId,
+            manifest_url = manifestUrl,
         )
     }
 
@@ -191,6 +207,7 @@ class AddonRepositoryImpl(
             serverId = row.server_id,
             syncedAt = row.synced_at,
             installedFrom = normalizeInstallSource(row.installed_from),
+            configId = row.config_id,
         )
     }
 

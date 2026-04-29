@@ -6,7 +6,11 @@ package com.torve.data.addon
  */
 object StreamParser {
 
-    fun parse(stream: StremioStream, fallbackAddonName: String = "Unknown"): ParsedStream {
+    fun parse(
+        stream: StremioStream,
+        fallbackAddonName: String = "Unknown",
+        addonBaseUrl: String? = null,
+    ): ParsedStream {
         val nameParts = (stream.name ?: "").split("\n")
         val addonName = nameParts.firstOrNull()?.takeIf { it.isNotBlank() } ?: fallbackAddonName
         val qualityFromName = nameParts.getOrNull(1) ?: ""
@@ -53,6 +57,7 @@ object StreamParser {
             hdr = hdr,
             audioCodec = audioCodec,
             languages = languages,
+            addonBaseUrl = addonBaseUrl,
         )
     }
 

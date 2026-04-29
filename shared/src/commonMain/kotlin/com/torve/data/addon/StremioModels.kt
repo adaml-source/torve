@@ -57,7 +57,52 @@ data class ParsedStream(
     val accelerationConfidenceReasons: List<StartupConfidenceReasonCode> = emptyList(),
     val accelerationScore: Double? = null,
     val accelerationScoreBreakdown: Map<String, Double> = emptyMap(),
+    /**
+     * Origin of the addon that produced this stream (e.g. "https://panda.torve.app").
+     * Used to recognise addon-hosted direct URLs (Panda's /u/<token>/easynews/… or
+     * /u/<token>/nzb/…) so the resolver can skip debrid unrestriction — those URLs
+     * are already playable or 302-redirect to a playable URL. Null for streams
+     * produced by code paths that don't know the origin (acceleration backend).
+     */
+    val addonBaseUrl: String? = null,
+    /**
+     * Full backend Usenet-candidate payload for rows whose
+     * `accelerationProvenanceKind == USENET_NZBDAV`. Null for every
+     * other provenance — non-NzbDAV rows render and resolve exactly as
+     * before.
+     *
+     * Required so the warm/resolve coordinators can rebuild the live
+     * backend's full `UsenetCandidate` request body (`candidate_id` +
+     * `hash_key` + optional `nzb_url`). The mapper that constructs
+     * USENET_NZBDAV `ParsedStream` instances must populate this field.
+     */
+    val usenetCandidate: com.torve.data.usenet.model.UsenetCandidatePayload? = null,
 )
+
+/**
+ * True when this stream's [directUrl] is served by the addon that produced it
+ * — not a hoster URL that needs debrid unrestriction. Compared by host (not
+ * full URL) so Panda's per-user manifest path /u/<token>/... still matches
+ * the plain panda.torve.app origin.
+ */
+fun ParsedStream.isAddonHostedUrl(): Boolean {
+    val addonHost = addonBaseUrl?.let { extractHost(it) } ?: return false
+    val streamHost = directUrl?.let { extractHost(it) } ?: return false
+    return addonHost.equals(streamHost, ignoreCase = true)
+}
+
+// Multiplatform URL.host isn't available in commonMain; pull the host out by
+// hand. Handles http/https, ignores port, case-insensitive. Returns null for
+// malformed input so callers fall through to the existing paths.
+private fun extractHost(url: String): String? {
+    val afterScheme = url.substringAfter("://", missingDelimiterValue = "")
+        .takeIf { it.isNotEmpty() } ?: return null
+    val hostWithPort = afterScheme.substringBefore('/').substringBefore('?').substringBefore('#')
+    if (hostWithPort.isEmpty()) return null
+    // Strip userinfo and port. Port may also be absent entirely.
+    val noUserinfo = hostWithPort.substringAfterLast('@')
+    return noUserinfo.substringBefore(':').takeIf { it.isNotEmpty() }
+}
 
 // ── Manifest Models ──
 

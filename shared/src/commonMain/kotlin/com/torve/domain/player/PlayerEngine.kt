@@ -1,6 +1,29 @@
 package com.torve.domain.player
 
 /**
+ * A subtitle track supplied by the caller, not embedded in the media
+ * container. Used for addon-sourced subtitles (Stremio `/subtitles/`
+ * resource) and any other side-loaded text tracks.
+ *
+ * Engines that support side-loading (currently ExoPlayer on Android)
+ * attach these as [androidx.media3.common.MediaItem.SubtitleConfiguration]
+ * on the next [PlayerEngine.play] call. Engines without side-load support
+ * safely ignore the list.
+ */
+data class ExternalSubtitle(
+    val url: String,
+    /** ISO 639-1/-2 code if known (e.g. "en", "fr", "eng"), else null. */
+    val languageCode: String?,
+    val label: String?,
+    /**
+     * MIME of the subtitle file. Common Stremio values are
+     * `application/x-subrip` (SRT) and `text/vtt` (WebVTT). Null means
+     * let the engine infer from the URL extension.
+     */
+    val mimeType: String? = null,
+)
+
+/**
  * Platform-agnostic player abstraction.
  * Implemented by MPVPlayerEngine (Android/iOS) or ExoPlayerEngine (Android fallback).
  */
@@ -8,6 +31,17 @@ interface PlayerEngine {
     val state: PlayerState
 
     fun play(url: String)
+
+    /**
+     * Play with side-loaded subtitle tracks. Default no-op delegates to
+     * [play] so engines that don't support side-loading (e.g. current
+     * MPV bindings) keep working unchanged. ExoPlayer overrides this to
+     * attach SubtitleConfigurations to the MediaItem before prepare().
+     */
+    fun play(url: String, externalSubtitles: List<ExternalSubtitle>) {
+        play(url)
+    }
+
     fun pause()
     fun resume()
     fun stop()

@@ -42,4 +42,10 @@ data class InstalledAddon(
     val syncedAt: Long? = null,
     val installedFrom: String = "app",
     val policyFlags: AddonPolicyFlags? = null,
+    /**
+     * Server-issued identifier for addons backed by a per-user Panda config.
+     * Required to authenticate management-token calls (PATCH/DELETE/rotate);
+     * null for non-Panda addons and for rows stored before the v5 migration.
+     */
+    val configId: String? = null,
 )
