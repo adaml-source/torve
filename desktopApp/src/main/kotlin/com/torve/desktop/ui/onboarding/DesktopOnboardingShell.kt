@@ -1,0 +1,1221 @@
+package com.torve.desktop.ui.onboarding
+
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
+import com.torve.desktop.DesktopReleaseInfo
+import com.torve.desktop.admission.DesktopAdmissionRequirement
+import com.torve.desktop.admission.DesktopAdmissionSnapshot
+import com.torve.desktop.auth.DesktopAuthController
+import com.torve.desktop.auth.DesktopAuthPhase
+import com.torve.desktop.auth.DesktopAuthUiState
+import com.torve.desktop.ui.components.TorveBadge
+import com.torve.desktop.ui.components.TorveBadgeTone
+import com.torve.desktop.ui.components.TorveBanner
+import com.torve.desktop.ui.components.TorveBannerTone
+import com.torve.desktop.ui.components.TorveGhostButton
+import com.torve.desktop.ui.components.TorvePageHeader
+import com.torve.desktop.ui.components.TorvePill
+import com.torve.desktop.ui.components.TorvePrimaryButton
+import com.torve.desktop.ui.components.TorveSecondaryButton
+import com.torve.desktop.ui.components.TorveSectionCard
+import com.torve.desktop.ui.components.TorveTextField
+import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
+import com.torve.domain.model.DebridServiceType
+import com.torve.domain.model.StreamQuality
+import com.torve.presentation.setup.SetupStep
+import com.torve.presentation.setup.SetupUiState
+import com.torve.presentation.setup.SetupWizardViewModel
+import kotlinx.coroutines.launch
+
+private enum class DesktopAuthEntryMode {
+    SIGN_IN,
+    REGISTER,
+}
+
+@Composable
+fun DesktopOnboardingShell(
+    authState: DesktopAuthUiState,
+    authController: DesktopAuthController,
+    setupWizardViewModel: SetupWizardViewModel,
+    releaseInfo: DesktopReleaseInfo,
+    admission: DesktopAdmissionSnapshot?,
+    onExit: () -> Unit,
+    onCompleteOnboarding: suspend () -> Result<Unit>,
+) {
+    val colors = TorveDesktopThemeTokens.colors
+    val radii = TorveDesktopThemeTokens.radii
+    val setupState by setupWizardViewModel.state.collectAsState()
+
+    // Unauthenticated → premium two-zone Torve login (DesktopAuthScreen.kt).
+    // Once a session exists we fall through to the legacy rail+card
+    // layout used for the post-sign-in setup wizard.
+    if (authState.user == null) {
+        DesktopPremiumAuthScreen(
+            authState = authState,
+            authController = authController,
+            releaseInfo = releaseInfo,
+            onExit = onExit,
+        )
+        return
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF050810)),
+    ) {
+        DesktopOnboardingBackground(modifier = Modifier.fillMaxSize())
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 72.dp, vertical = 56.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Surface(
+                modifier = Modifier
+                    .widthIn(max = 1240.dp)
+                    .fillMaxWidth(),
+                color = Color(0xFF0B111D).copy(alpha = 0.94f),
+                shape = RoundedCornerShape(32.dp),
+                border = BorderStroke(
+                    1.dp,
+                    Color(0xFF26314D).copy(alpha = 0.82f),
+                ),
+                shadowElevation = 34.dp,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(34.dp),
+                    horizontalArrangement = Arrangement.spacedBy(30.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    DesktopOnboardingRail(
+                        authState = authState,
+                        releaseInfo = releaseInfo,
+                        admission = admission,
+                        setupState = setupState,
+                        modifier = Modifier.width(390.dp),
+                    )
+
+                    Surface(
+                        modifier = Modifier.weight(1f),
+                        color = Color(0xFF0E1524).copy(alpha = 0.96f),
+                        shape = RoundedCornerShape(26.dp),
+                        border = BorderStroke(
+                            1.dp,
+                            Color(0xFF26314D).copy(alpha = 0.78f),
+                        ),
+                        shadowElevation = 20.dp,
+                    ) {
+                        DesktopSetupPane(
+                            authState = authState,
+                            setupState = setupState,
+                            setupWizardViewModel = setupWizardViewModel,
+                            admission = admission,
+                            onCompleteOnboarding = onCompleteOnboarding,
+                            onSignOut = authController::signOut,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(30.dp),
+                        )
+                    }
+                }
+            }
+        }
+
+        Text(
+            text = "Version ${releaseInfo.versionLabel} • ${releaseInfo.channel}",
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.textMuted.copy(alpha = 0.72f),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 28.dp, bottom = 22.dp),
+        )
+    }
+}
+
+@Composable
+private fun DesktopOnboardingBackground(modifier: Modifier = Modifier) {
+    Box(modifier = modifier) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(
+                            Color(0xFF121722),
+                            Color(0xFF070A12),
+                            Color(0xFF03060C),
+                        ),
+                        center = Offset(520f, 360f),
+                        radius = 1120f,
+                    ),
+                ),
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(
+                            Color(0xFFD7A33A).copy(alpha = 0.16f),
+                            Color(0xFFD7A33A).copy(alpha = 0.045f),
+                            Color.Transparent,
+                        ),
+                        center = Offset(420f, 280f),
+                        radius = 760f,
+                    ),
+                ),
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color(0xFF050810).copy(alpha = 0.12f),
+                        0.55f to Color.Transparent,
+                        1f to Color(0xFF02040A).copy(alpha = 0.86f),
+                    ),
+                ),
+        )
+    }
+}
+
+/**
+ * Legacy single-card login retained for fallback only — replaced at
+ * the entry point by DesktopPremiumAuthScreen (see DesktopAuthScreen.kt).
+ * Kept private to avoid accidental external use; safe to delete in a
+ * follow-up.
+ */
+@Suppress("unused")
+@Composable
+private fun DesktopPremiumLoginScreenLegacy(
+    authState: DesktopAuthUiState,
+    authController: DesktopAuthController,
+    releaseInfo: DesktopReleaseInfo,
+) {
+    val colors = TorveDesktopThemeTokens.colors
+    val radii = TorveDesktopThemeTokens.radii
+    var entryMode by remember { mutableStateOf(DesktopAuthEntryMode.SIGN_IN) }
+    val isBusy = authState.phase == DesktopAuthPhase.LOADING ||
+        authState.phase == DesktopAuthPhase.RESTORING_SESSION
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                // Two-stop dark vignette tinted with the brand accent
+                // — feels cinematic without committing a hero image.
+                Brush.radialGradient(
+                    colors = listOf(
+                        colors.accent.copy(alpha = 0.18f),
+                        colors.shellBackground,
+                    ),
+                    radius = 1400f,
+                ),
+            ),
+    ) {
+        // Subtle vertical gradient on top so the radial doesn't clip
+        // square at the edges.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0.0f to androidx.compose.ui.graphics.Color.Transparent,
+                        0.6f to colors.shellBackground.copy(alpha = 0.0f),
+                        1.0f to colors.shellBackground.copy(alpha = 0.85f),
+                    ),
+                ),
+        )
+
+        // Centered card.
+        Box(
+            modifier = Modifier.fillMaxSize().padding(48.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Surface(
+                modifier = Modifier.width(440.dp),
+                color = colors.cardSurface.copy(alpha = 0.92f),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(radii.xl),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    colors.borderSubtle.copy(alpha = 0.7f),
+                ),
+                shadowElevation = 24.dp,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 36.dp, vertical = 40.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(20.dp),
+                ) {
+                    // Brand logo — TV-asset PNG of the Torve wordmark.
+                    androidx.compose.foundation.Image(
+                        painter = androidx.compose.ui.res.painterResource("torve_logo.png"),
+                        contentDescription = "Torve",
+                        modifier = Modifier.height(56.dp),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                    )
+
+                    Text(
+                        text = if (entryMode == DesktopAuthEntryMode.SIGN_IN)
+                            "Sign in to continue"
+                        else
+                            "Create your account",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = colors.textSecondary,
+                    )
+
+                    if (entryMode == DesktopAuthEntryMode.REGISTER) {
+                        TorveTextField(
+                            value = authState.displayName,
+                            onValueChange = authController::updateDisplayName,
+                            label = "Display name",
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+
+                    TorveTextField(
+                        value = authState.email,
+                        onValueChange = authController::updateEmail,
+                        label = "Email",
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                    )
+
+                    TorveTextField(
+                        value = authState.password,
+                        onValueChange = authController::updatePassword,
+                        label = "Password",
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        visualTransformation = PasswordVisualTransformation(),
+                        onSubmit = {
+                            if (entryMode == DesktopAuthEntryMode.REGISTER) authController.register()
+                            else authController.signIn()
+                        },
+                    )
+
+                    // Inline error — only when there's something to say,
+                    // and styled as a single-line message rather than
+                    // the chunky banner the old design used.
+                    authState.authError?.takeIf { it.isNotBlank() }?.let { msg ->
+                        Text(
+                            text = msg,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.error,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        TorvePrimaryButton(
+                            text = when {
+                                isBusy -> "Working"
+                                entryMode == DesktopAuthEntryMode.REGISTER -> "Create account"
+                                else -> "Sign in"
+                            },
+                            onClick = {
+                                if (entryMode == DesktopAuthEntryMode.REGISTER) authController.register()
+                                else authController.signIn()
+                            },
+                            enabled = !isBusy && authState.email.isNotBlank() && authState.password.isNotBlank(),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+
+                    // Mode toggle as a quiet text link rather than a
+                    // sibling button — the primary action stays the
+                    // visual focus.
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = if (entryMode == DesktopAuthEntryMode.SIGN_IN)
+                                "Don't have an account?"
+                            else
+                                "Already have an account?",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.textSecondary,
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        TorveGhostButton(
+                            text = if (entryMode == DesktopAuthEntryMode.SIGN_IN) "Register" else "Sign in",
+                            onClick = {
+                                entryMode = if (entryMode == DesktopAuthEntryMode.SIGN_IN)
+                                    DesktopAuthEntryMode.REGISTER
+                                else DesktopAuthEntryMode.SIGN_IN
+                            },
+                            enabled = !isBusy,
+                        )
+                    }
+
+                    if (isBusy) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.width(18.dp).height(18.dp),
+                            strokeWidth = 2.dp,
+                            color = colors.accent,
+                        )
+                    }
+                }
+            }
+        }
+
+        // Tiny build chip in the corner — keeps the version visible
+        // for support without intruding on the centerpiece.
+        Text(
+            text = "${releaseInfo.versionLabel} · ${releaseInfo.channel}",
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.textMuted,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 20.dp, bottom = 16.dp),
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DesktopOnboardingRail(
+    authState: DesktopAuthUiState,
+    releaseInfo: DesktopReleaseInfo,
+    admission: DesktopAdmissionSnapshot?,
+    setupState: SetupUiState,
+    modifier: Modifier = Modifier,
+) {
+    val colors = TorveDesktopThemeTokens.colors
+
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        androidx.compose.foundation.Image(
+            painter = androidx.compose.ui.res.painterResource("torve_logo.png"),
+            contentDescription = "Torve",
+            modifier = Modifier.height(56.dp),
+            contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = "Finish your desktop setup.",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+            color = colors.textPrimary,
+        )
+
+        Text(
+            text = "Connect at least one playback path, choose your defaults, then enter the Torve desktop experience.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.textSecondary,
+        )
+
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            TorvePill(
+                text = "VOD",
+                backgroundColor = colors.fieldSurface.copy(alpha = 0.86f),
+                contentColor = colors.textSecondary,
+            )
+            TorvePill(
+                text = "Live TV",
+                backgroundColor = colors.fieldSurface.copy(alpha = 0.86f),
+                contentColor = colors.textSecondary,
+            )
+            TorvePill(
+                text = "Sync",
+                backgroundColor = colors.fieldSurface.copy(alpha = 0.86f),
+                contentColor = colors.textSecondary,
+            )
+            TorvePill(
+                text = "Playback",
+                backgroundColor = colors.fieldSurface.copy(alpha = 0.86f),
+                contentColor = colors.textSecondary,
+            )
+        }
+
+        TorveSectionCard(
+            title = "Setup progress",
+            supportingText = "Complete the required steps for desktop admission.",
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                SetupStep.entries.forEachIndexed { index, step ->
+                    val isCurrent = step == setupState.currentStep
+                    val isCompleted = index < SetupStep.entries.indexOf(setupState.currentStep)
+
+                    val tone = when {
+                        isCurrent -> TorveBadgeTone.Accent
+                        isCompleted -> TorveBadgeTone.Success
+                        else -> TorveBadgeTone.Neutral
+                    }
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        TorveBadge(
+                            text = "${index + 1}",
+                            tone = tone,
+                        )
+
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = step.desktopLabel(),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (isCurrent) colors.textPrimary else colors.textSecondary,
+                            )
+                            Text(
+                                text = step.desktopDescription(),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.textMuted,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        admission?.let { snapshot ->
+            if (snapshot.missingRequirements.isNotEmpty()) {
+                TorveBanner(
+                    title = "Required before entering desktop",
+                    description = snapshot.missingRequirements.joinToString(" ") { requirement ->
+                        when (requirement) {
+                            DesktopAdmissionRequirement.ONBOARDING_COMPLETED ->
+                                "Complete onboarding."
+
+                            DesktopAdmissionRequirement.PLAYBACK_PATH ->
+                                "Connect a VOD source or add one IPTV playlist."
+                        }
+                    },
+                    tone = TorveBannerTone.Warning,
+                )
+            }
+        }
+
+        TorveBanner(
+            title = "Build",
+            description = "${releaseInfo.versionLabel} • ${releaseInfo.channel}",
+            tone = TorveBannerTone.Info,
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DesktopAuthEntryPane(
+    authState: DesktopAuthUiState,
+    authController: DesktopAuthController,
+    modifier: Modifier = Modifier,
+) {
+    var entryMode by remember { mutableStateOf(DesktopAuthEntryMode.SIGN_IN) }
+    val isBusy = authState.phase == DesktopAuthPhase.LOADING || authState.phase == DesktopAuthPhase.RESTORING_SESSION
+
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        TorvePageHeader(
+            title = "Welcome",
+            subtitle = "Use an existing Torve account or create one here. Desktop admission stays locked until a valid authenticated session exists.",
+        )
+
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            if (entryMode == DesktopAuthEntryMode.SIGN_IN) {
+                TorveSecondaryButton(text = "Sign In", onClick = {}, enabled = false)
+                TorveGhostButton(
+                    text = "Register",
+                    onClick = { entryMode = DesktopAuthEntryMode.REGISTER },
+                )
+            } else {
+                TorveGhostButton(
+                    text = "Sign In",
+                    onClick = { entryMode = DesktopAuthEntryMode.SIGN_IN },
+                )
+                TorveSecondaryButton(text = "Register", onClick = {}, enabled = false)
+            }
+        }
+
+        TorveBanner(
+            title = if (authState.authError.isNullOrBlank()) "Session state" else "Authentication issue",
+            description = authState.authError ?: authState.statusMessage,
+            tone = if (authState.authError.isNullOrBlank()) TorveBannerTone.Info else TorveBannerTone.Error,
+        )
+
+        if (entryMode == DesktopAuthEntryMode.REGISTER) {
+            TorveTextField(
+                value = authState.displayName,
+                onValueChange = authController::updateDisplayName,
+                label = "Display Name (Optional)",
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        TorveTextField(
+            value = authState.email,
+            onValueChange = authController::updateEmail,
+            label = "Email",
+            modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+        )
+
+        TorveTextField(
+            value = authState.password,
+            onValueChange = authController::updatePassword,
+            label = "Password",
+            modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            visualTransformation = PasswordVisualTransformation(),
+        )
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TorvePrimaryButton(
+                text = when {
+                    isBusy -> "Working"
+                    entryMode == DesktopAuthEntryMode.REGISTER -> "Create Account"
+                    else -> "Sign In"
+                },
+                onClick = {
+                    if (entryMode == DesktopAuthEntryMode.REGISTER) {
+                        authController.register()
+                    } else {
+                        authController.signIn()
+                    }
+                },
+                enabled = !isBusy && authState.email.isNotBlank() && authState.password.isNotBlank(),
+            )
+            TorveGhostButton(
+                text = "Restore Session",
+                onClick = authController::retrySessionRestore,
+                enabled = !isBusy,
+            )
+            if (isBusy) {
+                CircularProgressIndicator(
+                    modifier = Modifier.width(18.dp).height(18.dp),
+                    strokeWidth = 2.dp,
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DesktopSetupPane(
+    authState: DesktopAuthUiState,
+    setupState: SetupUiState,
+    setupWizardViewModel: SetupWizardViewModel,
+    admission: DesktopAdmissionSnapshot?,
+    onCompleteOnboarding: suspend () -> Result<Unit>,
+    onSignOut: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val scope = rememberCoroutineScope()
+    val colors = TorveDesktopThemeTokens.colors
+    val currentStepIndex = SetupStep.entries.indexOf(setupState.currentStep)
+    var completionError by remember { mutableStateOf<String?>(null) }
+    var isCompleting by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top,
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = "Desktop setup",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.textPrimary,
+                )
+                Text(
+                    text = "Signed in as ${authState.user?.email.orEmpty()}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.textSecondary,
+                )
+            }
+            TorveGhostButton(
+                text = "Sign Out",
+                onClick = onSignOut,
+                enabled = !isCompleting,
+            )
+        }
+
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            SetupStep.entries.forEachIndexed { index, step ->
+                TorvePill(
+                    text = "${index + 1}. ${step.desktopLabel()}",
+                    backgroundColor = if (index == currentStepIndex) {
+                        colors.accentContainer
+                    } else {
+                        colors.fieldSurface
+                    },
+                    contentColor = if (index == currentStepIndex) colors.textPrimary else colors.textSecondary,
+                )
+            }
+        }
+
+        admission?.takeIf { it.hasUsablePlaybackPath }?.let { snapshot ->
+            TorveBanner(
+                title = "Playback path detected",
+                description = when {
+                    snapshot.hasVodPlaybackPath && snapshot.hasLivePlaybackPath ->
+                        "This desktop already has both a VOD source and at least one IPTV playlist."
+
+                    snapshot.hasVodPlaybackPath ->
+                        "A VOD playback path is already configured. You can finish onboarding after the remaining steps."
+
+                    else ->
+                        "An IPTV playlist is already configured. You can use it as the minimum playback path for desktop admission."
+                },
+                tone = TorveBannerTone.Success,
+            )
+        }
+
+        completionError?.let {
+            TorveBanner(
+                title = "Setup incomplete",
+                description = it,
+                tone = TorveBannerTone.Error,
+            )
+        }
+
+        Column(
+            modifier = Modifier
+                .weight(1f, fill = false)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            when (setupState.currentStep) {
+                SetupStep.WELCOME -> WelcomeStep()
+                SetupStep.TERMS -> TermsStep(setupState, setupWizardViewModel)
+                SetupStep.DEBRID -> DebridStep(setupState, setupWizardViewModel)
+                SetupStep.TRAKT -> TraktStep(setupState, setupWizardViewModel)
+                SetupStep.QUALITY -> QualityStep(setupState, setupWizardViewModel)
+                SetupStep.CHANNELS -> ChannelsStep(setupState, setupWizardViewModel)
+                SetupStep.DONE -> DoneStep()
+            }
+        }
+
+        DesktopSetupFooter(
+            setupState = setupState,
+            isCompleting = isCompleting,
+            onBack = setupWizardViewModel::previousStep,
+            onNext = setupWizardViewModel::nextStep,
+            onSkip = setupWizardViewModel::skipStep,
+            onComplete = {
+                completionError = null
+                scope.launch {
+                    isCompleting = true
+                    completionError = onCompleteOnboarding()
+                        .exceptionOrNull()
+                        ?.message
+                    isCompleting = false
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun DesktopSetupFlowCard(
+    setupState: SetupUiState,
+) {
+    val colors = TorveDesktopThemeTokens.colors
+    TorveSectionCard(
+        title = "Setup flow",
+        supportingText = "Desktop adapts the shared wizard logic to the approved V1 shell-admission model.",
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            SetupStep.entries.forEach { step ->
+                val isCurrent = step == setupState.currentStep
+                val isCompleted = SetupStep.entries.indexOf(step) < SetupStep.entries.indexOf(setupState.currentStep)
+                val tone = when {
+                    isCurrent -> TorveBadgeTone.Accent
+                    isCompleted -> TorveBadgeTone.Success
+                    else -> TorveBadgeTone.Neutral
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TorveBadge(
+                        text = step.desktopLabel(),
+                        tone = tone,
+                    )
+                    Text(
+                        text = step.desktopDescription(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.textSecondary,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DesktopSetupFooter(
+    setupState: SetupUiState,
+    isCompleting: Boolean,
+    onBack: () -> Unit,
+    onNext: () -> Unit,
+    onSkip: () -> Unit,
+    onComplete: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (setupState.currentStep != SetupStep.WELCOME && setupState.currentStep != SetupStep.DONE) {
+            TorveGhostButton(
+                text = "Back",
+                onClick = onBack,
+                enabled = !isCompleting,
+            )
+        } else {
+            Spacer(modifier = Modifier.width(1.dp))
+        }
+
+        when (setupState.currentStep) {
+            SetupStep.WELCOME -> {
+                TorvePrimaryButton(text = "Get Started", onClick = onNext)
+            }
+
+            SetupStep.TERMS -> {
+                TorvePrimaryButton(
+                    text = "Continue",
+                    onClick = onNext,
+                    enabled = setupState.termsAccepted,
+                )
+            }
+
+            SetupStep.DEBRID,
+            SetupStep.TRAKT,
+            SetupStep.CHANNELS,
+            -> {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    TorveGhostButton(
+                        text = "Skip",
+                        onClick = onSkip,
+                        enabled = !isCompleting,
+                    )
+                    TorvePrimaryButton(
+                        text = "Next",
+                        onClick = onNext,
+                        enabled = !isCompleting,
+                    )
+                }
+            }
+
+            SetupStep.QUALITY -> {
+                TorvePrimaryButton(
+                    text = "Next",
+                    onClick = onNext,
+                    enabled = !isCompleting,
+                )
+            }
+
+            SetupStep.DONE -> {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (isCompleting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.width(18.dp).height(18.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    }
+                    TorvePrimaryButton(
+                        text = if (isCompleting) "Entering Desktop" else "Enter Desktop",
+                        onClick = onComplete,
+                        enabled = !isCompleting,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WelcomeStep() {
+    TorveSectionCard(
+        title = "Desktop-first watch flow",
+        supportingText = "V1 admission proves the full loop: sign in, connect a source, pick something, and play reliably.",
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("- Faster route to playback than the current alpha shell")
+            Text("- Setup and control depth without turning the app into an admin console")
+            Text("- One consistent desktop shell instead of preview-era utilities")
+        }
+    }
+}
+
+@Composable
+private fun TermsStep(
+    setupState: SetupUiState,
+    setupWizardViewModel: SetupWizardViewModel,
+) {
+    TorveSectionCard(
+        title = "Desktop use terms",
+        supportingText = "Torve Desktop organizes playback, settings, and optional live sources. This phase keeps the legal and trust language lightweight while the product shell is still being built.",
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(
+                text = "Torve Desktop requires a valid Torve account and connected playback source. Metadata comes from third-party providers and playback availability depends on the services you connect.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(
+                    checked = setupState.termsAccepted,
+                    onCheckedChange = setupWizardViewModel::setTermsAccepted,
+                )
+                Text(
+                    text = "I understand and want to continue.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DebridStep(
+    setupState: SetupUiState,
+    setupWizardViewModel: SetupWizardViewModel,
+) {
+    TorveSectionCard(
+        title = "Connect a VOD source",
+        supportingText = "A debrid connection is the fastest V1 path into the main shell for on-demand playback.",
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                DebridServiceType.entries.forEach { provider ->
+                    val selected = provider == setupState.debridProvider
+                    if (selected) {
+                        TorveSecondaryButton(text = provider.label, onClick = {}, enabled = false)
+                    } else {
+                        TorveGhostButton(
+                            text = provider.label,
+                            onClick = { setupWizardViewModel.setDebridProvider(provider) },
+                        )
+                    }
+                }
+            }
+
+            TorveTextField(
+                value = setupState.debridApiKey,
+                onValueChange = setupWizardViewModel::setDebridApiKey,
+                label = "API Key",
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            if (setupState.debridConnected) {
+                TorveBanner(
+                    title = "Connected",
+                    description = "${setupState.debridProvider.label} is ready for desktop playback admission.",
+                    tone = TorveBannerTone.Success,
+                )
+            } else {
+                TorvePrimaryButton(
+                    text = if (setupState.debridLoading) "Verifying..." else "Verify & Connect",
+                    onClick = setupWizardViewModel::connectDebrid,
+                    enabled = setupState.debridApiKey.isNotBlank() && !setupState.debridLoading,
+                )
+            }
+
+            setupState.debridError?.let {
+                TorveBanner(
+                    title = "Connection failed",
+                    description = it,
+                    tone = TorveBannerTone.Error,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TraktStep(
+    setupState: SetupUiState,
+    setupWizardViewModel: SetupWizardViewModel,
+) {
+    TorveSectionCard(
+        title = "Connect Trakt",
+        supportingText = "Optional for admission, but useful for cross-device state and personal library continuity.",
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            when {
+                setupState.traktConnected -> {
+                    TorveBanner(
+                        title = "Trakt connected",
+                        description = setupState.traktUsername?.let { "Logged in as $it." }
+                            ?: "Desktop detected an active Trakt session.",
+                        tone = TorveBannerTone.Success,
+                    )
+                }
+
+                setupState.traktDeviceCode != null -> {
+                    val deviceCode = setupState.traktDeviceCode
+                    TorveBanner(
+                        title = "Authorize Trakt",
+                        description = "Go to ${deviceCode?.verificationUrl.orEmpty()} and enter ${deviceCode?.userCode.orEmpty()}. Desktop will keep polling in the background.",
+                        tone = TorveBannerTone.Info,
+                    )
+                }
+
+                else -> {
+                    TorvePrimaryButton(
+                        text = if (setupState.traktLoading) "Starting..." else "Connect Trakt",
+                        onClick = setupWizardViewModel::startTraktAuth,
+                        enabled = !setupState.traktLoading,
+                    )
+                }
+            }
+
+            setupState.traktError?.let {
+                TorveBanner(
+                    title = "Trakt issue",
+                    description = it,
+                    tone = TorveBannerTone.Error,
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun QualityStep(
+    setupState: SetupUiState,
+    setupWizardViewModel: SetupWizardViewModel,
+) {
+    val colors = TorveDesktopThemeTokens.colors
+    TorveSectionCard(
+        title = "Set desktop playback defaults",
+        supportingText = "Phase 2 keeps this focused on the core V1 preferences that matter for admission and playback preparation.",
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                StreamQuality.selectable.forEach { quality ->
+                    val selected = quality == setupState.maxQuality
+                    if (selected) {
+                        TorveSecondaryButton(text = quality.label, onClick = {}, enabled = false)
+                    } else {
+                        TorveGhostButton(
+                            text = quality.label,
+                            onClick = { setupWizardViewModel.setMaxQuality(quality) },
+                        )
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "Prefer cached-only sources",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = "Keeps the default playback path aligned with the current Torve desktop alpha assumptions.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.textSecondary,
+                    )
+                }
+                Switch(
+                    checked = setupState.cachedOnly,
+                    onCheckedChange = setupWizardViewModel::setCachedOnly,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChannelsStep(
+    setupState: SetupUiState,
+    setupWizardViewModel: SetupWizardViewModel,
+) {
+    val isXtream = setupState.channelPlaylistType.equals("xtream", ignoreCase = true)
+    TorveSectionCard(
+        title = "Add an IPTV source",
+        supportingText = "Optional for desktop admission, but a valid playlist can satisfy the V1 playback-path requirement even without a VOD connection.",
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (!isXtream) {
+                    TorveSecondaryButton(text = "M3U", onClick = {}, enabled = false)
+                    TorveGhostButton(
+                        text = "Xtream",
+                        onClick = { setupWizardViewModel.setChannelPlaylistType("xtream") },
+                    )
+                } else {
+                    TorveGhostButton(
+                        text = "M3U",
+                        onClick = { setupWizardViewModel.setChannelPlaylistType("m3u") },
+                    )
+                    TorveSecondaryButton(text = "Xtream", onClick = {}, enabled = false)
+                }
+            }
+
+            TorveTextField(
+                value = setupState.channelPlaylistName,
+                onValueChange = setupWizardViewModel::setChannelPlaylistName,
+                label = "Playlist Name",
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            if (isXtream) {
+                TorveTextField(
+                    value = setupState.channelXtreamServer,
+                    onValueChange = setupWizardViewModel::setChannelXtreamServer,
+                    label = "Server URL",
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                TorveTextField(
+                    value = setupState.channelXtreamUsername,
+                    onValueChange = setupWizardViewModel::setChannelXtreamUsername,
+                    label = "Username",
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                TorveTextField(
+                    value = setupState.channelXtreamPassword,
+                    onValueChange = setupWizardViewModel::setChannelXtreamPassword,
+                    label = "Password",
+                    modifier = Modifier.fillMaxWidth(),
+                    visualTransformation = PasswordVisualTransformation(),
+                )
+            } else {
+                TorveTextField(
+                    value = setupState.channelPlaylistUrl,
+                    onValueChange = setupWizardViewModel::setChannelPlaylistUrl,
+                    label = "Playlist URL",
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            TorveBanner(
+                title = "Desktop note",
+                description = "Phase 2 only captures one initial IPTV source here. Full playlist management and Live TV workflow remain later phases.",
+                tone = TorveBannerTone.Info,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DoneStep() {
+    TorveSectionCard(
+        title = "Ready to enter desktop",
+        supportingText = "The main shell unlocks once onboarding is marked complete and Torve can see at least one usable playback path.",
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("- Home, Search, Library, Live TV, and Settings become the only signed-in destinations.")
+            Text("- If playback configuration disappears later, Torve keeps you in the main shell and shows recovery guidance instead of trapping you back here.")
+            Text("- Live TV and Settings stay partial in this phase. The shell-admission model is what becomes final now.")
+        }
+    }
+}
+
+private fun SetupStep.desktopLabel(): String = when (this) {
+    SetupStep.WELCOME -> "Welcome"
+    SetupStep.TERMS -> "Terms"
+    SetupStep.DEBRID -> "VOD"
+    SetupStep.TRAKT -> "Trakt"
+    SetupStep.QUALITY -> "Playback"
+    SetupStep.CHANNELS -> "Live TV"
+    SetupStep.DONE -> "Done"
+}
+
+private fun SetupStep.desktopDescription(): String = when (this) {
+    SetupStep.WELCOME -> "Desktop role and admission contract."
+    SetupStep.TERMS -> "Consent and product framing."
+    SetupStep.DEBRID -> "Primary VOD playback path."
+    SetupStep.TRAKT -> "Optional sync layer."
+    SetupStep.QUALITY -> "Initial playback defaults."
+    SetupStep.CHANNELS -> "Optional IPTV admission path."
+    SetupStep.DONE -> "Persist and hand off to the main shell."
+}

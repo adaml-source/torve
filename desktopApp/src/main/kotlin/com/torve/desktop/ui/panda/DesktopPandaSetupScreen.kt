@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalLayoutApi::class)
+
 package com.torve.desktop.ui.panda
 
 import androidx.compose.foundation.background
@@ -21,14 +23,23 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -76,22 +87,43 @@ fun DesktopPandaSetupScreen(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(32.dp),
+            // Match every other page-level surface in V2App: clear the 72dp
+            // nav rail on the left so content never sits under the icons.
+            .padding(start = 72.dp, end = 24.dp, top = 24.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        TorvePageHeader(
-            title = "Panda guided setup",
-            subtitle = if (state.isEditMode) {
-                "Reconfiguring existing Panda setup"
-            } else {
-                "Pick a cloud provider, connect it, and Panda installs itself as a Torve add-on."
-            },
-        )
+        // Header + persistent Close button. The Close button gives users
+        // a guaranteed exit regardless of which step they're on; without
+        // it the only way out was hitting Update on the Review step,
+        // which leaves users stuck if they decided not to save.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top,
+        ) {
+            Box(modifier = Modifier.weight(1f)) {
+                TorvePageHeader(
+                    title = "Panda guided setup",
+                    subtitle = if (state.isEditMode) {
+                        "Reconfiguring existing Panda setup"
+                    } else {
+                        "Pick a cloud provider, connect it, and Panda installs itself as a Torve add-on."
+                    },
+                )
+            }
+            TorveGhostButton(text = "Close", onClick = onBack)
+        }
 
         LinearProgressIndicator(
             progress = { (stepIndex + 1).toFloat() / totalSteps },
             modifier = Modifier.fillMaxWidth(),
         )
+
+        // Recovery banner removed (2026-04-27) — Panda configs are now
+        // bound to the Torve account on the backend (Panda commit 972fa4a),
+        // so management_token recovery is no longer needed for the owner's
+        // own configs. Edit operations authenticate via the Torve JWT plus
+        // the X-Panda-Config-Id header — see PandaApiClient.
 
         when (state.currentStep) {
             PandaSetupStep.PROVIDER -> ProviderStep(state, viewModel)
@@ -298,12 +330,11 @@ private fun OAuthSection(state: PandaSetupUiState, viewModel: PandaSetupViewMode
 @Composable
 private fun ApiKeySection(state: PandaSetupUiState, viewModel: PandaSetupViewModel) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        TorveTextField(
+        PandaSecretField(
             value = state.apiKeyInput,
             onValueChange = { viewModel.setApiKeyInput(it) },
             label = "API key",
             modifier = Modifier.fillMaxWidth(),
-            visualTransformation = PasswordVisualTransformation(),
         )
         TorvePrimaryButton(
             text = if (state.authLoading) "Validating…" else "Validate & connect",
@@ -316,21 +347,50 @@ private fun ApiKeySection(state: PandaSetupUiState, viewModel: PandaSetupViewMod
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SourcesStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel) {
-    TorveSectionCard(
-        title = "Torrent sources",
-        supportingText = "Panda will search these indexers. Toggle any you want disabled.",
-    ) {
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+    Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        TorveSectionCard(
+            title = "Torrent sources",
+            supportingText = "Panda will search these indexers. Toggle any you want disabled.",
         ) {
-            state.sourceProviders.forEach { src ->
-                TorveFilterChip(
-                    text =src.name,
-                    selected = src.id in state.enabledSources,
-                    onClick = { viewModel.toggleSource(src.id) },
-                )
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                state.sourceProviders.forEach { src ->
+                    TorveFilterChip(
+                        text =src.name,
+                        selected = src.id in state.enabledSources,
+                        onClick = { viewModel.toggleSource(src.id) },
+                    )
+                }
             }
+        }
+        // Surface the language picker here too — the website shows it
+        // alongside debrid/quality at the top, but the desktop wizard
+        // splits each section across steps. Putting it on Sources gives
+        // users a chance to pick languages without having to walk all
+        // the way to the Quality step.
+        TorveSectionCard(
+            title = "Preferred release languages",
+            supportingText = "Pick all languages you want in results. \"any\" disables the filter.",
+        ) {
+            ReleaseLanguageChips(state = state, viewModel = viewModel)
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ReleaseLanguageChips(state: PandaSetupUiState, viewModel: PandaSetupViewModel) {
+    val selectedLanguages = state.releaseLanguages.toSet()
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        state.schema.releaseLanguages.forEach { id ->
+            val isSelected = id in selectedLanguages
+            TorveFilterChip(
+                text = desktopLabelForLanguage(id),
+                selected = isSelected,
+                onClick = { viewModel.toggleLanguage(id, !isSelected) },
+            )
         }
     }
 }
@@ -388,12 +448,14 @@ private fun UsenetStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel)
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(8.dp))
-            TorveTextField(
+            PandaSecretField(
                 value = state.usenetPassword,
                 onValueChange = { viewModel.setUsenetPassword(it) },
                 label = "Password",
                 modifier = Modifier.fillMaxWidth(),
-                visualTransformation = PasswordVisualTransformation(),
+                placeholder = if ("usenet_password" in state.serverHasSecrets) {
+                    "Saved on server — type to replace"
+                } else null,
             )
             if (state.usenetProvider == "generic") {
                 Spacer(Modifier.height(8.dp))
@@ -407,6 +469,8 @@ private fun UsenetStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel)
             Text("NZB indexers", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             state.nzbIndexers.forEachIndexed { index, row ->
                 if (index > 0) Spacer(Modifier.height(12.dp))
+                val keyOnServer = "indexer_api_key_$index" in state.serverHasSecrets ||
+                    (index == 0 && "indexer_api_key_legacy" in state.serverHasSecrets)
                 NzbIndexerRowEditor(
                     row = row,
                     indexerOptions = state.schema.nzbIndexers,
@@ -421,6 +485,7 @@ private fun UsenetStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel)
                     },
                     onRemove = { viewModel.removeIndexer(index) },
                     canRemove = state.nzbIndexers.size > 1,
+                    indexerKeyPlaceholder = if (keyOnServer) "Saved on server — type to replace" else null,
                 )
             }
             Spacer(Modifier.height(8.dp))
@@ -463,6 +528,7 @@ private fun NzbIndexerRowEditor(
     onKeyChange: (String) -> Unit,
     onRemove: () -> Unit,
     canRemove: Boolean,
+    indexerKeyPlaceholder: String? = null,
 ) {
     Column(
         modifier = Modifier
@@ -501,12 +567,12 @@ private fun NzbIndexerRowEditor(
                 )
             }
             Spacer(Modifier.height(8.dp))
-            TorveTextField(
+            PandaSecretField(
                 value = row.apiKey,
                 onValueChange = onKeyChange,
                 label = "Indexer API key",
                 modifier = Modifier.fillMaxWidth(),
-                visualTransformation = PasswordVisualTransformation(),
+                placeholder = indexerKeyPlaceholder,
             )
         }
     }
@@ -580,19 +646,23 @@ private fun DownloadClientFields(state: PandaSetupUiState, viewModel: PandaSetup
                 label = "User",
                 modifier = Modifier.fillMaxWidth(),
             )
-            "password" -> TorveTextField(
+            "password" -> PandaSecretField(
                 value = state.downloadClientPassword,
                 onValueChange = { viewModel.setDownloadClientPassword(it) },
                 label = "Password",
                 modifier = Modifier.fillMaxWidth(),
-                visualTransformation = PasswordVisualTransformation(),
+                placeholder = if ("download_client_password" in state.serverHasSecrets) {
+                    "Saved on server — type to replace"
+                } else null,
             )
-            "apiKey" -> TorveTextField(
+            "apiKey" -> PandaSecretField(
                 value = state.downloadClientApiKey,
                 onValueChange = { viewModel.setDownloadClientApiKey(it) },
                 label = "API key",
                 modifier = Modifier.fillMaxWidth(),
-                visualTransformation = PasswordVisualTransformation(),
+                placeholder = if ("download_client_api_key" in state.serverHasSecrets) {
+                    "Saved on server — type to replace"
+                } else null,
             )
         }
     }
@@ -653,17 +723,7 @@ private fun QualityStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel
 
         Spacer(Modifier.height(16.dp))
         Text("Release language", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-        val selectedLanguages = state.releaseLanguages.toSet()
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            state.schema.releaseLanguages.forEach { id ->
-                val isSelected = id in selectedLanguages
-                TorveFilterChip(
-                    text = desktopLabelForLanguage(id),
-                    selected = isSelected,
-                    onClick = { viewModel.toggleLanguage(id, !isSelected) },
-                )
-            }
-        }
+        ReleaseLanguageChips(state = state, viewModel = viewModel)
     }
 }
 
@@ -703,6 +763,25 @@ private fun ReviewStep(
     viewModel: PandaSetupViewModel,
     onComplete: () -> Unit,
 ) {
+    // Watch the save-completion counter. On increment we show a "Saved"
+    // banner briefly, then auto-close so the user gets back to whatever
+    // page they came from (Adult page, Add-ons list, etc.).
+    val baselineToken = androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf(state.saveCompletionToken)
+    }
+    val saveJustCompletedState = androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf(false)
+    }
+    val saveJustCompleted = saveJustCompletedState.value
+    androidx.compose.runtime.LaunchedEffect(state.saveCompletionToken) {
+        if (state.saveCompletionToken > baselineToken.value) {
+            baselineToken.value = state.saveCompletionToken
+            saveJustCompletedState.value = true
+            kotlinx.coroutines.delay(1200)
+            onComplete()
+        }
+    }
+
     TorveSectionCard(title = "Review & save") {
         TorveListRow(
             title = "Provider",
@@ -733,24 +812,37 @@ private fun ReviewStep(
 
         Spacer(Modifier.height(12.dp))
 
-        if (state.addonInstalled) {
+        // Show a success banner whenever a save just completed — works
+        // for both initial install AND edit-mode updates so the user
+        // always gets confirmation. The auto-close LaunchedEffect above
+        // will close the screen ~1.2s later.
+        if (saveJustCompleted) {
             TorveBanner(
-                title = "Panda installed",
-                description = "Panda is now configured and added to Torve. You can close this window.",
+                title = if (state.isEditMode) "Panda updated" else "Panda installed",
+                description = "Saved. Closing setup…",
                 tone = TorveBannerTone.Success,
             )
             Spacer(Modifier.height(12.dp))
-            TorvePrimaryButton(text = "Done", onClick = onComplete)
+            TorvePrimaryButton(text = "Close now", onClick = onComplete)
         } else {
             state.saveError?.let {
                 TorveBanner(title = "Save failed", description = it, tone = TorveBannerTone.Error)
                 Spacer(Modifier.height(12.dp))
             }
-            TorvePrimaryButton(
-                text = if (state.isSaving) "Saving…" else if (state.isEditMode) "Update Panda" else "Install Panda",
-                onClick = { viewModel.saveConfigAndInstall() },
-                enabled = !state.isSaving && state.selectedProvider != null && state.authConnected,
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                TorvePrimaryButton(
+                    text = when {
+                        state.isSaving -> "Saving…"
+                        state.isEditMode -> "Update Panda"
+                        else -> "Install Panda"
+                    },
+                    onClick = { viewModel.saveConfigAndInstall() },
+                    enabled = !state.isSaving && state.selectedProvider != null && state.authConnected,
+                )
+                if (state.addonInstalled) {
+                    TorveGhostButton(text = "Exit without saving", onClick = onComplete)
+                }
+            }
         }
     }
 }
@@ -761,4 +853,82 @@ private fun openUrl(url: String) {
             Desktop.getDesktop().browse(URI.create(url))
         }
     }
+}
+
+/**
+ * Masked text field with a trailing eye-toggle that flips between
+ * [PasswordVisualTransformation] and [VisualTransformation.None]. Used for
+ * every credential input on the Panda setup screen so users can verify what
+ * they typed (or what was hydrated from the backend) without re-entering it.
+ *
+ * When the underlying value is blank but the server confirmed it has a
+ * value (Panda returned a redacted placeholder on read), render a
+ * prominent "Saved on server" badge above the field so users don't
+ * mistake the blank input for a wiped credential. The placeholder
+ * inside the field stays as a secondary cue.
+ *
+ * The reveal state lives inside the composable — each field tracks its
+ * own visibility independently so toggling one doesn't expose the
+ * others.
+ */
+@Composable
+private fun PandaSecretField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier,
+    placeholder: String? = null,
+) {
+    val showSavedBadge = value.isBlank() && placeholder != null
+    val colors = com.torve.desktop.ui.theme.TorveDesktopThemeTokens.colors
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (showSavedBadge) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                TorveBadge(
+                    text = "✓ Saved on server",
+                    tone = TorveBadgeTone.Success,
+                )
+                Text(
+                    text = "Type to replace; leave blank to keep the stored value.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.textSecondary,
+                )
+            }
+        }
+        InnerPandaSecretField(
+            value = value,
+            onValueChange = onValueChange,
+            label = label,
+            placeholder = placeholder,
+        )
+    }
+}
+
+@Composable
+private fun InnerPandaSecretField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    placeholder: String? = null,
+) {
+    var visible by remember { mutableStateOf(false) }
+    TorveTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = label,
+        modifier = Modifier.fillMaxWidth(),
+        placeholder = placeholder,
+        visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+        trailingIcon = {
+            IconButton(onClick = { visible = !visible }) {
+                Icon(
+                    imageVector = if (visible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                    contentDescription = if (visible) "Hide" else "Show",
+                )
+            }
+        },
+    )
 }

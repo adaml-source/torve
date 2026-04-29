@@ -1,0 +1,769 @@
+package com.torve.desktop.ui.v2.live
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import com.torve.desktop.playback.DesktopPlayerController
+import com.torve.desktop.ui.components.TorveBadge
+import com.torve.desktop.ui.components.TorveBadgeTone
+import com.torve.desktop.ui.components.TorveFilterChip
+import com.torve.desktop.ui.components.TorveGhostButton
+import com.torve.desktop.ui.components.TorveListRow
+import com.torve.desktop.ui.components.TorvePageHeader
+import com.torve.desktop.ui.components.TorvePlaceholderState
+import com.torve.desktop.ui.components.TorvePrimaryButton
+import com.torve.desktop.ui.components.TorveSectionCard
+import com.torve.desktop.ui.components.TorveSearchField
+import com.torve.desktop.ui.l10n.ds
+import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
+import com.torve.domain.model.Channel
+import com.torve.domain.model.ChannelCategory
+import com.torve.domain.model.EnrichedChannel
+import com.torve.domain.model.channelIdentityCandidates
+import com.torve.presentation.channels.ChannelsSubTab
+import com.torve.presentation.channels.ChannelsUiState
+import com.torve.presentation.channels.ChannelsViewModel
+import com.torve.presentation.channels.EpgState
+
+enum class DesktopLiveMode { CHANNELS, GUIDE, FAVORITES }
+
+@Composable
+fun V2LivePage(
+    channelsState: ChannelsUiState,
+    channelsViewModel: ChannelsViewModel,
+    playerController: DesktopPlayerController,
+    onPremiumBlocked: (() -> Unit)? = null,
+) {
+    val hasPremium = com.torve.desktop.premium.rememberHasPremium()
+    var mode by remember { mutableStateOf(DesktopLiveMode.CHANNELS) }
+    val visibleChannels = resolveVisibleChannels(channelsState, channelsViewModel)
+
+    // ── EPG reminders ─────────────────────────────────────────────
+    // File-backed store under desktopDataDir; survives restarts. Each active
+    // reminder has a coroutine that fires a tray notification ~1 minute
+    // before the show starts.
+    // (Reminder firing now lives in the global ReminderScheduler — see Main.)
+    val reminderStore = remember {
+        // Process-wide singleton; the Settings reminder list page reads
+        // the same instance so changes here propagate immediately.
+        com.torve.desktop.globalReminderStore.also { it.pruneExpired(System.currentTimeMillis()) }
+    }
+    // Subscribe to the reminder store's StateFlow so the EPG context
+    // menu shows the right "Set/Cancel reminder" label live. Firing
+    // is handled by the global ReminderScheduler installed in Main.
+    val storeReminders by reminderStore.state.collectAsState()
+    val reminders = remember(storeReminders) { storeReminders.map { it.key }.toSet() }
+
+    val reminderKey: (com.torve.domain.model.Channel, com.torve.domain.model.EpgProgramme) -> String =
+        { ch, p -> com.torve.desktop.reminders.EpgReminderStore.reminderKey(ch, p) }
+    val toggleReminder: (com.torve.domain.model.Channel, com.torve.domain.model.EpgProgramme) -> Unit = { ch, p ->
+        val key = reminderKey(ch, p)
+        if (reminders.contains(key)) {
+            reminderStore.remove(key)
+        } else {
+            val stored = com.torve.desktop.reminders.StoredReminder(
+                key = key,
+                channelUrl = ch.url,
+                channelName = ch.name,
+                title = p.title,
+                startMs = p.startTime,
+                endMs = p.endTime,
+            )
+            reminderStore.add(stored)
+        }
+    }
+    val isFavoriteFor: (com.torve.domain.model.Channel) -> Boolean = { ch ->
+        channelsState.favorites.any { it.url == ch.url || it.name == ch.name }
+    }
+
+    // Channel-number keypad: pure state machine + a Compose-side mirror of its
+    // buffer + a 2.5 s idle-clear effect. The state machine itself is unit
+    // tested in ChannelKeypadStateMachineTest.
+    val keypad = remember { ChannelKeypadStateMachine() }
+    var channelBuffer by remember { mutableStateOf("") }
+    val liveKeypadFocus = remember { FocusRequester() }
+    LaunchedEffect(channelBuffer) {
+        if (channelBuffer.isEmpty()) return@LaunchedEffect
+        delay(2500)
+        if (keypad.applyIdleTick(System.currentTimeMillis())) {
+            channelBuffer = keypad.buffer
+        }
+    }
+
+    fun jumpToChannelNumber(number: Int) {
+        val match = visibleChannels.firstOrNull { it.channel.channelNumber == number }
+            ?: channelsState.channels.firstOrNull { it.channel.channelNumber == number }
+            ?: return
+        if (!hasPremium) { onPremiumBlocked?.invoke(); return }
+        channelsViewModel.selectChannel(match.channel)
+        channelsViewModel.recordChannelViewed(match.channel)
+        playerController.playDirectStream(
+            title = match.channel.name,
+            url = match.channel.url,
+            artworkUrl = match.channel.tvgLogo,
+            sourceSurface = "live_tv",
+        )
+    }
+
+    fun handleLiveKey(keyEvent: androidx.compose.ui.input.key.KeyEvent): Boolean {
+        if (keyEvent.type != KeyEventType.KeyDown) return false
+        val event = keyToKeypadEvent(keyEvent.key) ?: return false
+        val outcome = keypad.handle(event, System.currentTimeMillis())
+        channelBuffer = keypad.buffer
+        return when (outcome) {
+            is ChannelKeypadStateMachine.Outcome.Commit -> {
+                jumpToChannelNumber(outcome.channelNumber)
+                true
+            }
+            ChannelKeypadStateMachine.Outcome.Consumed -> true
+            ChannelKeypadStateMachine.Outcome.Ignored -> false
+        }
+    }
+
+    LaunchedEffect(channelsState.playlists, channelsState.selectedPlaylistId) {
+        if (channelsState.selectedPlaylistId == null) {
+            channelsState.playlists.firstOrNull()?.let { channelsViewModel.selectPlaylist(it.id) }
+        }
+    }
+    LaunchedEffect(channelsState.selectedPlaylistId) {
+        if (channelsState.selectedPlaylistId != null) {
+            channelsViewModel.ensureEpgLoaded()
+        }
+    }
+
+    val playLive: (Channel) -> Unit = lambda@{ channel ->
+        if (!hasPremium) {
+            onPremiumBlocked?.invoke()
+            return@lambda
+        }
+        channelsViewModel.selectChannel(channel)
+        channelsViewModel.recordChannelViewed(channel)
+        playerController.playDirectStream(
+            title = channel.name,
+            url = channel.url,
+            artworkUrl = channel.tvgLogo,
+            sourceSurface = "live_tv",
+        )
+    }
+
+    LaunchedEffect(Unit) { runCatching { liveKeypadFocus.requestFocus() } }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(start = 72.dp, end = 24.dp, top = 16.dp, bottom = 16.dp)
+            .focusRequester(liveKeypadFocus)
+            .focusable()
+            .onPreviewKeyEvent(::handleLiveKey),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        TorvePageHeader(
+            title = ds("Live TV"),
+            subtitle = "Search, switch playlists, then play. Toggle the Guide for an EPG view.",
+            trailing = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (channelBuffer.isNotEmpty()) {
+                        TorveBadge(
+                            text = "→ $channelBuffer",
+                            tone = TorveBadgeTone.Warning,
+                        )
+                    }
+                    TorveBadge(
+                        text = epgBadgeLabel(channelsState.epgState),
+                        tone = epgBadgeTone(channelsState.epgState),
+                    )
+                }
+            },
+        )
+
+        if (channelsState.playlists.isEmpty()) {
+            TorvePlaceholderState(
+                title = "No IPTV playlists configured",
+                description = "Add an M3U or Xtream playlist in Settings > Playlists to unlock channel browsing.",
+                emoji = "📻",
+            )
+            return
+        }
+
+        // Inline EPG error banner — surfaces the upstream message and offers a
+        // one-click retry without forcing the user into Guide mode to see it.
+        channelsState.guideError?.let { msg ->
+            EpgErrorBanner(
+                message = msg,
+                onRetry = { channelsViewModel.retryGuideLoad() },
+            )
+        }
+
+        // ── Top control row ─────────────────────────────────────────────
+        // Search owns the row at full bleed; playlist + recent collapse into
+        // dropdowns; the view-mode toggle anchors the right edge.
+        LiveControlRow(
+            searchQuery = channelsState.searchQuery,
+            onSearchChange = {
+                if (it.isBlank()) channelsViewModel.clearSearch()
+                else channelsViewModel.updateSearchQuery(it)
+            },
+            playlists = channelsState.playlists,
+            selectedPlaylistId = channelsState.selectedPlaylistId,
+            onSelectPlaylist = { channelsViewModel.selectPlaylist(it) },
+            recentChannels = channelsState.recentlyViewedChannels,
+            onPlayRecent = playLive,
+            mode = mode,
+            favoritesCount = channelsState.favorites.size,
+            guideChannelCount = channelsState.guideChannels.size,
+            onSelectMode = { next ->
+                mode = next
+                when (next) {
+                    DesktopLiveMode.CHANNELS -> channelsViewModel.selectSubTab(ChannelsSubTab.LIVE)
+                    DesktopLiveMode.FAVORITES -> channelsViewModel.selectSubTab(ChannelsSubTab.FAVOURITES)
+                    // Guide doesn't auto-build until the full playlist is in
+                    // memory; for first-time entry without that load, kick off
+                    // a guide build so users don't see an empty grid forever.
+                    DesktopLiveMode.GUIDE -> channelsViewModel.requestGuideBuild()
+                }
+            },
+        )
+
+        when (mode) {
+            DesktopLiveMode.GUIDE -> V2EpgGrid(
+                playlistId = channelsState.selectedPlaylistId,
+                guideChannels = channelsState.guideChannels,
+                guideProgrammes = channelsState.guideProgrammes,
+                isLoading = channelsState.isLoadingGuide,
+                error = channelsState.guideError,
+                onRetry = { channelsViewModel.retryGuideLoad() },
+                canCatchup = channelsViewModel::canCatchup,
+                resolveCatchupUrl = channelsViewModel::resolveCatchupUrl,
+                onPlayChannel = playLive,
+                onPlayCatchup = { channel, _, url ->
+                    if (!hasPremium) {
+                        onPremiumBlocked?.invoke()
+                        return@V2EpgGrid
+                    }
+                    channelsViewModel.selectChannel(channel)
+                    channelsViewModel.recordChannelViewed(channel)
+                    playerController.playDirectStream(
+                        title = channel.name,
+                        url = url,
+                        artworkUrl = channel.tvgLogo,
+                        sourceSurface = "live_tv_catchup",
+                    )
+                },
+                onSwitchToChannels = {
+                    mode = DesktopLiveMode.CHANNELS
+                    channelsViewModel.selectSubTab(ChannelsSubTab.LIVE)
+                },
+                epgProgrammeCount = (channelsState.epgState as? EpgState.Loaded)?.sourceProgrammeCount ?: 0,
+                isFavorite = isFavoriteFor,
+                onToggleFavorite = { ch -> channelsViewModel.toggleFavorite(ch) },
+                isReminderSet = { ch, p -> reminders.contains(reminderKey(ch, p)) },
+                onToggleReminder = toggleReminder,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            )
+
+            DesktopLiveMode.CHANNELS -> Row(
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                CategoryPane(
+                    categories = channelsState.categories,
+                    selectedGroup = channelsState.selectedGroup,
+                    onSelectCategory = { channelsViewModel.loadCategoryChannels(it.name) },
+                    modifier = Modifier.width(240.dp).fillMaxHeight(),
+                )
+
+                ChannelListPane(
+                    visibleChannels = visibleChannels,
+                    channelsState = channelsState,
+                    onSelect = { channelsViewModel.selectChannel(it) },
+                    onToggleFavorite = { channelsViewModel.toggleFavorite(it) },
+                    onPlay = playLive,
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                )
+
+                SelectedChannelPane(
+                    selectedChannel = channelsState.selectedChannel,
+                    programmes = channelsState.programmes,
+                    onPlay = playLive,
+                    modifier = Modifier.width(300.dp).fillMaxHeight(),
+                )
+            }
+
+            DesktopLiveMode.FAVORITES -> ChannelListPane(
+                visibleChannels = visibleChannels,
+                channelsState = channelsState,
+                onSelect = { channelsViewModel.selectChannel(it) },
+                onToggleFavorite = { channelsViewModel.toggleFavorite(it) },
+                onPlay = playLive,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ChannelListPane(
+    visibleChannels: List<EnrichedChannel>,
+    channelsState: ChannelsUiState,
+    onSelect: (Channel) -> Unit,
+    onToggleFavorite: (Channel) -> Unit,
+    onPlay: (Channel) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (visibleChannels.isEmpty()) {
+        TorvePlaceholderState(
+            modifier = modifier,
+            title = emptyTitleFor(channelsState.selectedSubTab),
+            description = emptyDescriptionFor(channelsState.selectedSubTab),
+        )
+        return
+    }
+    LazyColumn(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        // IPTV catalogues frequently emit duplicates (same tvg-id across
+        // multiple providers, identical URLs in stitched playlists). Keys
+        // must include the index or LazyColumn crashes the composition —
+        // which on Compose Desktop kills the whole app.
+        itemsIndexed(
+            items = visibleChannels,
+            key = { index, enriched -> "${channelRowKey(enriched)}#$index" },
+        ) { _, enriched ->
+            ChannelRow(
+                channel = enriched.channel,
+                currentProgramme = enriched.currentProgramme?.title,
+                nextProgramme = enriched.nextProgramme?.title,
+                isSelected = channelsState.selectedChannel?.url == enriched.channel.url,
+                isFavorite = channelsState.favorites.any {
+                    it.url == enriched.channel.url || it.name == enriched.channel.name
+                },
+                onSelect = { onSelect(enriched.channel) },
+                onToggleFavorite = { onToggleFavorite(enriched.channel) },
+                onPlay = { onPlay(enriched.channel) },
+            )
+        }
+    }
+}
+
+private fun resolveVisibleChannels(
+    channelsState: ChannelsUiState,
+    channelsViewModel: ChannelsViewModel,
+): List<EnrichedChannel> {
+    // Favorites tab: always show saved favorites, enriched with live catalog data
+    // when available so Now/Next programmes and logos come through.
+    if (channelsState.selectedSubTab == ChannelsSubTab.FAVOURITES) {
+        val favoriteIds = channelsState.favorites.flatMap(::channelIdentityCandidates).toSet()
+        val enrichedPool = channelsState.categoryChannels + channelsState.channels
+        val matched = enrichedPool.filter { enriched ->
+            channelIdentityCandidates(enriched.channel).any(favoriteIds::contains)
+        }
+        if (matched.isNotEmpty()) return matched.distinctBy { it.channel.url }
+        return channelsState.favorites.map { EnrichedChannel(channel = it) }
+    }
+
+    return when {
+        channelsState.searchQuery.length >= 2 -> {
+            // Enrich search results against whatever we already have in memory so
+            // Now/Next programmes appear on typed-search hits as well.
+            val byUrl = (channelsState.categoryChannels + channelsState.channels)
+                .associateBy { it.channel.url }
+            channelsState.searchResults.map { channel ->
+                byUrl[channel.url] ?: EnrichedChannel(channel = channel)
+            }
+        }
+        channelsState.selectedGroup != null && channelsState.categoryChannels.isNotEmpty() ->
+            channelsState.categoryChannels
+        else -> channelsViewModel.getDisplayChannels()
+    }
+}
+
+private fun channelRowKey(enriched: EnrichedChannel): String {
+    val channel = enriched.channel
+    return (channel.tvgId ?: channel.url).ifBlank { channel.name }
+}
+
+private fun sectionTitleFor(tab: ChannelsSubTab): String = when (tab) {
+    ChannelsSubTab.LIVE -> "Channels"
+    ChannelsSubTab.FAVOURITES -> "Favorite Channels"
+}
+
+private fun emptyTitleFor(tab: ChannelsSubTab): String = when (tab) {
+    ChannelsSubTab.LIVE -> "No channels loaded"
+    ChannelsSubTab.FAVOURITES -> "No favorites yet"
+}
+
+private fun emptyDescriptionFor(tab: ChannelsSubTab): String = when (tab) {
+    ChannelsSubTab.LIVE -> "Choose a category or enter at least two characters in search."
+    ChannelsSubTab.FAVOURITES -> "Save channels from the Live tab to see them here."
+}
+
+private fun keyToKeypadEvent(key: Key): ChannelKeypadStateMachine.Event? = when (key) {
+    Key.Zero, Key.NumPad0 -> ChannelKeypadStateMachine.Event.Digit0
+    Key.One, Key.NumPad1 -> ChannelKeypadStateMachine.Event.Digit1
+    Key.Two, Key.NumPad2 -> ChannelKeypadStateMachine.Event.Digit2
+    Key.Three, Key.NumPad3 -> ChannelKeypadStateMachine.Event.Digit3
+    Key.Four, Key.NumPad4 -> ChannelKeypadStateMachine.Event.Digit4
+    Key.Five, Key.NumPad5 -> ChannelKeypadStateMachine.Event.Digit5
+    Key.Six, Key.NumPad6 -> ChannelKeypadStateMachine.Event.Digit6
+    Key.Seven, Key.NumPad7 -> ChannelKeypadStateMachine.Event.Digit7
+    Key.Eight, Key.NumPad8 -> ChannelKeypadStateMachine.Event.Digit8
+    Key.Nine, Key.NumPad9 -> ChannelKeypadStateMachine.Event.Digit9
+    Key.Enter, Key.NumPadEnter -> ChannelKeypadStateMachine.Event.Enter
+    Key.Escape -> ChannelKeypadStateMachine.Event.Esc
+    else -> null
+}
+
+private fun epgBadgeLabel(state: EpgState): String = when (state) {
+    EpgState.NotConfigured -> "EPG: Off"
+    EpgState.Loading -> "EPG: Loading"
+    is EpgState.Loaded -> "EPG: ${state.sourceProgrammeCount} progs"
+    is EpgState.Error -> "EPG: Error"
+}
+
+private fun epgBadgeTone(state: EpgState): TorveBadgeTone = when (state) {
+    EpgState.NotConfigured -> TorveBadgeTone.Neutral
+    EpgState.Loading -> TorveBadgeTone.Accent
+    is EpgState.Loaded -> TorveBadgeTone.Success
+    is EpgState.Error -> TorveBadgeTone.Warning
+}
+
+@Composable
+private fun LiveControlRow(
+    searchQuery: String,
+    onSearchChange: (String) -> Unit,
+    playlists: List<com.torve.domain.model.ChannelPlaylist>,
+    selectedPlaylistId: String?,
+    onSelectPlaylist: (String) -> Unit,
+    recentChannels: List<Channel>,
+    onPlayRecent: (Channel) -> Unit,
+    mode: DesktopLiveMode,
+    favoritesCount: Int,
+    guideChannelCount: Int,
+    onSelectMode: (DesktopLiveMode) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+    ) {
+        TorveSearchField(
+            value = searchQuery,
+            onValueChange = onSearchChange,
+            placeholder = "Search channels",
+            modifier = Modifier.weight(1f),
+        )
+        PlaylistDropdown(
+            playlists = playlists,
+            selectedPlaylistId = selectedPlaylistId,
+            onSelect = onSelectPlaylist,
+        )
+        if (recentChannels.isNotEmpty()) {
+            RecentChannelsDropdown(
+                channels = recentChannels,
+                onPlay = onPlayRecent,
+            )
+        }
+        LiveModeToggle(
+            mode = mode,
+            favoritesCount = favoritesCount,
+            guideChannelCount = guideChannelCount,
+            onSelect = onSelectMode,
+        )
+    }
+}
+
+@Composable
+private fun PlaylistDropdown(
+    playlists: List<com.torve.domain.model.ChannelPlaylist>,
+    selectedPlaylistId: String?,
+    onSelect: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val active = playlists.firstOrNull { it.id == selectedPlaylistId }
+    val label = active?.name?.takeIf { it.isNotBlank() } ?: "Select playlist"
+    Box {
+        TorveGhostButton(
+            text = "Playlist · $label",
+            onClick = { expanded = true },
+        )
+        com.torve.desktop.ui.components.TorveDropdownScaffold(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            items = playlists.map { playlist ->
+                playlist.name to {
+                    onSelect(playlist.id)
+                    expanded = false
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun RecentChannelsDropdown(
+    channels: List<Channel>,
+    onPlay: (Channel) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        TorveGhostButton(
+            text = "Recent (${channels.size})",
+            onClick = { expanded = true },
+        )
+        com.torve.desktop.ui.components.TorveDropdownScaffold(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            items = channels.take(15).map { channel ->
+                channel.name to {
+                    onPlay(channel)
+                    expanded = false
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun LiveModeToggle(
+    mode: DesktopLiveMode,
+    favoritesCount: Int,
+    guideChannelCount: Int,
+    onSelect: (DesktopLiveMode) -> Unit,
+) {
+    val channelsLabel = ds("Channels")
+    val guideLabel = ds("Guide")
+    val favoritesLabel = ds("Favorites")
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        TorveFilterChip(
+            text = channelsLabel,
+            selected = mode == DesktopLiveMode.CHANNELS,
+            onClick = { onSelect(DesktopLiveMode.CHANNELS) },
+        )
+        TorveFilterChip(
+            text = if (guideChannelCount > 0) "$guideLabel ($guideChannelCount)" else guideLabel,
+            selected = mode == DesktopLiveMode.GUIDE,
+            onClick = { onSelect(DesktopLiveMode.GUIDE) },
+        )
+        TorveFilterChip(
+            text = if (favoritesCount > 0) "$favoritesLabel ($favoritesCount)" else favoritesLabel,
+            selected = mode == DesktopLiveMode.FAVORITES,
+            onClick = { onSelect(DesktopLiveMode.FAVORITES) },
+        )
+    }
+}
+
+@Composable
+private fun EpgErrorBanner(
+    message: String,
+    onRetry: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+    ) {
+        com.torve.desktop.ui.components.TorveBanner(
+            title = "EPG didn't load",
+            description = message,
+            tone = com.torve.desktop.ui.components.TorveBannerTone.Warning,
+            modifier = Modifier.weight(1f),
+        )
+        TorveGhostButton(text = "Retry EPG", onClick = onRetry)
+    }
+}
+
+@Composable
+private fun CategoryPane(
+    categories: List<ChannelCategory>,
+    selectedGroup: String?,
+    onSelectCategory: (ChannelCategory) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    TorveSectionCard(
+        modifier = modifier,
+        title = "Categories",
+        supportingText = "Pick a channel group to load it from your active playlist.",
+    ) {
+        if (categories.isEmpty()) {
+            TorvePlaceholderState(
+                title = "No categories yet",
+                description = "Select a playlist and let Torve load category counts.",
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxHeight().fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                items(
+                    items = categories,
+                    key = { it.name },
+                ) { category ->
+                    TorveListRow(
+                        title = formatCategoryLabel(category),
+                        subtitle = "${category.channelCount} channels",
+                        selected = selectedGroup == category.name,
+                        onClick = { onSelectCategory(category) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun formatCategoryLabel(category: ChannelCategory): String {
+    val countryCode = category.countryCode?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
+    return if (countryCode != null) "[$countryCode] ${category.name}" else category.name
+}
+
+@Composable
+private fun ChannelRow(
+    channel: Channel,
+    currentProgramme: String?,
+    nextProgramme: String?,
+    isSelected: Boolean,
+    isFavorite: Boolean,
+    onSelect: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    onPlay: () -> Unit,
+) {
+    TorveListRow(
+        title = channel.name,
+        subtitle = buildString {
+            append(channel.groupTitle ?: "Ungrouped")
+            currentProgramme?.takeIf { it.isNotBlank() }?.let {
+                append(" • Now: ")
+                append(it)
+            }
+            nextProgramme?.takeIf { it.isNotBlank() }?.let {
+                append(" • Next: ")
+                append(it)
+            }
+        },
+        selected = isSelected,
+        onClick = onSelect,
+        trailing = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (isFavorite) {
+                    TorveBadge("Fav", tone = TorveBadgeTone.Warning)
+                }
+                TorveGhostButton(
+                    text = if (isFavorite) "Unsave" else "Save",
+                    onClick = onToggleFavorite,
+                )
+                TorvePrimaryButton(
+                    text = "Play",
+                    onClick = onPlay,
+                )
+            }
+        },
+    )
+}
+
+@Composable
+private fun SelectedChannelPane(
+    selectedChannel: Channel?,
+    programmes: List<com.torve.domain.model.EpgProgramme>,
+    onPlay: (Channel) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = TorveDesktopThemeTokens.colors
+    Column(
+        modifier = modifier.verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        TorveSectionCard(
+            title = selectedChannel?.name ?: "Channel Details",
+            supportingText = selectedChannel?.groupTitle ?: "Select a channel to see current guide data and quick actions.",
+        ) {
+            if (selectedChannel == null) {
+                TorvePlaceholderState(
+                    title = "Nothing selected",
+                    description = "Select a channel from the center list to view EPG details and start playback.",
+                )
+            } else {
+                Text(
+                    text = selectedChannel.url,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textSecondary,
+                )
+                selectedChannel.tvgCountry?.let {
+                    Text(
+                        text = "Country: $it",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.textSecondary,
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TorvePrimaryButton(text = "Play Channel", onClick = { onPlay(selectedChannel) })
+                }
+                if (programmes.isEmpty()) {
+                    TorvePlaceholderState(
+                        title = "No guide entries",
+                        description = "This channel has no EPG data loaded yet.",
+                    )
+                } else {
+                    programmes.take(8).forEach { programme ->
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = programme.title,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = colors.textPrimary,
+                            )
+                            Text(
+                                text = programme.description ?: "No description",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.textSecondary,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private val ReminderTimeFormatter: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
+
+private fun formatReminderTime(epochMs: Long): String =
+    ReminderTimeFormatter.format(Instant.ofEpochMilli(epochMs))
