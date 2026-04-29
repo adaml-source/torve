@@ -271,7 +271,13 @@ private class EpgFakeChannelRepository(
     override suspend fun getChannelsByGroup(playlistId: String): Map<String, List<Channel>> =
         getChannels(playlistId).groupBy { it.groupTitle ?: "Ungrouped" }
 
-    override suspend fun addPlaylist(name: String, url: String, epgUrl: String?, id: String?): ChannelPlaylist = error("Not used")
+    override suspend fun addPlaylist(
+        name: String,
+        url: String,
+        epgUrl: String?,
+        id: String?,
+        onProgress: ((com.torve.domain.repository.PlaylistAddProgress) -> Unit)?,
+    ): ChannelPlaylist = error("Not used")
     override suspend fun addXtreamPlaylist(name: String, server: String, username: String, password: String, id: String?): ChannelPlaylist = error("Not used")
     override suspend fun removePlaylist(id: String) { persistedChannels.remove(id) }
     override suspend fun updatePlaylistEpgUrl(playlistId: String, epgUrl: String?) = Unit

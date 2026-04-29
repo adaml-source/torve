@@ -475,6 +475,13 @@ private class FakeAddonRepository : AddonRepository {
         addons.replaceAll { _, addon -> addon.copy(serverId = null, syncedAt = null) }
     }
 
+    override suspend fun setAddonConfigId(manifestUrl: String, configId: String?) {
+        val normalized = normalize(manifestUrl)
+        addons[normalized]?.let { existing ->
+            addons[normalized] = existing.copy(configId = configId)
+        }
+    }
+
     private fun normalize(url: String): String {
         val trimmed = url.trim().trimEnd('/')
         return "${trimmed.removeSuffix("/manifest.json")}/manifest.json"

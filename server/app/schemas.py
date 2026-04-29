@@ -148,6 +148,14 @@ class WatchStateReportResponse(BaseModel):
     reported_at: datetime
 
 
+class WatchStateLatestResponse(BaseModel):
+    content_id: str
+    provider: str
+    position_ms: int
+    reported_at: datetime
+    device_id: str
+
+
 # ── Purchase & Entitlement Schemas ──
 
 

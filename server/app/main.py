@@ -54,6 +54,7 @@ from .schemas import (
     SearchPushRequest,
     TokensResponse,
     UserResponse,
+    WatchStateLatestResponse,
     WatchStateReportRequest,
     WatchStateReportResponse,
     PlaylistSaveRequest,
@@ -873,6 +874,36 @@ async def report_watch_state(
     session.add(report_row)
     await session.commit()
     return WatchStateReportResponse(status="ok", reported_at=report_row.reported_at)
+
+
+@app.get("/me/watch_state/latest", response_model=WatchStateLatestResponse)
+async def get_latest_watch_state(
+    content_id: str,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> WatchStateLatestResponse:
+    # Cross-device resume read. Returns the newest WatchStateReport row for
+    # (user, content_id) across all of this user's devices. Callers merge
+    # this against their local SQLDelight row and prefer whichever has the
+    # greater reported_at / updatedAt.
+    if not content_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="content_id is required")
+    result = await session.execute(
+        select(WatchStateReport)
+        .where(WatchStateReport.user_id == user.id, WatchStateReport.content_id == content_id)
+        .order_by(WatchStateReport.reported_at.desc())
+        .limit(1),
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No watch state for content")
+    return WatchStateLatestResponse(
+        content_id=row.content_id,
+        provider=row.provider,
+        position_ms=row.position_ms,
+        reported_at=row.reported_at,
+        device_id=row.device_id,
+    )
 
 
 # ── Entitlement helpers ──

@@ -228,7 +228,13 @@ private class FakeChannelRepository(
     var refreshCalls: Int = 0
         private set
 
-    override suspend fun addPlaylist(name: String, url: String, epgUrl: String?, id: String?): ChannelPlaylist {
+    override suspend fun addPlaylist(
+        name: String,
+        url: String,
+        epgUrl: String?,
+        id: String?,
+        onProgress: ((com.torve.domain.repository.PlaylistAddProgress) -> Unit)?,
+    ): ChannelPlaylist {
         error("Not used")
     }
 
