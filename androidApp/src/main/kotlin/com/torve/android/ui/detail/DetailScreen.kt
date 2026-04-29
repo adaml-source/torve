@@ -66,6 +66,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import com.torve.android.R
 import com.torve.android.premium.AccessTier
@@ -90,11 +91,14 @@ import com.torve.android.ui.components.PosterCard
 import com.torve.android.ui.components.SectionHeader
 import com.torve.android.ui.components.mediaItemLazyKey
 import com.torve.android.ui.theme.Amber
+import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Graphite
 import com.torve.android.ui.theme.HeroGradient
 import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Torve
+import com.torve.domain.model.CandidateProvenanceKind
+import org.koin.compose.koinInject
 import com.torve.android.download.DownloadWorker
 import com.torve.data.download.BulkDownloadManager
 import androidx.compose.ui.platform.LocalContext
@@ -199,6 +203,34 @@ fun DetailScreen(
     }
 
     var resolvedFallbackUrl by remember { mutableStateOf("") }
+    // Usenet source sheet: fire onSourceSheetOpened exactly once per
+    // false→true transition of showStreamPicker. Keyed by the boolean
+    // value, not by a recompose token, so the hook doesn't re-fire on
+    // unrelated state changes within the open cycle.
+    LaunchedEffect(state.showStreamPicker) {
+        if (state.showStreamPicker) {
+            viewModel.onSourceSheetOpened()
+        }
+    }
+
+    // Usenet resolve → playback intent. On `/resolve` ready, the VM sets
+    // state.usenetPlaybackIntent; we hand the opaque URL byte-for-byte
+    // to the existing onPlayClick entrypoint, then clear the intent in
+    // the VM so a recomposition can't re-launch playback. The URL is
+    // self-authenticating under the live contract — no header staging.
+    LaunchedEffect(state.usenetPlaybackIntent) {
+        val intent = state.usenetPlaybackIntent ?: return@LaunchedEffect
+        val item = state.mediaItem
+        onPlayClick(
+            /* url = */ intent.url,
+            /* fallbackUrl = */ "",
+            /* season = */ state.streamContextSeason,
+            /* episode = */ state.streamContextEpisode,
+            /* imdbId = */ item?.imdbId,
+        )
+        viewModel.consumeUsenetPlaybackIntent()
+    }
+
     LaunchedEffect(state.resolvedStream) {
         state.resolvedStream?.let { resolved ->
             val url = listOf(
@@ -428,9 +460,11 @@ fun DetailScreen(
                                 onClick = {
                                     if (streamPlaybackLocked) {
                                         onLockedFeatureClick(PremiumFeature.STREAM_PLAYBACK)
-                                    } else if (!hasAnyAddon) {
-                                        // No addons installed → nothing can resolve streams.
-                                        // Send the user to the addon catalog to install one (e.g. Panda).
+                                    } else if (!settingsState.canPlayStreams) {
+                                        // No stream source (debrid or stream-providing addon) available.
+                                        // Metadata-only addons like Cinemeta don't qualify. Send the user
+                                        // to the addon catalog to install one (e.g. Panda). Predicate
+                                        // matches TvDetailsScreen for phone/TV consistency.
                                         onOpenAddonCatalog?.invoke()
                                     } else {
                                         // Let the addon layer decide between debrid/Usenet/etc. Panda
@@ -480,7 +514,7 @@ fun DetailScreen(
                                     Spacer(Modifier.width(8.dp))
                                     val playLabel = when {
                                         streamPlaybackLocked -> stringResource(R.string.premium_unlock_with_lifetime)
-                                        !hasAnyAddon -> stringResource(R.string.detail_install_addon)
+                                        !settingsState.canPlayStreams -> stringResource(R.string.detail_install_addon)
                                         item.type == MediaType.SERIES && state.streamContextSeason != null && state.streamContextEpisode != null ->
                                             "S${state.streamContextSeason.toString().padStart(2, '0')}E${state.streamContextEpisode.toString().padStart(2, '0')}"
                                         else -> state.primaryPlayLabel
@@ -632,6 +666,9 @@ fun DetailScreen(
                             state.streamsError?.let { error ->
                                 ErrorMessage(error, Modifier.padding(top = 8.dp))
                             }
+                            // Timeout branch from the preparing loop falls
+                            // through to this resolveError row with the
+                            // error_stream_preparing_timeout message key.
                             state.resolveError?.let { error ->
                                 ErrorMessage(error, Modifier.padding(top = 8.dp))
                             }
@@ -917,12 +954,20 @@ fun DetailScreen(
                         isLoadingMoreSources = state.isLoadingMoreSources,
                         playbackStartupStatus = state.playbackStartupStatus,
                         onStreamSelected = { stream ->
-                            viewModel.resolveStream(
-                                stream = stream,
-                                provider = settingsViewModel.getDebridProvider(),
-                                apiKey = settingsViewModel.getDebridApiKey(),
-                            )
+                            // Usenet rows go through the NzbDAV resolver; every
+                            // other provenance falls through to the existing
+                            // debrid/addon resolve path exactly as before.
+                            if (stream.accelerationProvenanceKind == CandidateProvenanceKind.USENET_NZBDAV) {
+                                viewModel.selectUsenetSource(stream)
+                            } else {
+                                viewModel.resolveStream(
+                                    stream = stream,
+                                    provider = settingsViewModel.getDebridProvider(),
+                                    apiKey = settingsViewModel.getDebridApiKey(),
+                                )
+                            }
                         },
+                        usenetCandidates = state.usenetCandidates,
                         onDismiss = { viewModel.dismissStreamPicker() },
                     )
                 }
@@ -992,6 +1037,18 @@ fun DetailScreen(
                     .statusBarsPadding()
                     .padding(start = 12.dp, top = 8.dp),
             )
+
+            // Preparing-stream overlay: blocks the detail surface while a
+            // Panda cloud-client stream is still warming up. Never open the
+            // player until the probe says Ready; cancelling routes through
+            // the VM to stop the retry loop cleanly.
+            state.preparing?.let { preparing ->
+                StreamPreparingOverlay(
+                    state = preparing,
+                    onCancel = { viewModel.cancelPreparing() },
+                    modifier = Modifier.zIndex(3f),
+                )
+            }
         }
     }
 }
@@ -1234,3 +1291,9 @@ private fun ErrorMessage(message: String, modifier: Modifier = Modifier) {
         modifier = modifier,
     )
 }
+
+/**
+ * Shown while a Panda cloud-client stream is still being prepared. Framed as
+ * progress (not error): the cloud download is working, we'll auto-retry once,
+ * and the user can nudge a retry manually if the auto-retry also 504s.
+ */

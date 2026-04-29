@@ -49,4 +49,7 @@ enum Route: Hashable {
     case manageDevices
     case deviceLimitReached
     case legal
+    case transferSend
+    case transferReceive
+    case transferDiagnostics
 }

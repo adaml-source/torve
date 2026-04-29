@@ -41,5 +41,10 @@
         <key>NSAllowsLocalNetworking</key>
         <true/>
     </dict>
+    <!-- Camera is used only by the credential-transfer QR scanner.
+         The flow keeps a manual paste fallback always reachable, so
+         denying access is non-blocking. -->
+    <key>NSCameraUsageDescription</key>
+    <string>Torve uses the camera to scan a QR code from another Torve device when transferring credentials. You can also paste the receive code by hand.</string>
 </dict>
 </plist>

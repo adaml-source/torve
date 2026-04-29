@@ -93,4 +93,24 @@ final class PandaSetupViewModelWrapper: ObservableObject {
     func saveConfigAndInstall() { viewModel.saveConfigAndInstall() }
     func deleteConfig() { viewModel.deleteConfig() }
     func clearError() { viewModel.clearError() }
+
+    // MARK: - Management token lifecycle
+
+    /// Dismiss the one-time display surface for the management token.
+    func acknowledgeManagementTokenDisplay() {
+        viewModel.acknowledgeManagementTokenDisplay()
+    }
+
+    /// Recovery flow: validate and persist an admin-issued management token
+    /// for the current config. Flips state.hasManagementToken on success.
+    func recoverManagementToken(_ adminIssuedToken: String) {
+        viewModel.recoverManagementToken(adminIssuedToken: adminIssuedToken)
+    }
+
+    /// Mint a fresh management token via rotate-management. Surfaces the new
+    /// value in state.pendingManagementTokenDisplay exactly once.
+    func rotateManagementToken() { viewModel.rotateManagementToken() }
+
+    /// Rotate the manifest (panda) token. Old manifest URL 404s on success.
+    func rotateManifestUrl() { viewModel.rotateManifestUrl() }
 }

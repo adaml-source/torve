@@ -1577,6 +1577,10 @@
     <string name="paywall_choose_lifetime">Escolher vitalicio</string>
     <string name="paywall_retry_verification">Tentar verificacao novamente</string>
     <string name="premium_refresh_access">Atualizar acesso</string>
+    <string name="paywall_needs_verification_title">Verifique seu email para usar Premium neste dispositivo</string>
+    <string name="paywall_needs_verification_body">Você fez o upgrade em outro dispositivo. Verifique seu email para desbloquear Premium aqui também.</string>
+    <string name="paywall_needs_verification_action_send">Enviar email de verificação</string>
+    <string name="paywall_needs_verification_action_refresh">Já verificado — atualizar</string>
     <string name="paywall_marketplace_copy">A cobranca e gerenciada por %1$s.</string>
     <string name="paywall_refund_copy">Reembolsos seguem as regras aplicaveis do marketplace.</string>
     <string name="purchase_received_message">%1$s Se nao terminar em breve, escolha Restaurar compra.</string>

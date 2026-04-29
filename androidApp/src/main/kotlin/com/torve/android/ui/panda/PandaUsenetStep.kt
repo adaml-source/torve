@@ -17,6 +17,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -474,6 +476,11 @@ private fun FieldInput(
     isPassword: Boolean = false,
     keyboardType: KeyboardType = KeyboardType.Text,
 ) {
+    // Per-field reveal toggle. Defaults to masked for password fields so the
+    // credential isn't shoulder-surfed in casual use; the user opts in to
+    // plaintext when they need to verify what they typed.
+    var revealed by remember { mutableStateOf(false) }
+    val effectiveKeyboardType = if (isPassword) KeyboardType.Password else keyboardType
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
@@ -481,8 +488,23 @@ private fun FieldInput(
         modifier = modifier.fillMaxWidth(),
         singleLine = true,
         shape = RoundedCornerShape(12.dp),
-        visualTransformation = if (isPassword) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
-        keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+        visualTransformation = if (isPassword && !revealed) {
+            PasswordVisualTransformation()
+        } else {
+            androidx.compose.ui.text.input.VisualTransformation.None
+        },
+        keyboardOptions = KeyboardOptions(keyboardType = effectiveKeyboardType),
+        trailingIcon = if (isPassword) {
+            {
+                IconButton(onClick = { revealed = !revealed }) {
+                    Icon(
+                        imageVector = if (revealed) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                        contentDescription = if (revealed) "Hide" else "Show",
+                        tint = Silver,
+                    )
+                }
+            }
+        } else null,
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = Amber,
             unfocusedBorderColor = Steel,

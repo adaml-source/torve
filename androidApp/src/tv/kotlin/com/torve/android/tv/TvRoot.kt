@@ -1883,6 +1883,15 @@ fun TvRoot(
                                                 onNavigateToPandaSetup = {
                                                     navController.navigate(TvRoutes.PANDA_SETUP)
                                                 },
+                                                onNavigateToSendCredentials = {
+                                                    navController.navigate("transfer_send_tv")
+                                                },
+                                                onNavigateToReceiveCredentials = {
+                                                    navController.navigate("transfer_receive_tv")
+                                                },
+                                                onNavigateToTransferDiagnostics = {
+                                                    navController.navigate("transfer_diagnostics_tv")
+                                                },
                                                 onNavigateToPairedDevices = { itemId ->
                                                     pendingSettingsDestinationReturnItemId = itemId
                                                     settingsDestination = TvSettingsDestination.PAIRED_DEVICES

@@ -8,16 +8,26 @@ final class IOSKeychainSecretStore: IntegrationSecretStore, SecureStorage {
 
     // MARK: - IntegrationSecretStore
 
-    func put(key: IntegrationSecretKey, value: String) async throws {
-        putString(key: key.name, value: value)
+    func put(key: IntegrationSecretKey, value: String, subKey: String?) async throws {
+        putString(key: storageKey(key: key, subKey: subKey), value: value)
     }
 
-    func get(key: IntegrationSecretKey) async throws -> String? {
-        return getString(key: key.name)
+    func get(key: IntegrationSecretKey, subKey: String?) async throws -> String? {
+        return getString(key: storageKey(key: key, subKey: subKey))
     }
 
-    func remove(key: IntegrationSecretKey) async throws {
-        removeKey(key: key.name)
+    func remove(key: IntegrationSecretKey, subKey: String?) async throws {
+        removeKey(key: storageKey(key: key, subKey: subKey))
+    }
+
+    // Scoped entries are stored under a composite keychain account so multiple
+    // per-owner secrets (e.g. PANDA_MANAGEMENT_TOKEN keyed by config_id) coexist
+    // without clobbering the legacy single-value slot.
+    private func storageKey(key: IntegrationSecretKey, subKey: String?) -> String {
+        if let sub = subKey, !sub.isEmpty {
+            return "\(key.name):\(sub)"
+        }
+        return key.name
     }
 
     // MARK: - SecureStorage

@@ -1578,6 +1578,10 @@
     <string name="paywall_choose_lifetime">Ömür boyu seç</string>
     <string name="paywall_retry_verification">Doğrulamayı tekrar dene</string>
     <string name="premium_refresh_access">Erişimi yenile</string>
+    <string name="paywall_needs_verification_title">Bu cihazda Premium kullanmak için e-postanı doğrula</string>
+    <string name="paywall_needs_verification_body">Yükseltmeyi farklı bir cihazda yaptın. Premium\'u burada da açmak için e-postanı doğrula.</string>
+    <string name="paywall_needs_verification_action_send">Doğrulama e-postası gönder</string>
+    <string name="paywall_needs_verification_action_refresh">Zaten doğrulandı — yenile</string>
     <string name="paywall_marketplace_copy">Faturalandırma %1$s tarafından yönetilir.</string>
     <string name="paywall_refund_copy">İadeler geçerli pazar yeri kurallarına tabidir.</string>
     <string name="purchase_received_message">%1$s Kısa süre içinde tamamlanmazsa, Satın almayı geri yükle\'yi seçin.</string>

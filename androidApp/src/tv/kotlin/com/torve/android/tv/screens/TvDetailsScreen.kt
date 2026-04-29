@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -43,6 +44,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -91,6 +93,7 @@ import androidx.compose.material3.Icon
 import com.torve.android.download.DownloadWorker
 import com.torve.data.download.BulkDownloadManager
 import com.torve.domain.model.AvailabilityOfferType
+import com.torve.domain.model.CandidateProvenanceKind
 import com.torve.domain.model.ContentWarmupTrigger
 import com.torve.domain.model.Download
 import com.torve.domain.model.DownloadStatus
@@ -287,6 +290,35 @@ fun TvDetailsScreen(
         }
     }
 
+    // Usenet source-sheet warmup hook. Mirrors the phone DetailScreen
+    // wiring exactly — keyed on the boolean only so it fires once per
+    // false→true transition of showStreamPicker, not on incidental
+    // recomposition. No-op when there are no Usenet candidates.
+    LaunchedEffect(state.showStreamPicker) {
+        if (state.showStreamPicker) {
+            detailViewModel.onSourceSheetOpened()
+        }
+    }
+
+    // Usenet ready-handoff observer. The shared VM stages the opaque
+    // playback URL on `state.usenetPlaybackIntent` when /resolve flips
+    // to ready (or the bounded poll terminates ready). Hand it
+    // byte-for-byte to the existing TV `onPlayResolved` entrypoint and
+    // clear the intent so a recomposition cannot re-launch.
+    LaunchedEffect(state.usenetPlaybackIntent) {
+        val intent = state.usenetPlaybackIntent ?: return@LaunchedEffect
+        val media = state.mediaItem ?: return@LaunchedEffect
+        onPlayResolved(
+            intent.url,
+            "",
+            media,
+            state.streamContextSeason,
+            state.streamContextEpisode,
+            state.autoPlayStream != null,
+        )
+        detailViewModel.consumeUsenetPlaybackIntent()
+    }
+
     LaunchedEffect(showWatchlistPicker, watchlistModalRestoreController.pendingRestore?.restoreToken) {
         if (showWatchlistPicker) return@LaunchedEffect
         watchlistModalRestoreController.restorePendingFocus(
@@ -453,7 +485,7 @@ fun TvDetailsScreen(
                                 streamLocked -> TvPremiumAccess.UNLOCK_WITH_LIFETIME_LABEL
                                 state.isLoadingStreams -> stringResource(R.string.tv_detail_finding_streams)
                                 state.isResolving -> stringResource(R.string.tv_detail_resolving)
-                                !settingsState.debridConnected -> stringResource(R.string.tv_detail_connect_cloud)
+                                !settingsState.canPlayStreams -> stringResource(R.string.tv_detail_connect_cloud)
                                 else -> state.primaryPlayLabel
                             }
                             TvActionButton(
@@ -470,7 +502,7 @@ fun TvDetailsScreen(
                                     )
                                 },
                                 onClick = {
-                                    if (!settingsState.debridConnected) {
+                                    if (!settingsState.canPlayStreams) {
                                         runPremiumAction(TvEntitledFeature.CLOUD_PROVIDER_SETUP) {
                                             context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE)
                                                 .edit()
@@ -1078,6 +1110,8 @@ fun TvDetailsScreen(
                 }
             }
 
+            // Preparing is now a full-screen overlay rendered outside the
+            // lazy list — see the overlay block at the end of this scope.
             if (state.resolveError != null) {
                 item(key = "resolve_error") {
                     Text(
@@ -1153,11 +1187,18 @@ fun TvDetailsScreen(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null,
                             ) {
-                                detailViewModel.resolveStream(
-                                    stream = stream,
-                                    provider = settingsViewModel.getDebridProvider(),
-                                    apiKey = settingsViewModel.getDebridApiKey(),
-                                )
+                                // USENET_NZBDAV rows go through the shared
+                                // NzbDAV resolver; everything else stays on
+                                // the existing debrid/addon resolve path.
+                                if (stream.accelerationProvenanceKind == CandidateProvenanceKind.USENET_NZBDAV) {
+                                    detailViewModel.selectUsenetSource(stream)
+                                } else {
+                                    detailViewModel.resolveStream(
+                                        stream = stream,
+                                        provider = settingsViewModel.getDebridProvider(),
+                                        apiKey = settingsViewModel.getDebridApiKey(),
+                                    )
+                                }
                             }
                             .padding(horizontal = 16.dp, vertical = 10.dp),
                     ) {
@@ -1285,8 +1326,22 @@ fun TvDetailsScreen(
 
     // Download toast now rendered by TvNotificationQueue in TvRoot
 
+    } // end LazyColumn
+
+    // Preparing overlay — rendered inside the Box but outside the
+    // LazyColumn so it always layers above the detail surface, blocking
+    // D-pad interaction with the rest of the UI until the probe resolves
+    // or the user cancels. Must live in a @Composable scope (Box) — not
+    // in the LazyColumn's LazyListScope lambda.
+    val preparing = state.preparing
+    if (preparing != null) {
+        TvStreamPreparingOverlay(
+            state = preparing,
+            onCancel = { detailViewModel.cancelPreparing() },
+        )
+    }
+
     } // end Box
-}
 }
 
 @Composable
@@ -1493,5 +1548,98 @@ private fun TvRatingChip(label: String, value: String, iconRes: Int? = null) {
             color = Snow,
             fontWeight = FontWeight.SemiBold,
         )
+    }
+}
+
+/**
+ * TV-friendly full-screen overlay for the preparing state. D-pad focus
+ * defaults to the Cancel button so the user always has an obvious exit.
+ * Sized for couch viewing — larger spinner, bigger type, centered panel.
+ */
+@Composable
+internal fun TvStreamPreparingOverlay(
+    state: com.torve.presentation.detail.PreparingStreamState,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.88f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .widthIn(max = 560.dp)
+                .fillMaxWidth()
+                .padding(horizontal = 48.dp)
+                .clip(RoundedCornerShape(22.dp))
+                .background(Gunmetal)
+                .padding(horizontal = 40.dp, vertical = 36.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(64.dp),
+                strokeWidth = 4.dp,
+                color = Amber,
+            )
+            Spacer(Modifier.height(20.dp))
+            Text(
+                stringResource(R.string.stream_preparing_title),
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = Snow,
+            )
+            Spacer(Modifier.height(14.dp))
+            Text(
+                stringResource(R.string.stream_preparing_body, state.serviceName),
+                style = MaterialTheme.typography.bodyLarge,
+                color = Silver,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+            Spacer(Modifier.height(16.dp))
+
+            // Elapsed-time ticker driven by a 1-second pulse.
+            var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+            androidx.compose.runtime.LaunchedEffect(state.startedAt) {
+                while (true) {
+                    nowMs = System.currentTimeMillis()
+                    kotlinx.coroutines.delay(1_000L)
+                }
+            }
+            val elapsedSec = ((nowMs - state.startedAt) / 1000L).coerceAtLeast(0L)
+            val mm = elapsedSec / 60
+            val ss = elapsedSec % 60
+            val ssStr = if (ss < 10) "0$ss" else ss.toString()
+            Text(
+                stringResource(R.string.stream_preparing_elapsed, "$mm:$ssStr"),
+                style = MaterialTheme.typography.titleMedium,
+                color = Amber,
+                fontWeight = FontWeight.Medium,
+            )
+
+            Spacer(Modifier.height(20.dp))
+            Text(
+                stringResource(R.string.stream_preparing_subnote),
+                style = MaterialTheme.typography.bodyMedium,
+                color = Silver,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+            if (state.canCancel) {
+                Spacer(Modifier.height(28.dp))
+                androidx.compose.material3.OutlinedButton(
+                    onClick = onCancel,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.stream_preparing_cancel),
+                        color = Silver,
+                        fontWeight = FontWeight.Medium,
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                }
+            }
+        }
     }
 }

@@ -22,11 +22,19 @@ class AndroidKeystoreSecretStore(
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
 
-    override suspend fun put(key: IntegrationSecretKey, value: String) = putString(key.name, value)
+    override suspend fun put(key: IntegrationSecretKey, value: String, subKey: String?) =
+        putString(storageKey(key, subKey), value)
 
-    override suspend fun get(key: IntegrationSecretKey): String? = getString(key.name)
+    override suspend fun get(key: IntegrationSecretKey, subKey: String?): String? =
+        getString(storageKey(key, subKey))
 
-    override suspend fun remove(key: IntegrationSecretKey) = remove(key.name)
+    override suspend fun remove(key: IntegrationSecretKey, subKey: String?) =
+        remove(storageKey(key, subKey))
+
+    // Scoped entries are suffixed `<KEY>:<subKey>` so they coexist in the same
+    // SharedPreferences file without clobbering the legacy single-value slot.
+    private fun storageKey(key: IntegrationSecretKey, subKey: String?): String =
+        if (subKey.isNullOrEmpty()) key.name else "${key.name}:$subKey"
 
     // ── Storage mode tracking ──────────────────────────────────
     // Stored in the same encrypted SharedPreferences with a "_mode" suffix.
@@ -45,9 +53,13 @@ class AndroidKeystoreSecretStore(
 
     override suspend fun clearAllSecrets() {
         val editor = prefs.edit()
-        for (key in IntegrationSecretKey.entries) {
-            editor.remove(key.name)
-            editor.remove(modeKey(key))
+        val knownPrefixes = IntegrationSecretKey.entries.map { it.name }.toSet()
+        // Scoped entries ("<KEY>:<subKey>") aren't enumerable from the enum alone.
+        // Walk the prefs once and drop anything that belongs to an IntegrationSecretKey
+        // (bare name, scoped suffix, or mode flag).
+        for (existing in prefs.all.keys) {
+            val base = existing.substringBefore(':').removeSuffix("_mode")
+            if (base in knownPrefixes) editor.remove(existing)
         }
         editor.apply()
     }

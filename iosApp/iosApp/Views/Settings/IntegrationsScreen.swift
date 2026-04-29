@@ -24,6 +24,10 @@ struct IntegrationsScreen: View {
             plexSection
             omdbSection
             kodiSection
+            // Backend-managed NzbDAV integration. The card owns its own
+            // wrapper instance (StateObject) so it doesn't depend on the
+            // existing SettingsViewModelWrapper plumbing.
+            NzbdavSetupCard()
         }
         .navigationTitle("Integrations")
         .onAppear {

@@ -52,6 +52,11 @@ class AndroidPurchaseStringResolver(private val context: Context) : PurchaseStri
     override fun appleVerifyFailed() = s(R.string.purchase_apple_verify_failed)
     override fun storeRestoreFailed(storeLabel: String) = s(R.string.purchase_store_restore_failed, storeLabel)
 
+    // Verification resend UX
+    override fun verificationEmailSent() = s(R.string.verify_email_sent)
+    override fun verificationEmailWaitBeforeResend() = s(R.string.verify_wait_before_resend)
+    override fun verificationEmailSendFailed() = s(R.string.verify_email_not_verified)
+
     // Access presentation
     override fun freeLabel() = s(R.string.access_free_label)
     override fun freeHelperText() = s(R.string.access_free_helper)

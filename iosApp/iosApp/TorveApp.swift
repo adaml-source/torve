@@ -5,7 +5,10 @@ import shared
 struct TorveApp: App {
 
     init() {
-        KoinHelperKt.doInitKoin(platformModules: [IOSAppModule.create()])
+        let transferModule = IosTransferModuleKt.buildIosTransferModule(
+            engine: IOSTransferCryptoEngine()
+        )
+        KoinHelperKt.doInitKoin(platformModules: [IOSAppModule.create(), transferModule])
     }
 
     var body: some Scene {

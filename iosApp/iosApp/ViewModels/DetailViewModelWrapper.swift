@@ -97,4 +97,36 @@ final class DetailViewModelWrapper: ObservableObject {
     func clearResolvedStream() {
         viewModel.clearResolvedStream()
     }
+
+    // MARK: - NzbDAV / Usenet routing
+
+    /// Fire when the source sheet becomes visible (false → true edge).
+    /// Triggers the expanded warm pass for Usenet rows in the current
+    /// stream list. Idempotent and safely a no-op when there are no
+    /// Usenet rows; the shared coordinator dedupes.
+    func onSourceSheetOpened() {
+        viewModel.onSourceSheetOpened()
+    }
+
+    /// Route a USENET_NZBDAV row to the resolver. Non-Usenet rows must
+    /// continue to use `resolveStream(...)` — the call site decides via
+    /// `stream.accelerationProvenanceKind`.
+    func selectUsenetSource(_ stream: ParsedStream) {
+        viewModel.selectUsenetSource(stream: stream)
+    }
+
+    /// Acknowledge that the UI has consumed the Usenet playback intent
+    /// (staged the handoff URL into the player). Clears the intent in
+    /// shared state so a recomposition / re-render cannot re-launch
+    /// playback for the same handoff.
+    func consumeUsenetPlaybackIntent() {
+        viewModel.consumeUsenetPlaybackIntent()
+    }
+
+    /// Optional explicit cleanup hook. Cancels any in-flight Usenet
+    /// resolve / poll for this VM's content. Safe to call from a
+    /// `.onDisappear` if the screen wants deterministic teardown.
+    func clearUsenetWork() {
+        viewModel.clear()
+    }
 }

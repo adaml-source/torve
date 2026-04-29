@@ -50,11 +50,18 @@ struct EpisodeSelector: View {
                 streams: wrapper.state.streams as? [ParsedStream] ?? [],
                 isResolving: wrapper.state.isResolving,
                 onStreamSelected: { stream in
-                    wrapper.resolveStream(stream)
+                    if stream.accelerationProvenanceKind == .usenetNzbdav {
+                        wrapper.selectUsenetSource(stream)
+                    } else {
+                        wrapper.resolveStream(stream)
+                    }
                     showStreamPicker = false
                 },
                 onDismiss: { showStreamPicker = false }
             )
+        }
+        .onChange(of: showStreamPicker) { _, isVisible in
+            if isVisible { wrapper.onSourceSheetOpened() }
         }
     }
 

@@ -4,6 +4,8 @@ import shared
 struct PandaSetupScreen: View {
     @StateObject private var wrapper = PandaSetupViewModelWrapper()
     @Environment(\.dismiss) private var dismiss
+    @State private var recoveryDialogShown = false
+    @State private var recoveryInput = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -576,6 +578,10 @@ struct PandaSetupScreen: View {
                     reviewRow("Usenet", wrapper.state.usenetProvider)
                 }
 
+                if wrapper.state.isEditMode && wrapper.state.configId != nil {
+                    managementTokenSection
+                }
+
                 if wrapper.state.addonInstalled {
                     VStack(alignment: .leading) {
                         Label("Panda installed", systemImage: "checkmark.seal.fill")
@@ -590,10 +596,30 @@ struct PandaSetupScreen: View {
                     .background(Color.green.opacity(0.1))
                     .cornerRadius(12)
 
+                    if let mgmtToken = wrapper.state.pendingManagementTokenDisplay,
+                       !mgmtToken.isEmpty {
+                        PandaManagementTokenCard(
+                            token: mgmtToken,
+                            notice: wrapper.state.managementTokenNotice,
+                            onAcknowledge: { wrapper.acknowledgeManagementTokenDisplay() }
+                        )
+                    }
+
                     Button("Done") { dismiss() }
                         .buttonStyle(.borderedProminent)
                         .tint(.orange)
                 } else {
+                    if wrapper.state.isEditMode && wrapper.state.editRequiresRecovery {
+                        Text(
+                            "This device doesn't have a Panda management token yet. Open Manage Panda → 'I need a management token' to paste the admin-issued token before editing this config."
+                        )
+                        .font(.caption)
+                        .foregroundColor(.red)
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.red.opacity(0.08))
+                        .cornerRadius(10)
+                    }
                     if let saveError = wrapper.state.saveError {
                         Text(saveError).foregroundColor(.red).font(.caption)
                     }
@@ -625,6 +651,60 @@ struct PandaSetupScreen: View {
             Text(value).fontWeight(.medium)
         }
         .padding(.vertical, 8)
+    }
+
+    private var managementTokenSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Divider()
+            Text("Management token")
+                .font(.headline)
+            Text(
+                wrapper.state.hasManagementToken
+                ? "Required for editing, deleting, or rotating this Panda config."
+                : "This device has no management token for this config. Paste an admin-issued token to unlock edits."
+            )
+            .font(.caption)
+            .foregroundColor(.secondary)
+
+            if wrapper.state.hasManagementToken {
+                Button("Rotate management token") { wrapper.rotateManagementToken() }
+                    .buttonStyle(.bordered)
+                    .disabled(wrapper.state.rotateInProgress)
+                Button("Reset leaked manifest URL") { wrapper.rotateManifestUrl() }
+                    .buttonStyle(.bordered)
+                    .disabled(wrapper.state.rotateInProgress)
+            } else {
+                Button("I need a management token") {
+                    recoveryInput = ""
+                    recoveryDialogShown = true
+                }
+                .buttonStyle(.bordered)
+            }
+
+            if let url = URL(string: "https://torve.app/help.html#article:panda-management-token") {
+                Link("Learn more", destination: url)
+                    .foregroundColor(.orange)
+            }
+
+            if let rotErr = wrapper.state.rotateError {
+                Text(rotErr).font(.caption).foregroundColor(.red)
+            }
+        }
+        .alert("Paste management token", isPresented: $recoveryDialogShown) {
+            TextField("Token", text: $recoveryInput)
+                .textInputAutocapitalization(.never)
+                .disableAutocorrection(true)
+            Button("Validate") {
+                wrapper.recoverManagementToken(recoveryInput)
+            }
+            .disabled(recoveryInput.trimmingCharacters(in: .whitespaces).isEmpty)
+            Button("Cancel", role: .cancel) { wrapper.clearError() }
+        } message: {
+            Text(
+                wrapper.state.recoveryError ??
+                "Paste the admin-issued management token. It validates immediately; invalid tokens aren't stored."
+            )
+        }
     }
 }
 

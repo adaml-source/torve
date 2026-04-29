@@ -90,6 +90,20 @@ struct SettingsScreen: View {
             NavigationLink(value: Route.manageDevices) {
                 Label("Manage Devices", systemImage: "desktopcomputer")
             }
+            // Recovery card surfaces only when 2+ transferable provider
+            // categories have no local credentials. Self-hides otherwise.
+            // Its "Receive credentials" button is a NavigationLink to
+            // Route.transferReceive — works inside this NavigationStack.
+            RestoreSetupRecoveryCard()
+            NavigationLink(value: Route.transferSend) {
+                Label("Send credentials to another device", systemImage: "square.and.arrow.up.on.square")
+            }
+            NavigationLink(value: Route.transferReceive) {
+                Label("Receive credentials from another device", systemImage: "square.and.arrow.down.on.square")
+            }
+            NavigationLink(value: Route.transferDiagnostics) {
+                Label("Transfer diagnostics", systemImage: "stethoscope")
+            }
         }
     }
 

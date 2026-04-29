@@ -77,6 +77,9 @@ import com.torve.android.R
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.presentation.settings.SettingsViewModel
+import com.torve.presentation.usenet.NzbdavSetupViewModel
+import com.torve.presentation.usenet.NzbdavStatus
+import com.torve.presentation.usenet.NzbdavTestResult
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
@@ -483,7 +486,141 @@ fun IntegrationsScreen(
                 }
             }
         }
+
+        Spacer(Modifier.height(12.dp))
+
+        // ── NzbDAV ──
+        // Backend-managed integration. The app never talks to the user's
+        // NzbDAV instance directly — base URL + API key are forwarded to
+        // the Torve backend which owns the connection.
+        NzbdavSetupSection()
     }
+}
+
+@Composable
+private fun NzbdavSetupSection(
+    vm: NzbdavSetupViewModel = koinInject(),
+) {
+    val state by vm.state.collectAsState()
+    IntegrationCard(
+        title = stringResource(R.string.integrations_nzbdav_title),
+        description = stringResource(R.string.integrations_nzbdav_desc),
+    ) {
+        // ── Status line ──
+        NzbdavStatusLine(state.status)
+
+        Spacer(Modifier.height(10.dp))
+
+        IntegrationTextField(
+            label = stringResource(R.string.integrations_nzbdav_base_url),
+            value = state.baseUrl,
+            onValueChange = { vm.updateBaseUrl(it) },
+            isSensitive = false,
+        )
+        Spacer(Modifier.height(6.dp))
+        IntegrationTextField(
+            label = stringResource(R.string.integrations_nzbdav_api_key),
+            value = state.apiKey,
+            onValueChange = { vm.updateApiKey(it) },
+            isSensitive = true,
+        )
+
+        // Inline transient action feedback. Neutral copy only — backend
+        // tokens / exception bodies never reach this surface (enforced
+        // by NzbdavSetupViewModel mapping + tests).
+        state.lastTestResult?.let { result ->
+            Spacer(Modifier.height(8.dp))
+            NzbdavLastActionLine(result)
+        }
+
+        Spacer(Modifier.height(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Button(
+                onClick = { vm.test() },
+                enabled = !state.isTesting && !state.isSaving && !state.isRemoving,
+                colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
+            ) {
+                if (state.isTesting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        strokeWidth = 2.dp,
+                        color = Obsidian,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                }
+                Text(stringResource(R.string.integrations_nzbdav_test))
+            }
+            Spacer(Modifier.width(8.dp))
+            Button(
+                onClick = { vm.save() },
+                enabled = !state.isSaving && !state.isTesting && !state.isRemoving,
+                colors = ButtonDefaults.buttonColors(containerColor = Emerald, contentColor = Obsidian),
+            ) {
+                if (state.isSaving) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        strokeWidth = 2.dp,
+                        color = Obsidian,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                }
+                Text(stringResource(R.string.integrations_nzbdav_save))
+            }
+            Spacer(Modifier.weight(1f))
+            OutlinedButton(
+                onClick = { vm.remove() },
+                enabled = state.status !is NzbdavStatus.NotConfigured &&
+                    !state.isRemoving && !state.isSaving && !state.isTesting,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Silver),
+            ) {
+                if (state.isRemoving) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        strokeWidth = 2.dp,
+                        color = Silver,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                }
+                Text(stringResource(R.string.integrations_nzbdav_remove))
+            }
+        }
+    }
+}
+
+@Composable
+private fun NzbdavStatusLine(status: NzbdavStatus) {
+    val (text, color) = when (status) {
+        NzbdavStatus.Loading -> stringResource(R.string.integrations_nzbdav_status_loading) to Silver
+        NzbdavStatus.NotConfigured -> stringResource(R.string.integrations_nzbdav_status_not_configured) to Silver
+        is NzbdavStatus.Connected ->
+            if (status.degraded) stringResource(R.string.integrations_nzbdav_status_connected_degraded) to Amber
+            else stringResource(R.string.integrations_nzbdav_status_connected) to Emerald
+        NzbdavStatus.ConnectionFailed ->
+            stringResource(R.string.integrations_nzbdav_status_failed) to Ruby
+    }
+    Text(
+        text = text,
+        color = color,
+        style = MaterialTheme.typography.bodySmall,
+        fontWeight = FontWeight.Medium,
+    )
+}
+
+@Composable
+private fun NzbdavLastActionLine(result: NzbdavTestResult) {
+    val (text, color) = when (result) {
+        NzbdavTestResult.Ok -> stringResource(R.string.integrations_nzbdav_action_test_ok) to Emerald
+        NzbdavTestResult.DegradedOk -> stringResource(R.string.integrations_nzbdav_action_test_degraded) to Amber
+        NzbdavTestResult.Failed -> stringResource(R.string.integrations_nzbdav_action_test_failed) to Ruby
+        NzbdavTestResult.MissingFields -> stringResource(R.string.integrations_nzbdav_action_missing_fields) to Ruby
+        NzbdavTestResult.Saved -> stringResource(R.string.integrations_nzbdav_action_saved) to Emerald
+        NzbdavTestResult.Removed -> stringResource(R.string.integrations_nzbdav_action_removed) to Silver
+    }
+    Text(
+        text = text,
+        color = color,
+        style = MaterialTheme.typography.bodySmall,
+    )
 }
 
 /** Reusable device-code auth section: clickable URL, copyable code, open-in-browser button. */

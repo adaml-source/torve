@@ -79,6 +79,36 @@ class TorveApp : Application() {
                 runCatching { getKoin().get<AccelerationInventorySyncService>().syncConnectedProviders() }
             }
             launch { runCatching { androidx.media3.decoder.ffmpeg.FfmpegLibrary.isAvailable() } }
+
+            // Provider-health: register shared checkers whose Android
+            // dependencies are bound, then run them once. Subsequent
+            // re-runs are driven by the credential-transfer completion
+            // notifier — see the observer below.
+            launch {
+                runCatching {
+                    val init = getKoin()
+                        .get<com.torve.android.providerhealth.AndroidProviderHealthInit>()
+                    init.start()
+                    init.refreshAll()
+                }
+            }
+
+            // Refresh provider-health rows the moment a credential
+            // transfer succeeds. The notifier ticks `lastImportEpochMs`
+            // on every Success branch (manual paste + relay-driven), so
+            // collecting it here drives a coordinator.runAll() per
+            // import — no recomposition-driven rerun storms.
+            launch {
+                runCatching {
+                    val notifier = getKoin()
+                        .get<com.torve.presentation.transfer.TransferImportCompletionNotifier>()
+                    val init = getKoin()
+                        .get<com.torve.android.providerhealth.AndroidProviderHealthInit>()
+                    notifier.lastImportEpochMs.collect { ms ->
+                        if (ms > 0L) init.refreshAll()
+                    }
+                }
+            }
         }
     }
 

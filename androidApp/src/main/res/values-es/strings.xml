@@ -1549,6 +1549,10 @@
     <string name="paywall_choose_lifetime">Elegir de por vida</string>
     <string name="paywall_retry_verification">Reintentar verificación</string>
     <string name="premium_refresh_access">Actualizar acceso</string>
+    <string name="paywall_needs_verification_title">Verifica tu correo para usar Premium en este dispositivo</string>
+    <string name="paywall_needs_verification_body">Actualizaste en otro dispositivo. Verifica tu correo para desbloquear Premium también aquí.</string>
+    <string name="paywall_needs_verification_action_send">Enviar correo de verificación</string>
+    <string name="paywall_needs_verification_action_refresh">Ya verificado — actualizar</string>
     <string name="paywall_marketplace_copy">La facturación es gestionada por %1$s.</string>
     <string name="paywall_refund_copy">Los reembolsos siguen las reglas aplicables del mercado.</string>
     <string name="purchase_received_message">%1$s Si no termina pronto, elige Restaurar compra.</string>

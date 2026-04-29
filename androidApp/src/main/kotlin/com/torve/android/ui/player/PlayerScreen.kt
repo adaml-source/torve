@@ -124,6 +124,7 @@ import com.torve.android.ui.system.configureTorveEdgeToEdge
 import com.torve.data.addon.ParsedStream
 import com.torve.data.addon.StreamRuntimeTelemetry
 import com.torve.data.addon.StreamSelector
+import com.torve.data.addon.isAddonHostedUrl
 import com.torve.data.simkl.SimklClient
 import com.torve.data.simkl.SimklIds
 import com.torve.data.simkl.SimklSyncBody
@@ -136,6 +137,7 @@ import com.torve.data.trakt.TraktHistoryMovie
 import com.torve.data.trakt.TraktHistoryShow
 import com.torve.data.trakt.TraktIds
 import com.torve.domain.model.ContentWarmupTrigger
+import com.torve.domain.model.DebridServiceType
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.Season
 import com.torve.domain.model.SourceAccelerationContext
@@ -146,6 +148,8 @@ import com.torve.domain.model.WatchHistoryEntry
 import com.torve.domain.model.WatchProgress
 import com.torve.domain.model.extractImdbIdOrNull
 import com.torve.domain.model.extractTmdbIdOrNull
+import com.torve.data.addon.SubtitleAggregator
+import com.torve.domain.player.ExternalSubtitle
 import com.torve.domain.player.NextEpisodeHelper
 import com.torve.domain.player.NextEpisodeInfo
 import com.torve.domain.player.PlayerEngine
@@ -203,6 +207,7 @@ fun PlayerScreen(
     simklClient: SimklClient = koinInject(),
     integrationSecretStore: IntegrationSecretStore = koinInject(),
     prefsRepo: PreferencesRepository = koinInject(),
+    subtitleAggregator: SubtitleAggregator = koinInject(),
 ) {
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
@@ -504,15 +509,56 @@ fun PlayerScreen(
         }
     }
 
+    // Side-loaded subtitles fetched from all installed Stremio subtitle
+    // addons (e.g. OpenSubtitles). Empty list is the common case; the engine
+    // treats an empty list as a no-op. Re-fetched when the content key
+    // changes (new title or new episode). MPV engine ignores side-loaded
+    // subs in the current bindings — see PlayerEngine.play default.
+    var externalSubtitles by remember { mutableStateOf<List<ExternalSubtitle>>(emptyList()) }
+
+    LaunchedEffect(mediaId, mediaType, seasonNumber, episodeNumber, showImdbId) {
+        // Prefer the series imdb id passed by nav; otherwise try to parse
+        // mediaId (addon items sometimes carry "tt…" directly); skip if
+        // neither is available. A skipped fetch is a graceful no-op —
+        // playback still works, just without addon subs.
+        val imdb = showImdbId?.trim()?.takeIf { it.isNotBlank() }
+            ?: mediaId.extractImdbIdOrNull()
+        if (imdb == null) {
+            externalSubtitles = emptyList()
+            return@LaunchedEffect
+        }
+        val addons = runCatching { addonRepo.getInstalledAddons() }.getOrNull().orEmpty()
+        val typeEnum = if (mediaType.equals("tv", ignoreCase = true) ||
+            mediaType.equals("series", ignoreCase = true)
+        ) MediaType.SERIES else MediaType.MOVIE
+        val fetched = runCatching {
+            subtitleAggregator.fetchSubtitles(
+                addons = addons,
+                type = typeEnum,
+                imdbId = imdb,
+                season = seasonNumber,
+                episode = episodeNumber,
+            )
+        }.getOrNull().orEmpty()
+        externalSubtitles = fetched.map { stremio ->
+            ExternalSubtitle(
+                url = stremio.url,
+                languageCode = stremio.lang.takeIf { it.isNotBlank() },
+                label = stremio.label,
+                mimeType = null, // engine infers from URL extension
+            )
+        }
+    }
+
     fun requestPlayback(url: String) {
         if (url.isBlank()) return
         currentUrl = url
         if (useMpv) {
             if (mpvSurfaceReady) {
-                engine.play(url)
+                engine.play(url, externalSubtitles)
             }
         } else {
-            engine.play(url)
+            engine.play(url, externalSubtitles)
         }
     }
 
@@ -543,9 +589,12 @@ fun PlayerScreen(
         val imdbId = showImdbId?.trim().takeIf { !it.isNullOrBlank() } ?: return false
         android.util.Log.w("Player", "Auto stability fallback requested: $reason")
 
-        val provider = settingsViewModel.getDebridProvider()
         val apiKey = settingsViewModel.getDebridApiKey()
-        if (apiKey.isBlank()) return false
+        // Nullable provider: addon-hosted streams (Panda + cloud download
+        // client) resolve without a local debrid key. Per-candidate
+        // resolveStream will throw if a given stream actually needs one.
+        val provider: DebridServiceType? =
+            if (apiKey.isBlank()) null else settingsViewModel.getDebridProvider()
 
         autoFallbackInProgress = true
         try {
@@ -595,6 +644,20 @@ fun PlayerScreen(
                     StreamRuntimeTelemetry.recordStartupTimeout(hostKey, 45_000L)
                     streamRepo.reportPlaybackOutcome(candidate, provider, success = false)
                     continue
+                }
+                // Addon-hosted URL? Probe before swapping — mid-playback we
+                // can't wait 5 min for Panda's cloud client, so skip any
+                // candidate that isn't serving right now. Non-addon URLs
+                // skip the probe entirely.
+                if (candidate.isAddonHostedUrl()) {
+                    val readiness = streamRepo.probeStreamReadiness(resolved.url.orEmpty())
+                    if (readiness !is com.torve.domain.repository.StreamReadiness.Ready) {
+                        android.util.Log.i(
+                            "Player",
+                            "startup_candidate_skip context=stability_fallback key=$key reason=${readiness::class.simpleName}",
+                        )
+                        continue
+                    }
                 }
 
                 val nextUrl = resolved.transcodeUrls?.mp4
@@ -667,6 +730,16 @@ fun PlayerScreen(
                     StreamRuntimeTelemetry.recordStartupTimeout(hostKey, 45_000L)
                     streamRepo.reportPlaybackOutcome(candidate, provider, success = false)
                     continue
+                }
+                if (candidate.isAddonHostedUrl()) {
+                    val readiness = streamRepo.probeStreamReadiness(resolved.url.orEmpty())
+                    if (readiness !is com.torve.domain.repository.StreamReadiness.Ready) {
+                        android.util.Log.i(
+                            "Player",
+                            "startup_candidate_skip context=full_fetch_fallback reason=${readiness::class.simpleName}",
+                        )
+                        continue
+                    }
                 }
 
                 val nextUrl = resolved.transcodeUrls?.mp4
@@ -1125,20 +1198,56 @@ fun PlayerScreen(
         if (!trackPrefsLoaded || trackPrefsAppliedForUrl) return@LaunchedEffect
         if (audioTracks.isEmpty() && subtitleTracks.isEmpty()) return@LaunchedEffect
 
+        // Step 1: audio. Prefer the per-content remembered tag; if none,
+        // try matching the global preferredAudioLanguage from Settings.
+        // Track whether the user's preferred audio language is actually
+        // present — drives the audio→sub fallback below.
+        val preferredAudioLanguage = settingsState.preferredAudioLanguage
+            .trim()
+            .takeIf { it.isNotBlank() }
+            ?.lowercase()
+        var preferredAudioLanguageMatched = preferredAudioLanguage == null
         preferredAudioTrackTag?.let { preferredTag ->
             audioTracks.firstOrNull { trackPreferenceTag(it) == preferredTag }?.let { track ->
-                if (!track.isSelected) {
-                    engine.selectAudioTrack(track.id)
+                if (!track.isSelected) engine.selectAudioTrack(track.id)
+                if (preferredAudioLanguage != null && languageMatches(track.language, preferredAudioLanguage)) {
+                    preferredAudioLanguageMatched = true
                 }
             }
         }
+        if (preferredAudioTrackTag == null && preferredAudioLanguage != null) {
+            val langTrack = audioTracks.firstOrNull { languageMatches(it.language, preferredAudioLanguage) }
+            if (langTrack != null) {
+                if (!langTrack.isSelected) engine.selectAudioTrack(langTrack.id)
+                preferredAudioLanguageMatched = true
+            }
+        }
+        // If preferredAudioLanguage is set but no track matches, the
+        // currently-selected audio is in a different language — the
+        // audio→sub fallback below will try to compensate.
+
+        // Step 2: subtitles. Priority order when subtitles are allowed:
+        //   1. Per-content remembered track tag (user's explicit last pick).
+        //   2. Global preferredSubtitleLanguage from Settings.
+        //   3. Audio-unavailable fallback: if preferredAudioLanguage is set
+        //      and no matching audio was found, enable a subtitle in that
+        //      language so the user at least has text in their preferred
+        //      language. Never forces subs on when the user has explicitly
+        //      disabled them — subtitlesPreferredEnabled is authoritative.
         if (subtitlesPreferredEnabled) {
-            preferredSubtitleTrackTag?.let { preferredTag ->
-                subtitleTracks.firstOrNull { trackPreferenceTag(it) == preferredTag }?.let { track ->
-                    if (!track.isSelected) {
-                        engine.selectSubtitleTrack(track.id)
-                    }
-                }
+            val applied = applyPreferredSubtitle(
+                subtitleTracks = subtitleTracks,
+                perContentTag = preferredSubtitleTrackTag,
+                preferredSubtitleLanguage = settingsState.preferredSubtitleLanguage
+                    .trim()
+                    .takeIf { it.isNotBlank() }
+                    ?.lowercase(),
+                audioFallbackLanguage = preferredAudioLanguage?.takeIf { !preferredAudioLanguageMatched },
+                selectTrack = { engine.selectSubtitleTrack(it) },
+            )
+            if (!applied && subtitleTracks.any { it.isSelected } && preferredSubtitleTrackTag == null) {
+                // No explicit preference matched; leave ExoPlayer's default
+                // selection alone so embedded "forced" tracks still work.
             }
         } else if (subtitleTracks.any { it.isSelected }) {
             engine.disableSubtitles()
@@ -1537,7 +1646,7 @@ fun PlayerScreen(
         if (currentUrl.isBlank()) {
             errorMessage = "No playback URL available"
         } else if (!useMpv) {
-            engine.play(currentUrl)
+            engine.play(currentUrl, externalSubtitles)
         }
         // mpv playback is started by the LaunchedEffect(mpvSurfaceReady) below
         if (!initialStartPositionConsumed && !showResumePrompt && resumePromptInitialPositionMs > 0L) {
@@ -1662,7 +1771,7 @@ fun PlayerScreen(
     // Start mpv playback only after its surface is attached
     LaunchedEffect(mpvSurfaceReady) {
         if (useMpv && mpvSurfaceReady && currentUrl.isNotBlank()) {
-            engine.play(currentUrl)
+            engine.play(currentUrl, externalSubtitles)
         }
     }
 
@@ -3590,7 +3699,7 @@ private suspend fun loadStartupPlaybackSelection(
 
 private suspend fun List<ParsedStream>.firstResolvedOrNull(
     streamRepo: StreamRepository,
-    provider: com.torve.domain.model.DebridServiceType,
+    provider: com.torve.domain.model.DebridServiceType?,
     apiKey: String,
     timeoutMs: Long,
     contextLabel: String,
@@ -3607,6 +3716,19 @@ private suspend fun List<ParsedStream>.firstResolvedOrNull(
             }
         } catch (_: Exception) {
             null
+        }
+        if (resolved != null && candidate.isAddonHostedUrl()) {
+            // Next-episode auto-resolve can't host the preparing overlay;
+            // skip any candidate that isn't serving right now rather than
+            // waiting on the cloud client.
+            val readiness = streamRepo.probeStreamReadiness(resolved.url.orEmpty())
+            if (readiness !is com.torve.domain.repository.StreamReadiness.Ready) {
+                android.util.Log.i(
+                    "Player",
+                    "${eventLabel}_skip context=$contextLabel key=$key reason=${readiness::class.simpleName}",
+                )
+                continue
+            }
         }
         if (resolved == null) {
             android.util.Log.w(
@@ -3672,8 +3794,10 @@ private suspend fun resolveAndPlayNextEpisode(
         val preferences = settingsViewModel.buildStreamPreferences()
         val addons = try { addonRepo.getInstalledAddons() } catch (_: Exception) { emptyList() }
         val debridAccounts = settingsViewModel.getDebridAccounts()
-        val provider = settingsViewModel.getDebridProvider()
         val apiKey = settingsViewModel.getDebridApiKey()
+        // Nullable provider: addon-hosted streams resolve without a local key.
+        val provider: DebridServiceType? =
+            if (apiKey.isBlank()) null else settingsViewModel.getDebridProvider()
         val deviceCaps = DeviceCodecProbe.probe()
         val startupSelection = loadStartupPlaybackSelection(
             type = MediaType.SERIES,
@@ -3929,6 +4053,30 @@ private fun trackPreferenceTag(track: TrackDescription): String {
         ?.takeIf { it.isNotEmpty() }
         ?: track.label.trim().lowercase().take(48)
 }
+
+/**
+ * Thin delegate to the module-level [com.torve.android.player.subtitleLanguageMatches].
+ * Kept as a file-local name so the composable's LaunchedEffect reads cleanly.
+ */
+private fun languageMatches(trackLanguage: String?, preferredLowercased: String): Boolean =
+    com.torve.android.player.subtitleLanguageMatches(trackLanguage, preferredLowercased)
+
+/**
+ * Thin delegate to the module-level [com.torve.android.player.selectPreferredSubtitle].
+ */
+private fun applyPreferredSubtitle(
+    subtitleTracks: List<TrackDescription>,
+    perContentTag: String?,
+    preferredSubtitleLanguage: String?,
+    audioFallbackLanguage: String?,
+    selectTrack: (Int) -> Unit,
+): Boolean = com.torve.android.player.selectPreferredSubtitle(
+    subtitleTracks = subtitleTracks,
+    perContentTag = perContentTag,
+    preferredSubtitleLanguage = preferredSubtitleLanguage,
+    audioFallbackLanguage = audioFallbackLanguage,
+    selectTrack = selectTrack,
+)
 
 internal fun formatTime(ms: Long): String {
     if (ms <= 0) return "0:00"

@@ -6,8 +6,10 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import android.net.Uri
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
@@ -24,6 +26,7 @@ import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import com.torve.domain.model.Channel
+import com.torve.domain.player.ExternalSubtitle
 import com.torve.domain.player.LiveAudioOutputMode
 import com.torve.domain.player.LiveAudioRecoveryMode
 import com.torve.domain.player.LiveTuneState
@@ -58,6 +61,14 @@ class ExoPlayerEngine(
     private var currentSubtitleTracks = listOf<TrackDescription>()
     private var currentAudioTracks = listOf<TrackDescription>()
     private var trackGroups = listOf<Tracks.Group>()
+
+    /**
+     * Side-loaded subtitle tracks supplied by the caller for the next
+     * [play] invocation. Consumed by [setPlaybackSource] when it builds
+     * the MediaItem. Cleared on each play() call so the list never
+     * carries across unrelated streams.
+     */
+    private var pendingExternalSubtitles: List<ExternalSubtitle> = emptyList()
     private val delayProcessor = DelayAudioProcessor()
     val equalizerProcessor = EqualizerAudioProcessor()
 
@@ -537,6 +548,13 @@ class ExoPlayerEngine(
                 outputMode = userLiveAudioOutputMode,
             )
         }
+    }
+
+    override fun play(url: String, externalSubtitles: List<ExternalSubtitle>) {
+        // Stage subs for the next MediaItem build, then delegate to the
+        // single-arg form so all the existing setup stays in one place.
+        pendingExternalSubtitles = externalSubtitles
+        play(url)
     }
 
     override fun play(url: String) {
@@ -1198,8 +1216,23 @@ class ExoPlayerEngine(
     private fun ExoPlayer.setPlaybackSource(url: String) {
         val overriddenMediaSource = testMediaSourceFactory?.invoke(context, url)
         if (overriddenMediaSource != null) {
+            // Test path — don't attach external subs so the fixture stays
+            // reproducible. Tests targeting side-load behavior should build
+            // the fixture MediaSource themselves.
             setMediaSource(overriddenMediaSource)
-        } else if (currentPlaybackContext != null) {
+            // Consume so the next real play() starts clean.
+            pendingExternalSubtitles = emptyList()
+            return
+        }
+        val subtitleConfigs = buildExternalSubtitleConfigurations(pendingExternalSubtitles)
+        // Consume regardless of outcome so a failed build doesn't leak
+        // subs into the next play() on an unrelated stream.
+        pendingExternalSubtitles = emptyList()
+        val builder = MediaItem.Builder().setUri(url)
+        if (subtitleConfigs.isNotEmpty()) {
+            builder.setSubtitleConfigurations(subtitleConfigs)
+        }
+        if (currentPlaybackContext != null) {
             // Live IPTV: configure speed control so the player stays at the
             // live edge instead of drifting behind and triggering periodic
             // BEHIND_LIVE_WINDOW resyncs (visible as 5-second repeats).
@@ -1210,14 +1243,41 @@ class ExoPlayerEngine(
                 .setMinOffsetMs(2_000)
                 .setMaxOffsetMs(12_000)
                 .build()
-            setMediaItem(
-                MediaItem.Builder()
-                    .setUri(url)
-                    .setLiveConfiguration(liveConfig)
-                    .build(),
-            )
-        } else {
-            setMediaItem(MediaItem.fromUri(url))
+            builder.setLiveConfiguration(liveConfig)
+        }
+        setMediaItem(builder.build())
+    }
+
+    /**
+     * Convert side-loaded [ExternalSubtitle] tracks into Media3's
+     * [MediaItem.SubtitleConfiguration] format. Invalid/unparseable entries
+     * are skipped rather than failing the whole play() call.
+     */
+    private fun buildExternalSubtitleConfigurations(
+        subs: List<ExternalSubtitle>,
+    ): List<MediaItem.SubtitleConfiguration> {
+        if (subs.isEmpty()) return emptyList()
+        return subs.mapNotNull { sub ->
+            val parsedUri = runCatching { Uri.parse(sub.url) }.getOrNull() ?: return@mapNotNull null
+            val mime = sub.mimeType ?: inferSubtitleMimeType(sub.url) ?: return@mapNotNull null
+            MediaItem.SubtitleConfiguration.Builder(parsedUri)
+                .setMimeType(mime)
+                .apply {
+                    sub.languageCode?.takeIf { it.isNotBlank() }?.let { setLanguage(it) }
+                    sub.label?.takeIf { it.isNotBlank() }?.let { setLabel(it) }
+                    setSelectionFlags(C.SELECTION_FLAG_DEFAULT.inv().and(0))
+                }
+                .build()
+        }
+    }
+
+    private fun inferSubtitleMimeType(url: String): String? {
+        val lower = url.lowercase()
+        return when {
+            lower.endsWith(".vtt") -> MimeTypes.TEXT_VTT
+            lower.endsWith(".srt") -> MimeTypes.APPLICATION_SUBRIP
+            lower.endsWith(".ttml") || lower.endsWith(".xml") -> MimeTypes.APPLICATION_TTML
+            else -> null
         }
     }
 

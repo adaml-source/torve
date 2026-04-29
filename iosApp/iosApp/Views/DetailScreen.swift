@@ -42,11 +42,24 @@ struct DetailScreen: View {
                 streams: wrapper.state.streams as? [ParsedStream] ?? [],
                 isResolving: wrapper.state.isResolving,
                 onStreamSelected: { stream in
-                    wrapper.resolveStream(stream)
+                    // Branch on provenance: USENET_NZBDAV rows go through
+                    // the NzbDAV resolver; everything else stays on the
+                    // existing debrid/addon resolve path verbatim.
+                    if stream.accelerationProvenanceKind == .usenetNzbdav {
+                        wrapper.selectUsenetSource(stream)
+                    } else {
+                        wrapper.resolveStream(stream)
+                    }
                     showStreamPicker = false
                 },
                 onDismiss: { showStreamPicker = false }
             )
+        }
+        .onChange(of: showStreamPicker) { _, isVisible in
+            // One-shot per false → true cycle. Fires the expanded sheet
+            // warmup for Usenet rows in the current list. The shared
+            // coordinator dedupes; safe even on rapid reopens.
+            if isVisible { wrapper.onSourceSheetOpened() }
         }
         .sheet(isPresented: $showTrailer) {
             if let key = wrapper.state.mediaItem?.trailerKey {
@@ -57,6 +70,17 @@ struct DetailScreen: View {
             if let url = url, !url.isEmpty {
                 let title = wrapper.state.mediaItem?.title ?? "Video"
                 wrapper.clearResolvedStream()
+                router.navigate(to: .player(streamUrl: url, title: title))
+            }
+        }
+        .onChange(of: wrapper.state.usenetPlaybackIntent?.url) { _, url in
+            // Ready handoff for Usenet sources. The opaque URL is passed
+            // byte-for-byte into the existing iOS player entrypoint —
+            // no parsing, no normalization. The intent is cleared in
+            // shared state so recomposition cannot re-launch.
+            if let url = url, !url.isEmpty {
+                let title = wrapper.state.mediaItem?.title ?? "Video"
+                wrapper.consumeUsenetPlaybackIntent()
                 router.navigate(to: .player(streamUrl: url, title: title))
             }
         }

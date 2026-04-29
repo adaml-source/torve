@@ -19,18 +19,24 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,6 +48,7 @@ import coil3.compose.AsyncImage
 import com.torve.android.BuildConfig
 import com.torve.android.R
 import com.torve.android.ui.components.BackButton
+import com.torve.android.ui.panda.PandaManagementTokenCard
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Gunmetal
 import com.torve.android.ui.theme.Ruby
@@ -49,15 +56,21 @@ import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Steel
 import com.torve.presentation.addon.AddonViewModel
+import com.torve.presentation.panda.PandaSetupViewModel
 import org.koin.compose.koinInject
+
+private const val HELP_URL_MANAGEMENT_TOKEN =
+    "https://torve.app/help.html#article:panda-management-token"
 
 @Composable
 fun ManagePandaScreen(
     onBack: () -> Unit,
     onSetupClick: () -> Unit = {},
     viewModel: AddonViewModel = koinInject(),
+    pandaViewModel: PandaSetupViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
+    val pandaState by pandaViewModel.state.collectAsState()
     val context = LocalContext.current
 
     val pandaManifestUrl = remember {
@@ -75,11 +88,15 @@ fun ManagePandaScreen(
     val pandaAddon = remember(state.addons) {
         state.addons.find {
             AddonViewModel.normalizeManifestUrl(it.manifestUrl) == pandaManifestUrl
+        } ?: state.addons.find {
+            it.manifestUrl.contains("panda.torve.app") ||
+                it.manifest.id == "com.torve.panda"
         }
     }
     val isInstalled = pandaAddon != null
     val isEnabled = pandaAddon?.isEnabled ?: false
-    val isInstalling = state.isInstalling && state.installingUrl == pandaManifestUrl
+
+    var showRecoveryDialog by remember { mutableStateOf(false) }
 
     Column(
         Modifier
@@ -113,7 +130,6 @@ fun ManagePandaScreen(
         ) {
             Spacer(Modifier.height(16.dp))
 
-            // Logo
             Box(
                 modifier = Modifier
                     .size(72.dp)
@@ -130,7 +146,6 @@ fun ManagePandaScreen(
 
             Spacer(Modifier.height(12.dp))
 
-            // Name
             Text(
                 stringResource(R.string.addon_popular_panda_name),
                 style = MaterialTheme.typography.headlineSmall,
@@ -138,7 +153,6 @@ fun ManagePandaScreen(
                 color = Snow,
             )
 
-            // Version
             if (isInstalled && pandaAddon?.manifest?.version != null) {
                 Text(
                     stringResource(R.string.manage_panda_version, pandaAddon.manifest.version),
@@ -149,7 +163,6 @@ fun ManagePandaScreen(
 
             Spacer(Modifier.height(8.dp))
 
-            // Description
             Text(
                 pandaAddon?.manifest?.description
                     ?: stringResource(R.string.addon_popular_panda_desc),
@@ -162,7 +175,6 @@ fun ManagePandaScreen(
             Spacer(Modifier.height(16.dp))
 
             if (isInstalled) {
-                // Enabled toggle
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -193,7 +205,6 @@ fun ManagePandaScreen(
             }
 
             if (!isInstalled) {
-                // Not installed state
                 Text(
                     stringResource(R.string.manage_panda_not_installed),
                     style = MaterialTheme.typography.bodyMedium,
@@ -202,12 +213,21 @@ fun ManagePandaScreen(
                 Spacer(Modifier.height(16.dp))
             }
 
-            // Actions
+            // One-time display following a successful rotate-management. Shown
+            // exactly once per rotate; "I've saved it" clears it.
+            if (!pandaState.pendingManagementTokenDisplay.isNullOrBlank()) {
+                PandaManagementTokenCard(
+                    token = pandaState.pendingManagementTokenDisplay,
+                    notice = pandaState.managementTokenNotice,
+                    onAcknowledge = { pandaViewModel.acknowledgeManagementTokenDisplay() },
+                )
+                Spacer(Modifier.height(16.dp))
+            }
+
             Column(
                 Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                // Native setup — primary action
                 Button(
                     onClick = onSetupClick,
                     modifier = Modifier.fillMaxWidth(),
@@ -224,14 +244,6 @@ fun ManagePandaScreen(
                     )
                 }
 
-                // Bare "Install Panda" button removed: installing the placeholder
-                // manifest at panda.torve.app/manifest.json registers an unconfigured
-                // addon that returns 404 on every /stream request. The only valid
-                // install path is through the setup flow, which POSTs to
-                // /api/v1/configs and installs the returned /u/<token>/manifest.json.
-                // The primary "Open setup" button above already drives that.
-
-                // Web fallback
                 OutlinedButton(
                     onClick = {
                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(pandaConfigUrl))
@@ -248,9 +260,80 @@ fun ManagePandaScreen(
                 }
 
                 if (isInstalled) {
-                    // Remove Panda
+                    // Management-token section. Gated on the addon being installed
+                    // so we never surface tooling for a config the user can't
+                    // actually address.
+                    HorizontalDivider(color = Steel.copy(alpha = 0.15f))
+                    Text(
+                        "Management token",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Snow,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                    )
+                    Text(
+                        if (pandaState.hasManagementToken) {
+                            "Required for editing, deleting, or rotating this Panda config."
+                        } else {
+                            "This device has no management token for this config. Paste an admin-issued token below to unlock config edits."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Silver,
+                    )
+
+                    if (!pandaState.hasManagementToken) {
+                        OutlinedButton(
+                            onClick = { showRecoveryDialog = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                        ) {
+                            Text("I need a management token", color = Silver)
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = { pandaViewModel.rotateManagementToken() },
+                            enabled = !pandaState.rotateInProgress,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                        ) {
+                            Text("Rotate management token", color = Silver)
+                        }
+                        OutlinedButton(
+                            onClick = { pandaViewModel.rotateManifestUrl() },
+                            enabled = !pandaState.rotateInProgress,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                        ) {
+                            Text("Reset leaked manifest URL", color = Silver)
+                        }
+                    }
+
+                    TextButton(
+                        onClick = {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(HELP_URL_MANAGEMENT_TOKEN))
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            context.startActivity(intent)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Learn more", color = Amber)
+                    }
+
+                    pandaState.rotateError?.let { err ->
+                        Text(err, color = Ruby, style = MaterialTheme.typography.bodySmall)
+                    }
+
+                    HorizontalDivider(color = Steel.copy(alpha = 0.15f))
+
                     OutlinedButton(
                         onClick = {
+                            // Server-side delete runs with the management token
+                            // (handled by PandaSetupViewModel.deleteConfig); the
+                            // local addon row is dropped independently so both
+                            // paths converge on a clean slate.
+                            pandaViewModel.deleteConfig()
                             pandaAddon?.let { viewModel.removeAddon(it.manifestUrl) }
                         },
                         modifier = Modifier.fillMaxWidth(),
@@ -265,7 +348,6 @@ fun ManagePandaScreen(
                 }
             }
 
-            // Error display
             state.installError?.let { error ->
                 Spacer(Modifier.height(12.dp))
                 Text(
@@ -286,4 +368,70 @@ fun ManagePandaScreen(
             Spacer(Modifier.height(32.dp))
         }
     }
+
+    if (showRecoveryDialog) {
+        // Auto-dismiss on success: the VM flips hasManagementToken when the
+        // server accepts the admin-issued token.
+        LaunchedEffect(pandaState.hasManagementToken) {
+            if (pandaState.hasManagementToken) showRecoveryDialog = false
+        }
+        RecoveryDialog(
+            inProgress = pandaState.recoveryInProgress,
+            error = pandaState.recoveryError,
+            onDismiss = {
+                showRecoveryDialog = false
+                pandaViewModel.clearError()
+            },
+            onSubmit = { adminToken ->
+                pandaViewModel.recoverManagementToken(adminToken)
+            },
+        )
+    }
+}
+
+@Composable
+private fun RecoveryDialog(
+    inProgress: Boolean,
+    error: String?,
+    onDismiss: () -> Unit,
+    onSubmit: (String) -> Unit,
+) {
+    var input by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Paste management token") },
+        text = {
+            Column {
+                Text(
+                    "Paste the admin-issued management token for this Panda config. " +
+                        "It validates immediately; invalid tokens aren't stored.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Silver,
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    label = { Text("Management token") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                error?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Text(it, color = Ruby, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !inProgress && input.isNotBlank(),
+                onClick = { onSubmit(input) },
+            ) {
+                Text(if (inProgress) "Checking…" else "Validate and save", color = Amber)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel", color = Silver) }
+        },
+    )
 }

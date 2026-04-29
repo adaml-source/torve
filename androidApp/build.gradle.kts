@@ -196,6 +196,25 @@ dependencies {
     // YouTube Player (in-app trailer playback)
     implementation("com.pierfrancescosoffritti.androidyoutubeplayer:core:12.1.0")
 
+    // ── Credential transfer (Phase 3) ──
+    // Tink covers the Android API < 33 X25519 gap; the JVM JCA provider
+    // only added X25519 in API 33. We use Tink's `subtle.X25519` for
+    // keypair gen + ECDH, plus platform AES-GCM and HMAC-SHA256 for
+    // HKDF (both available on every supported API).
+    implementation(libs.tink.android)
+
+    // ML Kit barcode scanning, standalone (no Play Services dep). Used
+    // only by the credential-transfer scan surface; gated at runtime on
+    // the device having a camera (TV form factor without camera hides
+    // the scan button).
+    implementation(libs.mlkit.barcode)
+
+    // CameraX — preview + lifecycle binding for the QR scanner.
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+
     // ── Google-only dependencies (excluded from Amazon builds) ──
 
     // Google Cast (Chromecast) — no GMS on Fire TV

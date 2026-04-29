@@ -21,7 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -88,6 +88,7 @@ import com.torve.presentation.catalog.RuntimeFilter
 import com.torve.presentation.catalog.SortOption
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.search.SearchFilter
+import com.torve.presentation.search.SearchRenderPhase
 import com.torve.presentation.search.SearchViewModel
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
@@ -418,8 +419,14 @@ fun SearchScreen(
         }
 
         // ── Active Search Banner ──
-        val displayItems = if (state.query.length >= 2 || state.hasActiveSearch) state.results else state.discoverResults
-        val isLoading = state.isSearching || state.isDiscovering
+        // `displayItems` and `isLoading` are derived on the state itself so
+        // the composable cannot compose an inconsistent view from partial
+        // field updates. The shared-module combine stage guarantees that
+        // state.renderPhase, state.results, and state.discoverResults are
+        // produced atomically for a single generation.
+        val displayItems = state.displayItems
+        val isLoading = state.renderPhase == SearchRenderPhase.SEARCHING ||
+            state.renderPhase == SearchRenderPhase.DISCOVERING
 
         if (state.hasActiveSearch && displayItems.isNotEmpty()) {
             Row(
@@ -491,18 +498,40 @@ fun SearchScreen(
             }
         }
         Box(modifier = Modifier.fillMaxSize()) {
-            when {
-                isLoading && displayItems.isEmpty() -> {
-                    CircularProgressIndicator(
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .size(40.dp),
-                        color = Amber,
-                        strokeWidth = 3.dp,
+            // Single-decision render. `state.renderPhase` is authoritative —
+            // `displayItems.isNotEmpty()` and `isLoading` are only used as
+            // secondary hints (e.g., keep prior results visible while a
+            // newer search loads, so the grid doesn't blank out).
+            when (state.renderPhase) {
+                SearchRenderPhase.SEARCHING,
+                SearchRenderPhase.DISCOVERING -> {
+                    if (displayItems.isNotEmpty()) {
+                        // Keep the old grid visible while the newer search
+                        // is in flight — avoids a blank flash when typing.
+                        SearchResultsGrid(
+                            items = displayItems,
+                            onMediaClick = onMediaClick,
+                        )
+                    } else {
+                        CircularProgressIndicator(
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .size(40.dp),
+                            color = Amber,
+                            strokeWidth = 3.dp,
+                        )
+                    }
+                }
+
+                SearchRenderPhase.RESULTS -> {
+                    SearchResultsGrid(
+                        items = displayItems,
+                        onMediaClick = onMediaClick,
                     )
                 }
 
-                displayItems.isEmpty() && (state.query.length >= 2 || state.filter.isActive) && !isLoading -> {
+                SearchRenderPhase.EMPTY,
+                SearchRenderPhase.ERROR -> {
                     Column(
                         modifier = Modifier.align(Alignment.Center),
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -528,24 +557,7 @@ fun SearchScreen(
                     }
                 }
 
-                displayItems.isNotEmpty() -> {
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(minSize = 130.dp),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                    ) {
-                        itemsIndexed(displayItems, key = { index, item -> mediaItemLazyKey(item, index) }) { _, item ->
-                            PosterCard(
-                                item = item,
-                                sizeOverride = CardSize.MEDIUM,
-                                onClick = { onMediaClick(item) },
-                            )
-                        }
-                    }
-                }
-
-                else -> {
+                SearchRenderPhase.IDLE -> {
                     Column(
                         modifier = Modifier.align(Alignment.Center),
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -608,6 +620,40 @@ fun SearchScreen(
         )
     }
 }
+}
+
+/**
+ * Renders the filtered display items. Pulled out so both the RESULTS phase
+ * and the "new search in flight, keep old grid visible" branch share one
+ * key-stable implementation. Item keys are derived purely from the media
+ * item's stable id + type via [mediaItemLazyKey], so identical items
+ * preserve their card state across generation changes.
+ */
+@Composable
+private fun SearchResultsGrid(
+    items: List<com.torve.domain.model.MediaItem>,
+    onMediaClick: (com.torve.domain.model.MediaItem) -> Unit,
+) {
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(minSize = 130.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        items(
+            items = items,
+            // Stable key: the same MediaItem id always maps to the same
+            // grid slot, so swapping the list contents doesn't reset
+            // card state or re-fire image requests for preserved items.
+            key = { item -> mediaItemLazyKey(item, 0) },
+        ) { item ->
+            PosterCard(
+                item = item,
+                sizeOverride = CardSize.MEDIUM,
+                onClick = { onMediaClick(item) },
+            )
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

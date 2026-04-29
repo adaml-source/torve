@@ -203,6 +203,19 @@ data class SyncWatchStateReportResponse(
 )
 
 @Serializable
+data class SyncWatchStateLatestResponse(
+    @SerialName("content_id")
+    val contentId: String,
+    val provider: String,
+    @SerialName("position_ms")
+    val positionMs: Long,
+    @SerialName("reported_at")
+    val reportedAt: String,
+    @SerialName("device_id")
+    val deviceId: String,
+)
+
+@Serializable
 data class SyncSettingsPushPayload(
     val categories: List<String> = emptyList(),
     @SerialName("payload_json")

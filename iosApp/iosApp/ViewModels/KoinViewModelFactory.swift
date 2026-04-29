@@ -100,4 +100,16 @@ enum KoinViewModelFactory {
     static func pandaSetupViewModel() -> PandaSetupViewModel {
         resolve(PandaSetupViewModel.self)
     }
+
+    static func nzbdavSetupViewModel() -> NzbdavSetupViewModel {
+        resolve(NzbdavSetupViewModel.self)
+    }
+
+    static func secretsTransferSenderViewModel() -> SecretsTransferSenderViewModel {
+        resolve(SecretsTransferSenderViewModel.self)
+    }
+
+    static func secretsTransferReceiverViewModel() -> SecretsTransferReceiverViewModel {
+        resolve(SecretsTransferReceiverViewModel.self)
+    }
 }

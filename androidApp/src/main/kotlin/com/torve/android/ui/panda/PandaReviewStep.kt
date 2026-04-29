@@ -150,6 +150,17 @@ fun PandaReviewStep(
                     color = Amber,
                 )
             }
+            // Management token is returned exactly once by the server. Surface it
+            // here as an "advanced" card so power users can capture it without
+            // gating the happy path for casuals.
+            if (!state.pendingManagementTokenDisplay.isNullOrBlank()) {
+                Spacer(Modifier.height(16.dp))
+                PandaManagementTokenCard(
+                    token = state.pendingManagementTokenDisplay,
+                    notice = state.managementTokenNotice,
+                    onAcknowledge = { viewModel.acknowledgeManagementTokenDisplay() },
+                )
+            }
             Spacer(Modifier.height(16.dp))
             Button(
                 onClick = onComplete,
@@ -164,6 +175,27 @@ fun PandaReviewStep(
                 )
             }
         } else {
+            // Edit mode without a local management token — saving would fail.
+            // Route the user to the recovery flow in Manage Panda.
+            if (state.isEditMode && state.editRequiresRecovery) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Ruby.copy(alpha = 0.12f))
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "This device doesn't have a Panda management token yet. " +
+                            "Open Manage Panda → 'I need a management token' to paste the " +
+                            "admin-issued token before editing this config.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Ruby,
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+            }
             // Save button
             Button(
                 onClick = { viewModel.saveConfigAndInstall() },

@@ -79,6 +79,32 @@
     <string name="settings_subscription">Premium</string>
     <string name="settings_downloads">Downloads</string>
     <string name="settings_calendar">Calendar</string>
+    <string name="settings_send_credentials">Send credentials to another device</string>
+    <string name="settings_receive_credentials">Receive credentials from another device</string>
+    <string name="settings_transfer_diagnostics">Transfer diagnostics</string>
+
+    <!-- Recovery card: shown when 2+ transferable categories have no local credentials. -->
+    <string name="recovery_card_title">Restore setup from another device</string>
+    <string name="recovery_card_body">Transfer encrypted credentials from a device that already works. Faster than re-entering each one by hand.</string>
+    <string name="recovery_card_action_receive">Receive credentials</string>
+    <string name="recovery_card_action_manual">Set up manually</string>
+    <string name="recovery_card_summary_format">%1$d provider categories missing local credentials.</string>
+    <string name="tv_send_credentials_subtitle">Paste the receive code from the other Torve device.</string>
+    <string name="tv_receive_credentials_subtitle">Show a one-time QR code for another Torve device to scan.</string>
+
+    <!-- Encryption + safety disclosure shared by send + receive surfaces. -->
+    <string name="transfer_encryption_disclosure">Credentials are end-to-end encrypted with a one-time key. The Torve backend only forwards the sealed envelope — it can\'t read the contents.</string>
+    <string name="transfer_paste_safety">Manual paste is the same sealed envelope shown as text. Copy/paste between your own devices when the camera or relay aren\'t available — never share it with anyone else.</string>
+    <string name="transfer_companion_config_explanation">Some integrations (Plex, Jellyfin) need a server URL alongside their token. If the URL isn\'t set on the sending device, you\'ll need to fill it in manually after import.</string>
+
+    <!-- Diagnostics labels. -->
+    <string name="diag_transfer_title">Credential transfer status</string>
+    <string name="diag_transfer_crypto">Crypto engine</string>
+    <string name="diag_transfer_signed_in">Signed in</string>
+    <string name="diag_transfer_relay">Backend relay</string>
+    <string name="diag_transfer_last_attempt">Last attempt</string>
+    <string name="diag_transfer_no_attempt">No attempt recorded yet on this device.</string>
+    <string name="diag_transfer_redaction_note">No credentials, tokens, session strings, or envelope bytes appear on this screen.</string>
 
     <string name="settings_cloud_service">Streaming Service</string>
     <string name="settings_provider">Provider</string>
@@ -230,6 +256,10 @@
     <string name="paywall_restore">Restore Purchase</string>
     <string name="paywall_retry_verification">Retry Verification</string>
     <string name="premium_refresh_access">Refresh Access</string>
+    <string name="paywall_needs_verification_title">Verify your email to use Premium on this device</string>
+    <string name="paywall_needs_verification_body">You upgraded on a different device. Verify your email to unlock Premium here too.</string>
+    <string name="paywall_needs_verification_action_send">Send verification email</string>
+    <string name="paywall_needs_verification_action_refresh">Already verified — refresh</string>
     <string name="paywall_lifetime_active">Lifetime Activated</string>
     <string name="paywall_full_access">You have full access to all features</string>
     <string name="paywall_free_status">Free Tier</string>

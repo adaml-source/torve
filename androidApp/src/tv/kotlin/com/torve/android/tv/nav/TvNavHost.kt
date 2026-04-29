@@ -105,6 +105,32 @@ internal fun TvNavHost(
             )
         }
 
+        composable("transfer_send_tv") {
+            val senderVm: com.torve.presentation.transfer.SecretsTransferSenderViewModel =
+                org.koin.compose.koinInject()
+            com.torve.android.ui.transfer.SecretsTransferSendScreen(
+                viewModel = senderVm,
+                onBack = { navController.popBackStack() },
+                preferPaste = true,
+            )
+        }
+
+        composable("transfer_receive_tv") {
+            val receiverVm: com.torve.presentation.transfer.SecretsTransferReceiverViewModel =
+                org.koin.compose.koinInject()
+            com.torve.android.ui.transfer.SecretsTransferReceiveScreen(
+                viewModel = receiverVm,
+                onBack = { navController.popBackStack() },
+                largeQr = true,
+            )
+        }
+
+        composable("transfer_diagnostics_tv") {
+            com.torve.android.ui.transfer.TransferDiagnosticsScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+
         composable(
             route = TvRoutes.SEE_ALL,
             arguments = listOf(

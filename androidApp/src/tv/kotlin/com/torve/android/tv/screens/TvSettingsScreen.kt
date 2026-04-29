@@ -229,6 +229,9 @@ internal fun TvSettingsScreen(
     onNavigateToPandaSetup: () -> Unit = {},
     onNavigateToPairedDevices: (String) -> Unit = {},
     onNavigateToActivatedDevices: (String) -> Unit = {},
+    onNavigateToSendCredentials: () -> Unit = {},
+    onNavigateToReceiveCredentials: () -> Unit = {},
+    onNavigateToTransferDiagnostics: () -> Unit = {},
     onAuthSuccess: () -> Unit = {},
     pairedDevicesFocusRequester: FocusRequester? = null,
     activatedDevicesFocusRequester: FocusRequester? = null,
@@ -277,6 +280,49 @@ internal fun TvSettingsScreen(
     var authShowRegister by remember { mutableStateOf(false) }
     val passwordsMismatchText = stringResource(R.string.tv_auth_passwords_mismatch)
     val authScope = rememberCoroutineScope()
+
+    // Recovery-card snapshot: shown when 2+ transferable provider
+    // categories have no local credentials. Recomputes on Settings
+    // entry AND whenever a credential transfer just imported (the
+    // shared notifier ticks the flow value).
+    val recoveryProvider: com.torve.presentation.providerhealth.ProviderHealthRecoveryStateProvider =
+        org.koin.compose.koinInject()
+    val transferCompletionNotifier: com.torve.presentation.transfer.TransferImportCompletionNotifier =
+        org.koin.compose.koinInject()
+    val transferLastImportMs by transferCompletionNotifier.lastImportEpochMs.collectAsState()
+    var recoverySnap by remember {
+        mutableStateOf<com.torve.presentation.providerhealth.ProviderHealthRecoverySnapshot?>(null)
+    }
+    var recoveryDismissed by remember { mutableStateOf(false) }
+    LaunchedEffect(transferLastImportMs) {
+        recoverySnap = recoveryProvider.snapshot()
+    }
+    val showRecoveryRow = !recoveryDismissed &&
+        (recoverySnap?.shouldShowRecoveryCard == true)
+
+    // Provider-health entries (when a future Android init lands).
+    // Today the coordinator has no checkers on Android → entries is
+    // empty and the section renders nothing. No fake green/red.
+    val providerHealthCoordinator: com.torve.presentation.providerhealth.ProviderHealthCoordinator =
+        org.koin.compose.koinInject()
+    val providerHealthEntries by providerHealthCoordinator.entries.collectAsState()
+    val tvHealthRows = remember(providerHealthEntries) {
+        providerHealthEntries
+            .map { entry ->
+                entry to com.torve.presentation.providerhealth.ProviderRepairMapper.actionsFor(entry)
+            }
+            // Only show rows we can act on with a remote: Transfer or
+            // Diagnostics has a TV destination; the other actions
+            // (Reenter / OpenSettings) don't have first-class TV routes,
+            // so we drop those rows rather than dead-end the user.
+            .filter { (_, actions) ->
+                actions.any {
+                    it == com.torve.presentation.providerhealth.ProviderRepairAction.TransferFromAnotherDevice ||
+                        it == com.torve.presentation.providerhealth.ProviderRepairAction.OpenDiagnostics
+                }
+            }
+            .sortedWith(compareBy({ it.first.category.ordinal }, { it.first.label }))
+    }
 
     // Check if already logged in, and sync account settings if so
     LaunchedEffect(Unit) {
@@ -2932,6 +2978,93 @@ internal fun TvSettingsScreen(
                         focusRequester = requester,
                         onFocused = { },
                         onClick = { onNavigateToPandaSetup() },
+                        rowType = TvSettingRowType.ACTION,
+                    )
+                }
+                if (showRecoveryRow) {
+                    item(key = "restore_setup") {
+                        val requester = remember("restore_setup") { FocusRequester() }
+                        val missingCount = recoverySnap?.missingTransferableCategoryCount ?: 0
+                        TvSettingCard(
+                            title = stringResource(R.string.recovery_card_title),
+                            subtitle = stringResource(
+                                R.string.recovery_card_summary_format,
+                                missingCount,
+                            ),
+                            modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                            focusRequester = requester,
+                            onFocused = { },
+                            onClick = { onNavigateToReceiveCredentials() },
+                            rowType = TvSettingRowType.ACTION,
+                        )
+                    }
+                }
+
+                // Provider-health repair rows. Each row shows the
+                // first remote-reachable action: Transfer beats
+                // Diagnostics when both apply (matches mapper order).
+                // No-op until an Android checker init exists.
+                tvHealthRows.forEach { (entry, actions) ->
+                    item(key = "health:${entry.providerKey}") {
+                        val requester = remember("health:${entry.providerKey}") { FocusRequester() }
+                        val primary = actions.firstOrNull {
+                            it == com.torve.presentation.providerhealth.ProviderRepairAction.TransferFromAnotherDevice ||
+                                it == com.torve.presentation.providerhealth.ProviderRepairAction.OpenDiagnostics
+                        }
+                        val (subtitleSuffix, onTap) = when (primary) {
+                            com.torve.presentation.providerhealth.ProviderRepairAction.TransferFromAnotherDevice ->
+                                "Open Transfer →" to { onNavigateToReceiveCredentials() }
+                            com.torve.presentation.providerhealth.ProviderRepairAction.OpenDiagnostics ->
+                                "Open Diagnostics →" to { onNavigateToTransferDiagnostics() }
+                            else -> "" to { /* unreachable */ }
+                        }
+                        val message = entry.message?.takeIf { it.isNotBlank() }
+                        val combined = if (message != null) "$message  •  $subtitleSuffix"
+                        else subtitleSuffix
+                        TvSettingCard(
+                            title = entry.label,
+                            subtitle = combined,
+                            modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                            focusRequester = requester,
+                            onFocused = { },
+                            onClick = onTap,
+                            rowType = TvSettingRowType.ACTION,
+                        )
+                    }
+                }
+                item(key = "send_credentials") {
+                    val requester = remember("send_credentials") { FocusRequester() }
+                    TvSettingCard(
+                        title = stringResource(R.string.settings_send_credentials),
+                        subtitle = stringResource(R.string.tv_send_credentials_subtitle),
+                        modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                        focusRequester = requester,
+                        onFocused = { },
+                        onClick = { onNavigateToSendCredentials() },
+                        rowType = TvSettingRowType.ACTION,
+                    )
+                }
+                item(key = "receive_credentials") {
+                    val requester = remember("receive_credentials") { FocusRequester() }
+                    TvSettingCard(
+                        title = stringResource(R.string.settings_receive_credentials),
+                        subtitle = stringResource(R.string.tv_receive_credentials_subtitle),
+                        modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                        focusRequester = requester,
+                        onFocused = { },
+                        onClick = { onNavigateToReceiveCredentials() },
+                        rowType = TvSettingRowType.ACTION,
+                    )
+                }
+                item(key = "transfer_diagnostics") {
+                    val requester = remember("transfer_diagnostics") { FocusRequester() }
+                    TvSettingCard(
+                        title = stringResource(R.string.settings_transfer_diagnostics),
+                        subtitle = stringResource(R.string.diag_transfer_redaction_note),
+                        modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                        focusRequester = requester,
+                        onFocused = { },
+                        onClick = { onNavigateToTransferDiagnostics() },
                         rowType = TvSettingRowType.ACTION,
                     )
                 }

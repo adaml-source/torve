@@ -87,8 +87,9 @@ import com.torve.android.premium.PremiumFeature
 import com.torve.android.util.findActivity
 import com.torve.domain.model.StreamQuality
 import com.torve.data.auth.AuthClient
-import com.torve.data.auth.AuthUser
 import com.torve.android.ui.auth.VerificationBanner
+import com.torve.android.ui.subscription.NeedsVerificationBanner
+import com.torve.android.ui.subscription.NeedsVerificationToastEffect
 import com.torve.domain.model.CodecPreference
 import com.torve.domain.model.HdrMode
 import com.torve.android.ui.theme.Amber
@@ -101,6 +102,9 @@ import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Steel
 import com.torve.android.ui.theme.Torve
+import com.torve.android.ui.transfer.ProviderHealthSection
+import com.torve.android.ui.transfer.RestoreSetupRecoveryCard
+import com.torve.android.ui.transfer.providerSettingsRouteFor
 import com.torve.data.account.AccountSettingsRepository
 import com.torve.android.sync.SyncCoordinator
 import com.torve.presentation.addon.AddonViewModel
@@ -145,6 +149,10 @@ fun SettingsScreen(
     onCardStyleClick: () -> Unit = {},
     onIntegrationsClick: () -> Unit = {},
     onDiagnosticsClick: () -> Unit = {},
+    onSendCredentialsClick: () -> Unit = {},
+    onReceiveCredentialsClick: () -> Unit = {},
+    onTransferDiagnosticsClick: () -> Unit = {},
+    onOpenProviderRoute: (route: String) -> Unit = {},
     viewModel: SettingsViewModel = koinInject(),
     syncCoordinator: SyncCoordinator = koinInject(),
     authClient: AuthClient = koinInject(),
@@ -164,6 +172,7 @@ fun SettingsScreen(
         subscriptionState.isDeviceActivated,
         subscriptionState.deviceBlockReason,
         subscriptionState.deviceCapReached,
+        subscriptionState.needsVerification,
         subscriptionState.purchaseStatus,
     ) {
         val strings: com.torve.presentation.subscription.PurchaseStringResolver = org.koin.java.KoinJavaComponent.getKoin().get()
@@ -226,6 +235,10 @@ fun SettingsScreen(
 
     val scope = rememberCoroutineScope()
     val premiumStatusLabel = subscriptionAccess.accessStatusLabel
+    NeedsVerificationToastEffect(
+        message = subscriptionState.verificationEmailMessage,
+        onConsumed = subscriptionViewModel::consumeVerificationEmailMessage,
+    )
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -321,7 +334,14 @@ fun SettingsScreen(
                         color = Snow,
                         fontWeight = FontWeight.SemiBold,
                     )
-                    if (authUser?.isVerified == false) {
+                    if (subscriptionState.needsVerification) {
+                        Spacer(Modifier.height(8.dp))
+                        NeedsVerificationBanner(
+                            isSending = subscriptionState.isSendingVerificationEmail,
+                            onSendVerificationEmail = subscriptionViewModel::sendVerificationEmail,
+                            onRefreshAccess = subscriptionViewModel::refreshAccess,
+                        )
+                    } else if (authUser?.isVerified == false) {
                         Spacer(Modifier.height(8.dp))
                         VerificationBanner(
                             email = authUser?.email ?: "",
@@ -600,6 +620,49 @@ fun SettingsScreen(
             colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
         ) {
             ButtonLabel(stringResource(R.string.settings_calendar))
+        }
+
+        if (subscriptionState.isLoggedIn) {
+            Spacer(Modifier.height(8.dp))
+            // Provider-health rows render only when the coordinator has
+            // entries — no fake green/red. Today Android registers no
+            // checkers, so this section is silent on mobile until an
+            // AndroidProviderHealthInit lands.
+            ProviderHealthSection(
+                onTransferReceive = onReceiveCredentialsClick,
+                onOpenSettings = { entry ->
+                    providerSettingsRouteFor(entry.category)?.let(onOpenProviderRoute)
+                },
+                onOpenDiagnostics = onTransferDiagnosticsClick,
+            )
+            Spacer(Modifier.height(8.dp))
+            RestoreSetupRecoveryCard(
+                onReceive = onReceiveCredentialsClick,
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = onSendCredentialsClick,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
+            ) {
+                ButtonLabel(stringResource(R.string.settings_send_credentials))
+            }
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = onReceiveCredentialsClick,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
+            ) {
+                ButtonLabel(stringResource(R.string.settings_receive_credentials))
+            }
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = onTransferDiagnosticsClick,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
+            ) {
+                ButtonLabel(stringResource(R.string.settings_transfer_diagnostics))
+            }
         }
 
         Spacer(Modifier.height(24.dp))

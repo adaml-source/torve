@@ -1059,6 +1059,10 @@ fun TorveNavGraph(
                             navController.navigate("diagnostics")
                         }
                     },
+                    onSendCredentialsClick = { navController.navigate("transfer_send") },
+                    onReceiveCredentialsClick = { navController.navigate("transfer_receive") },
+                    onTransferDiagnosticsClick = { navController.navigate("transfer_diagnostics") },
+                    onOpenProviderRoute = { route -> navController.navigate(route) },
                 )
             }
 
@@ -1580,6 +1584,38 @@ fun TorveNavGraph(
             }
             composable("legal/help") {
                 HelpScreen(onBack = { navController.popBackStack() })
+            }
+            composable("transfer_send") {
+                val senderVm: com.torve.presentation.transfer.SecretsTransferSenderViewModel =
+                    org.koin.compose.koinInject()
+                com.torve.android.ui.transfer.SecretsTransferSendScreen(
+                    viewModel = senderVm,
+                    onBack = { navController.popBackStack() },
+                    preferPaste = false,
+                )
+            }
+            composable("transfer_receive") {
+                val receiverVm: com.torve.presentation.transfer.SecretsTransferReceiverViewModel =
+                    org.koin.compose.koinInject()
+                com.torve.android.ui.transfer.SecretsTransferReceiveScreen(
+                    viewModel = receiverVm,
+                    onBack = { navController.popBackStack() },
+                    largeQr = false,
+                )
+            }
+            composable("transfer_diagnostics") {
+                com.torve.android.ui.transfer.TransferDiagnosticsScreen(
+                    onBack = { navController.popBackStack() },
+                )
+            }
+            composable("transfer_send_tv") {
+                val senderVm: com.torve.presentation.transfer.SecretsTransferSenderViewModel =
+                    org.koin.compose.koinInject()
+                com.torve.android.ui.transfer.SecretsTransferSendScreen(
+                    viewModel = senderVm,
+                    onBack = { navController.popBackStack() },
+                    preferPaste = true,
+                )
             }
         }
 

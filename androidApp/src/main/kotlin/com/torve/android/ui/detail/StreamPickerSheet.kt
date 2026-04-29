@@ -47,6 +47,7 @@ import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Torve
 import com.torve.data.addon.ParsedStream
+import com.torve.data.usenet.model.UsenetCandidateStates
 import com.torve.domain.model.StartupCandidate
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -58,6 +59,14 @@ fun StreamPickerSheet(
     isLoadingMoreSources: Boolean = false,
     playbackStartupStatus: com.torve.presentation.detail.PlaybackStartupStatus? = null,
     onStreamSelected: (ParsedStream) -> Unit,
+    /**
+     * Sidecar Usenet-row state keyed by backend candidate id. The sheet
+     * reads this as a read-only overlay for rows whose
+     * `accelerationProvenanceKind == USENET_NZBDAV`; the underlying
+     * [ParsedStream] list remains the visible row surface and ranking is
+     * untouched. Default empty is the no-Usenet case.
+     */
+    usenetCandidates: UsenetCandidateStates = emptyMap(),
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -159,6 +168,7 @@ fun StreamPickerSheet(
                             StreamItem(
                                 stream = stream,
                                 startupCandidate = startupCandidateMap[stream.streamUiKey()],
+                                usenetRowState = stream.accelerationSourceKey?.let { usenetCandidates[it] },
                                 onClick = { onStreamSelected(stream) },
                             )
                         }
@@ -192,6 +202,12 @@ private fun GroupHeader(title: String, subtitle: String?) {
 private fun StreamItem(
     stream: ParsedStream,
     startupCandidate: StartupCandidate?,
+    /**
+     * Sidecar state for rows whose provenance is USENET_NZBDAV. Null for
+     * every other provenance; the row renders exactly as before. When
+     * non-null, a compact inline pill overlays the quality badge area.
+     */
+    usenetRowState: com.torve.data.usenet.model.UsenetCandidateUiModel?,
     onClick: () -> Unit,
 ) {
     Surface(
@@ -236,6 +252,14 @@ private fun StreamItem(
 
             // Quality badge
             QualityBadge(quality = stream.quality)
+
+            // Compact Usenet availability pill — only rendered when this
+            // row is a sidecar-tracked Usenet candidate. Copy is drawn
+            // exclusively from the approved UsenetUserMessageKey set.
+            usenetRowState?.let { row ->
+                Spacer(Modifier.width(6.dp))
+                UsenetAvailabilityPill(row)
+            }
 
             Spacer(Modifier.width(10.dp))
 
@@ -318,4 +342,53 @@ private fun MetaChip(text: String) {
         style = MaterialTheme.typography.labelSmall,
         color = Torve.colors.textTertiary,
     )
+}
+
+/**
+ * Compact single-line pill showing Ready / Preparing / Unavailable for a
+ * Usenet source row. Copy is drawn strictly from the approved
+ * [com.torve.data.usenet.model.UsenetUserMessageKey] set — raw backend
+ * phase names or failure-reason tokens cannot reach this surface because
+ * the mapper already constrains `displayMessageKey` to those keys.
+ *
+ * The pill renders only when a row has sidecar state. It never changes
+ * the row's layout position or the parent list's identity — purely an
+ * overlay on the quality-badge strip so TV focus remains stable across
+ * pill transitions.
+ */
+@Composable
+private fun UsenetAvailabilityPill(
+    row: com.torve.data.usenet.model.UsenetCandidateUiModel,
+) {
+    val messageKey = row.displayMessageKey ?: return
+    val labelResId = when (messageKey) {
+        com.torve.data.usenet.model.UsenetUserMessageKey.READY_NOW -> R.string.usenet_row_ready_now
+        com.torve.data.usenet.model.UsenetUserMessageKey.PREPARING -> R.string.usenet_row_preparing
+        com.torve.data.usenet.model.UsenetUserMessageKey.UNAVAILABLE -> R.string.usenet_row_unavailable
+        com.torve.data.usenet.model.UsenetUserMessageKey.TRYING_NEXT_SOURCE -> R.string.usenet_trying_next_source
+        com.torve.data.usenet.model.UsenetUserMessageKey.PLAYBACK_LINK_EXPIRED -> R.string.usenet_playback_link_expired
+        // Any unrecognized key is a mapping bug — we silently skip so the
+        // surface never shows a raw token.
+        else -> return
+    }
+    val tint = when (row.availabilityState) {
+        com.torve.data.usenet.model.UsenetAvailability.READY -> Emerald
+        com.torve.data.usenet.model.UsenetAvailability.PREPARING -> Amber
+        com.torve.data.usenet.model.UsenetAvailability.UNAVAILABLE -> Torve.colors.textTertiary
+    }
+    Surface(
+        color = tint.copy(alpha = 0.18f),
+        contentColor = tint,
+        shape = RoundedCornerShape(6.dp),
+    ) {
+        Text(
+            text = stringResource(labelResId),
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
 }

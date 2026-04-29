@@ -17,14 +17,18 @@ import com.torve.android.sync.model.SyncRegisterRequest
 import com.torve.android.sync.model.SyncSearchPushRequest
 import com.torve.android.sync.model.SyncStatusMessage
 import com.torve.android.sync.model.SyncDeviceDto
+import com.torve.android.sync.model.SyncWatchStateLatestResponse
 import com.torve.android.sync.model.SyncWatchStateReportRequest
 import com.torve.android.sync.model.SyncWatchStateReportResponse
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
+import io.ktor.client.plugins.ClientRequestException
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.get
+import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.http.HttpStatusCode
 
 class TorveSyncApiClient(
     private val httpClient: HttpClient,
@@ -110,9 +114,28 @@ class TorveSyncApiClient(
         accessToken: String,
         payload: SyncWatchStateReportRequest,
     ): SyncWatchStateReportResponse {
-        return httpClient.post("$baseUrl/watch_state/report") {
+        return httpClient.post("$baseUrl/me/watch_state/report") {
             bearerAuth(accessToken)
             setBody(payload)
         }.body()
+    }
+
+    /**
+     * Fetch the newest watch-state report for this content across all of the
+     * user's devices. Returns `null` when the backend has no row for the given
+     * content yet (404) — callers fall back to local state.
+     */
+    suspend fun getLatestWatchState(
+        accessToken: String,
+        contentId: String,
+    ): SyncWatchStateLatestResponse? {
+        return try {
+            httpClient.get("$baseUrl/me/watch_state/latest") {
+                bearerAuth(accessToken)
+                parameter("content_id", contentId)
+            }.body()
+        } catch (e: ClientRequestException) {
+            if (e.response.status == HttpStatusCode.NotFound) null else throw e
+        }
     }
 }

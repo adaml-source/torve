@@ -79,6 +79,8 @@ import com.torve.android.ui.components.ShimmerBox
 import com.torve.android.ui.components.LocalCardStyle
 import com.torve.android.ui.components.LocalRatingPrefs
 import com.torve.android.ui.components.MultiRatingPills
+import com.torve.android.ui.subscription.NeedsVerificationBanner
+import com.torve.android.ui.subscription.NeedsVerificationToastEffect
 import com.torve.domain.model.MediaRatings
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Charcoal
@@ -104,6 +106,7 @@ import com.torve.domain.recommendation.ScoredMediaItem
 import com.torve.data.auth.AuthClient
 import com.torve.presentation.home.HomeViewModel
 import com.torve.presentation.seeall.SeeAllViewModel
+import com.torve.presentation.subscription.SubscriptionViewModel
 import com.torve.presentation.watchlist.WatchlistViewModel
 import kotlinx.coroutines.delay
 import org.koin.compose.koinInject
@@ -128,11 +131,13 @@ fun HomeScreen(
     watchlistViewModel: WatchlistViewModel = koinInject(),
     settingsViewModel: com.torve.presentation.settings.SettingsViewModel = koinInject(),
     authClient: AuthClient = koinInject(),
+    subscriptionViewModel: SubscriptionViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
     val watchlistState by watchlistViewModel.state.collectAsState()
     val authUser by authClient.authUserFlow.collectAsState()
+    val subscriptionState by subscriptionViewModel.state.collectAsState()
     val isSignedIn = authUser != null
     val sectionConfigs by viewModel.sectionConfigs.collectAsState()
     val enabledServiceIds by viewModel.enabledServiceIds.collectAsState()
@@ -201,6 +206,17 @@ fun HomeScreen(
     LaunchedEffect(mdblistApiKey) {
         viewModel.refreshRatings(mdblistApiKey)
     }
+
+    LaunchedEffect(authUser?.id) {
+        if (authUser != null) {
+            subscriptionViewModel.refreshAccess()
+        }
+    }
+
+    NeedsVerificationToastEffect(
+        message = subscriptionState.verificationEmailMessage,
+        onConsumed = subscriptionViewModel::consumeVerificationEmailMessage,
+    )
 
     // Reload home data when Trakt sync completes (new watchlist, history, etc.)
     val traktLastSync = settingsState.traktLastSyncTime
@@ -283,6 +299,16 @@ fun HomeScreen(
                     state = homeListState,
                     contentPadding = PaddingValues(bottom = 24.dp),
                 ) {
+                    if (subscriptionState.needsVerification) {
+                        item(key = "needs_verification") {
+                            NeedsVerificationBanner(
+                                isSending = subscriptionState.isSendingVerificationEmail,
+                                onSendVerificationEmail = subscriptionViewModel::sendVerificationEmail,
+                                onRefreshAccess = subscriptionViewModel::refreshAccess,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            )
+                        }
+                    }
                     enabledItems.forEach { item ->
                         when (item) {
                             is BuiltInItem -> {

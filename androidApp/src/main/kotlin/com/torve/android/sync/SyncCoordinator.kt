@@ -28,6 +28,9 @@ import com.torve.android.sync.model.SyncPlaybackIntentPayload
 import com.torve.android.sync.model.SyncSearchPushPayload
 import com.torve.android.sync.model.SecureChannelState
 import com.torve.android.sync.model.PairingRole
+import com.torve.android.sync.model.SyncWatchStateLatestResponse
+import com.torve.android.sync.model.SyncWatchStateReportRequest
+import com.torve.android.sync.network.TorveSyncApiClient
 import com.torve.android.sync.storage.InstallationIdStore
 import com.torve.data.auth.AuthClient
 import com.torve.data.auth.DeviceRegistrationDto
@@ -79,6 +82,7 @@ class SyncCoordinator(
     private val authClient: AuthClient,
     private val pairingApi: PairingApi,
     private val secureStorage: com.torve.domain.security.SecureStorage? = null,
+    private val torveSyncApiClient: TorveSyncApiClient? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val installationIdStore = InstallationIdStore(context)
@@ -496,8 +500,46 @@ class SyncCoordinator(
             markPremiumBlocked(access.feature, access.message)
             return Result.failure(PremiumAccessDeniedException(access.feature, access.message))
         }
-        appendRecentEvent("watch_state:${contentId.trim()}:${provider}:${positionMs.coerceAtLeast(0L)}")
-        return Result.success(Unit)
+        val safePosition = positionMs.coerceAtLeast(0L)
+        appendRecentEvent("watch_state:${contentId.trim()}:${provider}:$safePosition")
+        // Best-effort POST to /watch_state/report. A failed write falls back
+        // silently — the local SQLDelight DB is still authoritative for the
+        // current device, and the next successful write will overwrite.
+        val api = torveSyncApiClient ?: return Result.success(Unit)
+        val accessToken = authClient.getValidAccessToken() ?: return Result.success(Unit)
+        return try {
+            api.reportWatchState(
+                accessToken = accessToken,
+                payload = SyncWatchStateReportRequest(
+                    contentId = contentId.trim(),
+                    provider = provider,
+                    positionMs = safePosition,
+                ),
+            )
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.d(TAG, "reportWatchState remote write failed: ${e::class.simpleName}")
+            Result.success(Unit)
+        }
+    }
+
+    /**
+     * Cross-device resume read. Returns the newest watch-state report the
+     * backend has for this content, or `null` if the backend has never seen
+     * this content for this user. Callers merge this with their local
+     * SQLDelight row and pick whichever has the greater timestamp.
+     */
+    suspend fun getLatestWatchState(contentId: String): SyncWatchStateLatestResponse? {
+        if (contentId.isBlank()) return null
+        if (!_state.value.isAuthenticated) return null
+        val api = torveSyncApiClient ?: return null
+        val accessToken = authClient.getValidAccessToken() ?: return null
+        return try {
+            api.getLatestWatchState(accessToken = accessToken, contentId = contentId.trim())
+        } catch (e: Exception) {
+            Log.d(TAG, "getLatestWatchState failed: ${e::class.simpleName}")
+            null
+        }
     }
 
     fun claimPairingCode(code: String) {

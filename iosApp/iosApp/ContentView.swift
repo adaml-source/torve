@@ -181,6 +181,12 @@ struct ContentView: View {
             DeviceLimitReachedScreen()
         case .legal:
             LegalScreen()
+        case .transferSend:
+            SecretsTransferSendScreen()
+        case .transferReceive:
+            SecretsTransferReceiveScreen()
+        case .transferDiagnostics:
+            TransferDiagnosticsScreen()
         default:
             Text("Not implemented")
         }
