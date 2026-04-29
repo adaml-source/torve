@@ -793,6 +793,21 @@ class ChannelsViewModel(
         buildGuideChannels(forceRefreshEpg = true)
     }
 
+    /**
+     * Trigger a guide build without forcing a network refresh of the EPG XML.
+     * Surface that lets the desktop shell populate [ChannelsUiState.guideChannels]
+     * the first time the user opens the Guide tab — without this, the Guide
+     * stays empty until the user manually presses Retry, because
+     * [buildGuideChannels] is private and only auto-fires on playlist load.
+     */
+    fun requestGuideBuild() {
+        if (_state.value.guideChannels.isNotEmpty() && _state.value.isLoadingGuide.not()) {
+            // Already populated — refresh would re-trigger network for nothing.
+            return
+        }
+        buildGuideChannels(forceRefreshEpg = false)
+    }
+
     // --- Hidden categories/channels management ---
 
     private fun loadHiddenItems() {
@@ -926,6 +941,8 @@ class ChannelsViewModel(
                 newXtreamServer = "",
                 newXtreamUsername = "",
                 newXtreamPassword = "",
+                isAddingPlaylist = false,
+                addPlaylistProgress = null,
             )
         }
     }
@@ -996,10 +1013,19 @@ class ChannelsViewModel(
         if (st.newPlaylistName.isBlank() || st.newPlaylistUrl.isBlank()) return
 
         scope.launch {
-            _state.update { it.copy(isAddingPlaylist = true, error = null) }
+            _state.update { it.copy(isAddingPlaylist = true, addPlaylistProgress = null, error = null) }
             try {
                 val epg = st.newPlaylistEpgUrl.ifBlank { null }
-                val playlist = withContext(backgroundDispatcher) { channelRepo.addPlaylist(st.newPlaylistName, st.newPlaylistUrl, epg) }
+                val playlist = withContext(backgroundDispatcher) {
+                    channelRepo.addPlaylist(
+                        name = st.newPlaylistName,
+                        url = st.newPlaylistUrl,
+                        epgUrl = epg,
+                        onProgress = { progress ->
+                            _state.update { it.copy(addPlaylistProgress = progress) }
+                        },
+                    )
+                }
                 // Backup to backend for cross-device restore
                 val backendOk = runCatching {
                     playlistBackup?.savePlaylistToBackend(
@@ -1018,7 +1044,13 @@ class ChannelsViewModel(
                 dismissAddPlaylistDialog()
                 loadPlaylists()
             } catch (e: Exception) {
-                _state.update { it.copy(isAddingPlaylist = false, error = com.torve.presentation.error.UserFacingError.CHANNEL_LOAD_FAILED.messageKey) }
+                _state.update {
+                    it.copy(
+                        isAddingPlaylist = false,
+                        addPlaylistProgress = null,
+                        error = com.torve.presentation.error.UserFacingError.CHANNEL_LOAD_FAILED.messageKey,
+                    )
+                }
             }
         }
     }
@@ -1059,7 +1091,13 @@ class ChannelsViewModel(
                 dismissAddPlaylistDialog()
                 loadPlaylists()
             } catch (e: Exception) {
-                _state.update { it.copy(isAddingPlaylist = false, error = com.torve.presentation.error.UserFacingError.CHANNEL_LOAD_FAILED.messageKey) }
+                _state.update {
+                    it.copy(
+                        isAddingPlaylist = false,
+                        addPlaylistProgress = null,
+                        error = com.torve.presentation.error.UserFacingError.CHANNEL_LOAD_FAILED.messageKey,
+                    )
+                }
             }
         }
     }
@@ -1372,6 +1410,22 @@ class ChannelsViewModel(
                         )
                         val loadMs = Clock.System.now().toEpochMilliseconds() - loadStart
                         println("CATALOG_LOAD: full channel load in ${loadMs}ms — ${enriched.size} channels")
+                        // Empty DB recovery: if we found neither category counts
+                        // nor enriched rows, the playlist hasn't been ingested
+                        // on this device yet (or the rows were dropped during
+                        // a generation bump). Refresh from the source URL so
+                        // the user isn't stuck behind the "Syncing IPTV
+                        // playlist" overlay forever — refresh either populates
+                        // categories/channels (clearing the overlay) or sets
+                        // an error (also clearing the overlay).
+                        if (enriched.isEmpty()) {
+                            println("CATALOG_LOAD: empty DB for $playlistId — kicking off source refresh to recover")
+                            refreshPlaylistInBackground(
+                                playlistId = playlistId,
+                                preserveVisibleCatalog = false,
+                                restoreSavedState = restoreSavedState,
+                            )
+                        }
                     }
                 }
 
@@ -1552,14 +1606,30 @@ class ChannelsViewModel(
      * Explicitly load the full playlist into memory. Only called when a feature
      * that truly needs all channels is activated (search, EPG guide, advanced filters).
      * Not called during normal category browsing.
+     *
+     * Two guards:
+     *  - [ensureFullLoadJob] tracks an in-flight load so concurrent
+     *    callers don't spawn parallel coroutines.
+     *  - When the DB returns 0 enriched channels we deliberately do NOT
+     *    call [applyLoadedPlaylist] — that would re-fire
+     *    [buildGuideChannels] which re-calls this function, looping
+     *    forever when the playlist has a generation pointer but no
+     *    channel rows backing it (stale DB state, partial sync, etc.).
      */
+    private var ensureFullLoadJob: kotlinx.coroutines.Job? = null
     fun ensureFullPlaylistLoaded() {
         val playlistId = _state.value.selectedPlaylistId ?: return
         if (_state.value.channels.isNotEmpty()) return // already loaded
-        scope.launch {
+        if (ensureFullLoadJob?.isActive == true) return // load in flight
+        ensureFullLoadJob = scope.launch {
             try {
                 val enriched = withContext(backgroundDispatcher) {
                     channelRepo.getEnrichedChannels(playlistId)
+                }
+                if (enriched.isEmpty()) {
+                    println("ensureFullPlaylistLoaded: DB returned 0 channels for $playlistId — stale generation? Skipping applyLoadedPlaylist to avoid buildGuideChannels recursion loop.")
+                    _state.update { it.copy(isLoadingChannels = false) }
+                    return@launch
                 }
                 applyLoadedPlaylist(
                     playlistId = playlistId,

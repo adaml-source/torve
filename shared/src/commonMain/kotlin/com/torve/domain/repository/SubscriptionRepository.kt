@@ -13,7 +13,10 @@ sealed interface BackendPremiumResult {
     data object Active : BackendPremiumResult
 
     /** User has entitlement but device is blocked (e.g., cap reached). */
-    data class DeviceBlocked(val reason: String? = null) : BackendPremiumResult
+    data class DeviceBlocked(
+        val reason: String? = null,
+        val needsVerification: Boolean = false,
+    ) : BackendPremiumResult
 
     /** No premium entitlement at all. */
     data object NoEntitlement : BackendPremiumResult

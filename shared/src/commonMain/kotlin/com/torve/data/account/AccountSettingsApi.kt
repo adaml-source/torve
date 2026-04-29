@@ -156,6 +156,47 @@ class AccountSettingsApi(
         }
     }
 
+    /**
+     * Merge new credential keys into an existing integration row server-side.
+     * Backfills the Panda `management_token` for users whose row was
+     * created before that field was persisted at create time.
+     *
+     * Returns one of:
+     *  - [PatchCredentialsOutcome.Ok] on 200 — backend merged the keys
+     *  - [PatchCredentialsOutcome.RowMissing] on 404 — caller should fall back to a full PUT
+     *  - [PatchCredentialsOutcome.PremiumRequired] on 403 — surface upgrade UX
+     *  - [PatchCredentialsOutcome.Error] for any other failure (network, 4xx/5xx, parse)
+     */
+    suspend fun patchIntegrationCredentials(
+        accessToken: String,
+        integrationType: String,
+        credentials: Map<String, String>,
+    ): PatchCredentialsOutcome {
+        return try {
+            val url = "${baseUrl()}/me/integrations/$integrationType/credentials"
+            torveVerboseLog { "[IntegrationAPI] PATCH $url keys=${credentials.keys}" }
+            val resp = httpClient.patch(url) {
+                bearerAuth(accessToken)
+                contentType(ContentType.Application.Json)
+                appendChannelHeader()
+                setBody(PatchCredentialsRequest(credentials = credentials))
+            }
+            when (resp.status.value) {
+                in 200..299 -> PatchCredentialsOutcome.Ok
+                404 -> PatchCredentialsOutcome.RowMissing
+                403 -> PatchCredentialsOutcome.PremiumRequired
+                else -> {
+                    val body = try { resp.bodyAsText() } catch (_: Exception) { "" }
+                    torveVerboseLog { "[IntegrationAPI] PATCH failed: ${resp.status.value} body=$body" }
+                    PatchCredentialsOutcome.Error("HTTP ${resp.status.value}")
+                }
+            }
+        } catch (e: Exception) {
+            torveVerboseLog { "[IntegrationAPI] PATCH exception: ${e::class.simpleName} ${e.message}" }
+            PatchCredentialsOutcome.Error(e.message ?: "Network failure")
+        }
+    }
+
     // ── Playlist backup/restore ────────────────────────────────
 
     suspend fun getPlaylists(accessToken: String): List<RemotePlaylistDto> {
@@ -473,6 +514,21 @@ data class SaveIntegrationRequest(
     val displayIdentifier: String? = null,
     val config: Map<String, String> = emptyMap(),
 )
+
+@Serializable
+data class PatchCredentialsRequest(
+    val credentials: Map<String, String>,
+)
+
+/** Result of [AccountSettingsApi.patchIntegrationCredentials]. */
+sealed class PatchCredentialsOutcome {
+    data object Ok : PatchCredentialsOutcome()
+    /** No row exists yet for this integration_type — caller should PUT. */
+    data object RowMissing : PatchCredentialsOutcome()
+    /** User isn't entitled to write integrations. Surface the upgrade UX. */
+    data object PremiumRequired : PatchCredentialsOutcome()
+    data class Error(val message: String) : PatchCredentialsOutcome()
+}
 
 @Serializable
 data class AddonDto(

@@ -131,15 +131,33 @@ class TraktClient(
             }
             when (response.status.value) {
                 200 -> {
-                    val resp: TraktTokenResponse = response.body()
-                    TraktPollResult.Success(
-                        TraktTokens(
-                            accessToken = resp.accessToken,
-                            refreshToken = resp.refreshToken,
-                            expiresIn = resp.expiresIn,
-                            createdAt = resp.createdAt,
-                        ),
-                    )
+                    // Parse defensively: if the JSON shape drifts or the
+                    // serializer can't decode for any reason, prefer a typed
+                    // Error with a short preview of the body instead of
+                    // throwing out to the generic catch (which loses context).
+                    try {
+                        val resp: TraktTokenResponse = response.body()
+                        if (resp.accessToken.isBlank() || resp.refreshToken.isBlank()) {
+                            val preview = runCatching { response.bodyAsText().take(200) }
+                                .getOrDefault("")
+                            TraktPollResult.Error("Trakt returned empty tokens. body=$preview")
+                        } else {
+                            TraktPollResult.Success(
+                                TraktTokens(
+                                    accessToken = resp.accessToken,
+                                    refreshToken = resp.refreshToken,
+                                    expiresIn = resp.expiresIn,
+                                    createdAt = resp.createdAt,
+                                ),
+                            )
+                        }
+                    } catch (parseErr: Exception) {
+                        val preview = runCatching { response.bodyAsText().take(200) }
+                            .getOrDefault("")
+                        TraktPollResult.Error(
+                            "Parse error: ${parseErr.message ?: parseErr::class.simpleName}. body=$preview",
+                        )
+                    }
                 }
                 400 -> TraktPollResult.Pending
                 403 -> TraktPollResult.SlowDown
@@ -147,11 +165,20 @@ class TraktClient(
                 409 -> TraktPollResult.AlreadyUsed
                 418 -> TraktPollResult.Denied
                 429 -> TraktPollResult.SlowDown
-                in 500..599 -> TraktPollResult.Error("Server error: ${response.status.value}")
-                else -> TraktPollResult.Error("HTTP ${response.status.value}")
+                // 5xx is retryable — Trakt sometimes blips mid-flight.
+                in 500..599 -> TraktPollResult.TransientError("Server error ${response.status.value}")
+                else -> {
+                    val preview = runCatching { response.bodyAsText().take(200) }
+                        .getOrDefault("")
+                    TraktPollResult.Error("HTTP ${response.status.value}: $preview")
+                }
             }
         } catch (e: Exception) {
-            TraktPollResult.Error(e.message ?: "Unknown error")
+            // Network-layer failures (DNS, connect, timeout) are transient
+            // by nature during a 10-minute device-auth window — the network
+            // often shifts when the user bounces to the browser. Retrying
+            // on the next tick almost always recovers.
+            TraktPollResult.TransientError("${e::class.simpleName}: ${e.message ?: "Unknown error"}")
         }
     }
 

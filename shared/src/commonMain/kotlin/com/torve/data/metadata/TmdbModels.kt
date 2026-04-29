@@ -112,6 +112,8 @@ data class TmdbVideo(
     val site: String = "",
     val type: String = "",
     val name: String = "",
+    @SerialName("iso_639_1") val language: String? = null,
+    val official: Boolean = false,
 )
 
 @Serializable

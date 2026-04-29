@@ -206,6 +206,40 @@ class AccountSessionCoordinator(
         return ok
     }
 
+    /**
+     * Merge new credential keys into an existing integration row server-
+     * side. Used to backfill the Panda `management_token` for users who
+     * onboarded before that field was persisted at create time —
+     * without rewriting the whole row.
+     *
+     * Returns the typed [com.torve.data.account.PatchCredentialsOutcome]
+     * so callers can branch on `RowMissing` (fall back to PUT) and
+     * `PremiumRequired` (surface upgrade UX) explicitly.
+     */
+    /**
+     * Expose the user's currently-valid Torve JWT to other components
+     * that need to authenticate against Torve-account-bound services
+     * directly (e.g. Panda's `/api/v1/configs/me` endpoints). Returns
+     * `null` when the user is signed out or the refresh token is dead.
+     */
+    suspend fun getTorveAccessToken(): String? = authClient.getValidAccessToken()
+
+    suspend fun patchIntegrationCredentials(
+        integrationType: String,
+        credentials: Map<String, String>,
+    ): com.torve.data.account.PatchCredentialsOutcome {
+        torveVerboseLog { "[IntegrationSync] PATCH $integrationType keys=${credentials.keys}" }
+        val token = authClient.getValidAccessToken()
+            ?: return com.torve.data.account.PatchCredentialsOutcome.Error("No access token")
+        val outcome = accountSettingsApi.patchIntegrationCredentials(
+            accessToken = token,
+            integrationType = integrationType,
+            credentials = credentials,
+        )
+        torveVerboseLog { "[IntegrationSync] PATCH $integrationType → $outcome" }
+        return outcome
+    }
+
     suspend fun savePlaylistToBackend(
         playlistId: String,
         name: String,

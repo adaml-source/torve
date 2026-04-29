@@ -7,8 +7,29 @@ import com.torve.domain.model.Channel
 import com.torve.domain.model.ChannelContentType
 import com.torve.domain.model.ChannelPlaylist
 
+/**
+ * Download-phase progress report for M3U playlist fetching.
+ *
+ * - [bytesRead] monotonically grows during download.
+ * - [totalBytes] is null when the server doesn't send Content-Length.
+ * - [phase] transitions Downloading → Parsing → Saving on success.
+ */
+data class PlaylistAddProgress(
+    val bytesRead: Long,
+    val totalBytes: Long?,
+    val phase: Phase = Phase.DOWNLOADING,
+) {
+    enum class Phase { DOWNLOADING, PARSING, SAVING }
+}
+
 interface ChannelRepository {
-    suspend fun addPlaylist(name: String, url: String, epgUrl: String? = null, id: String? = null): ChannelPlaylist
+    suspend fun addPlaylist(
+        name: String,
+        url: String,
+        epgUrl: String? = null,
+        id: String? = null,
+        onProgress: ((PlaylistAddProgress) -> Unit)? = null,
+    ): ChannelPlaylist
     suspend fun addXtreamPlaylist(name: String, server: String, username: String, password: String, id: String? = null): ChannelPlaylist
     suspend fun removePlaylist(id: String)
     suspend fun updatePlaylistEpgUrl(playlistId: String, epgUrl: String?)

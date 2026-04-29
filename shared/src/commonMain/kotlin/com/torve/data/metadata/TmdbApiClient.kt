@@ -195,6 +195,40 @@ class TmdbApiClient(
         )
     }
 
+    /**
+     * Adult-permissive movie search. Used by the desktop "Adult" catalog;
+     * gated behind a Settings toggle and intended for users who source
+     * playback from Usenet indexers that handle adult content.
+     */
+    suspend fun searchMoviesAdult(query: String, page: Int = 1): TmdbResponse<TmdbMovie> {
+        return get(
+            endpoint = "/search/movie",
+            requestCategory = "tmdb.search.movie.adult",
+            parameters = baseParams() + listOf(
+                "query" to query,
+                "page" to page,
+                "include_adult" to true,
+            ),
+        )
+    }
+
+    /**
+     * Adult-permissive popular discover. Surfaces TMDB's adult catalog
+     * for the dedicated desktop "Adult" page entry point. Sorted by
+     * popularity descending.
+     */
+    suspend fun discoverAdultMovies(page: Int = 1): TmdbResponse<TmdbMovie> {
+        return get(
+            endpoint = "/discover/movie",
+            requestCategory = "tmdb.discover.movie.adult",
+            parameters = baseParams() + listOf(
+                "page" to page,
+                "include_adult" to true,
+                "sort_by" to "popularity.desc",
+            ),
+        )
+    }
+
     suspend fun findByImdbId(imdbId: String): TmdbFindResponse {
         return get(
             endpoint = "/find/$imdbId",
@@ -206,23 +240,31 @@ class TmdbApiClient(
     }
 
     suspend fun getMovieDetail(id: Int): TmdbMovie {
+        val lang = languageProvider() ?: "en"
         return get(
             endpoint = "/movie/$id",
             requestCategory = "tmdb.detail.movie",
             parameters = baseParams() + listOf(
                 "append_to_response" to "credits,videos,similar,external_ids,images",
-                "include_image_language" to "${languageProvider() ?: "en"},null",
+                "include_image_language" to "$lang,null",
+                // Fetch trailers in the user's language and English as a
+                // fallback so the trailer mapper has options. TMDB returns
+                // every video for the title regardless when no filter is
+                // set; we constrain to two locales to keep payloads small.
+                "include_video_language" to "$lang,en",
             ),
         )
     }
 
     suspend fun getTvDetail(id: Int): TmdbTv {
+        val lang = languageProvider() ?: "en"
         return get(
             endpoint = "/tv/$id",
             requestCategory = "tmdb.detail.tv",
             parameters = baseParams() + listOf(
                 "append_to_response" to "credits,videos,similar,external_ids,images",
-                "include_image_language" to "${languageProvider() ?: "en"},null",
+                "include_image_language" to "$lang,null",
+                "include_video_language" to "$lang,en",
             ),
         )
     }

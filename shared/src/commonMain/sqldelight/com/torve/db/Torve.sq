@@ -87,7 +87,10 @@ CREATE TABLE addon (
     installed_at INTEGER NOT NULL,
     server_id TEXT,
     synced_at INTEGER,
-    installed_from TEXT NOT NULL DEFAULT 'app'
+    installed_from TEXT NOT NULL DEFAULT 'app',
+    -- Panda per-config identifier, needed for management-token authenticated
+    -- PATCH/DELETE/rotate. Null for non-Panda addons.
+    config_id TEXT
 );
 
 getAllAddons:
@@ -100,7 +103,10 @@ getAddonByUrl:
 SELECT * FROM addon WHERE manifest_url = ?;
 
 insertAddon:
-INSERT OR REPLACE INTO addon (manifest_url, id, name, version, description, logo, manifest_json, is_enabled, priority, installed_at, server_id, synced_at, installed_from) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO addon (manifest_url, id, name, version, description, logo, manifest_json, is_enabled, priority, installed_at, server_id, synced_at, installed_from, config_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+updateAddonConfigId:
+UPDATE addon SET config_id = ? WHERE manifest_url = ?;
 
 updateAddonEnabled:
 UPDATE addon SET is_enabled = ?, synced_at = NULL WHERE manifest_url = ?;

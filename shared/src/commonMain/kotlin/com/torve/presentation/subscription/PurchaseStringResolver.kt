@@ -71,6 +71,29 @@ interface PurchaseStringResolver {
         "Google Play purchase could not be verified. Try Restore Purchase again after signing in."
     fun appleVerifyFailed(): String =
         "Apple purchase could not be verified. Try Restore Purchase again after signing in."
+
+    // Google Play verify error_code mapping — sanitized, user-safe text.
+    // None of these surface internal ops detail (no file paths, env var
+    // names, credential state, or exception messages).
+    fun googleVerifyConfigMissingTitle(): String = "Verification temporarily unavailable"
+    fun googleVerifyConfigMissing(): String =
+        "Purchase verification is temporarily unavailable. Your purchase is safe — please try Restore Purchase again shortly."
+
+    fun googleVerifyProductMismatchTitle(): String = "Purchase couldn't be matched"
+    fun googleVerifyProductMismatch(): String =
+        "This purchase doesn't match a Torve product. If you think this is wrong, contact support with your order ID."
+
+    fun googleVerifyServiceAccountFailureTitle(): String = "Verification temporarily unavailable"
+    fun googleVerifyServiceAccountFailure(): String =
+        "Purchase verification is temporarily unavailable. Your purchase is safe — please try Restore Purchase again shortly."
+
+    fun googleVerifyUpstreamUnreachableTitle(): String = "Google Play unreachable"
+    fun googleVerifyUpstreamUnreachable(): String =
+        "Couldn't reach Google Play to confirm your purchase. Please try Restore Purchase again in a few minutes."
+
+    fun googleVerifyNotVerifiedTitle(): String = "Purchase not verified"
+    fun googleVerifyNotVerified(): String =
+        "Google Play did not confirm this purchase. If it appears in your order history, try Restore Purchase after signing in."
     fun storeRestoreFailed(storeLabel: String): String =
         "$storeLabel restore could not be completed. Try again after signing in."
     fun localPurchaseDisabled(): String =
@@ -96,6 +119,12 @@ interface PurchaseStringResolver {
         "Your Amazon purchase is waiting to be verified. Choose Retry Verification to finish Premium activation."
     fun pendingRetryMessage(): String =
         "Sign in to Torve, then choose Retry Verification to finish Premium activation."
+
+    // Verification resend UX
+    fun verificationEmailSent(): String = "Verification email sent!"
+    fun verificationEmailWaitBeforeResend(): String = "Please wait before resending."
+    fun verificationEmailSendFailed(): String = "Failed to send verification email."
+    fun verificationSignInRequired(): String = "Sign in to Torve before requesting a verification email."
 
     // Access presentation
     fun monthlyActiveUntil(date: String): String = "Premium Monthly active until $date"

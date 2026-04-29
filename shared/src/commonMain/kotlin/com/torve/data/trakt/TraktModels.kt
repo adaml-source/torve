@@ -25,6 +25,18 @@ sealed class TraktPollResult {
     data object Expired : TraktPollResult()
     data object AlreadyUsed : TraktPollResult()
     data object Denied : TraktPollResult()
+    /**
+     * The poll couldn't reach Trakt or Trakt returned a 5xx. Treated as a
+     * retryable hiccup in the caller — DNS failures, timeouts, and transient
+     * server errors happen during a 10-minute auth window, especially when
+     * the device browser steals focus or the network shifts mid-flight.
+     */
+    data class TransientError(val message: String) : TraktPollResult()
+    /**
+     * A non-retryable failure: Trakt answered with an unknown/non-2xx status
+     * that isn't one of the protocol-defined ones, or the 2xx body couldn't
+     * be parsed. The auth flow stops and the user is shown the message.
+     */
     data class Error(val message: String) : TraktPollResult()
 }
 

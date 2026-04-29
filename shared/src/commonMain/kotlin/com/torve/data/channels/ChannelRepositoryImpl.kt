@@ -15,14 +15,19 @@ import com.torve.domain.model.channelMatchesIdentity
 import com.torve.domain.model.canonicalEpgChannelKey
 import com.torve.domain.model.stableChannelId
 import com.torve.domain.repository.ChannelRepository
+import com.torve.domain.repository.PlaylistAddProgress
 import com.torve.data.network.HttpClientFactory
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.timeout
 import io.ktor.client.request.get
 import io.ktor.client.request.prepareGet
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.contentLength
 import io.ktor.http.encodeURLParameter
 import io.ktor.http.isSuccess
+import io.ktor.utils.io.ByteReadChannel
+import io.ktor.utils.io.readAvailable
 import kotlinx.datetime.Clock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -138,16 +143,41 @@ class ChannelRepositoryImpl(
         val allowedCanonicalKeys: Set<String>,
     )
 
-    override suspend fun addPlaylist(name: String, url: String, epgUrl: String?, id: String?): ChannelPlaylist {
+    override suspend fun addPlaylist(
+        name: String,
+        url: String,
+        epgUrl: String?,
+        id: String?,
+        onProgress: ((PlaylistAddProgress) -> Unit)?,
+    ): ChannelPlaylist {
         val id = id ?: "ch_${Clock.System.now().toEpochMilliseconds()}"
         val now = Clock.System.now().toEpochMilliseconds()
 
-        // Fetch and parse the playlist
-        val m3uContent = httpClient.get(url).bodyAsText()
-        val parsed = m3uParser.parse(m3uContent, id)
+        // Stream the M3U body so the UI can show real byte-level progress even
+        // on large playlists. Falls back to bodyAsText for trivially small
+        // responses where streaming overhead isn't worth it.
+        val m3uContent = httpClient.prepareGet(url).execute { response ->
+            val totalBytes = response.contentLength()
+            val channel = response.bodyAsChannel()
+            val sb = StringBuilder()
+            val buffer = ByteArray(64 * 1024)
+            var bytesRead = 0L
+            onProgress?.invoke(PlaylistAddProgress(0L, totalBytes, PlaylistAddProgress.Phase.DOWNLOADING))
+            while (!channel.isClosedForRead) {
+                val n = channel.readAvailable(buffer, 0, buffer.size)
+                if (n <= 0) break
+                sb.append(buffer.decodeToString(0, n))
+                bytesRead += n
+                onProgress?.invoke(PlaylistAddProgress(bytesRead, totalBytes, PlaylistAddProgress.Phase.DOWNLOADING))
+            }
+            sb.toString()
+        }
 
+        onProgress?.invoke(PlaylistAddProgress(m3uContent.length.toLong(), m3uContent.length.toLong(), PlaylistAddProgress.Phase.PARSING))
+        val parsed = m3uParser.parse(m3uContent, id)
         val resolvedEpgUrl = epgUrl ?: parsed.epgUrl
 
+        onProgress?.invoke(PlaylistAddProgress(m3uContent.length.toLong(), m3uContent.length.toLong(), PlaylistAddProgress.Phase.SAVING))
         persistPlaylistSnapshot(
             playlistId = id,
             playlistName = name,

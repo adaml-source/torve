@@ -32,6 +32,7 @@ import com.torve.domain.model.RatingSource
 import com.torve.domain.model.defaultTorveWeights
 import com.torve.domain.model.StreamPreferences
 import com.torve.domain.model.StreamQuality
+import com.torve.domain.repository.AddonRepository
 import com.torve.domain.repository.PreferencesRepository
 import com.torve.domain.repository.WatchHistoryRepository
 import com.torve.domain.repository.WatchProgressRepository
@@ -51,6 +52,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
@@ -75,6 +77,7 @@ class SettingsViewModel(
     private val omdbClient: OmdbClient,
     private val aiSuggestClient: AiSuggestClient,
     private val settingsRefreshNotifier: SettingsRefreshNotifier,
+    private val addonRepo: AddonRepository,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(SettingsUiState())
@@ -137,6 +140,8 @@ class SettingsViewModel(
         const val KEY_LAST_VOLUME = "last_volume"
         const val KEY_MOVIE_DOWNLOAD_PATH = "movie_download_path"
         const val KEY_SHOW_DOWNLOAD_PATH = "show_download_path"
+        const val KEY_ADULT_DOWNLOAD_PATH = "adult_download_path"
+        const val KEY_SPORTS_DOWNLOAD_PATH = "sports_download_path"
         const val KEY_DOWNLOAD_SCAN_FOLDERS = "download_scan_folders"
         const val KEY_LAST_SYNC_TIME = "last_sync_time"
         const val KEY_REGEX_PATTERNS = "regex_patterns"
@@ -157,6 +162,8 @@ class SettingsViewModel(
         const val KEY_CARD_PREFS = "card_prefs"
         const val KEY_CARD_STYLE_PRESETS = "card_style_presets"
         const val KEY_CARD_DEFAULT_PRESET_ID = "card_style_default_preset_id"
+        const val KEY_HOME_LAYOUT_SOURCE = "home_layout_source"
+        const val KEY_LAN_SERVING_ENABLED = "lan_serving_enabled"
 
         /** Mask a secret value for display: show last 4 chars only. */
         fun maskSecret(value: String): String {
@@ -200,9 +207,17 @@ class SettingsViewModel(
     init {
         loadSavedSettings()
         scope.launch {
-            settingsRefreshNotifier.events.collect {
-                refreshSettings()
-            }
+            // Debounce: during startup the notifier fires multiple times in
+            // quick succession (account-session init, panda config check,
+            // addon sync, policy invalidate). Without a debounce every
+            // downstream listener re-runs loadSavedSettings() and re-reads
+            // every secure-store key. 500ms collapses the burst.
+            @OptIn(kotlinx.coroutines.FlowPreview::class)
+            settingsRefreshNotifier.events
+                .debounce(500L)
+                .collect {
+                    refreshSettings()
+                }
         }
     }
 
@@ -300,6 +315,10 @@ class SettingsViewModel(
                 try { AppLanguage.valueOf(it) } catch (_: Exception) { null }
             } ?: AppLanguage.ENGLISH
             onLanguageChanged?.invoke(appLanguage)
+            val homeLayoutSource = prefsRepo.getString(KEY_HOME_LAYOUT_SOURCE)
+                ?.takeIf { it == "DESKTOP_OWN" || it == "SHARED_WITH_MOBILE" }
+                ?: "SHARED_WITH_MOBILE"
+            val lanServingEnabled = prefsRepo.getString(KEY_LAN_SERVING_ENABLED)?.toBooleanStrictOrNull() ?: false
 
             val autoPlayEnabled = prefsRepo.getString(KEY_AUTO_PLAY_ENABLED)?.toBooleanStrictOrNull() ?: true
             val autoPlayNextEpisodeEnabled = prefsRepo.getString(KEY_AUTO_PLAY_NEXT_EPISODE)?.toBooleanStrictOrNull() ?: true
@@ -332,6 +351,8 @@ class SettingsViewModel(
                 ?.toIntOrNull()?.coerceIn(0, 100) ?: 100
             val movieDownloadPath = prefsRepo.getString(KEY_MOVIE_DOWNLOAD_PATH) ?: ""
             val showDownloadPath = prefsRepo.getString(KEY_SHOW_DOWNLOAD_PATH) ?: ""
+            val adultDownloadPath = prefsRepo.getString(KEY_ADULT_DOWNLOAD_PATH) ?: ""
+            val sportsDownloadPath = prefsRepo.getString(KEY_SPORTS_DOWNLOAD_PATH) ?: ""
             val downloadScanFolders = prefsRepo.getString(KEY_DOWNLOAD_SCAN_FOLDERS)?.let {
                 try { jsonParser.decodeFromString<List<String>>(it) } catch (_: Exception) { emptyList() }
             } ?: emptyList()
@@ -393,11 +414,23 @@ class SettingsViewModel(
                 ratingPrefs = ratingPrefs,
             )
 
+            // Derive whether any enabled addon can produce streams — the
+            // "stream" resource is the Stremio-addon contract for /stream/…
+            // endpoints. Empty resources list is treated as a full-service
+            // addon (mirrors StreamAggregator.supportsStreamResolution).
+            val hasStreamAddon = runCatching {
+                addonRepo.getEnabledAddons().any { addon ->
+                    val resources = addon.manifest.resources
+                    resources.isEmpty() || resources.any { it.equals("stream", ignoreCase = true) }
+                }
+            }.getOrDefault(false)
+
             _state.update {
                 it.copy(
                     debridProvider = provider,
                     debridApiKey = apiKey,
                     debridConnected = apiKey.isNotBlank(),
+                    hasStreamAddon = hasStreamAddon,
                     connectedDebridProviders = allDebridKeys,
                     // Clear runtime-only account-linked state that isn't re-read from stores.
                     // After logout, secrets are empty → connected=false → profiles/users gone.
@@ -424,6 +457,8 @@ class SettingsViewModel(
                     kodiHosts = kodiHosts,
                     themeMode = themeMode,
                     appLanguage = appLanguage,
+                    homeLayoutSource = homeLayoutSource,
+                    lanServingEnabled = lanServingEnabled,
                     autoPlayEnabled = autoPlayEnabled,
                     autoPlayNextEpisodeEnabled = autoPlayNextEpisodeEnabled,
                     autoSourceMode = autoSourceMode,
@@ -441,6 +476,8 @@ class SettingsViewModel(
                     lastVolume = lastVolume,
                     movieDownloadPath = movieDownloadPath,
                     showDownloadPath = showDownloadPath,
+                    adultDownloadPath = adultDownloadPath,
+                    sportsDownloadPath = sportsDownloadPath,
                     downloadScanFolders = downloadScanFolders,
                     codecPreference = codecPreference,
                     hdrMode = hdrMode,
@@ -477,7 +514,7 @@ class SettingsViewModel(
             // Legacy migration block removed — migrateSecretPref() handles all
             // one-time imports from plaintext prefs → secure store above.
 
-            println("[SettingsLoad] debridConnected=${apiKey.isNotBlank()} traktConnected=${traktAccessToken.isNotBlank()} simklConnected=${simklAccessToken.isNotBlank()}")
+            println("[SettingsLoad] debridConnected=${apiKey.isNotBlank()} traktConnected=${traktAccessToken.isNotBlank()} simklConnected=${simklAccessToken.isNotBlank()} ratingPrefs.enabled=${ratingPrefs.enabledProviders} maxRatingsOnCard=${ratingPrefs.maxRatingsOnCard} pillPosition=${ratingPrefs.pillPosition}")
             if (apiKey.isNotBlank()) {
                 verifyDebridConnection()
             }
@@ -750,8 +787,30 @@ class SettingsViewModel(
                         _state.update { it.copy(isPollingTrakt = false, traktDeviceCode = null, traktError = com.torve.presentation.error.UserFacingError.INTEGRATION_AUTH_USED.defaultMessage()) }
                         return@launch
                     }
+                    is com.torve.data.trakt.TraktPollResult.TransientError -> {
+                        // DNS miss, timeout, 5xx — common during the auth
+                        // window when the user bounces to the browser and
+                        // back. Keep polling; nudge the interval up a touch
+                        // so we don't hammer a flaky network. A SINGLE
+                        // transient error must never terminate the flow
+                        // (the bug this replaces).
+                        println("[TraktPoll] Transient error, retrying: ${result.message}")
+                        interval = (interval + 1).coerceAtMost(15L)
+                    }
                     is com.torve.data.trakt.TraktPollResult.Error -> {
-                        _state.update { it.copy(isPollingTrakt = false, traktDeviceCode = null, traktError = com.torve.presentation.error.UserFacingError.INTEGRATION_CONNECT_FAILED.defaultMessage()) }
+                        // Surface the actual error so "invalid_grant",
+                        // deserialization failures, or HTTP status code drift
+                        // are diagnosable without a debug build. Formerly this
+                        // was a generic "Could not connect to the service"
+                        // message that hid every real failure.
+                        println("[TraktPoll] Error result: ${result.message}")
+                        _state.update {
+                            it.copy(
+                                isPollingTrakt = false,
+                                traktDeviceCode = null,
+                                traktError = "Trakt: ${result.message}",
+                            )
+                        }
                         return@launch
                     }
                 }
@@ -1657,6 +1716,18 @@ class SettingsViewModel(
         scope.launch { prefsRepo.setString(KEY_SHOW_DOWNLOAD_PATH, sanitized) }
     }
 
+    fun setAdultDownloadPath(path: String) {
+        val sanitized = path.trim()
+        _state.update { it.copy(adultDownloadPath = sanitized) }
+        scope.launch { prefsRepo.setString(KEY_ADULT_DOWNLOAD_PATH, sanitized) }
+    }
+
+    fun setSportsDownloadPath(path: String) {
+        val sanitized = path.trim()
+        _state.update { it.copy(sportsDownloadPath = sanitized) }
+        scope.launch { prefsRepo.setString(KEY_SPORTS_DOWNLOAD_PATH, sanitized) }
+    }
+
     fun setDownloadScanFoldersText(text: String) {
         val folders = text.lines()
             .map { it.trim() }
@@ -1770,6 +1841,38 @@ class SettingsViewModel(
         _state.update { it.copy(appLanguage = language) }
         onLanguageChanged?.invoke(language)
         scope.launch { prefsRepo.setString(KEY_APP_LANGUAGE, language.name) }
+    }
+
+    /**
+     * Desktop-only toggle: pick whether desktop's home layout follows the
+     * mobile-shared keys or its own private keys. Mobile UI never offers this
+     * control; the pref is harmless when left at its default on mobile.
+     *
+     * After persist, fires [SettingsRefreshNotifier] so HomeViewModel reloads
+     * its section configs from the new key.
+     */
+    /**
+     * Desktop-only toggle. Off by default — when enabled, the desktop's
+     * LAN library server starts on localhost (binding to a real LAN
+     * address is a future explicit toggle, not this one). The
+     * [SettingsRefreshNotifier] fires so the lifecycle coordinator can
+     * react.
+     */
+    fun setLanServingEnabled(enabled: Boolean) {
+        _state.update { it.copy(lanServingEnabled = enabled) }
+        scope.launch {
+            prefsRepo.setString(KEY_LAN_SERVING_ENABLED, enabled.toString())
+            settingsRefreshNotifier.notifyRefresh(kotlinx.datetime.Clock.System.now().toEpochMilliseconds())
+        }
+    }
+
+    fun setHomeLayoutSource(source: String) {
+        val normalized = if (source == "DESKTOP_OWN") "DESKTOP_OWN" else "SHARED_WITH_MOBILE"
+        _state.update { it.copy(homeLayoutSource = normalized) }
+        scope.launch {
+            prefsRepo.setString(KEY_HOME_LAYOUT_SOURCE, normalized)
+            settingsRefreshNotifier.notifyRefresh(kotlinx.datetime.Clock.System.now().toEpochMilliseconds())
+        }
     }
 
     fun setDedupeResultsEnabled(enabled: Boolean) {

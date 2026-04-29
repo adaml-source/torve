@@ -40,6 +40,11 @@ object HttpClientFactory {
 
         install(Logging) {
             level = LogLevel.HEADERS
+            // Authorization carries Bearer tokens for every integration
+            // (Panda manifest + management, Trakt, Simkl, debrid, Torve
+            // backend). Redact so HEADERS logging never leaks raw secrets
+            // into logcat / stdout / crash reports.
+            sanitizeHeader { it.equals("Authorization", ignoreCase = true) }
         }
 
         defaultRequest {
@@ -60,6 +65,11 @@ object HttpClientFactory {
 
         install(Logging) {
             level = LogLevel.HEADERS
+            // Authorization carries Bearer tokens for every integration
+            // (Panda manifest + management, Trakt, Simkl, debrid, Torve
+            // backend). Redact so HEADERS logging never leaks raw secrets
+            // into logcat / stdout / crash reports.
+            sanitizeHeader { it.equals("Authorization", ignoreCase = true) }
         }
 
         defaultRequest {

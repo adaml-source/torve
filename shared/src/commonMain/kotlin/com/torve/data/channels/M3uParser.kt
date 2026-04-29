@@ -8,18 +8,21 @@ class M3uParser {
     companion object {
         private const val MAX_CHANNELS = 50_000
         private const val MAX_LINES = 50_000
+        private const val UTF8_BOM = "﻿"
     }
 
     fun parse(content: String, playlistId: String = ""): M3uPlaylist {
-        val trimmed = content.trimStart()
-        if (!trimmed.startsWith("#EXTM3U")) {
+        // Strip UTF-8 BOM which is common on IPTV provider feeds and would
+        // otherwise make the #EXTM3U header check fail silently.
+        val normalized = content.removePrefix(UTF8_BOM).trimStart()
+        if (!normalized.startsWith("#EXTM3U")) {
             return M3uPlaylist(
                 channels = emptyList(),
                 error = "Invalid M3U: missing #EXTM3U header",
             )
         }
 
-        val lines = content.lines().map { it.trim() }
+        val lines = normalized.lines().map { it.trim() }
         if (lines.size > MAX_LINES) {
             return M3uPlaylist(
                 channels = emptyList(),

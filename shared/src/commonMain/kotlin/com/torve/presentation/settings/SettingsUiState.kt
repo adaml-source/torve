@@ -37,6 +37,12 @@ data class SettingsUiState(
     val debridApiKey: String = "",
     val debridUser: DebridUser? = null,
     val debridConnected: Boolean = false,
+    // True iff the user has at least one enabled addon that declares the
+    // "stream" resource — i.e. somewhere a stream URL can come from. Separate
+    // from [debridConnected] because Panda (or any future cloud-debrid addon)
+    // resolves streams server-side and the app doesn't need a local debrid
+    // key for playback in that case.
+    val hasStreamAddon: Boolean = false,
     val debridError: String? = null,
     val debridLoading: Boolean = false,
     // Debrid device auth
@@ -110,6 +116,15 @@ data class SettingsUiState(
     val lastVolume: Int = 100,
     val movieDownloadPath: String = "",
     val showDownloadPath: String = "",
+    /**
+     * Optional surface-specific download folders for NZB-sourced content.
+     * Empty means "block downloads from this surface; prompt the user to
+     * pick a folder before queuing". A separate folder per surface lets
+     * users keep adult content out of the main Movies library and route
+     * sports recordings somewhere distinct.
+     */
+    val adultDownloadPath: String = "",
+    val sportsDownloadPath: String = "",
     val downloadScanFolders: List<String> = emptyList(),
     // Kodi
     val kodiHosts: List<KodiHost> = emptyList(),
@@ -117,6 +132,12 @@ data class SettingsUiState(
     // Theme & Language
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val appLanguage: AppLanguage = AppLanguage.ENGLISH,
+    // Home layout source ("SHARED_WITH_MOBILE" | "DESKTOP_OWN") — desktop-only toggle.
+    val homeLayoutSource: String = "SHARED_WITH_MOBILE",
+    // LAN library serving (desktop-only). Off by default — server stays
+    // unbound until the user opts in. Phase 3 Slice C wiring binds to
+    // localhost only; LAN binding is a future toggle.
+    val lanServingEnabled: Boolean = false,
     // Cache
     val cacheCleared: Boolean = false,
     // Sync / Backup
@@ -163,4 +184,14 @@ data class SettingsUiState(
         AiProvider.PERPLEXITY -> perplexityApiKey
         AiProvider.DEEPSEEK -> deepSeekApiKey
     }
+
+    /**
+     * True when playback can be attempted: either the user has a local debrid
+     * key (torrent/hoster unrestrict path) or at least one installed addon
+     * that produces streams (Panda serving direct / cloud-debrid URLs).
+     *
+     * Use this to gate play buttons. Use [debridConnected] when specifically
+     * checking whether the local unrestrict / bulk-download path is available.
+     */
+    val canPlayStreams: Boolean get() = debridConnected || hasStreamAddon
 }

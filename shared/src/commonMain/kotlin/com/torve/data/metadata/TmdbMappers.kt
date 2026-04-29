@@ -36,9 +36,7 @@ object TmdbMappers {
     }
 
     fun movieToMediaItem(m: TmdbMovie): MediaItem {
-        val trailer = m.videos?.results?.firstOrNull { v ->
-            v.site == "YouTube" && v.type == "Trailer"
-        }
+        val trailer = pickBestTrailer(m.videos?.results)
         val director = m.credits?.crew?.firstOrNull { it.job == "Director" }
         return MediaItem(
             id = m.id.toString(),
@@ -78,9 +76,7 @@ object TmdbMappers {
     }
 
     fun tvToMediaItem(t: TmdbTv): MediaItem {
-        val trailer = t.videos?.results?.firstOrNull { v ->
-            v.site == "YouTube" && v.type == "Trailer"
-        }
+        val trailer = pickBestTrailer(t.videos?.results)
         val director = t.credits?.crew?.firstOrNull { it.job == "Director" }
         return MediaItem(
             id = t.id.toString(),
@@ -188,5 +184,38 @@ object TmdbMappers {
             popularity = r.popularity,
             ratings = r.voteAverage?.let { MediaRatings(tmdbScore = it.toFloat()) },
         )
+    }
+
+    /**
+     * Pick the best YouTube trailer for the user's locale.
+     *
+     * The detail request is already filtered to the user's language plus
+     * English (see [TmdbApiClient.getMovieDetail]/`getTvDetail`'s
+     * `include_video_language` param). With that pre-filter:
+     *
+     *  1. Prefer official trailers in a non-English language (= the user's
+     *     language when it differs from English).
+     *  2. Otherwise prefer official English trailers.
+     *  3. Otherwise any trailer in the user's language.
+     *  4. Otherwise any English trailer.
+     *  5. Last resort: any YouTube trailer at all.
+     *
+     * Always restricted to `site == "YouTube"` and `type == "Trailer"` so
+     * we don't accidentally surface a behind-the-scenes clip or a teaser
+     * marked as `Featurette`.
+     */
+    fun pickBestTrailer(videos: List<TmdbVideo>?): TmdbVideo? {
+        val candidates = videos?.filter { it.site == "YouTube" && it.type == "Trailer" }
+            ?: return null
+        if (candidates.isEmpty()) return null
+        val officialNonEn = candidates.firstOrNull { it.official && !it.language.equals("en", true) }
+        if (officialNonEn != null) return officialNonEn
+        val officialEn = candidates.firstOrNull { it.official && it.language.equals("en", true) }
+        if (officialEn != null) return officialEn
+        val anyNonEn = candidates.firstOrNull { !it.language.equals("en", true) }
+        if (anyNonEn != null) return anyNonEn
+        val anyEn = candidates.firstOrNull { it.language.equals("en", true) }
+        if (anyEn != null) return anyEn
+        return candidates.firstOrNull()
     }
 }

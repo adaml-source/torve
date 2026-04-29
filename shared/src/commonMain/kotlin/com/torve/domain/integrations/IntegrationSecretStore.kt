@@ -24,6 +24,45 @@ enum class IntegrationSecretKey {
     MDBLIST_API_KEY,
     OMDB_API_KEY,
     PANDA_TOKEN,
+    /**
+     * Panda per-config management token. Always persisted as DEVICE_ONLY: a
+     * compromised Torve account must not leak write access to Panda configs.
+     * Keyed by the server-issued `config_id` via the [IntegrationSecretStore]
+     * subKey parameter so multiple Panda configs can coexist per install.
+     */
+    PANDA_MANAGEMENT_TOKEN,
+    /**
+     * Base URL of the user's NzbDAV instance, e.g. `https://nzbdav.example.com`.
+     * Forwarded to the Torve backend — the app never speaks NzbDAV directly.
+     */
+    NZBDAV_BASE_URL,
+    /**
+     * API key for the user's NzbDAV instance. Forwarded to the backend on
+     * save; after that the backend owns the credential and the app only
+     * reads a sanitized status.
+     */
+    NZBDAV_API_KEY,
+    /**
+     * Local cache of Panda's NZB indexer API keys. Panda's read API
+     * always returns indexer apiKeys as `[redacted]`, so the desktop's
+     * Adult / Sports / Movies-via-Usenet tabs (which talk to the
+     * Newznab indexer directly, not via Panda) lose access to the key
+     * across restarts. We mirror the user-typed value here on save and
+     * prefer it over the redacted server response on hydrate. SubKey is
+     * `<indexerType>|<indexerUrl>` so multiple indexers coexist.
+     */
+    PANDA_INDEXER_API_KEY,
+    /**
+     * Same role as [PANDA_INDEXER_API_KEY] for the Panda download
+     * client (e.g. TorBox API key). SubKey is `<downloadClientType>`.
+     */
+    PANDA_DOWNLOAD_CLIENT_API_KEY,
+    /** Local cache of the Panda download client password (NZBget /
+     *  SABnzbd self-hosted creds). SubKey is `<downloadClientType>`. */
+    PANDA_DOWNLOAD_CLIENT_PASSWORD,
+    /** Local cache of the Panda usenet provider password (Easynews /
+     *  generic NNTP). SubKey is `<usenetProviderType>`. */
+    PANDA_USENET_PASSWORD,
 }
 
 /**
@@ -71,9 +110,16 @@ fun resolveRuntimeState(
 }
 
 interface IntegrationSecretStore {
-    suspend fun put(key: IntegrationSecretKey, value: String)
-    suspend fun get(key: IntegrationSecretKey): String?
-    suspend fun remove(key: IntegrationSecretKey)
+    /**
+     * Persist [value] under [key]. When [subKey] is non-null the entry is
+     * scoped — distinct subKeys under the same key coexist without collision.
+     * Pass `null` to use the single-value slot (legacy behavior). Implementors
+     * must never log the raw [value]. Use subKey for per-owner secrets such
+     * as `PANDA_MANAGEMENT_TOKEN` keyed by `config_id`.
+     */
+    suspend fun put(key: IntegrationSecretKey, value: String, subKey: String? = null)
+    suspend fun get(key: IntegrationSecretKey, subKey: String? = null): String?
+    suspend fun remove(key: IntegrationSecretKey, subKey: String? = null)
 
     /** Persist the storage mode chosen by the user for [key]. */
     suspend fun setStorageMode(key: IntegrationSecretKey, mode: IntegrationStorageMode)
@@ -87,8 +133,9 @@ interface IntegrationSecretStore {
      *  Device-only secrets are gone — the user must re-enter them. */
     suspend fun clearAllSecrets()
 
-    /** Check if a usable local secret exists for [key]. */
-    suspend fun hasSecret(key: IntegrationSecretKey): Boolean = get(key)?.isNotBlank() == true
+    /** Check if a usable local secret exists for [key] and optional [subKey]. */
+    suspend fun hasSecret(key: IntegrationSecretKey, subKey: String? = null): Boolean =
+        get(key, subKey)?.isNotBlank() == true
 
     /** Keys in the preferences DB that may contain legacy secret fallbacks.
      *  Must be cleared on logout alongside the secure store. */

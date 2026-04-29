@@ -148,7 +148,10 @@ class SubscriptionRepositoryImpl(
                 records = entitlementRecords,
                 nowEpochMs = Clock.System.now().toEpochMilliseconds(),
             )
-            val hasEntitlement = accessState.resolvedHasPremiumEntitlement() || resolvedEntitlement.hasEntitlement
+            val needsVerification = accessState.needs_verification
+            val hasEntitlement = accessState.resolvedHasPremiumEntitlement() ||
+                resolvedEntitlement.hasEntitlement ||
+                needsVerification
             val isDeviceActivated = accessState.resolvedIsDeviceActivated()
             val usablePremium = hasEntitlement && isDeviceActivated
             val reason = accessState.resolvedDeviceBlockReason()
@@ -185,9 +188,12 @@ class SubscriptionRepositoryImpl(
                     )
                     persistResolvedTier(entitlementForPersistence)
                     torveVerboseLog {
-                        "SUBSCRIPTION_BACKEND refresh_result status=device_blocked reason=$reason tier=${entitlementForPersistence.tier}"
+                        "SUBSCRIPTION_BACKEND refresh_result status=device_blocked reason=$reason needsVerification=$needsVerification tier=${entitlementForPersistence.tier}"
                     }
-                    BackendPremiumResult.DeviceBlocked(reason)
+                    BackendPremiumResult.DeviceBlocked(
+                        reason = reason,
+                        needsVerification = needsVerification,
+                    )
                 }
                 else -> {
                     clearCachedBackendPremiumAccess()

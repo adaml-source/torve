@@ -6,6 +6,7 @@ import com.torve.domain.model.ChannelCategory
 import com.torve.domain.model.Channel
 import com.torve.domain.model.ChannelPlaylist
 import com.torve.domain.player.LiveAudioOutputMode
+import com.torve.domain.repository.PlaylistAddProgress
 
 enum class ChannelsSubTab { LIVE, FAVOURITES }
 
@@ -46,6 +47,7 @@ data class ChannelsUiState(
     val isLoading: Boolean = false,
     val isLoadingChannels: Boolean = false,
     val isAddingPlaylist: Boolean = false,
+    val addPlaylistProgress: PlaylistAddProgress? = null,
     val error: String? = null,
     // Add playlist dialog
     val showAddPlaylist: Boolean = false,

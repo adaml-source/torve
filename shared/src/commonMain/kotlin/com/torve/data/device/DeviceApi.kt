@@ -67,7 +67,7 @@ class DeviceApi(
             }
             json.decodeFromString(AccessStateDto.serializer(), raw).also { decoded ->
                 torveVerboseLog {
-                    "ACCESS_STATE fetch_success hasEntitlement=${decoded.resolvedHasPremiumEntitlement()} deviceActivated=${decoded.resolvedIsDeviceActivated()} blockReason=${decoded.resolvedDeviceBlockReason()}"
+                    "ACCESS_STATE fetch_success hasEntitlement=${decoded.resolvedHasPremiumEntitlement()} deviceActivated=${decoded.resolvedIsDeviceActivated()} needsVerification=${decoded.needs_verification} blockReason=${decoded.resolvedDeviceBlockReason()}"
                 }
             }
         } catch (e: Exception) {
@@ -313,6 +313,8 @@ data class AccessStateDto(
     val is_device_activated: Boolean? = null,
     @SerialName("device_block_reason")
     val device_block_reason: String? = null,
+    @SerialName("needs_verification")
+    val needs_verification: Boolean = false,
     @SerialName("entitlement_type")
     val entitlement_type: String? = null,
     @SerialName("source")
@@ -338,7 +340,7 @@ fun AccessStateDto.resolvedHasPremiumEntitlement(): Boolean {
 }
 
 fun AccessStateDto.resolvedAccessTier(): SubscriptionTier? {
-    return parseAccessTier(access_tier)
+    return parseAccessTier(access_tier) ?: parseAccessTier(entitlement_type)
 }
 
 /**

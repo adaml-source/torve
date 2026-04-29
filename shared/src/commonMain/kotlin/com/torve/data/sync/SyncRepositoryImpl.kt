@@ -226,6 +226,7 @@ class SyncRepositoryImpl(
                     server_id = null,
                     synced_at = null,
                     installed_from = "sync",
+                    config_id = null,
                 )
                 addonsImported++
             } else {
