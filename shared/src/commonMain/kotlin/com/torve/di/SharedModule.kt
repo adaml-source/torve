@@ -356,6 +356,126 @@ val sharedModule = module {
     single { PairingApi(get(), baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL }) }
     single { AccountSessionCoordinator(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
 
+    // Provider-health primitives. Repository hydrates from prefs on first
+    // load; the coordinator holds in-memory checker registrations and is
+    // populated per platform (desktop/Android wire their own checkers).
+    single<com.torve.domain.providerhealth.ProviderHealthRepository> {
+        com.torve.data.providerhealth.PrefsBackedProviderHealthRepository(get())
+    }
+    single { com.torve.presentation.providerhealth.ProviderHealthCoordinator(get()) }
+    // Auto-rerun every checker when SettingsRefreshNotifier ticks
+    // (Panda save success, Debrid token rotation, etc.). Both Desktop
+    // and Android init launch a single long-running collector.
+    single {
+        com.torve.presentation.providerhealth.ProviderHealthRefreshOnSettings(
+            notifier = get(),
+            coordinator = get(),
+        )
+    }
+    single { com.torve.presentation.setup.SetupIntentsViewModel(get()) }
+
+    // Phase 3 Sub-pass 1 — credential-transfer apply path. The
+    // protocol and crypto engine binding lives per-platform (desktop
+    // wires JvmTransferCryptoEngine + SecretsTransferProtocol).
+    single { com.torve.domain.transfer.ConsumedNonceStore(prefs = get()) }
+    single<com.torve.domain.transfer.ConfigKeyAllowlist> {
+        com.torve.domain.transfer.DefaultConfigKeyAllowlist()
+    }
+    single {
+        com.torve.domain.transfer.SecretsTransferApplier(
+            secretStore = get(),
+            nonceStore = get(),
+            prefsRepo = get(),
+            configKeyAllowlist = get(),
+        )
+    }
+    // Phase 3 — backend relay client for credential transfer. Binding
+    // here is platform-agnostic; if the backend lacks `/api/v1/transfer/*`,
+    // the client returns Unavailable and the UI degrades to manual paste.
+    single<com.torve.data.transfer.TransferRelayApi> {
+        com.torve.data.transfer.KtorTransferRelayApi(
+            httpClient = get(),
+            baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
+        )
+    }
+
+    // Cross-platform sender + receiver VMs for credential transfer.
+    // Both delegate platform-specific X25519 keypair gen + AEAD to the
+    // injected SecretsTransferProtocol (engine bound per platform).
+    //
+    // Diagnostics + telemetry: the singletons below are shared between
+    // both VMs and the diagnostics screen so the "last attempt" pill is
+    // the same value the VMs reported.
+    single { com.torve.presentation.transfer.TransferAttemptTracker() }
+    // Cross-platform "an import just landed" broadcast. Receiver VM
+    // emits on Success; recovery surfaces observe to recompute.
+    single { com.torve.presentation.transfer.TransferImportCompletionNotifier() }
+    // Recovery-card state for the "Restore setup from another device"
+    // card surfaced on every platform's Settings entry.
+    single {
+        com.torve.presentation.providerhealth.ProviderHealthRecoveryStateProvider(
+            secretStore = get(),
+        )
+    }
+    factory {
+        // Platform tag — read from DeviceIdProvider so we don't need an
+        // expect/actual just for a string.
+        val platformTag = runCatching { get<com.torve.domain.device.DeviceIdProvider>().getPlatform() }
+            .getOrElse { "unknown" }
+        com.torve.presentation.transfer.SecretsTransferSenderViewModel(
+            protocol = get(),
+            secretStore = get(),
+            deviceIdProvider = get(),
+            prefsRepo = get(),
+            configKeyAllowlist = get(),
+            relayApi = get(),
+            accessTokenProvider = { get<com.torve.data.auth.AuthClient>().getValidAccessToken() },
+            telemetry = get(),
+            attemptTracker = get(),
+            platform = platformTag,
+        )
+    }
+    factory {
+        val platformTag = runCatching { get<com.torve.domain.device.DeviceIdProvider>().getPlatform() }
+            .getOrElse { "unknown" }
+        com.torve.presentation.transfer.SecretsTransferReceiverViewModel(
+            protocol = get(),
+            applier = get(),
+            nonceStore = get(),
+            relayApi = get(),
+            accessTokenProvider = { get<com.torve.data.auth.AuthClient>().getValidAccessToken() },
+            deviceIdProvider = get(),
+            telemetry = get(),
+            attemptTracker = get(),
+            completionNotifier = get(),
+            platform = platformTag,
+        )
+    }
+    factory {
+        com.torve.presentation.transfer.TransferDiagnosticsCollector(
+            cryptoEngine = getOrNull(),
+            authClient = getOrNull(),
+            relayApi = getOrNull(),
+            tracker = get(),
+        )
+    }
+
+    // Source-availability primitives — Phase 3 Slice A.
+    // Three real providers (local downloads, Plex, Jellyfin); aggregator
+    // fans out to all of them in parallel and caches results in-process.
+    single { com.torve.data.sourceavailability.LocalDownloadSourceAvailabilityProvider(get()) }
+    single { com.torve.data.sourceavailability.PlexSourceAvailabilityProvider(get(), get(), get()) }
+    single { com.torve.data.sourceavailability.JellyfinSourceAvailabilityProvider(get(), get(), get()) }
+    single<com.torve.domain.sourceavailability.SourceAvailabilityAggregator> {
+        com.torve.data.sourceavailability.DefaultSourceAvailabilityAggregator(
+            providers = listOf(
+                get<com.torve.data.sourceavailability.LocalDownloadSourceAvailabilityProvider>(),
+                get<com.torve.data.sourceavailability.PlexSourceAvailabilityProvider>(),
+                get<com.torve.data.sourceavailability.JellyfinSourceAvailabilityProvider>(),
+            ),
+        )
+    }
+
     // Use Cases
     factory { GetRecommendationsUseCase(get(), get()) }
     factory { MoodMatcher(get()) }
@@ -403,7 +523,16 @@ val sharedModule = module {
         )
     }
     single { com.torve.data.panda.PandaApiClient(get(), get()) }
-    factory { com.torve.presentation.panda.PandaSetupViewModel(get(), get(), get(), get(), get(), get(), get(), get()) }
+    // Singleton mirror so provider-health checkers can read the Panda
+    // wizard's current config without holding a (factory-bound) VM
+    // reference. The VM publishes its `_state` here on every update.
+    single { com.torve.presentation.panda.PandaConfigStateStore() }
+    factory {
+        com.torve.presentation.panda.PandaSetupViewModel(
+            get(), get(), get(), get(), get(), get(), get(), get(),
+            configStateStore = get(),
+        )
+    }
     // NzbDAV / Usenet-resolver data layer. Talks only to the Torve backend;
     // never speaks raw NzbDAV/WebDAV/SABnzbd. Settings VM + warm/resolve
     // coordinators land in later prompts and inject UsenetRepository.

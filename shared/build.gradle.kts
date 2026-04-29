@@ -72,6 +72,11 @@ kotlin {
 
             // Koin
             implementation(libs.koin.core)
+
+            // QR code rendering — used by credential-transfer receive UIs
+            // on every platform. Pure-Kotlin KMP library; outputs raw PNG
+            // bytes that each platform converts to its own bitmap type.
+            implementation(libs.qrcode.kotlin)
         }
 
         androidMain.dependencies {

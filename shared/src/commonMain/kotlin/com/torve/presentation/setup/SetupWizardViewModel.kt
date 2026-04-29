@@ -186,6 +186,11 @@ class SetupWizardViewModel(
                         _state.update { it.copy(traktDeviceCode = null, traktError = "Authorization failed. Try again.") }
                         return@launch
                     }
+                    is com.torve.data.trakt.TraktPollResult.TransientError -> {
+                        // DNS / timeout / 5xx — keep polling, don't abandon
+                        // the auth window on a single hiccup.
+                        interval = (interval + 1).coerceAtMost(15L)
+                    }
                     is com.torve.data.trakt.TraktPollResult.Error -> {
                         _state.update { it.copy(traktDeviceCode = null, traktError = result.message) }
                         return@launch

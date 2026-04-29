@@ -369,7 +369,9 @@ class AuthClient(
 
     suspend fun resendVerification(email: String): AuthResult {
         return try {
+            val accessToken = getValidAccessToken()
             val resp = httpClient.post("${baseUrl()}/auth/resend-verification") {
+                accessToken?.let { bearerAuth(it) }
                 contentType(ContentType.Application.Json)
                 setBody(ResendVerificationDto(email.trim()))
             }
