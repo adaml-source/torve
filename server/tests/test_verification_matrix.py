@@ -352,24 +352,42 @@ async def test_row_e_ios_restore_full_cap(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_row_f_stale_device_auto_expiry(client: AsyncClient):
-    """ROW F: Stale device auto-expires, freeing a slot without consuming a swap."""
+    """ROW F: Stale device auto-expires, freeing a slot without consuming a swap.
+
+    The product invariant we pin here:
+      - Device 2 has been silent for 50 days (> STALE_DAYS = 45).
+      - A 6th device shows up and activates without paying a swap.
+      - After activation, device 2 is no longer in the active list and
+        the swap budget is intact.
+
+    The previous version of this test asserted on
+    `device_limit.stale_devices_pruned >= 1` from the access-state
+    response. That counter is per-call only; whichever call (login or
+    access-state) happens to do the pruning eats the count. The
+    durable invariant is "device 2 is gone from the active list", which
+    we now check directly via `/me/devices`.
+    """
     from datetime import datetime, timedelta, timezone
-    from unittest.mock import patch
 
     data = await register_with_device(client, "rowf@test.com", "TestPass123!", make_device("rowf-1"))
     token1 = data["tokens"]["access_token"]
     await verify_apple_purchase(client, token1)
     tokens, device_ids = await fill_5_devices(client, "rowf@test.com", "TestPass123!", token1)
 
-    # Manually set device 2's last_seen_at to 50 days ago (beyond STALE_DAYS=45)
-    # We do this by patching the DB directly through the app's session
+    # Pre-create device 6 via login — but BEFORE we patch device 2 stale,
+    # so the login's auto-activation does NOT consume the prune budget.
+    # (Login auto-activates; if we let it run with device 2 already
+    # stale, the per-call prune counter eats the credit before
+    # access-state can see it.)
+    device6 = make_device("rowf-6")
+
+    # Patch device 2's last_seen_at to 50 days ago AFTER fill_5_devices
+    # but BEFORE device 6 logs in.
     from app.db import get_session as app_get_session
-    from app.models import Device, utcnow
+    from app.models import Device
     from sqlalchemy import update
     from app.main import app
-    from sqlalchemy.ext.asyncio import AsyncSession
 
-    # Get a session from the override
     override = app.dependency_overrides.get(app_get_session)
     if override:
         async for session in override():
@@ -382,8 +400,9 @@ async def test_row_f_stale_device_auto_expiry(client: AsyncClient):
             await session.commit()
             break
 
-    # 6th device — should succeed because device 2 will be auto-pruned
-    device6 = make_device("rowf-6")
+    # Login + access-state for device 6. Either of these may run the
+    # prune (auth_login also calls try_activate_device); we check the
+    # durable post-state, not which call did the work.
     login6 = await login_with_device(client, "rowf@test.com", "TestPass123!", device6)
     t6 = login6["tokens"]["access_token"]
 
@@ -393,14 +412,26 @@ async def test_row_f_stale_device_auto_expiry(client: AsyncClient):
         "premium.premium_access",
         "device.is_active",
         "device.active_device_count",
-        "device_limit.stale_devices_pruned",
         "device_limit.swaps_remaining",
     ])
 
+    # 1. Device 6 is active.
     assert d["premium"]["premium_access"] is True
-    assert d["device_limit"]["stale_devices_pruned"] >= 1
-    # Stale expiry does NOT count toward swaps
-    assert d["device_limit"]["swaps_remaining"] == 3  # full swap budget intact
+    assert d["device"]["is_active"] is True
+
+    # 2. Stale expiry does NOT count toward swaps (full budget intact).
+    assert d["device_limit"]["swaps_remaining"] == 3
+
+    # 3. Durable invariant: device 2 is no longer active. Check the
+    # device list — the auto-expired device must have moved out of
+    # the active set.
+    devices_resp = await client.get("/me/devices", headers={"Authorization": f"Bearer {t6}"})
+    active_ids = [d["id"] for d in devices_resp.json()["devices"]]
+    assert device_ids[1] not in active_ids, (
+        f"device 2 ({device_ids[1]}) was not auto-expired; active list = {active_ids}"
+    )
+    # And device 6 IS active.
+    assert d["device"]["id"] in active_ids
 
 
 # ──────────────────────────────────────────────────

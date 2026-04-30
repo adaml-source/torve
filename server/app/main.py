@@ -10,8 +10,9 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from .config import get_settings
 from .db import get_session
-from .models import AccountSettings, Device, DeviceActivationEvent, Entitlement, EventOutbox, PairingCode, Purchase, Session, User, UserPlaylist, WatchStateReport, utcnow
+from .models import AccountSettings, Device, DeviceActivationEvent, Entitlement, EventOutbox, LanHub, PairingCode, Purchase, Session, User, UserPlaylist, WatchStateReport, utcnow
 from .realtime import ConnectionRegistry, deliver_pending_events, dispatch_event
+from .secret_wrap import WrapUnavailable, wrap as wrap_secret, unwrap as unwrap_secret
 from .schemas import (
     AccountSettingsPatchRequest,
     AccountSettingsResponse,
@@ -59,6 +60,10 @@ from .schemas import (
     WatchStateReportResponse,
     PlaylistSaveRequest,
     PlaylistResponse,
+    LanHubPublishRequest,
+    LanHubResponse,
+    LanHubListResponse,
+    LanHubSecretResponse,
 )
 from .security import (
     create_access_token,
@@ -495,32 +500,198 @@ async def auth_delete_account(
     user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict:
-    """Permanently delete the authenticated user's account and all associated data."""
-    # Revoke all sessions
+    """Permanently delete the authenticated user's account and all associated data.
+
+    Hard-deletes every per-user row across all tables (Prompt 12 hardening
+    extends the original cascade to cover watch reports, playlists, LAN
+    hubs, purchases, entitlements, account settings, and outbox rows). The
+    user row is removed last so foreign keys never dangle mid-transaction.
+    """
+    user_id = user.id
+
+    # Revoke active sessions first so any in-flight request from another
+    # device gets a clean 401 instead of operating on a half-deleted user.
     sessions_result = await session.execute(
-        select(Session).where(Session.user_id == user.id, Session.revoked_at.is_(None)),
+        select(Session).where(Session.user_id == user_id, Session.revoked_at.is_(None)),
     )
     for row in sessions_result.scalars().all():
         row.revoked_at = utcnow()
 
-    # Remove devices
+    # Per-user data cascade. Order is leaf-tables first so a foreign-key
+    # constraint never blocks the user delete at the end.
+    await session.execute(delete(WatchStateReport).where(WatchStateReport.user_id == user_id))
+    await session.execute(delete(UserPlaylist).where(UserPlaylist.user_id == user_id))
+    await session.execute(delete(LanHub).where(LanHub.user_id == user_id))
+    await session.execute(delete(Purchase).where(Purchase.user_id == user_id))
+    await session.execute(delete(Entitlement).where(Entitlement.user_id == user_id))
+    await session.execute(delete(AccountSettings).where(AccountSettings.user_id == user_id))
+    await session.execute(delete(EventOutbox).where(EventOutbox.user_id == user_id))
+    # Pairing codes that the user has claimed reference them via
+    # claimed_by_user_id; null those out so we don't drop other users'
+    # codes by accident.
     await session.execute(
-        delete(Device).where(Device.user_id == user.id),
+        PairingCode.__table__.update()
+        .where(PairingCode.claimed_by_user_id == user_id)
+        .values(claimed_by_user_id=None)
     )
-    # Remove activation events
-    await session.execute(
-        delete(DeviceActivationEvent).where(DeviceActivationEvent.user_id == user.id),
-    )
-    # Remove sessions
-    await session.execute(
-        delete(Session).where(Session.user_id == user.id),
-    )
-    # Remove the user
-    await session.execute(
-        delete(User).where(User.id == user.id),
-    )
+
+    # Devices and activation events.
+    await session.execute(delete(Device).where(Device.user_id == user_id))
+    await session.execute(delete(DeviceActivationEvent).where(DeviceActivationEvent.user_id == user_id))
+    # Now sessions and finally the user row itself.
+    await session.execute(delete(Session).where(Session.user_id == user_id))
+    await session.execute(delete(User).where(User.id == user_id))
     await session.commit()
     return {"status": "ok"}
+
+
+@app.get("/me/export")
+async def export_user_data(
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    """GDPR-style data export for the authenticated user.
+
+    Returns a JSON blob with everything the server holds for this user,
+    minus secrets that the user shouldn't get back in cleartext from the
+    backend (LAN auth secrets, refresh-token hashes, etc.). The shape is
+    documented in docs/release-hardening.md.
+    """
+    user_id = user.id
+
+    devices_rows = (await session.execute(
+        select(Device).where(Device.user_id == user_id)
+    )).scalars().all()
+    sessions_rows = (await session.execute(
+        select(Session).where(Session.user_id == user_id)
+    )).scalars().all()
+    watch_rows = (await session.execute(
+        select(WatchStateReport).where(WatchStateReport.user_id == user_id)
+    )).scalars().all()
+    playlists_rows = (await session.execute(
+        select(UserPlaylist).where(UserPlaylist.user_id == user_id)
+    )).scalars().all()
+    hubs_rows = (await session.execute(
+        select(LanHub).where(LanHub.user_id == user_id)
+    )).scalars().all()
+    purchases_rows = (await session.execute(
+        select(Purchase).where(Purchase.user_id == user_id)
+    )).scalars().all()
+    entitlements_rows = (await session.execute(
+        select(Entitlement).where(Entitlement.user_id == user_id)
+    )).scalars().all()
+    settings_rows = (await session.execute(
+        select(AccountSettings).where(AccountSettings.user_id == user_id)
+    )).scalars().all()
+
+    def _iso(dt) -> str | None:
+        return dt.isoformat() if dt is not None else None
+
+    return {
+        "export_format_version": 1,
+        "exported_at": utcnow().isoformat(),
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "is_verified": getattr(user, "is_verified", False),
+            "created_at": _iso(user.created_at),
+        },
+        "devices": [
+            {
+                "id": d.id,
+                "device_name": d.device_name,
+                "device_type": d.device_type,
+                "platform": d.platform,
+                "installation_id": d.installation_id,
+                "first_seen_at": _iso(d.first_seen_at),
+                "last_seen_at": _iso(d.last_seen_at),
+                "activated_at": _iso(d.activated_at),
+                "removed_at": _iso(d.removed_at),
+            }
+            for d in devices_rows
+        ],
+        "sessions": [
+            {
+                "id": s.id,
+                "device_id": s.device_id,
+                "issued_at": _iso(getattr(s, "issued_at", None)),
+                "expires_at": _iso(getattr(s, "expires_at", None)),
+                "revoked_at": _iso(getattr(s, "revoked_at", None)),
+            }
+            for s in sessions_rows
+        ],
+        "watch_state_reports": [
+            {
+                "id": w.id,
+                "device_id": w.device_id,
+                "content_id": w.content_id,
+                "provider": w.provider,
+                "position_ms": w.position_ms,
+                "reported_at": _iso(w.reported_at),
+            }
+            for w in watch_rows
+        ],
+        "playlists": [
+            {
+                "id": p.id,
+                "name": p.name,
+                "url": p.url,
+                "epg_url": p.epg_url,
+                "playlist_type": p.playlist_type,
+                "server": p.server,
+                "username": p.username,
+                # password_enc deliberately omitted from export — the user
+                # already knows their own password; echoing back ciphertext
+                # serves no purpose.
+                "created_at": _iso(p.created_at),
+                "updated_at": _iso(p.updated_at),
+            }
+            for p in playlists_rows
+        ],
+        "lan_hubs": [
+            {
+                "id": h.id,
+                "publisher_id": h.publisher_id,
+                "device_label": h.device_label,
+                "lan_host": h.lan_host,
+                "lan_port": h.lan_port,
+                "protocol_version": h.protocol_version,
+                # auth_secret deliberately omitted — exporting an at-rest
+                # ciphertext is meaningless; the live secret is fetched
+                # via the dedicated /me/lan/hubs/{publisher_id}/secret
+                # endpoint per session.
+                "last_seen_at": _iso(h.last_seen_at),
+                "created_at": _iso(h.created_at),
+            }
+            for h in hubs_rows
+        ],
+        "purchases": [
+            {
+                "id": p.id,
+                "store": getattr(p, "store", None),
+                "product_id": getattr(p, "product_id", None),
+                "purchased_at": _iso(getattr(p, "purchased_at", None)),
+            }
+            for p in purchases_rows
+        ],
+        "entitlements": [
+            {
+                "id": e.id,
+                "product_id": getattr(e, "product_id", None),
+                "granted_at": _iso(getattr(e, "granted_at", None)),
+                "expires_at": _iso(getattr(e, "expires_at", None)),
+            }
+            for e in entitlements_rows
+        ],
+        "account_settings": [
+            {
+                "id": s.id,
+                "settings_json": getattr(s, "settings_json", None),
+                "updated_at": _iso(getattr(s, "updated_at", None)),
+            }
+            for s in settings_rows
+        ],
+    }
 
 
 @app.post("/pairing/code", response_model=PairingCodeResponse)
@@ -1609,3 +1780,163 @@ async def get_playlist_credentials(
         "username": p.username,
         "password": p.password_enc,  # TODO: decrypt at rest
     }
+
+
+# ── LAN hub registry (Prompt 9B) ──────────────────────────────────────
+#
+# Same-user only. The publisher (desktop) calls POST to advertise its
+# host:port + LAN auth secret; consumers (TV / mobile) call GET to
+# discover hubs + GET /secret to fetch the auth secret. Hubs whose
+# `last_seen_at` is older than LAN_HUB_STALE_SECONDS are filtered out
+# of listings and the secret endpoint so a crashed publisher cannot
+# strand authentication material in a "looks online" state.
+
+LAN_HUB_STALE_SECONDS: int = 15 * 60
+
+
+def _hub_is_fresh(hub) -> bool:  # type: ignore[no-untyped-def]
+    # SQLite (used in tests) returns naive datetimes. Coerce both sides
+    # to naive UTC so the subtraction never raises on offset mismatch.
+    last_seen = hub.last_seen_at
+    if last_seen.tzinfo is not None:
+        last_seen = last_seen.replace(tzinfo=None)
+    age = (datetime.utcnow() - last_seen).total_seconds()
+    return age <= LAN_HUB_STALE_SECONDS
+
+
+def _as_lan_hub_response(hub) -> LanHubResponse:  # type: ignore[no-untyped-def]
+    last_seen = hub.last_seen_at
+    if last_seen.tzinfo is None:
+        # Treat naive timestamps as UTC. SQLite-backed test runs hit
+        # this path; PostgreSQL keeps tz-aware rows untouched.
+        last_seen = last_seen.replace(tzinfo=timezone.utc)
+    return LanHubResponse(
+        publisher_id=hub.publisher_id,
+        device_label=hub.device_label,
+        lan_host=hub.lan_host,
+        lan_port=hub.lan_port,
+        protocol_version=hub.protocol_version,
+        published_at_epoch_ms=int(last_seen.timestamp() * 1000),
+    )
+
+
+@app.post("/me/lan/hubs", response_model=LanHubResponse)
+async def publish_lan_hub(
+    payload: LanHubPublishRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> LanHubResponse:
+    """Insert or refresh the caller's hub. Same (user, publisher_id)
+    rows are updated in-place so re-publishes are idempotent.
+    """
+    result = await session.execute(
+        select(LanHub).where(
+            LanHub.user_id == user.id,
+            LanHub.publisher_id == payload.publisher_id,
+        )
+    )
+    existing = result.scalar_one_or_none()
+    now = utcnow()
+    # Wrap the auth_secret before persistence. In production with no
+    # wrap key configured, surface 503 so the operator sees the broken
+    # config rather than silently storing plaintext.
+    try:
+        wrapped_secret = wrap_secret(payload.auth_secret)
+    except WrapUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="LAN secret wrapping not configured on this deployment",
+        ) from exc
+    if existing is None:
+        hub = LanHub(
+            user_id=user.id,
+            publisher_id=payload.publisher_id,
+            device_label=payload.device_label,
+            lan_host=payload.lan_host,
+            lan_port=payload.lan_port,
+            protocol_version=payload.protocol_version,
+            auth_secret=wrapped_secret,
+            last_seen_at=now,
+        )
+        session.add(hub)
+    else:
+        existing.device_label = payload.device_label
+        existing.lan_host = payload.lan_host
+        existing.lan_port = payload.lan_port
+        existing.protocol_version = payload.protocol_version
+        existing.auth_secret = wrapped_secret
+        existing.last_seen_at = now
+        hub = existing
+    await session.commit()
+    await session.refresh(hub)
+    return _as_lan_hub_response(hub)
+
+
+@app.get("/me/lan/hubs", response_model=LanHubListResponse)
+async def list_lan_hubs(
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> LanHubListResponse:
+    """List the caller's currently-fresh hubs. Cross-user listings are
+    impossible by construction — the WHERE clause is fixed to the
+    caller's user_id and stale rows are filtered out.
+    """
+    result = await session.execute(
+        select(LanHub).where(LanHub.user_id == user.id)
+    )
+    rows = result.scalars().all()
+    fresh = [r for r in rows if _hub_is_fresh(r)]
+    return LanHubListResponse(hubs=[_as_lan_hub_response(r) for r in fresh])
+
+
+@app.get("/me/lan/hubs/{publisher_id}/secret", response_model=LanHubSecretResponse)
+async def get_lan_hub_secret(
+    publisher_id: str,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> LanHubSecretResponse:
+    """Return the auth secret for the caller's hub. Same-user gate is
+    enforced via the WHERE clause. Stale rows return 410 so the
+    consumer doesn't try to authenticate against a dead publisher.
+    """
+    result = await session.execute(
+        select(LanHub).where(
+            LanHub.user_id == user.id,
+            LanHub.publisher_id == publisher_id,
+        )
+    )
+    hub = result.scalar_one_or_none()
+    if hub is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="hub not found")
+    if not _hub_is_fresh(hub):
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="hub stale")
+    try:
+        secret_value = unwrap_secret(hub.auth_secret) or ""
+    except WrapUnavailable as exc:
+        # The DB has a wrapped value but this process has no key — config
+        # bug. Surface explicitly rather than letting the consumer
+        # 401-loop forever against a corrupt secret.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="LAN secret wrap key missing or invalid",
+        ) from exc
+    return LanHubSecretResponse(publisher_id=hub.publisher_id, auth_secret=secret_value)
+
+
+@app.delete("/me/lan/hubs/{publisher_id}")
+async def delete_lan_hub(
+    publisher_id: str,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    """Remove the caller's hub. No-op (and 204) when the row doesn't
+    exist — keeps shutdown handlers and sign-out hooks idempotent.
+    """
+    await session.execute(
+        delete(LanHub).where(
+            LanHub.user_id == user.id,
+            LanHub.publisher_id == publisher_id,
+        )
+    )
+    await session.commit()
+    return {"ok": True}

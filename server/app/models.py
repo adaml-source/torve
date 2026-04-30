@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import BigInteger, DateTime, ForeignKey, JSON, String, Text, UniqueConstraint, Index
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
 
@@ -15,6 +15,7 @@ class User(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
 
     devices = relationship("Device", back_populates="user")
@@ -224,6 +225,45 @@ class WatchStateReport(Base):
     provider: Mapped[str] = mapped_column(String(80), nullable=False)
     position_ms: Mapped[int] = mapped_column(BigInteger, nullable=False)
     reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class LanHub(Base):
+    """LAN-library hub announced by a desktop instance.
+
+    Prompt 9B contract:
+      * One row per (user, publisher_id) so re-publishing updates rather
+        than creates.
+      * `auth_secret` is the in-process value the desktop's LAN HTTP
+        server expects in `X-Torve-Lan-Auth`. Stored plaintext for
+        same-user retrieval; production deployments should layer
+        encryption-at-rest (TODO: KMS / fernet wrap).
+      * `last_seen_at` updates on every publish — the listing endpoint
+        filters out rows older than [STALE_THRESHOLD_SECONDS] so
+        crashed-publisher entries fall out without manual cleanup.
+      * Cross-account isolation is enforced at the query level — every
+        endpoint filters by `user_id == current_user.id`.
+    """
+
+    __tablename__ = "lan_hubs"
+    __table_args__ = (
+        UniqueConstraint("user_id", "publisher_id", name="uq_lan_hubs_user_publisher"),
+        Index("ix_lan_hubs_user_id", "user_id"),
+        Index("ix_lan_hubs_user_last_seen", "user_id", "last_seen_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    publisher_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    device_label: Mapped[str] = mapped_column(String(120), nullable=False)
+    lan_host: Mapped[str] = mapped_column(String(64), nullable=False)
+    lan_port: Mapped[int] = mapped_column(Integer, nullable=False)
+    protocol_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # TODO(prompt-9b-prod): wrap with KMS / fernet before deploying.
+    auth_secret: Mapped[str] = mapped_column(Text, nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    user = relationship("User")
 
 
 class UserPlaylist(Base):

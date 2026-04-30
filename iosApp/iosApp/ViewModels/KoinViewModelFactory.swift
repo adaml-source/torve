@@ -61,6 +61,10 @@ enum KoinViewModelFactory {
         resolve(SetupWizardViewModel.self)
     }
 
+    static func setupWizardCoordinator() -> SetupWizardCoordinator {
+        resolve(SetupWizardCoordinator.self)
+    }
+
     static func discoverViewModel() -> DiscoverViewModel {
         resolve(DiscoverViewModel.self)
     }

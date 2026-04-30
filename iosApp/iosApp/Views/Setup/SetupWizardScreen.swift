@@ -5,8 +5,73 @@ struct SetupWizardScreen: View {
     @StateObject private var wrapper = SetupWizardViewModelWrapper()
     @Environment(\.dismiss) private var dismiss
 
+    /// Modes for the iOS setup screen. Default is the credential-first
+    /// hub (matching desktop / Android). The legacy linear wizard stays
+    /// reachable via the hub's "Use guided wizard instead" link.
+    private enum Mode { case hub, guided }
+    @State private var mode: Mode = .hub
+
+    /// Invoked when the user taps "Continue" on the hub or "Start
+    /// streaming" at the end of the guided flow. Root navigation passes
+    /// a closure that pops the wizard off the nav stack.
+    var onComplete: (() -> Void)? = nil
+
+    /// Routes Plex/Jellyfin "Set up" tap to an actionable surface.
+    /// Default is `Route.integrations`-driven nav; ContentView wires it.
+    var onOpenIntegrations: (() -> Void)? = nil
+
+    /// Routes Usenet "Set up" tap to Panda multi-step setup. ContentView
+    /// wires `Route.pandaSetup`.
+    var onOpenPandaSetup: (() -> Void)? = nil
+
     var body: some View {
+        Group {
+            switch mode {
+            case .hub:
+                SetupIntentHubScreen(
+                    onOpenDebridSetup: {
+                        wrapper.viewModel.jumpToStep(step: SetupStep.debrid)
+                        mode = .guided
+                    },
+                    onOpenIptvSetup: {
+                        wrapper.viewModel.jumpToStep(step: SetupStep.channels)
+                        mode = .guided
+                    },
+                    onOpenPlexJellyfinSetup: {
+                        // Plex/Jellyfin lives under Settings →
+                        // Integrations on iOS. The hub view marks the
+                        // intent IN_PROGRESS via beginIntent before
+                        // calling this closure; ContentView pushes
+                        // Route.integrations on the active nav stack.
+                        onOpenIntegrations?()
+                    },
+                    onOpenUsenetSetup: {
+                        // Usenet → Panda multi-step setup. ContentView
+                        // pushes Route.pandaSetup on the active stack.
+                        onOpenPandaSetup?()
+                    },
+                    onUseGuidedWizard: { mode = .guided },
+                    onContinueToApp: { onComplete?() }
+                )
+            case .guided:
+                guidedFlow
+            }
+        }
+        .navigationTitle("Setup")
+        .navigationBarTitleDisplayMode(.inline)
+        .interactiveDismissDisabled()
+    }
+
+    private var guidedFlow: some View {
         VStack(spacing: 0) {
+            HStack {
+                Button("← Back to hub") { mode = .hub }
+                    .foregroundColor(SVColor.onSurfaceVariant)
+                Spacer()
+            }
+            .padding(.horizontal)
+            .padding(.top, 8)
+
             // Progress indicator
             progressBar
 
@@ -31,9 +96,6 @@ struct SetupWizardScreen: View {
                 navigationButtons
             }
         }
-        .navigationTitle("Setup")
-        .navigationBarTitleDisplayMode(.inline)
-        .interactiveDismissDisabled()
     }
 
     // MARK: - Progress Bar
@@ -482,7 +544,10 @@ struct SetupWizardScreen: View {
 
             Button(action: {
                 wrapper.completeSetup()
-                dismiss()
+                // Prefer the explicit onComplete from root nav; fall back
+                // to dismiss() so deep-linked entries (e.g. opening the
+                // wizard from Settings) still close cleanly.
+                if let cb = onComplete { cb() } else { dismiss() }
             }) {
                 Text("Get Started")
                     .frame(maxWidth: .infinity)

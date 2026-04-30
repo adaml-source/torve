@@ -24,15 +24,23 @@ import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
 
 /**
  * Slim "an update is available" banner. Positioned by the caller (V2App
- * docks it at top-center). Stays out of the way: a single line of copy +
- * two buttons (View release / Dismiss). Doesn't auto-update — the user
- * downloads the new build manually for now.
+ * docks it at top-center). Stays out of the way: one line of copy plus
+ * the smallest action set that fits the available metadata:
+ *
+ *   * When the appcast feed includes a direct `<enclosure url=...>`
+ *     installer URL, render **Download & install** as the primary
+ *     action — wired by the caller to [UpdateInstallerHandoff.start].
+ *   * Otherwise fall back to **View release** (open the release page
+ *     in the OS browser).
+ *
+ * Either way, "Dismiss" hides the banner for the session.
  */
 @Composable
 fun UpdateBanner(
     info: UpdateChecker.UpdateInfo,
     currentVersion: String,
     onView: () -> Unit,
+    onInstall: (() -> Unit)? = null,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -66,7 +74,15 @@ fun UpdateBanner(
             }
             Spacer(Modifier.weight(1f))
             TorveGhostButton(text = "Dismiss", onClick = onDismiss)
-            TorvePrimaryButton(text = "View release", onClick = onView)
+            // Show "View release" as a secondary link when an installer
+            // handoff is available, so the user can still read the
+            // changelog before triggering the install.
+            if (onInstall != null && info.installerUrl != null) {
+                TorveGhostButton(text = "View release", onClick = onView)
+                TorvePrimaryButton(text = "Download & install", onClick = onInstall)
+            } else {
+                TorvePrimaryButton(text = "View release", onClick = onView)
+            }
         }
     }
 }

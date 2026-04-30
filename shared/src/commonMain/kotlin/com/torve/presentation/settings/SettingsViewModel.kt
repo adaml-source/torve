@@ -164,6 +164,23 @@ class SettingsViewModel(
         const val KEY_CARD_DEFAULT_PRESET_ID = "card_style_default_preset_id"
         const val KEY_HOME_LAYOUT_SOURCE = "home_layout_source"
         const val KEY_LAN_SERVING_ENABLED = "lan_serving_enabled"
+        /**
+         * Prompt 9 — desktop-only. Controls bind interface when
+         * [KEY_LAN_SERVING_ENABLED] is also true. Values: "loopback"
+         * (default) or "lan". When "lan", the desktop's HTTP server
+         * accepts connections from peer devices on the same LAN; when
+         * "loopback" only the desktop talks to itself. The toggle is
+         * intentionally distinct from the master enable so the user
+         * can opt into LAN exposure deliberately.
+         */
+        const val KEY_LAN_SERVING_BIND = "lan_serving_bind"
+        /**
+         * Prompt 9 — mobile-only. When true (default) the LAN-stream
+         * route chooser refuses to play a LAN URL while the device is
+         * on cellular, falling through to the provider stream or a
+         * re-download prompt. Set false to use cellular freely.
+         */
+        const val KEY_LAN_PLAYBACK_WIFI_ONLY = "lan_playback_wifi_only"
 
         /** Mask a secret value for display: show last 4 chars only. */
         fun maskSecret(value: String): String {
@@ -319,6 +336,8 @@ class SettingsViewModel(
                 ?.takeIf { it == "DESKTOP_OWN" || it == "SHARED_WITH_MOBILE" }
                 ?: "SHARED_WITH_MOBILE"
             val lanServingEnabled = prefsRepo.getString(KEY_LAN_SERVING_ENABLED)?.toBooleanStrictOrNull() ?: false
+            val lanServingBindToLan = prefsRepo.getString(KEY_LAN_SERVING_BIND)?.equals("lan", ignoreCase = true) == true
+            val lanPlaybackWifiOnly = prefsRepo.getString(KEY_LAN_PLAYBACK_WIFI_ONLY)?.toBooleanStrictOrNull() ?: true
 
             val autoPlayEnabled = prefsRepo.getString(KEY_AUTO_PLAY_ENABLED)?.toBooleanStrictOrNull() ?: true
             val autoPlayNextEpisodeEnabled = prefsRepo.getString(KEY_AUTO_PLAY_NEXT_EPISODE)?.toBooleanStrictOrNull() ?: true
@@ -459,6 +478,8 @@ class SettingsViewModel(
                     appLanguage = appLanguage,
                     homeLayoutSource = homeLayoutSource,
                     lanServingEnabled = lanServingEnabled,
+                    lanServingBindToLan = lanServingBindToLan,
+                    lanPlaybackWifiOnly = lanPlaybackWifiOnly,
                     autoPlayEnabled = autoPlayEnabled,
                     autoPlayNextEpisodeEnabled = autoPlayNextEpisodeEnabled,
                     autoSourceMode = autoSourceMode,
@@ -1862,6 +1883,31 @@ class SettingsViewModel(
         _state.update { it.copy(lanServingEnabled = enabled) }
         scope.launch {
             prefsRepo.setString(KEY_LAN_SERVING_ENABLED, enabled.toString())
+            settingsRefreshNotifier.notifyRefresh(kotlinx.datetime.Clock.System.now().toEpochMilliseconds())
+        }
+    }
+
+    /**
+     * Desktop-only: switch the LAN server's bind interface. `true` →
+     * bind to the wildcard address so peer devices on the same LAN can
+     * pull the manifest and stream; `false` → loopback only.
+     */
+    fun setLanServingBindToLan(bindToLan: Boolean) {
+        _state.update { it.copy(lanServingBindToLan = bindToLan) }
+        scope.launch {
+            prefsRepo.setString(KEY_LAN_SERVING_BIND, if (bindToLan) "lan" else "loopback")
+            settingsRefreshNotifier.notifyRefresh(kotlinx.datetime.Clock.System.now().toEpochMilliseconds())
+        }
+    }
+
+    /**
+     * Mobile-only: gate LAN-stream playback on Wi-Fi. Default true so
+     * accidental cellular streams don't burn data caps.
+     */
+    fun setLanPlaybackWifiOnly(wifiOnly: Boolean) {
+        _state.update { it.copy(lanPlaybackWifiOnly = wifiOnly) }
+        scope.launch {
+            prefsRepo.setString(KEY_LAN_PLAYBACK_WIFI_ONLY, wifiOnly.toString())
             settingsRefreshNotifier.notifyRefresh(kotlinx.datetime.Clock.System.now().toEpochMilliseconds())
         }
     }

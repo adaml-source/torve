@@ -96,7 +96,21 @@ tasks.register("verifyWindowsPackagingPrereqs") {
         // shouldn't have to install VLC, mpv, or set env vars. Set
         // `TORVE_PACKAGE_ALLOW_MISSING_RUNTIME=1` to downgrade this to a
         // warning for local dev packaging dry-runs only.
+        //
+        // **Release-build override**: when `TORVE_RELEASE_BUILD=1` is
+        // set the bypass is refused — release builds MUST have a
+        // complete runtime even if a tired engineer typed
+        // `TORVE_PACKAGE_ALLOW_MISSING_RUNTIME=1` two terminals ago. CI
+        // for `release/*` branches sets `TORVE_RELEASE_BUILD=1`.
         val allowMissing = System.getenv("TORVE_PACKAGE_ALLOW_MISSING_RUNTIME") == "1"
+        val isReleaseBuild = System.getenv("TORVE_RELEASE_BUILD") == "1"
+        if (allowMissing && isReleaseBuild) {
+            throw GradleException(
+                "TORVE_RELEASE_BUILD=1 is set; TORVE_PACKAGE_ALLOW_MISSING_RUNTIME=1 cannot be used " +
+                    "for release builds. Stage the VLC runtime with desktopApp/scripts/" +
+                    "stage-windows-vlc-runtime.{ps1,sh} and re-run.",
+            )
+        }
         val vlcDir = bundledVlcDirectory.asFile
         val problems = mutableListOf<String>()
 
@@ -114,9 +128,26 @@ tasks.register("verifyWindowsPackagingPrereqs") {
             } else {
                 val pluginCount = pluginsDir.walkTopDown()
                     .count { it.isFile && it.name.endsWith(".dll", ignoreCase = true) }
-                if (pluginCount < 30) {
+                // VLC 3.x ships ~280 plugin DLLs out of the box; 100 is a
+                // very forgiving floor that still catches the "I copied
+                // libvlc.dll only" / "I copied just access/ and codec/"
+                // truncation cases the previous floor of 30 missed.
+                val pluginFloor = 100
+                if (pluginCount < pluginFloor) {
                     problems += "VLC plugins/ directory only contains $pluginCount .dll files; " +
-                        "expected the full plugin set (50+). Re-copy from a clean VLC install."
+                        "expected at least $pluginFloor (a clean VLC 3.x install ships ~280). " +
+                        "Re-copy the full plugins/ tree — partial drops break codecs at runtime."
+                }
+                // Spot-check that the required plugin families exist.
+                // A pruned plugins/ tree compiles fine through jpackage
+                // but ships a player that can't open most files.
+                val requiredPluginFamilies = listOf("access", "codec", "demux", "video_output")
+                val missingFamilies = requiredPluginFamilies.filter {
+                    !File(pluginsDir, it).isDirectory
+                }
+                if (missingFamilies.isNotEmpty()) {
+                    problems += "VLC plugin families missing: ${missingFamilies.joinToString()}. " +
+                        "These subdirectories are required for working playback; copy the full plugins/ tree."
                 }
             }
             // Per VLC's LGPL-2.1 obligations, a bundled distribution must
@@ -157,7 +188,11 @@ tasks.register("verifyWindowsPackagingPrereqs") {
                 appendLine("Bundled playback runtime is not release-ready:")
                 problems.forEach { appendLine("  • $it") }
                 appendLine()
-                appendLine("Stage the VLC runtime under ${vlcDir.absolutePath}:")
+                appendLine("Easiest path — run the staging script:")
+                appendLine("  Windows: powershell desktopApp/scripts/stage-windows-vlc-runtime.ps1")
+                appendLine("  Linux/macOS CI: TORVE_VLC_PORTABLE=<dir> desktopApp/scripts/stage-windows-vlc-runtime.sh")
+                appendLine()
+                appendLine("Manual path — stage VLC runtime under ${vlcDir.absolutePath}:")
                 appendLine("  - Copy libvlc.dll, libvlccore.dll, and plugins/ from a clean")
                 appendLine("    install of VLC 64-bit (e.g. C:\\Program Files\\VideoLAN\\VLC).")
                 appendLine("  - Drop the upstream COPYING.txt next to libvlc.dll.")
@@ -167,6 +202,7 @@ tasks.register("verifyWindowsPackagingPrereqs") {
                 appendLine("To bypass for a local packaging dry-run only, set the env var")
                 appendLine("  TORVE_PACKAGE_ALLOW_MISSING_RUNTIME=1")
                 appendLine("Released builds MUST NOT bypass this check.")
+                appendLine("(Refused automatically when TORVE_RELEASE_BUILD=1.)")
             }
             if (allowMissing) {
                 logger.warn(summary)
@@ -268,13 +304,20 @@ listOf(
 compose.desktop {
     application {
         mainClass = "com.torve.desktop.MainKt"
+        // Release channel is env-driven so a single build script
+        // produces stable / beta / internal artifacts. CI sets
+        // TORVE_RELEASE_CHANNEL per pipeline; defaults to
+        // internal-preview when unset.
+        val releaseChannel = providers.environmentVariable("TORVE_RELEASE_CHANNEL")
+            .orElse("internal-preview")
+            .get()
         jvmArgs += listOf(
             "-DTMDB_API_KEY=${readTmdbApiKey()}",
             "-Dtorve.desktop.appName=Torve",
             "-Dtorve.desktop.version=1.0.6",
             "-Dtorve.desktop.vendor=Torve",
             "-Dtorve.desktop.description=Torve desktop for Windows with embedded VLC playback.",
-            "-Dtorve.desktop.channel=internal-preview",
+            "-Dtorve.desktop.channel=$releaseChannel",
         )
 
         nativeDistributions {

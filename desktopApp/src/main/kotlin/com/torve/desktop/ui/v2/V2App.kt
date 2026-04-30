@@ -31,6 +31,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -119,6 +120,7 @@ fun V2App(
     statsViewModel: com.torve.presentation.stats.StatsViewModel? = null,
     setupRecoveryMessage: String? = null,
     setupIntentsViewModel: com.torve.presentation.setup.SetupIntentsViewModel? = null,
+    onboardingDeepLink: com.torve.desktop.ui.onboarding.DesktopOnboardingDeepLink? = null,
     providerHealthInit: com.torve.desktop.providerhealth.DesktopProviderHealthInit? = null,
 ) {
     val colors = TorveDesktopThemeTokens.colors
@@ -164,6 +166,28 @@ fun V2App(
     var pandaSetupOpen by remember { mutableStateOf(false) }
     var manageDevicesOpen by remember { mutableStateOf(false) }
     var deviceLimitReachedOpen by remember { mutableStateOf(false) }
+    // Prompt 10B: My Recordings page reachable from Settings.
+    var recordingsPageOpen by remember { mutableStateOf(false) }
+
+    // Consume any deep-link the credential-first onboarding hub queued
+    // (Plex/Jellyfin / Usenet "Set up" buttons). One-shot: the holder
+    // returns the target exactly once, then nulls itself out. The
+    // category name flows into V2SettingsPage so Integrations opens
+    // directly on the Plex/Jellyfin section instead of the SOURCES
+    // overview.
+    var settingsLandingCategory by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(onboardingDeepLink) {
+        when (onboardingDeepLink?.consume()) {
+            com.torve.desktop.ui.onboarding.DesktopOnboardingDeepLink.Target.Integrations -> {
+                settingsLandingCategory = "INTEGRATIONS"
+                settingsOpen = true
+            }
+            com.torve.desktop.ui.onboarding.DesktopOnboardingDeepLink.Target.PandaSetup -> {
+                pandaSetupOpen = true
+            }
+            null -> Unit
+        }
+    }
     var statsOpen by remember { mutableStateOf(false) }
     var accessMenuExpanded by remember { mutableStateOf(false) }
     var liveTvNavigationPending by remember { mutableStateOf(false) }
@@ -896,6 +920,22 @@ fun V2App(
                             onBack = { statsOpen = false },
                         )
 
+                        recordingsPageOpen -> com.torve.desktop.ui.v2.recording.V2RecordingsPage(
+                            onBack = { recordingsPageOpen = false },
+                            onPlayLocal = { recording ->
+                                val path = recording.filePath
+                                if (!path.isNullOrBlank()) {
+                                    playerController.playDirectStream(
+                                        title = recording.programmeTitle,
+                                        url = "file://$path",
+                                        artworkUrl = null,
+                                        sourceSurface = "iptv_recording",
+                                    )
+                                    recordingsPageOpen = false
+                                }
+                            },
+                        )
+
                         pandaSetupOpen -> com.torve.desktop.ui.panda.DesktopPandaSetupScreen(
                             viewModel = pandaSetupViewModel,
                             onBack = { pandaSetupOpen = false },
@@ -918,6 +958,11 @@ fun V2App(
                                 settingsOpen = false
                                 statsOpen = true
                             },
+                            onOpenRecordings = {
+                                settingsOpen = false
+                                recordingsPageOpen = true
+                            },
+                            initialCategoryName = settingsLandingCategory,
                         )
 
                         personId != null -> {
@@ -1353,6 +1398,13 @@ fun V2App(
                                 .padding(top = 12.dp)
                                 .widthIn(max = 540.dp),
                         ) {
+                            // One handoff instance per banner
+                            // appearance; the start() coroutine is
+                            // single-shot per UpdateInfo.
+                            val handoffScope = rememberCoroutineScope()
+                            val handoff = remember(available.info) {
+                                com.torve.desktop.updates.UpdateInstallerHandoff()
+                            }
                             com.torve.desktop.updates.UpdateBanner(
                                 info = available.info,
                                 currentVersion = com.torve.desktop.globalUpdateChecker
@@ -1364,6 +1416,13 @@ fun V2App(
                                         )
                                     }
                                 },
+                                onInstall = if (available.info.installerUrl != null) {
+                                    {
+                                        handoffScope.launch {
+                                            handoff.start(available.info)
+                                        }
+                                    }
+                                } else null,
                                 onDismiss = { updateBannerDismissed = true },
                             )
                         }

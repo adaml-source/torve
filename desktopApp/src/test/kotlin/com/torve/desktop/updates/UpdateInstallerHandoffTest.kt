@@ -1,0 +1,180 @@
+package com.torve.desktop.updates
+
+import kotlinx.coroutines.runBlocking
+import java.io.ByteArrayInputStream
+import java.io.File
+import java.security.MessageDigest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
+
+/**
+ * Pins the contract surface that the UpdateBanner relies on:
+ *
+ *   * non-HTTPS URLs are refused
+ *   * empty installer URLs are refused
+ *   * unsupported OSes (today: Linux) fall back to the View-release path
+ *   * SHA-256 mismatch fails before launching the installer
+ *   * happy path lands in HandedOff and actually invokes the launcher
+ *
+ * Uses injected `osLauncher` / `urlOpener` / `osNameSupplier` /
+ * `tempDirSupplier` so it never touches the network or pops a real
+ * Windows Installer dialog under CI.
+ */
+class UpdateInstallerHandoffTest {
+
+    @Test
+    fun emptyInstallerUrlReturnsFailed() : Unit = runBlocking {
+        val handoff = UpdateInstallerHandoff(
+            tempDirSupplier = ::tempDir,
+            osLauncher = { error("should not launch") },
+            urlOpener = { error("should not download") },
+            osNameSupplier = { "Windows 11" },
+        )
+
+        val phase = handoff.start(infoWith(installerUrl = null))
+
+        assertTrue(phase is UpdateInstallerHandoff.Phase.Failed, "phase=$phase")
+        assertTrue("direct installer URL" in phase.reason, "reason=${phase.reason}")
+    }
+
+    @Test
+    fun nonHttpsUrlReturnsFailed() : Unit = runBlocking {
+        val handoff = UpdateInstallerHandoff(
+            tempDirSupplier = ::tempDir,
+            osLauncher = { error("should not launch") },
+            urlOpener = { error("should not download") },
+            osNameSupplier = { "Windows 11" },
+        )
+
+        val phase = handoff.start(infoWith(installerUrl = "http://insecure.example/torve.exe"))
+
+        assertTrue(phase is UpdateInstallerHandoff.Phase.Failed, "phase=$phase")
+        assertTrue("non-HTTPS" in phase.reason, "reason=${phase.reason}")
+    }
+
+    @Test
+    fun unsupportedOsReturnsFailed() : Unit = runBlocking {
+        val handoff = UpdateInstallerHandoff(
+            tempDirSupplier = ::tempDir,
+            osLauncher = { error("should not launch") },
+            urlOpener = { error("should not download") },
+            osNameSupplier = { "Linux" },
+        )
+
+        val phase = handoff.start(infoWith(installerUrl = "https://example.com/torve.deb"))
+
+        assertTrue(phase is UpdateInstallerHandoff.Phase.Failed, "phase=$phase")
+        assertTrue("not supported" in phase.reason, "reason=${phase.reason}")
+    }
+
+    @Test
+    fun sha256MismatchFailsBeforeLaunch() : Unit = runBlocking {
+        val payload = "fake-installer-bytes".toByteArray()
+        var launched = false
+        val handoff = UpdateInstallerHandoff(
+            tempDirSupplier = ::tempDir,
+            osLauncher = { launched = true },
+            urlOpener = { ByteArrayInputStream(payload) },
+            osNameSupplier = { "Windows 11" },
+        )
+
+        val phase = handoff.start(
+            infoWith(
+                installerUrl = "https://example.com/torve.exe",
+                installerSha256 = "0".repeat(64), // bogus
+            ),
+        )
+
+        assertTrue(phase is UpdateInstallerHandoff.Phase.Failed, "phase=$phase")
+        assertTrue("SHA-256" in phase.reason, "reason=${phase.reason}")
+        assertEquals(false, launched, "launcher must NOT run on hash mismatch")
+    }
+
+    @Test
+    fun happyPathProducesHandedOff() : Unit = runBlocking {
+        val payload = "real-installer-bytes-pretend-this-is-an-exe".toByteArray()
+        val expectedSha = sha256Hex(payload)
+        var launchedFile: File? = null
+        val handoff = UpdateInstallerHandoff(
+            tempDirSupplier = ::tempDir,
+            osLauncher = { launchedFile = it },
+            urlOpener = { ByteArrayInputStream(payload) },
+            osNameSupplier = { "Windows 11" },
+        )
+
+        val phase = handoff.start(
+            infoWith(
+                installerUrl = "https://example.com/torve-1.2.3.exe",
+                installerSha256 = expectedSha,
+            ),
+        )
+
+        assertTrue(phase is UpdateInstallerHandoff.Phase.HandedOff, "phase=$phase")
+        assertNotNull(launchedFile, "osLauncher should have been invoked")
+        val onDisk = phase.installer
+        assertTrue(onDisk.exists(), "installer should still exist on disk after handoff")
+        assertEquals(payload.size.toLong(), onDisk.length(), "downloaded size mismatch")
+        assertEquals(onDisk.absolutePath, launchedFile?.absolutePath, "wrong file passed to launcher")
+        assertEquals(payload.size.toLong(), launchedFile!!.length())
+
+        onDisk.delete()
+    }
+
+    @Test
+    fun happyPathWithoutHashStillLaunches() : Unit = runBlocking {
+        val payload = "no-hash-but-fine".toByteArray()
+        var launched = false
+        val handoff = UpdateInstallerHandoff(
+            tempDirSupplier = ::tempDir,
+            osLauncher = { launched = true },
+            urlOpener = { ByteArrayInputStream(payload) },
+            osNameSupplier = { "Mac OS X" },
+        )
+
+        val phase = handoff.start(
+            infoWith(
+                installerUrl = "https://example.com/torve.dmg",
+                installerSha256 = null,
+            ),
+        )
+
+        assertTrue(phase is UpdateInstallerHandoff.Phase.HandedOff, "phase=$phase")
+        assertEquals(true, launched)
+        phase.installer.delete()
+    }
+
+    @Test
+    fun supportsHandoffMatrix() {
+        assertTrue(UpdateInstallerHandoff.supportsHandoffOn("Windows 11"))
+        assertTrue(UpdateInstallerHandoff.supportsHandoffOn("Mac OS X"))
+        assertTrue(UpdateInstallerHandoff.supportsHandoffOn("Darwin"))
+        assertEquals(false, UpdateInstallerHandoff.supportsHandoffOn("Linux"))
+        assertEquals(false, UpdateInstallerHandoff.supportsHandoffOn(""))
+    }
+
+    private fun infoWith(
+        installerUrl: String? = "https://example.com/torve.exe",
+        installerSha256: String? = null,
+    ) = UpdateChecker.UpdateInfo(
+        tag = "1.2.3",
+        name = "Torve 1.2.3",
+        htmlUrl = "https://example.com/release/1.2.3",
+        publishedAt = null,
+        body = null,
+        installerUrl = installerUrl,
+        installerSha256 = installerSha256,
+    )
+
+    private fun tempDir(): File {
+        val base = File(System.getProperty("java.io.tmpdir"), "torve-update-handoff-test")
+        base.mkdirs()
+        return base
+    }
+
+    private fun sha256Hex(bytes: ByteArray): String {
+        val md = MessageDigest.getInstance("SHA-256")
+        return md.digest(bytes).joinToString("") { "%02x".format(it) }
+    }
+}

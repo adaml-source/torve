@@ -132,7 +132,15 @@ struct ContentView: View {
             CatalogScreen(mediaType: mediaType)
                 .navigationTitle(genreName)
         case .setupWizard:
-            SetupWizardScreen()
+            // Wire the credential-first hub's actions to the root nav so
+            // Plex/Jellyfin and Usenet "Set up" buttons land on real
+            // destinations rather than no-ops, and "Continue" / "Get
+            // Started" pop the wizard off the active tab's nav stack.
+            SetupWizardScreen(
+                onComplete: { router.popToRoot() },
+                onOpenIntegrations: { router.navigate(to: .integrations) },
+                onOpenPandaSetup: { router.navigate(to: .pandaSetup) }
+            )
         case .paywall:
             PaywallScreen()
         case .login:

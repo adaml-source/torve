@@ -86,4 +86,77 @@ class SourceAvailabilityRankerTest {
         ) { it.tmdbId }
         assertEquals("Downloaded", out.single().primaryBadge)
     }
+
+    // ── Prompt 8: new-kind ordering ────────────────────────────────
+
+    private val debridCache = SourceAvailabilitySignal(
+        SourceAvailabilityKind.DEBRID_CACHE, "Cached", SourceAvailabilityRankBoost.DEBRID_CACHE,
+    )
+    private val addonSrc = SourceAvailabilitySignal(
+        SourceAvailabilityKind.STREMIO_ADDON, "Addon source", SourceAvailabilityRankBoost.STREMIO_ADDON,
+    )
+    private val usenetReady = SourceAvailabilitySignal(
+        SourceAvailabilityKind.USENET_READY, "Usenet ready", SourceAvailabilityRankBoost.USENET_READY,
+    )
+    private val iptvLive = SourceAvailabilitySignal(
+        SourceAvailabilityKind.IPTV_LIVE, "On now: BBC", SourceAvailabilityRankBoost.IPTV_LIVE,
+    )
+    private val watched = SourceAvailabilitySignal(
+        SourceAvailabilityKind.WATCH_HISTORY, "Watched", SourceAvailabilityRankBoost.WATCH_HISTORY,
+    )
+
+    @Test
+    fun `prompt 8 ordering — local download beats every Phase-3 source`() {
+        val items = listOf(
+            FakeItem(1, "addon"),
+            FakeItem(2, "debrid"),
+            FakeItem(3, "local"),
+            FakeItem(4, "usenet"),
+            FakeItem(5, "iptv"),
+        )
+        val records = mapOf(
+            1 to record(1, addonSrc),
+            2 to record(2, debridCache),
+            3 to record(3, downloaded),
+            4 to record(4, usenetReady),
+            5 to record(5, iptvLive),
+        )
+        val out = SourceAvailabilityRanker.rerank(items, records) { it.tmdbId }
+        assertEquals(listOf(3, 2, 1, 4, 5), out.map { it.item.tmdbId })
+    }
+
+    @Test
+    fun `available sources beat generic TMDB results`() {
+        // 5 plain TMDB rows + 1 with a debrid-cache hit. The hit must
+        // surface to the top regardless of the original index — this
+        // is the headline acceptance criterion for Prompt 8.
+        val items = (1..5).map { FakeItem(it, "tmdb-$it") } + FakeItem(99, "debrid-only")
+        val records = mapOf(99 to record(99, debridCache))
+        val out = SourceAvailabilityRanker.rerank(items, records) { it.tmdbId }
+        assertEquals(99, out.first().item.tmdbId)
+        assertEquals("Cached", out.first().primaryBadge)
+    }
+
+    @Test
+    fun `watch history alone surfaces the row but lowest among available`() {
+        val items = listOf(FakeItem(1, "watched-only"), FakeItem(2, "iptv-only"))
+        val records = mapOf(
+            1 to record(1, watched),
+            2 to record(2, iptvLive),
+        )
+        val out = SourceAvailabilityRanker.rerank(items, records) { it.tmdbId }
+        // IPTV (130) > Watched (50) → 2 first.
+        assertEquals(listOf(2, 1), out.map { it.item.tmdbId })
+        // Both are available — watched is still surfaced, just last.
+        assertTrue(out.all { it.isAvailable })
+    }
+
+    @Test
+    fun `multiple signals on one item — primary badge picks the strongest`() {
+        // Same row has both debrid-cache and addon-source signals;
+        // primary badge is the higher boost.
+        val rec = record(7, addonSrc, debridCache, watched)
+        val out = SourceAvailabilityRanker.rerank(listOf(FakeItem(7, "x")), mapOf(7 to rec)) { it.tmdbId }
+        assertEquals("Cached", out.single().primaryBadge)
+    }
 }

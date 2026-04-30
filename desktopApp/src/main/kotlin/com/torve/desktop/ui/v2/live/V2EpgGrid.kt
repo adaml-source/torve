@@ -88,6 +88,14 @@ fun V2EpgGrid(
     onToggleFavorite: (Channel) -> Unit = {},
     isReminderSet: (Channel, EpgProgramme) -> Boolean = { _, _ -> false },
     onToggleReminder: (Channel, EpgProgramme) -> Unit = { _, _ -> },
+    /**
+     * Per-slot recording status — drives the small pill on the row and
+     * the Record / Cancel-recording label in the programme dropdown.
+     * Defaults to NONE so callers that don't wire DVR keep working.
+     */
+    recordingStatusFor: (Channel, EpgProgramme) -> com.torve.presentation.recording.RecordingSlotStatus =
+        { _, _ -> com.torve.presentation.recording.RecordingSlotStatus.NONE },
+    onToggleRecord: (Channel, EpgProgramme) -> Unit = { _, _ -> },
 ) {
     val colors = TorveDesktopThemeTokens.colors
 
@@ -247,6 +255,8 @@ fun V2EpgGrid(
                         },
                         onToggleFavorite = { onToggleFavorite(enriched.channel) },
                         onToggleReminder = { p -> onToggleReminder(enriched.channel, p) },
+                        recordingStatusFor = { p -> recordingStatusFor(enriched.channel, p) },
+                        onToggleRecord = { p -> onToggleRecord(enriched.channel, p) },
                         onFindOtherAirings = { p -> otherAiringsTitle = p.title },
                         onCopyInfo = { p ->
                             val text = buildString {
@@ -379,6 +389,8 @@ private fun GuideRow(
     onPlayFromStart: (EpgProgramme) -> Unit,
     onToggleFavorite: () -> Unit,
     onToggleReminder: (EpgProgramme) -> Unit,
+    recordingStatusFor: (EpgProgramme) -> com.torve.presentation.recording.RecordingSlotStatus,
+    onToggleRecord: (EpgProgramme) -> Unit,
     onFindOtherAirings: (EpgProgramme) -> Unit,
     onCopyInfo: (EpgProgramme) -> Unit,
     onClickChannel: () -> Unit,
@@ -414,6 +426,8 @@ private fun GuideRow(
                 onPlayFromStart = onPlayFromStart,
                 onToggleFavorite = onToggleFavorite,
                 onToggleReminder = onToggleReminder,
+                recordingStatusFor = recordingStatusFor,
+                onToggleRecord = onToggleRecord,
                 onFindOtherAirings = onFindOtherAirings,
                 onCopyInfo = onCopyInfo,
             )
@@ -482,6 +496,8 @@ private fun ProgrammeTrack(
     onPlayFromStart: (EpgProgramme) -> Unit,
     onToggleFavorite: () -> Unit,
     onToggleReminder: (EpgProgramme) -> Unit,
+    recordingStatusFor: (EpgProgramme) -> com.torve.presentation.recording.RecordingSlotStatus,
+    onToggleRecord: (EpgProgramme) -> Unit,
     onFindOtherAirings: (EpgProgramme) -> Unit,
     onCopyInfo: (EpgProgramme) -> Unit,
 ) {
@@ -523,10 +539,12 @@ private fun ProgrammeTrack(
                 isFuture = isFuture,
                 canCatchup = canCatchup,
                 isFavorite = isFavorite,
+                recordingStatus = recordingStatusFor(programme),
                 onPlayLive = onPlayLive,
                 onPlayFromStart = { onPlayFromStart(programme) },
                 onToggleFavorite = onToggleFavorite,
                 onToggleReminder = { onToggleReminder(programme) },
+                onToggleRecord = { onToggleRecord(programme) },
                 onFindOtherAirings = { onFindOtherAirings(programme) },
                 onCopyInfo = { onCopyInfo(programme) },
             )
@@ -548,10 +566,12 @@ private fun ProgrammeCell(
     isFuture: Boolean,
     canCatchup: Boolean,
     isFavorite: Boolean,
+    recordingStatus: com.torve.presentation.recording.RecordingSlotStatus,
     onPlayLive: () -> Unit,
     onPlayFromStart: () -> Unit,
     onToggleFavorite: () -> Unit,
     onToggleReminder: () -> Unit,
+    onToggleRecord: () -> Unit,
     onFindOtherAirings: () -> Unit,
     onCopyInfo: () -> Unit,
 ) {
@@ -592,7 +612,19 @@ private fun ProgrammeCell(
                     maxLines = 1,
                 )
             }
-            if (showReminderDot) {
+            // Status pills are layered: recording state takes priority
+            // over reminder when both are active so the user sees the
+            // higher-stakes signal first.
+            val recordingMark = when (recordingStatus) {
+                com.torve.presentation.recording.RecordingSlotStatus.RECORDING -> "🔴"
+                com.torve.presentation.recording.RecordingSlotStatus.SCHEDULED -> "⏺"
+                com.torve.presentation.recording.RecordingSlotStatus.COMPLETED -> "✓"
+                com.torve.presentation.recording.RecordingSlotStatus.FAILED -> "⚠"
+                com.torve.presentation.recording.RecordingSlotStatus.CANCELLED -> "✕"
+                com.torve.presentation.recording.RecordingSlotStatus.NONE -> null
+            }
+            recordingMark?.let { Text(it, fontSize = 10.sp) }
+            if (showReminderDot && recordingStatus == com.torve.presentation.recording.RecordingSlotStatus.NONE) {
                 Text("🔔", fontSize = 10.sp)
             }
         }
@@ -629,6 +661,30 @@ private fun ProgrammeCell(
                         )
                     },
                     onClick = { menuOpen = false; onToggleReminder() },
+                )
+            }
+            // Record / cancel-record. Available for future programmes
+            // (one-off schedule) and currently-airing slots; past
+            // programmes route through Catch-up instead.
+            if (isFuture || isLive) {
+                val recordLabel = when (recordingStatus) {
+                    com.torve.presentation.recording.RecordingSlotStatus.SCHEDULED ->
+                        "✕  Cancel scheduled recording"
+                    com.torve.presentation.recording.RecordingSlotStatus.RECORDING ->
+                        "■  Stop recording"
+                    com.torve.presentation.recording.RecordingSlotStatus.NONE ->
+                        "⏺  Record this programme"
+                    com.torve.presentation.recording.RecordingSlotStatus.COMPLETED ->
+                        "✓  Recording saved"
+                    com.torve.presentation.recording.RecordingSlotStatus.FAILED ->
+                        "⚠  Recording failed — try again"
+                    com.torve.presentation.recording.RecordingSlotStatus.CANCELLED ->
+                        "⏺  Record this programme"
+                }
+                DropdownMenuItem(
+                    text = { Text(recordLabel) },
+                    onClick = { menuOpen = false; onToggleRecord() },
+                    enabled = recordingStatus != com.torve.presentation.recording.RecordingSlotStatus.COMPLETED,
                 )
             }
             HorizontalDivider()

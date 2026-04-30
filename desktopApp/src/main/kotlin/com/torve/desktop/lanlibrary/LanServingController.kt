@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.io.File
@@ -18,14 +19,19 @@ import java.io.File
 /**
  * Owns the LAN HTTP server lifecycle on desktop.
  *
- * Reacts to two flows:
- *   - [SettingsViewModel.state.lanServingEnabled] → start / stop the server.
+ * Reacts to three flows:
+ *   - [SettingsViewModel.state.lanServingEnabled] → start / stop the
+ *     server entirely.
+ *   - [SettingsViewModel.state.lanServingBindToLan] → switch between
+ *     loopback-only and LAN-wildcard bind. Restarts the server when
+ *     the value changes so peers can or cannot reach it.
  *   - [AuthClient.authUserFlow] → on transition to null (signed out),
  *     immediately stop the server AND wipe the token table so any
  *     in-flight LAN clients lose access.
  *
- * Always starts on **localhost only**. LAN binding is a future toggle
- * and is not exposed by this class.
+ * Default state is **off**. When the master toggle flips on but the
+ * LAN-bind toggle is still off, the server runs on loopback only —
+ * matching pre-Prompt-9 behavior so existing tests stay valid.
  */
 class LanServingController(
     private val tokenTable: LanMediaTokenTable,
@@ -55,11 +61,14 @@ class LanServingController(
         if (started) return
         started = true
 
+        // Combine the master toggle and the LAN-bind toggle so we
+        // restart cleanly when either flips. distinctUntilChanged on
+        // the pair avoids duplicate restarts.
         scope.launch {
             settings.state
-                .map { it.lanServingEnabled }
+                .map { it.lanServingEnabled to it.lanServingBindToLan }
                 .distinctUntilChanged()
-                .collect { enabled -> applyEnabled(enabled) }
+                .collect { (enabled, bindToLan) -> applyEnabled(enabled, bindToLan) }
         }
 
         scope.launch {
@@ -99,8 +108,16 @@ class LanServingController(
      */
     private fun snapshotManifestBlocking(): LanLibraryManifest = runBlocking { currentManifest() }
 
-    private fun applyEnabled(enabled: Boolean) {
-        if (enabled) server.start() else clearAllAndStop()
+    private fun applyEnabled(enabled: Boolean, bindToLan: Boolean) {
+        if (!enabled) {
+            clearAllAndStop()
+            return
+        }
+        // Restart cleanly so a bind-mode flip rebinds. Idempotent if
+        // the server was already in the desired state.
+        runCatching { server.stop() }
+        tokenTable.clearAll()
+        server.start(bindToLan = bindToLan)
     }
 
     private fun clearAllAndStop() {

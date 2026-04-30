@@ -9,16 +9,27 @@ import com.torve.domain.model.MediaType
  * external streaming-service availability (Netflix, Hulu, …) — the
  * concept here is *owned* availability: things Torve can play directly
  * because the user has them in their own download folder, Plex library,
- * or Jellyfin server.
+ * Jellyfin server, debrid cache, addon source, Usenet warm queue, or as
+ * a currently-on-air IPTV channel.
  *
- * Phase 3 Slice A intentionally ships only the kinds where Torve can
- * actually launch playback. Debrid cache / Usenet warm / IPTV live are
- * deliberately omitted until they can return real signals.
+ * Prompt 8 extends the original three with five new kinds. Each new
+ * kind is backed by a real provider — UNCONFIGURED-silent when the
+ * user hasn't set up the matching service.
  */
 enum class SourceAvailabilityKind {
     LOCAL_DOWNLOAD,
     PLEX,
     JELLYFIN,
+    /** Debrid (RD/AD/PM/TB) reports the title cached and instantly playable. */
+    DEBRID_CACHE,
+    /** A Stremio addon advertises a stream for this title. */
+    STREMIO_ADDON,
+    /** Usenet stack (Panda + NzbDAV) reports a warm/ready candidate. */
+    USENET_READY,
+    /** IPTV: a configured channel is currently airing this title. */
+    IPTV_LIVE,
+    /** User has watched this before — informational, not a playback path. */
+    WATCH_HISTORY,
 }
 
 /**
@@ -52,16 +63,32 @@ data class SourceAvailabilityRecord(
 /**
  * Default rank boosts. Higher is better — the ranker sorts descending.
  *
- *   - LOCAL_DOWNLOAD beats everything: zero network, fastest playback,
- *     guaranteed-offline.
- *   - PLEX and JELLYFIN tie for second: LAN-fast, transcoded if needed,
- *     shape parity from the user's perspective.
+ * Ordering (Prompt 8):
+ *   LOCAL_DOWNLOAD > PLEX/JELLYFIN > DEBRID_CACHE > STREMIO_ADDON >
+ *   USENET_READY > IPTV_LIVE > WATCH_HISTORY > (no signal — generic catalog).
  *
- * Slice A leaves these as bare integer constants rather than a config
- * surface; tuning is a follow-up if real product feedback warrants it.
+ * Reasoning per tier:
+ *   - LOCAL_DOWNLOAD: zero network, fastest, guaranteed-offline.
+ *   - PLEX / JELLYFIN: LAN-fast, transcoded if needed, owner-controlled.
+ *   - DEBRID_CACHE: instant cloud playback, no torrent wait, costs only
+ *     bandwidth from the debrid CDN.
+ *   - STREMIO_ADDON: addon-published direct URLs (debrid-attached or
+ *     addon-hosted) — usually instant once unrestrict completes.
+ *   - USENET_READY: requires NzbDAV mounting / SAB / TorBox so the
+ *     start-up isn't quite zero-latency, but no "wait for swarm" risk.
+ *   - IPTV_LIVE: only useful when intent matches the on-air slot —
+ *     scoped by the provider so it doesn't sneak into VOD-only queries.
+ *   - WATCH_HISTORY: a *trail* not a *path*. Lowest boost so it never
+ *     beats anything actually playable; surfaces only when the item has
+ *     no other signal.
  */
 object SourceAvailabilityRankBoost {
     const val LOCAL_DOWNLOAD = 300
     const val PLEX = 200
     const val JELLYFIN = 200
+    const val DEBRID_CACHE = 180
+    const val STREMIO_ADDON = 170
+    const val USENET_READY = 150
+    const val IPTV_LIVE = 130
+    const val WATCH_HISTORY = 50
 }

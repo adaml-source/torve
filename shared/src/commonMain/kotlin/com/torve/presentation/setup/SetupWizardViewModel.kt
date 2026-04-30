@@ -111,6 +111,16 @@ class SetupWizardViewModel(
         nextStep()
     }
 
+    /**
+     * Jump directly to [step]. Used by the credential-first hub to deep-link
+     * into the matching guided-wizard step when the user picks an intent
+     * card; preserved separately from [nextStep] so the linear forward/back
+     * UX still works for users who chose the guided path.
+     */
+    fun jumpToStep(step: SetupStep) {
+        _state.update { it.copy(currentStep = step) }
+    }
+
     // Debrid
     fun setDebridProvider(provider: DebridServiceType) {
         _state.update { it.copy(debridProvider = provider) }

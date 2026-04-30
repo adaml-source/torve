@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.res.stringResource
 import com.torve.android.R
@@ -12,18 +13,32 @@ import com.torve.android.tv.components.TvCardStyle
 import com.torve.android.tv.components.TvContentRail
 import com.torve.android.tv.components.TvMediaContextMenuAction
 import com.torve.android.tv.components.TvMediaRails
+import com.torve.android.tv.components.TvOnNowRail
+import com.torve.android.tv.components.TvProviderHealthBanner
 import com.torve.android.tv.components.dedupeAcrossRails
 import com.torve.android.tv.components.rememberTvFocusMemory
 import com.torve.android.tv.focus.TvScreenFocusHandle
 import com.torve.android.tv.toMediaItemOrNull
+import com.torve.domain.lanlibrary.NetworkMode
 import com.torve.domain.model.CatalogShelf
 import com.torve.domain.model.CustomSection
+import com.torve.domain.model.EnrichedChannel
 import com.torve.domain.model.HomeSection
 import com.torve.domain.model.HomeSectionConfig
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
+import com.torve.platform.NetworkMonitor
+import com.torve.platform.NetworkType
 import com.torve.presentation.home.HomeUiState
 import com.torve.presentation.home.HomeViewModel
+import com.torve.presentation.lanlibrary.LanLibraryConsumer
+import com.torve.presentation.lanlibrary.PendingLanPlaybackHandoff
+import com.torve.presentation.settings.SettingsViewModel
+import com.torve.presentation.tvhome.TvHomeOutcomeUiState
+import com.torve.presentation.tvhome.TvHomeOutcomeViewModel
+import com.torve.presentation.tvhome.TvHomePlaybackDecision
+import com.torve.presentation.tvhome.TvHomePlaybackRouter
+import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
 private sealed interface TvHomeRenderItem {
@@ -62,12 +77,43 @@ internal fun TvHomeScreen(
     contextMenuActionsForItem: ((MediaItem, Float?) -> List<TvMediaContextMenuAction>)? = null,
     onContextMenuAction: ((MediaItem, TvMediaContextMenuAction, Float?) -> Unit)? = null,
     registerFocusHandle: ((TvScreenFocusHandle?) -> Unit)? = null,
+    /**
+     * Direct-to-player launch for AutoplayLocal decisions. Caller
+     * navigates to the player route with the given absolute file path
+     * as a `file://` URL. When null, autoplay-eligible tiles fall
+     * through to [onMediaClick] (loses the single-OK property).
+     */
+    onPlayLocalFile: ((MediaItem, absolutePath: String) -> Unit)? = null,
+    /**
+     * Direct-to-player launch for AutoplayLan decisions. Caller
+     * navigates to the player route with the LAN URL — headers are
+     * attached automatically via PendingLanPlaybackHandoff.
+     */
+    onPlayLanRoute: ((MediaItem, lanUrl: String) -> Unit)? = null,
+    /**
+     * Live-channel tile click. Receives an [EnrichedChannel] from the
+     * outcome state's onNow bucket; caller navigates to the live
+     * player route. Hidden when null.
+     */
+    onLiveChannelClick: ((EnrichedChannel) -> Unit)? = null,
+    /** Provider banner action. When null, the banner stays informational. */
+    onProviderBannerAction: (() -> Unit)? = null,
 ) {
     val homeViewModel: HomeViewModel = koinInject()
+    val settingsViewModel: SettingsViewModel = koinInject()
+    val outcomeViewModel: TvHomeOutcomeViewModel = koinInject()
+    val playbackRouter: TvHomePlaybackRouter = koinInject()
+    val networkMonitor: NetworkMonitor = koinInject()
+    val lanLibraryConsumer: LanLibraryConsumer = koinInject()
+
     val state by homeViewModel.state.collectAsState()
     val sectionConfigs by homeViewModel.sectionConfigs.collectAsState()
     val customSections by homeViewModel.customSections.collectAsState()
     val homeLayoutOrder by homeViewModel.homeLayoutOrder.collectAsState()
+    val outcomeState by outcomeViewModel.state.collectAsState()
+    val settingsState by settingsViewModel.state.collectAsState()
+    val coroutineScope = rememberCoroutineScope()
+
     val focusMemory = rememberTvFocusMemory()
     val emptyMessage = state.error ?: stringResource(R.string.tv_no_data)
 
@@ -76,20 +122,99 @@ internal fun TvHomeScreen(
         sectionConfigs,
         customSections,
         homeLayoutOrder,
+        outcomeState,
     ) {
-        buildTvHomeRails(
-            state = state,
-            sectionConfigs = sectionConfigs,
-            customSections = customSections,
-            homeLayoutOrder = homeLayoutOrder,
-        )
+        buildOutcomeRails(outcomeState) +
+            buildTvHomeRails(
+                state = state,
+                sectionConfigs = sectionConfigs,
+                customSections = customSections,
+                homeLayoutOrder = homeLayoutOrder,
+            )
+    }
+
+    // Map a tap into a one-shot decision. Router lookup is suspend
+    // (one DB read on the way in), then we either resolve a route and
+    // launch the player directly (single-OK path) or open detail.
+    // LAN token mint runs on the same coroutine — if the publisher has
+    // gone away between the snapshot and the tap, we fall back to
+    // opening detail rather than crashing or staring at a black screen.
+    val handleMediaClick: (MediaItem) -> Unit = { item ->
+        coroutineScope.launch {
+            val networkMode = networkMonitor.currentNetworkType().toLanlibraryMode()
+            val decision = playbackRouter.resolve(
+                item = item,
+                availability = outcomeState.availabilityByTmdbId,
+                lanTitlesLowercase = outcomeState.lanTitlesLowercase,
+                networkMode = networkMode,
+                wifiOnlyForLan = settingsState.lanPlaybackWifiOnly,
+            )
+            when (decision) {
+                is TvHomePlaybackDecision.AutoplayLocal -> {
+                    val launch = onPlayLocalFile
+                    if (launch != null) launch(item, decision.absolutePath)
+                    else onMediaClick(item)
+                }
+                is TvHomePlaybackDecision.AutoplayLan -> {
+                    val launch = onPlayLanRoute
+                    val route = runCatching {
+                        lanLibraryConsumer.findLanRoute(
+                            title = decision.title,
+                            seasonNumber = decision.seasonNumber,
+                            episodeNumber = decision.episodeNumber,
+                        )
+                    }.getOrNull()
+                    if (launch != null && route != null) {
+                        // Stage headers BEFORE navigating so the player
+                        // attaches `X-Torve-Lan-Auth` on the same frame
+                        // it calls play().
+                        PendingLanPlaybackHandoff.stage(route)
+                        launch(item, route.url)
+                    } else {
+                        onMediaClick(item)
+                    }
+                }
+                TvHomePlaybackDecision.OpenDetail -> onMediaClick(item)
+            }
+        }
+    }
+
+    val composedHeroOverlay: (@Composable () -> Unit)? = remember(
+        outcomeState.providerBanner,
+        outcomeState.onNow,
+        heroOverlay,
+        onLiveChannelClick,
+    ) {
+        val banner = outcomeState.providerBanner
+        val onNow = outcomeState.onNow
+        val showOnNow = onNow.isNotEmpty() && onLiveChannelClick != null
+        if (banner == null && !showOnNow && heroOverlay == null) {
+            null
+        } else {
+            @Composable {
+                if (banner != null) {
+                    TvProviderHealthBanner(
+                        banner = banner,
+                        onClick = { onProviderBannerAction?.invoke() },
+                    )
+                }
+                heroOverlay?.invoke()
+                if (showOnNow) {
+                    TvOnNowRail(
+                        title = "On Now",
+                        channels = onNow,
+                        onChannelClick = { ch -> onLiveChannelClick?.invoke(ch) },
+                    )
+                }
+            }
+        }
     }
 
     TvMediaRails(
         rails = rails,
         railFocusRequester = railFocusRequester,
         headerFocusRequester = headerFocusRequester,
-        onMediaClick = onMediaClick,
+        onMediaClick = handleMediaClick,
         onFirstContentRequester = onFirstContentRequester,
         onContentFocused = onContentFocused,
         screenId = "home",
@@ -98,13 +223,51 @@ internal fun TvHomeScreen(
         focusMemory = focusMemory,
         onMediaFocused = onMediaFocused,
         onSeeAll = onSeeAll,
-        heroOverlay = heroOverlay,
+        heroOverlay = composedHeroOverlay,
         shouldAutoFocus = shouldAutoFocus,
         browseLayout = browseLayout,
         contextMenuActionsForItem = contextMenuActionsForItem,
         onContextMenuAction = onContextMenuAction,
         registerFocusHandle = registerFocusHandle,
     )
+}
+
+private fun NetworkType.toLanlibraryMode(): NetworkMode = when (this) {
+    NetworkType.WIFI -> NetworkMode.WIFI
+    NetworkType.CELLULAR -> NetworkMode.CELLULAR
+    NetworkType.ETHERNET -> NetworkMode.ETHERNET
+    NetworkType.UNKNOWN, NetworkType.NONE -> NetworkMode.UNKNOWN
+}
+
+/**
+ * Outcome rails are surfaced FIRST so the user lands on something they
+ * can play immediately. Empty buckets are skipped, so the rest of the
+ * (TMDB-shaped) rails fall into place when nothing's playable.
+ */
+private fun buildOutcomeRails(outcome: TvHomeOutcomeUiState): List<TvContentRail> {
+    val out = mutableListOf<TvContentRail>()
+    if (outcome.availableNow.isNotEmpty()) {
+        out += TvContentRail(
+            key = "outcome:available_now",
+            title = "Available Now",
+            items = outcome.availableNow,
+        )
+    }
+    if (outcome.downloadsOnDesktop.isNotEmpty()) {
+        out += TvContentRail(
+            key = "outcome:downloads_on_desktop",
+            title = "Downloads on Desktop",
+            items = outcome.downloadsOnDesktop,
+        )
+    }
+    if (outcome.recentlyAdded.isNotEmpty()) {
+        out += TvContentRail(
+            key = "outcome:recently_added",
+            title = "Recently Added From My Sources",
+            items = outcome.recentlyAdded,
+        )
+    }
+    return out
 }
 
 private fun buildTvHomeRails(

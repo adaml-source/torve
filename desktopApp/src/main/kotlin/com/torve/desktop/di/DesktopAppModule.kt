@@ -75,6 +75,61 @@ val desktopAppModule = module {
         )
     }
 
+    // Hand-off slot the credential-first onboarding hub uses to deep-link
+    // into a post-onboarding screen (Settings → Integrations or Panda
+    // setup). Both DesktopOnboardingShell and V2App resolve the same
+    // singleton.
+    single { com.torve.desktop.ui.onboarding.DesktopOnboardingDeepLink() }
+
+    // Prompt 9B: backend hub publisher. Lifecycle is started from
+    // Main.kt once auth + LanServingController are wired. The
+    // publisherId is the same value [LanLibraryManifestBuilder] uses,
+    // so peers see a stable id across desktop restarts.
+    single {
+        com.torve.desktop.lanlibrary.LanHubPublisher(
+            controller = get(),
+            registry = get(),
+            settings = get(),
+            authClient = get(),
+            publisherId = get<com.torve.domain.device.DeviceIdProvider>().getDeviceId(),
+        )
+    }
+    // Prompt 9 storage cleanup. Wired so Settings can call into it.
+    single {
+        com.torve.desktop.lanlibrary.WatchedDownloadCleanup(
+            downloadRepository = get(),
+            watchHistoryRepository = get(),
+            allowlist = get(),
+        )
+    }
+
+    // ── IPTV DVR (Prompt 10 / 10B) ────────────────────────────────
+    // FileBackedRecordingRepository persists rows under the OS app-data
+    // dir; the shared scheduler binding (in SharedModule) resolves to
+    // this implementation. The service is started from Main.kt right
+    // after LanServingController so both lifecycle owners observe the
+    // same auth state.
+    single<com.torve.domain.recording.RecordingRepository> {
+        com.torve.desktop.recording.FileBackedRecordingRepository(
+            rootDir = com.torve.desktop.platform.desktopDataDir(),
+        )
+    }
+    single {
+        com.torve.desktop.recording.DesktopRecordingService(
+            scheduler = get(),
+            repository = get(),
+            allowlist = get(),
+            // Recordings land under the configured movies download path
+            // so they're already inside the existing
+            // DownloadFolderAllowlist. UI surfaces the choice; this
+            // provider just reads the latest setting.
+            recordingsRootProvider = {
+                val s = get<com.torve.presentation.settings.SettingsViewModel>().state.value
+                s.movieDownloadPath.takeIf { it.isNotBlank() }?.let { java.io.File(it) }
+            },
+        )
+    }
+
     // Desktop wires its own ProviderHealthChecker set into the shared
     // ProviderHealthCoordinator at startup. See V2App for the call site.
     single {

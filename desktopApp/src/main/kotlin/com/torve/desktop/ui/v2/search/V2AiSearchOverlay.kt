@@ -223,11 +223,15 @@ fun V2AiSearchOverlay(
                 if (rankedItems.isNotEmpty()) {
                     val anyAvailable = rankedItems.any { it.isAvailable }
                     if (availabilityAggregator != null && !anyAvailable) {
+                        // Setup-repair fallback per Prompt 8: when no
+                        // result has an "owned" path, route the user to
+                        // the credential-first hub instead of leaving
+                        // generic TMDB rows as the only thing visible.
                         TorveBanner(
-                            title = "No available matches found.",
-                            description = "These results aren't in your library or downloads. " +
-                                "Connect Plex/Jellyfin or download a title from your providers " +
-                                "to see availability badges here.",
+                            title = "No owned source matched.",
+                            description = "These results aren't in your library, downloads, debrid cache, " +
+                                "addons, Usenet stack, or live IPTV. Open Settings → Sources to connect a " +
+                                "playback path, then re-run the search.",
                             tone = TorveBannerTone.Info,
                         )
                     }
@@ -254,6 +258,11 @@ fun V2AiSearchOverlay(
                                         SourceAvailabilityKind.LOCAL_DOWNLOAD -> TorveBadgeTone.Success
                                         SourceAvailabilityKind.PLEX -> TorveBadgeTone.Accent
                                         SourceAvailabilityKind.JELLYFIN -> TorveBadgeTone.Accent
+                                        SourceAvailabilityKind.DEBRID_CACHE -> TorveBadgeTone.Success
+                                        SourceAvailabilityKind.STREMIO_ADDON -> TorveBadgeTone.Accent
+                                        SourceAvailabilityKind.USENET_READY -> TorveBadgeTone.Accent
+                                        SourceAvailabilityKind.IPTV_LIVE -> TorveBadgeTone.Live
+                                        SourceAvailabilityKind.WATCH_HISTORY -> TorveBadgeTone.Neutral
                                     }
                                     Box(
                                         modifier = Modifier

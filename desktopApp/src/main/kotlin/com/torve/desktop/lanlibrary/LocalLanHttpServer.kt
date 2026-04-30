@@ -16,14 +16,25 @@ import java.util.concurrent.ThreadFactory
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Phase 3 Slice C wiring — JDK `HttpServer` exposing two routes:
+ * JDK `HttpServer` exposing three routes:
  *
- *   GET /local/manifest                  — JSON manifest, no paths
- *   GET /local/stream/{id}?token=...     — ranged file stream
+ *   GET  /local/manifest                  — JSON manifest, no paths
+ *   POST /local/stream-token/{id}         — issues a per-id stream token
+ *                                          (Prompt 9C). Hub auth header
+ *                                          required; uniform 404 on
+ *                                          unknown ids so a bystander
+ *                                          can't probe the id space.
+ *   GET  /local/stream/{id}?token=...     — ranged file stream
  *
- * Default bind is **loopback only**. LAN binding is a future toggle.
+ * Bind model (Prompt 9):
+ *   - Loopback by default — only the desktop talks to itself. This is
+ *     what runs whenever the master `lanServingEnabled` toggle is on
+ *     but the explicit LAN-bind toggle is off.
+ *   - LAN-bind mode — when both toggles are on, the server binds to
+ *     the wildcard address so peer devices on the same LAN can connect.
+ *     Activated only via [start] with `bindToLan = true`.
  *
- * Auth model:
+ * Auth model (unchanged):
  *   - Both routes require header `X-Torve-Lan-Auth: <serverSecret>`.
  *     Wrong/missing → 401 with no body.
  *   - The stream route ALSO requires a `?token=...` query that
@@ -54,20 +65,42 @@ class LocalLanHttpServer(
     /** Port the server is currently bound to, or -1 if not running. */
     val port: Int get() = server?.address?.port ?: -1
 
+    /**
+     * The address actually bound on. `null` while stopped. Used by the
+     * registry publisher to announce a reachable host:port to peers.
+     */
+    val boundAddress: InetSocketAddress? get() = server?.address
+
+    /** True iff the server is currently bound to a non-loopback address. */
+    val isBoundToLan: Boolean
+        get() = server?.address?.address?.let { !it.isLoopbackAddress } ?: false
+
     /** Shared secret callers must include in the auth header. Null when stopped. */
     val secret: String? get() = currentSecret
 
     /**
      * Start the server. Idempotent — calling twice is a no-op.
      * @param desiredPort 0 to let the OS assign a free port.
+     * @param bindToLan when true, bind the wildcard address so peers
+     * on the same LAN can reach the server. When false, bind loopback
+     * only (the default — peers cannot reach the server).
      */
-    fun start(desiredPort: Int = 0) {
+    fun start(desiredPort: Int = 0, bindToLan: Boolean = false) {
         if (server != null) return
-        val addr = InetSocketAddress(InetAddress.getLoopbackAddress(), desiredPort)
+        val bindAddress = if (bindToLan) {
+            // 0.0.0.0 — let the OS bind every interface. The user
+            // already opted in via the toggle; the auth secret + token
+            // table are still required to pull anything off the wire.
+            InetAddress.getByName("0.0.0.0")
+        } else {
+            InetAddress.getLoopbackAddress()
+        }
+        val addr = InetSocketAddress(bindAddress, desiredPort)
         val srv = HttpServer.create(addr, BACKLOG)
         currentSecret = freshSecret()
         srv.executor = Executors.newFixedThreadPool(WORKER_THREADS, namedFactory("torve-lan-"))
         srv.createContext("/local/manifest") { ex -> handleManifest(ex) }
+        srv.createContext("/local/stream-token/") { ex -> handleStreamToken(ex) }
         srv.createContext("/local/stream/") { ex -> handleStream(ex) }
         srv.start()
         server = srv
@@ -99,6 +132,46 @@ class LocalLanHttpServer(
             exchange.responseHeaders.add("Cache-Control", "no-store, private")
             exchange.sendResponseHeaders(200, body.size.toLong())
             exchange.responseBody.use { it.write(body) }
+        } catch (t: Throwable) {
+            runCatching { sendStatus(exchange, 500) }
+        }
+    }
+
+    // ── /local/stream-token/{id} ─────────────────────────────────────
+
+    private fun handleStreamToken(exchange: HttpExchange) {
+        try {
+            if (!authorize(exchange)) return
+            if (exchange.requestMethod != "POST") {
+                sendStatus(exchange, 405)
+                return
+            }
+            val path = exchange.requestURI.path  // /local/stream-token/<id>
+            val id = path.removePrefix("/local/stream-token/").trim('/')
+            // Uniform 404 on missing/invalid id AND on unknown id, so
+            // a bystander with the hub auth header still cannot probe
+            // the id space (matches the streaming route's behavior).
+            if (id.isEmpty() || id.contains('/')) {
+                sendStatus(exchange, 404)
+                return
+            }
+            val token = tokenTable.issueAccessToken(id)
+            if (token == null) {
+                sendStatus(exchange, 404)
+                return
+            }
+            // Cap the advertised expiry at the token table's TTL so a
+            // consumer that caches the response never tries to use a
+            // dead token. We don't know the table's TTL constant from
+            // here directly; use the documented default.
+            val expiresAt = System.currentTimeMillis() + LanMediaTokenTable.DEFAULT_TOKEN_TTL_MS
+            val streamPath = "/local/stream/$id?token=$token"
+            val responseBody = """{"path":"$streamPath","token":"$token","expires_at_epoch_ms":$expiresAt}"""
+                .toByteArray(Charsets.UTF_8)
+            exchange.responseHeaders.add("Content-Type", "application/json; charset=utf-8")
+            exchange.responseHeaders.add("Cache-Control", "no-store, private")
+            exchange.sendResponseHeaders(200, responseBody.size.toLong())
+            exchange.responseBody.use { it.write(responseBody) }
         } catch (t: Throwable) {
             runCatching { sendStatus(exchange, 500) }
         }

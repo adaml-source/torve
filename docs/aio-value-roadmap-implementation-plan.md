@@ -18,42 +18,81 @@ Turn Torve from a feature-rich enthusiast app into a credential-only AIO media h
 - Defaults must work for normal users. Advanced controls stay behind an Advanced section.
 - Desktop public release must not require VLC, mpv, Java, terminal commands, or environment variables.
 
-## Implementation Status Update - 2026-04-29
+## Implementation Status Update - 2026-04-30
 
-This file is not fully implemented yet. The credential-transfer and provider-health work moved the product substantially forward, but the repo still has several roadmap blockers. Treat the current state as "strong beta foundation", not "100% roadmap complete."
+This roadmap is no longer in the "strong beta foundation" state from 2026-04-29. Prompts 5 through 12, including cleanup passes 7B, 9B, 9C, 10B, 10C, 11B, and 11C, have moved most core roadmap items from partial/foundation into implemented beta-candidate territory.
+
+The harsh status is still not "100% done." After Prompt 12B, the current state is **public beta code GO for desktop, Android mobile, and Android TV**, **not stable**, and **not iOS-ready from this Windows host**. The remaining beta artifact blocker is reproducibility: `git status --porcelain` currently reports 101 dirty paths (44 modified, 57 untracked) from Prompts 6-12 plus the audit/docs updates. Those changes must be committed or otherwise checkpointed before cutting beta artifacts.
 
 ### Current Status
 
-| Area | Status | Blocking gaps before this can be called complete |
+| Area | Status | Current truth |
 | --- | --- | --- |
-| Playback and desktop release foundation | Partial | VLC packaging gates exist, but the actual Windows VLC runtime is not staged in `desktopApp/runtime/windows/vlc/`; clean Windows package smoke is still required. |
-| Credential-first setup wizard | Partial | Setup intent summaries exist, but the actual wizard is still centered on debrid, Trakt, quality, and channels. Plex/Jellyfin and Usenet are not first-class wizard paths. |
-| Encrypted credential transfer | Mostly implemented | Desktop, Android/TV, iOS surfaces and backend relay are present, but real multi-device operator smoke and iOS macOS build verification are still required. Durable transfer audit history is still weaker than the roadmap asks for. |
-| Provider health and recovery | Mostly implemented | Desktop and Android rows exist; Panda freshness was fixed. Android playback-health bridge and cross-device non-sensitive health summary sync are still not complete. |
-| Source-aware AI search | Partial | Availability ranking exists only for local downloads, Plex, and Jellyfin. Debrid cache, Stremio/addon availability, Usenet ready state, IPTV live/EPG, watch history, and profile filtering are missing. |
-| Cross-device downloads and LAN library | Foundation only | Desktop loopback server, manifest, tokens, and route model exist. Real LAN binding, discovery, mobile/TV consumption, "available on desktop" UX, quotas, and cleanup policy are not complete. |
-| IPTV DVR-grade features | Not implemented | Recording UI still says "coming soon"; no one-off recording, series pass, conflict detection, recording library, or EPG correction workflow is complete. |
-| TV-first UX | Partial | TV has many screens and provider-health hooks, but Home is not fully outcome-based around Available Now, Downloads on Desktop, provider issue banners, and one-click best source playback. |
-| Public release hardening | Partial | Privacy/terms/account deletion exist. Real auto-update apply path, signed package verification, data export, release channels, support-ready crash breadcrumbs, and final public release smoke remain. |
+| Baseline and hygiene | Implemented, needs new checkpoint | The original 338-path dirty tree and secret/artifact hazards were cleaned and checkpointed. A later Prompt 6-12 wave is dirty again: 101 paths including audit/doc updates. This is not a product blocker, but it is a release-process blocker until committed and re-verified. |
+| Playback and desktop release foundation | Beta candidate, stable blocked by operator smoke | VLC runtime staging scripts, hard packaging gates, release-build bypass refusal, installer handoff, SHA-256 verification, channel envs, and signing docs exist. A clean Windows VM package/install/playback/update-handoff smoke is still required before stable. |
+| Credential-first setup wizard | Implemented | Four setup intents, per-intent state, validation, Ready-to-watch summary, desktop/Android/iOS hub wiring, and desktop/iOS deep-link cleanup are landed. iOS remains operator-build-required on macOS. |
+| Encrypted credential transfer | Implemented, operator smoke required | Desktop, Android mobile, Android TV, and iOS surfaces exist with redaction/diagnostics/recovery coverage. The 12-row live-backend/multi-device smoke matrix is still operator-side. iOS compile/runtime verification requires macOS. |
+| Provider health and recovery | Implemented for beta | Desktop, Android mobile, and TV provider-health/recovery rows are wired; Panda state freshness and refresh-on-save are fixed. Remaining non-blockers: Android playback-health bridge parity and cross-device non-sensitive health summary sync. |
+| Source-aware AI search | Implemented on shared + desktop, parity gaps remain | Availability kinds now include debrid cache, addon, Usenet ready, IPTV live, watch history, plus privacy sanitizer and desktop badges. Android/iOS search UI parity and first-run performance optimization are follow-ups. |
+| Cross-device downloads and LAN library | Implemented for Android/TV beta path, stable smoke pending | Backend registry, LAN publish/discovery, stream-token endpoint, authenticated headers, ExoPlayer header injection, TV/mobile detail badge, Wi-Fi/cellular guard, and desktop settings controls exist. Remaining gaps: MPV/iOS header support, title-only matching, stale-token retry, and real two-device LAN smoke. |
+| IPTV DVR-grade features | Implemented for one-off desktop recording | Recording scheduler, conflict detection, file-backed repository, desktop recording service, My Recordings UI, EPG correction UI, and correction application to rendered guide state are landed. Series-pass DVR, mobile/iOS surfaces, immediate guide rebuild on correction edit, and live-provider smoke remain follow-ups. |
+| TV-first UX | Implemented for Android TV beta after 11C | TV Home renders outcome rails, provider banner, On Now/Live TV, Downloads on Desktop, and direct one-OK playback. TV details has a D-pad source picker and LAN header handoff. Series next-episode source picking remains a follow-up. |
+| Public release hardening | Public beta code GO, stable blocked | Backend `User.is_verified` regression fixed, pairing schema drift fixed, stale-device invariant test corrected, backend is now 110/110, account deletion/export landed, legal links centralized, telemetry redaction landed, LAN `auth_secret` wrapping added with prod gate. Stable still needs web delete-account mirror, macOS/iOS verification, Windows clean-VM smoke, and prod wrap-key setup. |
 
-### Definition Of 100%
+### Closed Gaps From The Original Audit
 
-The roadmap is complete only when all of these are true:
+- Desktop release no longer depends on an informal runtime setup: release packaging gates and staging scripts exist, and release builds cannot bypass the runtime gate.
+- Setup is no longer debrid-linear only: debrid, IPTV, Plex/Jellyfin, and Usenet are first-class intents with validation and resume state.
+- Panda provider-health no longer reads a fresh empty factory VM: a singleton state store plus settings-refresh observer keeps rows current.
+- Source-aware AI is no longer local/Plex/Jellyfin-only: debrid, addon, Usenet, IPTV, and watch-history signals now participate.
+- LAN library is no longer loopback-only foundation: backend registry, LAN bind, token issuance, authenticated playback, and Android/TV ExoPlayer headers are wired.
+- IPTV is no longer "coming soon" only: one-off desktop DVR, recording library, conflict handling, storage allowlist, and EPG correction are implemented.
+- TV Home is no longer generic catalog-first only: Android TV now has outcome rails, provider banner, source picker, On Now rail, and one-OK playback.
+- Public hardening is no longer just docs: deletion/export, redacted telemetry, LAN secret wrapping, and release-hardening docs are implemented.
 
-- Fresh Windows desktop install plays without external VLC/mpv/Java setup.
-- Desktop package fails if required playback runtime or license notices are absent.
-- Setup wizard can complete debrid, IPTV, Plex/Jellyfin, and Usenet paths without raw Settings browsing.
-- Credential transfer is smoke-tested across desktop, Android mobile, Android TV, and iOS with the live backend.
-- Provider health rows are populated and actionable on desktop, Android mobile, and Android TV.
-- AI search ranks against real available sources beyond local/Plex/Jellyfin.
-- TV/mobile can discover and play desktop downloads over authenticated LAN.
-- IPTV supports at least one-off desktop recording from EPG, recording playback, and basic conflict/staleness diagnostics.
-- TV Home makes available content and provider problems clear without advanced Settings.
-- Public release builds are signed, updateable, privacy/legal complete, and supportable.
+### Remaining Hard Gates
 
-## Remaining Prompt Package To Reach 100%
+These block stable release and, where noted, block public beta artifact cutting:
 
-Run these prompts in order. Do not combine them unless the previous prompt reports a clean build/test baseline and no unresolved manual blocker.
+| Gate | Blocks | Owner / host |
+| --- | --- | --- |
+| Commit/checkpoint the Prompt 6-12 dirty paths plus audit/docs updates, then re-run the release-verification matrix | Public beta artifact cut | Repo operator |
+| Keep backend at 110/110 on the release branch after checkpointing | Public beta signoff | Backend |
+| Publish `https://torve.app/delete-account.html` | Public stable and app-store compliance | Web ops |
+| Run iOS build + simulator smoke for the Prompt 12 Swift changes | iOS beta/stable | macOS + Xcode |
+| Run macOS sign + notarize round-trip | macOS stable | macOS + Apple ID |
+| Run clean Windows VM install/launch/playback/update-handoff smoke with real VLC runtime | Desktop stable | Windows VM |
+| Set `TORVE_LAN_SECRET_WRAP_KEY` and `TORVE_ENV=prod`, then verify backend LAN hub writes refuse plaintext | Stable with LAN registry enabled | Backend ops |
+| Run live credential-transfer smoke across desktop, Android mobile, Android TV, and iOS | Full cross-device claim | Multi-device operator |
+| Run live IPTV DVR recording/playback smoke on a real EPG provider | DVR release claim | Desktop + live IPTV |
+
+### Deferred Non-Blockers
+
+- Native WinSparkle/Sparkle updater, delta updates, auto-relaunch, and rollback automation.
+- Runtime release-channel selector in Settings; channel is currently build/feed controlled.
+- Series-pass DVR and next-episode source picker parity.
+- MPV and iOS LAN-header playback support.
+- LAN manifest matching by TMDB/imdb id instead of title-only.
+- Playlist `password_enc` Fernet wrapping to match LAN `auth_secret`.
+- Android/iOS AI search badge parity.
+- Immediate guide rebuild after EPG correction edits.
+- Cross-device non-sensitive provider-health summary sync.
+
+### GO / NO-GO
+
+| Target | Status | Reason |
+| --- | --- | --- |
+| Desktop public beta | GO after checkpoint | Prompt 12B fixed the backend blockers and verified the host-runnable code path. Do not cut artifacts until the dirty paths are checkpointed and the final sweep is re-run on the release branch. |
+| Android mobile public beta | GO after checkpoint | Host-runnable build and legal/account surfaces are green by report. Do not cut artifacts until checkpoint + final sweep. |
+| Android TV public beta | GO after checkpoint | TV-first flow is accepted after 11C and Prompt 12B kept the build/test signal green. Real-device couch smoke is still required before strong marketing claims. |
+| iOS beta | NO-GO from this host | Swift changes exist, but macOS `xcodebuild` and simulator smoke have not run. |
+| Public stable | NO-GO | Stable is blocked by web legal mirror, macOS/iOS verification, Windows clean-VM smoke, and prod LAN wrap-key validation. |
+
+## Prompt Packages And Remaining Verification
+
+Prompts 5-12B are retained below as the implementation history and reproduction plan. Do not start new feature prompts before checkpointing the Prompt 6-12B work and re-running the final artifact sweep on the release branch.
+
+For the updated commercial/product verdict, see `docs/market-readiness-assessment.md`.
 
 ### Prompt 5: Baseline Stabilization And Truth Matrix
 
@@ -410,6 +449,63 @@ Return only:
 - Tests/builds run
 - Operator smoke results
 - Final go/no-go
+```
+
+### Prompt 12B: Public Beta Release Verification Pack
+
+```text
+Read docs/aio-value-roadmap-implementation-plan.md and docs/release-hardening.md, but do not implement new product features.
+
+Goal:
+Convert the current public-beta-candidate state into a reproducible beta release signoff, or downgrade the GO if verification fails.
+
+Scope:
+1. Checkpoint the current Prompt 6-12 work.
+   - Start from a clean `git status --short`.
+   - Commit or otherwise checkpoint every intended source/doc/test path.
+   - Do not include generated artifacts, secrets, local DBs, screenshots, copied Kodi addons, build output, or scratch directories.
+2. List the exact 5 failing backend tests by name.
+   - Mark each release-blocking or non-blocking.
+   - If any touches auth, account deletion, data export, device pairing, stale sessions, entitlement state, or LAN hub isolation, fix it or downgrade the GO.
+3. Run final repo and artifact-input sweep.
+   - No `.pem`, `.p12`, `.env`, `.db`, logs, screenshots, Kodi addons, local user paths, bearer tokens, transfer payloads, LAN auth headers, provider credentials, AI keys, or source URLs with secrets.
+   - Include package input directories, not only tracked source.
+4. Verify legal/account flows.
+   - Delete-account URL is live or explicitly beta-blocking.
+   - In-app delete works on backend + desktop + Android; iOS remains macOS-required if host cannot build it.
+   - Export returns no secrets.
+   - Privacy/terms/support links are reachable on desktop, Android mobile, Android TV, and iOS where host-verifiable.
+5. Run host-runnable beta checks.
+   - Backend tests.
+   - Shared telemetry/redaction tests.
+   - Shared tvhome/LAN/DVR/setup/provider-health/transfer focused tests.
+   - Desktop compile/test high-signal slice.
+   - Android mobile + Android TV assemble.
+   - Windows packaging prerequisite gate with and without release-bypass refusal.
+6. Produce operator-required command list.
+   - Clean Windows VM package/install/playback/update-handoff smoke.
+   - macOS `xcodebuild` and iOS simulator smoke.
+   - macOS sign/notarize/staple round-trip.
+   - Live multi-device credential-transfer smoke.
+   - Live LAN desktop-to-TV playback smoke.
+   - Live IPTV DVR record/playback smoke.
+   - Backend production env validation for `TORVE_LAN_SECRET_WRAP_KEY` + `TORVE_ENV=prod`.
+
+Acceptance criteria:
+- Worktree is clean after checkpointing.
+- The 5 backend failures are either fixed or explicitly proven non-blocking by test name.
+- No release hazards remain in repo or package inputs.
+- Host-runnable checks pass.
+- Public beta GO/NO-GO is split by platform: desktop, Android mobile, Android TV, iOS.
+- Public stable remains NO-GO until operator gates are cleared.
+
+Return only:
+- Checkpoint status
+- Backend failure classification
+- Artifact/repo sweep
+- Host-runnable verification
+- Operator-required verification
+- Platform GO/NO-GO table
 ```
 
 ## Copy-Paste Implementation Prompts

@@ -61,8 +61,10 @@ import com.torve.desktop.ui.components.TorveTextField
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
 import com.torve.domain.model.DebridServiceType
 import com.torve.domain.model.StreamQuality
+import com.torve.presentation.setup.SetupIntent
 import com.torve.presentation.setup.SetupStep
 import com.torve.presentation.setup.SetupUiState
+import com.torve.presentation.setup.SetupWizardCoordinator
 import com.torve.presentation.setup.SetupWizardViewModel
 import kotlinx.coroutines.launch
 
@@ -76,6 +78,8 @@ fun DesktopOnboardingShell(
     authState: DesktopAuthUiState,
     authController: DesktopAuthController,
     setupWizardViewModel: SetupWizardViewModel,
+    setupWizardCoordinator: SetupWizardCoordinator,
+    onboardingDeepLink: DesktopOnboardingDeepLink,
     releaseInfo: DesktopReleaseInfo,
     admission: DesktopAdmissionSnapshot?,
     onExit: () -> Unit,
@@ -152,6 +156,8 @@ fun DesktopOnboardingShell(
                             authState = authState,
                             setupState = setupState,
                             setupWizardViewModel = setupWizardViewModel,
+                            setupWizardCoordinator = setupWizardCoordinator,
+                            onboardingDeepLink = onboardingDeepLink,
                             admission = admission,
                             onCompleteOnboarding = onCompleteOnboarding,
                             onSignOut = authController::signOut,
@@ -657,12 +663,17 @@ private fun DesktopAuthEntryPane(
     }
 }
 
+/** Modes for the desktop setup pane. Default is the credential-first hub. */
+private enum class DesktopSetupMode { HUB, GUIDED }
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DesktopSetupPane(
     authState: DesktopAuthUiState,
     setupState: SetupUiState,
     setupWizardViewModel: SetupWizardViewModel,
+    setupWizardCoordinator: SetupWizardCoordinator,
+    onboardingDeepLink: DesktopOnboardingDeepLink,
     admission: DesktopAdmissionSnapshot?,
     onCompleteOnboarding: suspend () -> Result<Unit>,
     onSignOut: () -> Unit,
@@ -673,6 +684,7 @@ private fun DesktopSetupPane(
     val currentStepIndex = SetupStep.entries.indexOf(setupState.currentStep)
     var completionError by remember { mutableStateOf<String?>(null) }
     var isCompleting by remember { mutableStateOf(false) }
+    var mode by remember { mutableStateOf(DesktopSetupMode.HUB) }
 
     Column(
         modifier = modifier,
@@ -703,6 +715,71 @@ private fun DesktopSetupPane(
             )
         }
 
+        if (mode == DesktopSetupMode.HUB) {
+            // Credential-first hub. Per-card "Set up" routes to the
+            // matching legacy step (Debrid/IPTV) or completes onboarding
+            // with a deep-link slot pre-set so V2App opens the relevant
+            // post-onboarding surface (Settings → Integrations for
+            // Plex/Jellyfin, Panda setup for Usenet). Avoids duplicating
+            // per-feature credential forms inside the onboarding shell.
+            //
+            // Helper: deep-link + complete onboarding. Errors land on
+            // completionError so the hub banner shows them.
+            val deepLinkAndComplete: (DesktopOnboardingDeepLink.Target, SetupIntent) -> Unit =
+                { target, intent ->
+                    setupWizardCoordinator.beginIntent(intent)
+                    onboardingDeepLink.set(target)
+                    completionError = null
+                    scope.launch {
+                        isCompleting = true
+                        completionError = onCompleteOnboarding()
+                            .exceptionOrNull()
+                            ?.message
+                        isCompleting = false
+                    }
+                }
+            DesktopSetupIntentHub(
+                coordinator = setupWizardCoordinator,
+                onOpenDebridSetup = {
+                    setupWizardViewModel.jumpToStep(SetupStep.DEBRID)
+                    mode = DesktopSetupMode.GUIDED
+                },
+                onOpenIptvSetup = {
+                    setupWizardViewModel.jumpToStep(SetupStep.CHANNELS)
+                    mode = DesktopSetupMode.GUIDED
+                },
+                onOpenPlexJellyfinSetup = {
+                    deepLinkAndComplete(
+                        DesktopOnboardingDeepLink.Target.Integrations,
+                        SetupIntent.PLEX_JELLYFIN,
+                    )
+                },
+                onOpenUsenetSetup = {
+                    deepLinkAndComplete(
+                        DesktopOnboardingDeepLink.Target.PandaSetup,
+                        SetupIntent.USENET,
+                    )
+                },
+                onUseGuidedWizard = { mode = DesktopSetupMode.GUIDED },
+                onContinueToDesktop = {
+                    completionError = null
+                    scope.launch {
+                        isCompleting = true
+                        completionError = onCompleteOnboarding()
+                            .exceptionOrNull()
+                            ?.message
+                        isCompleting = false
+                    }
+                },
+                isCompleting = isCompleting,
+                completionError = completionError,
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .fillMaxWidth(),
+            )
+            return@Column
+        }
+
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -719,6 +796,12 @@ private fun DesktopSetupPane(
                 )
             }
         }
+
+        TorveGhostButton(
+            text = "Back to credential-first hub",
+            onClick = { mode = DesktopSetupMode.HUB },
+            enabled = !isCompleting,
+        )
 
         admission?.takeIf { it.hasUsablePlaybackPath }?.let { snapshot ->
             TorveBanner(

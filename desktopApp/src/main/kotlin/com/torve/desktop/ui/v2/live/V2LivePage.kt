@@ -114,6 +114,39 @@ fun V2LivePage(
         channelsState.favorites.any { it.url == ch.url || it.name == ch.name }
     }
 
+    // ── IPTV recording (Prompt 10B) ──────────────────────────────
+    // Per-slot recording lookups + the Record/Cancel toggle. The VM is
+    // bound in SharedModule so this composable just resolves it via
+    // Koin. The EPG grid receives no-op defaults if the recording stack
+    // ever fails to bind, so the live page never crashes on a missing
+    // dependency.
+    val recordingsVm = remember {
+        org.koin.mp.KoinPlatform.getKoin()
+            .get<com.torve.presentation.recording.RecordingsViewModel>()
+    }
+    val recordingsState by recordingsVm.state.collectAsState()
+    val recordingStatusFor: (com.torve.domain.model.Channel, com.torve.domain.model.EpgProgramme) -> com.torve.presentation.recording.RecordingSlotStatus =
+        { ch, p -> recordingsVm.statusFor(ch.url, p.startTime, p.endTime) }
+    val onToggleRecord: (com.torve.domain.model.Channel, com.torve.domain.model.EpgProgramme) -> Unit = { ch, p ->
+        val existing = recordingsVm.rowFor(ch.url, p.startTime, p.endTime)
+        if (existing != null && (existing.status == com.torve.domain.recording.RecordingStatus.SCHEDULED ||
+                    existing.status == com.torve.domain.recording.RecordingStatus.RECORDING)
+        ) {
+            recordingsVm.cancel(existing.id)
+        } else {
+            recordingsVm.schedule(
+                playlistId = channelsState.selectedPlaylistId.orEmpty(),
+                channelId = ch.url,
+                channelName = ch.name,
+                streamUrl = ch.url,
+                programmeTitle = p.title,
+                programmeDescription = p.description,
+                startMs = p.startTime,
+                endMs = p.endTime,
+            )
+        }
+    }
+
     // Channel-number keypad: pure state machine + a Compose-side mirror of its
     // buffer + a 2.5 s idle-clear effect. The state machine itself is unit
     // tested in ChannelKeypadStateMachineTest.
@@ -296,6 +329,8 @@ fun V2LivePage(
                 onToggleFavorite = { ch -> channelsViewModel.toggleFavorite(ch) },
                 isReminderSet = { ch, p -> reminders.contains(reminderKey(ch, p)) },
                 onToggleReminder = toggleReminder,
+                recordingStatusFor = recordingStatusFor,
+                onToggleRecord = onToggleRecord,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             )
 
@@ -336,6 +371,33 @@ fun V2LivePage(
                 modifier = Modifier.fillMaxSize(),
             )
         }
+    }
+
+    // ── Conflict dialog (Prompt 10B) ──────────────────────────────
+    // Surfaces overlapping schedule attempts with an explicit
+    // "Schedule anyway" affordance. Dismiss = no rows changed.
+    recordingsState.conflict?.let { pending ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { recordingsVm.dismissConflict() },
+            title = { androidx.compose.material3.Text("Recording conflict") },
+            text = {
+                androidx.compose.material3.Text(
+                    "\"${pending.candidate.programmeTitle}\" overlaps with " +
+                        "\"${pending.existing.programmeTitle}\" on " +
+                        "${pending.existing.channelName}. Schedule anyway?",
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = { recordingsVm.confirmConflict() },
+                ) { androidx.compose.material3.Text("Schedule anyway") }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = { recordingsVm.dismissConflict() },
+                ) { androidx.compose.material3.Text("Cancel") }
+            },
+        )
     }
 }
 

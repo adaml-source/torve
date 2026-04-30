@@ -145,6 +145,10 @@ fun DetailScreen(
 ) {
     val bulkDownloadManager: BulkDownloadManager = koinInject()
     val bulkProgress by bulkDownloadManager.progress.collectAsState()
+    // Kick the LAN-library consumer once so the "Available on desktop"
+    // pill resolves on first paint (instead of waiting for the next
+    // background poll).
+    com.torve.android.ui.components.LanAvailabilityBootstrap()
     val coroutineScope = rememberCoroutineScope()
     val state by viewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
@@ -372,6 +376,15 @@ fun DetailScreen(
                             text = item.title,
                             style = MaterialTheme.typography.displaySmall,
                             color = Snow,
+                        )
+
+                        // LAN-library presence pill (Prompt 9C). Hidden
+                        // when no desktop hub on the same account is
+                        // serving this title; shown once
+                        // LanLibraryConsumer's manifest cache resolves.
+                        com.torve.android.ui.components.LanAvailabilityBadge(
+                            title = item.title,
+                            modifier = Modifier.padding(top = 6.dp),
                         )
 
                         if (state.isInLibrary) {

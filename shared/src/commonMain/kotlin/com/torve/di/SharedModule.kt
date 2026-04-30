@@ -374,6 +374,110 @@ val sharedModule = module {
     }
     single { com.torve.presentation.setup.SetupIntentsViewModel(get()) }
 
+    // ── Credential-first setup wizard (Prompt 7B) ─────────────────
+    // The four IntentValidators delegate to existing clients/state
+    // singletons so the wizard's verdict matches what the rest of the
+    // app sees. Validators are bound as singles so platform code can
+    // resolve them individually (e.g. Debrid validator gets re-run by
+    // the recovery card after a transfer-receive lands).
+    single<com.torve.presentation.setup.IntentValidator>(
+        qualifier = named("setup.validator.debrid"),
+    ) {
+        com.torve.presentation.setup.DebridIntentValidator(
+            providerSource = providerSource@{
+                // Pick the first debrid provider the user has a key
+                // on file for. Mirrors the resolution order in
+                // SettingsViewModel.connectDebrid.
+                val store = get<com.torve.domain.integrations.IntegrationSecretStore>()
+                val prefs = get<com.torve.domain.repository.PreferencesRepository>()
+                val configured = com.torve.domain.model.DebridServiceType.entries
+                    .firstOrNull { provider ->
+                        val key = store.get(debridSecretKey(provider))
+                        !key.isNullOrBlank()
+                    }
+                if (configured != null) return@providerSource configured
+                // Fall back to legacy `debrid_provider` pref string when
+                // a key only lives in the legacy slot.
+                runCatching {
+                    prefs.getString("debrid_provider")
+                        ?.let { com.torve.domain.model.DebridServiceType.valueOf(it) }
+                }.getOrNull()
+            },
+            apiKeySource = {
+                val store = get<com.torve.domain.integrations.IntegrationSecretStore>()
+                val prefs = get<com.torve.domain.repository.PreferencesRepository>()
+                val configured = com.torve.domain.model.DebridServiceType.entries
+                    .firstNotNullOfOrNull { provider ->
+                        store.get(debridSecretKey(provider))?.takeIf { it.isNotBlank() }
+                    }
+                configured
+                    ?: runCatching { prefs.getString("debrid_api_key") }.getOrNull()
+            },
+            debridClient = get(),
+        )
+    }
+    single<com.torve.presentation.setup.IntentValidator>(
+        qualifier = named("setup.validator.iptv"),
+    ) {
+        com.torve.presentation.setup.IptvIntentValidator(
+            stateSource = { get<ChannelsViewModel>().state.value },
+        )
+    }
+    single<com.torve.presentation.setup.IntentValidator>(
+        qualifier = named("setup.validator.plex_jellyfin"),
+    ) {
+        com.torve.presentation.setup.PlexJellyfinIntentValidator(
+            serverUrlSource = {
+                val prefs = get<com.torve.domain.repository.PreferencesRepository>()
+                val plex = runCatching { prefs.getString("plex_server_url") }.getOrNull()
+                if (!plex.isNullOrBlank()) plex
+                else runCatching { prefs.getString("jellyfin_server_url") }.getOrNull()
+            },
+            tokenSource = {
+                val store = get<com.torve.domain.integrations.IntegrationSecretStore>()
+                val plexToken = runCatching {
+                    store.get(com.torve.domain.integrations.IntegrationSecretKey.PLEX_ACCESS_TOKEN)
+                }.getOrNull()
+                if (!plexToken.isNullOrBlank()) plexToken
+                else runCatching {
+                    store.get(com.torve.domain.integrations.IntegrationSecretKey.JELLYFIN_API_KEY)
+                }.getOrNull()
+            },
+            service = get(),
+        )
+    }
+    single<com.torve.presentation.setup.IntentValidator>(
+        qualifier = named("setup.validator.usenet"),
+    ) {
+        com.torve.presentation.setup.UsenetIntentValidator(
+            stateSource = { get<com.torve.presentation.panda.PandaConfigStateStore>().current },
+        )
+    }
+    single {
+        com.torve.presentation.setup.SetupWizardCoordinator(
+            prefs = get(),
+            validators = mapOf(
+                com.torve.presentation.setup.SetupIntent.DEBRID to
+                    get<com.torve.presentation.setup.IntentValidator>(
+                        qualifier = named("setup.validator.debrid"),
+                    ),
+                com.torve.presentation.setup.SetupIntent.IPTV to
+                    get<com.torve.presentation.setup.IntentValidator>(
+                        qualifier = named("setup.validator.iptv"),
+                    ),
+                com.torve.presentation.setup.SetupIntent.PLEX_JELLYFIN to
+                    get<com.torve.presentation.setup.IntentValidator>(
+                        qualifier = named("setup.validator.plex_jellyfin"),
+                    ),
+                com.torve.presentation.setup.SetupIntent.USENET to
+                    get<com.torve.presentation.setup.IntentValidator>(
+                        qualifier = named("setup.validator.usenet"),
+                    ),
+            ),
+            healthRows = get<com.torve.domain.providerhealth.ProviderHealthRepository>().entries,
+        )
+    }
+
     // Phase 3 Sub-pass 1 — credential-transfer apply path. The
     // protocol and crypto engine binding lives per-platform (desktop
     // wires JvmTransferCryptoEngine + SecretsTransferProtocol).
@@ -460,19 +564,144 @@ val sharedModule = module {
         )
     }
 
-    // Source-availability primitives — Phase 3 Slice A.
-    // Three real providers (local downloads, Plex, Jellyfin); aggregator
-    // fans out to all of them in parallel and caches results in-process.
+    // Source-availability primitives — Phase 3 Slice A + Prompt 8.
+    // Real providers covering every "owned" playback path the user can
+    // launch from a search result. Aggregator fans out in parallel and
+    // caches results in-process so re-renders stay cheap.
     single { com.torve.data.sourceavailability.LocalDownloadSourceAvailabilityProvider(get()) }
     single { com.torve.data.sourceavailability.PlexSourceAvailabilityProvider(get(), get(), get()) }
     single { com.torve.data.sourceavailability.JellyfinSourceAvailabilityProvider(get(), get(), get()) }
+    // Shared resolver: tmdbId → imdb id. Cached per-process by
+    // MetadataRepository — calls TMDB only when the imdb id isn't in
+    // the local catalog. Returns null on any failure (the providers
+    // treat null as UNCONFIGURED-silent).
+    single<suspend (Int, com.torve.domain.model.MediaType) -> String?>(
+        qualifier = named("availability.tmdb_to_imdb"),
+    ) {
+        val metadata = get<com.torve.domain.repository.MetadataRepository>()
+        ({ tmdbId, mediaType ->
+            val type = if (mediaType == com.torve.domain.model.MediaType.SERIES) "tv" else "movie"
+            runCatching { metadata.getDetail(type, tmdbId) }.getOrNull()?.imdbId
+        })
+    }
+    single<suspend (Int, com.torve.domain.model.MediaType) -> String?>(
+        qualifier = named("availability.tmdb_to_title"),
+    ) {
+        val metadata = get<com.torve.domain.repository.MetadataRepository>()
+        ({ tmdbId, mediaType ->
+            val type = if (mediaType == com.torve.domain.model.MediaType.SERIES) "tv" else "movie"
+            runCatching { metadata.getDetail(type, tmdbId) }.getOrNull()?.title
+        })
+    }
+    single {
+        com.torve.data.sourceavailability.DebridCacheSourceAvailabilityProvider(
+            streamRepository = get(),
+            secretStore = get(),
+            tmdbToImdbResolver = get(qualifier = named("availability.tmdb_to_imdb")),
+        )
+    }
+    single {
+        com.torve.data.sourceavailability.StremioAddonSourceAvailabilityProvider(
+            addonRepository = get(),
+            streamRepository = get(),
+            tmdbToImdbResolver = get(qualifier = named("availability.tmdb_to_imdb")),
+        )
+    }
+    single {
+        com.torve.data.sourceavailability.UsenetReadySourceAvailabilityProvider(
+            streamRepository = get(),
+            pandaStateSource = { get<com.torve.presentation.panda.PandaConfigStateStore>().current },
+            tmdbToImdbResolver = get(qualifier = named("availability.tmdb_to_imdb")),
+        )
+    }
+    single {
+        com.torve.data.sourceavailability.IptvLiveSourceAvailabilityProvider(
+            channelsStateSource = { get<ChannelsViewModel>().state.value },
+            titleSource = get(qualifier = named("availability.tmdb_to_title")),
+        )
+    }
+    single {
+        com.torve.data.sourceavailability.WatchHistorySourceAvailabilityProvider(
+            repository = get(),
+        )
+    }
     single<com.torve.domain.sourceavailability.SourceAvailabilityAggregator> {
         com.torve.data.sourceavailability.DefaultSourceAvailabilityAggregator(
             providers = listOf(
                 get<com.torve.data.sourceavailability.LocalDownloadSourceAvailabilityProvider>(),
                 get<com.torve.data.sourceavailability.PlexSourceAvailabilityProvider>(),
                 get<com.torve.data.sourceavailability.JellyfinSourceAvailabilityProvider>(),
+                get<com.torve.data.sourceavailability.DebridCacheSourceAvailabilityProvider>(),
+                get<com.torve.data.sourceavailability.StremioAddonSourceAvailabilityProvider>(),
+                get<com.torve.data.sourceavailability.UsenetReadySourceAvailabilityProvider>(),
+                get<com.torve.data.sourceavailability.IptvLiveSourceAvailabilityProvider>(),
+                get<com.torve.data.sourceavailability.WatchHistorySourceAvailabilityProvider>(),
             ),
+        )
+    }
+
+    // ── IPTV recording / EPG correction (Prompt 10 / 10B) ───────
+    // Repository binding lives per-platform (desktop uses
+    // FileBackedRecordingRepository); shared keeps the scheduler
+    // single + presentation VMs + the EPG correction repo.
+    single {
+        com.torve.data.recording.EpgCorrectionRepository(prefs = get())
+    }
+    single {
+        com.torve.domain.recording.RecordingScheduler(repository = get())
+    }
+    single {
+        com.torve.presentation.recording.RecordingsViewModel(
+            scheduler = get(),
+            repository = get(),
+        )
+    }
+    single {
+        com.torve.presentation.recording.EpgCorrectionViewModel(
+            repository = get(),
+        )
+    }
+
+    // ── LAN hub registry (Prompt 9 / 9B) ─────────────────────────
+    // Backend-assisted discovery + secret fetch. Shared between desktop
+    // (publisher) and TV / mobile (consumer). Defensive: every call
+    // degrades gracefully on a missing backend.
+    single {
+        com.torve.data.lanlibrary.LanHubRegistryApi(
+            httpClient = get(),
+            authClient = get<com.torve.data.auth.AuthClient>(),
+        )
+    }
+    single {
+        com.torve.presentation.lanlibrary.LanHubDiscovery(
+            registry = get(),
+        )
+    }
+    single {
+        com.torve.data.lanlibrary.LanLibraryHttpClient(httpClient = get())
+    }
+    single {
+        com.torve.presentation.lanlibrary.LanLibraryConsumer(
+            registry = get(),
+            httpClient = get(),
+        )
+    }
+
+    // ── TV-Home outcome aggregator + one-click router (Prompt 11B) ──
+    // Consumed by the Android TV layer. Pure presentation — no Compose
+    // deps so the wiring stays unit-testable.
+    single {
+        com.torve.presentation.tvhome.TvHomeOutcomeViewModel(
+            homeViewModel = get(),
+            availabilityAggregator = get(),
+            lanLibraryConsumer = get(),
+            providerHealthCoordinator = get(),
+            channelsViewModel = get(),
+        )
+    }
+    single {
+        com.torve.presentation.tvhome.TvHomePlaybackRouter(
+            downloadRepository = get(),
         )
     }
 
@@ -552,8 +781,16 @@ val sharedModule = module {
     // Analytics surface. Default is a no-op sink — feature code can emit
     // safely and a real backend integration can swap this without VM or
     // coordinator changes. See com.torve.domain.telemetry.TelemetryEmitter.
+    //
+    // Prompt 12 hardening: every selected sink is wrapped in
+    // [RedactingTelemetryEmitter] so a future production sink inherits
+    // redaction without per-call-site care. The platform module overrides
+    // this binding when it can read TORVE_TELEMETRY_SINK from the env;
+    // otherwise we default to the wrapped NoOp.
     single<com.torve.domain.telemetry.TelemetryEmitter> {
-        com.torve.domain.telemetry.NoOpTelemetryEmitter()
+        com.torve.domain.telemetry.RedactingTelemetryEmitter(
+            com.torve.domain.telemetry.NoOpTelemetryEmitter(),
+        )
     }
     factory {
         com.torve.presentation.usenet.NzbdavSetupViewModel(
@@ -564,7 +801,20 @@ val sharedModule = module {
     single { com.torve.domain.streams.UsenetWarmCoordinator(repository = get(), telemetry = get()) }
     single { com.torve.domain.streams.UsenetResolveCoordinator(repository = get(), telemetry = get()) }
     single { com.torve.domain.streams.UsenetJobPoller(repository = get()) }
-    single { ChannelsViewModel(get(), get(), get(), backgroundDispatcher = kotlinx.coroutines.Dispatchers.IO, playlistBackup = get(), settingsRefreshNotifier = get()) }
+    single {
+        ChannelsViewModel(
+            channelRepo = get(),
+            prefsRepo = get(),
+            catchupResolver = get(),
+            backgroundDispatcher = kotlinx.coroutines.Dispatchers.IO,
+            playlistBackup = get(),
+            settingsRefreshNotifier = get(),
+            // Prompt 10C: apply persisted EPG corrections at guide
+            // build time + emit health to drive the stale banner.
+            epgCorrectionRepository = get(),
+            epgCorrectionViewModel = get(),
+        )
+    }
     factory { CalendarViewModel(get(), get()) }
     factory { DownloadViewModel(get(), contentPolicyRepository = get(), contentPolicyFilter = ContentPolicyFilter()) }
     factory { DownloadCatalogueViewModel(get(), get(), get(), get(), contentPolicyRepository = get(), contentPolicyFilter = ContentPolicyFilter()) }
@@ -606,4 +856,22 @@ val sharedModule = module {
     }
     factory { SensitiveMaterialSettingsViewModel(get()) }
     factory { com.torve.presentation.jellyfin.JellyfinBrowserViewModel(get()) }
+}
+
+/**
+ * Per-provider secret key. Same mapping as DesktopProviderHealthInit /
+ * AndroidProviderHealthInit; lifted here so the DebridIntentValidator
+ * single can resolve a provider without pulling in either platform init.
+ */
+private fun debridSecretKey(
+    provider: com.torve.domain.model.DebridServiceType,
+): com.torve.domain.integrations.IntegrationSecretKey = when (provider) {
+    com.torve.domain.model.DebridServiceType.REAL_DEBRID ->
+        com.torve.domain.integrations.IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID
+    com.torve.domain.model.DebridServiceType.ALL_DEBRID ->
+        com.torve.domain.integrations.IntegrationSecretKey.DEBRID_API_KEY_ALL_DEBRID
+    com.torve.domain.model.DebridServiceType.PREMIUMIZE ->
+        com.torve.domain.integrations.IntegrationSecretKey.DEBRID_API_KEY_PREMIUMIZE
+    com.torve.domain.model.DebridServiceType.TORBOX ->
+        com.torve.domain.integrations.IntegrationSecretKey.DEBRID_API_KEY_TORBOX
 }

@@ -55,6 +55,62 @@ class PlaybackRouteAndRangeTest {
         assertEquals(PlaybackRoute.ReDownload, pref.pick())
     }
 
+    // ── Mobile-data guard (Prompt 9) ──────────────────────────────
+
+    @Test
+    fun `mobile-data guard hides LAN stream on cellular when wifiOnly is true`() {
+        val pref = PlaybackRoutePreference.of(
+            lanStream = PlaybackRoute.LanDesktopStream("http://lan/local/stream/x"),
+            providerStream = PlaybackRoute.ProviderStream("https://up/a"),
+            networkMode = NetworkMode.CELLULAR,
+            wifiOnlyForLan = true,
+        )
+        assertEquals(PlaybackRoute.ProviderStream("https://up/a"), pref.pick())
+    }
+
+    @Test
+    fun `mobile-data guard preserves LAN stream on Wi-Fi`() {
+        val pref = PlaybackRoutePreference.of(
+            lanStream = PlaybackRoute.LanDesktopStream("http://lan/local/stream/x"),
+            providerStream = PlaybackRoute.ProviderStream("https://up/a"),
+            networkMode = NetworkMode.WIFI,
+            wifiOnlyForLan = true,
+        )
+        assertEquals(PlaybackRoute.LanDesktopStream("http://lan/local/stream/x"), pref.pick())
+    }
+
+    @Test
+    fun `mobile-data guard preserves LAN stream on cellular when wifiOnly is false`() {
+        val pref = PlaybackRoutePreference.of(
+            lanStream = PlaybackRoute.LanDesktopStream("http://lan/local/stream/x"),
+            networkMode = NetworkMode.CELLULAR,
+            wifiOnlyForLan = false,
+        )
+        assertEquals(PlaybackRoute.LanDesktopStream("http://lan/local/stream/x"), pref.pick())
+    }
+
+    @Test
+    fun `mobile-data guard falls through to ReDownload when only LAN was offered`() {
+        val pref = PlaybackRoutePreference.of(
+            lanStream = PlaybackRoute.LanDesktopStream("http://lan/local/stream/x"),
+            networkMode = NetworkMode.CELLULAR,
+            wifiOnlyForLan = true,
+        )
+        assertEquals(PlaybackRoute.ReDownload, pref.pick())
+    }
+
+    @Test
+    fun `mobile-data guard does not affect local file priority`() {
+        val pref = PlaybackRoutePreference.of(
+            localFile = PlaybackRoute.LocalFile("/disk/movie.mkv"),
+            lanStream = PlaybackRoute.LanDesktopStream("http://lan/local/stream/x"),
+            networkMode = NetworkMode.CELLULAR,
+            wifiOnlyForLan = true,
+        )
+        // Local file always wins regardless of network mode.
+        assertEquals(PlaybackRoute.LocalFile("/disk/movie.mkv"), pref.pick())
+    }
+
     // ── RangeRequest.parse ─────────────────────────────────────────
 
     @Test

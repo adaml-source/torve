@@ -122,6 +122,8 @@ private data class DesktopRuntime(
     val castController: com.torve.desktop.cast.DesktopCastController?,
     val statsViewModel: com.torve.presentation.stats.StatsViewModel,
     val setupIntentsViewModel: com.torve.presentation.setup.SetupIntentsViewModel,
+    val setupWizardCoordinator: com.torve.presentation.setup.SetupWizardCoordinator,
+    val onboardingDeepLink: com.torve.desktop.ui.onboarding.DesktopOnboardingDeepLink,
     val providerHealthInit: com.torve.desktop.providerhealth.DesktopProviderHealthInit,
 )
 
@@ -533,6 +535,8 @@ private fun bootstrapDesktop(): BootstrapState {
             castController = castController,
             statsViewModel = koin.get<com.torve.presentation.stats.StatsViewModel>(),
             setupIntentsViewModel = koin.get<com.torve.presentation.setup.SetupIntentsViewModel>(),
+            setupWizardCoordinator = koin.get<com.torve.presentation.setup.SetupWizardCoordinator>(),
+            onboardingDeepLink = koin.get<com.torve.desktop.ui.onboarding.DesktopOnboardingDeepLink>(),
             providerHealthInit = koin.get<com.torve.desktop.providerhealth.DesktopProviderHealthInit>(),
         )
         // Phase 3 Slice C: kick the LAN serving controller. It listens
@@ -540,6 +544,21 @@ private fun bootstrapDesktop(): BootstrapState {
         // and only binds when the user explicitly opts in.
         runCatching { koin.get<com.torve.desktop.lanlibrary.LanServingController>().start() }
             .onFailure { println("Torve desktop bootstrap: LAN controller start failed: ${it.message}") }
+
+        // Prompt 9B: publish the desktop's LAN hub to the backend
+        // registry whenever LAN-bind is on AND the user is signed in.
+        // The publisher itself owns the start/stop logic; we just
+        // kick its long-running observer.
+        runCatching { koin.get<com.torve.desktop.lanlibrary.LanHubPublisher>().start() }
+            .onFailure { println("Torve desktop bootstrap: LAN hub publisher start failed: ${it.message}") }
+
+        // Prompt 10B: kick the IPTV recording service. It polls the
+        // scheduler every 30 s for SCHEDULED rows whose start time has
+        // arrived, opens the upstream HTTP stream, and writes the
+        // bytes into the configured recordings root. Storage boundary
+        // is enforced inside the service.
+        runCatching { koin.get<com.torve.desktop.recording.DesktopRecordingService>().start() }
+            .onFailure { println("Torve desktop bootstrap: recording service start failed: ${it.message}") }
 
         println("Torve desktop bootstrap: DI startup succeeded")
         BootstrapState.Ready(runtime)
@@ -779,6 +798,8 @@ private fun DesktopRuntimePane(
             authState = state.authState,
             authController = authController,
             setupWizardViewModel = runtime.setupWizardViewModel,
+            setupWizardCoordinator = runtime.setupWizardCoordinator,
+            onboardingDeepLink = runtime.onboardingDeepLink,
             releaseInfo = releaseInfo,
             admission = null,
             onExit = onExit,
@@ -789,6 +810,8 @@ private fun DesktopRuntimePane(
             authState = state.authState,
             authController = authController,
             setupWizardViewModel = runtime.setupWizardViewModel,
+            setupWizardCoordinator = runtime.setupWizardCoordinator,
+            onboardingDeepLink = runtime.onboardingDeepLink,
             releaseInfo = releaseInfo,
             admission = state.admission,
             onExit = onExit,
@@ -799,6 +822,7 @@ private fun DesktopRuntimePane(
             authState = state.authState,
             authController = authController,
             setupIntentsViewModel = runtime.setupIntentsViewModel,
+            onboardingDeepLink = runtime.onboardingDeepLink,
             providerHealthInit = runtime.providerHealthInit,
             playerController = runtime.playerController,
             windowState = windowState,

@@ -129,8 +129,22 @@ fun V2SettingsPage(
     onOpenPandaSetup: () -> Unit = {},
     onOpenManageDevices: () -> Unit = {},
     onOpenStats: () -> Unit = {},
+    onOpenRecordings: () -> Unit = {},
+    /**
+     * Onboarding deep-link entry: when the user picked "Set up
+     * Plex/Jellyfin" from the credential-first hub the shell completes
+     * onboarding with a request to land on this section. Null falls back
+     * to the default SOURCES category. String form keeps SettingsCategory
+     * private to this file.
+     */
+    initialCategoryName: String? = null,
 ) {
-    var selectedCategory by remember { mutableStateOf(SettingsCategory.SOURCES) }
+    var selectedCategory by remember {
+        val resolved = initialCategoryName?.let { name ->
+            SettingsCategory.entries.firstOrNull { it.name == name }
+        }
+        mutableStateOf(resolved ?: SettingsCategory.SOURCES)
+    }
     var addonManifestUrl by remember { mutableStateOf("") }
     var addonMessage by remember { mutableStateOf<String?>(null) }
     var addonError by remember { mutableStateOf<String?>(null) }
@@ -280,6 +294,7 @@ fun V2SettingsPage(
                 SettingsCategory.PLAYLISTS -> PlaylistsSection(
                     channelsState = channelsState,
                     channelsViewModel = channelsViewModel,
+                    onOpenRecordings = onOpenRecordings,
                 )
                 SettingsCategory.ABOUT -> AboutSection(
                     settingsViewModel = settingsViewModel,
@@ -1487,6 +1502,7 @@ private fun AddonsSection(
 private fun PlaylistsSection(
     channelsState: ChannelsUiState,
     channelsViewModel: ChannelsViewModel,
+    onOpenRecordings: () -> Unit,
 ) {
     val selectedPlaylist = channelsState.playlists.firstOrNull { it.id == channelsState.selectedPlaylistId }
     val hasPremium = com.torve.desktop.premium.rememberHasPremium()
@@ -1516,6 +1532,28 @@ private fun PlaylistsSection(
                 },
             )
         }
+
+        // ── IPTV recordings + EPG correction (Prompt 10B) ────────
+        // The selected playlist drives both surfaces: the recordings
+        // list is global, but EPG correction is per-playlist (offset,
+        // tvg-id remap, hidden categories).
+        val recordingsPlaylistId = channelsState.selectedPlaylistId
+        TorveSectionCard(
+            title = "Live TV recordings",
+            supportingText = "Schedule recordings from the EPG. They land in your movies download folder.",
+        ) {
+            TorvePrimaryButton(
+                text = "Open My Recordings",
+                onClick = onOpenRecordings,
+            )
+        }
+        if (recordingsPlaylistId != null) {
+            EpgCorrectionCard(
+                playlistId = recordingsPlaylistId,
+                channelsState = channelsState,
+            )
+        }
+
         TorveSectionCard(
             title = "Add Playlist",
             supportingText = "Desktop can now create M3U or Xtream playlists directly in settings.",
@@ -2354,6 +2392,139 @@ private fun AboutSection(
                     color = TorveDesktopThemeTokens.colors.textSecondary,
                 )
             }
+        }
+
+        // ── Legal & Support (Prompt 12 hardening) ──
+        // Required by every store policy and by general public-release
+        // hygiene. URLs are sourced from the shared LegalUrls module so
+        // a copy change is one PR, not seven.
+        TorveSectionCard(
+            title = "Legal & support",
+            supportingText = "Privacy, terms, and how to reach us.",
+        ) {
+            TorveListRow(
+                title = "Privacy Policy",
+                subtitle = com.torve.presentation.legal.LegalUrls.PRIVACY_POLICY,
+                trailing = {
+                    TorveGhostButton(
+                        text = "Open",
+                        onClick = {
+                            runCatching {
+                                java.awt.Desktop.getDesktop().browse(
+                                    java.net.URI(com.torve.presentation.legal.LegalUrls.PRIVACY_POLICY),
+                                )
+                            }
+                        },
+                    )
+                },
+            )
+            TorveListRow(
+                title = "Terms of Service",
+                subtitle = com.torve.presentation.legal.LegalUrls.TERMS_OF_SERVICE,
+                trailing = {
+                    TorveGhostButton(
+                        text = "Open",
+                        onClick = {
+                            runCatching {
+                                java.awt.Desktop.getDesktop().browse(
+                                    java.net.URI(com.torve.presentation.legal.LegalUrls.TERMS_OF_SERVICE),
+                                )
+                            }
+                        },
+                    )
+                },
+            )
+            TorveListRow(
+                title = "Help & support",
+                subtitle = com.torve.presentation.legal.LegalUrls.HELP,
+                trailing = {
+                    TorveGhostButton(
+                        text = "Open",
+                        onClick = {
+                            runCatching {
+                                java.awt.Desktop.getDesktop().browse(
+                                    java.net.URI(com.torve.presentation.legal.LegalUrls.HELP),
+                                )
+                            }
+                        },
+                    )
+                },
+            )
+            TorveListRow(
+                title = "Email support",
+                subtitle = com.torve.presentation.legal.LegalUrls.SUPPORT_EMAIL,
+                trailing = {
+                    TorveGhostButton(
+                        text = "Email",
+                        onClick = {
+                            runCatching {
+                                java.awt.Desktop.getDesktop().mail(
+                                    java.net.URI("mailto:${com.torve.presentation.legal.LegalUrls.SUPPORT_EMAIL}"),
+                                )
+                            }
+                        },
+                    )
+                },
+            )
+        }
+
+        // ── Account deletion (Prompt 12 hardening) ──
+        // Store-policy required. The in-app DELETE is the primary path;
+        // the web mirror exists for users without the app installed.
+        var showDeleteAccountDialog by remember { mutableStateOf(false) }
+        var deleteAccountStatus by remember { mutableStateOf<String?>(null) }
+        TorveSectionCard(
+            title = "Delete account",
+            supportingText = "Permanently remove your Torve account and associated data " +
+                "from our servers. This action cannot be undone.",
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                TorveGhostButton(
+                    text = "Delete account…",
+                    onClick = { showDeleteAccountDialog = true },
+                )
+            }
+            deleteAccountStatus?.let { msg ->
+                Text(
+                    msg,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TorveDesktopThemeTokens.colors.textSecondary,
+                )
+            }
+        }
+        if (showDeleteAccountDialog) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { showDeleteAccountDialog = false },
+                title = { Text("Delete your Torve account?") },
+                text = {
+                    Text(
+                        "This permanently deletes your account, devices, watch history, " +
+                            "playlists, and entitlements on the Torve servers. Local " +
+                            "downloads on this computer are not affected.",
+                    )
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        showDeleteAccountDialog = false
+                        @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
+                        kotlinx.coroutines.GlobalScope.launch {
+                            val authClient = org.koin.mp.KoinPlatform.getKoin()
+                                .get<com.torve.data.auth.AuthClient>()
+                            val result = authClient.deleteAccount()
+                            deleteAccountStatus = if (result.success) {
+                                "Account deleted. Restart Torve to sign in again."
+                            } else {
+                                "Could not delete account: ${result.error ?: "unknown error"}"
+                            }
+                        }
+                    }) { Text("Delete account") }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = { showDeleteAccountDialog = false }) {
+                        Text("Cancel")
+                    }
+                },
+            )
         }
     }
 }
@@ -3217,22 +3388,90 @@ private fun SourcesSection(
         }
     }
 
-    // ── LAN library serving (Phase 3 Slice C) ─────────────────────
+    // ── LAN library serving (Phase 3 Slice C / Prompt 9B) ─────────
+    val lanStatusLabel = when {
+        !settingsState.lanServingEnabled -> "Off — desktop talks only to itself."
+        !settingsState.lanServingBindToLan -> "Loopback only — peers on this LAN cannot connect."
+        else -> "LAN published — peers on this network can authenticate and stream."
+    }
     TorveSectionCard(
         title = "LAN library",
         supportingText = "Let this desktop serve its downloaded media to other devices on your local network. " +
-            "Off by default. When enabled, the server binds to localhost only — exposing it to the LAN " +
-            "is a separate, future toggle.",
+            "Off by default. Enable serving first, then opt into LAN-bind to publish a hub other devices " +
+            "can discover.",
     ) {
+        Text(
+            text = lanStatusLabel,
+            style = MaterialTheme.typography.bodySmall,
+            color = TorveDesktopThemeTokens.colors.textSecondary,
+        )
         PreferenceToggleRow(
             title = "Enable LAN serving",
             subtitle = if (settingsState.lanServingEnabled)
-                "Localhost server is running. Sign-out or disabling this toggle stops it immediately."
+                "Server is running. Sign-out or disabling this toggle stops it immediately."
             else
-                "Localhost server is stopped.",
+                "Server is stopped.",
             checked = settingsState.lanServingEnabled,
             onCheckedChange = settingsViewModel::setLanServingEnabled,
         )
+        PreferenceToggleRow(
+            title = "Allow other devices on this network",
+            subtitle = if (settingsState.lanServingBindToLan)
+                "Server is bound to your LAN interface; the hub is published to the registry. Disable to revert to loopback only."
+            else
+                "Loopback only — flip to allow LAN-discovered TV / mobile to authenticate and stream.",
+            checked = settingsState.lanServingBindToLan,
+            onCheckedChange = settingsViewModel::setLanServingBindToLan,
+        )
+        PreferenceToggleRow(
+            title = "LAN streams require Wi-Fi (peer setting)",
+            subtitle = "Mobile / TV peers refuse to play LAN streams on cellular when this is on. Local files always play.",
+            checked = settingsState.lanPlaybackWifiOnly,
+            onCheckedChange = settingsViewModel::setLanPlaybackWifiOnly,
+        )
+        Spacer(Modifier.height(8.dp))
+        // Manual storage hygiene: deletes only watched + completed
+        // downloads whose path lies in the configured allowlist.
+        // Result is summarized in a transient banner state; the helper
+        // never deletes files it can't prove are owned.
+        var cleanupSummary by remember { mutableStateOf<String?>(null) }
+        var cleanupRunning by remember { mutableStateOf(false) }
+        val cleanupScope = rememberCoroutineScope()
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TorveSecondaryButton(
+                text = if (cleanupRunning) "Working…" else "Free up space (watched downloads)",
+                onClick = {
+                    cleanupRunning = true
+                    cleanupSummary = null
+                    cleanupScope.launch {
+                        val cleanup = runCatching {
+                            org.koin.mp.KoinPlatform.getKoin()
+                                .get<com.torve.desktop.lanlibrary.WatchedDownloadCleanup>()
+                        }.getOrNull()
+                        val outcomes = cleanup?.cleanWatched().orEmpty()
+                        val deleted = outcomes
+                            .filterIsInstance<com.torve.desktop.lanlibrary.WatchedDownloadCleanup.CleanupOutcome.Deleted>()
+                        val skipped = outcomes
+                            .filterIsInstance<com.torve.desktop.lanlibrary.WatchedDownloadCleanup.CleanupOutcome.Skipped>()
+                        val freedMb = deleted.sumOf { it.freedBytes } / (1024 * 1024)
+                        cleanupSummary = "Freed ${freedMb} MB across ${deleted.size} title(s); skipped ${skipped.size}."
+                        cleanupRunning = false
+                    }
+                },
+                enabled = !cleanupRunning,
+            )
+            cleanupSummary?.let { msg ->
+                Text(
+                    text = msg,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TorveDesktopThemeTokens.colors.textSecondary,
+                )
+            }
+        }
     }
 
     // Credential transfer (Phase 3 sub-pass 2: receiver only).
@@ -3465,5 +3704,172 @@ private fun formatLastChecked(epochMs: Long?): String {
         deltaSec < 3600L -> "${deltaSec / 60L} min ago"
         deltaSec < 86_400L -> "${deltaSec / 3600L} h ago"
         else -> "${deltaSec / 86_400L} d ago"
+    }
+}
+
+/**
+ * EPG correction card (Prompt 10B). Three levers: per-playlist time
+ * offset minutes, hidden categories (chips), and a tvg-id remap field.
+ * Persistence is handled by [com.torve.presentation.recording.EpgCorrectionViewModel].
+ */
+@Composable
+private fun EpgCorrectionCard(
+    playlistId: String,
+    channelsState: ChannelsUiState,
+) {
+    val vm = remember {
+        org.koin.mp.KoinPlatform.getKoin()
+            .get<com.torve.presentation.recording.EpgCorrectionViewModel>()
+    }
+    LaunchedEffect(playlistId) { vm.load(playlistId) }
+    val state by vm.state.collectAsState()
+    val correction = state.correction
+
+    TorveSectionCard(
+        title = "EPG correction",
+        supportingText = "Fix common EPG issues without editing M3U or XMLTV. Changes apply to the selected playlist.",
+    ) {
+        // Time offset
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "Time offset (minutes):",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            TorveGhostButton(
+                text = "−60",
+                onClick = { vm.setOffsetMinutes(correction.offsetMinutes - 60) },
+            )
+            TorveGhostButton(
+                text = "−15",
+                onClick = { vm.setOffsetMinutes(correction.offsetMinutes - 15) },
+            )
+            Text(
+                text = "${correction.offsetMinutes}",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            )
+            TorveGhostButton(
+                text = "+15",
+                onClick = { vm.setOffsetMinutes(correction.offsetMinutes + 15) },
+            )
+            TorveGhostButton(
+                text = "+60",
+                onClick = { vm.setOffsetMinutes(correction.offsetMinutes + 60) },
+            )
+            if (correction.offsetMinutes != 0) {
+                TorveGhostButton(
+                    text = "Reset",
+                    onClick = { vm.setOffsetMinutes(0) },
+                )
+            }
+        }
+
+        // Hidden categories
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "Hide categories",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        val allCategories = remember(channelsState.categories) {
+            channelsState.categories.map { it.name }.distinct().sorted()
+        }
+        if (allCategories.isEmpty()) {
+            Text(
+                text = "No categories detected yet — load the channel list first.",
+                style = MaterialTheme.typography.bodySmall,
+                color = TorveDesktopThemeTokens.colors.textSecondary,
+            )
+        } else {
+            androidx.compose.foundation.layout.FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                allCategories.forEach { name ->
+                    val hidden = name in correction.hiddenCategories
+                    val tone = if (hidden) TorveBadgeTone.Error else TorveBadgeTone.Neutral
+                    androidx.compose.foundation.layout.Box(
+                        modifier = Modifier
+                            .clickable { vm.toggleHiddenCategory(name) },
+                    ) {
+                        TorveBadge(text = (if (hidden) "✕ " else "") + name, tone = tone)
+                    }
+                }
+            }
+        }
+
+        // Manual tvg-id remap — minimal text-based form for now.
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = "Channel id remap",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = "Use only when a channel doesn't pair with the EPG. Format: playlist_id → epg_id.",
+            style = MaterialTheme.typography.bodySmall,
+            color = TorveDesktopThemeTokens.colors.textSecondary,
+        )
+        var newPlaylistId by remember { mutableStateOf("") }
+        var newEpgId by remember { mutableStateOf("") }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            TorveTextField(
+                value = newPlaylistId,
+                onValueChange = { newPlaylistId = it },
+                label = "Playlist id",
+                modifier = Modifier.weight(1f),
+            )
+            Text("→", style = MaterialTheme.typography.bodyMedium)
+            TorveTextField(
+                value = newEpgId,
+                onValueChange = { newEpgId = it },
+                label = "EPG id",
+                modifier = Modifier.weight(1f),
+            )
+            TorvePrimaryButton(
+                text = "Add",
+                onClick = {
+                    if (newPlaylistId.isNotBlank() && newEpgId.isNotBlank()) {
+                        vm.setMapping(newPlaylistId.trim(), newEpgId.trim())
+                        newPlaylistId = ""
+                        newEpgId = ""
+                    }
+                },
+                enabled = newPlaylistId.isNotBlank() && newEpgId.isNotBlank(),
+            )
+        }
+        if (correction.tvgIdRemap.isNotEmpty()) {
+            Spacer(Modifier.height(6.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                correction.tvgIdRemap.forEach { (k, v) ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            text = "$k  →  $v",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TorveDesktopThemeTokens.colors.textSecondary,
+                        )
+                        TorveGhostButton(text = "Remove", onClick = { vm.setMapping(k, null) })
+                    }
+                }
+            }
+        }
+
+        // Stale-EPG banner — only when the VM has been told.
+        state.health?.takeIf { it.isStale }?.let {
+            Spacer(Modifier.height(10.dp))
+            TorveBanner(
+                title = "EPG looks stale",
+                description = "The latest programme on this playlist ended before now. " +
+                    "Refresh from Settings → Live TV → Refresh, or check the EPG URL.",
+                tone = TorveBannerTone.Warning,
+            )
+        }
     }
 }

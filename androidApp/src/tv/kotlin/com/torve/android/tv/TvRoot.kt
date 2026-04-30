@@ -1624,6 +1624,70 @@ fun TvRoot(
                                 pushFocusReturnEntry(TvRoutes.HOME)
                                 navController.navigateToTvDetails(item)
                             },
+                            onPlayLocalFile = { item, absolutePath ->
+                                // Single-OK path for downloaded items: jump
+                                // straight to the player route, no detail
+                                // detour. file:// URL goes through the same
+                                // ExoPlayer flow as a remote URL.
+                                pushFocusReturnEntry(TvRoutes.HOME)
+                                val mediaType =
+                                    if (item.type == MediaType.SERIES) "tv" else "movie"
+                                navController.navigate(
+                                    TvRoutes.player(
+                                        url = "file://$absolutePath",
+                                        fallbackUrl = "",
+                                        title = item.title,
+                                        mediaId = item.id,
+                                        mediaType = mediaType,
+                                        posterUrl = item.posterUrl.orEmpty(),
+                                        backdropUrl = item.backdropUrl.orEmpty(),
+                                        showTmdbId = if (mediaType == "tv") item.tmdbId else null,
+                                        showImdbId = item.imdbId,
+                                    ),
+                                )
+                            },
+                            onPlayLanRoute = { item, lanUrl ->
+                                // Single-OK path for LAN-available items.
+                                // PendingLanPlaybackHandoff was staged by
+                                // TvHomeScreen — PlayerScreen consumes it
+                                // before play() and attaches X-Torve-Lan-Auth.
+                                pushFocusReturnEntry(TvRoutes.HOME)
+                                val mediaType =
+                                    if (item.type == MediaType.SERIES) "tv" else "movie"
+                                navController.navigate(
+                                    TvRoutes.player(
+                                        url = lanUrl,
+                                        fallbackUrl = "",
+                                        title = item.title,
+                                        mediaId = item.id,
+                                        mediaType = mediaType,
+                                        posterUrl = item.posterUrl.orEmpty(),
+                                        backdropUrl = item.backdropUrl.orEmpty(),
+                                        showTmdbId = if (mediaType == "tv") item.tmdbId else null,
+                                        showImdbId = item.imdbId,
+                                    ),
+                                )
+                            },
+                            onLiveChannelClick = { enriched ->
+                                if (TvPremiumAccess.isPremiumLocked(
+                                        TvEntitledFeature.STREAM_PLAYBACK,
+                                        accessTier,
+                                    )
+                                ) {
+                                    requestLifetimeUnlock(TvEntitledFeature.STREAM_PLAYBACK)
+                                } else {
+                                    navController.navigate(
+                                        TvRoutes.livePlayer(
+                                            channelUrl = enriched.channel.url,
+                                            channelName = enriched.channel.name,
+                                            groupName = enriched.channel.groupTitle.orEmpty(),
+                                        ),
+                                    ) { launchSingleTop = true }
+                                }
+                            },
+                            onProviderBannerAction = {
+                                navController.navigate(TvRoutes.SETTINGS)
+                            },
                             onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.HOME] = it },
                             onContentFocused = { lastFocusedContentByRoute[TvRoutes.HOME] = it },
                             registerFocusHandle = { handle ->

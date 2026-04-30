@@ -553,6 +553,15 @@ fun PlayerScreen(
     fun requestPlayback(url: String) {
         if (url.isBlank()) return
         currentUrl = url
+        // Consume any LAN handoff staged before navigation. The route
+        // schema can't carry HTTP headers, so the LAN-from-Home /
+        // LAN-from-Details flows stage them in
+        // PendingLanPlaybackHandoff. setNextRequestHeaders is
+        // single-shot so it MUST be called before play() on the same
+        // engine.
+        com.torve.presentation.lanlibrary.PendingLanPlaybackHandoff
+            .consumeFor(url)
+            ?.let { headers -> engine.setNextRequestHeaders(headers) }
         if (useMpv) {
             if (mpvSurfaceReady) {
                 engine.play(url, externalSubtitles)

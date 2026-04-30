@@ -42,6 +42,23 @@ interface PlayerEngine {
         play(url)
     }
 
+    /**
+     * Stage HTTP request headers to attach on the **next** [play] call
+     * only. Used by the LAN-library route (`X-Torve-Lan-Auth`) and
+     * other authenticated stream sources that travel over plain HTTP.
+     *
+     * Default no-op. Engines that can attach headers (ExoPlayer via
+     * `DefaultHttpDataSource.Factory().setDefaultRequestProperties`,
+     * MPV via `--http-header-fields`) override this to capture the map
+     * and consume it when the next play() builds its data source. The
+     * headers are intentionally one-shot — staying on the engine would
+     * leak them to an unrelated stream the next time the user picks a
+     * provider URL.
+     */
+    fun setNextRequestHeaders(headers: Map<String, String>) {
+        // no-op default
+    }
+
     fun pause()
     fun resume()
     fun stop()

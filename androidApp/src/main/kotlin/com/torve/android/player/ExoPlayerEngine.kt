@@ -20,6 +20,7 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
@@ -69,6 +70,19 @@ class ExoPlayerEngine(
      * carries across unrelated streams.
      */
     private var pendingExternalSubtitles: List<ExternalSubtitle> = emptyList()
+
+    /**
+     * One-shot HTTP request headers staged via
+     * [setNextRequestHeaders]. Consumed by [setPlaybackSource] when it
+     * builds the next MediaSource and cleared immediately after, so the
+     * headers never leak to an unrelated stream the next time the user
+     * picks a provider URL. Used by the LAN-library route to attach
+     * `X-Torve-Lan-Auth` to the desktop hub's stream URL.
+     */
+    private var pendingRequestHeaders: Map<String, String> = emptyMap()
+    /** Test-only accessor — the Android instrumentation test reads this. */
+    @androidx.annotation.VisibleForTesting
+    internal fun pendingRequestHeadersForTest(): Map<String, String> = pendingRequestHeaders
     private val delayProcessor = DelayAudioProcessor()
     val equalizerProcessor = EqualizerAudioProcessor()
 
@@ -555,6 +569,12 @@ class ExoPlayerEngine(
         // single-arg form so all the existing setup stays in one place.
         pendingExternalSubtitles = externalSubtitles
         play(url)
+    }
+
+    override fun setNextRequestHeaders(headers: Map<String, String>) {
+        // Defensive copy — caller can reuse / mutate their map after
+        // staging without affecting the captured value.
+        pendingRequestHeaders = if (headers.isEmpty()) emptyMap() else headers.toMap()
     }
 
     override fun play(url: String) {
@@ -1222,12 +1242,17 @@ class ExoPlayerEngine(
             setMediaSource(overriddenMediaSource)
             // Consume so the next real play() starts clean.
             pendingExternalSubtitles = emptyList()
+            pendingRequestHeaders = emptyMap()
             return
         }
         val subtitleConfigs = buildExternalSubtitleConfigurations(pendingExternalSubtitles)
         // Consume regardless of outcome so a failed build doesn't leak
         // subs into the next play() on an unrelated stream.
         pendingExternalSubtitles = emptyList()
+        // Capture and consume headers before the MediaSource build so a
+        // build failure doesn't carry them across.
+        val headers = pendingRequestHeaders
+        pendingRequestHeaders = emptyMap()
         val builder = MediaItem.Builder().setUri(url)
         if (subtitleConfigs.isNotEmpty()) {
             builder.setSubtitleConfigurations(subtitleConfigs)
@@ -1245,7 +1270,19 @@ class ExoPlayerEngine(
                 .build()
             builder.setLiveConfiguration(liveConfig)
         }
-        setMediaItem(builder.build())
+        if (headers.isNotEmpty()) {
+            // Custom HTTP data source so `X-Torve-Lan-Auth` (and any
+            // other staged header) is attached to every request the
+            // player issues for this URL.
+            val httpFactory = DefaultHttpDataSource.Factory()
+                .setDefaultRequestProperties(headers)
+                .setAllowCrossProtocolRedirects(false)
+            val mediaSourceFactory = DefaultMediaSourceFactory(context)
+                .setDataSourceFactory(httpFactory)
+            setMediaSource(mediaSourceFactory.createMediaSource(builder.build()))
+        } else {
+            setMediaItem(builder.build())
+        }
     }
 
     /**

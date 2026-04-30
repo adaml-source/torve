@@ -49,6 +49,15 @@ class ChannelsViewModel(
     private val backgroundDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
     private val playlistBackup: com.torve.presentation.session.AccountSessionCoordinator? = null,
     private val settingsRefreshNotifier: com.torve.presentation.settings.SettingsRefreshNotifier? = null,
+    /**
+     * Optional EPG correction surfaces. When wired (default in
+     * production via Koin), guide builds apply the persisted offset +
+     * tvg-id remap and the live page surfaces a stale-EPG banner.
+     * Null in tests / older platforms keeps the legacy code path
+     * byte-equivalent.
+     */
+    private val epgCorrectionRepository: com.torve.data.recording.EpgCorrectionRepository? = null,
+    private val epgCorrectionViewModel: com.torve.presentation.recording.EpgCorrectionViewModel? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(ChannelsUiState())
@@ -380,6 +389,31 @@ class ChannelsViewModel(
             showLoadingUntilRefresh = false,
         )
         ensureEpgLoaded(playlistId)
+        // Prompt 10C: union the persisted EPG-correction hidden-
+        // categories into state.hiddenCategories so the existing
+        // filters drop them from the rendered channel list. The
+        // correction repo is the source of truth for the user's
+        // toggles in Settings → EPG Correction; this bridge keeps the
+        // two stores aligned without invasive filter rewires.
+        epgCorrectionRepository?.let { repo ->
+            scope.launch {
+                val correction = runCatching { repo.get(playlistId) }.getOrNull() ?: return@launch
+                if (correction.hiddenCategories.isEmpty()) return@launch
+                val hiddenLower = correction.hiddenCategories.map { it.lowercase() }.toSet()
+                val current = _state.value.hiddenCategories
+                val toAdd = correction.hiddenCategories.filter { it.lowercase() !in current.map { c -> c.lowercase() } }
+                if (toAdd.isEmpty()) return@launch
+                val merged = current + toAdd
+                val visible = _state.value.allCategories
+                    .filter { it.name.lowercase() !in hiddenLower && it.name.lowercase() !in current.map { c -> c.lowercase() } }
+                _state.update {
+                    it.copy(
+                        hiddenCategories = merged,
+                        categories = visible,
+                    )
+                }
+            }
+        }
     }
 
     fun selectGroup(group: String?) {
@@ -721,30 +755,65 @@ class ChannelsViewModel(
         playlistId: String,
         epgData: EpgData,
     ): GuideBuildResult = withContext(backgroundDispatcher) {
-        val programmesByKey = HashMap<String, List<EpgProgramme>>(guide.size)
-        var matchedChannels = 0
-        var unmatchedChannels = 0
-        guide.forEach { enriched ->
-            val key = canonicalEpgChannelKey(
-                playlistId = playlistId,
-                channel = enriched.channel,
-            )
-            if (key.isNullOrBlank()) {
-                unmatchedChannels++
-                return@forEach
-            }
-            val programmes = epgData.programmesByChannelKey[key].orEmpty()
-            programmesByKey[key] = programmes
-            if (programmes.isEmpty()) {
-                unmatchedChannels++
-            } else {
-                matchedChannels++
-            }
+        // Prompt 10C: apply persisted EPG correction (offset + tvg-id
+        // remap) so the rendered guide reflects the user's manual fix
+        // for a feed that's slightly off. The applier is a no-op when
+        // correction is empty, so legacy paths stay byte-equivalent.
+        val correction = epgCorrectionRepository?.let { repo ->
+            runCatching { repo.get(playlistId) }.getOrNull()
         }
+        if (correction == null || correction.isEmpty) {
+            // Legacy path — direct lookup against the input map.
+            val programmesByKey = HashMap<String, List<EpgProgramme>>(guide.size)
+            var matchedChannels = 0
+            var unmatchedChannels = 0
+            guide.forEach { enriched ->
+                val key = canonicalEpgChannelKey(
+                    playlistId = playlistId,
+                    channel = enriched.channel,
+                )
+                if (key.isNullOrBlank()) {
+                    unmatchedChannels++
+                    return@forEach
+                }
+                val programmes = epgData.programmesByChannelKey[key].orEmpty()
+                programmesByKey[key] = programmes
+                if (programmes.isEmpty()) {
+                    unmatchedChannels++
+                } else {
+                    matchedChannels++
+                }
+            }
+            // Even with empty correction we still emit health when the
+            // VM is wired so the live page's stale banner stays
+            // data-driven.
+            epgCorrectionViewModel?.updateHealth(
+                matchedChannelCount = matchedChannels,
+                unmatchedChannelCount = unmatchedChannels,
+                programmes = epgData.programmes,
+            )
+            return@withContext GuideBuildResult(
+                programmesByKey = programmesByKey,
+                matchedChannels = matchedChannels,
+                unmatchedChannels = unmatchedChannels,
+            )
+        }
+        val applied = com.torve.data.recording.EpgCorrectionApplier.apply(
+            playlistId = playlistId,
+            channels = guide,
+            epgData = epgData,
+            correction = correction,
+        )
+        // Drive the stale-EPG banner from the corrected programme list.
+        epgCorrectionViewModel?.updateHealth(
+            matchedChannelCount = applied.matchedChannels,
+            unmatchedChannelCount = applied.unmatchedChannels,
+            programmes = applied.correctedProgrammes,
+        )
         GuideBuildResult(
-            programmesByKey = programmesByKey,
-            matchedChannels = matchedChannels,
-            unmatchedChannels = unmatchedChannels,
+            programmesByKey = applied.programmesByKey,
+            matchedChannels = applied.matchedChannels,
+            unmatchedChannels = applied.unmatchedChannels,
         )
     }
 

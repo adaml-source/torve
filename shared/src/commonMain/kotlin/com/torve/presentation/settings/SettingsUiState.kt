@@ -135,9 +135,17 @@ data class SettingsUiState(
     // Home layout source ("SHARED_WITH_MOBILE" | "DESKTOP_OWN") — desktop-only toggle.
     val homeLayoutSource: String = "SHARED_WITH_MOBILE",
     // LAN library serving (desktop-only). Off by default — server stays
-    // unbound until the user opts in. Phase 3 Slice C wiring binds to
-    // localhost only; LAN binding is a future toggle.
+    // unbound until the user opts in. When `lanServingBindToLan` is also
+    // true the server binds to the wildcard address so peer devices on
+    // the same LAN can pull `/local/manifest` and stream files; otherwise
+    // it serves loopback only.
     val lanServingEnabled: Boolean = false,
+    val lanServingBindToLan: Boolean = false,
+    // Mobile-only: when true (default), LAN-stream playback is refused
+    // on cellular networks. Surfaced so the user can flip it on a metered
+    // plan; the route chooser reads this via PlaybackRoutePreference.of(...)
+    // mobile-data guard.
+    val lanPlaybackWifiOnly: Boolean = true,
     // Cache
     val cacheCleared: Boolean = false,
     // Sync / Backup

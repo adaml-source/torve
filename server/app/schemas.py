@@ -30,7 +30,12 @@ class AuthLogoutRequest(BaseModel):
 
 
 class PairingCodeRequest(BaseModel):
-    device_id: str = Field(min_length=8, max_length=128)
+    # `installation_id` is the canonical device identifier across the
+    # codebase (Device.installation_id has the unique constraint and
+    # /auth/register uses DeviceRegistration without device_id).
+    # The pairing endpoint only reads installation_id + name/type/platform;
+    # an additional device_id was schema bloat that broke the API contract
+    # for clients that follow the same pattern as register/login.
     installation_id: str = Field(min_length=8, max_length=128)
     device_name: str = Field(min_length=1, max_length=120)
     device_type: str = Field(min_length=1, max_length=40)
@@ -39,7 +44,6 @@ class PairingCodeRequest(BaseModel):
 
 class PairingClaimRequest(BaseModel):
     code: str = Field(min_length=4, max_length=12)
-    device_id: str = Field(min_length=8, max_length=128)
     installation_id: str | None = Field(default=None, min_length=8, max_length=128)
     device_name: str | None = Field(default=None, min_length=1, max_length=120)
     device_type: str | None = Field(default=None, min_length=1, max_length=40)
@@ -339,3 +343,42 @@ class PlaylistResponse(BaseModel):
     has_password: bool = False
     created_at: datetime
     updated_at: datetime
+
+
+# ── LAN hub registry (Prompt 9B) ──────────────────────────────────────
+
+
+class LanHubPublishRequest(BaseModel):
+    """Body the publisher sends to POST /me/lan/hubs.
+
+    Privacy contract: `auth_secret` lives only in this request and the
+    same-user-only secret endpoint response. The `LanHubResponse`
+    listing schema has no place for it.
+    """
+
+    publisher_id: str = Field(min_length=1, max_length=64)
+    device_label: str = Field(min_length=1, max_length=120)
+    lan_host: str = Field(min_length=1, max_length=64)
+    lan_port: int = Field(ge=1, le=65535)
+    protocol_version: int = Field(default=1, ge=1)
+    auth_secret: str = Field(min_length=1, max_length=512)
+
+
+class LanHubResponse(BaseModel):
+    """Listing schema. Carries no auth_secret and no filesystem paths."""
+
+    publisher_id: str
+    device_label: str
+    lan_host: str
+    lan_port: int
+    protocol_version: int
+    published_at_epoch_ms: int
+
+
+class LanHubListResponse(BaseModel):
+    hubs: list[LanHubResponse]
+
+
+class LanHubSecretResponse(BaseModel):
+    publisher_id: str
+    auth_secret: str

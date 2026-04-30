@@ -125,14 +125,27 @@ fun LiveEpgGuideOverlay(
             .background(Obsidian.copy(alpha = 0.95f)),
     ) {
         Column(modifier = Modifier.fillMaxSize().padding(top = 24.dp)) {
-            // Title
-            Text(
-                text = stringResource(R.string.tv_live_tv_guide),
-                color = Snow,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(start = 24.dp, bottom = 12.dp),
-            )
+            // Title row + non-blocking recording-availability hint
+            // (Prompt 10B). Recordings are managed on desktop today;
+            // surfacing the copy here keeps TV users informed without
+            // breaking guide focus or D-pad nav.
+            Row(
+                modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = stringResource(R.string.tv_live_tv_guide),
+                    color = Snow,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = "Recordings managed on desktop",
+                    color = Silver,
+                    fontSize = 12.sp,
+                )
+            }
 
             // Time ruler row
             Row(modifier = Modifier.fillMaxWidth()) {

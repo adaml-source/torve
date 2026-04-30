@@ -4,6 +4,11 @@ import Foundation
 /// Handles auth, entitlements, and purchase verification for iOS.
 @MainActor
 final class TorveAPIClient: ObservableObject {
+    /// Single process-wide instance. SwiftUI views observe this via
+    /// `@ObservedObject` so auth state changes (login, logout, account
+    /// deletion) propagate without each screen creating its own client.
+    static let shared = TorveAPIClient()
+
     @Published var isLoggedIn = false
     @Published var isPremium = false
     @Published var userEmail: String?
@@ -60,6 +65,23 @@ final class TorveAPIClient: ObservableObject {
             _ = try? await post(path: "/auth/logout", body: body, auth: true)
         }
         clearAuth()
+    }
+
+    /// Permanently delete the authenticated user's account.
+    /// Backend cascades all per-user data (devices, sessions, watch
+    /// history, playlists, LAN hubs, purchases, entitlements,
+    /// settings) before dropping the user row. Local auth state is
+    /// cleared on success.
+    func deleteAccount() async throws {
+        _ = try await delete(path: "/auth/account")
+        clearAuth()
+    }
+
+    /// GDPR-style data export. Returns the raw JSON bytes the user
+    /// can save. Caller chooses how to surface (share sheet, save
+    /// dialog, …).
+    func exportData() async throws -> Data {
+        return try await get(path: "/me/export")
     }
 
     // MARK: - Entitlements
@@ -134,6 +156,17 @@ final class TorveAPIClient: ObservableObject {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try checkResponse(response, data: data)
+        return data
+    }
+
+    private func delete(path: String) async throws -> Data {
+        var request = URLRequest(url: URL(string: baseURL + path)!)
+        request.httpMethod = "DELETE"
+        if let token = accessToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
         let (data, response) = try await URLSession.shared.data(for: request)
         try checkResponse(response, data: data)
         return data

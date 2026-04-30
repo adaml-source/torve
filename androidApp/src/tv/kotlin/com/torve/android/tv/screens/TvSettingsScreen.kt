@@ -2999,6 +2999,23 @@ internal fun TvSettingsScreen(
                         )
                     }
                 }
+                // Prompt 11: unconditional "Receive credentials" entry
+                // so a fresh TV install can pick up secrets from a
+                // signed-in desktop without typing API keys on a
+                // remote. Sits next to the recovery card so all
+                // transfer-related actions cluster.
+                item(key = "transfer_receive_unconditional") {
+                    val requester = remember("transfer_receive_unconditional") { FocusRequester() }
+                    TvSettingCard(
+                        title = "Receive credentials from another device",
+                        subtitle = "Show a one-time pairing code to import debrid / Plex / Panda secrets without typing.",
+                        modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                        focusRequester = requester,
+                        onFocused = { },
+                        onClick = { onNavigateToReceiveCredentials() },
+                        rowType = TvSettingRowType.ACTION,
+                    )
+                }
 
                 // Provider-health repair rows. Each row shows the
                 // first remote-reachable action: Transfer beats

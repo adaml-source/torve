@@ -13,10 +13,16 @@ sealed interface PlaybackRoute {
 
     /**
      * An authenticated LAN URL the desktop instance is serving (or a
-     * peer is serving). Token is opaque; the URL embeds whatever the
-     * publisher chooses for auth.
+     * peer is serving). [url] embeds the publisher-issued per-item
+     * `?token=...`; [headers] carry the hub-level
+     * `X-Torve-Lan-Auth` secret that the player must attach to every
+     * request. Players that can't attach headers MUST skip this
+     * route — they will get 401 otherwise.
      */
-    data class LanDesktopStream(val url: String) : PlaybackRoute
+    data class LanDesktopStream(
+        val url: String,
+        val headers: Map<String, String> = emptyMap(),
+    ) : PlaybackRoute
 
     /** Original provider URL — debrid, addon, IPTV, anything else. */
     data class ProviderStream(val url: String) : PlaybackRoute
@@ -24,6 +30,16 @@ sealed interface PlaybackRoute {
     /** Nothing playable right now — UI should offer a download CTA. */
     data object ReDownload : PlaybackRoute
 }
+
+/**
+ * Network mode the consumer device is currently on. Used by
+ * [PlaybackRoutePreference.of] to apply the mobile-data guard:
+ * a CELLULAR client with `wifiOnly = true` won't pick a LAN-stream
+ * route (LAN streams travel over the local interface; the guard
+ * exists in case the OS routes them through a captive proxy or
+ * the user is tethered through cellular).
+ */
+enum class NetworkMode { WIFI, CELLULAR, ETHERNET, UNKNOWN }
 
 /**
  * One media's set of candidate routes. Use [pick] to pull the preferred
@@ -39,13 +55,20 @@ data class PlaybackRoutePreference(
          * Build a preference from optional inputs in source order. Nulls
          * are skipped. Callers don't have to know the priority — the
          * priority lives entirely in [pickInOrder].
+         *
+         * @param networkMode the consumer device's current network mode.
+         * @param wifiOnlyForLan when true, refuse a LAN stream when the
+         * device is on cellular. Pass false to ignore the guard.
          */
         fun of(
             localFile: PlaybackRoute.LocalFile? = null,
             lanStream: PlaybackRoute.LanDesktopStream? = null,
             providerStream: PlaybackRoute.ProviderStream? = null,
+            networkMode: NetworkMode = NetworkMode.UNKNOWN,
+            wifiOnlyForLan: Boolean = true,
         ): PlaybackRoutePreference {
-            val items = listOfNotNull(localFile, lanStream, providerStream)
+            val effectiveLan = if (wifiOnlyForLan && networkMode == NetworkMode.CELLULAR) null else lanStream
+            val items = listOfNotNull(localFile, effectiveLan, providerStream)
             return if (items.isEmpty()) {
                 PlaybackRoutePreference(listOf(PlaybackRoute.ReDownload))
             } else {

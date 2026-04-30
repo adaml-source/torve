@@ -99,10 +99,22 @@ import com.torve.domain.model.Download
 import com.torve.domain.model.DownloadStatus
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
+import com.torve.android.tv.components.TvSourcePickerSheet
+import com.torve.domain.lanlibrary.NetworkMode
+import com.torve.domain.lanlibrary.PlaybackRoute
+import com.torve.domain.repository.DownloadRepository
+import com.torve.platform.NetworkMonitor
+import com.torve.platform.NetworkType
 import com.torve.presentation.detail.DetailViewModel
 import com.torve.presentation.download.DownloadViewModel
+import com.torve.presentation.lanlibrary.LanLibraryConsumer
+import com.torve.presentation.lanlibrary.PendingLanPlaybackHandoff
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.subscription.SubscriptionViewModel
+import com.torve.presentation.tvhome.TvDetailsSourcePickerStateBuilder
+import com.torve.presentation.tvhome.TvSourcePicker
+import com.torve.presentation.tvhome.TvSourcePickerOption
+import com.torve.presentation.tvhome.TvSourcePickerState
 import com.torve.presentation.watchlist.WatchlistViewModel
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
@@ -141,6 +153,12 @@ fun TvDetailsScreen(
     val downloadViewModel: DownloadViewModel = koinInject()
     val bulkDownloadManager: BulkDownloadManager = koinInject()
     val subscriptionViewModel: SubscriptionViewModel = koinInject()
+    val downloadRepository: DownloadRepository = koinInject()
+    val lanLibraryConsumer: LanLibraryConsumer = koinInject()
+    val networkMonitor: NetworkMonitor = koinInject()
+    // Kick the LAN-library consumer once so the badge resolves on
+    // first paint of the TV detail screen.
+    com.torve.android.ui.components.LanAvailabilityBootstrap()
     val coroutineScope = rememberCoroutineScope()
     val watchlistState by watchlistViewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
@@ -175,6 +193,10 @@ fun TvDetailsScreen(
     var didAutoPlay by rememberSaveable(type, id) { mutableStateOf(false) }
     var pendingDownloadAction by remember { mutableStateOf<DownloadAction>(DownloadAction.None) }
     var showWatchlistPicker by remember { mutableStateOf(false) }
+    // Source picker (Prompt 11C). Non-null while the sheet is open;
+    // selection routes either directly to the player (LocalFile/LAN)
+    // or falls back to fetchStreams() (Provider). Cleared on dismiss.
+    var sourcePickerState by remember { mutableStateOf<TvSourcePickerState?>(null) }
     val watchlistModalRestoreController = rememberTvModalFocusRestoreController(
         key = "details_watchlist_${type}_$id",
     )
@@ -446,6 +468,12 @@ fun TvDetailsScreen(
                             color = Snow,
                             fontWeight = FontWeight.SemiBold,
                         )
+                        // LAN-library presence pill (Prompt 9C). The
+                        // shared `LanAvailabilityBadge` is in the main
+                        // source set; TV reuses it.
+                        com.torve.android.ui.components.LanAvailabilityBadge(
+                            title = item.title,
+                        )
                         val metadata = buildString {
                             item.year?.let { append(it) }
                             if (item.rating != null) {
@@ -514,10 +542,37 @@ fun TvDetailsScreen(
                                     }
 
                                     runPremiumAction(TvEntitledFeature.STREAM_PLAYBACK) {
+                                        // Movies: surface the source picker if there's
+                                        // a non-Provider option (LocalFile or LAN). For
+                                        // series, the next-episode flow stays as-is —
+                                        // route disambiguation per-episode is too rich
+                                        // to hang on the picker without an episode
+                                        // context map. Series picker integration is a
+                                        // follow-up.
                                         if (item.type == MediaType.SERIES) {
                                             detailViewModel.playNextEpisode()
-                                        } else {
-                                            detailViewModel.fetchStreams()
+                                            return@runPremiumAction
+                                        }
+                                        coroutineScope.launch {
+                                            val picker = buildMoviePickerState(
+                                                item = item,
+                                                downloadRepository = downloadRepository,
+                                                lanLibraryConsumer = lanLibraryConsumer,
+                                                networkMonitor = networkMonitor,
+                                                wifiOnlyForLan = settingsState.lanPlaybackWifiOnly,
+                                            )
+                                            // If the only option is Provider (or no real
+                                            // options at all), skip the sheet — preserve
+                                            // existing behavior.
+                                            val hasNonProvider = picker.options.any { opt ->
+                                                opt.route is PlaybackRoute.LocalFile ||
+                                                    opt.route is PlaybackRoute.LanDesktopStream
+                                            }
+                                            if (!hasNonProvider) {
+                                                detailViewModel.fetchStreams()
+                                            } else {
+                                                sourcePickerState = picker
+                                            }
                                         }
                                     }
                                 },
@@ -1341,7 +1396,114 @@ fun TvDetailsScreen(
         )
     }
 
+    // ── Source picker (Prompt 11C) ──
+    // Sits above the rest of the detail content. D-pad OK on a row
+    // either launches the player directly (LocalFile / LAN) or
+    // dismisses the sheet and re-enters the existing fetchStreams
+    // flow (Provider). Route failure is surfaced by the player
+    // engine; we keep the picker state around in [pendingPickerForFallback]
+    // so the caller can call TvSourcePicker.fallbackAfter(...) on a
+    // failed route — those fallbacks are wired by the player itself.
+    sourcePickerState?.let { picker ->
+        val mediaItem = state.mediaItem
+        TvSourcePickerSheet(
+            state = picker,
+            onSelect = { option ->
+                sourcePickerState = null
+                if (mediaItem == null) return@TvSourcePickerSheet
+                if (TvDetailsSourcePickerStateBuilder.isProviderFetchSentinel(option)) {
+                    detailViewModel.fetchStreams()
+                    return@TvSourcePickerSheet
+                }
+                when (val route = option.route) {
+                    is PlaybackRoute.LocalFile -> {
+                        onPlayResolved(
+                            "file://${route.absolutePath}",
+                            "",
+                            mediaItem,
+                            null,
+                            null,
+                            false,
+                        )
+                    }
+                    is PlaybackRoute.LanDesktopStream -> {
+                        // Stage headers BEFORE navigating — PlayerScreen
+                        // attaches X-Torve-Lan-Auth before play().
+                        PendingLanPlaybackHandoff.stage(route)
+                        onPlayResolved(
+                            route.url,
+                            "",
+                            mediaItem,
+                            null,
+                            null,
+                            false,
+                        )
+                    }
+                    is PlaybackRoute.ProviderStream -> {
+                        // Synthetic "Provider" sentinel handled above.
+                        // A real ProviderStream URL here would be
+                        // unusual — fall back to fetchStreams to keep
+                        // the source disambiguation flow.
+                        detailViewModel.fetchStreams()
+                    }
+                    PlaybackRoute.ReDownload -> {
+                        // No-op — the picker only emits ReDownload when
+                        // there's nothing else, and the build pre-check
+                        // already filters those out.
+                    }
+                }
+            },
+            onDismiss = { sourcePickerState = null },
+        )
+    }
+
     } // end Box
+}
+
+/**
+ * Build the source picker for a movie. Probes the local download repo
+ * + LAN library snapshot for this title and folds them through
+ * [TvDetailsSourcePickerStateBuilder]. Cellular guard mirrors the
+ * preference applied elsewhere.
+ */
+private suspend fun buildMoviePickerState(
+    item: MediaItem,
+    downloadRepository: DownloadRepository,
+    lanLibraryConsumer: LanLibraryConsumer,
+    networkMonitor: NetworkMonitor,
+    wifiOnlyForLan: Boolean,
+): TvSourcePickerState {
+    val mediaIdLookup = item.tmdbId?.toString()
+    val download = mediaIdLookup?.let {
+        runCatching { downloadRepository.getDownloadByMediaId(it) }.getOrNull()
+    }
+    val localFilePath = download
+        ?.takeIf { it.status == DownloadStatus.COMPLETED }
+        ?.filePath
+        ?.takeIf { it.isNotBlank() }
+    val lanRoute = runCatching {
+        lanLibraryConsumer.findLanRoute(
+            title = item.title,
+            seasonNumber = null,
+            episodeNumber = null,
+        )
+    }.getOrNull()
+    val networkMode = when (networkMonitor.currentNetworkType()) {
+        NetworkType.WIFI -> NetworkMode.WIFI
+        NetworkType.CELLULAR -> NetworkMode.CELLULAR
+        NetworkType.ETHERNET -> NetworkMode.ETHERNET
+        NetworkType.UNKNOWN, NetworkType.NONE -> NetworkMode.UNKNOWN
+    }
+    return TvDetailsSourcePickerStateBuilder.build(
+        localFilePath = localFilePath,
+        lanRoute = lanRoute,
+        // The detail screen always assumes provider streams might
+        // resolve — the existing fetchStreams() will tell the user if
+        // none are actually available.
+        providerAvailable = true,
+        networkMode = networkMode,
+        wifiOnlyForLan = wifiOnlyForLan,
+    )
 }
 
 @Composable

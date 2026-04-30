@@ -46,6 +46,21 @@ class UpdateChecker(
         val htmlUrl: String,
         val publishedAt: String?,
         val body: String?,
+        /**
+         * Direct installer URL extracted from the appcast `<enclosure>`
+         * tag, when present. Null for GitHub Releases JSON (no
+         * deterministic per-asset selection without filename rules).
+         * The banner uses this to offer "Download & install" instead
+         * of just "View release".
+         */
+        val installerUrl: String? = null,
+        /**
+         * Optional SHA-256 hex from the appcast. When present, the
+         * handoff verifies the downloaded installer matches before
+         * launching it. Null skips verification — the handoff still
+         * launches but logs that the artifact wasn't checksum-pinned.
+         */
+        val installerSha256: String? = null,
     )
 
     sealed class Result {
@@ -159,6 +174,13 @@ class UpdateChecker(
             .find(enclosure)?.groupValues?.getOrNull(1)
         val enclosureUrl = Regex("""\burl\s*=\s*"([^"]+)"""")
             .find(enclosure)?.groupValues?.getOrNull(1)
+        // Sparkle's optional `sparkle:installerSha256` attr (or `sha256`,
+        // or `sparkle:edSignature` — last is technically Ed25519 not
+        // SHA-256, so we ignore it for hash verification but accept it
+        // as "feed signed" indicator). 64 hex chars only.
+        val sha256 = Regex(
+            """(?:sparkle:installerSha256|sha256)\s*=\s*"([0-9a-fA-F]{64})"""",
+        ).find(enclosure)?.groupValues?.getOrNull(1)?.lowercase()
         val tag = sparkleVersion ?: title?.substringAfterLast(' ')?.trim() ?: return null
         return UpdateInfo(
             tag = tag,
@@ -166,6 +188,8 @@ class UpdateChecker(
             htmlUrl = link?.takeIf { it.isNotBlank() } ?: enclosureUrl ?: "",
             publishedAt = pubDate,
             body = description,
+            installerUrl = enclosureUrl?.takeIf { it.isNotBlank() },
+            installerSha256 = sha256,
         )
     }
 

@@ -53,30 +53,36 @@ class AiSuggestClient(private val httpClient: HttpClient) {
     suspend fun suggest(provider: AiProvider, apiKey: String, phrase: String): AiSuggestResult {
         return try {
             val systemPrompt = buildSystemPrompt()
+            // Privacy backstop: redact secret-shaped substrings (API
+            // keys, Panda tokenized URLs, local filesystem paths) before
+            // forwarding the user's phrase. The provider's own API key
+            // still goes via the HTTP Authorization header — that is
+            // necessary and stays out of scope of the sanitizer.
+            val sanitizedPhrase = AiPayloadSanitizer.sanitize(phrase)
 
             val text = when (provider) {
-                AiProvider.CLAUDE -> callClaude(apiKey, systemPrompt, phrase)
+                AiProvider.CLAUDE -> callClaude(apiKey, systemPrompt, sanitizedPhrase)
                 AiProvider.CHATGPT -> callOpenAiCompatible(
                     url = "https://api.openai.com/v1/chat/completions",
                     model = "gpt-4o-mini",
                     apiKey = apiKey,
                     systemPrompt = systemPrompt,
-                    userMessage = phrase,
+                    userMessage = sanitizedPhrase,
                 )
-                AiProvider.GEMINI -> callGemini(apiKey, systemPrompt, phrase)
+                AiProvider.GEMINI -> callGemini(apiKey, systemPrompt, sanitizedPhrase)
                 AiProvider.PERPLEXITY -> callOpenAiCompatible(
                     url = "https://api.perplexity.ai/chat/completions",
                     model = "sonar",
                     apiKey = apiKey,
                     systemPrompt = systemPrompt,
-                    userMessage = phrase,
+                    userMessage = sanitizedPhrase,
                 )
                 AiProvider.DEEPSEEK -> callOpenAiCompatible(
                     url = "https://api.deepseek.com/chat/completions",
                     model = "deepseek-chat",
                     apiKey = apiKey,
                     systemPrompt = systemPrompt,
-                    userMessage = phrase,
+                    userMessage = sanitizedPhrase,
                 )
             }
 

@@ -113,6 +113,7 @@ import com.torve.android.ui.settings.SensitiveMaterialSettingsScreen
 import com.torve.android.ui.settings.StreamingServicesSettingsScreen
 import com.torve.android.ui.stats.StatsScreen
 import com.torve.android.ui.watchlist.WatchlistScreen
+import com.torve.android.ui.setup.SetupIntentHubScreen
 import com.torve.android.ui.setup.SetupWizardScreen
 import com.torve.android.ui.device.DeviceLimitReachedScreen
 import com.torve.android.ui.device.ManageDevicesScreen
@@ -298,6 +299,7 @@ fun TorveNavGraph(
     val showTvNavRail = isTvMode && currentRoute in tvNavTabDefs.map { it.route }
 
     val setupViewModel: SetupWizardViewModel = koinInject()
+    val setupCoordinator: com.torve.presentation.setup.SetupWizardCoordinator = koinInject()
     val watchlistViewModel: WatchlistViewModel = koinInject()
     val homeViewModel: HomeViewModel = koinInject()
     val searchViewModel: SearchViewModel = koinInject()
@@ -591,8 +593,45 @@ fun TorveNavGraph(
                     bottom = contentBottomPadding,
                 ),
         ) {
-            // Setup wizard
+            // Setup hub — credential-first picker. Each card "Set up"
+            // routes into the relevant detail surface (legacy wizard step
+            // for Debrid/IPTV, settings for Plex/Jellyfin, Panda setup
+            // for Usenet) so we don't duplicate per-feature credential
+            // forms. The legacy linear wizard is reachable via "Use
+            // guided wizard instead".
             composable("setup") {
+                SetupIntentHubScreen(
+                    coordinator = setupCoordinator,
+                    onOpenDebridSetup = {
+                        setupViewModel.jumpToStep(com.torve.presentation.setup.SetupStep.DEBRID)
+                        navController.navigate("setup_guided")
+                    },
+                    onOpenIptvSetup = {
+                        setupViewModel.jumpToStep(com.torve.presentation.setup.SetupStep.CHANNELS)
+                        navController.navigate("setup_guided")
+                    },
+                    onOpenPlexJellyfinSetup = {
+                        setupCoordinator.beginIntent(com.torve.presentation.setup.SetupIntent.PLEX_JELLYFIN)
+                        navController.navigate("settings")
+                    },
+                    onOpenUsenetSetup = {
+                        setupCoordinator.beginIntent(com.torve.presentation.setup.SetupIntent.USENET)
+                        navController.navigate("panda_setup")
+                    },
+                    onUseGuidedWizard = { navController.navigate("setup_guided") },
+                    onContinueToApp = {
+                        val target = if (isTvMode) TV_HOME_ROUTE else MOBILE_ROOT_ROUTE
+                        navController.navigate(target) {
+                            popUpTo("setup") { inclusive = true }
+                        }
+                    },
+                )
+            }
+
+            // Legacy linear setup wizard. Still reachable from the hub
+            // for users who want a guided walkthrough. Onboarding-flag
+            // persistence (`setup_completed`) lives here.
+            composable("setup_guided") {
                 SetupWizardScreen(
                     viewModel = setupViewModel,
                     onComplete = {
