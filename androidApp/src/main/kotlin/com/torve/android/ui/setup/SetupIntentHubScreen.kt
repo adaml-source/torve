@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -70,6 +72,15 @@ fun SetupIntentHubScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            // Pad for the status bar (top) and gesture nav bar (bottom)
+            // BEFORE the scroll/inner padding — without this, the
+            // top-right "Close setup" TextButton paints under the
+            // notification area on edge-to-edge displays (Pixel 8 Pro,
+            // Galaxy S24, etc.) and either falls behind the system UI or
+            // shrinks past its 48dp tap target. Same fix at the bottom
+            // for the gesture pill.
+            .statusBarsPadding()
+            .navigationBarsPadding()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),

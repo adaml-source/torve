@@ -262,8 +262,18 @@ fun SettingsScreen(
 
         // Persistent nudge encouraging users to run the Panda wizard,
         // which is the easiest way to get debrid + indexer plumbing wired
-        // up. Hidden once Panda is configured OR the user dismisses.
-        PandaSetupNudgeCard(onSetupClick = onSetupPandaClick)
+        // up. Hidden once Panda is configured OR the user dismisses, AND
+        // only shown to users who can actually finish the flow — Panda
+        // depends on the premium-gated addon catalog, so signed-out,
+        // unverified, or free-tier users would be told to set up
+        // something they can't complete.
+        val pandaNudgeEligible = authUser != null &&
+            authUser?.isVerified == true &&
+            accessTier != AccessTier.FREE
+        PandaSetupNudgeCard(
+            onSetupClick = onSetupPandaClick,
+            eligible = pandaNudgeEligible,
+        )
 
         // Prominent subscription summary card. Only rendered when the user
         // is signed in — for signed-out users the existing account card

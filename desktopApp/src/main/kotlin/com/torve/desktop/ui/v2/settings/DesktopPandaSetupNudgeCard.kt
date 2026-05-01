@@ -40,16 +40,24 @@ import org.koin.mp.KoinPlatform
 private const val PREF_KEY_PANDA_NUDGE_DISMISSED = "panda_setup_nudge_dismissed"
 
 /**
- * Desktop counterpart to the mobile PandaSetupNudgeCard. Same predicates:
- * hidden when Panda is configured ([PandaConfigStateStore.current.isEditMode])
- * or when the user clicks the close button (persisted via the shared
- * [PreferencesRepository] under [PREF_KEY_PANDA_NUDGE_DISMISSED]).
+ * Desktop counterpart to the mobile PandaSetupNudgeCard. Visibility
+ * predicates — all must be true:
+ *  - [eligible] = true. Panda completion needs the addon catalog, which
+ *    is premium-gated, so nudging users who can't actually finish the
+ *    flow is misleading. Callers usually compute this as
+ *    `signedIn AND emailVerified AND accessTier != FREE`.
+ *  - Panda not already configured.
+ *  - User hasn't clicked the dismiss button (persisted via the shared
+ *    [PreferencesRepository] under [PREF_KEY_PANDA_NUDGE_DISMISSED]).
  *
  * Lives at the top of every Settings category right under the page header
  * so it's noticeable on first open without dominating the screen.
  */
 @Composable
-fun DesktopPandaSetupNudgeCard(onSetupClick: () -> Unit) {
+fun DesktopPandaSetupNudgeCard(
+    onSetupClick: () -> Unit,
+    eligible: Boolean,
+) {
     val pandaConfigStore: PandaConfigStateStore = remember {
         KoinPlatform.getKoin().get<PandaConfigStateStore>()
     }
@@ -64,7 +72,7 @@ fun DesktopPandaSetupNudgeCard(onSetupClick: () -> Unit) {
         dismissed = prefsRepo.getString(PREF_KEY_PANDA_NUDGE_DISMISSED) == "true"
     }
 
-    if (pandaState.isEditMode || dismissed != false) return
+    if (!eligible || pandaState.isEditMode || dismissed != false) return
 
     val colors = TorveDesktopThemeTokens.colors
     Row(

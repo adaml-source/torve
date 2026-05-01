@@ -14,6 +14,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.material3.Surface
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -77,9 +80,26 @@ fun SetupWizardScreen(
     val stepIndex = SetupStep.entries.indexOf(state.currentStep)
     val totalSteps = SetupStep.entries.size
 
+    // Wrap the wizard body in a Surface(background) so default text
+    // colors resolve to colorScheme.onBackground (light on dark theme)
+    // instead of falling back to black. Without this, every Text() that
+    // doesn't pass an explicit `color =` renders in the default content
+    // color of "no Surface", which is black — invisible against the
+    // NavHost's transparent backdrop. This is why the welcome
+    // bullet labels and the terms-accept checkbox label rendered as
+    // empty rows on Pixel/dark devices.
+    //
+    // Insets pad the Close-setup button (status bar) and Next button
+    // (gesture bar) on edge-to-edge displays.
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background,
+    ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .statusBarsPadding()
+            .navigationBarsPadding()
             .padding(24.dp),
     ) {
         Row(
@@ -200,6 +220,7 @@ fun SetupWizardScreen(
             }
         }
     }
+    } // end Surface
 }
 
 @Composable
@@ -331,6 +352,13 @@ private fun DebridStep(state: SetupUiState, viewModel: SetupWizardViewModel, onP
         Card(
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
+                // Pin content color so the title + description below render
+                // against the amber background with proper contrast. Without
+                // this, descendants pick up the screen's onBackground (white)
+                // which works for the title but the inner Text that uses
+                // onSurfaceVariant lands as a muted gray that's nearly
+                // invisible on amber.
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
             ),
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
@@ -338,12 +366,13 @@ private fun DebridStep(state: SetupUiState, viewModel: SetupWizardViewModel, onP
                     stringResource(R.string.setup_panda_title),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
                     stringResource(R.string.setup_panda_desc),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
                 Spacer(Modifier.height(12.dp))
                 FilledTonalButton(

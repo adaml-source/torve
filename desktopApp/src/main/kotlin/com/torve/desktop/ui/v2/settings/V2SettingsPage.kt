@@ -232,9 +232,18 @@ fun V2SettingsPage(
             )
 
             // Persistent (until-dismissed) Panda nudge — easiest path to
-            // wiring debrid + indexer access. Hidden once Panda is set up
-            // OR the user clicks the close button.
-            DesktopPandaSetupNudgeCard(onSetupClick = onOpenPandaSetup)
+            // wiring debrid + indexer access. Only shown to users who can
+            // actually finish the flow (signed in + email verified +
+            // premium entitlement); Panda's addon catalog is premium-
+            // gated so nudging anyone else points them at a wall.
+            val pandaNudgeEligible = authState.user != null &&
+                authState.user?.isVerified == true &&
+                authState.subscriptionState.isPro &&
+                authState.subscriptionState.hasEntitlement
+            DesktopPandaSetupNudgeCard(
+                onSetupClick = onOpenPandaSetup,
+                eligible = pandaNudgeEligible,
+            )
 
             when (selectedCategory) {
                 SettingsCategory.SOURCES -> SourcesSection(

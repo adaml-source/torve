@@ -74,6 +74,18 @@ class PandaUsenetProviderHealthChecker(
 /**
  * Newshosting / Easynews / etc. usenet provider — checks `enableUsenet`
  * + a non-blank password.
+ *
+ * Special case: when the user has a debrid-style download client (TorBox
+ * being the only one of these today) wired up WITH credentials AND at
+ * least one NZB indexer with an API key, the direct Usenet provider
+ * password is unused — TorBox resolves the NZB server-side and serves
+ * the file over HTTP. Flagging "password missing" in that case sends
+ * the user to fix something they don't need. The check returns GREEN
+ * with a "not required" message in that scenario instead.
+ *
+ * Plain SABnzbd / NZBGet still need direct NNTP credentials (they
+ * download from your usenet provider locally), so the special case is
+ * narrow on purpose: only debrid-NZB clients short-circuit the check.
  */
 class PandaUsenetProviderProviderHealthChecker(
     private val stateSource: () -> PandaSetupUiState,
@@ -90,6 +102,13 @@ class PandaUsenetProviderProviderHealthChecker(
                 nextAction = "Pick a usenet provider",
             )
         }
+        if (debridNzbClientCoversIt(state)) {
+            return base(ProviderHealthCategory.USENET_PROVIDER, "Usenet provider").copy(
+                status = ProviderHealthStatus.GREEN,
+                message = "Not required — ${state.downloadClient.replaceFirstChar { it.uppercase() }} resolves NZBs server-side.",
+                nextAction = null,
+            )
+        }
         val pwOk = state.usenetPassword.isNotBlank() && !isRedacted(state.usenetPassword)
         return base(ProviderHealthCategory.USENET_PROVIDER, "Usenet provider").copy(
             status = if (pwOk) ProviderHealthStatus.GREEN else ProviderHealthStatus.RED,
@@ -100,6 +119,28 @@ class PandaUsenetProviderProviderHealthChecker(
             },
             nextAction = if (pwOk) null else "Re-enter password",
         )
+    }
+
+    /**
+     * True when the configured download client handles NZB resolution
+     * server-side AND has the credentials it needs to do so AND there's
+     * at least one indexer with an API key for it to fetch from. In
+     * that mode the user never talks to a Usenet server directly, so
+     * the provider password is unused.
+     */
+    private fun debridNzbClientCoversIt(state: PandaSetupUiState): Boolean {
+        val client = state.downloadClient.lowercase()
+        // Keep this list narrow — only clients that resolve NZBs in the
+        // cloud belong here. SABnzbd/NZBGet need direct NNTP creds.
+        val isDebridNzbClient = client == "torbox"
+        if (!isDebridNzbClient) return false
+        val clientCredsOk = (state.downloadClientApiKey.isNotBlank() && !isRedacted(state.downloadClientApiKey)) ||
+            (state.downloadClientPassword.isNotBlank() && !isRedacted(state.downloadClientPassword))
+        if (!clientCredsOk) return false
+        val anyIndexerKeyed = state.nzbIndexers.any { idx ->
+            idx.type != "none" && idx.apiKey.isNotBlank() && !isRedacted(idx.apiKey)
+        }
+        return anyIndexerKeyed
     }
 }
 

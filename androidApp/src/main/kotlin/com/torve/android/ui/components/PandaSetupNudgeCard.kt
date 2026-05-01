@@ -46,21 +46,24 @@ import org.koin.compose.koinInject
  * Panda wizard — the fastest path to wiring up debrid + indexer access,
  * which the rest of the app relies on for source discovery.
  *
- * Visibility rules:
- *  - Hidden when Panda is already configured
+ * Visibility rules — all must be true:
+ *  - Caller marks the user as eligible ([eligible] = true). Panda
+ *    completion needs the addon catalog, which is premium-gated, so
+ *    nudging users who can't actually finish the flow is misleading.
+ *    Callers usually compute this as `signedIn AND emailVerified AND
+ *    accessTier != FREE`.
+ *  - Panda not already configured
  *    ([PandaConfigStateStore.current.isEditMode] == true).
- *  - Hidden once the user has tapped the dismiss button (persisted via
+ *  - User hasn't tapped the dismiss button (persisted via
  *    [PreferencesRepository] under [PREF_KEY_PANDA_NUDGE_DISMISSED]).
- *  - Not extensively styled — a single one-line subtitle and a CTA. The
- *    intent is "you'll see this on every Settings open until you act or
- *    dismiss," not "an ad".
  *
  * Setting up Panda re-arms the nudge for any user who later disconnects
- * Panda — the predicate is reactive on the live state store.
+ * it — the predicate is reactive on the live state store.
  */
 @Composable
 fun PandaSetupNudgeCard(
     onSetupClick: () -> Unit,
+    eligible: Boolean,
     pandaConfigStore: PandaConfigStateStore = koinInject(),
     prefsRepo: PreferencesRepository = koinInject(),
 ) {
@@ -73,7 +76,7 @@ fun PandaSetupNudgeCard(
         dismissed = prefsRepo.getString(PREF_KEY_PANDA_NUDGE_DISMISSED) == "true"
     }
 
-    if (isPandaConfigured || dismissed != false) return
+    if (!eligible || isPandaConfigured || dismissed != false) return
 
     Card(
         modifier = Modifier
