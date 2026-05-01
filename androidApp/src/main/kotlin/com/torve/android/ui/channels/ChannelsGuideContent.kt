@@ -27,8 +27,17 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -121,7 +130,38 @@ fun ChannelsGuideContent(
         scrollState.scrollTo((initialScroll - 50 * density.density).toInt().coerceAtLeast(0))
     }
 
+    // In-screen search filters the channel list locally by name.
+    // Pure client-side — no VM call — so it stays responsive even on
+    // playlists with thousands of channels.
+    var searchQuery by remember { mutableStateOf("") }
+    val filteredChannels = remember(channels, searchQuery) {
+        if (searchQuery.isBlank()) channels
+        else {
+            val needle = searchQuery.trim().lowercase()
+            channels.filter { it.channel.name.lowercase().contains(needle) }
+        }
+    }
+
     Column(modifier = modifier.fillMaxSize()) {
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            singleLine = true,
+            placeholder = { Text("Search channels in guide") },
+            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+            trailingIcon = if (searchQuery.isNotEmpty()) {
+                {
+                    IconButton(onClick = { searchQuery = "" }) {
+                        Icon(Icons.Filled.Close, contentDescription = "Clear")
+                    }
+                }
+            } else null,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+        )
+
         // Time header row
         Row(modifier = Modifier.fillMaxWidth()) {
             // Channel column header
@@ -156,9 +196,19 @@ fun ChannelsGuideContent(
             thickness = 0.5.dp,
         )
 
+        if (filteredChannels.isEmpty() && searchQuery.isNotBlank()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    "No channels matching \"$searchQuery\".",
+                    color = Torve.colors.textSecondary,
+                )
+            }
+            return@Column
+        }
+
         // Channel rows with timeline
         LazyColumn(modifier = Modifier.fillMaxSize()) {
-            items(channels, key = { "guide_${it.channel.playlistId}_${it.channel.url}" }) { enriched ->
+            items(filteredChannels, key = { "guide_${it.channel.playlistId}_${it.channel.url}" }) { enriched ->
                 val progs = remember(enriched.channel, guideProgrammes) {
                     val chKey = canonicalEpgChannelKey(
                         playlistId = enriched.channel.playlistId,

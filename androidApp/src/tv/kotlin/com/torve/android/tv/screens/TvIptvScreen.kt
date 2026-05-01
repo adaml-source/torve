@@ -17,6 +17,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -230,11 +233,21 @@ fun TvIptvScreen(
     val favoritesLabel = stringResource(R.string.tv_iptv_favorites)
     val recentlyViewedLabel = stringResource(R.string.tv_iptv_recently_viewed)
 
+    // TV-side IPTV search — local substring match against category +
+    // channel names. Empty query falls through to the unfiltered list.
+    // Kept in this screen rather than the VM because the VM's
+    // searchQuery flow runs a debounced repository.searchChannels
+    // call meant for the mobile global search; TV just needs a
+    // visible client-side filter on the categories the user can D-pad
+    // through.
+    var iptvSearchQuery by rememberSaveable { mutableStateOf("") }
+
     val displayCategories = remember(
         state.categories,
         state.favorites,
         state.recentlyViewedChannels,
         state.selectedCountries,
+        iptvSearchQuery,
     ) {
         val actualCategories = state.categories
             .filter { it.channels.isNotEmpty() || it.channelCount > 0 }
@@ -279,6 +292,17 @@ fun TvIptvScreen(
                 )
             }
             addAll(actualCategories)
+        }.let { built ->
+            // Apply the search filter after the buildList. Match
+            // category names AND any contained channel names so a
+            // search like "ESPN" surfaces the category whose
+            // channels match even if the category is named "Sports".
+            val needle = iptvSearchQuery.trim().lowercase()
+            if (needle.isBlank()) built
+            else built.filter { cat ->
+                cat.name.lowercase().contains(needle) ||
+                    cat.channels.any { it.channel.name.lowercase().contains(needle) }
+            }
         }
     }
 
@@ -567,6 +591,35 @@ fun TvIptvScreen(
                     }
                     .padding(vertical = 8.dp),
             ) {
+                item(key = "iptv_search") {
+                    androidx.compose.material3.OutlinedTextField(
+                        value = iptvSearchQuery,
+                        onValueChange = { iptvSearchQuery = it },
+                        singleLine = true,
+                        placeholder = { Text("Search channels") },
+                        leadingIcon = {
+                            androidx.compose.material3.Icon(
+                                Icons.Filled.Search,
+                                contentDescription = null,
+                            )
+                        },
+                        trailingIcon = if (iptvSearchQuery.isNotEmpty()) {
+                            {
+                                androidx.compose.material3.IconButton(onClick = { iptvSearchQuery = "" }) {
+                                    androidx.compose.material3.Icon(
+                                        Icons.Filled.Close,
+                                        contentDescription = "Clear",
+                                    )
+                                }
+                            }
+                        } else null,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                            .focusProperties { left = railFocusRequester },
+                    )
+                }
+
                 item(key = "list_controls") {
                     TvIptvControlChip(
                         label = stringResource(R.string.tv_iptv_manage_channels),

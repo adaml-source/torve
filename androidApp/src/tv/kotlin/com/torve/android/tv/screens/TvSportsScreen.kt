@@ -49,6 +49,8 @@ import com.torve.android.ui.theme.Graphite
 import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Torve
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import com.torve.data.usenet.NewznabClient
 import com.torve.data.usenet.NewznabItem
 import com.torve.data.usenet.TorBoxUsenetClient
@@ -125,6 +127,7 @@ fun TvSportsScreen(
 
     val pageKey = "tv_sports"
     val saved = remember { NzbBrowseStateHolder.get(pageKey) }
+    var query by remember { mutableStateOf(saved.query) }
     var allItems by remember { mutableStateOf<List<NewznabItem>>(saved.items) }
     var loading by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(saved.errorText) }
@@ -147,10 +150,15 @@ fun TvSportsScreen(
         try {
             val sportsCat = UsenetIndexerCategoryMap.sportsCategoriesFor(indexerType)
             allItems = withContext(Dispatchers.IO) {
-                newznab.browseAllPages(indexerUrl, indexerKey, sportsCat, maxItems = 1000)
+                if (query.isBlank()) {
+                    newznab.browseAllPages(indexerUrl, indexerKey, sportsCat, maxItems = 1000)
+                } else {
+                    newznab.searchAllPages(indexerUrl, indexerKey, sportsCat, query.trim(), maxItems = 1000)
+                }
             }
             if (allItems.isEmpty() && configured) {
-                errorText = "Indexer returned 0 results."
+                errorText = if (query.isBlank()) "Indexer returned 0 results."
+                    else "No matches for \"$query\"."
             }
         } catch (t: Throwable) {
             errorText = t.message ?: "Indexer call failed."
@@ -160,7 +168,7 @@ fun TvSportsScreen(
         NzbBrowseStateHolder.put(
             pageKey,
             NzbBrowseStateHolder.State(
-                query = "",
+                query = query,
                 items = allItems,
                 errorText = errorText,
                 scrollIndex = listState.firstVisibleItemIndex,
@@ -207,6 +215,50 @@ fun TvSportsScreen(
             style = MaterialTheme.typography.bodyMedium,
             color = Torve.colors.textSecondary,
         )
+
+        // Search row — submit triggers a Newznab `t=search` against
+        // the same sport categories. Empty query falls back to the
+        // browse fetch on the next reload.
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            androidx.compose.material3.OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                singleLine = true,
+                label = { Text("Search sport releases") },
+                modifier = Modifier
+                    .weight(1f)
+                    .focusProperties { left = railFocusRequester },
+                trailingIcon = if (query.isNotBlank()) {
+                    {
+                        androidx.compose.material3.IconButton(onClick = {
+                            query = ""
+                            scope.launch { reload() }
+                        }) {
+                            androidx.compose.material3.Icon(
+                                Icons.Filled.Close,
+                                contentDescription = "Clear search",
+                            )
+                        }
+                    }
+                } else null,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    imeAction = androidx.compose.ui.text.input.ImeAction.Search,
+                ),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                    onSearch = { scope.launch { reload() } },
+                ),
+            )
+            androidx.compose.material3.Button(
+                onClick = { scope.launch { reload() } },
+                enabled = configured && !loading,
+            ) {
+                Text(if (loading) "Searching…" else "Search")
+            }
+        }
 
         // Bucket filter pills — first focusable row; LEFT off the
         // first pill returns to the nav rail.
