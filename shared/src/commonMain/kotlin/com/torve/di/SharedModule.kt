@@ -354,6 +354,13 @@ val sharedModule = module {
     // Sync Repository
     single<SyncRepository> { SyncRepositoryImpl(get(), get(), get(), get()) }
     single { PairingApi(get(), baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL }) }
+
+    // Cross-platform Newznab + TorBox usenet plumbing for the shared
+    // Sports surface (and future Adult / NZB-Movies surfaces). Both
+    // are stateless, thread-safe wrappers around the shared Ktor
+    // HttpClient — single() is fine.
+    single { com.torve.data.usenet.NewznabClient(httpClient = get()) }
+    single { com.torve.data.usenet.TorBoxUsenetClient(httpClient = get()) }
     factory {
         com.torve.presentation.pairing.TvPairingSignInViewModel(
             pairingApi = get(),

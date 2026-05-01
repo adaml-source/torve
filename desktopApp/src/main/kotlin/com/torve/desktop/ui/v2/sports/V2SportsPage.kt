@@ -38,12 +38,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import com.torve.desktop.adult.NewznabClient
-import com.torve.desktop.adult.NewznabItem
-import com.torve.desktop.adult.NzbBrowseStateHolder
-import com.torve.desktop.adult.TorBoxUsenetClient
+import com.torve.data.usenet.NewznabClient
+import com.torve.data.usenet.NewznabItem
+import com.torve.data.usenet.TorBoxUsenetClient
 import com.torve.desktop.download.DesktopDownloadManager
-import com.torve.desktop.sports.SportBucket
+import com.torve.domain.sports.SportBucket
+import com.torve.presentation.usenet.NzbBrowseStateHolder
 import com.torve.desktop.ui.components.TorveBanner
 import com.torve.desktop.ui.components.TorveBannerTone
 import com.torve.desktop.ui.components.TorveFilterChip
@@ -115,7 +115,7 @@ fun V2SportsPage(
             // is blocking and would freeze recompositions otherwise.
             // scenenzbs has a German sport sub-cat (5160) alongside
             // the spec 5060; both together broaden the user's pool.
-            val sportsCat = com.torve.desktop.adult.IndexerCategoryMap.sportsCategoriesFor(indexerType)
+            val sportsCat = com.torve.domain.usenet.UsenetIndexerCategoryMap.sportsCategoriesFor(indexerType)
             allItems = withContext(Dispatchers.IO) {
                 if (query.isBlank()) {
                     newznab.browseAllPages(indexerUrl, indexerApiKey, sportsCat, maxItems = 1000)

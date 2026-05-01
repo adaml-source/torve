@@ -1225,8 +1225,8 @@ fun V2App(
                                     pandaState.downloadClientApiKey.isUsableSecret()
                                 ) pandaState.downloadClientApiKey else ""
                                 com.torve.desktop.ui.v2.sports.V2SportsPage(
-                                    newznab = remember { com.torve.desktop.adult.NewznabClient() },
-                                    torbox = remember { com.torve.desktop.adult.TorBoxUsenetClient() },
+                                    newznab = org.koin.java.KoinJavaComponent.get(com.torve.data.usenet.NewznabClient::class.java),
+                                    torbox = org.koin.java.KoinJavaComponent.get(com.torve.data.usenet.TorBoxUsenetClient::class.java),
                                     torboxApiKey = sTorboxKey,
                                     indexerType = sIndexerType,
                                     indexerUrl = sIndexerUrl,

@@ -1086,6 +1086,7 @@
 
     <!-- TV Navigation -->
     <string name="tv_nav_iptv">Channels</string>
+    <string name="tv_nav_sports">Sports</string>
     <string name="tv_nav_search">Search</string>
     <string name="tv_nav_library">Library</string>
     <string name="tv_nav_settings">Settings</string>

@@ -77,6 +77,7 @@ import com.torve.android.tv.premium.TvPremiumAccess
 import com.torve.android.tv.screens.TvHomeScreen
 import com.torve.android.tv.screens.TvIptvScreen
 import com.torve.android.tv.screens.TvIptvRailState
+import com.torve.android.tv.screens.TvSportsScreen
 import com.torve.android.tv.screens.TvLibraryScreen
 import com.torve.android.tv.screens.TvMoviesScreen
 import com.torve.android.tv.screens.TvSearchScreen
@@ -1093,6 +1094,7 @@ fun TvRoot(
         TvRoutes.MOVIES -> stringResource(R.string.nav_movies)
         TvRoutes.SHOWS -> stringResource(R.string.nav_tv_shows)
         TvRoutes.IPTV -> stringResource(R.string.tv_nav_iptv)
+        TvRoutes.SPORTS -> stringResource(R.string.tv_nav_sports)
         TvRoutes.SEARCH -> stringResource(R.string.tv_nav_search)
         TvRoutes.LIBRARY -> stringResource(R.string.tv_nav_library)
         TvRoutes.SETTINGS -> stringResource(R.string.tv_nav_settings)
@@ -1102,6 +1104,7 @@ fun TvRoot(
         TvRoutes.MOVIES -> stringResource(R.string.tv_hero_subtitle_movies)
         TvRoutes.SHOWS -> stringResource(R.string.tv_hero_subtitle_shows)
         TvRoutes.IPTV -> stringResource(R.string.tv_hero_subtitle_iptv)
+        TvRoutes.SPORTS -> "Newznab sport releases"
         TvRoutes.SEARCH -> stringResource(R.string.tv_hero_subtitle_search)
         TvRoutes.LIBRARY -> stringResource(R.string.tv_hero_subtitle_library)
         TvRoutes.SETTINGS -> stringResource(R.string.tv_hero_subtitle_settings)
@@ -1855,6 +1858,31 @@ fun TvRoot(
                                             confirmedTopRoute = TvRoutes.HOME
                                             pendingContentEntryRoute = null
                                         },
+                                    )
+
+                                    TvRoutes.SPORTS -> TvSportsScreen(
+                                        railFocusRequester = railFocusRequester,
+                                        onPlayStream = { url, title, sizeBytes ->
+                                            if (TvPremiumAccess.isPremiumLocked(TvEntitledFeature.STREAM_PLAYBACK, accessTier)) {
+                                                requestLifetimeUnlock(TvEntitledFeature.STREAM_PLAYBACK)
+                                            } else {
+                                                pushFocusReturnEntry(TvRoutes.SPORTS)
+                                                navController.navigate(
+                                                    TvRoutes.player(
+                                                        url = url,
+                                                        fallbackUrl = "",
+                                                        title = title,
+                                                        mediaId = "sports:${title.hashCode()}",
+                                                        mediaType = "sports",
+                                                    ),
+                                                ) { launchSingleTop = true }
+                                            }
+                                        },
+                                        onOpenPandaSetup = {
+                                            navController.navigate(TvRoutes.PANDA_SETUP)
+                                        },
+                                        onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.SPORTS] = it },
+                                        onContentFocused = { lastFocusedContentByRoute[TvRoutes.SPORTS] = it },
                                     )
 
                                     TvRoutes.SEARCH -> TvSearchScreen(
