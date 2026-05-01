@@ -499,6 +499,13 @@ class ChannelsViewModel(
 
     fun selectSubTab(tab: ChannelsSubTab) {
         _state.update { it.copy(selectedSubTab = tab) }
+        // Selecting GUIDE pre-builds the EPG so the user doesn't see
+        // an empty grid on first switch. Skips when guideProgrammes
+        // already populated — the build is expensive enough that we
+        // don't want to re-run it on every tab toggle.
+        if (tab == ChannelsSubTab.GUIDE && _state.value.guideProgrammes.isEmpty()) {
+            buildGuideChannels()
+        }
     }
 
     fun toggleViewMode() {

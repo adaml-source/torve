@@ -223,6 +223,21 @@ fun ChannelsScreen(
                         },
                         onChannelFavorite = { viewModel.toggleFavorite(it) },
                     )
+
+                    // EPG grid surfaced as a top-level sub-tab. Was
+                    // previously only reachable by starting playback
+                    // and tapping the small TV icon overlay.
+                    // selectSubTab() pre-builds guideProgrammes so the
+                    // grid isn't empty on first switch.
+                    ChannelsSubTab.GUIDE -> ChannelsGuideContent(
+                        channels = state.channels,
+                        guideProgrammes = state.guideProgrammes,
+                        isLoading = state.isLoadingChannels && state.guideProgrammes.isEmpty(),
+                        onChannelPlay = { channel ->
+                            viewModel.recordChannelViewed(channel)
+                            onChannelPlay(channel)
+                        },
+                    )
                 }
             }
         }

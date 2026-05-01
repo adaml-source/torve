@@ -56,11 +56,13 @@ import com.torve.domain.sports.SportBucket
 import com.torve.domain.usenet.UsenetIndexerCategoryMap
 import com.torve.domain.usenet.UsenetIndexerUrlResolver
 import com.torve.presentation.panda.PandaConfigStateStore
+import com.torve.presentation.panda.PandaSetupViewModel
 import com.torve.presentation.usenet.NzbBrowseStateHolder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.koin.compose.koinInject
+import org.koin.mp.KoinPlatform
 
 /**
  * TV Sports catalog. Cross-platform Newznab + TorBox plumbing now lives
@@ -88,6 +90,20 @@ fun TvSportsScreen(
 ) {
     val pandaState by pandaStore.state.collectAsState()
     val scope = rememberCoroutineScope()
+
+    // Hydrate the PandaConfigStateStore by instantiating the VM once.
+    // Without this, a user who's never opened the Panda wizard in
+    // this app session sees an empty configStateStore — so Sports
+    // can't resolve any indexer URL/key even though their Panda
+    // setup IS persisted on the backend. The VM's init pulls the
+    // saved config from /panda/configs/me and publishes into the
+    // singleton store; the resulting StateFlow update re-triggers
+    // the credential resolution below. Discarding the VM reference
+    // is fine — it's a factory and gets GC'd as soon as the launch
+    // finishes; the store retains the hydrated state.
+    LaunchedEffect(Unit) {
+        runCatching { KoinPlatform.getKoin().get<PandaSetupViewModel>() }
+    }
 
     // Resolve indexer + TorBox credentials from the live Panda state.
     // Mirrors the desktop V2SportsPage logic but reads directly from

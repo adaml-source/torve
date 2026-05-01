@@ -41,6 +41,22 @@ data class ReadyToWatchSummary(
     /** Total count of "needs your attention" rows. */
     val attentionCount: Int get() = warnings.size + invalid.size
 
+    /**
+     * Provider-health-resolved per-intent status — what the row badge
+     * should display. Without this, the summary card and the per-row
+     * badge can disagree (summary says "Ready: IPTV" while the IPTV row
+     * still shows "Not started" because the row was reading raw
+     * SetupIntentState.status, missing the GREEN provider-health row
+     * that flipped IPTV into ready).
+     */
+    fun resolvedStatusFor(intent: SetupIntent): SetupIntentStatus = when {
+        intent in ready -> SetupIntentStatus.READY
+        intent in warnings -> SetupIntentStatus.NEEDS_ATTENTION
+        intent in invalid -> SetupIntentStatus.INVALID
+        intent in inProgress -> SetupIntentStatus.IN_PROGRESS
+        else -> SetupIntentStatus.NOT_STARTED
+    }
+
     companion object {
         /**
          * Computes a [ReadyToWatchSummary] from the per-intent state map and

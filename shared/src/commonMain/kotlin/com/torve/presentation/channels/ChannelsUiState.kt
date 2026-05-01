@@ -8,7 +8,7 @@ import com.torve.domain.model.ChannelPlaylist
 import com.torve.domain.player.LiveAudioOutputMode
 import com.torve.domain.repository.PlaylistAddProgress
 
-enum class ChannelsSubTab { LIVE, FAVOURITES }
+enum class ChannelsSubTab { LIVE, FAVOURITES, GUIDE }
 
 enum class ChannelsViewMode { LIST, GRID }
 

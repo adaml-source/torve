@@ -65,7 +65,19 @@ fun SetupIntentHubScreen(
     onExit: (() -> Unit)? = null,
     onSkipToApp: (() -> Unit)? = null,
 ) {
-    LaunchedEffect(coordinator) { coordinator.load() }
+    LaunchedEffect(coordinator) {
+        coordinator.load()
+        // Auto-validate every intent once on entry. Without this the
+        // user has to tap "Validate" on each row before the badges
+        // (and the summary card) reflect their actual configured
+        // state — a fresh hub open showed everything as "Not started"
+        // even when Panda + IPTV were fully wired and working.
+        // Validators are cheap (in-process state inspection, no
+        // network), so running them all is fine.
+        for (intent in SetupIntent.entries) {
+            coordinator.validate(intent)
+        }
+    }
 
     val state by coordinator.state.collectAsState()
     val summary by coordinator.summary.collectAsState()
@@ -111,6 +123,13 @@ fun SetupIntentHubScreen(
             SetupIntentRow(
                 intent = intent,
                 state = state[intent] ?: SetupIntentState(intent = intent),
+                // The summary card derives its readiness by merging the
+                // raw per-intent state with the live provider-health
+                // rows (so a GREEN ProviderHealth check can flip an
+                // unvalidated intent into READY). The row badge has to
+                // use the same resolved status or the summary and the
+                // row contradict each other.
+                resolvedStatus = summary.resolvedStatusFor(intent),
                 onSetUp = {
                     when (intent) {
                         SetupIntent.DEBRID -> onOpenDebridSetup()
@@ -211,6 +230,7 @@ private fun ReadyToWatchSummaryCard(summary: ReadyToWatchSummary) {
 private fun SetupIntentRow(
     intent: SetupIntent,
     state: SetupIntentState,
+    resolvedStatus: SetupIntentStatus,
     onSetUp: () -> Unit,
     onValidate: () -> Unit,
     onReset: () -> Unit,
@@ -239,7 +259,7 @@ private fun SetupIntentRow(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                StatusChip(state.status)
+                StatusChip(resolvedStatus)
             }
             state.message?.takeIf { it.isNotBlank() }?.let {
                 Text(
@@ -253,7 +273,7 @@ private fun SetupIntentRow(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Button(onClick = onSetUp) {
-                    Text(if (state.status == SetupIntentStatus.READY) "Edit" else "Set up")
+                    Text(if (resolvedStatus == SetupIntentStatus.READY) "Edit" else "Set up")
                 }
                 OutlinedButton(
                     onClick = onValidate,
@@ -261,7 +281,7 @@ private fun SetupIntentRow(
                 ) {
                     Text("Validate")
                 }
-                if (state.status != SetupIntentStatus.NOT_STARTED) {
+                if (resolvedStatus != SetupIntentStatus.NOT_STARTED) {
                     TextButton(onClick = onReset) { Text("Reset") }
                 }
                 if (state.status == SetupIntentStatus.VALIDATING) {

@@ -132,9 +132,17 @@ class IptvIntentValidator(
                 val matched = epg.matchedChannelCount
                 val total = matched + epg.unmatchedChannelCount
                 when {
-                    total == 0 -> SetupIntentValidation.needsAttention(
-                        message = "EPG loaded but no channels matched.",
-                        nextAction = "Check tvg-id mapping",
+                    // Placeholder state: ChannelsViewModel sets
+                    // EpgState.Loaded with all counts zero on
+                    // cache-first startup — the EPG grid builds match
+                    // data lazily per category, so a full guide hasn't
+                    // run yet. Reading this as "loaded but no channels
+                    // matched" produced a false-negative on the hub
+                    // (the actual player matches by name and works
+                    // fine). Treat zero-total as "ready, counts not
+                    // built yet" rather than an attention warning.
+                    total == 0 -> SetupIntentValidation.ready(
+                        message = "\"$activeName\" — $channelCount channels (EPG ready).",
                     )
                     matched == 0 -> SetupIntentValidation.invalid(
                         message = "0 of $total channels matched the EPG.",
@@ -235,7 +243,19 @@ class UsenetIntentValidator(
             it.apiKey.isNotBlank() && !isRedacted(it.apiKey)
         }
         val downloadClientOk = downloadClientReady(state)
+        // Special case: when the user has a debrid-style download
+        // client (TorBox today) wired up with credentials AND at least
+        // one indexer with an API key, the direct Usenet provider
+        // password is unused — TorBox resolves NZBs server-side over
+        // HTTP. The "missing password for generic" warning was
+        // sending users to fix something they don't need. Mirrors the
+        // same short-circuit in PandaUsenetProviderProviderHealthChecker.
+        // SABnzbd / NZBGet still need direct NNTP creds.
+        val debridNzbClientCoversIt = state.downloadClient.equals("torbox", ignoreCase = true) &&
+            downloadClientOk &&
+            indexersWithKey.isNotEmpty()
         val providerOk = !state.enableUsenet ||
+            debridNzbClientCoversIt ||
             (state.usenetProvider != "none" &&
                 state.usenetPassword.isNotBlank() &&
                 !isRedacted(state.usenetPassword))

@@ -108,11 +108,18 @@ fun TvPandaSetupScreen(
             )
             Spacer(Modifier.height(24.dp))
 
+            // Some step screens (PandaSourcesStep, PandaUsenetStep)
+            // host their own LazyColumn for indexer rows. Wrapping them
+            // in a verticalScroll meant those LazyColumns saw an
+            // infinite max-height and crashed with "Vertically
+            // scrollable component was measured with an infinity
+            // maximum height constraints". Drop the outer scroll —
+            // the Box's weight(1f) bounds the height already, and the
+            // step screens that need scrolling provide their own.
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
-                    .verticalScroll(rememberScrollState())
                     .focusRequester(contentFocusRequester),
             ) {
                 when (state.currentStep) {
