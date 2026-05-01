@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -129,14 +130,26 @@ fun SetupIntentHubScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = onUseGuidedWizard) {
-                Text("Use guided wizard instead")
+            // The guided wizard is an alternative entry into setup —
+            // only meaningful before the user has wired any source.
+            // Once paths are green, "Continue" and the wizard both
+            // ultimately exit to the app, so showing both side-by-side
+            // reads as two ways to do the same thing. Hide it then.
+            if (!summary.canStartWatching) {
+                TextButton(onClick = onUseGuidedWizard) {
+                    Text("Use guided wizard instead")
+                }
+            } else {
+                Spacer(Modifier.width(0.dp))
             }
             Button(
                 onClick = onContinueToApp,
                 enabled = summary.canStartWatching,
             ) {
-                Text(if (summary.canStartWatching) "Continue" else "Set up at least one path")
+                // Use a verb that signals "you're done with setup, this
+                // takes you out". "Continue" was ambiguous — readers
+                // expected it to advance setup, not exit.
+                Text(if (summary.canStartWatching) "Start watching" else "Set up at least one path")
             }
         }
         if (!summary.canStartWatching && onSkipToApp != null) {
