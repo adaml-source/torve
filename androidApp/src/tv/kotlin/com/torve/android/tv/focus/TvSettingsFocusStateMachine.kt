@@ -36,6 +36,7 @@ internal object TvSettingsItemIds {
     const val ACCOUNT_AUTH_SUBMIT = "settings/account/auth_submit"
     const val ACCOUNT_AUTH_TOGGLE = "settings/account/auth_toggle"
     const val ACCOUNT_AUTH_FORGOT_PASSWORD = "settings/account/auth_forgot_password"
+    const val ACCOUNT_AUTH_PAIR_WITH_PHONE = "settings/account/auth_pair_with_phone"
     const val ACCOUNT_SUBSCRIPTION_MANAGE_DEVICES = "settings/account/subscription_manage_devices"
     const val ACCOUNT_SUBSCRIPTION_MONTHLY = "settings/account/subscription_monthly"
     const val ACCOUNT_SUBSCRIPTION_LIFETIME = "settings/account/subscription_lifetime"

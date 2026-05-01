@@ -10,7 +10,7 @@ import com.torve.domain.model.MediaItem
 @Composable
 internal fun TvShowsScreen(
     railFocusRequester: FocusRequester,
-    headerFocusRequester: FocusRequester,
+    headerFocusRequester: FocusRequester?,
     heroOverlay: (@Composable () -> Unit)? = null,
     onMediaClick: (MediaItem) -> Unit,
     onFirstContentRequester: (FocusRequester) -> Unit,

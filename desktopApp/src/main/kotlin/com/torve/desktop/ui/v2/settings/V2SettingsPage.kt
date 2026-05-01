@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -21,6 +23,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.foundation.border
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -476,31 +479,93 @@ private fun CustomizationSection(
             title = "Desktop Playback",
             supportingText = "Seek, subtitle, audio, and volume preferences stored locally.",
         ) {
-            val launchPlayerMode = remember { PlayerModePreferences.read() }
-            var chosenPlayerMode by remember { mutableStateOf(launchPlayerMode) }
-            SelectorBlock(
-                label = "Playback Engine",
-                options = DesktopPlayerMode.entries,
-                selected = chosenPlayerMode,
-                optionLabel = { it.label },
-                onSelect = { mode ->
-                    chosenPlayerMode = mode
-                    PlayerModePreferences.write(mode)
-                },
-            )
+            // Discovery is mutable here so the Re-check button can refresh
+            // it without restarting the app. Snapshot derives the
+            // displayed strings + selectable modes from it.
+            var discoveryRefresh by remember { mutableStateOf(0) }
+            val mpvDiscovery = remember(discoveryRefresh) { MpvRuntimeLocator.discover() }
+            val savedMode = remember(discoveryRefresh) { PlayerModePreferences.read() }
+            val labsSnapshot = remember(discoveryRefresh, mpvDiscovery, savedMode) {
+                com.torve.desktop.playback.MpvLabsStatus.compute(mpvDiscovery, savedMode)
+            }
+            var chosenPlayerMode by remember(discoveryRefresh) {
+                mutableStateOf(labsSnapshot.effectiveMode)
+            }
+            // Silent normalization: if saved preference was MPV but
+            // libmpv is missing, rewrite to VLC. UI explains via the
+            // resetNotice line; no warning toast.
+            LaunchedEffect(labsSnapshot.wasResetFromMpv) {
+                if (labsSnapshot.wasResetFromMpv) {
+                    PlayerModePreferences.write(DesktopPlayerMode.VLC)
+                    chosenPlayerMode = DesktopPlayerMode.VLC
+                }
+            }
+
+            // Engine selector — VLC always selectable; MPV Labs always
+            // visible but disabled when libmpv is unavailable. The
+            // disabled row is the user's signal that MPV exists; the
+            // premium info card below explains WHY it's disabled.
             Text(
-                text = when {
-                    chosenPlayerMode != launchPlayerMode ->
-                        "Restart Torve for the engine change to take effect."
-                    chosenPlayerMode == DesktopPlayerMode.MPV ->
-                        "MPV plays in its own window for now. Embedded rendering arrives in a future update."
-                    else ->
-                        "VLC renders in-app and is the recommended default."
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = TorveDesktopThemeTokens.colors.textSecondary,
+                text = "Playback Engine",
+                style = MaterialTheme.typography.labelLarge,
+                color = TorveDesktopThemeTokens.colors.textPrimary,
             )
-            if (chosenPlayerMode == DesktopPlayerMode.MPV) {
+            DesktopPlayerMode.entries.forEach { mode ->
+                val isSelectable = mode in labsSnapshot.selectableModes
+                EnginePickerRow(
+                    label = mode.label,
+                    selected = chosenPlayerMode == mode,
+                    enabled = isSelectable,
+                    trailingNote = when {
+                        mode == DesktopPlayerMode.VLC -> "Active"
+                        mode == DesktopPlayerMode.MPV && !isSelectable -> "Unavailable on this device"
+                        mode == DesktopPlayerMode.MPV -> "Available — Labs"
+                        else -> null
+                    },
+                    onClick = {
+                        if (isSelectable) {
+                            chosenPlayerMode = mode
+                            PlayerModePreferences.write(mode)
+                        }
+                    },
+                )
+            }
+            // Reset notice — only shown when the saved preference was
+            // MPV and got normalized to VLC. Replaces the old playback
+            // overlay/banner that used to ride along on every launch.
+            labsSnapshot.resetNotice?.let { msg ->
+                Text(
+                    text = msg,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TorveDesktopThemeTokens.colors.textSecondary,
+                )
+            }
+            if (chosenPlayerMode != labsSnapshot.effectiveMode) {
+                Text(
+                    text = "Restart Torve for the engine change to take effect.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TorveDesktopThemeTokens.colors.textSecondary,
+                )
+            }
+
+            // ── MPV Labs premium info card ──
+            var showMpvSetupGuide by remember { mutableStateOf(false) }
+            MpvLabsInfoCard(
+                snapshot = labsSnapshot,
+                onOpenSetupGuide = { showMpvSetupGuide = true },
+                onRecheck = {
+                    discoveryRefresh += 1
+                },
+            )
+            if (showMpvSetupGuide) {
+                MpvLabsSetupGuideDialog(
+                    snapshot = labsSnapshot,
+                    onDismiss = { showMpvSetupGuide = false },
+                )
+            }
+            // Pre-existing detailed status row, only meaningful when
+            // MPV is actually selected as the active engine.
+            if (chosenPlayerMode == DesktopPlayerMode.MPV && mpvDiscovery.found) {
                 MpvInstallStatusRow()
             }
             Row(
@@ -3301,6 +3366,19 @@ private fun SourcesSection(
     // collapsible receive surface.
     var transferReceiveOpen by remember { mutableStateOf(false) }
 
+    // Separate flag for the MODAL dialog launched from a Provider
+    // Health row's "Transfer from another device" button. The card
+    // version sits far below on the page; flipping its inline expander
+    // alone gives the user no visible feedback (the affordance is
+    // off-screen). Modal dialog gives immediate feedback.
+    var transferReceiveDialogOpen by remember { mutableStateOf(false) }
+
+    // Hoisted up: transient banner surfaced when a Provider Health
+    // repair button (or the Restore Setup "Set up manually" button)
+    // routes the user away from one panel toward another. Declared
+    // before the recovery card so its onClick handler can write to it.
+    var redirectNotice by remember { mutableStateOf<String?>(null) }
+
     // ── Recovery card: shown above Provider Health when 2+ transferable
     // categories are missing local credentials. Single-source-of-truth
     // signal pulled from the shared recovery-state provider. ─────────
@@ -3333,30 +3411,128 @@ private fun SourcesSection(
         }
     }
     recoverySnap?.takeIf { it.shouldShowRecoveryCard }?.let { snap ->
+        // Human-readable category list — replaces the opaque
+        // "3 categories" count. Each chip names the affected provider
+        // family AND a one-line impact statement so the user sees what's
+        // blocked before deciding between transfer vs manual setup.
+        val missingDetails: List<Pair<String, String>> = snap.missingCategories.map { cat ->
+            when (cat) {
+                com.torve.domain.transfer.SecretCategory.DEBRID ->
+                    "Debrid (Real-Debrid / AllDebrid / Premiumize / TorBox)" to
+                        "Streaming and downloads from cached debrid sources are unavailable until configured."
+                com.torve.domain.transfer.SecretCategory.IPTV ->
+                    "IPTV playlists" to
+                        "Live TV channels and EPG won't load. Recordings can't be scheduled."
+                com.torve.domain.transfer.SecretCategory.PLEX_JELLYFIN ->
+                    "Plex / Jellyfin" to
+                        "Your local media server library won't appear in Torve."
+                com.torve.domain.transfer.SecretCategory.TRAKT_SIMKL ->
+                    "Trakt / SIMKL" to
+                        "Watch history won't sync, and watchlist changes stay on this device only."
+                com.torve.domain.transfer.SecretCategory.AI_KEYS ->
+                    "AI provider keys" to
+                        "Natural-language search (\"Ask AI\") will be off."
+                com.torve.domain.transfer.SecretCategory.PANDA ->
+                    "Usenet / Easynews / NZB indexers" to
+                        "Usenet warming, downloads, and instant playback for cached items are off."
+            }
+        }
         TorveSectionCard(
             title = "Restore setup from another device",
             supportingText = "Transfer encrypted credentials from a device that already works. " +
                 "Faster than re-entering each one by hand.",
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                TorveBanner(
-                    title = "${snap.missingTransferableCategoryCount} provider categories missing local credentials",
-                    description = "Receive credentials from another Torve device, or set them up manually.",
-                    tone = TorveBannerTone.Info,
+                Text(
+                    text = "${snap.missingTransferableCategoryCount} provider categor" +
+                        (if (snap.missingTransferableCategoryCount == 1) "y is" else "ies are") +
+                        " missing on this device",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.textPrimary,
+                )
+                Text(
+                    text = "Why: provider credentials (Trakt, Plex, debrid keys, etc.) are " +
+                        "stored only on the device that authorized them — they never reach " +
+                        "Torve servers, by design. So they don't sync down when you sign in " +
+                        "on a new device. Watch history and watchlist do sync; connections " +
+                        "themselves do not.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textSecondary,
+                )
+                Text(
+                    text = "Until you fix one of the items below, the matching Torve features " +
+                        "stay off on this device.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textSecondary,
+                )
+                // Per-category impact list — gives the user the
+                // "what's affected" answer without scrolling away.
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    missingDetails.forEach { (label, impact) ->
+                        Row(
+                            verticalAlignment = Alignment.Top,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                text = "•",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.textSecondary,
+                            )
+                            Column {
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = colors.textPrimary,
+                                )
+                                Text(
+                                    text = impact,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = colors.textSecondary,
+                                )
+                            }
+                        }
+                    }
+                }
+                Text(
+                    text = "Fix options: (1) receive an encrypted credential bundle from a " +
+                        "device that already has these set up — Torve servers never see the " +
+                        "decrypted contents; or (2) open each provider's setup card above " +
+                        "and re-authenticate / re-enter the credential here. Either path " +
+                        "resolves the same items.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textSecondary,
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    // "Set up manually" used to just close the card —
+                    // now it dismisses the recovery card AND nudges the
+                    // user to use the per-provider Setup & Sources rows
+                    // above. The card naturally re-appears on next
+                    // refresh if categories are still missing.
                     TorveGhostButton(
                         text = "Set up manually",
-                        onClick = { recoverySnap = null },
+                        onClick = {
+                            recoverySnap = null
+                            redirectNotice = "Use the Setup & Sources cards above — " +
+                                "tap \"Open setup\" on each row that says \"Not set up\"."
+                        },
                     )
                     Spacer(Modifier.width(8.dp))
                     TorvePrimaryButton(
                         text = "Receive credentials",
-                        onClick = { transferReceiveOpen = true },
+                        // Open the MODAL dialog (same one the per-row
+                        // Transfer button uses). Flipping just the inline
+                        // expander far below the page gave the user no
+                        // visible feedback.
+                        onClick = {
+                            transferReceiveDialogOpen = true
+                            transferReceiveOpen = true
+                        },
                     )
                 }
             }
@@ -3376,12 +3552,124 @@ private fun SourcesSection(
             )
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                redirectNotice?.let { msg ->
+                    TorveBanner(
+                        title = "Heads up",
+                        description = msg,
+                        tone = TorveBannerTone.Info,
+                    )
+                }
+
+                // Map a provider category to the right destination AND
+                // a human-readable hint about where the credentials
+                // actually live. Debrid (Real-Debrid / AllDebrid /
+                // Premiumize / TorBox) is configured inside the Panda
+                // setup wizard, NOT in Account — surfacing the wrong
+                // destination silently was the cause of the previous
+                // confusion.
+                val routeToCategorySettings: (com.torve.domain.providerhealth.ProviderHealthCategory) -> Unit = { cat ->
+                    when (cat) {
+                        com.torve.domain.providerhealth.ProviderHealthCategory.DEBRID -> {
+                            redirectNotice = "Debrid credentials (Real-Debrid / AllDebrid / " +
+                                "Premiumize / TorBox) are configured inside the Panda setup " +
+                                "wizard. Opening it now."
+                            onOpenPandaSetup()
+                        }
+                        com.torve.domain.providerhealth.ProviderHealthCategory.IPTV,
+                        com.torve.domain.providerhealth.ProviderHealthCategory.EPG -> {
+                            redirectNotice = null
+                            onSwitchToCategory(SettingsCategory.PLAYLISTS)
+                        }
+                        com.torve.domain.providerhealth.ProviderHealthCategory.PLEX_JELLYFIN,
+                        com.torve.domain.providerhealth.ProviderHealthCategory.TRAKT,
+                        com.torve.domain.providerhealth.ProviderHealthCategory.SIMKL -> {
+                            redirectNotice = null
+                            onSwitchToCategory(SettingsCategory.INTEGRATIONS)
+                        }
+                        com.torve.domain.providerhealth.ProviderHealthCategory.ADDON -> {
+                            redirectNotice = null
+                            onSwitchToCategory(SettingsCategory.ADDONS)
+                        }
+                        com.torve.domain.providerhealth.ProviderHealthCategory.USENET_INDEXER,
+                        com.torve.domain.providerhealth.ProviderHealthCategory.USENET_PROVIDER,
+                        com.torve.domain.providerhealth.ProviderHealthCategory.DOWNLOAD_CLIENT -> {
+                            redirectNotice = "Usenet stack (NZB indexer + provider + download " +
+                                "client) is configured inside the Panda setup wizard. " +
+                                "Opening it now."
+                            onOpenPandaSetup()
+                        }
+                        com.torve.domain.providerhealth.ProviderHealthCategory.PLAYBACK -> {
+                            redirectNotice = null
+                            onSwitchToCategory(SettingsCategory.CUSTOMIZATION)
+                        }
+                    }
+                }
                 rawEntries.sortedWith(
                     compareBy({ it.category.ordinal }, { it.label }),
                 ).forEach { entry ->
                     ProviderHealthRow(
                         entry = entry,
-                        onTransferReceive = { transferReceiveOpen = true },
+                        onTransferReceive = {
+                            // Open the modal AND keep the inline card
+                            // primed in case the user dismisses the
+                            // dialog and scrolls down later.
+                            transferReceiveDialogOpen = true
+                            transferReceiveOpen = true
+                        },
+                        onReenterManually = routeToCategorySettings,
+                        // Diagnostics + crash-reporting state lives in the
+                        // About tab on desktop. Send the user there so they
+                        // can copy the env-var, run the diagnostics export,
+                        // or read the runtime VLC state.
+                        onOpenDiagnostics = {
+                            redirectNotice = null
+                            onSwitchToCategory(SettingsCategory.ABOUT)
+                        },
+                        onOpenProviderSettings = routeToCategorySettings,
+                    )
+                }
+            }
+        }
+    }
+
+    // Modal dialog hosting the receive screen — opened by the
+    // Provider Health row buttons. Visible immediately on click
+    // regardless of scroll position.
+    if (transferReceiveDialogOpen) {
+        val receiverVm: com.torve.presentation.transfer.SecretsTransferReceiverViewModel = remember {
+            org.koin.java.KoinJavaComponent.get(
+                com.torve.presentation.transfer.SecretsTransferReceiverViewModel::class.java,
+            )
+        }
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { transferReceiveDialogOpen = false },
+        ) {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = colors.cardSurface,
+                modifier = Modifier
+                    .widthIn(min = 480.dp, max = 720.dp)
+                    .padding(8.dp),
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "Receive credentials from another device",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = colors.textPrimary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TorveGhostButton(
+                            text = "Close",
+                            onClick = { transferReceiveDialogOpen = false },
+                        )
+                    }
+                    com.torve.desktop.transfer.SecretsTransferReceiveScreen(
+                        viewModel = receiverVm,
+                        onClose = { transferReceiveDialogOpen = false },
                     )
                 }
             }
@@ -3507,8 +3795,8 @@ private fun SourcesSection(
     var transferSendOpen by remember { mutableStateOf(false) }
     TorveSectionCard(
         title = "Send credentials to another device",
-        supportingText = "Paste a receiver session string from another desktop and generate " +
-            "a sealed credential code. Nothing is sent to a backend.",
+        supportingText = "Sending starts on the device you want to set up. Open Receive " +
+            "credentials there first to get a code, then bring it back here.",
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -3580,10 +3868,25 @@ private fun SetupIntentCard(
 private fun ProviderHealthRow(
     entry: com.torve.domain.providerhealth.ProviderHealthEntry,
     onTransferReceive: () -> Unit = {},
+    onReenterManually: (com.torve.domain.providerhealth.ProviderHealthCategory) -> Unit = {},
+    onOpenDiagnostics: () -> Unit = {},
+    onOpenProviderSettings: (com.torve.domain.providerhealth.ProviderHealthCategory) -> Unit = {},
 ) {
     val colors = TorveDesktopThemeTokens.colors
     val actions = remember(entry) {
         com.torve.presentation.providerhealth.ProviderRepairMapper.actionsFor(entry)
+    }
+    // Permanent location hint on rows whose credentials don't live in
+    // a Settings tab — surfaces "Configured in Panda setup" right next
+    // to the row label so the user knows where to go even before
+    // they click any repair button.
+    val locationHint = when (entry.category) {
+        com.torve.domain.providerhealth.ProviderHealthCategory.DEBRID,
+        com.torve.domain.providerhealth.ProviderHealthCategory.USENET_INDEXER,
+        com.torve.domain.providerhealth.ProviderHealthCategory.USENET_PROVIDER,
+        com.torve.domain.providerhealth.ProviderHealthCategory.DOWNLOAD_CLIENT ->
+            "Configured in Panda setup"
+        else -> null
     }
     Column(
         modifier = Modifier
@@ -3602,12 +3905,23 @@ private fun ProviderHealthRow(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                Text(
-                    text = entry.label,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = colors.textPrimary,
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = entry.label,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.textPrimary,
+                    )
+                    locationHint?.let { hint ->
+                        TorveBadge(
+                            text = hint,
+                            tone = TorveBadgeTone.Neutral,
+                        )
+                    }
+                }
                 entry.message?.takeIf { it.isNotBlank() }?.let { msg ->
                     Text(
                         text = msg,
@@ -3641,17 +3955,17 @@ private fun ProviderHealthRow(
                         com.torve.presentation.providerhealth.ProviderRepairAction.ReenterCredentials ->
                             TorveGhostButton(
                                 text = "Re-enter manually",
-                                onClick = { /* settings UI is the same page */ },
+                                onClick = { onReenterManually(entry.category) },
                             )
                         com.torve.presentation.providerhealth.ProviderRepairAction.OpenDiagnostics ->
                             TorveGhostButton(
                                 text = "Diagnostics",
-                                onClick = { /* desktop renders diagnostics inline below */ },
+                                onClick = onOpenDiagnostics,
                             )
                         com.torve.presentation.providerhealth.ProviderRepairAction.OpenProviderSettings ->
                             TorveGhostButton(
                                 text = "Open settings",
-                                onClick = { /* page already shows the settings */ },
+                                onClick = { onOpenProviderSettings(entry.category) },
                             )
                     }
                 }
@@ -3870,6 +4184,211 @@ private fun EpgCorrectionCard(
                     "Refresh from Settings → Live TV → Refresh, or check the EPG URL.",
                 tone = TorveBannerTone.Warning,
             )
+        }
+    }
+}
+
+/**
+ * Engine selector row used by Settings → Desktop Playback. Renders the
+ * engine name + a trailing status note ("Active", "Available — Labs",
+ * "Unavailable on this device") with an explicit disabled state. The
+ * disabled state is the user-visible signal that MPV exists, even when
+ * libmpv is missing — keeping the row visible (instead of hiding it
+ * entirely) is the premium behaviour the spec asks for.
+ */
+@Composable
+private fun EnginePickerRow(
+    label: String,
+    selected: Boolean,
+    enabled: Boolean,
+    trailingNote: String?,
+    onClick: () -> Unit,
+) {
+    val colors = TorveDesktopThemeTokens.colors
+    val containerColor = when {
+        !enabled -> colors.cardSurface.copy(alpha = 0.55f)
+        selected -> colors.cardSurface
+        else -> colors.cardSurface
+    }
+    val borderColor = when {
+        !enabled -> colors.borderSubtle.copy(alpha = 0.45f)
+        selected -> colors.accent.copy(alpha = 0.7f)
+        else -> colors.borderSubtle
+    }
+    val labelColor = if (enabled) colors.textPrimary else colors.textMuted
+    val noteColor = if (enabled) colors.textSecondary else colors.textMuted
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(containerColor, RoundedCornerShape(10.dp))
+            .border(1.dp, borderColor, RoundedCornerShape(10.dp))
+            .let { m -> if (enabled) m.clickable(onClick = onClick) else m }
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        // Custom radio dot — keeps the disabled visual neutral instead
+        // of the platform RadioButton's "muted blue" which reads as
+        // a yellow-warning to some users in our palette.
+        Box(
+            modifier = Modifier
+                .size(16.dp)
+                .border(1.5.dp, if (selected && enabled) colors.accent else colors.borderSubtle, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (selected && enabled) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .background(colors.accent, CircleShape),
+                )
+            }
+        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = labelColor,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f),
+        )
+        if (trailingNote != null) {
+            Text(
+                text = trailingNote,
+                style = MaterialTheme.typography.labelSmall,
+                color = noteColor,
+            )
+        }
+    }
+}
+
+/**
+ * Premium info card for the MPV Labs engine. Replaces the old playback
+ * overlay/warning that used to ride along during playback — the user
+ * only sees this when they explicitly inspect Settings.
+ */
+@Composable
+private fun MpvLabsInfoCard(
+    snapshot: com.torve.desktop.playback.MpvLabsStatus.Snapshot,
+    onOpenSetupGuide: () -> Unit,
+    onRecheck: () -> Unit,
+) {
+    val colors = TorveDesktopThemeTokens.colors
+    val unavailable = snapshot.state == com.torve.desktop.playback.MpvLabsStatus.State.UNAVAILABLE
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.cardSurface, RoundedCornerShape(12.dp))
+            .border(1.dp, colors.borderSubtle, RoundedCornerShape(12.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = snapshot.title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.textPrimary,
+                modifier = Modifier.weight(1f),
+            )
+            // Neutral pill — explicitly NOT yellow/warning. Premium
+            // visual hierarchy: state is information, not alarm.
+            TorveBadge(
+                text = snapshot.stateLabel,
+                tone = if (unavailable) TorveBadgeTone.Neutral else TorveBadgeTone.Success,
+            )
+        }
+        Text(
+            text = snapshot.description,
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.textSecondary,
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TorveGhostButton(
+                text = "Setup guide",
+                onClick = onOpenSetupGuide,
+            )
+            TorveGhostButton(
+                text = "Re-check",
+                onClick = onRecheck,
+            )
+        }
+    }
+}
+
+/**
+ * Modal containing actionable MPV Labs setup instructions. Pulls
+ * search-path diagnostics from [MpvLabsStatus.setupGuideBody] so the
+ * user sees exactly where Torve looked.
+ */
+@Composable
+private fun MpvLabsSetupGuideDialog(
+    snapshot: com.torve.desktop.playback.MpvLabsStatus.Snapshot,
+    onDismiss: () -> Unit,
+) {
+    val colors = TorveDesktopThemeTokens.colors
+    val body = remember(snapshot) {
+        com.torve.desktop.playback.MpvLabsStatus.setupGuideBody(snapshot)
+    }
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = colors.cardSurface,
+            modifier = Modifier
+                .widthIn(min = 480.dp, max = 720.dp)
+                .padding(8.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "MPV Labs setup guide",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = colors.textPrimary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TorveGhostButton(text = "Close", onClick = onDismiss)
+                }
+                // Plain-text scrollable body — preserves whitespace from
+                // the helper so the path list reads correctly.
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 360.dp)
+                        .verticalScroll(rememberScrollState())
+                        .background(colors.fieldSurface, RoundedCornerShape(8.dp))
+                        .padding(12.dp),
+                ) {
+                    Text(
+                        text = body,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.textPrimary,
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TorveGhostButton(
+                        text = "Open mpv.io",
+                        onClick = {
+                            runCatching {
+                                java.awt.Desktop.getDesktop().browse(java.net.URI("https://mpv.io"))
+                            }
+                        },
+                    )
+                }
+            }
         }
     }
 }

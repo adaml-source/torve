@@ -145,8 +145,8 @@ fun providerSettingsRouteFor(category: ProviderHealthCategory): String? = when (
     ProviderHealthCategory.USENET_INDEXER,
     ProviderHealthCategory.USENET_PROVIDER,
     ProviderHealthCategory.DOWNLOAD_CLIENT -> "manage_panda"
-    ProviderHealthCategory.IPTV -> "streaming_services_settings"
+    ProviderHealthCategory.IPTV -> "settings"
     ProviderHealthCategory.ADDON -> "addon_catalog"
-    ProviderHealthCategory.EPG -> "streaming_services_settings"
+    ProviderHealthCategory.EPG -> "settings"
     ProviderHealthCategory.PLAYBACK -> null
 }

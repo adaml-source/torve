@@ -461,8 +461,16 @@ private fun bootstrapDesktop(): BootstrapState {
                 .getOrDefault(com.torve.desktop.playback.DesktopPlayerMode.VLC)
             val (engine, actualMode) = com.torve.desktop.playback.createPlaybackEngineWithFallback(preferredMode)
             println("Torve desktop player mode: requested=$preferredMode, actual=$actualMode")
+            if (preferredMode != actualMode && actualMode == com.torve.desktop.playback.DesktopPlayerMode.VLC) {
+                // MPV is an advanced/lab engine. If it is not available, normalize the
+                // persisted preference back to the release-safe embedded VLC path so users
+                // are not shown a warning on every launch.
+                runCatching {
+                    com.torve.desktop.playback.PlayerModePreferences.write(actualMode)
+                }
+            }
             com.torve.desktop.playback.PlayerEngineStartup.record(
-                requested = preferredMode,
+                requested = actualMode,
                 actual = actualMode,
             )
             engine to actualMode

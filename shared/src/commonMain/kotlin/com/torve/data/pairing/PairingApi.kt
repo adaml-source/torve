@@ -71,6 +71,84 @@ class PairingApi(
         return json.decodeFromString(PairingCodeDto.serializer(), raw)
     }
 
+    /**
+     * Anonymous code creation for the TV-sign-in-via-phone flow. Distinct
+     * route from [createPairingCode] — `/pairing/signin/code` issues codes
+     * from a separate `pairing_signin_codes` table and requires no bearer
+     * auth (the TV is signed out by definition). The legacy
+     * `/pairing/code` is the premium-gated phone↔TV remote-control flow.
+     */
+    suspend fun createSigninCode(device: DeviceRegistrationDto): PairingCodeDto {
+        val url = "${baseUrl()}/pairing/signin/code"
+        val response = httpClient.post(url) {
+            setBody(device)
+        }
+        val raw = response.bodyAsText()
+        if (!response.status.isSuccess()) {
+            val detail = parseErrorDetail(raw)
+            if (response.status.value == 404 && detail == null) {
+                throw PairingUnsupportedException("TV sign-in is not available on this server.")
+            }
+            throw IllegalStateException(detail ?: "Pairing signin code failed (${response.status.value}): $raw")
+        }
+        return json.decodeFromString(PairingCodeDto.serializer(), raw)
+    }
+
+    /**
+     * Anonymous status poll for the TV-sign-in-via-phone flow. Returns
+     * tokens on the first claimed-poll matching the same `installationId`
+     * that created the code; subsequent polls return `expired`. A 404
+     * means the code never existed, expired, or the installationId
+     * doesn't match — all of which the TV should treat as expired so it
+     * restarts cleanly.
+     */
+    suspend fun pollSigninStatus(
+        code: String,
+        installationId: String,
+    ): PairingStatusDto {
+        val response = httpClient.post("${baseUrl()}/pairing/signin/status") {
+            setBody(PairingStatusRequestDto(code = code, installationId = installationId))
+        }
+        val raw = response.bodyAsText()
+        if (!response.status.isSuccess()) {
+            val detail = parseErrorDetail(raw)
+            if (response.status.value == 404) {
+                return PairingStatusDto(status = "expired")
+            }
+            throw IllegalStateException(detail ?: "Pairing signin status failed (${response.status.value}): $raw")
+        }
+        return json.decodeFromString(PairingStatusDto.serializer(), raw)
+    }
+
+    /**
+     * Phone-side claim of a TV-sign-in code. The phone is signed in;
+     * backend mints a fresh access+refresh pair for the phone's user,
+     * stores them on the row, and the TV's next status poll receives
+     * them. May return 409 with the standard DeviceLimitError body when
+     * the phone's account is at its device cap — the caller MUST surface
+     * this to the user as "you've reached your device limit, free a
+     * slot first" so they can resolve it the same way as a regular login
+     * that hits the cap.
+     */
+    suspend fun claimSigninCode(accessToken: String, code: String): PairingStatusDto {
+        val response = httpClient.post("${baseUrl()}/pairing/signin/claim") {
+            bearerAuth(accessToken)
+            setBody(PairingSigninClaimDto(code = code))
+        }
+        val raw = response.bodyAsText()
+        if (!response.status.isSuccess()) {
+            val detail = parseErrorDetail(raw)
+            if (response.status.value == 409) {
+                throw PairingDeviceLimitException(detail ?: "Device limit reached.")
+            }
+            if (response.status.value == 404 && detail == null) {
+                throw PairingUnsupportedException("TV sign-in is not available on this server.")
+            }
+            throw IllegalStateException(detail ?: "Pairing signin claim failed (${response.status.value}): $raw")
+        }
+        return json.decodeFromString(PairingStatusDto.serializer(), raw)
+    }
+
     suspend fun claimPairingCode(accessToken: String, code: String, device: DeviceRegistrationDto? = null): PairingStatusDto {
         val response = httpClient.post("${baseUrl()}/pairing/claim") {
             bearerAuth(accessToken)
@@ -104,6 +182,51 @@ class PairingApi(
         }
         if (!response.status.isSuccess()) {
             throw IllegalStateException(parseErrorDetail(raw) ?: "Failed to revoke pairing (${response.status.value})")
+        }
+        return json.decodeFromString(PairingStatusDto.serializer(), raw)
+    }
+
+    /**
+     * Poll the backend for a pairing code's status — used by a
+     * signed-OUT device (typically a TV) that just generated a code via
+     * [createPairingCode] and is waiting for a signed-IN device (phone)
+     * to claim it. Returns:
+     *
+     *   - status == "pending" — nobody has claimed yet, keep polling.
+     *   - status == "claimed" with tokens populated — first-time observer
+     *     of a successful claim. The caller MUST persist these tokens
+     *     (via [com.torve.data.auth.AuthClient.signInViaPairing]) before
+     *     polling again, because the backend stamps `consumed_at` and a
+     *     subsequent poll returns claimed-without-tokens.
+     *   - status == "claimed" without tokens — already consumed by an
+     *     earlier observer; should never normally happen for the same
+     *     poller, but if it does the caller has nothing to act on.
+     *   - status == "expired" — code TTL ran out, ask user to restart.
+     *
+     * No bearer auth is sent — pairing/status is the unauthenticated
+     * polling endpoint that's the whole point of the QR-sign-in flow
+     * (the TV doesn't have a token yet by definition).
+     */
+    suspend fun pollPairingStatus(
+        code: String,
+        installationId: String,
+    ): PairingStatusDto {
+        val response = httpClient.post("${baseUrl()}/pairing/status") {
+            setBody(PairingStatusRequestDto(code = code, installationId = installationId))
+        }
+        val raw = response.bodyAsText()
+        if (!response.status.isSuccess()) {
+            val detail = parseErrorDetail(raw)
+            if (response.status.value == 404 && detail == null) {
+                throw PairingUnsupportedException("Pairing status polling is not available on this server.")
+            }
+            // 404 with a "not found" detail is a normal "code expired or
+            // never existed" outcome — surface as expired so the caller
+            // can restart cleanly.
+            if (response.status.value == 404) {
+                return PairingStatusDto(status = "expired")
+            }
+            throw IllegalStateException(detail ?: "Pairing status failed (${response.status.value}): $raw")
         }
         return json.decodeFromString(PairingStatusDto.serializer(), raw)
     }
@@ -215,6 +338,54 @@ data class PairedDeviceDto(
 @Serializable
 data class PairingStatusDto(
     val status: String,
+    /**
+     * Auth tokens for the user that claimed this pairing. Populated by
+     * the backend when [status] == "claimed" and the TV (which created
+     * the code unauthenticated) is polling — this is how a signed-out
+     * device gets its first access/refresh tokens via the QR-sign-in
+     * flow. Null on every other status (pending, expired) and on
+     * server-link replies (the phone-side claim only sees the link
+     * confirmation, not tokens for itself — it's already authed).
+     */
+    val tokens: PairingTokensDto? = null,
+    val user: PairingUserDto? = null,
+    @SerialName("paired_device")
+    val pairedDevice: PairingDeviceDto? = null,
+)
+
+@Serializable
+data class PairingTokensDto(
+    @SerialName("access_token")
+    val accessToken: String,
+    @SerialName("refresh_token")
+    val refreshToken: String,
+    @SerialName("token_type")
+    val tokenType: String = "bearer",
+    @SerialName("expires_in")
+    val expiresIn: Int = 900,
+)
+
+@Serializable
+data class PairingUserDto(
+    val id: String,
+    val email: String,
+    @SerialName("display_name")
+    val displayName: String? = null,
+    @SerialName("is_verified")
+    val isVerified: Boolean = false,
+)
+
+@Serializable
+data class PairingDeviceDto(
+    val id: String = "",
+    val name: String? = null,
+)
+
+@Serializable
+private data class PairingStatusRequestDto(
+    val code: String,
+    @SerialName("installation_id")
+    val installationId: String,
 )
 
 @Serializable
@@ -228,8 +399,20 @@ private data class PairingClaimDto(
 )
 
 @Serializable
+private data class PairingSigninClaimDto(
+    val code: String,
+)
+
+@Serializable
 private data class PairingErrorDto(
     val detail: String? = null,
 )
 
 class PairingUnsupportedException(message: String) : IllegalStateException(message)
+
+/**
+ * Thrown by [PairingApi.claimSigninCode] when the phone's account has
+ * already reached its active-device cap. Caller routes the user to the
+ * same "manage devices" UX as a regular login that hits the cap.
+ */
+class PairingDeviceLimitException(message: String) : IllegalStateException(message)

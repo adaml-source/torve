@@ -4,9 +4,9 @@ Last updated: 2026-04-30
 
 ## Harsh Verdict
 
-Torve is no longer just a powerful enthusiast workstation. After Prompt 12B, it is a credible **desktop + Android public beta code GO**, assuming the dirty worktree is checkpointed and the final artifact sweep is re-run on that release branch. It is still **not stable-market-ready** as a broad consumer AIO product.
+Torve is no longer just a powerful enthusiast workstation. After Prompt 12B, it is a credible **desktop + Android public beta GO**. The Prompt 6-12B work is checkpointed and pushed at `79844ed`, and the host-runnable verification matrix is green by report. It is still **not stable-market-ready** as a broad consumer AIO product.
 
-The old fatal blocker was "desktop violates no further setup because VLC is not staged." That is no longer the right critique. The packaging gate, staging scripts, release-build bypass refusal, installer handoff, and signing docs now exist. The new blocker is release discipline: a clean Windows VM package/install/playback/update smoke with a real VLC runtime has not been completed, and the Prompt 6-12B work is still dirty in git. Until those changes are checkpointed and smoked, the product is beta-code-ready, not release-trustworthy.
+The old fatal blocker was "desktop violates no further setup because VLC is not staged." That is no longer the right critique. The packaging gate, staging scripts, release-build bypass refusal, installer handoff, and signing docs now exist. The new blocker is stable-release proof: a clean Windows VM package/install/playback/update smoke with a real VLC runtime has not been completed. Beta can proceed; stable cannot.
 
 The deeper market risk remains product clarity. Torve now has the technical pieces: credential-first setup, encrypted transfer, provider health, source-aware AI, LAN desktop playback, IPTV DVR, Android TV couch flow, account deletion/export, and telemetry redaction. But a normal user still must understand too many source categories. The winning pitch cannot be "supports everything." The winning pitch must be:
 
@@ -17,7 +17,7 @@ Current readiness:
 | Target | Readiness | Reason |
 | --- | ---: | --- |
 | Closed enthusiast beta | 8/10 | Advanced users will value the depth and tolerate rough edges. |
-| Public desktop + Android beta | 7/10 | Backend blockers are fixed and host-runnable verification is green by report; still needs checkpointed release branch, artifact sweep, and operator smoke. |
+| Public desktop + Android beta | 7.5/10 | Backend blockers are fixed, host-runnable verification is green by report, and the beta checkpoint is pushed. Real-device operator smoke still limits confidence. |
 | Public paid stable launch | 5.5/10 | Still blocked by Windows clean-VM smoke, macOS/iOS validation, legal web mirror, production LAN wrap-key validation, and support burden. |
 | iOS beta | 3/10 | Swift work exists, but this Windows host cannot validate `xcodebuild` or simulator behavior. |
 
@@ -63,8 +63,8 @@ The strongest beta wedge is:
 
 The weakest beta risks are:
 
-- The repo is currently dirty again after Prompt 6-12B work, so the build is not reproducible until checkpointed.
-- Backend is now reported 110/110 after fixing pairing schema drift and the stale-device invariant test; this must be re-run after checkpointing.
+- Beta checkpoint is pushed at `79844ed`, so reproducibility is no longer the immediate blocker.
+- Backend is now reported 110/110 after fixing pairing schema drift and the stale-device invariant test.
 - iOS is unverified on macOS.
 - Windows packaging is still not clean-VM proven.
 - Support burden can easily exceed revenue at low pricing.
@@ -104,7 +104,7 @@ Do not underprice the full AIO power-user bundle. Syncler can sit around $1.25/m
 
 ## What Would Increase Value Most Now
 
-1. Checkpoint the dirty Prompt 6-12B work and re-run the final release-verification matrix on the release branch.
+1. Cut beta artifacts for desktop Windows, Android mobile, and Android TV from `79844ed`.
 2. Run clean Windows VM install/playback/update smoke with real VLC runtime.
 3. Run Android TV real-device couch smoke: setup, receive credentials, provider banner, Home one-OK playback, source picker, LAN playback.
 4. Run live multi-device credential-transfer smoke across desktop, Android mobile, Android TV, and iOS.
@@ -120,7 +120,7 @@ Do not underprice the full AIO power-user bundle. Syncler can sit around $1.25/m
 Torve now has enough technical depth to justify a serious beta. The previous assessment's "4/10 public paid launch" is too harsh for the current code state, but it is still directionally right for stable consumer release. The product is now roughly:
 
 - **8/10 closed enthusiast beta**
-- **7/10 public desktop + Android beta after checkpointed Prompt 12B verification**
+- **7.5/10 public desktop + Android beta after checkpointed Prompt 12B verification**
 - **5.5/10 stable paid consumer launch**
 - **3/10 iOS until macOS verification**
 

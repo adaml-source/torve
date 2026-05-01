@@ -59,6 +59,8 @@ fun SetupIntentHubScreen(
     onOpenUsenetSetup: () -> Unit,
     onUseGuidedWizard: () -> Unit,
     onContinueToApp: () -> Unit,
+    onExit: (() -> Unit)? = null,
+    onSkipToApp: (() -> Unit)? = null,
 ) {
     LaunchedEffect(coordinator) { coordinator.load() }
 
@@ -72,13 +74,21 @@ fun SetupIntentHubScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        if (onExit != null) {
+            TextButton(
+                onClick = onExit,
+                modifier = Modifier.align(Alignment.End),
+            ) {
+                Text("Close setup")
+            }
+        }
         Text(
-            text = "Pick what you'd like to set up.",
+            text = "Set up Torve for watching.",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
         )
         Text(
-            text = "Complete one path or all four — the hub remembers progress between launches.",
+            text = "Start with one source. Panda covers Debrid and Usenet; IPTV is separate for live TV; Plex/Jellyfin connects your existing library.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -116,6 +126,14 @@ fun SetupIntentHubScreen(
                 enabled = summary.canStartWatching,
             ) {
                 Text(if (summary.canStartWatching) "Continue" else "Set up at least one path")
+            }
+        }
+        if (!summary.canStartWatching && onSkipToApp != null) {
+            TextButton(
+                onClick = onSkipToApp,
+                modifier = Modifier.align(Alignment.End),
+            ) {
+                Text("Explore without sources")
             }
         }
     }

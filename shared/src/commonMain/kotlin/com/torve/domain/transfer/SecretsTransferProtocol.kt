@@ -61,12 +61,18 @@ class SecretsTransferProtocol(
          * gate every key through [ConfigKeyAllowlist].
          */
         configEntries: List<ConfigEntry> = emptyList(),
+        /**
+         * IPTV/M3U/Xtream playlists travelling alongside the secret bag.
+         * Each entry contains the credentials directly — they only ever
+         * appear inside the AES-GCM ciphertext.
+         */
+        playlists: List<TransferPlaylistDto> = emptyList(),
     ): SealedSecretsEnvelope {
         require(senderDeviceId.isNotBlank() && senderDeviceId.length <= 128) {
             "senderDeviceId required, ≤ 128 chars"
         }
-        require(secrets.isNotEmpty() || configEntries.isNotEmpty()) {
-            "at least one secret or config entry required"
+        require(secrets.isNotEmpty() || configEntries.isNotEmpty() || playlists.isNotEmpty()) {
+            "at least one secret, config entry, or playlist required"
         }
         require(expiresAtEpochMs > nowMs()) { "envelope already expired" }
 
@@ -87,6 +93,7 @@ class SecretsTransferProtocol(
             categories = categories,
             secrets = secrets,
             configEntries = configEntries,
+            playlists = playlists,
         )
         val plaintext = json.encodeToString(SecretsTransferPayload.serializer(), payload)
             .encodeToByteArray()

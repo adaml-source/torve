@@ -211,10 +211,20 @@ class SecretsTransferReceiverViewModel(
                 )
                 emitRelayUnavailable(result)
             }
-            is TransferRelayResult.ServerError -> {
+            TransferRelayResult.EmailNotVerified -> {
                 updateRelayStatus(
-                    RelayStatus.Unavailable("Relay server error (${result.statusCode}).")
+                    RelayStatus.Unavailable(
+                        "Verify your email address first — we just sent a confirmation link to your inbox. Until then, use the manual paste field below.",
+                    ),
                 )
+                emitRelayUnavailable(result)
+            }
+            is TransferRelayResult.ServerError -> {
+                // Prefer the backend's parsed `detail` over a bare status
+                // code — "(400)" is meaningless to a user.
+                val human = result.detail?.takeIf { it.isNotBlank() }
+                    ?: "Couldn't reach the auto-import service (status ${result.statusCode})."
+                updateRelayStatus(RelayStatus.Unavailable(human))
                 emitRelayUnavailable(result)
             }
         }
@@ -241,38 +251,63 @@ class SecretsTransferReceiverViewModel(
     private fun startRelayPolling(sessionId: String) {
         val api = relayApi ?: return
         pollJob?.cancel()
+        // Diagnostic — every poll outcome goes to logcat under
+        // [TransferPoll] so we can see why a TV receiver "isn't picking
+        // up" without needing remote debug. Strip after the
+        // receive-poll bug is reproduced and root-caused.
+        println("[TransferPoll] start sessionId=$sessionId intervalMs=$pollIntervalMs")
         pollJob = scope.launch {
+            var iteration = 0
             while (isActive) {
                 delay(pollIntervalMs)
-                val active = _state.value as? ReceiverState.Active ?: break
-                if (active.relayStatus !is RelayStatus.Registered) break
+                iteration++
+                val active = _state.value as? ReceiverState.Active ?: run {
+                    println("[TransferPoll] halt iter=$iteration reason=state_not_active")
+                    break
+                }
+                if (active.relayStatus !is RelayStatus.Registered) {
+                    println("[TransferPoll] halt iter=$iteration reason=relayStatus_not_registered current=${active.relayStatus::class.simpleName}")
+                    break
+                }
                 val token = runCatching { accessTokenProvider?.invoke() }.getOrNull()
                 if (token.isNullOrBlank()) {
+                    println("[TransferPoll] halt iter=$iteration reason=auth_lost")
                     updateRelayStatus(RelayStatus.Unavailable("Auth lost while polling."))
                     break
                 }
                 val poll = api.getSession(token, sessionId)
                 if (poll is TransferRelayResult.Success) {
                     val dto = poll.value
+                    println("[TransferPoll] iter=$iteration result=success state=${dto.state} delivered=${dto.isDelivered} expired=${dto.isExpired} consumed=${dto.isConsumed} envelopePresent=${dto.envelope != null}")
                     if (dto.isDelivered) {
                         val envelope = dto.envelope
                         if (envelope != null) {
+                            println("[TransferPoll] applying envelope")
                             applyRelayEnvelope(envelope, sessionId, token)
+                        } else {
+                            println("[TransferPoll] delivered but envelope null — backend bug?")
                         }
                         break
                     }
-                    if (dto.isExpired || dto.isConsumed) break
+                    if (dto.isExpired || dto.isConsumed) {
+                        println("[TransferPoll] halt iter=$iteration reason=session_terminal")
+                        break
+                    }
                     // pending → keep polling
                 } else if (poll is TransferRelayResult.Unavailable
                     || poll is TransferRelayResult.NotFound
                     || poll is TransferRelayResult.Unauthorized
                     || poll is TransferRelayResult.Forbidden) {
+                    println("[TransferPoll] halt iter=$iteration reason=fatal_${poll::class.simpleName}")
                     // Don't hammer the backend if we know it's never going to answer.
                     updateRelayStatus(RelayStatus.Unavailable("Polling halted: ${poll::class.simpleName}"))
                     break
+                } else {
+                    println("[TransferPoll] iter=$iteration result=transient_${poll::class.simpleName} — retry")
                 }
                 // NetworkError/ServerError → keep retrying until expiry.
             }
+            println("[TransferPoll] end iterations=$iteration")
         }
     }
 

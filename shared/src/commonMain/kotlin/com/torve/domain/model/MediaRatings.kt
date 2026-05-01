@@ -86,14 +86,23 @@ fun deriveProvidersToRender(
     enabledProviders: List<RatingSource>,
     providerOrder: List<RatingSource>,
     maxRatingsOnCard: Int,
+    fallbackToTmdbWhenNoneSelected: Boolean = true,
 ): List<RatingSource> {
     if (maxRatingsOnCard <= 0) return emptyList()
-    return providerOrder
-        .filter { enabledProviders.contains(it) }
+    val providers = if (enabledProviders.isEmpty() && fallbackToTmdbWhenNoneSelected) {
+        listOf(RatingSource.TMDB)
+    } else {
+        enabledProviders
+    }
+    return (providerOrder + RatingSource.entries).distinct()
+        .filter { providers.contains(it) }
         .take(maxRatingsOnCard)
 }
 
 fun RatingPillPosition.isOutside(): Boolean = this == RatingPillPosition.OUTSIDE
+
+fun RatingDisplayPrefs.allowsTmdbRatingProvider(): Boolean =
+    enabledProviders.isEmpty() || RatingSource.TMDB in enabledProviders
 
 fun defaultTorveWeights(): Map<RatingSource, Int> = mapOf(
     RatingSource.IMDB to 35,
@@ -119,7 +128,12 @@ fun MediaRatings.hasAnyEnabledDisplayValue(
     prefs: RatingDisplayPrefs,
     includeTorve: Boolean = false,
 ): Boolean {
-    return prefs.enabledProviders.any { source ->
+    val providers = if (prefs.enabledProviders.isEmpty()) {
+        listOf(RatingSource.TMDB)
+    } else {
+        prefs.enabledProviders
+    }
+    return providers.any { source ->
         when {
             source == RatingSource.TORVE -> includeTorve && calculateTorveScore(this, prefs.torveWeights) != null
             else -> hasValueFor(source)

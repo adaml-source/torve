@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
@@ -15,22 +16,27 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.torve.desktop.ui.components.TorveBanner
 import com.torve.desktop.ui.components.TorveBannerTone
+import com.torve.desktop.ui.components.TorveGhostButton
 import com.torve.desktop.ui.components.TorvePrimaryButton
 import com.torve.desktop.ui.components.TorveSectionCard
 import com.torve.desktop.ui.components.TorveTextField
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
-import com.torve.domain.transfer.SecretCategory
 import com.torve.presentation.transfer.RelayDeliveryState
 import com.torve.presentation.transfer.SecretsTransferSenderViewModel
 import com.torve.presentation.transfer.SenderStatus
 import com.torve.presentation.transfer.TransferCategorySpec
+import com.torve.presentation.transfer.TransferCopy
 import com.torve.presentation.transfer.TransferSecretCatalog
 import kotlinx.coroutines.launch
 
@@ -41,44 +47,87 @@ fun SecretsTransferSendScreen(
     val state by viewModel.state.collectAsState()
     val scope = rememberCoroutineScope()
     val status = state.status
+    val colors = TorveDesktopThemeTokens.colors
+
+    // Disclosures default to collapsed — the spec calls for reduced
+    // visual noise and a clear three-step main flow. Power users can
+    // open the privacy explainer + the category list inline.
+    var privacyOpen by remember { mutableStateOf(false) }
+    var categoriesOpen by remember { mutableStateOf(false) }
 
     TorveSectionCard(
         title = "Send credentials to another device",
-        supportingText = "Paste the receiver code from the other Torve device, choose what to include, " +
-            "then generate a sealed code for the receiver to import.",
+        supportingText = "Sending starts on the device you want to set up. " +
+            "Open Receive credentials there first to get a code.",
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            TorveBanner(
-                title = "End-to-end encrypted",
-                description = "Credentials are sealed with a one-time key derived from the receiver's " +
-                    "code. The Torve backend only forwards the envelope — it can't read the contents. " +
-                    "Manual paste is the same sealed envelope shown as text.",
-                tone = TorveBannerTone.Info,
+            // ── Step 1: get the receiver code ──
+            StepHeader(text = TransferCopy.SEND_STEP1_HEADER)
+            Text(
+                text = TransferCopy.SEND_STEP1_EXPLAINER,
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textSecondary,
             )
             TorveTextField(
                 value = state.receiverSessionString,
                 onValueChange = viewModel::updateReceiverSessionString,
-                label = "Receiver session string",
+                label = TransferCopy.SEND_RECEIVER_FIELD_LABEL,
                 singleLine = false,
-                placeholder = "torve://transfer/receive/...",
+                placeholder = TransferCopy.SEND_RECEIVER_FIELD_PLACEHOLDER,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 92.dp),
             )
+            if (state.receiverSessionString.isBlank()) {
+                Text(
+                    text = TransferCopy.SEND_RECEIVER_EMPTY_HINT,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textMuted,
+                )
+            }
 
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                TransferSecretCatalog.specs.forEach { spec ->
-                    CategoryRow(
-                        spec = spec,
-                        checked = spec.category in state.selectedCategories,
-                        onCheckedChange = { checked ->
-                            viewModel.setCategoryEnabled(spec.category, checked)
-                        },
-                    )
+            // ── Step 2: choose what to send (collapsed by default) ──
+            StepHeader(text = TransferCopy.SEND_STEP2_HEADER)
+            val selectedSummary = remember(state.selectedCategories) {
+                if (state.selectedCategories.isEmpty()) {
+                    "Nothing selected — tap to choose categories."
+                } else {
+                    state.selectedCategories.joinToString { TransferSecretCatalog.titleFor(it) }
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = selectedSummary,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textSecondary,
+                    modifier = Modifier.weight(1f),
+                )
+                TorveGhostButton(
+                    text = if (categoriesOpen) "Hide categories" else "Choose categories",
+                    onClick = { categoriesOpen = !categoriesOpen },
+                )
+            }
+            if (categoriesOpen) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TransferSecretCatalog.specs.forEach { spec ->
+                        CategoryRow(
+                            spec = spec,
+                            checked = spec.category in state.selectedCategories,
+                            onCheckedChange = { checked ->
+                                viewModel.setCategoryEnabled(spec.category, checked)
+                            },
+                        )
+                    }
                 }
             }
 
+            // ── Step 3: generate ──
+            StepHeader(text = TransferCopy.SEND_STEP3_HEADER)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
@@ -105,8 +154,37 @@ fun SecretsTransferSendScreen(
                 )
                 is SenderStatus.Ready -> SenderEnvelopeOutput(status)
             }
+
+            // ── Privacy disclosure (collapsed by default) ──
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TorveGhostButton(
+                    text = if (privacyOpen) "Hide" else TransferCopy.SEND_PRIVACY_DISCLOSURE_HEADER,
+                    onClick = { privacyOpen = !privacyOpen },
+                )
+            }
+            if (privacyOpen) {
+                Text(
+                    text = TransferCopy.SEND_PRIVACY_DISCLOSURE_BODY,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textSecondary,
+                )
+            }
         }
     }
+}
+
+@Composable
+private fun StepHeader(text: String) {
+    val colors = TorveDesktopThemeTokens.colors
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.SemiBold,
+        color = colors.textPrimary,
+    )
 }
 
 @Composable
@@ -119,7 +197,7 @@ private fun CategoryRow(
     Surface(
         color = colors.cardSurface,
         border = BorderStroke(1.dp, colors.borderSubtle),
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(10.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
@@ -177,7 +255,7 @@ private fun SenderEnvelopeOutput(status: SenderStatus.Ready) {
                     append(". No local credentials found for: ")
                     append(missing)
                 }
-                append(". Paste the sealed code into the receiver.")
+                append(".")
             },
             tone = TorveBannerTone.Success,
         )
@@ -193,19 +271,33 @@ private fun SenderEnvelopeOutput(status: SenderStatus.Ready) {
 
         RelayDeliveryBanner(status.relayDelivery)
 
-        SelectionContainer {
-            Surface(
-                color = colors.cardSurface,
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, colors.borderSubtle),
-                modifier = Modifier.fillMaxWidth().heightIn(min = 130.dp),
-            ) {
-                Text(
-                    text = status.envelopeJson,
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    color = colors.textPrimary,
-                    modifier = Modifier.padding(12.dp),
-                )
+        // Manual sealed-code paste fallback — moved into a collapsed
+        // Advanced disclosure per the new flow. Still reachable.
+        var advancedOpen by remember { mutableStateOf(false) }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TorveGhostButton(
+                text = if (advancedOpen) "Hide sealed code" else TransferCopy.SEND_ADVANCED_HEADER,
+                onClick = { advancedOpen = !advancedOpen },
+            )
+        }
+        if (advancedOpen) {
+            SelectionContainer {
+                Surface(
+                    color = colors.cardSurface,
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, colors.borderSubtle),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 130.dp),
+                ) {
+                    Text(
+                        text = status.envelopeJson,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        color = colors.textPrimary,
+                        modifier = Modifier.padding(12.dp),
+                    )
+                }
             }
         }
     }
@@ -221,18 +313,18 @@ private fun RelayDeliveryBanner(state: RelayDeliveryState) {
         }
         RelayDeliveryState.Posting -> TorveBanner(
             title = "Delivering through relay…",
-            description = "Posting the sealed envelope to the Torve backend so the receiver " +
+            description = "Posting the encrypted bundle to the Torve backend so the receiver " +
                 "can pull it automatically.",
             tone = TorveBannerTone.Info,
         )
         RelayDeliveryState.Delivered -> TorveBanner(
             title = "Delivered to the receiver",
-            description = "The sealed envelope is on the relay; the receiver will import on " +
+            description = "The encrypted bundle is on the relay; the receiver will import on " +
                 "its next poll. You can close this surface.",
             tone = TorveBannerTone.Success,
         )
         is RelayDeliveryState.Failed -> TorveBanner(
-            title = "Relay delivery failed",
+            title = TransferCopy.SEND_RELAY_UNAVAILABLE,
             description = state.reason,
             tone = TorveBannerTone.Warning,
         )

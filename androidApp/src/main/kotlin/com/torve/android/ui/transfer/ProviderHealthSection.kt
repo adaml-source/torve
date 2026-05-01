@@ -13,21 +13,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.torve.domain.providerhealth.ProviderHealthEntry
+import com.torve.domain.providerhealth.ProviderHealthStatus
 import com.torve.presentation.providerhealth.ProviderHealthCoordinator
 import org.koin.compose.koinInject
 
 /**
- * Provider-health rows section for Android mobile Settings.
+ * Needs-attention rows for Android mobile Settings.
  *
- * Renders nothing when [ProviderHealthCoordinator.entries] is empty —
- * Android currently registers no checkers (desktop has its own
- * `DesktopProviderHealthInit`; an `AndroidProviderHealthInit` is the
- * one piece of follow-up work for parity). Until that exists, the
- * recovery card and Transfer entry points carry the UX. As soon as
- * any checker is registered (e.g. when an Android init equivalent
- * lands), this section starts rendering rows automatically.
- *
- * No fake green/red is displayed when the coordinator has no data.
+ * This is intentionally not a second configuration catalog. Settings
+ * already has durable places to configure Debrid, IPTV, Plex, Trakt,
+ * SIMKL, addons, and Panda. The top health area only surfaces
+ * configured functionality that currently needs action.
  */
 @Composable
 fun ProviderHealthSection(
@@ -38,9 +34,13 @@ fun ProviderHealthSection(
     modifier: Modifier = Modifier,
 ) {
     val entries by coordinator.entries.collectAsState()
-    if (entries.isEmpty()) return
+    val attentionEntries = entries.filter { entry ->
+        entry.status == ProviderHealthStatus.RED ||
+            entry.status == ProviderHealthStatus.YELLOW
+    }
+    if (attentionEntries.isEmpty()) return
 
-    val sorted = entries.sortedWith(
+    val sorted = attentionEntries.sortedWith(
         compareBy({ it.category.ordinal }, { it.label }),
     )
     Column(
@@ -48,7 +48,7 @@ fun ProviderHealthSection(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
-            text = "Provider health",
+            text = "Needs attention",
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold,
         )

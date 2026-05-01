@@ -131,6 +131,17 @@ internal fun TvNavHost(
             )
         }
 
+        composable("pairing_signin_tv") {
+            com.torve.android.tv.screens.TvPairingSignInScreen(
+                onBack = { navController.popBackStack() },
+                onSignedIn = {
+                    // Pop the sign-in flow; the rest of the TV nav will
+                    // pick up the signed-in user via authUserFlow.
+                    navController.popBackStack()
+                },
+            )
+        }
+
         composable(
             route = TvRoutes.SEE_ALL,
             arguments = listOf(

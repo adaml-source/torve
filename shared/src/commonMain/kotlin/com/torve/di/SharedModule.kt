@@ -354,6 +354,12 @@ val sharedModule = module {
     // Sync Repository
     single<SyncRepository> { SyncRepositoryImpl(get(), get(), get(), get()) }
     single { PairingApi(get(), baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL }) }
+    factory {
+        com.torve.presentation.pairing.TvPairingSignInViewModel(
+            pairingApi = get(),
+            authClient = get(),
+        )
+    }
     single { AccountSessionCoordinator(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
 
     // Provider-health primitives. Repository hydrates from prefs on first
@@ -491,6 +497,7 @@ val sharedModule = module {
             nonceStore = get(),
             prefsRepo = get(),
             configKeyAllowlist = get(),
+            channelRepo = get(),
         )
     }
     // Phase 3 — backend relay client for credential transfer. Binding
@@ -537,6 +544,7 @@ val sharedModule = module {
             telemetry = get(),
             attemptTracker = get(),
             platform = platformTag,
+            channelRepo = get(),
         )
     }
     factory {

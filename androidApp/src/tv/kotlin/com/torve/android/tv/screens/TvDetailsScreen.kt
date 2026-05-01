@@ -76,7 +76,9 @@ import com.torve.android.ui.detail.StreamExperienceBadges
 import com.torve.android.ui.detail.StreamReadinessLabel
 import com.torve.android.ui.detail.groupPlaybackOptionStreams
 import com.torve.android.ui.detail.streamUiKey
+import com.torve.android.ui.components.getRatingValue
 import com.torve.android.ui.components.mediaItemLazyKey
+import com.torve.android.ui.components.ratingSourceIconRes
 import com.torve.android.ui.theme.*
 import com.torve.android.player.DeviceCodecProbe
 import com.torve.android.tv.NotificationType
@@ -99,6 +101,11 @@ import com.torve.domain.model.Download
 import com.torve.domain.model.DownloadStatus
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
+import com.torve.domain.model.RatingSource
+import com.torve.domain.model.allowsTmdbRatingProvider
+import com.torve.domain.model.deriveProvidersToRender
+import com.torve.domain.model.hasAnyEnabledDisplayValue
+import com.torve.domain.model.withFallbackTmdbScore
 import com.torve.android.tv.components.TvSourcePickerSheet
 import com.torve.domain.lanlibrary.NetworkMode
 import com.torve.domain.lanlibrary.PlaybackRoute
@@ -476,7 +483,7 @@ fun TvDetailsScreen(
                         )
                         val metadata = buildString {
                             item.year?.let { append(it) }
-                            if (item.rating != null) {
+                            if (item.rating != null && settingsState.ratingPrefs.allowsTmdbRatingProvider()) {
                                 if (isNotBlank()) append("  ")
                                 append(String.format("%.1f", item.rating))
                             }
@@ -719,57 +726,36 @@ fun TvDetailsScreen(
 
             // ── Multi-source ratings ──
             val ratingPrefs = settingsState.ratingPrefs
-            if (item.ratings != null && ratingPrefs.showRatingsOnDetailPage) {
+            val detailRatings = item.ratings.withFallbackTmdbScore(item.rating)
+            if (detailRatings != null &&
+                ratingPrefs.showRatingsOnDetailPage &&
+                detailRatings.hasAnyEnabledDisplayValue(ratingPrefs)
+            ) {
                 item(key = "ratings") {
-                    val r = item.ratings!!
-                    val enabled = ratingPrefs.enabledProviders.toSet()
+                    val selectedProviders = ratingPrefs.enabledProviders.filterNot { it == RatingSource.TORVE }
+                    val providers = deriveProvidersToRender(
+                        enabledProviders = selectedProviders,
+                        providerOrder = ratingPrefs.providerOrder,
+                        maxRatingsOnCard = selectedProviders.size.coerceAtLeast(1),
+                        fallbackToTmdbWhenNoneSelected = ratingPrefs.enabledProviders.isEmpty(),
+                    )
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.padding(bottom = 14.dp),
                     ) {
-                        for (source in ratingPrefs.providerOrder) {
-                            if (source !in enabled) continue
-                            when (source) {
-                                com.torve.domain.model.RatingSource.IMDB -> r.imdbScore?.let { score ->
-                                    TvRatingChip(label = "IMDb", value = "%.1f".format(score), iconRes = R.drawable.ic_rating_imdb)
-                                }
-                                com.torve.domain.model.RatingSource.ROTTEN_TOMATOES -> r.rottenTomatoesScore?.let { score ->
-                                    val rtIcon = when {
-                                        score >= 75 -> R.drawable.ic_rt_certified_fresh
-                                        score >= 60 -> R.drawable.ic_rt_fresh
-                                        else -> R.drawable.ic_rt_rotten
-                                    }
-                                    TvRatingChip(label = "RT", value = "${score}%", iconRes = rtIcon)
-                                }
-                                com.torve.domain.model.RatingSource.TMDB -> r.tmdbScore?.let { score ->
-                                    TvRatingChip(label = "TMDB", value = "%.1f".format(score), iconRes = R.drawable.tmbd_logo)
-                                }
-                                com.torve.domain.model.RatingSource.METACRITIC -> r.metacriticScore?.let { score ->
-                                    TvRatingChip(label = "MC", value = "$score", iconRes = R.drawable.ic_rating_metacritic)
-                                }
-                                com.torve.domain.model.RatingSource.TRAKT -> r.traktScore?.let { score ->
-                                    TvRatingChip(label = "Trakt", value = "%.0f".format(score), iconRes = R.drawable.ic_rating_trakt)
-                                }
-                                com.torve.domain.model.RatingSource.LETTERBOXD -> r.letterboxdScore?.let { score ->
-                                    TvRatingChip(label = "LB", value = "%.1f".format(score), iconRes = R.drawable.ic_rating_letterboxd)
-                                }
-                                com.torve.domain.model.RatingSource.RT_AUDIENCE -> r.rtAudienceScore?.let { score ->
-                                    TvRatingChip(label = "RT Aud", value = "${score}%", iconRes = R.drawable.ic_rt_fresh)
-                                }
-                                com.torve.domain.model.RatingSource.MDBLIST -> r.mdblistScore?.let { score ->
-                                    TvRatingChip(label = "MDB", value = "%.1f".format(score), iconRes = R.drawable.ic_rating_mdblist)
-                                }
-                                com.torve.domain.model.RatingSource.MAL -> r.malScore?.let { score ->
-                                    TvRatingChip(label = "MAL", value = "%.1f".format(score), iconRes = R.drawable.ic_rating_mal)
-                                }
-                                else -> Unit
-                            }
+                        for (source in providers) {
+                            val value = getRatingValue(source, detailRatings, ratingPrefs) ?: continue
+                            TvRatingChip(
+                                label = source.displayName,
+                                value = value,
+                                iconRes = ratingSourceIconRes(source, detailRatings),
+                            )
                         }
                     }
                 }
                 item(key = "ratings_attribution") {
                     DetailRatingsAttribution(
-                        ratings = item.ratings!!,
+                        ratings = detailRatings,
                         prefs = ratingPrefs,
                         modifier = Modifier.padding(bottom = 14.dp),
                     )

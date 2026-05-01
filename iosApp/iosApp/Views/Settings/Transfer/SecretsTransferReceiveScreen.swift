@@ -46,12 +46,13 @@ struct SecretsTransferReceiveScreen: View {
 
     @ViewBuilder
     private func activeBlock(_ active: ReceiverState.Active) -> some View {
+        let copy = TransferCopy.shared
         Section {
-            Text("Open Send credentials on the other Torve device, then scan this QR or paste the code into its session string field.")
+            // Phone receiver shows the desktop-style explainer (the
+            // sender will be a desktop most of the time on iOS).
+            Text(copy.rECEIVE_PRIMARY_EXPLAINER_DESKTOP)
                 .font(.subheadline)
                 .foregroundColor(.secondary)
-            TransferBanner(.info, "End-to-end encrypted",
-                           "The QR holds your device's one-time public key — it's safe to share with the other Torve device. The sealed envelope you'll receive can only be opened on this device. The Torve backend never sees credentials in the clear.")
         }
 
         Section {
@@ -66,23 +67,24 @@ struct SecretsTransferReceiveScreen: View {
 
         Section { relayBanner(active.relayStatus) }
 
-        Section(header: Text("Session string")) {
+        // Receiver code (formerly "Session string") — the short
+        // human-typeable handle the sender pastes if they can't scan.
+        Section(header: Text(copy.rECEIVE_SHORT_CODE_LABEL)) {
             Text(active.sessionString)
                 .font(.system(.caption, design: .monospaced))
                 .textSelection(.enabled)
                 .lineLimit(6)
-            Button("Copy session string") {
+            Button("Copy receiver code") {
                 UIPasteboard.general.string = active.sessionString
             }
         }
 
-        // Manual paste fallback. Hidden behind an "Advanced" toggle once
-        // the relay says auto-import is on; always reachable so a relay
-        // outage never leaves the user stuck.
+        // Manual sealed-code paste fallback — Advanced disclosure.
+        // Always reachable, never the primary mental model.
         let relayRegistered = active.relayStatus is RelayStatus.Registered
         Section {
             if relayRegistered {
-                Button(advancedOpen ? "Hide manual paste" : "Advanced: paste sealed code manually") {
+                Button(advancedOpen ? "Hide manual paste" : copy.rECEIVE_ADVANCED_HEADER) {
                     advancedOpen.toggle()
                     if !advancedOpen { pasteInput = "" }
                 }
@@ -167,10 +169,10 @@ struct SecretsTransferReceiveScreen: View {
             EmptyView()
         case is RelayStatus.Registering:
             TransferBanner(.info, "Setting up auto-import…",
-                           "Asking the Torve backend to forward a sealed envelope to this device.")
+                           "Asking the Torve backend to forward a encrypted bundle to this device.")
         case is RelayStatus.Registered:
             TransferBanner(.success, "Auto-import is on",
-                           "When the sender posts the sealed envelope, this device imports it automatically. Manual paste stays available below.")
+                           "When the sender posts the encrypted bundle, this device imports it automatically. Manual paste stays available below.")
         case let unavailable as RelayStatus.Unavailable:
             TransferBanner(.warning, "Auto-import unavailable",
                            "\(unavailable.reason) Use the paste field below.")

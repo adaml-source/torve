@@ -145,11 +145,27 @@ sealed interface TransferRelayResult<out T> {
     /** Body larger than backend cap (≥ 413). */
     data object PayloadTooLarge : TransferRelayResult<Nothing>
 
+    /**
+     * Backend rejected the request because the caller's account email
+     * isn't verified yet. Distinct from [Forbidden] so the UI can prompt
+     * the user to check their inbox and resend verification, rather than
+     * a generic "rejected" message.
+     */
+    data object EmailNotVerified : TransferRelayResult<Nothing>
+
     /** Network error before any HTTP status was received. */
     data class NetworkError(val message: String) : TransferRelayResult<Nothing>
 
-    /** Any other non-2xx response. */
-    data class ServerError(val statusCode: Int, val message: String) : TransferRelayResult<Nothing>
+    /**
+     * Any other non-2xx response. [detail] is the human-readable string
+     * pulled from the backend's `{"detail": "..."}` body when present —
+     * preferred over [message] (raw body) for UI display.
+     */
+    data class ServerError(
+        val statusCode: Int,
+        val message: String,
+        val detail: String? = null,
+    ) : TransferRelayResult<Nothing>
 }
 
 // ── Ktor implementation ─────────────────────────────────────────
@@ -263,7 +279,13 @@ class KtorTransferRelayApi(
         notFoundIsUnavailable: Boolean,
     ): TransferRelayResult<T> = when {
         status.value == 401 -> TransferRelayResult.Unauthorized
-        status.value == 403 -> TransferRelayResult.Forbidden
+        status.value == 403 -> {
+            // Email-verification gate is sometimes enforced as 403 instead
+            // of 400 depending on backend version — sniff the detail so the
+            // user gets the right "verify your email" message either way.
+            if (looksLikeUnverifiedEmail(bodyText)) TransferRelayResult.EmailNotVerified
+            else TransferRelayResult.Forbidden
+        }
         status.value == 404 ->
             if (notFoundIsUnavailable) TransferRelayResult.Unavailable
             else TransferRelayResult.NotFound
@@ -274,6 +296,45 @@ class KtorTransferRelayApi(
             } else TransferRelayResult.Expired
         }
         status.value == 413 -> TransferRelayResult.PayloadTooLarge
-        else -> TransferRelayResult.ServerError(status.value, bodyText.take(500))
+        status.value == 400 && looksLikeUnverifiedEmail(bodyText) ->
+            TransferRelayResult.EmailNotVerified
+        else -> TransferRelayResult.ServerError(
+            statusCode = status.value,
+            message = bodyText.take(500),
+            detail = parseDetailField(bodyText),
+        )
+    }
+
+    /**
+     * Pull the `detail` string out of a FastAPI-style error body
+     * (`{"detail": "..."}`). Falls back to null when the body isn't JSON
+     * or doesn't have that field — caller decides what to render in
+     * place of a parsed detail.
+     */
+    private fun parseDetailField(bodyText: String): String? {
+        val trimmed = bodyText.trim()
+        if (!trimmed.startsWith("{")) return null
+        return runCatching {
+            val element = json.parseToJsonElement(trimmed)
+            val obj = element as? kotlinx.serialization.json.JsonObject ?: return@runCatching null
+            val prim = obj["detail"] as? kotlinx.serialization.json.JsonPrimitive
+                ?: return@runCatching null
+            if (!prim.isString) null else prim.content.takeIf { it.isNotBlank() }
+        }.getOrNull()
+    }
+
+    /**
+     * True if the response body looks like FastAPI's standard "email
+     * verification required" error. Production back-ends have rotated
+     * between 400 and 403 with various wording; sniff several common
+     * forms rather than pin to one.
+     */
+    private fun looksLikeUnverifiedEmail(bodyText: String): Boolean {
+        val lower = bodyText.lowercase()
+        return lower.contains("email_not_verified") ||
+            lower.contains("email not verified") ||
+            lower.contains("unverified") ||
+            lower.contains("verify your email") ||
+            lower.contains("verify_email")
     }
 }

@@ -2,6 +2,7 @@ package com.torve.android.providerhealth
 
 import com.torve.data.addon.StremioAddonClient
 import com.torve.data.debrid.DebridClient
+import com.torve.data.trakt.auth.TraktTokenStore
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.integrations.LibraryOverlayService
@@ -48,6 +49,7 @@ class AndroidProviderHealthInit(
     private val coordinator: ProviderHealthCoordinator,
     private val debridClient: DebridClient,
     private val secretStore: IntegrationSecretStore,
+    private val traktTokenStore: TraktTokenStore,
     private val prefs: PreferencesRepository,
     private val libraryService: LibraryOverlayService,
     private val addonRepository: AddonRepository,
@@ -133,7 +135,10 @@ class AndroidProviderHealthInit(
         // ── Trakt / SIMKL (token presence) ────────────────────────────
         coordinator.register(
             TraktProviderHealthChecker(
-                tokenSource = { secretStore.get(IntegrationSecretKey.TRAKT_ACCESS_TOKEN) },
+                tokenSource = {
+                    traktTokenStore.accessToken()
+                        ?: secretStore.get(IntegrationSecretKey.TRAKT_ACCESS_TOKEN)
+                },
             ),
         )
         coordinator.register(

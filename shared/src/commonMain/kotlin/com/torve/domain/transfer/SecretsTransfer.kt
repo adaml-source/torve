@@ -60,6 +60,35 @@ data class ConfigEntry(
     val value: String,
 )
 
+/**
+ * One IPTV / Xtream / M3U playlist with its credentials, packed inside a
+ * transfer envelope. Lives outside [SecretRecord] because IPTV
+ * credentials are stored per-row in SQLite (not as enum-keyed singletons
+ * in [com.torve.domain.integrations.IntegrationSecretStore]) — the
+ * shared catalog can't enumerate them, so we ship the playlist rows
+ * themselves alongside the secret bag.
+ *
+ * `password` is plaintext but only ever appears inside the AES-GCM
+ * ciphertext — same protection as every other secret in this protocol.
+ */
+@Serializable
+data class TransferPlaylistDto(
+    val playlistId: String,
+    val name: String,
+    /** "m3u" or "xtream" — matches [com.torve.domain.model.PlaylistType.wireValue]. */
+    val playlistType: String,
+    /** M3U source URL (only when playlistType == "m3u"). */
+    val url: String? = null,
+    /** Optional EPG companion URL for M3U playlists. */
+    val epgUrl: String? = null,
+    /** Xtream server base URL (only when playlistType == "xtream"). */
+    val server: String? = null,
+    /** Xtream username (only when playlistType == "xtream"). */
+    val username: String? = null,
+    /** Xtream password — plaintext inside the sealed envelope. */
+    val password: String? = null,
+)
+
 /** Plaintext payload — what's inside [SealedSecretsEnvelope.ciphertext]. */
 @Serializable
 data class SecretsTransferPayload(
@@ -78,11 +107,20 @@ data class SecretsTransferPayload(
      * Receivers gate every key through [ConfigKeyAllowlist].
      */
     val configEntries: List<ConfigEntry> = emptyList(),
+    /**
+     * IPTV/M3U/Xtream playlists travelling alongside [secrets].
+     * Backwards compatible — pre-IPTV-aware senders emit no entries
+     * and receivers will simply not import any playlists.
+     */
+    val playlists: List<TransferPlaylistDto> = emptyList(),
 ) {
     init {
         require(transferNonce.isNotBlank()) { "transferNonce required" }
         require(secrets.all { it.key.isNotBlank() }) { "secret keys must be non-blank" }
         require(configEntries.all { it.key.isNotBlank() }) { "config keys must be non-blank" }
+        require(playlists.all { it.playlistId.isNotBlank() && it.name.isNotBlank() }) {
+            "playlist id and name must be non-blank"
+        }
     }
 }
 

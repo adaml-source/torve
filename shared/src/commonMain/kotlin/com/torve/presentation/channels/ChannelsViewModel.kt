@@ -1839,6 +1839,13 @@ class ChannelsViewModel(
         )
 
         _state.update { current ->
+            // Belt-and-braces: a successful applyLoadedPlaylist with a
+            // non-empty `enriched` list proves the playlist parsed and
+            // populated. Clear any stale `error` flag set by an
+            // earlier transient failure so other UI surfaces (Settings
+            // → Sources, provider-health rows, banners) don't keep
+            // reporting "load failed" against a working catalogue.
+            val clearedError = if (enriched.isNotEmpty()) null else current.error
             current.copy(
                 selectedPlaylistId = playlistId,
                 channels = enriched,
@@ -1849,6 +1856,7 @@ class ChannelsViewModel(
                 availableCountries = prep.countries,
                 guideError = guideErrorOverride ?: current.guideError,
                 epgState = epgStateOverride ?: current.epgState,
+                error = clearedError,
             )
         }
 

@@ -1133,7 +1133,24 @@ fun V2App(
                                 onApplyFilter = { searchViewModel.applyFilter(searchState.filter.copy(mediaType = it)) },
                                 onPlay = { launchPlayback(it, controllerKey = DesktopDetailControllerKey.SEARCH) },
                                 onOpenDetail = { openFullDetail(it, DesktopDetailControllerKey.SEARCH) },
-                                onOpenAiSearch = { aiSearchOpen = true },
+                                aiProvider = settingsState.aiProvider,
+                                aiApiKey = settingsState.activeAiApiKey,
+                                onOpenAiProviderSettings = {
+                                    // Open Settings overlay landing on the
+                                    // AI provider section (Integrations).
+                                    settingsLandingCategory = "INTEGRATIONS"
+                                    settingsOpen = true
+                                },
+                                keywordSearch = {
+                                    org.koin.java.KoinJavaComponent.get(
+                                        com.torve.data.ai.KeywordSearchService::class.java,
+                                    )
+                                },
+                                tmdb = {
+                                    org.koin.java.KoinJavaComponent.get(
+                                        com.torve.data.metadata.TmdbApiClient::class.java,
+                                    )
+                                },
                             )
                             V2Destination.LIBRARY -> V2LibraryPage(
                                 homeState = homeState,
@@ -1424,31 +1441,6 @@ fun V2App(
                                     }
                                 } else null,
                                 onDismiss = { updateBannerDismissed = true },
-                            )
-                        }
-                    }
-
-                    // Engine-fallback banner — surfaces when the user
-                    // picked MPV but libmpv isn't available, so they know
-                    // VLC is in fact what's running.
-                    val engineSnapshot by com.torve.desktop.playback.PlayerEngineStartup.state.collectAsState()
-                    val fallback = engineSnapshot
-                    if (fallback != null && fallback.didFallBack && !fallback.acknowledged && !settingsOpen) {
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.TopCenter)
-                                .padding(top = if (available != null && !updateBannerDismissed) 80.dp else 12.dp)
-                                .widthIn(max = 600.dp),
-                        ) {
-                            com.torve.desktop.playback.EngineFallbackBanner(
-                                snapshot = fallback,
-                                onOpenSettings = {
-                                    com.torve.desktop.playback.PlayerEngineStartup.acknowledge()
-                                    settingsOpen = true
-                                },
-                                onDismiss = {
-                                    com.torve.desktop.playback.PlayerEngineStartup.acknowledge()
-                                },
                             )
                         }
                     }

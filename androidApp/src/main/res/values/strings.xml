@@ -93,8 +93,8 @@
     <string name="tv_receive_credentials_subtitle">Show a one-time QR code for another Torve device to scan.</string>
 
     <!-- Encryption + safety disclosure shared by send + receive surfaces. -->
-    <string name="transfer_encryption_disclosure">Credentials are end-to-end encrypted with a one-time key. The Torve backend only forwards the sealed envelope — it can\'t read the contents.</string>
-    <string name="transfer_paste_safety">Manual paste is the same sealed envelope shown as text. Copy/paste between your own devices when the camera or relay aren\'t available — never share it with anyone else.</string>
+    <string name="transfer_encryption_disclosure">Credentials are end-to-end encrypted with a one-time key. Torve servers only forward the encrypted bundle — they can\'t read the contents.</string>
+    <string name="transfer_paste_safety">Manual paste is the same encrypted bundle shown as text. Copy/paste between your own devices when the camera or relay aren\'t available — never share it with anyone else.</string>
     <string name="transfer_companion_config_explanation">Some integrations (Plex, Jellyfin) need a server URL alongside their token. If the URL isn\'t set on the sending device, you\'ll need to fill it in manually after import.</string>
 
     <!-- Diagnostics labels. -->

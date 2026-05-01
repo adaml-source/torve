@@ -50,6 +50,7 @@ fun TvBackdropCard(
     onClick: () -> Unit,
     onFocused: () -> Unit,
     progress: Float? = null,
+    showTmdbRating: Boolean = true,
 ) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(targetValue = if (focused) 1.06f else 1f, label = "backdropScale")
@@ -129,7 +130,7 @@ fun TvBackdropCard(
                 )
                 val subtitle = buildString {
                     item.year?.let { append(it) }
-                    if (focused && item.rating != null) {
+                    if (focused && showTmdbRating && item.rating != null) {
                         if (isNotBlank()) append("  ")
                         append(String.format("%.1f", item.rating))
                     }

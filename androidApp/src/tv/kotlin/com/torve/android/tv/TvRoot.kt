@@ -411,6 +411,7 @@ fun TvRoot(
     /* ── For focus restoration when returning from sub-routes ───────────────────────────── */
     var rootHasFocus by remember { mutableStateOf(false) }
     var focusRestoreTrigger by remember { mutableStateOf(0) }
+    var railInteractionEpoch by remember { mutableStateOf(0) }
     var pendingContentEntryRoute by remember { mutableStateOf<String?>(null) }
     var pendingRailEntryRoute by remember { mutableStateOf<String?>(null) }
     var pendingSettingsSubpageEntryRoute by remember { mutableStateOf<String?>(null) }
@@ -496,6 +497,7 @@ fun TvRoot(
     // which would cancel the coroutine before delay() completes.
     LaunchedEffect(focusRestoreTrigger) {
         if (focusRestoreTrigger == 0) return@LaunchedEffect
+        val restoreRailEpoch = railInteractionEpoch
         if (pendingFocusBackRestore != null) {
             Log.d("TvFocusRestore", "root_focus_restore_suppressed pendingBackRestore=${pendingFocusBackRestore?.route}")
             return@LaunchedEffect
@@ -529,6 +531,14 @@ fun TvRoot(
         }
         for ((attempt, waitMs) in delays.withIndex()) {
             delay(waitMs)
+            if (isRailFocused && railInteractionEpoch != restoreRailEpoch) {
+                Log.d("TvFocusRestore", "root_focus_restore_cancelled railInteractionEpochChanged")
+                return@LaunchedEffect
+            }
+            if (isRailFocused && pendingContentEntryRoute == null) {
+                Log.d("TvFocusRestore", "root_focus_restore_cancelled railOwnsFocus=true")
+                return@LaunchedEffect
+            }
             // After each delay, check if focus already landed on content (e.g.
             // the user pressed right again, or a previous attempt took effect).
             if (!isRailFocused && pendingContentEntryRoute != null) {
@@ -572,6 +582,10 @@ fun TvRoot(
             // All candidates failed or focus didn't move — retry after next delay
         }
         pendingContentEntryRoute = null
+        if (isRailFocused && railInteractionEpoch != restoreRailEpoch) {
+            Log.d("TvFocusRestore", "root_focus_restore_fallback_cancelled railInteractionEpochChanged")
+            return@LaunchedEffect
+        }
         // Last resort: put focus back on the rail so the user isn't stuck
         pendingRailEntryRoute = selectedTopRoute
         try { railFocusRequester.requestFocus() } catch (_: Throwable) { }
@@ -1446,6 +1460,9 @@ fun TvRoot(
                     navigateOnFocus = true,
                     onRailFocusChanged = { hasFocus ->
                         isRailFocused = hasFocus
+                        if (hasFocus) {
+                            railInteractionEpoch++
+                        }
                         // Only collapse immediately; expansion is debounced below
                         // to prevent the rail from flashing open during transient focus.
                         if (!hasFocus) {
@@ -1504,6 +1521,7 @@ fun TvRoot(
                         requestContentFocusFromRail(route)
                     },
                     onNavigate = { route ->
+                        railInteractionEpoch++
                         pendingContentEntryRoute = null
                         pendingRailEntryRoute = null
                         pendingNavJob?.cancel()
@@ -1545,6 +1563,18 @@ fun TvRoot(
                 // content-to-details transitions (which caused the nav rail to flash).
                 val activeTabRoute = selectedTopRoute
                 val tabContentVisible = !isSubRouteActive
+
+                // The hero overlay's primary-action button is only attached to a
+                // node when displayedFeaturedItem != null (TvHeroOverlay gates its
+                // action row behind a non-null item). When the item is missing,
+                // headerPrimaryActionRequester has no host node, so any focusProperties
+                // edge that targets it (e.g. `up = …` or rail row UP redirect) will
+                // throw "FocusRequester is not initialized" the moment the user
+                // presses a direction key — the crash is caught and swallowed by
+                // TvMainActivity, but Compose's focus state ends up stuck.
+                // Pass null downstream when the requester isn't safe to target.
+                val heroPrimaryActionRequester = headerPrimaryActionRequester
+                    .takeIf { displayedFeaturedItem != null }
 
                 // Shared hero overlay content — only attached to the visible tab.
                 val heroOverlayContent: (@Composable () -> Unit) = {
@@ -1607,7 +1637,7 @@ fun TvRoot(
                                     canFocus = false
                                     enter = { FocusRequester.Cancel }
                                 } else if (showHero && TvRoutes.HOME in heroRoutes) {
-                                    up = headerPrimaryActionRequester
+                                    heroPrimaryActionRequester?.let { up = it }
                                 }
                             }
                             .then(
@@ -1619,7 +1649,7 @@ fun TvRoot(
 
                         TvHomeScreen(
                             railFocusRequester = railFocusRequester,
-                            headerFocusRequester = headerPrimaryActionRequester,
+                            headerFocusRequester = heroPrimaryActionRequester,
                             onMediaClick = { item ->
                                 pushFocusReturnEntry(TvRoutes.HOME)
                                 navController.navigateToTvDetails(item)
@@ -1729,7 +1759,7 @@ fun TvRoot(
                                         enter = { FocusRequester.Cancel }
                                     }
                                     if (showHero && activeTabRoute in heroRoutes) {
-                                        up = headerPrimaryActionRequester
+                                        heroPrimaryActionRequester?.let { up = it }
                                     }
                                 },
                         ) {
@@ -1739,7 +1769,7 @@ fun TvRoot(
                             when (activeTabRoute) {
                                     TvRoutes.MOVIES -> TvMoviesScreen(
                                         railFocusRequester = railFocusRequester,
-                                        headerFocusRequester = headerPrimaryActionRequester,
+                                        headerFocusRequester = heroPrimaryActionRequester,
                                         heroOverlay = tabHeroOverlay,
                                         onMediaClick = { item ->
                                             pushFocusReturnEntry(TvRoutes.MOVIES)
@@ -1763,7 +1793,7 @@ fun TvRoot(
 
                                     TvRoutes.SHOWS -> TvShowsScreen(
                                         railFocusRequester = railFocusRequester,
-                                        headerFocusRequester = headerPrimaryActionRequester,
+                                        headerFocusRequester = heroPrimaryActionRequester,
                                         heroOverlay = tabHeroOverlay,
                                         onMediaClick = { item ->
                                             pushFocusReturnEntry(TvRoutes.SHOWS)
@@ -1841,7 +1871,7 @@ fun TvRoot(
 
                                     TvRoutes.LIBRARY -> TvLibraryScreen(
                                         railFocusRequester = railFocusRequester,
-                                        headerFocusRequester = headerPrimaryActionRequester,
+                                        headerFocusRequester = heroPrimaryActionRequester,
                                         heroOverlay = tabHeroOverlay,
                                         onMediaClick = { item ->
                                             pushFocusReturnEntry(TvRoutes.LIBRARY)
@@ -1955,6 +1985,9 @@ fun TvRoot(
                                                 },
                                                 onNavigateToTransferDiagnostics = {
                                                     navController.navigate("transfer_diagnostics_tv")
+                                                },
+                                                onNavigateToPairingSignIn = {
+                                                    navController.navigate("pairing_signin_tv")
                                                 },
                                                 onNavigateToPairedDevices = { itemId ->
                                                     pendingSettingsDestinationReturnItemId = itemId

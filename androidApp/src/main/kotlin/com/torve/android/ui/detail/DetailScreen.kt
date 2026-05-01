@@ -333,7 +333,9 @@ fun DetailScreen(
                 val detailRatings = remember(item.ratings, item.rating) {
                     item.ratings.withFallbackTmdbScore(item.rating)
                 }
-                val hasRenderableDetailProviders = detailRatings != null
+                val hasRenderableDetailProviders = remember(detailRatings, settingsState.ratingPrefs) {
+                    detailRatings?.hasAnyEnabledDisplayValue(settingsState.ratingPrefs) == true
+                }
                 val torveDetailScore = remember(detailRatings, settingsState.ratingPrefs) {
                     detailRatings?.takeIf { settingsState.ratingPrefs.showTorveScoreOnDetailPage }
                         ?.let { calculateTorveScore(it, settingsState.ratingPrefs.torveWeights) }
@@ -451,7 +453,7 @@ fun DetailScreen(
                                 MultiRatingPills(
                                     ratings = detailRatings,
                                     prefs = settingsState.ratingPrefs.copy(
-                                        maxRatingsOnCard = settingsState.ratingPrefs.enabledProviders.size,
+                                        maxRatingsOnCard = settingsState.ratingPrefs.enabledProviders.size.coerceAtLeast(1),
                                     ),
                                 )
                                 Spacer(Modifier.height(10.dp))

@@ -5,13 +5,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * Process-wide capture of which engine was *requested* at startup vs which
- * one we actually instantiated. Used by the shell to surface a one-shot
- * banner when [requested] != [actual] (e.g. user picked MPV but libmpv
- * isn't installed → silently downgraded to VLC).
- *
- * Lives outside Koin/DI so Main.kt can record before any UI composes and
- * any composable can read [state] without threading it through.
+ * Process-wide capture of which engine was requested at startup vs which
+ * one we actually instantiated. Kept for diagnostics; unavailable lab engines
+ * are normalized back to the release-safe VLC path without surfacing a warning
+ * in the consumer UI.
  */
 object PlayerEngineStartup {
 
@@ -30,7 +27,7 @@ object PlayerEngineStartup {
         _state.value = Snapshot(requested = requested, actual = actual)
     }
 
-    /** Mark the fall-back banner as dismissed so the shell stops showing it. */
+    /** Mark the diagnostic snapshot as acknowledged. */
     fun acknowledge() {
         val current = _state.value ?: return
         _state.value = current.copy(acknowledged = true)

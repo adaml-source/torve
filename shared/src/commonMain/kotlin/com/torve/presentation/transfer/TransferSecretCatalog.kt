@@ -33,7 +33,12 @@ object TransferSecretCatalog {
         TransferCategorySpec(
             category = SecretCategory.IPTV,
             title = "IPTV",
-            description = "No enum-backed IPTV credentials are available yet.",
+            // IPTV credentials live per-playlist in SQLite, not as
+            // enum-keyed singletons. The sender ships the playlist rows
+            // themselves via [SecretsTransferPayload.playlists]; this
+            // category therefore reports zero enum keys but still
+            // participates in transfers when selected.
+            description = "Xtream + M3U playlists with their credentials.",
             keys = emptyList(),
         ),
         TransferCategorySpec(
@@ -83,8 +88,16 @@ object TransferSecretCatalog {
         ),
     )
 
+    /**
+     * Categories that ship at least one transferable item by default.
+     * Includes IPTV — it carries playlists alongside the secret bag,
+     * so the empty `keys` list shouldn't drop it from the default
+     * selection.
+     */
     val defaultSelectedCategories: Set<SecretCategory> =
-        specs.filter { it.keys.isNotEmpty() }.map { it.category }.toSet()
+        specs.filter { it.keys.isNotEmpty() || it.category == SecretCategory.IPTV }
+            .map { it.category }
+            .toSet()
 
     fun keysFor(category: SecretCategory): List<IntegrationSecretKey> =
         specs.firstOrNull { it.category == category }?.keys.orEmpty()

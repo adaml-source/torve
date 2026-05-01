@@ -55,7 +55,10 @@ import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.RatingSource
+import com.torve.domain.model.allowsTmdbRatingProvider
 import com.torve.domain.model.deriveProvidersToRender
+import com.torve.domain.model.hasAnyEnabledDisplayValue
+import com.torve.domain.model.withFallbackTmdbScore
 import com.torve.domain.repository.MetadataRepository
 import com.torve.android.ui.components.getRatingValue
 import com.torve.presentation.settings.SettingsViewModel
@@ -87,6 +90,8 @@ fun TvFocusDetailsPanel(
     val ratingsEnricher: com.torve.data.mdblist.RatingsEnricher = koinInject()
     val prefsRepo: com.torve.domain.repository.PreferencesRepository = koinInject()
     val secretStore: com.torve.domain.integrations.IntegrationSecretStore = koinInject()
+    val settingsViewModel: SettingsViewModel = koinInject()
+    val settingsState by settingsViewModel.state.collectAsState()
     var lastResolvedLogoUrl by remember { mutableStateOf<String?>(null) }
     val enrichScope = rememberCoroutineScope()
 
@@ -99,14 +104,19 @@ fun TvFocusDetailsPanel(
     // for items enriched by HomeViewModel or rail-level enrichment). For cache misses,
     // does network calls. Results stored in static enrichedItemCache so returning to an
     // item is always instant.
-    LaunchedEffect(focusedItem?.let { "${it.type}:${it.tmdbId ?: it.id}" }) {
+    LaunchedEffect(
+        focusedItem?.let { "${it.type}:${it.tmdbId ?: it.id}" },
+        settingsState.ratingPrefs.enabledProviders,
+    ) {
         val item = focusedItem ?: return@LaunchedEffect
         val itemKey = "${item.type}:${item.tmdbId ?: item.id}"
         val tmdbId = item.tmdbId ?: return@LaunchedEffect
         // Skip if already in static cache
         if (enrichedItemCache.containsKey(itemKey)) return@LaunchedEffect
-        // Skip if the item already has ratings from rail-level enrichment
-        if (item.ratings != null && hasAnyRating(item.ratings!!)) {
+        // Skip only when the item already has values for the user's selected
+        // providers. A raw TMDB score should not block IMDb/RT enrichment.
+        val displayRatings = item.ratings.withFallbackTmdbScore(item.rating)
+        if (displayRatings?.hasAnyEnabledDisplayValue(settingsState.ratingPrefs) == true) {
             enrichedItemCache[itemKey] = item
             return@LaunchedEffect
         }
@@ -262,13 +272,10 @@ private fun FocusPanelContent(
         val settingsViewModel: SettingsViewModel = koinInject()
         val settingsState by settingsViewModel.state.collectAsState()
         val ratingPrefs = settingsState.ratingPrefs
-        val ratings = item.ratings
-        if (ratings != null && hasAnyRating(ratings)) {
+        val ratings = item.ratings.withFallbackTmdbScore(item.rating)
+        if (ratings != null && ratings.hasAnyEnabledDisplayValue(ratingPrefs)) {
             Spacer(Modifier.height(14.dp))
             RatingsRow(ratings, ratingPrefs)
-        } else if (item.rating != null && item.rating!! > 0) {
-            Spacer(Modifier.height(14.dp))
-            FallbackRatingRow(item.rating!!, ratingPrefs)
         }
 
         // 5. Synopsis — TV-readable size, expanded with poster removed
@@ -527,6 +534,7 @@ private fun RatingsRow(
         enabledProviders = enabledProviders,
         providerOrder = prefs.providerOrder,
         maxRatingsOnCard = prefs.maxRatingsOnCard,
+        fallbackToTmdbWhenNoneSelected = prefs.enabledProviders.isEmpty(),
     )
     val pills = providers.mapNotNull { source ->
         val value = getRatingValue(source, ratings, prefs)
@@ -579,8 +587,8 @@ private fun FallbackRatingRow(
     tmdbRating: Double,
     prefs: com.torve.domain.model.RatingDisplayPrefs = com.torve.domain.model.RatingDisplayPrefs(),
 ) {
-    // Only show the TMDB fallback if TMDB is enabled in preferences
-    if (!prefs.enabledProviders.contains(RatingSource.TMDB)) return
+    // TMDB is a fallback only when no providers are selected, or when selected explicitly.
+    if (prefs.maxRatingsOnCard <= 0 || !prefs.allowsTmdbRatingProvider()) return
     Row(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,

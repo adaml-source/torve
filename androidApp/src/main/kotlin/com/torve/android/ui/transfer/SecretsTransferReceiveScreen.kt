@@ -143,28 +143,67 @@ private fun ActiveBlock(
         runCatching { AndroidTransferQrRenderer.render(state.sessionString) }.getOrNull()
     }
 
+    // largeQr is the TV form-factor signal; pick the right explainer.
+    val explainer = if (largeQr) {
+        com.torve.presentation.transfer.TransferCopy.RECEIVE_PRIMARY_EXPLAINER_TV
+    } else {
+        com.torve.presentation.transfer.TransferCopy.RECEIVE_PRIMARY_EXPLAINER_DESKTOP
+    }
     Text(
-        text = "Open Send credentials on the other Torve device, then scan this QR " +
-            "or paste the code into its session string field.",
+        text = explainer,
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 
-    StatusBanner(
-        title = "End-to-end encrypted",
-        body = "The QR holds your device's one-time public key — it's safe to share with the " +
-            "other Torve device. The sealed envelope you'll receive can only be opened on " +
-            "this device. The Torve backend never sees credentials in the clear.",
-        tone = TransferBannerTone.Info,
-    )
+    // On TV, lay QR and details side-by-side so a phone camera can
+    // frame the QR without it dominating the screen, and the receiver
+    // code + copy button stay above the fold. On mobile/portrait,
+    // stack vertically as before.
+    if (largeQr) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(20.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            QrSurface(qrBitmap = qrBitmap, modifier = Modifier.size(320.dp))
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                CountdownChip(remainingSeconds = state.remainingSeconds)
+                RelayStatusBanner(state.relayStatus)
+                SessionStringBlock(sessionString = state.sessionString, onCopy = {})
+            }
+        }
+    } else {
+        QrSurface(
+            qrBitmap = qrBitmap,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 240.dp).padding(top = 4.dp),
+        )
+        CountdownChip(remainingSeconds = state.remainingSeconds)
+        RelayStatusBanner(state.relayStatus)
+        SessionStringBlock(sessionString = state.sessionString, onCopy = {})
+    }
 
+    AdvancedPasteSection(
+        envelopeText = state.envelopeText,
+        importing = state.importing,
+        importResult = state.importResult,
+        relayStatus = state.relayStatus,
+        onChange = onEnvelopeChanged,
+        onImport = onImport,
+    )
+}
+
+@Composable
+private fun QrSurface(
+    qrBitmap: androidx.compose.ui.graphics.ImageBitmap?,
+    modifier: Modifier,
+) {
     Surface(
         color = Color.White,
         shape = RoundedCornerShape(12.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .let { if (largeQr) it.heightIn(min = 360.dp) else it.heightIn(min = 240.dp) }
-            .padding(top = 4.dp),
+        modifier = modifier,
     ) {
         Box(
             modifier = Modifier.fillMaxSize().padding(12.dp),
@@ -183,27 +222,6 @@ private fun ActiveBlock(
             }
         }
     }
-
-    CountdownChip(remainingSeconds = state.remainingSeconds)
-
-    RelayStatusBanner(state.relayStatus)
-
-    SessionStringBlock(
-        sessionString = state.sessionString,
-        onCopy = {
-            // Caller composables can wrap this — for parity with the
-            // sender screen we also offer a copy button here.
-        },
-    )
-
-    AdvancedPasteSection(
-        envelopeText = state.envelopeText,
-        importing = state.importing,
-        importResult = state.importResult,
-        relayStatus = state.relayStatus,
-        onChange = onEnvelopeChanged,
-        onImport = onImport,
-    )
 }
 
 @Composable
@@ -242,12 +260,12 @@ private fun RelayStatusBanner(status: RelayStatus) {
         }
         RelayStatus.Registering -> StatusBanner(
             title = "Setting up auto-import…",
-            body = "Asking the Torve backend to forward a sealed envelope to this device.",
+            body = "Asking the Torve backend to forward a encrypted bundle to this device.",
             tone = TransferBannerTone.Info,
         )
         is RelayStatus.Registered -> StatusBanner(
             title = "Auto-import is on",
-            body = "When the sender posts the sealed envelope, this device imports it " +
+            body = "When the sender posts the encrypted bundle, this device imports it " +
                 "automatically. Manual paste stays available below.",
             tone = TransferBannerTone.Success,
         )
@@ -267,7 +285,7 @@ private fun SessionStringBlock(
     val context = LocalContext.current
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
-            text = "Session string",
+            text = com.torve.presentation.transfer.TransferCopy.RECEIVE_SHORT_CODE_LABEL,
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold,
         )
@@ -289,7 +307,7 @@ private fun SessionStringBlock(
                 as? android.content.ClipboardManager
             cm?.setPrimaryClip(android.content.ClipData.newPlainText("Torve receive code", sessionString))
             onCopy()
-        }) { Text("Copy session string") }
+        }) { Text("Copy receiver code") }
     }
 }
 

@@ -70,7 +70,7 @@ private enum class LibraryTab { WATCHLIST, DOWNLOADS, JELLYFIN }
 @Composable
 internal fun TvLibraryScreen(
     railFocusRequester: FocusRequester,
-    headerFocusRequester: FocusRequester,
+    headerFocusRequester: FocusRequester?,
     onMediaClick: (MediaItem) -> Unit,
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
@@ -163,7 +163,7 @@ internal fun TvLibraryScreen(
 @Composable
 private fun WatchlistContent(
     railFocusRequester: FocusRequester,
-    headerFocusRequester: FocusRequester,
+    headerFocusRequester: FocusRequester?,
     onMediaClick: (MediaItem) -> Unit,
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
@@ -242,7 +242,7 @@ private fun WatchlistContent(
 @Composable
 private fun DownloadsContent(
     railFocusRequester: FocusRequester,
-    headerFocusRequester: FocusRequester,
+    headerFocusRequester: FocusRequester?,
     onMediaClick: (MediaItem) -> Unit,
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
@@ -329,7 +329,7 @@ private fun DownloadsContent(
 @Composable
 private fun JellyfinContent(
     railFocusRequester: FocusRequester,
-    headerFocusRequester: FocusRequester,
+    headerFocusRequester: FocusRequester?,
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
     onMediaFocused: ((MediaItem) -> Unit)?,

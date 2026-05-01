@@ -7,23 +7,16 @@ import com.torve.domain.transfer.SecretCategory
 import com.torve.presentation.transfer.TransferSecretCatalog
 
 /**
- * "Restore setup from another device" card state. Shown on Settings
- * surfaces when the device is missing local credentials for two or
- * more transferable provider categories — the unambiguous "fresh
- * device" or "lost setup" signal.
+ * "Restore setup from another device" card state.
  *
- * Two detection paths feed the same decision:
- *   1. Direct: scan the [IntegrationSecretStore] for any non-blank
- *      value under each [TransferSecretCatalog] category. Works on
- *      every platform, including ones (Android, iOS) where no
- *      provider-health checker has run yet.
- *   2. Provider-health: count [ProviderHealthEntry] rows whose
- *      [ProviderHealthStatus] is [ProviderHealthStatus.UNCONFIGURED]
- *      and whose category is transferable. Adds confidence on desktop
- *      where checkers have run.
+ * This is a fresh-device/lost-setup nudge, not a second configuration
+ * catalog. If the device already has any transferable credential
+ * category present, the user is doing a partial/manual setup and should
+ * use the explicit Receive credentials entry instead of seeing a broad
+ * recovery prompt.
  */
 data class ProviderHealthRecoverySnapshot(
-    /** Final decision — true when the UI should show the card. */
+    /** Final decision: true when the UI should show the card. */
     val shouldShowRecoveryCard: Boolean,
     /** Coarse count of transferable categories with no local credentials. */
     val missingTransferableCategoryCount: Int,
@@ -35,36 +28,45 @@ class ProviderHealthRecoveryStateProvider(
     private val secretStore: IntegrationSecretStore,
 ) {
     /**
-     * Build a snapshot. [healthEntries] is optional; when present, an
-     * UNCONFIGURED row for a transferable category counts as missing
-     * even if the secret-store scan said otherwise (defense in depth).
+     * Build a snapshot. [healthEntries] is optional; when present, green
+     * transferable rows count as present and unconfigured transferable
+     * rows count as missing.
      *
-     * Threshold: card shows when **two or more** transferable categories
-     * are missing. One missing category is just normal "I added Plex
-     * but not Trakt" — not the recovery story.
+     * The card shows only when two or more transferable categories are
+     * missing and no transferable category is present. That keeps a user
+     * with just SIMKL, Plex, or Debrid configured from being told they
+     * still "need" to receive credentials.
      */
     suspend fun snapshot(
         healthEntries: List<ProviderHealthEntry> = emptyList(),
     ): ProviderHealthRecoverySnapshot {
         val missing = mutableSetOf<SecretCategory>()
+        val present = mutableSetOf<SecretCategory>()
 
-        // Direct detection: any catalog category whose entire key list
-        // has only blanks/nulls in the store is "missing."
         for (spec in TransferSecretCatalog.specs) {
             if (spec.keys.isEmpty()) continue
             val anyPresent = spec.keys.any { key ->
                 val value = runCatching { secretStore.get(key) }.getOrNull()
                 !value.isNullOrBlank()
             }
-            if (!anyPresent) missing += spec.category
+            if (anyPresent) present += spec.category else missing += spec.category
         }
 
-        // Health-row signal: an UNCONFIGURED row for a transferable
-        // category bumps the same set.
         for (entry in healthEntries) {
-            if (entry.status != ProviderHealthStatus.UNCONFIGURED) continue
-            val transferableCategory = entry.category.transferableSecretCategory()
-            if (transferableCategory != null) missing += transferableCategory
+            val transferableCategory = entry.category.transferableSecretCategory() ?: continue
+            when (entry.status) {
+                ProviderHealthStatus.UNCONFIGURED -> {
+                    missing += transferableCategory
+                    present -= transferableCategory
+                }
+                ProviderHealthStatus.GREEN -> {
+                    present += transferableCategory
+                    missing -= transferableCategory
+                }
+                ProviderHealthStatus.YELLOW,
+                ProviderHealthStatus.RED,
+                ProviderHealthStatus.UNKNOWN -> Unit
+            }
         }
 
         val orderedMissing = TransferSecretCatalog.specs
@@ -72,19 +74,14 @@ class ProviderHealthRecoveryStateProvider(
             .filter { it in missing }
 
         return ProviderHealthRecoverySnapshot(
-            shouldShowRecoveryCard = orderedMissing.size >= MIN_MISSING_FOR_CARD,
+            shouldShowRecoveryCard = present.isEmpty() &&
+                orderedMissing.size >= MIN_MISSING_FOR_CARD,
             missingTransferableCategoryCount = orderedMissing.size,
             missingCategories = orderedMissing,
         )
     }
 
     companion object {
-        /**
-         * Two missing transferable categories is the minimum signal
-         * we need before nudging the user. One missing category is
-         * normal partial setup; two strongly suggests fresh-install
-         * or lost-setup.
-         */
         const val MIN_MISSING_FOR_CARD: Int = 2
     }
 }

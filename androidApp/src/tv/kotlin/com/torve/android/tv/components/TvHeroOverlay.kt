@@ -28,6 +28,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -51,6 +52,9 @@ import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Snow
 import com.torve.domain.model.MediaItem
+import com.torve.domain.model.allowsTmdbRatingProvider
+import com.torve.presentation.settings.SettingsViewModel
+import org.koin.compose.koinInject
 
 /**
  * Hero overlay with title, metadata, overview, and action buttons.
@@ -71,6 +75,10 @@ fun TvHeroOverlay(
     onWatchlistToggle: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    val settingsViewModel: SettingsViewModel = koinInject()
+    val settingsState by settingsViewModel.state.collectAsState()
+    val showTmdbRating = settingsState.ratingPrefs.allowsTmdbRatingProvider()
+
     Column(modifier = modifier.fillMaxWidth()) {
         // Keep more of the hero artwork visible while still reserving space for metadata/actions.
         Spacer(modifier = Modifier.height(64.dp))
@@ -130,7 +138,7 @@ fun TvHeroOverlay(
                             )
                         }
                         item.rating?.let { rating ->
-                            if (rating > 0) {
+                            if (showTmdbRating && rating > 0) {
                                 Text(
                                     text = "  \u2022  \u2605 ${"%.1f".format(rating)}",
                                     style = MaterialTheme.typography.bodyMedium,

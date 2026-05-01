@@ -126,9 +126,8 @@ private fun ActiveReceiver(
     }
 
     TorveSectionCard(
-        title = "Receive credentials",
-        supportingText = "Show this one-time code to the sending device. It can scan the QR " +
-            "or paste the session string below.",
+        title = com.torve.presentation.transfer.TransferCopy.RECEIVE_HEADER,
+        supportingText = com.torve.presentation.transfer.TransferCopy.RECEIVE_PRIMARY_EXPLAINER_DESKTOP,
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -175,7 +174,8 @@ private fun ActiveReceiver(
                 ) {
                     CountdownRow(remainingSeconds = state.remainingSeconds)
                     Text(
-                        text = "Or paste this code on the sending device:",
+                        text = "${com.torve.presentation.transfer.TransferCopy.RECEIVE_SHORT_CODE_LABEL} " +
+                            "(paste on the sending device):",
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.textSecondary,
                     )
@@ -441,12 +441,12 @@ private fun RelayStatusBanner(status: RelayStatus) {
         }
         RelayStatus.Registering -> TorveBanner(
             title = "Setting up auto-import…",
-            description = "Asking the Torve backend to forward a sealed envelope to this device.",
+            description = "Asking the Torve backend to forward a encrypted bundle to this device.",
             tone = TorveBannerTone.Info,
         )
         is RelayStatus.Registered -> TorveBanner(
             title = "Auto-import is on",
-            description = "When the sender posts the sealed envelope, this device imports it " +
+            description = "When the sender posts the encrypted bundle, this device imports it " +
                 "automatically. Manual paste stays available under Advanced.",
             tone = TorveBannerTone.Success,
         )

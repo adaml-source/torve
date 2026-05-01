@@ -91,18 +91,26 @@ class IptvIntentValidator(
         val activeName = state.selectedPlaylistId
             ?.let { id -> state.playlists.firstOrNull { it.id == id }?.name }
             ?: state.playlists.first().name
-        if (state.error != null) {
+        val storedChannelCount = state.selectedPlaylistId
+            ?.let { id -> state.playlists.firstOrNull { it.id == id }?.channelCount }
+            ?: state.playlists.firstOrNull()?.channelCount
+            ?: 0
+        val channelCount = maxOf(state.channels.size, storedChannelCount)
+        val hasLoadedContent = channelCount > 0 ||
+            state.categories.isNotEmpty() ||
+            state.groupedChannels.isNotEmpty()
+        if (state.error != null && !hasLoadedContent) {
             return SetupIntentValidation.invalid(
                 message = "Couldn't load \"$activeName\": ${state.error}",
                 nextAction = "Re-add or refresh playlist",
             )
         }
-        if (state.channels.isEmpty() && state.isLoadingChannels) {
+        if (!hasLoadedContent && state.isLoadingChannels) {
             return SetupIntentValidation.inProgress(
                 message = "Loading \"$activeName\"…",
             )
         }
-        if (state.channels.isEmpty()) {
+        if (!hasLoadedContent) {
             return SetupIntentValidation.needsAttention(
                 message = "\"$activeName\" loaded with 0 channels.",
                 nextAction = "Refresh playlist",
@@ -111,10 +119,10 @@ class IptvIntentValidator(
         // Playlist OK; let EPG state degrade us to YELLOW if matching is poor.
         return when (val epg = state.epgState) {
             EpgState.NotConfigured -> SetupIntentValidation.ready(
-                message = "\"$activeName\" — ${state.channels.size} channels (no EPG).",
+                message = "\"$activeName\" — $channelCount channels (no EPG).",
             )
             EpgState.Loading -> SetupIntentValidation.ready(
-                message = "\"$activeName\" — ${state.channels.size} channels (loading EPG).",
+                message = "\"$activeName\" — $channelCount channels (loading EPG).",
             )
             is EpgState.Error -> SetupIntentValidation.needsAttention(
                 message = "Channels load OK but EPG failed: ${epg.message}",

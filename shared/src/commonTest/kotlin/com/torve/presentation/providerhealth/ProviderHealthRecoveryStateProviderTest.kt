@@ -42,6 +42,17 @@ class ProviderHealthRecoveryStateProviderTest {
     }
 
     @Test
+    fun partialSetupDoesNotShowCardEvenWhenManyCategoriesAreMissing() = runTest {
+        val store = RecoveryFakeStore().apply {
+            seed(IntegrationSecretKey.SIMKL_ACCESS_TOKEN, "simkl")
+        }
+        val provider = ProviderHealthRecoveryStateProvider(secretStore = store)
+        val snap = provider.snapshot()
+        assertFalse(snap.shouldShowRecoveryCard, "partial setup should not trigger; got $snap")
+        assertTrue(snap.missingTransferableCategoryCount >= 2)
+    }
+
+    @Test
     fun singleMissingCategoryDoesNotTriggerCard() = runTest {
         // Only Trakt missing — that's normal partial setup, not the
         // "fresh device" signal. Threshold is 2.
@@ -78,7 +89,7 @@ class ProviderHealthRecoveryStateProviderTest {
         )
         val snap = provider.snapshot(healthEntries = healthEntries)
         // DEBRID forced missing by health-row signal even though store had a value.
-        assertTrue(snap.shouldShowRecoveryCard)
+        assertFalse(snap.shouldShowRecoveryCard)
         assertTrue(SecretCategory.DEBRID in snap.missingCategories)
     }
 

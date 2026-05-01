@@ -25,6 +25,9 @@ import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.ParentalFilter
 import com.torve.domain.model.ContentRating
+import com.torve.domain.model.RatingDisplayPrefs
+import com.torve.domain.model.hasAnyEnabledDisplayValue
+import com.torve.domain.model.withFallbackTmdbScore
 import com.torve.domain.repository.MetadataRepository
 import com.torve.domain.repository.PreferencesRepository
 import com.torve.data.mdblist.MdbListApi
@@ -52,7 +55,7 @@ private data class GenreSpec(val id: Int, val label: String)
 internal fun TvCatalogRailsScreen(
     mediaType: String,
     railFocusRequester: FocusRequester,
-    headerFocusRequester: FocusRequester,
+    headerFocusRequester: FocusRequester?,
     onMediaClick: (MediaItem) -> Unit,
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
@@ -71,7 +74,9 @@ internal fun TvCatalogRailsScreen(
     val prefsRepo: PreferencesRepository = koinInject()
     val secretStore: IntegrationSecretStore = koinInject()
     val homeViewModel: HomeViewModel = koinInject()
+    val settingsViewModel: SettingsViewModel = koinInject()
     val homeState by homeViewModel.state.collectAsState()
+    val settingsState by settingsViewModel.state.collectAsState()
     val focusMemory = rememberTvFocusMemory()
 
     val trendingLabel = if (mediaType == "movie") {
@@ -164,6 +169,7 @@ internal fun TvCatalogRailsScreen(
                         }
                     }
                 }.dedupeAcrossRails()
+                    .hydrateRailsFromRatingCache(ratingsEnricher)
             }
             CatalogRailsUiState(loading = false, rails = rails).also { TvScreenCache.put(cacheKey, it) }
         } catch (t: Throwable) {
@@ -173,12 +179,30 @@ internal fun TvCatalogRailsScreen(
 
     // Background ratings enrichment — populates SQLite cache for all rail items.
     // Same pattern as HomeViewModel.refreshRatings(). Runs once after rails load.
-    val enrichCacheKey = "enriched_$mediaType"
-    LaunchedEffect(uiState.rails.isNotEmpty()) {
+    LaunchedEffect(cacheKey) {
         if (uiState.rails.isEmpty()) return@LaunchedEffect
-        // Skip if already enriched this session
+        val hydrated = withContext(Dispatchers.IO) {
+            uiState.rails.hydrateRailsFromRatingCache(ratingsEnricher)
+        }
+        if (railsRatingsChanged(uiState.rails, hydrated)) {
+            uiState = uiState.copy(rails = hydrated)
+            TvScreenCache.put(cacheKey, uiState)
+        }
+    }
+
+    val ratingPrefs = settingsState.ratingPrefs
+    val enrichCacheKey = remember(mediaType, ratingPrefs.enabledProviders) {
+        val providerKey = ratingPrefs.enabledProviders.joinToString("_") { it.name }
+            .ifBlank { "TMDB_FALLBACK" }
+        "enriched_${mediaType}_$providerKey"
+    }
+    LaunchedEffect(uiState.rails, enrichCacheKey) {
+        if (uiState.rails.isEmpty()) return@LaunchedEffect
+        if (!uiState.rails.needsRatingEnrichment(ratingPrefs)) {
+            TvScreenCache.put(enrichCacheKey, true)
+            return@LaunchedEffect
+        }
         if (TvScreenCache.get<Boolean>(enrichCacheKey) == true) return@LaunchedEffect
-        TvScreenCache.put(enrichCacheKey, true)
 
         launch(Dispatchers.IO) {
             val apiKey = runCatching {
@@ -192,8 +216,11 @@ internal fun TvCatalogRailsScreen(
                 rail.copy(items = enrichedItems)
             }
             withContext(Dispatchers.Main) {
-                uiState = uiState.copy(rails = enrichedRails)
+                if (railsRatingsChanged(uiState.rails, enrichedRails)) {
+                    uiState = uiState.copy(rails = enrichedRails)
+                }
                 TvScreenCache.put(cacheKey, uiState)
+                TvScreenCache.put(enrichCacheKey, true)
             }
         }
     }
@@ -256,4 +283,36 @@ internal fun TvCatalogRailsScreen(
         onContextMenuAction = onContextMenuAction,
         registerFocusHandle = registerFocusHandle,
     )
+}
+
+private fun List<TvContentRail>.hydrateRailsFromRatingCache(
+    ratingsEnricher: RatingsEnricher,
+): List<TvContentRail> = map { rail ->
+    rail.copy(items = ratingsEnricher.hydrateListFromCache(rail.items))
+}
+
+private fun List<TvContentRail>.needsRatingEnrichment(
+    prefs: RatingDisplayPrefs,
+): Boolean = any { rail ->
+    rail.items.any { item ->
+        item.ratings.withFallbackTmdbScore(item.rating)
+            ?.hasAnyEnabledDisplayValue(prefs) != true
+    }
+}
+
+private fun railsRatingsChanged(
+    before: List<TvContentRail>,
+    after: List<TvContentRail>,
+): Boolean {
+    if (before.size != after.size) return true
+    for (railIndex in before.indices) {
+        val beforeItems = before[railIndex].items
+        val afterItems = after[railIndex].items
+        if (beforeItems.size != afterItems.size) return true
+        for (itemIndex in beforeItems.indices) {
+            if (beforeItems[itemIndex].ratings != afterItems[itemIndex].ratings) return true
+            if (beforeItems[itemIndex].imdbId != afterItems[itemIndex].imdbId) return true
+        }
+    }
+    return false
 }

@@ -50,6 +50,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -96,6 +97,7 @@ import com.torve.android.ui.search.SearchScreen
 import com.torve.android.ui.seeall.SeeAllScreen
 import com.torve.android.ui.settings.AddonCatalogScreen
 import com.torve.android.ui.panda.PandaSetupScreen
+import com.torve.android.ui.onboarding.VerifyEmailGateScreen
 import com.torve.android.ui.settings.ManagePandaScreen
 import com.torve.android.ui.settings.RegexPatternsScreen
 import com.torve.android.ui.settings.SettingsScreen
@@ -114,6 +116,7 @@ import com.torve.android.ui.settings.StreamingServicesSettingsScreen
 import com.torve.android.ui.stats.StatsScreen
 import com.torve.android.ui.watchlist.WatchlistScreen
 import com.torve.android.ui.setup.SetupIntentHubScreen
+import com.torve.android.ui.setup.SetupChoiceScreen
 import com.torve.android.ui.setup.SetupWizardScreen
 import com.torve.android.ui.device.DeviceLimitReachedScreen
 import com.torve.android.ui.device.ManageDevicesScreen
@@ -130,6 +133,7 @@ import com.torve.domain.model.MediaType
 import com.torve.domain.model.extractTmdbIdOrNull
 import com.torve.domain.model.extractImdbIdOrNull
 import com.torve.data.ai.KeywordSearchService
+import com.torve.data.auth.AuthClient
 import com.torve.data.contentpolicy.ContentPolicyCacheInvalidationCoordinator
 import com.torve.data.contentpolicy.ContentPolicyRepository
 import com.torve.data.mdblist.RatingsEnricher
@@ -143,6 +147,7 @@ import com.torve.presentation.subscription.SubscriptionViewModel
 import com.torve.presentation.watchlist.WatchlistViewModel
 import com.torve.presentation.home.HomeViewModel
 import org.koin.compose.koinInject
+import kotlinx.coroutines.launch
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Safe detail navigation — guards against null tmdbId
@@ -269,7 +274,33 @@ private val navTabDefs = listOf(
 
 private const val MOBILE_ROOT_ROUTE = "mobile_root"
 private const val MOBILE_HOME_ROUTE = "home"
+private const val VERIFY_EMAIL_ROUTE = "verify_email"
+private const val SETUP_CHOICE_ROUTE = "setup_choice"
+private const val SETUP_ROUTE = "setup"
 private const val TV_HOME_ROUTE = "tv_home"
+
+private fun mobileOnboardingCompleteKey(userId: String): String =
+    "mobile_onboarding_complete_$userId"
+
+private fun mobileOnboardingRequiredKey(userId: String): String =
+    "mobile_onboarding_required_$userId"
+
+private fun String?.requiresDeviceManagement(): Boolean =
+    this in setOf(
+        "device_cap_reached",
+        "activation_slot_exhausted",
+        "no_activation_slots",
+        "swap_limit_reached",
+    )
+
+private fun String?.isAuthOrOnboardingRoute(): Boolean =
+    this in setOf(
+        "login",
+        VERIFY_EMAIL_ROUTE,
+        SETUP_CHOICE_ROUTE,
+        SETUP_ROUTE,
+        "setup_guided",
+    )
 
 private val tvNavTabDefs = listOf(
     NavTab(TV_HOME_ROUTE, R.string.nav_home, Icons.Filled.Home, Icons.Outlined.Home),
@@ -300,6 +331,10 @@ fun TorveNavGraph(
 
     val setupViewModel: SetupWizardViewModel = koinInject()
     val setupCoordinator: com.torve.presentation.setup.SetupWizardCoordinator = koinInject()
+    val setupSummary by setupCoordinator.summary.collectAsState()
+    val authClient: AuthClient = koinInject()
+    val authUser by authClient.authUserFlow.collectAsState()
+    val navScope = rememberCoroutineScope()
     val watchlistViewModel: WatchlistViewModel = koinInject()
     val homeViewModel: HomeViewModel = koinInject()
     val searchViewModel: SearchViewModel = koinInject()
@@ -309,6 +344,8 @@ fun TorveNavGraph(
     val subscriptionState by subscriptionViewModel.state.collectAsState()
     val syncState by syncCoordinator.state.collectAsState()
     var didInitialWatchlistSync by remember { mutableStateOf(false) }
+    var mobileOnboardingComplete by rememberSaveable { mutableStateOf(false) }
+    var mobileOnboardingRequired by rememberSaveable { mutableStateOf(false) }
     val dest = if (isTvMode) TV_HOME_ROUTE else MOBILE_ROOT_ROUTE
     val accessTier = rememberEffectivePremiumAccessTier(
         subscriptionTier = subscriptionState.subscription?.tier,
@@ -345,8 +382,13 @@ fun TorveNavGraph(
                 // User has entitlement but this device isn't activated for
                 // any other reason (e.g. activation_slot_exhausted) — send
                 // them to the device manager.
-                state.hasEntitlement && !state.isDeviceActivated -> {
+                state.hasEntitlement &&
+                    !state.isDeviceActivated &&
+                    state.deviceBlockReason.requiresDeviceManagement() -> {
                     navController.navigate("manage_devices")
+                }
+                state.hasEntitlement && !state.isDeviceActivated -> {
+                    subscriptionViewModel.refreshAccess()
                 }
                 // Genuinely no entitlement — paywall is the right surface.
                 else -> {
@@ -359,6 +401,10 @@ fun TorveNavGraph(
 
     LaunchedEffect(syncState.blockedFeature, currentRoute) {
         val blockedFeature = syncState.blockedFeature ?: return@LaunchedEffect
+        if (currentRoute.isAuthOrOnboardingRoute()) {
+            syncCoordinator.clearBlockedFeature()
+            return@LaunchedEffect
+        }
         if (currentRoute?.startsWith("paywall") != true) {
             requestLifetimeUnlock(blockedFeature)
         }
@@ -373,6 +419,66 @@ fun TorveNavGraph(
     val contentPolicyRepository: ContentPolicyRepository = koinInject()
     val contentPolicyFilter: ContentPolicyFilter = koinInject()
     val invalidationCoordinator: ContentPolicyCacheInvalidationCoordinator = koinInject()
+
+    fun markMobileOnboardingComplete() {
+        val userId = authUser?.id ?: return
+        mobileOnboardingComplete = true
+        mobileOnboardingRequired = false
+        navScope.launch {
+            prefsRepo.setString(mobileOnboardingCompleteKey(userId), "true")
+            prefsRepo.remove(mobileOnboardingRequiredKey(userId))
+        }
+    }
+
+    fun markMobileOnboardingRequired() {
+        val userId = authUser?.id ?: return
+        mobileOnboardingRequired = true
+        navScope.launch {
+            prefsRepo.setString(mobileOnboardingRequiredKey(userId), "true")
+        }
+    }
+
+    LaunchedEffect(authUser?.id) {
+        val userId = authUser?.id
+        setupCoordinator.load()
+        if (userId == null) {
+            mobileOnboardingComplete = false
+            mobileOnboardingRequired = false
+        } else {
+            mobileOnboardingComplete = prefsRepo.getString(mobileOnboardingCompleteKey(userId)) == "true"
+            mobileOnboardingRequired = prefsRepo.getString(mobileOnboardingRequiredKey(userId)) == "true"
+        }
+    }
+
+    LaunchedEffect(authUser?.id, authUser?.isVerified, mobileOnboardingComplete, mobileOnboardingRequired, setupSummary.canStartWatching, currentRoute, isTvMode) {
+        if (isTvMode) return@LaunchedEffect
+        val user = authUser ?: return@LaunchedEffect
+        if (currentRoute == "login" || currentRoute == "device_limit_reached") return@LaunchedEffect
+        if (!user.isVerified) {
+            if (currentRoute != VERIFY_EMAIL_ROUTE) {
+                navController.navigate(VERIFY_EMAIL_ROUTE) {
+                    launchSingleTop = true
+                }
+            }
+            return@LaunchedEffect
+        }
+        if (currentRoute == VERIFY_EMAIL_ROUTE) {
+            val target = if (mobileOnboardingRequired && !mobileOnboardingComplete) SETUP_CHOICE_ROUTE else MOBILE_ROOT_ROUTE
+            navController.navigate(target) {
+                popUpTo(VERIFY_EMAIL_ROUTE) { inclusive = true }
+                launchSingleTop = true
+            }
+            return@LaunchedEffect
+        }
+        if (mobileOnboardingRequired && !mobileOnboardingComplete && !setupSummary.canStartWatching && currentRoute == MOBILE_ROOT_ROUTE) {
+            navController.navigate(SETUP_CHOICE_ROUTE) {
+                launchSingleTop = true
+            }
+        }
+        if (mobileOnboardingRequired && setupSummary.canStartWatching) {
+            markMobileOnboardingComplete()
+        }
+    }
     val movieCatalogViewModel = remember(
         metadataRepo,
         keywordSearchService,
@@ -452,7 +558,7 @@ fun TorveNavGraph(
             }
 
             TorveAppLinkTarget.SETUP -> {
-                navController.navigate("setup") {
+                navController.navigate(SETUP_ROUTE) {
                     launchSingleTop = true
                 }
             }
@@ -593,13 +699,38 @@ fun TorveNavGraph(
                     bottom = contentBottomPadding,
                 ),
         ) {
+            composable(SETUP_CHOICE_ROUTE) {
+                SetupChoiceScreen(
+                    onGuidedSetup = {
+                        navController.navigate(SETUP_ROUTE) {
+                            launchSingleTop = true
+                        }
+                    },
+                    onManualSetup = {
+                        markMobileOnboardingComplete()
+                        navController.navigate("settings") {
+                            popUpTo(SETUP_CHOICE_ROUTE) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    },
+                    onExit = {
+                        markMobileOnboardingComplete()
+                        val target = if (isTvMode) TV_HOME_ROUTE else MOBILE_ROOT_ROUTE
+                        navController.navigate(target) {
+                            popUpTo(SETUP_CHOICE_ROUTE) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    },
+                )
+            }
+
             // Setup hub — credential-first picker. Each card "Set up"
             // routes into the relevant detail surface (legacy wizard step
             // for Debrid/IPTV, settings for Plex/Jellyfin, Panda setup
             // for Usenet) so we don't duplicate per-feature credential
             // forms. The legacy linear wizard is reachable via "Use
             // guided wizard instead".
-            composable("setup") {
+            composable(SETUP_ROUTE) {
                 SetupIntentHubScreen(
                     coordinator = setupCoordinator,
                     onOpenDebridSetup = {
@@ -620,9 +751,27 @@ fun TorveNavGraph(
                     },
                     onUseGuidedWizard = { navController.navigate("setup_guided") },
                     onContinueToApp = {
+                        markMobileOnboardingComplete()
                         val target = if (isTvMode) TV_HOME_ROUTE else MOBILE_ROOT_ROUTE
                         navController.navigate(target) {
-                            popUpTo("setup") { inclusive = true }
+                            popUpTo(SETUP_CHOICE_ROUTE) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    },
+                    onExit = {
+                        markMobileOnboardingComplete()
+                        val target = if (isTvMode) TV_HOME_ROUTE else MOBILE_ROOT_ROUTE
+                        navController.navigate(target) {
+                            popUpTo(SETUP_CHOICE_ROUTE) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    },
+                    onSkipToApp = {
+                        markMobileOnboardingComplete()
+                        val target = if (isTvMode) TV_HOME_ROUTE else MOBILE_ROOT_ROUTE
+                        navController.navigate(target) {
+                            popUpTo(SETUP_CHOICE_ROUTE) { inclusive = true }
+                            launchSingleTop = true
                         }
                     },
                 )
@@ -635,9 +784,19 @@ fun TorveNavGraph(
                 SetupWizardScreen(
                     viewModel = setupViewModel,
                     onComplete = {
+                        markMobileOnboardingComplete()
                         val target = if (isTvMode) TV_HOME_ROUTE else MOBILE_ROOT_ROUTE
                         navController.navigate(target) {
-                            popUpTo("setup") { inclusive = true }
+                            popUpTo(SETUP_CHOICE_ROUTE) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    },
+                    onExit = {
+                        markMobileOnboardingComplete()
+                        val target = if (isTvMode) TV_HOME_ROUTE else MOBILE_ROOT_ROUTE
+                        navController.navigate(target) {
+                            popUpTo(SETUP_CHOICE_ROUTE) { inclusive = true }
+                            launchSingleTop = true
                         }
                     },
                     onPandaSetupClick = { navController.navigate("panda_setup") },
@@ -762,6 +921,7 @@ fun TorveNavGraph(
                             onCalendarClick = { navController.navigate("calendar") },
                             onAccountClick = { navController.navigate("sync_account") },
                             onDevicesClick = { navController.navigate("sync_devices") },
+                            onSignInTvClick = { navController.navigate("sign_in_tv") },
                             onManageDevicesClick = { navController.navigate("manage_devices") },
                             onLoginClick = { navController.navigate("login") },
                             onPrivacyPolicyClick = { navController.navigate("legal/privacy") },
@@ -826,6 +986,11 @@ fun TorveNavGraph(
                                     navController.navigate("diagnostics")
                                 }
                             },
+                            onSendCredentialsClick = { navController.navigate("transfer_send") },
+                            onReceiveCredentialsClick = { navController.navigate("transfer_receive") },
+                            onTransferDiagnosticsClick = { navController.navigate("transfer_diagnostics") },
+                            onStartSetupClick = { navController.navigate(SETUP_CHOICE_ROUTE) },
+                            onOpenProviderRoute = { route -> navController.navigate(route) },
                         )
                     }
                 }
@@ -1034,6 +1199,7 @@ fun TorveNavGraph(
                     onCalendarClick = { navController.navigate("calendar") },
                     onAccountClick = { navController.navigate("sync_account") },
                     onDevicesClick = { navController.navigate("sync_devices") },
+                    onSignInTvClick = { navController.navigate("sign_in_tv") },
                     onManageDevicesClick = { navController.navigate("manage_devices") },
                     onLoginClick = { navController.navigate("login") },
                     onPrivacyPolicyClick = { navController.navigate("legal/privacy") },
@@ -1101,6 +1267,7 @@ fun TorveNavGraph(
                     onSendCredentialsClick = { navController.navigate("transfer_send") },
                     onReceiveCredentialsClick = { navController.navigate("transfer_receive") },
                     onTransferDiagnosticsClick = { navController.navigate("transfer_diagnostics") },
+                    onStartSetupClick = { navController.navigate(SETUP_CHOICE_ROUTE) },
                     onOpenProviderRoute = { route -> navController.navigate(route) },
                 )
             }
@@ -1335,7 +1502,17 @@ fun TorveNavGraph(
             // Pairings — accessible to all authenticated users (individual
             // pair-creation actions may still check premium at runtime).
             composable("sync_devices") {
-                DevicesScreen(onBack = { navController.popBackStack() })
+                DevicesScreen(
+                    onBack = { navController.popBackStack() },
+                    onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                )
+            }
+
+            composable("sign_in_tv") {
+                com.torve.android.ui.sync.SignInTvScreen(
+                    onBack = { navController.popBackStack() },
+                    onDeviceLimitReached = { navController.navigate("device_limit_reached") },
+                )
             }
 
             // Paywall
@@ -1382,12 +1559,53 @@ fun TorveNavGraph(
                 )
             }
 
+            composable(VERIFY_EMAIL_ROUTE) {
+                VerifyEmailGateScreen(
+                    authClient = authClient,
+                    onVerified = {
+                        val target = if (mobileOnboardingRequired && !mobileOnboardingComplete) {
+                            SETUP_CHOICE_ROUTE
+                        } else {
+                            MOBILE_ROOT_ROUTE
+                        }
+                        navController.navigate(target) {
+                            popUpTo(VERIFY_EMAIL_ROUTE) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    },
+                    onSignedOut = {
+                        navController.navigate(MOBILE_ROOT_ROUTE) {
+                            popUpTo(VERIFY_EMAIL_ROUTE) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    },
+                )
+            }
+
             // Login
             composable("login") {
                 LoginScreen(
-                    onLoginSuccess = {
+                    onLoginSuccess = { isNewRegistration ->
                         subscriptionViewModel.loadSubscription()
-                        navController.popBackStack()
+                        val user = authClient.authUserFlow.value
+                        navScope.launch {
+                            if (isNewRegistration && user?.id != null) {
+                                prefsRepo.setString(mobileOnboardingRequiredKey(user.id), "true")
+                                mobileOnboardingRequired = true
+                            }
+                            val isComplete = user?.id?.let {
+                                prefsRepo.getString(mobileOnboardingCompleteKey(it)) == "true"
+                            } ?: false
+                            val target = when {
+                                user?.isVerified == false -> VERIFY_EMAIL_ROUTE
+                                isNewRegistration && !isComplete -> SETUP_CHOICE_ROUTE
+                                else -> MOBILE_ROOT_ROUTE
+                            }
+                            navController.navigate(target) {
+                                popUpTo("login") { inclusive = true }
+                                launchSingleTop = true
+                            }
+                        }
                     },
                     onDeviceLimitReached = { navController.navigate("device_limit_reached") },
                     onSkip = { navController.popBackStack() },

@@ -53,6 +53,7 @@ import com.torve.presentation.transfer.RelayDeliveryState
 import com.torve.presentation.transfer.SecretsTransferSenderViewModel
 import com.torve.presentation.transfer.SenderStatus
 import com.torve.presentation.transfer.TransferCategorySpec
+import com.torve.presentation.transfer.TransferCopy
 import com.torve.presentation.transfer.TransferSecretCatalog
 import kotlinx.coroutines.launch
 
@@ -105,18 +106,14 @@ fun SecretsTransferSendScreen(
             Spacer(Modifier.height(0.dp))
 
             Text(
-                text = "Open Receive credentials on the other Torve device, then scan its QR " +
-                    "or paste the session string here.",
+                text = TransferCopy.SEND_STEP1_HEADER,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = TransferCopy.SEND_STEP1_EXPLAINER,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
-            StatusBanner(
-                title = "End-to-end encrypted",
-                body = "Credentials are sealed with a one-time key derived from the receiver's " +
-                    "QR. The Torve backend only forwards the envelope — it can't read the " +
-                    "contents. Manual paste is the same sealed envelope shown as text.",
-                tone = TransferBannerTone.Info,
             )
 
             if (!preferPaste && hasCamera) {
@@ -228,7 +225,7 @@ private fun ScanSection(
             )
             if (scannerStatus is ScannerUnavailable.PermissionDenied) {
                 Text(
-                    text = "Camera permission denied. Use paste below.",
+                    text = TransferCopy.SEND_CAMERA_DENIED,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )
@@ -261,17 +258,24 @@ private fun PasteSection(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
-            text = "Or paste the receive code",
+            text = TransferCopy.SEND_RECEIVER_FIELD_LABEL,
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold,
         )
         OutlinedTextField(
             value = value,
             onValueChange = onChange,
-            label = { Text("torve://transfer/receive/...") },
+            label = { Text(TransferCopy.SEND_RECEIVER_FIELD_PLACEHOLDER) },
             singleLine = false,
             modifier = Modifier.fillMaxWidth().heightIn(min = 90.dp),
         )
+        if (value.isBlank()) {
+            Text(
+                text = TransferCopy.SEND_RECEIVER_EMPTY_HINT,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -282,7 +286,7 @@ private fun CategoryPicker(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
-            text = "Choose what to send",
+            text = TransferCopy.SEND_STEP2_HEADER,
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold,
         )
@@ -384,13 +388,13 @@ private fun RelayDeliveryBanner(state: RelayDeliveryState) {
         RelayDeliveryState.NotAttempted -> Unit
         RelayDeliveryState.Posting -> StatusBanner(
             title = "Delivering through relay…",
-            body = "Posting the sealed envelope to the Torve backend so the receiver can " +
+            body = "Posting the encrypted bundle to the Torve backend so the receiver can " +
                 "pull it automatically.",
             tone = TransferBannerTone.Info,
         )
         RelayDeliveryState.Delivered -> StatusBanner(
             title = "Delivered to the receiver",
-            body = "The sealed envelope is on the relay; the receiver will import on its " +
+            body = "The encrypted bundle is on the relay; the receiver will import on its " +
                 "next poll.",
             tone = TransferBannerTone.Success,
         )

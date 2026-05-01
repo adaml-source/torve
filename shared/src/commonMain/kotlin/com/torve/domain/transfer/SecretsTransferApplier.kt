@@ -2,6 +2,7 @@ package com.torve.domain.transfer
 
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
+import com.torve.domain.repository.ChannelRepository
 import com.torve.domain.repository.PreferencesRepository
 
 /**
@@ -31,6 +32,13 @@ class SecretsTransferApplier(
     private val nonceStore: ConsumedNonceStore,
     private val prefsRepo: PreferencesRepository,
     private val configKeyAllowlist: ConfigKeyAllowlist = DefaultConfigKeyAllowlist(),
+    /**
+     * Optional channel repo for IPTV/M3U/Xtream playlist transfers. Null
+     * on platforms without a channel repo wired (or in tests). When null
+     * the applier silently ignores [SecretsTransferPayload.playlists]
+     * the same way it silently skips unrecognised secret enum names.
+     */
+    private val channelRepo: ChannelRepository? = null,
 ) {
 
     suspend fun apply(payload: SecretsTransferPayload): TransferApplyResult {
@@ -63,10 +71,46 @@ class SecretsTransferApplier(
             }
         }
 
-        if (resolvedSecrets.isEmpty() && resolvedConfig.isEmpty()) {
+        // Resolve playlists. Skip rows whose required fields are blank
+        // (e.g. xtream without server / password) and rows whose id
+        // already exists locally — playlist transfer is idempotent;
+        // we never overwrite a working local entry.
+        val skippedPlaylistIds = mutableListOf<String>()
+        val repo = channelRepo
+        val resolvedPlaylists: List<TransferPlaylistDto> = if (repo == null) {
+            // No channel repo wired — every playlist becomes "skipped".
+            payload.playlists.forEach { skippedPlaylistIds += it.playlistId }
+            emptyList()
+        } else {
+            val existingIds = runCatching { repo.getPlaylists() }
+                .getOrDefault(emptyList())
+                .map { it.id }
+                .toSet()
+            payload.playlists.mapNotNull { p ->
+                if (p.playlistId in existingIds) {
+                    skippedPlaylistIds += p.playlistId
+                    null
+                } else when (p.playlistType.lowercase()) {
+                    "xtream" -> {
+                        val ok = !p.server.isNullOrBlank() &&
+                            !p.username.isNullOrBlank() &&
+                            !p.password.isNullOrBlank()
+                        if (ok) p else { skippedPlaylistIds += p.playlistId; null }
+                    }
+                    "m3u" -> {
+                        if (!p.url.isNullOrBlank()) p
+                        else { skippedPlaylistIds += p.playlistId; null }
+                    }
+                    else -> { skippedPlaylistIds += p.playlistId; null }
+                }
+            }
+        }
+
+        if (resolvedSecrets.isEmpty() && resolvedConfig.isEmpty() && resolvedPlaylists.isEmpty()) {
             return TransferApplyResult.NothingApplied(
                 skippedKeyNames = skippedSecretNames.toList(),
                 skippedConfigKeys = skippedConfigKeys.toList(),
+                skippedPlaylistIds = skippedPlaylistIds.toList(),
             )
         }
 
@@ -134,6 +178,42 @@ class SecretsTransferApplier(
                     applied = 0,
                     skippedKeyNames = skippedSecretNames.toList(),
                     skippedConfigKeys = skippedConfigKeys.toList(),
+                    skippedPlaylistIds = skippedPlaylistIds.toList(),
+                )
+            }
+        }
+        // Playlists last: they can be re-added safely if a later step
+        // fails mid-loop, and they don't carry secrets (everything
+        // sensitive is in the secret-store branch above). channelRepo
+        // is non-null here iff resolvedPlaylists is non-empty.
+        for (p in resolvedPlaylists) {
+            try {
+                when (p.playlistType.lowercase()) {
+                    "xtream" -> channelRepo!!.addXtreamPlaylist(
+                        name = p.name,
+                        server = p.server!!,
+                        username = p.username!!,
+                        password = p.password!!,
+                        id = p.playlistId,
+                    )
+                    "m3u" -> channelRepo!!.addPlaylist(
+                        name = p.name,
+                        url = p.url!!,
+                        epgUrl = p.epgUrl,
+                        id = p.playlistId,
+                    )
+                }
+                written += ApplyTarget.Playlist(p.playlistId)
+            } catch (t: Throwable) {
+                val rollback = rollback(written, secretPreImages, configPreImages)
+                return TransferApplyResult.StoreFailure(
+                    message = "playlist put failed for ${p.playlistId}: ${errMsg(t)}",
+                    rollbackAttempted = true,
+                    rollbackSucceeded = rollback,
+                    applied = 0,
+                    skippedKeyNames = skippedSecretNames.toList(),
+                    skippedConfigKeys = skippedConfigKeys.toList(),
+                    skippedPlaylistIds = skippedPlaylistIds.toList(),
                 )
             }
         }
@@ -141,11 +221,14 @@ class SecretsTransferApplier(
         nonceStore.markConsumed(payload.transferNonce)
         val secretsApplied = written.count { it is ApplyTarget.Secret }
         val configApplied = written.count { it is ApplyTarget.Config }
+        val playlistsApplied = written.count { it is ApplyTarget.Playlist }
         return TransferApplyResult.Success(
             applied = secretsApplied,
             configApplied = configApplied,
+            playlistsApplied = playlistsApplied,
             skippedKeyNames = skippedSecretNames.toList(),
             skippedConfigKeys = skippedConfigKeys.toList(),
+            skippedPlaylistIds = skippedPlaylistIds.toList(),
             categoriesMissingCompanionConfig = categoriesMissingCompanionConfig(payload),
         )
     }
@@ -176,6 +259,12 @@ class SecretsTransferApplier(
                         if (pre == null) prefsRepo.remove(target.key)
                         else prefsRepo.setString(target.key, pre)
                     }
+                    is ApplyTarget.Playlist -> {
+                        // Playlist transfer is add-only (idempotent on
+                        // pre-existing rows skipped above), so rollback
+                        // is just removing what we added in this txn.
+                        channelRepo?.removePlaylist(target.playlistId)
+                    }
                 }
             }
             if (attempt.isFailure) ok = false
@@ -187,6 +276,7 @@ class SecretsTransferApplier(
         message: String,
         skippedSecretNames: List<String>,
         skippedConfigKeys: List<String>,
+        skippedPlaylistIds: List<String> = emptyList(),
     ): TransferApplyResult.StoreFailure = TransferApplyResult.StoreFailure(
         message = message,
         rollbackAttempted = false,
@@ -194,6 +284,7 @@ class SecretsTransferApplier(
         applied = 0,
         skippedKeyNames = skippedSecretNames,
         skippedConfigKeys = skippedConfigKeys,
+        skippedPlaylistIds = skippedPlaylistIds,
     )
 
     /**
@@ -230,6 +321,7 @@ class SecretsTransferApplier(
     private sealed interface ApplyTarget {
         data class Secret(val addr: KeyAddress) : ApplyTarget
         data class Config(val key: String) : ApplyTarget
+        data class Playlist(val playlistId: String) : ApplyTarget
     }
 }
 
@@ -240,10 +332,18 @@ sealed interface TransferApplyResult {
         val applied: Int,
         /** Count of [ConfigEntry] records written to [PreferencesRepository]. */
         val configApplied: Int = 0,
+        /** Count of [TransferPlaylistDto] rows written to the channel repo. */
+        val playlistsApplied: Int = 0,
         /** Secret enum names from the payload we couldn't resolve — never wrote. */
         val skippedKeyNames: List<String>,
         /** Config keys rejected by the receiver allowlist — never wrote. */
         val skippedConfigKeys: List<String> = emptyList(),
+        /**
+         * Playlist ids skipped because they already existed locally
+         * (idempotent re-import) or because their required fields were
+         * blank (xtream without server/password, m3u without url).
+         */
+        val skippedPlaylistIds: List<String> = emptyList(),
         /**
          * Categories whose tokens *did* import but whose companion
          * config didn't arrive — e.g. Plex token without its server URL.
@@ -264,6 +364,7 @@ sealed interface TransferApplyResult {
     data class NothingApplied(
         val skippedKeyNames: List<String>,
         val skippedConfigKeys: List<String> = emptyList(),
+        val skippedPlaylistIds: List<String> = emptyList(),
     ) : TransferApplyResult
 
     /**
@@ -280,5 +381,6 @@ sealed interface TransferApplyResult {
         val applied: Int,
         val skippedKeyNames: List<String>,
         val skippedConfigKeys: List<String> = emptyList(),
+        val skippedPlaylistIds: List<String> = emptyList(),
     ) : TransferApplyResult
 }

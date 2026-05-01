@@ -260,6 +260,47 @@ class AuthClient(
 
     suspend fun getServerDeviceId(): String? = localSettingsRepository.getString(KEY_AUTH_DEVICE_ID)
 
+    /**
+     * Persist tokens received from a successful [PairingApi.pollPairingStatus]
+     * claim. Used by the QR-sign-in flow: the TV (signed-out) generated a
+     * code, the phone (signed-in) scanned and claimed it, and the TV's next
+     * poll returned auth tokens for the user. We feed those into the same
+     * persistence path as a normal login so all observers (auth flow,
+     * subscription VM, content-policy repo, account-session coordinator)
+     * see the user appear exactly as if they'd signed in by typing their
+     * email + password.
+     */
+    suspend fun signInViaPairing(
+        accessToken: String,
+        refreshToken: String,
+        expiresInSeconds: Int,
+        userId: String,
+        email: String,
+        displayName: String?,
+        isVerified: Boolean,
+        deviceId: String?,
+    ): AuthResult {
+        val response = AuthResponseDto(
+            user = UserResponseDto(
+                id = userId,
+                email = email,
+                display_name = displayName,
+                is_verified = isVerified,
+            ),
+            tokens = TokensResponseDto(
+                access_token = accessToken,
+                refresh_token = refreshToken,
+                expires_in = expiresInSeconds,
+            ),
+            device = deviceId?.takeIf { it.isNotBlank() }?.let { AuthDeviceResponseDto(id = it) },
+        )
+        validateAuthResponse(response, requireRefreshToken = true)?.let { return it }
+        authStateMutex.withLock {
+            persistAuthLocked(response)
+        }
+        return response.toAuthResult()
+    }
+
     suspend fun login(email: String, password: String): AuthResult {
         if (email.isBlank() || !email.contains("@")) {
             return AuthResult(success = false, error = "Please enter a valid email address")

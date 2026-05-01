@@ -22,13 +22,13 @@ Turn Torve from a feature-rich enthusiast app into a credential-only AIO media h
 
 This roadmap is no longer in the "strong beta foundation" state from 2026-04-29. Prompts 5 through 12, including cleanup passes 7B, 9B, 9C, 10B, 10C, 11B, and 11C, have moved most core roadmap items from partial/foundation into implemented beta-candidate territory.
 
-The harsh status is still not "100% done." After Prompt 12B, the current state is **public beta code GO for desktop, Android mobile, and Android TV**, **not stable**, and **not iOS-ready from this Windows host**. The remaining beta artifact blocker is reproducibility: `git status --porcelain` currently reports 101 dirty paths (44 modified, 57 untracked) from Prompts 6-12 plus the audit/docs updates. Those changes must be committed or otherwise checkpointed before cutting beta artifacts.
+The harsh status is still not "100% done." After Prompt 12B, the current state is **public beta GO for desktop, Android mobile, and Android TV**, **not stable**, and **not iOS-ready from this Windows host**. The Prompt 6-12B work is checkpointed and pushed: `HEAD = origin/master = 79844ed` (`Checkpoint Prompt 6-12B public beta release work`). `git status --short` is clean aside from unrelated pytest cache permission warnings.
 
 ### Current Status
 
 | Area | Status | Current truth |
 | --- | --- | --- |
-| Baseline and hygiene | Implemented, needs new checkpoint | The original 338-path dirty tree and secret/artifact hazards were cleaned and checkpointed. A later Prompt 6-12 wave is dirty again: 101 paths including audit/doc updates. This is not a product blocker, but it is a release-process blocker until committed and re-verified. |
+| Baseline and hygiene | Implemented | The original 338-path dirty tree and secret/artifact hazards were cleaned and checkpointed. The later Prompt 6-12B wave is now committed and pushed at `79844ed`; local status is clean aside from pytest cache permission warnings. |
 | Playback and desktop release foundation | Beta candidate, stable blocked by operator smoke | VLC runtime staging scripts, hard packaging gates, release-build bypass refusal, installer handoff, SHA-256 verification, channel envs, and signing docs exist. A clean Windows VM package/install/playback/update-handoff smoke is still required before stable. |
 | Credential-first setup wizard | Implemented | Four setup intents, per-intent state, validation, Ready-to-watch summary, desktop/Android/iOS hub wiring, and desktop/iOS deep-link cleanup are landed. iOS remains operator-build-required on macOS. |
 | Encrypted credential transfer | Implemented, operator smoke required | Desktop, Android mobile, Android TV, and iOS surfaces exist with redaction/diagnostics/recovery coverage. The 12-row live-backend/multi-device smoke matrix is still operator-side. iOS compile/runtime verification requires macOS. |
@@ -56,8 +56,7 @@ These block stable release and, where noted, block public beta artifact cutting:
 
 | Gate | Blocks | Owner / host |
 | --- | --- | --- |
-| Commit/checkpoint the Prompt 6-12 dirty paths plus audit/docs updates, then re-run the release-verification matrix | Public beta artifact cut | Repo operator |
-| Keep backend at 110/110 on the release branch after checkpointing | Public beta signoff | Backend |
+| Keep backend at 110/110 on the release branch during beta artifact production | Public beta signoff | Backend |
 | Publish `https://torve.app/delete-account.html` | Public stable and app-store compliance | Web ops |
 | Run iOS build + simulator smoke for the Prompt 12 Swift changes | iOS beta/stable | macOS + Xcode |
 | Run macOS sign + notarize round-trip | macOS stable | macOS + Apple ID |
@@ -82,15 +81,15 @@ These block stable release and, where noted, block public beta artifact cutting:
 
 | Target | Status | Reason |
 | --- | --- | --- |
-| Desktop public beta | GO after checkpoint | Prompt 12B fixed the backend blockers and verified the host-runnable code path. Do not cut artifacts until the dirty paths are checkpointed and the final sweep is re-run on the release branch. |
-| Android mobile public beta | GO after checkpoint | Host-runnable build and legal/account surfaces are green by report. Do not cut artifacts until checkpoint + final sweep. |
-| Android TV public beta | GO after checkpoint | TV-first flow is accepted after 11C and Prompt 12B kept the build/test signal green. Real-device couch smoke is still required before strong marketing claims. |
+| Desktop public beta | GO | Prompt 12B fixed the backend blockers and verified the host-runnable code path. Cut beta artifacts only; stable still needs clean Windows VM smoke. |
+| Android mobile public beta | GO | Host-runnable build and legal/account surfaces are green by report. |
+| Android TV public beta | GO | TV-first flow is accepted after 11C and Prompt 12B kept the build/test signal green. Real-device couch smoke is still required before strong marketing claims. |
 | iOS beta | NO-GO from this host | Swift changes exist, but macOS `xcodebuild` and simulator smoke have not run. |
 | Public stable | NO-GO | Stable is blocked by web legal mirror, macOS/iOS verification, Windows clean-VM smoke, and prod LAN wrap-key validation. |
 
 ## Prompt Packages And Remaining Verification
 
-Prompts 5-12B are retained below as the implementation history and reproduction plan. Do not start new feature prompts before checkpointing the Prompt 6-12B work and re-running the final artifact sweep on the release branch.
+Prompts 5-12B are retained below as the implementation history and reproduction plan. The next work should be beta artifact production and the stable-release operator gates, not new feature scope.
 
 For the updated commercial/product verdict, see `docs/market-readiness-assessment.md`.
 

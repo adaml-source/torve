@@ -52,7 +52,7 @@ import org.koin.compose.koinInject
 
 @Composable
 fun LoginScreen(
-    onLoginSuccess: () -> Unit,
+    onLoginSuccess: (isNewRegistration: Boolean) -> Unit,
     onDeviceLimitReached: () -> Unit,
     onSkip: () -> Unit,
     authClient: AuthClient = koinInject(),
@@ -231,7 +231,7 @@ fun LoginScreen(
                                 // Proceed after successful login. Registration errors
                                 // are stored in AccountSessionCoordinator.state.lastError
                                 // and surfaced on the Settings/Manage Devices screens.
-                                onLoginSuccess()
+                                onLoginSuccess(isRegisterMode)
                             }
                         } else {
                             error = result.error
@@ -275,4 +275,3 @@ fun LoginScreen(
         }
     }
 }
-

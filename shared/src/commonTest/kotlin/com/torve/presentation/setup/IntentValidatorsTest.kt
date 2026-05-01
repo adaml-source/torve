@@ -116,6 +116,22 @@ class IntentValidatorsTest {
     }
 
     @Test
+    fun `iptv validator ignores stale error when persisted playlist count proves channels loaded`() = runTest {
+        val v = IptvIntentValidator {
+            ChannelsUiState(
+                playlists = listOf(playlist("p1", "8K", channelCount = 8_000)),
+                selectedPlaylistId = "p1",
+                channels = emptyList(),
+                error = "error_channel_load_failed",
+                epgState = EpgState.NotConfigured,
+            )
+        }
+        val result = v.validate()
+        assertEquals(SetupIntentStatus.READY, result.status)
+        assertTrue(result.message?.contains("8000 channels") == true, "got ${result.message}")
+    }
+
+    @Test
     fun `iptv validator returns NEEDS_ATTENTION when parse OK but 0 channels`() = runTest {
         val v = IptvIntentValidator {
             ChannelsUiState(
@@ -317,8 +333,8 @@ class IntentValidatorsTest {
 
     // ── helpers ──────────────────────────────────────────────────────
 
-    private fun playlist(id: String, name: String): ChannelPlaylist =
-        ChannelPlaylist(id = id, name = name, url = "https://x")
+    private fun playlist(id: String, name: String, channelCount: Int = 0): ChannelPlaylist =
+        ChannelPlaylist(id = id, name = name, url = "https://x", channelCount = channelCount)
 
     private fun makeChannel(id: String): com.torve.domain.model.EnrichedChannel =
         com.torve.domain.model.EnrichedChannel(

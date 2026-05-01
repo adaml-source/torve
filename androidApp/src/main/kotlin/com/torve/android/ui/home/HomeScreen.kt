@@ -96,7 +96,7 @@ import com.torve.domain.model.HomeSectionConfig
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.PersonSummary
 import com.torve.domain.model.MediaType
-import com.torve.domain.model.RatingSource
+import com.torve.domain.model.allowsTmdbRatingProvider
 import com.torve.domain.model.ShelfType
 import com.torve.domain.model.WatchProgress
 import com.torve.domain.model.matchesSection
@@ -978,7 +978,7 @@ private fun HeroSlide(
                         color = Snow.copy(alpha = 0.7f),
                     )
                 }
-                if (RatingSource.TMDB in ratingPrefs.enabledProviders) {
+                if (ratingPrefs.allowsTmdbRatingProvider()) {
                     item.rating?.let { rating ->
                         if (rating > 0) {
                             Text(

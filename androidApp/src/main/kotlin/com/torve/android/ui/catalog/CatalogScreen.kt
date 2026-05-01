@@ -102,7 +102,7 @@ import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Torve
 import com.torve.android.ui.components.LocalRatingPrefs
 import com.torve.domain.model.MediaItem
-import com.torve.domain.model.RatingSource
+import com.torve.domain.model.allowsTmdbRatingProvider
 import com.torve.domain.model.resolveCardStyle
 import com.torve.presentation.catalog.CatalogCategory
 import com.torve.presentation.catalog.CatalogFilter
@@ -653,7 +653,7 @@ private fun CatalogHeroSlide(
     onClick: () -> Unit,
 ) {
     val ratingPrefs = LocalRatingPrefs.current
-    val tmdbTextRating = if (RatingSource.TMDB in ratingPrefs.enabledProviders) item.rating else null
+    val tmdbTextRating = if (ratingPrefs.allowsTmdbRatingProvider()) item.rating else null
     Box(
         modifier = Modifier
             .fillMaxWidth()

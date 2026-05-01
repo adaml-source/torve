@@ -32,15 +32,25 @@ import androidx.compose.ui.unit.dp
 import com.torve.android.sync.SyncCoordinator
 import com.torve.android.sync.model.SecureChannelState
 import com.torve.android.sync.model.SyncDeviceDto
+import com.torve.android.ui.transfer.QrScannerView
+import com.torve.android.ui.transfer.cameraPermissionGranted
+import com.torve.android.ui.transfer.deviceHasAnyCamera
 import com.torve.domain.sync.SyncRepository
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import com.torve.android.R
+import com.torve.presentation.pairing.TvPairingSignInViewModel
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
 @Composable
 fun DevicesScreen(
     onBack: () -> Unit,
+    onDeviceLimitReached: () -> Unit = {},
     syncCoordinator: SyncCoordinator = koinInject(),
 ) {
     val state by syncCoordinator.state.collectAsState()
@@ -79,6 +89,69 @@ fun DevicesScreen(
                 }
                 OutlinedButton(onClick = { syncCoordinator.refreshDevices() }) {
                     Text(stringResource(R.string.devices_refresh))
+                }
+            }
+
+            // Inline QR scanner for the "Sign in your TV with this phone"
+            // flow. The TV displays a QR encoding `torve-signin:<code>`;
+            // scanning it here unwraps the code and POSTs to
+            // `/pairing/signin/claim` (NOT the legacy `/pairing/claim`,
+            // which targets the premium-gated phone↔TV remote-control
+            // flow on a different table). The TV's own poll then
+            // receives auth tokens for this phone's account.
+            val context = LocalContext.current
+            val hasCamera = remember { deviceHasAnyCamera(context) }
+            if (hasCamera) {
+                var scannerOpen by remember { mutableStateOf(false) }
+                var permissionGranted by remember {
+                    mutableStateOf(cameraPermissionGranted(context))
+                }
+                val cameraPermissionLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.RequestPermission(),
+                ) { granted ->
+                    permissionGranted = granted
+                    if (granted) scannerOpen = true
+                }
+                if (!scannerOpen) {
+                    OutlinedButton(
+                        onClick = {
+                            if (permissionGranted) scannerOpen = true
+                            else cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Scan TV sign-in QR")
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        androidx.compose.foundation.layout.Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(1f)
+                                .clip(RoundedCornerShape(16.dp)),
+                        ) {
+                            QrScannerView(
+                                onQrDetected = { payload ->
+                                    val code = TvPairingSignInViewModel
+                                        .extractCodeFromQrPayload(payload)
+                                    if (code != null) {
+                                        scannerOpen = false
+                                        syncCoordinator.claimTvSigninCode(
+                                            code = code,
+                                            onDeviceLimitReached = onDeviceLimitReached,
+                                        )
+                                    }
+                                },
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = { scannerOpen = false },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(stringResource(R.string.common_cancel))
+                        }
+                    }
                 }
             }
         } else {

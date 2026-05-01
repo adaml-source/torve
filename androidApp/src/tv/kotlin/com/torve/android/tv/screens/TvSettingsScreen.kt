@@ -232,6 +232,7 @@ internal fun TvSettingsScreen(
     onNavigateToSendCredentials: () -> Unit = {},
     onNavigateToReceiveCredentials: () -> Unit = {},
     onNavigateToTransferDiagnostics: () -> Unit = {},
+    onNavigateToPairingSignIn: () -> Unit = {},
     onAuthSuccess: () -> Unit = {},
     pairedDevicesFocusRequester: FocusRequester? = null,
     activatedDevicesFocusRequester: FocusRequester? = null,
@@ -334,6 +335,29 @@ internal fun TvSettingsScreen(
             runCatching {
                 accountSettingsRepository.refreshIfStale(force = true)
                 settingsViewModel.refreshSettings()
+            }
+        }
+    }
+
+    // Observe live auth-state changes — covers paths that don't go through
+    // the local `authUser = ...` mutations on this screen, most importantly
+    // the QR sign-in flow where AuthClient.signInViaPairing persists tokens
+    // and emits via authUserFlow but the user stays on the Account tab the
+    // whole time, so neither the LaunchedEffect(Unit) above nor the
+    // LaunchedEffect(selectedCategory) on line ~565 re-fires. Without this,
+    // the screen keeps showing email+password login fields after a
+    // successful TV sign-in.
+    LaunchedEffect(Unit) {
+        authClient.authUserFlow.collect { user ->
+            if (user != authUser) {
+                authUser = user
+                if (user != null) {
+                    runCatching {
+                        accountSettingsRepository.refreshIfStale(force = true)
+                        settingsViewModel.refreshSettings()
+                        subscriptionViewModel.refreshAccess()
+                    }
+                }
             }
         }
     }
@@ -990,6 +1014,17 @@ internal fun TvSettingsScreen(
             focusTargetType = "navigation",
         )
     }
+    val authPairWithPhoneTarget = remember {
+        TvSettingsFocusTarget(
+            itemId = TvSettingsItemIds.ACCOUNT_AUTH_PAIR_WITH_PHONE,
+            category = TvSettingsCategory.ACCOUNT,
+            // Sit between auth_toggle (24) and the existing auth_forgot_password (25)
+            // is the natural reading order; use 26 to stay above the
+            // subscription-management cluster (30+) without colliding.
+            listIndex = 26,
+            focusTargetType = "navigation",
+        )
+    }
     val authForgotPasswordTarget = remember {
         TvSettingsFocusTarget(
             itemId = TvSettingsItemIds.ACCOUNT_AUTH_FORGOT_PASSWORD,
@@ -1599,6 +1634,13 @@ internal fun TvSettingsScreen(
         val origin = settingsFocusController.pendingFocusRepair ?: return@LaunchedEffect
         if (!isActive) return@LaunchedEffect
         if (categoryPaneHasFocus) return@LaunchedEffect
+        // If the user is currently on the rail, do NOT pull focus back into
+        // Settings content — they'd see Settings auto-enter content as soon
+        // as they hovered the rail item. The repair stays pending; the
+        // LaunchedEffect is keyed on `isRailFocused`, so it re-fires the
+        // moment they explicitly move into content (OK/RIGHT, or sub-route
+        // return) and restores focus to the saved card then.
+        if (isRailFocused) return@LaunchedEffect
         if (aboutOverlayState != null || showLanguagePicker || showMaxQualityPicker || showMinQualityPicker) {
             return@LaunchedEffect
         }
@@ -2585,6 +2627,30 @@ internal fun TvSettingsScreen(
                     rowType = TvSettingRowType.NAVIGATION,
                 )
             }
+            // QR sign-in escape hatch — typing email + password on a TV
+            // remote is the worst onboarding moment in the app. This card
+            // takes the user to a screen that displays a one-time pairing
+            // code as a QR; their phone scans, claims, and the TV silently
+            // signs in via the same persisted-tokens path as email login.
+            item(key = "auth_pair_with_phone") {
+                val requester = rememberRegisteredTvSettingsFocusRequester(
+                    controller = settingsFocusController,
+                    target = authPairWithPhoneTarget,
+                    externalRequester = remember("auth_pair_with_phone") { FocusRequester() },
+                )
+                TvSettingCard(
+                    title = "Sign in with your phone",
+                    subtitle = "Scan a QR with the Torve app on your phone — no typing required.",
+                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                    focusRequester = requester,
+                    onFocused = {
+                        settingsFocusController.markFocused(authPairWithPhoneTarget.itemId, requester)
+                        onContentFocused(requester)
+                    },
+                    onClick = onNavigateToPairingSignIn,
+                    rowType = TvSettingRowType.NAVIGATION,
+                )
+            }
             if (!authShowRegister) {
                 item(key = "auth_forgot_password") {
                     val requester = rememberRegisteredTvSettingsFocusRequester(
@@ -3216,6 +3282,27 @@ internal fun TvSettingsScreen(
                         TvSectionHeader(
                             text = stringResource(R.string.tv_settings_streaming_accounts),
                             description = stringResource(R.string.tv_settings_streaming_accounts_desc),
+                        )
+                    }
+                    // Prompt 15 fix: "Receive credentials" must be reachable
+                    // on a fresh TV install, not only on phone-paired ones.
+                    // The earlier "unconditional" entry was nested inside the
+                    // ANDROID_PHONE / IOS_PHONE branch only — meaning a
+                    // brand-new TV (default setupMode = TV_ONLY) had no way
+                    // to receive credentials over the remote at all. Place
+                    // it FIRST in this section so a non-technical user lands
+                    // on it immediately when they open Connections.
+                    item(key = "transfer_receive_tv_only") {
+                        val requester = remember("transfer_receive_tv_only") { FocusRequester() }
+                        TvSettingCard(
+                            title = "Receive credentials from another device",
+                            subtitle = "Show a one-time pairing code so a desktop or phone can " +
+                                "send debrid / Plex / Panda credentials without typing on the remote.",
+                            modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                            focusRequester = requester,
+                            onFocused = { },
+                            onClick = { onNavigateToReceiveCredentials() },
+                            rowType = TvSettingRowType.ACTION,
                         )
                     }
                     item(key = "panda_setup") {
@@ -5662,7 +5749,6 @@ private fun TvSettingsTopCategoryChip(
             style = MaterialTheme.typography.titleMedium,
             color = if (focused || selected) Snow else Silver,
             fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.weight(1f, fill = false),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )

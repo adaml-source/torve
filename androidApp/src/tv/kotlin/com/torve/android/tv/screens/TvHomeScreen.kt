@@ -65,7 +65,7 @@ private data class AddonShelfHomeItem(
 @Composable
 internal fun TvHomeScreen(
     railFocusRequester: FocusRequester,
-    headerFocusRequester: FocusRequester,
+    headerFocusRequester: FocusRequester?,
     onMediaClick: (MediaItem) -> Unit,
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,

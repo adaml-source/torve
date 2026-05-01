@@ -64,6 +64,29 @@ class RatingDisplayPrefsTest {
     }
 
     @Test
+    fun deriveProvidersToRender_usesTmdbOnlyWhenNoProviderIsSelected() {
+        val result = deriveProvidersToRender(
+            enabledProviders = emptyList(),
+            providerOrder = listOf(RatingSource.IMDB, RatingSource.ROTTEN_TOMATOES),
+            maxRatingsOnCard = 3,
+        )
+
+        assertEquals(listOf(RatingSource.TMDB), result)
+    }
+
+    @Test
+    fun deriveProvidersToRender_canDisableEmptySelectionTmdbFallback() {
+        val result = deriveProvidersToRender(
+            enabledProviders = emptyList(),
+            providerOrder = listOf(RatingSource.IMDB, RatingSource.ROTTEN_TOMATOES),
+            maxRatingsOnCard = 3,
+            fallbackToTmdbWhenNoneSelected = false,
+        )
+
+        assertTrue(result.isEmpty())
+    }
+
+    @Test
     fun withFallbackTmdbScore_onlyAddsTmdbWhenMissing() {
         val fromBaseline = null.withFallbackTmdbScore(7.4)
         assertEquals(7.4f, fromBaseline?.tmdbScore)
@@ -87,6 +110,11 @@ class RatingDisplayPrefsTest {
         assertTrue(
             ratings.hasAnyEnabledDisplayValue(
                 RatingDisplayPrefs(enabledProviders = listOf(RatingSource.IMDB)),
+            ),
+        )
+        assertTrue(
+            ratings.hasAnyEnabledDisplayValue(
+                RatingDisplayPrefs(enabledProviders = emptyList()),
             ),
         )
         assertFalse(

@@ -36,6 +36,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -89,7 +90,10 @@ import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Steel
 import com.torve.domain.model.MediaItem
+import com.torve.domain.model.allowsTmdbRatingProvider
+import com.torve.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.launch
+import org.koin.compose.koinInject
 
 enum class TvCardStyle { POSTER, BACKDROP }
 
@@ -170,6 +174,9 @@ internal fun TvMediaRails(
     onContextMenuAction: ((MediaItem, TvMediaContextMenuAction, Float?) -> Unit)? = null,
     registerFocusHandle: ((TvScreenFocusHandle?) -> Unit)? = null,
 ) {
+    val settingsViewModel: SettingsViewModel = koinInject()
+    val settingsState by settingsViewModel.state.collectAsState()
+    val showTmdbRating = settingsState.ratingPrefs.allowsTmdbRatingProvider()
     val context = LocalContext.current
     val tvPrefs = remember { context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE) }
     val showTitlesOnCards = tvPrefs.getBoolean("tv_show_poster_titles", true) &&
@@ -422,6 +429,7 @@ internal fun TvMediaRails(
                                             onClick = { onMediaClick(item) },
                                             onFocused = onItemFocused,
                                             progress = progress,
+                                            showTmdbRating = showTmdbRating,
                                         )
                                     }
 
@@ -440,6 +448,7 @@ internal fun TvMediaRails(
                                             onFocused = onItemFocused,
                                             progress = progress,
                                             showTitles = showTitlesOnCards,
+                                            showTmdbRating = showTmdbRating,
                                             onContextMenuRequested = { anchorBounds ->
                                                 openContextMenu(
                                                     item = item,
@@ -502,6 +511,7 @@ private fun TvPosterCard(
     onFocused: () -> Unit,
     progress: Float? = null,
     showTitles: Boolean = true,
+    showTmdbRating: Boolean = true,
     onContextMenuRequested: ((Rect?) -> Unit)? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -610,7 +620,7 @@ private fun TvPosterCard(
                                 color = Silver,
                             )
                         }
-                        if (item.rating != null) {
+                        if (showTmdbRating && item.rating != null) {
                             if (item.year != null) {
                                 Spacer(modifier = Modifier.width(2.dp))
                             }

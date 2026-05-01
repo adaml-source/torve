@@ -320,11 +320,10 @@ Backend status after Prompt 12B: **110 / 110 passing**.
 
 ## 9. GO / NO-GO
 
-**Recommendation: GO for public beta on desktop + Android after
-checkpointing the Prompt 6-12B work and re-running the final artifact
-sweep on that release branch. iOS remains NO-GO until macOS build and
-simulator smoke pass. Stable remains NO-GO until the blockers below are
-cleared.**
+**Recommendation: GO for public beta on desktop + Android from
+checkpoint `79844ed` (`Checkpoint Prompt 6-12B public beta release
+work`). iOS remains NO-GO until macOS build and simulator smoke pass.
+Stable remains NO-GO until the blockers below are cleared.**
 
 ### Blockers (must clear before public stable)
 
@@ -345,3 +344,55 @@ cleared.**
 - N4: Playlist password ciphertext wrap deferred.
 - N5: Pairing-flow + stale-device tests pre-existing failures
   (out of scope for Prompt 12).
+- N6: Receiver code is a ~250-char `torve://transfer/receive/…` URL,
+  not a 6–8 char pairing code. Copy was corrected to drop "short"
+  framing in Prompt 15 (2026-04-30). A real relay-assigned short
+  pairing code is a future enhancement — paste-based handoff still
+  works today.
+
+### Prompt 15 — credential-transfer real-device pass (2026-04-30)
+
+Ran `docs/transfer-real-device-runbook.md` against `Television_4K`
+AVD with the freshly built `androidApp-google-tv-debug.apk`.
+
+**Blockers found and fixed in-slice:**
+
+1. **TV_ONLY mode hid the Receive entry.** Fresh installs default
+   `setup_mode = TvSetupMode.TV_ONLY` (`TvSettingsScreen.kt` line
+   ~403). The Receive credentials entry was nested inside the
+   `ANDROID_PHONE | IOS_PHONE` branch only, so a TV-only user could
+   never reach it from Settings. Fixed by adding a fresh
+   `transfer_receive_tv_only` entry at the top of the TV_ONLY →
+   CONNECTIONS section.
+2. **"Short receiver code" copy lie.** `TransferCopy` user-facing
+   strings promised a "short receiver code"; the actual rendered
+   code is a long base64 URL. Removed "short" from
+   `SEND_STEP1_EXPLAINER` and `RECEIVE_PRIMARY_EXPLAINER_DESKTOP`,
+   updated `TransferCopyTest`, and synchronised
+   `docs/transfer-real-device-runbook.md`.
+3. **TV QR filled the entire screen, hiding the receiver code +
+   copy button below the fold.** `SecretsTransferReceiveScreen`
+   used `fillMaxWidth()` with no width cap — on a 4K TV at 640 dpi
+   that drew a ~3700 dp QR no phone camera could frame at 3 m, and
+   that pushed every other control off the screen. Fixed by giving
+   `largeQr = true` a Row layout: QR fixed at 320 dp on the left,
+   countdown + relay banner + receiver code + copy button stacked
+   on the right. Both halves now sit above the fold. Verified on
+   `Television_4K` AVD (`build/tv_30_at_categories.png`).
+4. **TV Settings category chips lost their titles.**
+   `TvSettingsTopCategoryChip` wrapped its title `Text` with
+   `Modifier.weight(1f, fill = false)` inside an unbounded-width
+   `LazyRow` item — weight in an infinite parent collapses the
+   child to 0 dp. The result: empty pills with only the status
+   badge ("Connected" / "Needs setup" / "Locked items"), no
+   "Account" / "Playback" / "Appearance" / etc. labels. Fixed by
+   removing the weight modifier; the title sizes to its intrinsic
+   width and the chip grows to fit. Verified on Television_4K AVD
+   (`build/tv_33_chips_top.png`).
+
+**Operator residue (S1 desktop half, S2, S3, S8):** still requires
+human-driven smoke; emulator does not have a phone camera and
+cannot execute the desktop sender end-to-end paste against a
+running TV without sign-in (relay path requires authenticated
+receiver). Receive-screen render is now visually verified
+(`build/tv_18_receive.png`, `build/tv_20_after_back.png`).

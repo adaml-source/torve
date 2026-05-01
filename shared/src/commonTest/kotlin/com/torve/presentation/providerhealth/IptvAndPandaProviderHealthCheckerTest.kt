@@ -71,6 +71,27 @@ class IptvAndPandaProviderHealthCheckerTest {
         assertTrue(out.message?.contains("Invalid M3U") == true)
     }
 
+    @Test
+    fun `iptv reports green when persisted playlist count exists despite stale error`() = runTest {
+        val state = ChannelsUiState(
+            playlists = listOf(com.torve.domain.model.ChannelPlaylist(
+                id = "p1",
+                name = "8K",
+                url = "https://x",
+                epgUrl = null,
+                channelCount = 8_000,
+            )),
+            selectedPlaylistId = "p1",
+            channels = emptyList(),
+            categories = emptyList(),
+            groupedChannels = emptyMap(),
+            error = "error_channel_load_failed",
+        )
+        val out = IptvProviderHealthChecker { state }.check()
+        assertEquals(ProviderHealthStatus.GREEN, out.status)
+        assertTrue(out.message?.contains("8000 channels") == true, "message was ${out.message}")
+    }
+
     // ── EPG ─────────────────────────────────────────────────────────
 
     @Test
@@ -96,7 +117,7 @@ class IptvAndPandaProviderHealthCheckerTest {
     }
 
     @Test
-    fun `epg yellow at low match rate`() = runTest {
+    fun `epg green at low match rate when programmes are available`() = runTest {
         val state = ChannelsUiState(
             epgState = EpgState.Loaded(
                 sourceUrl = "https://epg",
@@ -107,7 +128,25 @@ class IptvAndPandaProviderHealthCheckerTest {
             ),
         )
         val out = IptvEpgProviderHealthChecker { state }.check()
-        assertEquals(ProviderHealthStatus.YELLOW, out.status)
+        assertEquals(ProviderHealthStatus.GREEN, out.status)
+        assertTrue(out.message?.contains("Optional mapping") == true)
+    }
+
+    @Test
+    fun `epg loaded with empty match counters is not a warning`() = runTest {
+        val state = ChannelsUiState(
+            epgState = EpgState.Loaded(
+                sourceUrl = "https://epg",
+                sourceChannelCount = 0,
+                sourceProgrammeCount = 0,
+                matchedChannelCount = 0,
+                unmatchedChannelCount = 0,
+            ),
+        )
+        val out = IptvEpgProviderHealthChecker { state }.check()
+        assertEquals(ProviderHealthStatus.GREEN, out.status)
+        assertEquals("EPG data is loaded.", out.message)
+        assertEquals(null, out.nextAction)
     }
 
     @Test

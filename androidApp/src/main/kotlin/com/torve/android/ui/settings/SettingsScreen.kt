@@ -133,6 +133,7 @@ fun SettingsScreen(
     onCalendarClick: () -> Unit = {},
     onAccountClick: () -> Unit = {},
     onDevicesClick: () -> Unit = {},
+    onSignInTvClick: () -> Unit = {},
     onManageDevicesClick: () -> Unit = {},
     onLoginClick: () -> Unit = {},
     onPrivacyPolicyClick: () -> Unit = {},
@@ -152,6 +153,7 @@ fun SettingsScreen(
     onSendCredentialsClick: () -> Unit = {},
     onReceiveCredentialsClick: () -> Unit = {},
     onTransferDiagnosticsClick: () -> Unit = {},
+    onStartSetupClick: () -> Unit = {},
     onOpenProviderRoute: (route: String) -> Unit = {},
     viewModel: SettingsViewModel = koinInject(),
     syncCoordinator: SyncCoordinator = koinInject(),
@@ -405,6 +407,21 @@ fun SettingsScreen(
                         }
                     }
                     Spacer(Modifier.height(8.dp))
+                    // "Sign in a TV with this phone" — entry point for the
+                    // QR-sign-in flow. The TV displays a QR encoding
+                    // `torve-signin:<CODE>`; native phone camera apps don't
+                    // know how to interpret that scheme, so the scanner has
+                    // to live inside Torve. Discoverable from the top-level
+                    // Account card so users don't have to dig through the
+                    // legacy "Devices" pairing screen.
+                    OutlinedButton(
+                        onClick = onSignInTvClick,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
+                    ) {
+                        Text("Sign in a TV with this phone")
+                    }
+                    Spacer(Modifier.height(8.dp))
                     var showSignOutConfirm by remember { mutableStateOf(false) }
                     OutlinedButton(
                         onClick = { showSignOutConfirm = true },
@@ -633,12 +650,20 @@ fun SettingsScreen(
                 onOpenSettings = { entry ->
                     providerSettingsRouteFor(entry.category)?.let(onOpenProviderRoute)
                 },
-                onOpenDiagnostics = onTransferDiagnosticsClick,
+                onOpenDiagnostics = onDiagnosticsClick,
             )
             Spacer(Modifier.height(8.dp))
             RestoreSetupRecoveryCard(
                 onReceive = onReceiveCredentialsClick,
             )
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = onStartSetupClick,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
+            ) {
+                ButtonLabel("Start setup guide")
+            }
             Spacer(Modifier.height(8.dp))
             OutlinedButton(
                 onClick = onSendCredentialsClick,
@@ -654,14 +679,6 @@ fun SettingsScreen(
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
             ) {
                 ButtonLabel(stringResource(R.string.settings_receive_credentials))
-            }
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(
-                onClick = onTransferDiagnosticsClick,
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
-            ) {
-                ButtonLabel(stringResource(R.string.settings_transfer_diagnostics))
             }
         }
 

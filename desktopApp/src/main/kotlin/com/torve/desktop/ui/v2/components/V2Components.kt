@@ -281,12 +281,22 @@ fun V2PosterCard(
 ) {
     val ratingPrefs = LocalRatingDisplayPrefs.current
     val colors = TorveDesktopThemeTokens.colors
-    val artwork = rememberCachedBitmap(imageUrl)
-    // Hover-preview backdrop. Lazily fetched: rememberCachedBitmap already
-    // dedupes and caches by URL, so pre-loading on every poster card is
-    // cheap once the user scrolls past the same item twice.
-    val backdrop = rememberCachedBitmap(backdropUrl)
-    val palette = artPalette(imageUrl ?: title)
+    // When the card is rendered in landscape orientation (aspect > 1),
+    // a portrait TMDB poster gets cropped to its top strip and looks
+    // wrong. Swap to the backdrop as the primary artwork in that case;
+    // fall back to the poster only when no backdrop exists. Portrait
+    // cards keep their original behavior (poster primary, backdrop on
+    // hover-preview).
+    val cardAspect = cardStyle.size.resolvedAspectRatio()
+    val isLandscape = cardAspect > 1f
+    val primaryUrl = if (isLandscape) backdropUrl ?: imageUrl else imageUrl
+    val secondaryUrl = if (isLandscape) imageUrl else backdropUrl
+    val artwork = rememberCachedBitmap(primaryUrl)
+    // Hover-preview second image. Lazily fetched: rememberCachedBitmap
+    // already dedupes and caches by URL, so pre-loading on every poster
+    // card is cheap once the user scrolls past the same item twice.
+    val backdrop = rememberCachedBitmap(secondaryUrl)
+    val palette = artPalette(primaryUrl ?: title)
     val interactionSource = remember { MutableInteractionSource() }
     val hovered by interactionSource.collectIsHoveredAsState()
     val pri by animateColorAsState(palette.primary, label = "posterPri")
@@ -296,7 +306,7 @@ fun V2PosterCard(
     else 1f
     val posterScale by animateFloatAsState(hoverScaleTarget, label = "posterScale")
     val cornerRadius = cardStyle.appearance.cornerRadiusDp.dp
-    val aspect = cardStyle.size.resolvedAspectRatio()
+    val aspect = cardAspect
     val showTitle = cardStyle.appearance.titlePosition != CardTitlePosition.HIDDEN
     // Crossfade fraction: 0 = poster, 1 = backdrop. Tracks hover and is
     // bypassed (stays at 0) when no backdrop is provided.

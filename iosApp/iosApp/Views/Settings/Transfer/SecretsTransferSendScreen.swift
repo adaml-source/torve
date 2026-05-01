@@ -1,51 +1,64 @@
 import SwiftUI
 import shared
 
-/// Settings → "Send credentials to another device" surface.
+/// Settings → "Send credentials to another device" surface (iOS).
 ///
-/// Mirrors the Android sender screen: scan a QR (camera-permission
-/// gated, hidden on devices with no rear camera), or paste the receive
-/// code by hand. Pick categories. Generate the sealed envelope. Show
-/// the relay-delivery state. Manual sealed-code copy stays reachable
-/// always — no relay outcome leaves the user without a path forward.
+/// Mirrors the desktop and Android sender flow: three explicit steps,
+/// scan-first when a camera exists, paste fallback always reachable,
+/// privacy explainer + manual sealed-code paste demoted to collapsed
+/// disclosures. All visible copy reads from `shared.TransferCopy` so
+/// a copy edit lands on every platform with one PR.
 struct SecretsTransferSendScreen: View {
 
     @StateObject private var wrapper = SecretsTransferSenderViewModelWrapper()
 
     @State private var scannerOpen = false
     @State private var scannerStatus: QrScannerView.Unavailable?
+    @State private var categoriesExpanded = false
+    @State private var privacyExpanded = false
+    @State private var advancedExpanded = false
 
     private let hasCamera = deviceHasAnyCamera()
 
+    private let copy = TransferCopy.shared
+
     var body: some View {
         Form {
-            instructionsSection
+            // Step 1 — get the receiver code
+            step1Section
             if hasCamera { scanSection }
             pasteSection
-            categorySection
+
+            // Step 2 — choose what to send (collapsed by default)
+            categoryDisclosureSection
+
+            // Step 3 — generate
             generateSection
             statusSection
+
+            // Disclosures: how this stays private + manual sealed-code
+            privacyDisclosureSection
         }
         .navigationTitle("Send credentials")
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    // MARK: - Sections
+    // MARK: - Step 1
 
-    private var instructionsSection: some View {
+    private var step1Section: some View {
         Section {
-            Text("Open Receive credentials on the other Torve device, then scan its QR or paste the session string here.")
+            Text(copy.sEND_STEP1_HEADER)
+                .font(.headline)
+            Text(copy.sEND_STEP1_EXPLAINER)
                 .font(.subheadline)
                 .foregroundColor(.secondary)
-            TransferBanner(.info, "End-to-end encrypted",
-                           "Credentials are sealed with a one-time key derived from the receiver's QR. The Torve backend only forwards the envelope — it can't read the contents. Manual paste is the same sealed envelope shown as text.")
         }
     }
 
     private var scanSection: some View {
         Section(header: Text("Scan QR from receiving device")) {
             if let denied = scannerStatus, denied == .permissionDenied {
-                Text("Camera permission denied. Use paste below.")
+                Text(copy.sEND_CAMERA_DENIED)
                     .font(.footnote)
                     .foregroundColor(.red)
             }
@@ -73,34 +86,70 @@ struct SecretsTransferSendScreen: View {
     }
 
     private var pasteSection: some View {
-        Section(header: Text("Or paste the receive code")) {
+        Section(header: Text(copy.sEND_RECEIVER_FIELD_LABEL)) {
             TextEditor(text: Binding(
                 get: { wrapper.receiverSessionString },
                 set: { wrapper.updateReceiverSessionString($0) }
             ))
             .frame(minHeight: 80)
             .font(.system(.footnote, design: .monospaced))
+            // Empty-state hint — tells the user where the receiver code
+            // actually comes from. Without this, "paste here" is opaque.
+            if wrapper.receiverSessionString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(copy.sEND_RECEIVER_EMPTY_HINT)
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+            } else {
+                Text(copy.sEND_RECEIVER_FIELD_PLACEHOLDER)
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+            }
         }
     }
 
-    private var categorySection: some View {
-        Section(header: Text("Choose what to send")) {
-            ForEach(TransferSecretCatalog.shared.specs as! [TransferCategorySpec], id: \.category) { spec in
-                Toggle(isOn: Binding(
-                    get: { wrapper.selectedCategories.contains(spec.category) },
-                    set: { wrapper.setCategoryEnabled(spec.category, $0) }
-                )) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(spec.title).font(.body)
-                        Text(spec.description).font(.caption).foregroundColor(.secondary)
+    // MARK: - Step 2 — collapsed by default
+
+    private var categoryDisclosureSection: some View {
+        Section {
+            DisclosureGroup(isExpanded: $categoriesExpanded) {
+                ForEach(TransferSecretCatalog.shared.specs as! [TransferCategorySpec], id: \.category) { spec in
+                    Toggle(isOn: Binding(
+                        get: { wrapper.selectedCategories.contains(spec.category) },
+                        set: { wrapper.setCategoryEnabled(spec.category, $0) }
+                    )) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(spec.title).font(.body)
+                            Text(spec.description).font(.caption).foregroundColor(.secondary)
+                        }
                     }
+                }
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(copy.sEND_STEP2_HEADER).font(.headline)
+                    Text(selectedCategoriesSummary)
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
                 }
             }
         }
     }
 
+    private var selectedCategoriesSummary: String {
+        let selected = wrapper.selectedCategories
+        if selected.isEmpty {
+            return "Nothing selected — tap to choose."
+        }
+        return (selected as! Set<SecretCategory>)
+            .map { TransferSecretCatalog.shared.titleFor(category: $0) }
+            .sorted()
+            .joined(separator: ", ")
+    }
+
+    // MARK: - Step 3 — generate
+
     private var generateSection: some View {
         Section {
+            Text(copy.sEND_STEP3_HEADER).font(.headline)
             Button {
                 Task { await wrapper.generateEnvelope() }
             } label: {
@@ -166,13 +215,18 @@ struct SecretsTransferSendScreen: View {
             relayBanner(status.relayDelivery)
         }
 
-        Section(header: Text("Manual fallback — sealed code")) {
-            Text(status.envelopeJson)
-                .font(.system(.caption, design: .monospaced))
-                .textSelection(.enabled)
-                .lineLimit(8)
-            Button("Copy sealed code") {
-                UIPasteboard.general.string = status.envelopeJson
+        // Manual sealed-code paste — Advanced disclosure (collapsed).
+        Section {
+            DisclosureGroup(isExpanded: $advancedExpanded) {
+                Text(status.envelopeJson)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .lineLimit(8)
+                Button("Copy sealed code") {
+                    UIPasteboard.general.string = status.envelopeJson
+                }
+            } label: {
+                Text(copy.sEND_ADVANCED_HEADER).font(.subheadline)
             }
         }
     }
@@ -184,14 +238,28 @@ struct SecretsTransferSendScreen: View {
             EmptyView()
         case is RelayDeliveryState.Posting:
             TransferBanner(.info, "Delivering through relay…",
-                           "Posting the sealed envelope to the Torve backend so the receiver can pull it automatically.")
+                           "Posting the encrypted bundle to the Torve backend so the receiver can pull it automatically.")
         case is RelayDeliveryState.Delivered:
             TransferBanner(.success, "Delivered to the receiver",
-                           "The sealed envelope is on the relay; the receiver will import on its next poll.")
+                           "The encrypted bundle is on the relay; the receiver will import on its next poll.")
         case let failed as RelayDeliveryState.Failed:
-            TransferBanner(.warning, "Relay delivery failed", failed.reason)
+            TransferBanner(.warning, copy.sEND_RELAY_UNAVAILABLE, failed.reason)
         default:
             EmptyView()
+        }
+    }
+
+    // MARK: - Privacy disclosure (collapsed)
+
+    private var privacyDisclosureSection: some View {
+        Section {
+            DisclosureGroup(isExpanded: $privacyExpanded) {
+                Text(copy.sEND_PRIVACY_DISCLOSURE_BODY)
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+            } label: {
+                Text(copy.sEND_PRIVACY_DISCLOSURE_HEADER).font(.subheadline)
+            }
         }
     }
 

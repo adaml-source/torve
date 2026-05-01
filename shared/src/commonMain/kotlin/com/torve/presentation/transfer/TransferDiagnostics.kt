@@ -154,6 +154,7 @@ class TransferDiagnosticsCollector(
             TransferRelayResult.Expired,
             TransferRelayResult.Consumed -> RelayReachability.REACHABLE
             TransferRelayResult.PayloadTooLarge -> RelayReachability.REACHABLE
+            TransferRelayResult.EmailNotVerified -> RelayReachability.UNAUTHORIZED
             is TransferRelayResult.NetworkError -> RelayReachability.NETWORK_ERROR
             is TransferRelayResult.ServerError -> RelayReachability.NETWORK_ERROR
         }
@@ -174,6 +175,7 @@ fun TransferRelayResult<*>.toErrorCategory(): TransferTelemetryErrorCategory? = 
     TransferRelayResult.Expired -> TransferTelemetryErrorCategory.EXPIRED
     TransferRelayResult.Consumed -> TransferTelemetryErrorCategory.CONSUMED
     TransferRelayResult.PayloadTooLarge -> TransferTelemetryErrorCategory.PAYLOAD_TOO_LARGE
+    TransferRelayResult.EmailNotVerified -> TransferTelemetryErrorCategory.FORBIDDEN
     is TransferRelayResult.NetworkError -> TransferTelemetryErrorCategory.NETWORK
     is TransferRelayResult.ServerError -> TransferTelemetryErrorCategory.SERVER
 }

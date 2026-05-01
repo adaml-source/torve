@@ -52,6 +52,7 @@ val androidAppModule = module {
             coordinator = get(),
             debridClient = get(),
             secretStore = get(),
+            traktTokenStore = get(),
             prefs = get(),
             libraryService = get(),
             addonRepository = get(),

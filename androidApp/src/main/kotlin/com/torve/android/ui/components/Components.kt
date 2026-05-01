@@ -182,7 +182,6 @@ fun PosterCard(
     ) {
         val showCardRatings = showRating &&
             (!isLandscapeCard || ratingPrefs.allowRatingsOnLandscapeCards) &&
-            ratingPrefs.enabledProviders.isNotEmpty() &&
             ratingPrefs.maxRatingsOnCard > 0
         val effectiveRatings = item.ratings.withFallbackTmdbScore(item.rating)
         // Let MultiRatingPills handle empty-pill gracefully; avoid extra gating

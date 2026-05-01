@@ -17,10 +17,13 @@ import com.torve.domain.transfer.Base64Url
 import com.torve.domain.transfer.ConfigEntry
 import com.torve.domain.transfer.ConfigKeyAllowlist
 import com.torve.domain.transfer.DefaultConfigKeyAllowlist
+import com.torve.domain.model.PlaylistType
+import com.torve.domain.repository.ChannelRepository
 import com.torve.domain.transfer.SealedSecretsEnvelope
 import com.torve.domain.transfer.SecretCategory
 import com.torve.domain.transfer.SecretRecord
 import com.torve.domain.transfer.SecretsTransferProtocol
+import com.torve.domain.transfer.TransferPlaylistDto
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -52,6 +55,14 @@ class SecretsTransferSenderViewModel(
     private val attemptTracker: TransferAttemptTracker? = null,
     private val platform: String = "unknown",
     private val nowMs: () -> Long = { Clock.System.now().toEpochMilliseconds() },
+    /**
+     * Optional access to local IPTV/M3U/Xtream playlists. When wired,
+     * selecting [SecretCategory.IPTV] in the sender ships every local
+     * playlist (with credentials) inside the sealed envelope alongside
+     * the enum-keyed secret bag. Null in tests / on platforms without
+     * a channel repo wired — IPTV transfers simply ship no playlists.
+     */
+    private val channelRepo: ChannelRepository? = null,
 ) {
     private val _state = MutableStateFlow(
         SenderState(
@@ -88,19 +99,23 @@ class SecretsTransferSenderViewModel(
         val parsed = TransferSessionCodec.decode(current.receiverSessionString)
         val handshake = when (parsed) {
             is TransferSessionParseResult.Success -> parsed.handshake
-            TransferSessionParseResult.Empty -> return setError("Paste the receiver session string first.")
-            TransferSessionParseResult.BadPrefix -> return setError("This is not a Torve receive code.")
-            TransferSessionParseResult.BadBase64 -> return setError("The receive code is not valid base64url.")
-            is TransferSessionParseResult.BadJson -> return setError("The receive code JSON is invalid.")
-            TransferSessionParseResult.BadReceiverPublicKey -> return setError("The receive code has an invalid receiver key.")
+            TransferSessionParseResult.Empty -> return setError(TransferCopy.SEND_RECEIVER_REQUIRED_ERROR)
+            TransferSessionParseResult.BadPrefix -> return setError(TransferCopy.SEND_RECEIVER_NOT_TORVE_ERROR)
+            // Every "shape-correct but malformed" failure becomes the
+            // same user-friendly message. Crypto/encoding jargon
+            // (base64url, JSON, public key) only appears in
+            // diagnostics surfaces.
+            TransferSessionParseResult.BadBase64 -> return setError(TransferCopy.SEND_RECEIVER_CORRUPTED_ERROR)
+            is TransferSessionParseResult.BadJson -> return setError(TransferCopy.SEND_RECEIVER_CORRUPTED_ERROR)
+            TransferSessionParseResult.BadReceiverPublicKey -> return setError(TransferCopy.SEND_RECEIVER_CORRUPTED_ERROR)
         }
         if (handshake.expiresAtEpochMs <= nowMs()) {
-            setError("The receive code has expired. Generate a new one on the receiving device.")
+            setError(TransferCopy.SEND_RECEIVER_EXPIRED_ERROR)
             return
         }
         val receiverPublicKey = Base64Url.decodeOrNull(handshake.receiverEphemeralPublicKey)
         if (receiverPublicKey == null) {
-            setError("The receive code has an invalid receiver key.")
+            setError(TransferCopy.SEND_RECEIVER_CORRUPTED_ERROR)
             return
         }
 
@@ -117,34 +132,58 @@ class SecretsTransferSenderViewModel(
             setError("Could not read companion config: ${t.message ?: t::class.simpleName}")
             return
         }
-        if (snapshot.secrets.isEmpty() && configSnapshot.entries.isEmpty()) {
-            setError("No transferable credentials or config found for the selected categories.")
+        val playlistSnapshot = runCatching {
+            snapshotPlaylists(current.selectedCategories)
+        }.getOrElse { t ->
+            setError("Could not read local playlists: ${t.message ?: t::class.simpleName}")
+            return
+        }
+        if (snapshot.secrets.isEmpty() && configSnapshot.entries.isEmpty() && playlistSnapshot.isEmpty()) {
+            setError("No transferable credentials, config, or playlists found for the selected categories.")
             return
         }
 
         val envelope = runCatching {
+            val combinedCategories = buildList {
+                addAll(snapshot.secrets.map { it.category })
+                addAll(configSnapshot.entries.map { it.category })
+                if (playlistSnapshot.isNotEmpty()) add(SecretCategory.IPTV)
+            }.distinct()
             protocol.seal(
                 receiverPublicKey = receiverPublicKey,
                 senderDeviceId = deviceIdProvider.getDeviceId(),
                 senderDeviceName = deviceIdProvider.getDeviceName(),
-                categories = (snapshot.secrets.map { it.category } + configSnapshot.entries.map { it.category })
-                    .distinct(),
+                categories = combinedCategories,
                 secrets = snapshot.secrets,
                 expiresAtEpochMs = handshake.expiresAtEpochMs,
                 configEntries = configSnapshot.entries,
+                playlists = playlistSnapshot,
             )
         }.getOrElse { t ->
             setError("Could not seal credentials: ${t.message ?: t::class.simpleName}")
             return
         }
 
+        // IPTV category is "non-empty" iff at least one playlist made it
+        // into the envelope — drop it from the empty-categories list so
+        // the UI doesn't tell the user IPTV had nothing when in fact
+        // they shipped playlists.
+        val effectiveEmptyCategories = if (playlistSnapshot.isNotEmpty()) {
+            snapshot.categoriesWithoutSecrets.filterNot { it == SecretCategory.IPTV }
+        } else {
+            snapshot.categoriesWithoutSecrets
+        }
         val readyBase = SenderStatus.Ready(
             envelopeJson = JSON.encodeToString(SealedSecretsEnvelope.serializer(), envelope),
             secretCount = snapshot.secrets.size,
             configCount = configSnapshot.entries.size,
-            includedCategories = (snapshot.secrets.map { it.category } + configSnapshot.entries.map { it.category })
-                .distinct(),
-            categoriesWithoutSecrets = snapshot.categoriesWithoutSecrets,
+            playlistCount = playlistSnapshot.size,
+            includedCategories = buildList {
+                addAll(snapshot.secrets.map { it.category })
+                addAll(configSnapshot.entries.map { it.category })
+                if (playlistSnapshot.isNotEmpty()) add(SecretCategory.IPTV)
+            }.distinct(),
+            categoriesWithoutSecrets = effectiveEmptyCategories,
             categoriesMissingCompanionConfig = configSnapshot.categoriesMissingCompanionConfig,
             relayDelivery = if (handshake.relaySessionId != null && relayApi != null) {
                 RelayDeliveryState.Posting
@@ -193,8 +232,15 @@ class SecretsTransferSenderViewModel(
                 // Generic message — never include the raw error so we don't
                 // leak hostnames / IPs / Apple-Network reason strings.
                 RelayDeliveryState.Failed("Network unreachable. Copy the sealed code below.")
-            is TransferRelayResult.ServerError ->
-                RelayDeliveryState.Failed("Relay server error (${result.statusCode}). Copy the sealed code below.")
+            TransferRelayResult.EmailNotVerified ->
+                RelayDeliveryState.Failed(
+                    "Verify your email address first — we sent a confirmation link to your inbox. Copy the sealed code below in the meantime.",
+                )
+            is TransferRelayResult.ServerError -> {
+                val human = result.detail?.takeIf { it.isNotBlank() }
+                    ?: "Couldn't reach the auto-import service (status ${result.statusCode})."
+                RelayDeliveryState.Failed("$human Copy the sealed code below.")
+            }
         }
         updateRelayDelivery(newState)
 
@@ -293,6 +339,48 @@ class SecretsTransferSenderViewModel(
         return value?.takeIf { it.isNotBlank() }
     }
 
+    /**
+     * Snapshot every local IPTV playlist when [SecretCategory.IPTV] is
+     * selected. Only Xtream playlists with full credentials and M3U
+     * playlists with a URL are included — degenerate rows (missing
+     * server/url) are skipped to avoid creating broken entries on the
+     * receiver. Returns an empty list when no channel repo is wired,
+     * IPTV isn't selected, or there are no transferable playlists.
+     */
+    private suspend fun snapshotPlaylists(selected: Set<SecretCategory>): List<TransferPlaylistDto> {
+        if (SecretCategory.IPTV !in selected) return emptyList()
+        val repo = channelRepo ?: return emptyList()
+        return runCatching { repo.getPlaylists() }
+            .getOrDefault(emptyList())
+            .mapNotNull { playlist ->
+                when (playlist.type) {
+                    PlaylistType.XTREAM -> {
+                        val server = playlist.server?.trim()?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+                        val username = playlist.username?.trim()?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+                        val password = playlist.password?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                        TransferPlaylistDto(
+                            playlistId = playlist.id,
+                            name = playlist.name,
+                            playlistType = "xtream",
+                            server = server,
+                            username = username,
+                            password = password,
+                        )
+                    }
+                    PlaylistType.M3U -> {
+                        val url = playlist.url.trim().takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+                        TransferPlaylistDto(
+                            playlistId = playlist.id,
+                            name = playlist.name,
+                            playlistType = "m3u",
+                            url = url,
+                            epgUrl = playlist.epgUrl?.trim()?.takeIf { it.isNotEmpty() },
+                        )
+                    }
+                }
+            }
+    }
+
     private fun setError(message: String) {
         _state.value = _state.value.copy(status = SenderStatus.Error(message))
     }
@@ -326,6 +414,8 @@ sealed interface SenderStatus {
         val envelopeJson: String,
         val secretCount: Int,
         val configCount: Int = 0,
+        /** Number of IPTV/M3U/Xtream playlists shipped inside the envelope. */
+        val playlistCount: Int = 0,
         val includedCategories: List<SecretCategory>,
         val categoriesWithoutSecrets: List<SecretCategory>,
         val categoriesMissingCompanionConfig: List<SecretCategory> = emptyList(),

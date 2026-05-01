@@ -55,6 +55,7 @@ fun MultiRatingPills(
         enabledProviders = enabledProviders,
         providerOrder = prefs.providerOrder,
         maxRatingsOnCard = prefs.maxRatingsOnCard,
+        fallbackToTmdbWhenNoneSelected = prefs.enabledProviders.isEmpty(),
     )
 
     val pills = providersToRender.mapNotNull { source ->

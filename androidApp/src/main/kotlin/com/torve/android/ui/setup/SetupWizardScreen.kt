@@ -69,6 +69,7 @@ import com.torve.presentation.setup.SetupWizardViewModel
 fun SetupWizardScreen(
     viewModel: SetupWizardViewModel,
     onComplete: () -> Unit,
+    onExit: () -> Unit = {},
     onPandaSetupClick: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
@@ -81,6 +82,15 @@ fun SetupWizardScreen(
             .fillMaxSize()
             .padding(24.dp),
     ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            TextButton(onClick = onExit) {
+                Text("Close setup")
+            }
+        }
+
         // Progress indicator
         if (state.currentStep != SetupStep.WELCOME && state.currentStep != SetupStep.DONE) {
             LinearProgressIndicator(
