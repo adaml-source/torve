@@ -27,17 +27,12 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.ui.text.input.ImeAction
+import com.torve.android.ui.components.TorveSearchField
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -143,23 +138,13 @@ fun ChannelsGuideContent(
     }
 
     Column(modifier = modifier.fillMaxSize()) {
-        OutlinedTextField(
+        TorveSearchField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
-            singleLine = true,
-            placeholder = { Text("Search channels in guide") },
-            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-            trailingIcon = if (searchQuery.isNotEmpty()) {
-                {
-                    IconButton(onClick = { searchQuery = "" }) {
-                        Icon(Icons.Filled.Close, contentDescription = "Clear")
-                    }
-                }
-            } else null,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            placeholder = "Search channels in guide",
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(horizontal = 12.dp, vertical = 6.dp),
         )
 
         // Time header row

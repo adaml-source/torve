@@ -1,7 +1,10 @@
 package com.torve.android.ui.panda
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,9 +25,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -82,12 +88,31 @@ fun PandaProviderStep(
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 state.providers.forEach { provider ->
                     val isSelected = state.selectedProvider?.id == provider.id
+                    // Track focus via the InteractionSource so the
+                    // card draws an Amber border whenever the D-pad
+                    // cursor lands on it. The previous design only
+                    // shaded the BG when SELECTED — but selection is
+                    // a click outcome, not a focus indicator. On TV
+                    // the user couldn't tell which card their dpad
+                    // had highlighted.
+                    val interactionSource = remember { MutableInteractionSource() }
+                    val isFocused by interactionSource.collectIsFocusedAsState()
+                    val borderColor: Color = when {
+                        isFocused -> Amber
+                        isSelected -> Amber.copy(alpha = 0.6f)
+                        else -> Color.Transparent
+                    }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
                             .background(if (isSelected) Amber.copy(alpha = 0.15f) else Gunmetal)
-                            .clickable { viewModel.selectProvider(provider) }
+                            .border(2.dp, borderColor, RoundedCornerShape(12.dp))
+                            .clickable(
+                                interactionSource = interactionSource,
+                                indication = null,
+                                onClick = { viewModel.selectProvider(provider) },
+                            )
                             .padding(16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {

@@ -592,27 +592,11 @@ fun TvIptvScreen(
                     .padding(vertical = 8.dp),
             ) {
                 item(key = "iptv_search") {
-                    androidx.compose.material3.OutlinedTextField(
+                    com.torve.android.ui.components.TorveSearchField(
                         value = iptvSearchQuery,
                         onValueChange = { iptvSearchQuery = it },
-                        singleLine = true,
-                        placeholder = { Text("Search channels") },
-                        leadingIcon = {
-                            androidx.compose.material3.Icon(
-                                Icons.Filled.Search,
-                                contentDescription = null,
-                            )
-                        },
-                        trailingIcon = if (iptvSearchQuery.isNotEmpty()) {
-                            {
-                                androidx.compose.material3.IconButton(onClick = { iptvSearchQuery = "" }) {
-                                    androidx.compose.material3.Icon(
-                                        Icons.Filled.Close,
-                                        contentDescription = "Clear",
-                                    )
-                                }
-                            }
-                        } else null,
+                        placeholder = "Search channels",
+                        showFocusRing = true,
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 8.dp, vertical = 6.dp)

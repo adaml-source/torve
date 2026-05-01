@@ -18,6 +18,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -97,7 +98,17 @@ fun TvPandaSetupScreen(
                     "${stepIndex + 1} / $totalSteps",
                     style = MaterialTheme.typography.titleMedium,
                     color = Amber,
+                    modifier = Modifier.padding(end = 16.dp),
                 )
+                // Top-right exit out of the wizard. The bottom-row
+                // back button only walks one step at a time and the
+                // user previously had no obvious way to bail without
+                // pressing the system back button repeatedly.
+                OutlinedButton(onClick = onBack) {
+                    Icon(Icons.Filled.Close, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Close setup")
+                }
             }
 
             Spacer(Modifier.height(16.dp))

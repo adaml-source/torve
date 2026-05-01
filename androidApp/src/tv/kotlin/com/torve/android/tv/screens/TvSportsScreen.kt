@@ -216,49 +216,25 @@ fun TvSportsScreen(
             color = Torve.colors.textSecondary,
         )
 
-        // Search row — submit triggers a Newznab `t=search` against
-        // the same sport categories. Empty query falls back to the
-        // browse fetch on the next reload.
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            androidx.compose.material3.OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                singleLine = true,
-                label = { Text("Search sport releases") },
-                modifier = Modifier
-                    .weight(1f)
-                    .focusProperties { left = railFocusRequester },
-                trailingIcon = if (query.isNotBlank()) {
-                    {
-                        androidx.compose.material3.IconButton(onClick = {
-                            query = ""
-                            scope.launch { reload() }
-                        }) {
-                            androidx.compose.material3.Icon(
-                                Icons.Filled.Close,
-                                contentDescription = "Clear search",
-                            )
-                        }
-                    }
-                } else null,
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                    imeAction = androidx.compose.ui.text.input.ImeAction.Search,
-                ),
-                keyboardActions = androidx.compose.foundation.text.KeyboardActions(
-                    onSearch = { scope.launch { reload() } },
-                ),
-            )
-            androidx.compose.material3.Button(
-                onClick = { scope.launch { reload() } },
-                enabled = configured && !loading,
-            ) {
-                Text(if (loading) "Searching…" else "Search")
-            }
-        }
+        // Search row — submit (IME action / OK on the field) triggers
+        // a Newznab `t=search` against the configured sport
+        // categories. Empty query falls back to browse on next reload.
+        // Clearing the field via the trailing X re-runs the browse so
+        // the user sees a fresh list without re-tapping Search.
+        com.torve.android.ui.components.TorveSearchField(
+            value = query,
+            onValueChange = { newValue ->
+                val clearing = query.isNotBlank() && newValue.isBlank()
+                query = newValue
+                if (clearing) scope.launch { reload() }
+            },
+            placeholder = if (loading) "Searching…" else "Search sport releases",
+            onSubmit = { scope.launch { reload() } },
+            showFocusRing = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusProperties { left = railFocusRequester },
+        )
 
         // Bucket filter pills — first focusable row; LEFT off the
         // first pill returns to the nav rail.
