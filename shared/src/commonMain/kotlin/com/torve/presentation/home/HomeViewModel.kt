@@ -291,7 +291,15 @@ class HomeViewModel(
     }
 
     private fun defaultSectionConfigs(): List<HomeSectionConfig> =
-        HomeSection.entries.map { HomeSectionConfig(it, it.defaultEnabled, it.defaultOrder) }
+        HomeSection.entries.map { section ->
+            // Continue Watching ships pre-bound to the built-in
+            // "landscape-default" preset so freshly-installed users see
+            // backdrops there (which are designed for the in-progress
+            // strip) while every other shelf shows portrait posters via
+            // the global default.
+            val presetId = if (section == HomeSection.CONTINUE_WATCHING) "landscape-default" else null
+            HomeSectionConfig(section, section.defaultEnabled, section.defaultOrder, presetId = presetId)
+        }
 
     fun updateSectionOrder(configs: List<HomeSectionConfig>) {
         _sectionConfigs.value = configs

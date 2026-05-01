@@ -1,6 +1,7 @@
 package com.torve.android.ui.settings
 
 import com.torve.android.BuildConfig
+import com.torve.android.ui.components.PandaSetupNudgeCard
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -154,6 +155,7 @@ fun SettingsScreen(
     onReceiveCredentialsClick: () -> Unit = {},
     onTransferDiagnosticsClick: () -> Unit = {},
     onStartSetupClick: () -> Unit = {},
+    onSetupPandaClick: () -> Unit = {},
     onOpenProviderRoute: (route: String) -> Unit = {},
     viewModel: SettingsViewModel = koinInject(),
     syncCoordinator: SyncCoordinator = koinInject(),
@@ -257,6 +259,11 @@ fun SettingsScreen(
         )
 
         Spacer(Modifier.height(16.dp))
+
+        // Persistent nudge encouraging users to run the Panda wizard,
+        // which is the easiest way to get debrid + indexer plumbing wired
+        // up. Hidden once Panda is configured OR the user dismisses.
+        PandaSetupNudgeCard(onSetupClick = onSetupPandaClick)
 
         // Prominent subscription summary card. Only rendered when the user
         // is signed in — for signed-out users the existing account card

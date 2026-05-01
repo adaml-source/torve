@@ -15,6 +15,7 @@ import com.torve.db.TorveDatabase
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.integrations.LibraryOverlayService
+import com.torve.domain.model.CardOrientation
 import com.torve.domain.model.CardPrefs
 import com.torve.domain.model.CardStyle
 import com.torve.domain.model.CardStylePreset
@@ -1500,28 +1501,22 @@ class SettingsViewModel(
     }
 
     fun resetAppearanceSettings() {
-        val now = nowMs()
         val ratingDefaults = RatingDisplayPrefs()
-        val defaultPreset = CardStylePreset(
-            presetId = "default",
-            name = "Default",
-            cardStyle = CardStyle(ratingPrefs = ratingDefaults),
-            isBuiltIn = true,
-            createdAt = now,
-            updatedAt = now,
+        val (presets, defaultId) = builtInCardStylePresets(
+            legacyCardPrefs = CardPrefs(),
+            ratingPrefs = ratingDefaults,
         )
-        val presets = listOf(defaultPreset)
         _state.update {
             it.copy(
                 ratingPrefs = ratingDefaults,
                 cardStylePresets = presets,
-                globalDefaultPresetId = defaultPreset.presetId,
+                globalDefaultPresetId = defaultId,
             )
         }
         scope.launch {
             prefsRepo.setString(KEY_RATING_PREFS, jsonParser.encodeToString(ratingDefaults))
             prefsRepo.setString(KEY_CARD_STYLE_PRESETS, jsonParser.encodeToString(presets))
-            prefsRepo.setString(KEY_CARD_DEFAULT_PRESET_ID, defaultPreset.presetId)
+            prefsRepo.setString(KEY_CARD_DEFAULT_PRESET_ID, defaultId)
         }
     }
 
@@ -2088,6 +2083,26 @@ class SettingsViewModel(
             return storedPresets to defaultId
         }
 
+        val (presets, defaultId) = builtInCardStylePresets(legacyCardPrefs, ratingPrefs)
+        scope.launch {
+            prefsRepo.setString(KEY_CARD_STYLE_PRESETS, jsonParser.encodeToString(presets))
+            prefsRepo.setString(KEY_CARD_DEFAULT_PRESET_ID, defaultId)
+        }
+        return presets to defaultId
+    }
+
+    /**
+     * Built-in seed presets shipped on a fresh install (and re-seeded on
+     * appearance reset). Two named templates so users can flip a shelf
+     * between portrait posters and landscape backdrops without rebuilding
+     * a custom preset every time. Portrait Default is the global default
+     * because the catalog is poster-first; Continue Watching's section
+     * config opts into Landscape Default in [defaultSectionConfigs].
+     */
+    private fun builtInCardStylePresets(
+        legacyCardPrefs: CardPrefs,
+        ratingPrefs: RatingDisplayPrefs,
+    ): Pair<List<CardStylePreset>, String> {
         val now = nowMs()
         val baseStyle = CardStyle(
             size = legacyCardPrefs.size,
@@ -2096,20 +2111,27 @@ class SettingsViewModel(
             appearance = legacyCardPrefs.appearance,
             ratingPrefs = ratingPrefs,
         )
-        val defaultPreset = CardStylePreset(
-            presetId = "default",
-            name = "Default",
-            cardStyle = baseStyle,
+        val portraitPreset = CardStylePreset(
+            presetId = "portrait-default",
+            name = "Portrait Default",
+            cardStyle = baseStyle.copy(
+                size = baseStyle.size.copy(orientation = CardOrientation.PORTRAIT),
+            ),
             isBuiltIn = true,
             createdAt = now,
             updatedAt = now,
         )
-        val presets = listOf(defaultPreset)
-        scope.launch {
-            prefsRepo.setString(KEY_CARD_STYLE_PRESETS, jsonParser.encodeToString(presets))
-            prefsRepo.setString(KEY_CARD_DEFAULT_PRESET_ID, defaultPreset.presetId)
-        }
-        return presets to defaultPreset.presetId
+        val landscapePreset = CardStylePreset(
+            presetId = "landscape-default",
+            name = "Landscape Default",
+            cardStyle = baseStyle.copy(
+                size = baseStyle.size.copy(orientation = CardOrientation.LANDSCAPE),
+            ),
+            isBuiltIn = true,
+            createdAt = now,
+            updatedAt = now,
+        )
+        return listOf(portraitPreset, landscapePreset) to portraitPreset.presetId
     }
 
     private fun nowMs(): Long = Clock.System.now().toEpochMilliseconds()

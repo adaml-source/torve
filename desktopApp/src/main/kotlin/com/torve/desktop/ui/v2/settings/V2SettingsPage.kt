@@ -231,6 +231,11 @@ fun V2SettingsPage(
                 subtitle = selectedCategory.description,
             )
 
+            // Persistent (until-dismissed) Panda nudge — easiest path to
+            // wiring debrid + indexer access. Hidden once Panda is set up
+            // OR the user clicks the close button.
+            DesktopPandaSetupNudgeCard(onSetupClick = onOpenPandaSetup)
+
             when (selectedCategory) {
                 SettingsCategory.SOURCES -> SourcesSection(
                     setupIntentsViewModel = setupIntentsViewModel,
