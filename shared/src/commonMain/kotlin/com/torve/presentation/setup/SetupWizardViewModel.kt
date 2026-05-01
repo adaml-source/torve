@@ -73,20 +73,53 @@ class SetupWizardViewModel(
     private val _state = MutableStateFlow(SetupUiState())
     val state: StateFlow<SetupUiState> = _state.asStateFlow()
 
+    /**
+     * If [jumpToStep] was called for a target past TERMS while the user
+     * hadn't accepted yet, we redirect them to TERMS and stash the
+     * intended destination here. After they tick + advance, [nextStep]
+     * (or the gating callsite) consumes this and lands them where they
+     * originally meant to go instead of the next sequential step.
+     */
+    private var pendingPostTermsJump: SetupStep? = null
+
     companion object {
         const val KEY_SETUP_COMPLETED = "setup_completed"
+        const val KEY_TERMS_ACCEPTED = "setup_terms_accepted"
+    }
+
+    init {
+        // Hydrate persisted terms acceptance so a returning user who
+        // already agreed never sees the disclaimer-as-blocker again.
+        // Also covers process death / cold start within the same install.
+        scope.launch {
+            val accepted = prefsRepo.getString(KEY_TERMS_ACCEPTED) == "true"
+            if (accepted) {
+                _state.update { it.copy(termsAccepted = true) }
+            }
+        }
     }
 
     fun nextStep() {
         _state.update { s ->
-            val next = when (s.currentStep) {
-                SetupStep.WELCOME -> SetupStep.TERMS
-                SetupStep.TERMS -> SetupStep.DEBRID
-                SetupStep.DEBRID -> SetupStep.TRAKT
-                SetupStep.TRAKT -> SetupStep.QUALITY
-                SetupStep.QUALITY -> SetupStep.CHANNELS
-                SetupStep.CHANNELS -> SetupStep.DONE
-                SetupStep.DONE -> SetupStep.DONE
+            // Special case: leaving TERMS while a deep-link target is
+            // queued means the user originally tapped "Set up Trakt"
+            // (or similar) on the hub and we deflected them to TERMS.
+            // Honor that original destination instead of the default
+            // TERMS → DEBRID step.
+            val deepLinkTarget = pendingPostTermsJump
+            val next = if (s.currentStep == SetupStep.TERMS && deepLinkTarget != null) {
+                pendingPostTermsJump = null
+                deepLinkTarget
+            } else {
+                when (s.currentStep) {
+                    SetupStep.WELCOME -> SetupStep.TERMS
+                    SetupStep.TERMS -> SetupStep.DEBRID
+                    SetupStep.DEBRID -> SetupStep.TRAKT
+                    SetupStep.TRAKT -> SetupStep.QUALITY
+                    SetupStep.QUALITY -> SetupStep.CHANNELS
+                    SetupStep.CHANNELS -> SetupStep.DONE
+                    SetupStep.DONE -> SetupStep.DONE
+                }
             }
             s.copy(currentStep = next)
         }
@@ -116,10 +149,29 @@ class SetupWizardViewModel(
      * into the matching guided-wizard step when the user picks an intent
      * card; preserved separately from [nextStep] so the linear forward/back
      * UX still works for users who chose the guided path.
+     *
+     * Gated on [SetupUiState.termsAccepted]: if the user hasn't accepted
+     * yet AND the target lives past TERMS, we land them on TERMS first
+     * and remember the original target. After they tick the box and
+     * advance, [nextStep] consumes [pendingPostTermsJump] and lands
+     * them on what they originally clicked. Without this gate, every
+     * "Set up X" button on the SetupIntentHub bypassed the disclaimer
+     * — users only ever saw it by walking backward through the wizard,
+     * and TMDB's API attribution requirement is contractual.
      */
     fun jumpToStep(step: SetupStep) {
-        _state.update { it.copy(currentStep = step) }
+        val termsAccepted = _state.value.termsAccepted
+        val pastTerms = step != SetupStep.WELCOME && step != SetupStep.TERMS
+        if (!termsAccepted && pastTerms) {
+            pendingPostTermsJump = step
+            _state.update { it.copy(currentStep = SetupStep.TERMS) }
+        } else {
+            _state.update { it.copy(currentStep = step) }
+        }
     }
+
+    /** True when the user must accept terms before doing anything else. */
+    fun needsTermsAcceptance(): Boolean = !_state.value.termsAccepted
 
     // Debrid
     fun setDebridProvider(provider: DebridServiceType) {
@@ -245,6 +297,12 @@ class SetupWizardViewModel(
     // Terms
     fun setTermsAccepted(accepted: Boolean) {
         _state.update { it.copy(termsAccepted = accepted) }
+        // Persist so a returning user doesn't see the disclaimer again
+        // on every cold start. Untick clears the pref too.
+        scope.launch {
+            if (accepted) prefsRepo.setString(KEY_TERMS_ACCEPTED, "true")
+            else prefsRepo.remove(KEY_TERMS_ACCEPTED)
+        }
     }
 
     // Channels

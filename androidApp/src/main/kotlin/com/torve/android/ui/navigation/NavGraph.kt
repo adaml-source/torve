@@ -731,6 +731,32 @@ fun TorveNavGraph(
             // forms. The legacy linear wizard is reachable via "Use
             // guided wizard instead".
             composable(SETUP_ROUTE) {
+                // Force the disclaimer/terms before any path that
+                // ultimately exits to the app or jumps deep into the
+                // wizard. SetupWizardViewModel.jumpToStep already gates
+                // wizard targets, but the hub also has "exit to app"
+                // shortcuts ("Continue", "Explore without sources",
+                // window-X) that must not bypass terms either. Wrap each
+                // exit so it routes through the wizard at TERMS first.
+                fun runWithTermsGate(intendedExit: () -> Unit) {
+                    if (setupViewModel.needsTermsAcceptance()) {
+                        // Land on TERMS; honoring the intended exit
+                        // after acceptance is handled by the wizard's
+                        // own "Next" → DONE → onComplete callback below.
+                        setupViewModel.jumpToStep(com.torve.presentation.setup.SetupStep.TERMS)
+                        navController.navigate("setup_guided")
+                    } else {
+                        intendedExit()
+                    }
+                }
+                val exitToHome: () -> Unit = {
+                    markMobileOnboardingComplete()
+                    val target = if (isTvMode) TV_HOME_ROUTE else MOBILE_ROOT_ROUTE
+                    navController.navigate(target) {
+                        popUpTo(SETUP_CHOICE_ROUTE) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                }
                 SetupIntentHubScreen(
                     coordinator = setupCoordinator,
                     onOpenDebridSetup = {
@@ -742,38 +768,21 @@ fun TorveNavGraph(
                         navController.navigate("setup_guided")
                     },
                     onOpenPlexJellyfinSetup = {
-                        setupCoordinator.beginIntent(com.torve.presentation.setup.SetupIntent.PLEX_JELLYFIN)
-                        navController.navigate("settings")
+                        runWithTermsGate {
+                            setupCoordinator.beginIntent(com.torve.presentation.setup.SetupIntent.PLEX_JELLYFIN)
+                            navController.navigate("settings")
+                        }
                     },
                     onOpenUsenetSetup = {
-                        setupCoordinator.beginIntent(com.torve.presentation.setup.SetupIntent.USENET)
-                        navController.navigate("panda_setup")
+                        runWithTermsGate {
+                            setupCoordinator.beginIntent(com.torve.presentation.setup.SetupIntent.USENET)
+                            navController.navigate("panda_setup")
+                        }
                     },
                     onUseGuidedWizard = { navController.navigate("setup_guided") },
-                    onContinueToApp = {
-                        markMobileOnboardingComplete()
-                        val target = if (isTvMode) TV_HOME_ROUTE else MOBILE_ROOT_ROUTE
-                        navController.navigate(target) {
-                            popUpTo(SETUP_CHOICE_ROUTE) { inclusive = true }
-                            launchSingleTop = true
-                        }
-                    },
-                    onExit = {
-                        markMobileOnboardingComplete()
-                        val target = if (isTvMode) TV_HOME_ROUTE else MOBILE_ROOT_ROUTE
-                        navController.navigate(target) {
-                            popUpTo(SETUP_CHOICE_ROUTE) { inclusive = true }
-                            launchSingleTop = true
-                        }
-                    },
-                    onSkipToApp = {
-                        markMobileOnboardingComplete()
-                        val target = if (isTvMode) TV_HOME_ROUTE else MOBILE_ROOT_ROUTE
-                        navController.navigate(target) {
-                            popUpTo(SETUP_CHOICE_ROUTE) { inclusive = true }
-                            launchSingleTop = true
-                        }
-                    },
+                    onContinueToApp = { runWithTermsGate(exitToHome) },
+                    onExit = { runWithTermsGate(exitToHome) },
+                    onSkipToApp = { runWithTermsGate(exitToHome) },
                 )
             }
 
