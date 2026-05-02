@@ -106,6 +106,12 @@ tv_focus_audit.txt
 # Build outputs not yet covered
 desktopApp/build/
 
+# Smoke harness scratch — live run artefacts. The harness lives in
+# scripts/smoke/ and the matrix doc in docs/smoke/; the per-run result
+# files are operator artefacts, optionally committed alongside a
+# release tag.
+smoke-results/
+
 # Copied third-party Kodi addons (roadmap forbids unauthorized content sources)
 plugin.video.*/
 script.module.*/
