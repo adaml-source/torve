@@ -1875,13 +1875,32 @@ class ChannelsViewModel(
             // → Sources, provider-health rows, banners) don't keep
             // reporting "load failed" against a working catalogue.
             val clearedError = if (enriched.isNotEmpty()) null else current.error
+            // On a same-playlist refresh (background reload, EPG
+            // catch-up), preserve the user's CURRENT selection instead
+            // of restoring from prefs. Without this, a click on a new
+            // category gets clobbered ~300ms later by the next refresh
+            // cycle, producing a visible flicker between the user's
+            // pick and the saved value (caught live in user recording
+            // 2026-05-02 181744.mp4: HULU <-> DISNEY+ ping-pong every
+            // 0.3s after clicking DISNEY+).
+            val sameLoad = previousPlaylistId == playlistId
+            val keptGroup = if (sameLoad && current.selectedGroup != null) {
+                current.selectedGroup
+            } else {
+                prep.restoredGroup
+            }
+            val keptChannel = if (sameLoad && current.selectedChannel != null) {
+                current.selectedChannel
+            } else {
+                prep.restoredChannel
+            }
             current.copy(
                 selectedPlaylistId = playlistId,
                 channels = enriched,
                 groupedChannels = prep.grouped,
                 isLoadingChannels = keepLoading,
-                selectedGroup = prep.restoredGroup,
-                selectedChannel = prep.restoredChannel,
+                selectedGroup = keptGroup,
+                selectedChannel = keptChannel,
                 availableCountries = prep.countries,
                 guideError = guideErrorOverride ?: current.guideError,
                 epgState = epgStateOverride ?: current.epgState,
@@ -1889,9 +1908,15 @@ class ChannelsViewModel(
             )
         }
 
+        // Persist the actually-applied selection (which on a same-load
+        // refresh is the user's current pick, not prep.restoredGroup) —
+        // otherwise the pref would drift back to the stale restored
+        // value and the next cold start would land on the wrong group.
+        val appliedGroup = _state.value.selectedGroup
+        val appliedChannel = _state.value.selectedChannel
         withContext(backgroundDispatcher) {
-            persistSelectedGroup(playlistId, prep.restoredGroup)
-            prep.restoredChannel?.let { persistSelectedChannel(playlistId, it) }
+            persistSelectedGroup(playlistId, appliedGroup)
+            appliedChannel?.let { persistSelectedChannel(playlistId, it) }
         }
 
         buildLiveCategories()
