@@ -1577,7 +1577,30 @@ class ChannelsViewModel(
                 )
             }
             if (categoryChannels.all { it.currentProgramme == null && it.nextProgramme == null }) {
-                ensureEpgLoaded(playlistId)
+                // Only kick off an EPG fetch when the EPG hasn't been
+                // loaded yet. If EpgState is already Loaded, the channels
+                // having null programmes means their tvg-ids don't match
+                // the EPG source — re-loading EPG won't change that.
+                //
+                // Without this guard, the cycle is:
+                //   loadCategoryChannels(X) -> ensureEpgLoaded -> cache
+                //   hit -> refreshSelectedCategoryChannels ->
+                //   loadCategoryChannels(X) -> here -> ensureEpgLoaded
+                //   -> ...
+                // Each iteration calls getEpg (the "ChannelsEPG: cache
+                // read" log spam visible during the user's reported
+                // ~10-second flicker on category click). The cycle also
+                // races against the user's click: if a background trigger
+                // fires refreshSelectedCategoryChannels while the new
+                // click is still suspended on the DB query,
+                // refreshSelectedCategoryChannels reads the *old*
+                // selectedGroup and queues a parallel load for the old
+                // category, which lands its state update LATE and flips
+                // the highlight back. Visible as the highlight flickering
+                // between the old and the new category for ~10s.
+                if (_state.value.epgState !is EpgState.Loaded) {
+                    ensureEpgLoaded(playlistId)
+                }
             }
         }
     }
