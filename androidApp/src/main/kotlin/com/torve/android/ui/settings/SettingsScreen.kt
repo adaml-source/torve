@@ -1795,6 +1795,56 @@ fun SettingsScreen(
                         context.startActivity(Intent.createChooser(intent, "Report issue"))
                     },
                 )
+                HorizontalDivider(color = Steel.copy(alpha = 0.3f))
+                // Prompt 26: one-tap support bundle that includes
+                // provider health + transfer relay state + active
+                // engine. Pure shared builder (DiagnosticsBundleBuilder)
+                // produces a redacted text blob the user pastes into
+                // a support email or attaches to an issue.
+                val providerCoordinator: com.torve.presentation.providerhealth.ProviderHealthCoordinator =
+                    koinInject()
+                val transferCollector: com.torve.presentation.transfer.TransferDiagnosticsCollector =
+                    koinInject()
+                val exportScope = rememberCoroutineScope()
+                SettingsLinkItem(
+                    title = stringResource(R.string.settings_export_diagnostics),
+                    onClick = {
+                        exportScope.launch {
+                            val versionName = try {
+                                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
+                            } catch (_: Exception) { "unknown" }
+                            val versionCode = try {
+                                @Suppress("DEPRECATION")
+                                context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode.toString()
+                            } catch (_: Exception) { "unknown" }
+                            val transferSnapshot = runCatching { transferCollector.collect(probeRelay = false) }.getOrNull()
+                            val bundle = com.torve.domain.diagnostics.DiagnosticsBundleBuilder.build(
+                                app = com.torve.domain.diagnostics.DiagnosticsBundleBuilder.AppInfo(
+                                    versionName = versionName,
+                                    versionCode = versionCode,
+                                    storeFlavor = com.torve.android.BuildConfig.FLAVOR_store
+                                        .ifBlank { "unknown" },
+                                    activeEngineId = "ExoPlayer",
+                                ),
+                                device = com.torve.domain.diagnostics.DiagnosticsBundleBuilder.DeviceInfo(
+                                    platform = "Android",
+                                    deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}",
+                                    osVersion = "API ${Build.VERSION.SDK_INT}",
+                                    locale = java.util.Locale.getDefault().toLanguageTag(),
+                                ),
+                                providerEntries = providerCoordinator.entries.value,
+                                transfer = transferSnapshot,
+                                nowEpochMs = System.currentTimeMillis(),
+                            )
+                            val intent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_SUBJECT, "Torve diagnostics")
+                                putExtra(Intent.EXTRA_TEXT, bundle)
+                            }
+                            context.startActivity(Intent.createChooser(intent, "Export diagnostics"))
+                        }
+                    },
+                )
             }
         }
 
