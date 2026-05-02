@@ -56,7 +56,11 @@ import com.torve.desktop.auth.DesktopAuthUiState
 import com.torve.desktop.player.VlcRuntimeLocator
 import com.torve.desktop.platform.desktopDataDir
 import com.torve.desktop.playback.DesktopPlayerMode
+import com.torve.desktop.playback.DesktopPlaybackHotkeyAction
 import com.torve.desktop.playback.PlayerModePreferences
+import com.torve.desktop.playback.bindingFor
+import com.torve.desktop.playback.isSupportedPlaybackHotkey
+import com.torve.desktop.playback.withBinding
 import com.torve.desktop.mpv.MpvRuntimeLocator
 import com.torve.desktop.ui.components.TorveBadge
 import com.torve.desktop.ui.components.TorveBadgeTone
@@ -660,6 +664,10 @@ private fun CustomizationSection(
                     )
                 }
             }
+            DesktopHotkeysEditor(
+                settingsState = settingsState,
+                settingsViewModel = settingsViewModel,
+            )
         }
 
         TorveSectionCard(
@@ -791,6 +799,61 @@ private fun FolderPickerRow(
                 TorveGhostButton(text = "Clear", onClick = onClear)
             }
         }
+    }
+}
+
+@Composable
+private fun DesktopHotkeysEditor(
+    settingsState: SettingsUiState,
+    settingsViewModel: SettingsViewModel,
+) {
+    val colors = TorveDesktopThemeTokens.colors
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = "Playback Hotkeys",
+            style = MaterialTheme.typography.labelLarge,
+            color = colors.textPrimary,
+        )
+        Text(
+            text = "Defaults match desktop media-player expectations. IPTV channel changes use PageUp/PageDown so arrow keys remain volume and seek controls during Live TV.",
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.textSecondary,
+        )
+        DesktopPlaybackHotkeyAction.entries.chunked(2).forEach { rowActions ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                rowActions.forEach { action ->
+                    val value = settingsState.desktopPlaybackHotkeys.bindingFor(action)
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        TorveTextField(
+                            value = value,
+                            onValueChange = { input ->
+                                settingsViewModel.updateDesktopPlaybackHotkeys(
+                                    settingsState.desktopPlaybackHotkeys.withBinding(action, input),
+                                )
+                            },
+                            label = action.label,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            text = if (isSupportedPlaybackHotkey(value)) action.hint else "Unsupported key. Use Space, Esc, arrows, PageUp/PageDown, F, C, V, M, N, P, S.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isSupportedPlaybackHotkey(value)) colors.textMuted else colors.error,
+                        )
+                    }
+                }
+                if (rowActions.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+        TorveGhostButton(
+            text = "Reset Hotkeys",
+            onClick = { settingsViewModel.updateDesktopPlaybackHotkeys(com.torve.domain.player.DesktopPlaybackHotkeys()) },
+        )
     }
 }
 

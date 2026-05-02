@@ -73,6 +73,7 @@ import com.torve.domain.model.RatingSource
 import com.torve.domain.model.calculateTorveScore
 import com.torve.domain.model.deriveProvidersToRender
 import com.torve.domain.model.resolvedAspectRatio
+import com.torve.domain.model.withFallbackTmdbScore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -323,7 +324,8 @@ fun V2PosterCard(
         label = "posterTitleColor",
     )
 
-    val hasRatings = ratings != null
+    val displayRatings = ratings.withFallbackTmdbScore(rating?.toDoubleOrNull())
+    val hasRatings = displayRatings != null
 
     Box(modifier = modifier) {
         Column(
@@ -406,7 +408,7 @@ fun V2PosterCard(
                 // Rating pills inside card (only when multi-provider data available)
                 if (hasRatings && ratingPrefs.pillPosition == RatingPillPosition.INSIDE) {
                     DesktopRatingPills(
-                        ratings = ratings,
+                        ratings = displayRatings,
                         modifier = Modifier.align(Alignment.BottomStart).padding(4.dp),
                     )
                 }
@@ -423,7 +425,7 @@ fun V2PosterCard(
                 if (hasRatings && ratingPrefs.pillPosition == RatingPillPosition.OUTSIDE) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         year?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textMuted) }
-                        DesktopRatingPills(ratings = ratings, showBackground = false)
+                        DesktopRatingPills(ratings = displayRatings, showBackground = false)
                     }
                 } else {
                     val meta = listOfNotNull(year, rating).joinToString(" \u00B7 ")

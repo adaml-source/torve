@@ -103,6 +103,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowState
+import com.torve.desktop.playback.DesktopPlaybackHotkeyAction
+import com.torve.desktop.playback.bindingFor
+import com.torve.desktop.playback.toComposePlaybackKey
+import com.torve.domain.player.DesktopPlaybackHotkeys
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import java.awt.FileDialog
@@ -163,6 +167,7 @@ fun VlcComposePlayerSurface(
     onMinimizeToPip: (() -> Unit)? = null,
     onSearchOnlineSubtitles: (() -> Unit)? = null,
     castController: com.torve.desktop.cast.DesktopCastController? = null,
+    hotkeys: DesktopPlaybackHotkeys = DesktopPlaybackHotkeys(),
     modifier: Modifier = Modifier,
 ) {
     val sessionStateFlow = engine.sessionState
@@ -316,6 +321,41 @@ fun VlcComposePlayerSurface(
         // Aspect ratio is enforced at the Compose drawing layer, not via vlcj API,
         // because callback rendering mode (vmem) ignores vlcj aspect ratio calls.
     }
+    fun cycleVideoMode() {
+        val currentIndex = aspectOptions.indexOfFirst { it.label == selectedAspect }.coerceAtLeast(0)
+        val next = aspectOptions[(currentIndex + 1) % aspectOptions.size]
+        applyAspect(next)
+        showToast("Video mode: ${next.label}")
+    }
+    fun cycleSubtitleTrack() {
+        val tracks = sessionState.availableSubtitleTracks
+        val session = engine.session
+        if (session == null || tracks.isEmpty()) {
+            showToast("No subtitle tracks available")
+            return
+        }
+        val selectedIndex = tracks.indexOfFirst { it.id == sessionState.selectedSubtitleTrack?.id }
+        kotlinx.coroutines.runBlocking {
+            if (selectedIndex < 0) {
+                session.selectSubtitleTrack(tracks.first().id)
+            } else if (selectedIndex >= tracks.lastIndex) {
+                session.disableSubtitles()
+            } else {
+                session.selectSubtitleTrack(tracks[selectedIndex + 1].id)
+            }
+            session.refreshTracks()
+        }
+        val nextLabel = when {
+            selectedIndex < 0 -> tracks.first().name
+            selectedIndex >= tracks.lastIndex -> "Off"
+            else -> tracks[selectedIndex + 1].name
+        }
+        showToast("Subtitles: $nextLabel")
+    }
+    fun matchesHotkey(
+        event: androidx.compose.ui.input.key.KeyEvent,
+        action: DesktopPlaybackHotkeyAction,
+    ): Boolean = hotkeys.bindingFor(action).toComposePlaybackKey()?.let { event.key == it } == true
     fun toggleFullscreen() {
         val ws = windowState ?: return
         ws.placement = if (ws.placement == WindowPlacement.Fullscreen) WindowPlacement.Floating else WindowPlacement.Fullscreen
@@ -412,7 +452,6 @@ fun VlcComposePlayerSurface(
                 label = "Stop",
                 enabled = sessionState.isPlaying || sessionState.isPaused || sessionState.positionMs > 0,
             ) {
-                kotlinx.coroutines.runBlocking { engine.stop() }
                 onStop()
             }
         )
@@ -710,34 +749,61 @@ fun VlcComposePlayerSurface(
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 onInteraction()
-                if (event.key == Key.Escape) {
+                if (matchesHotkey(event, DesktopPlaybackHotkeyAction.EXIT_PLAYBACK)) {
                     if (showContextMenu) { showContextMenu = false; return@onPreviewKeyEvent true }
                     if (activePanel != null) { activePanel = null; return@onPreviewKeyEvent true }
                     if (isFullscreen) toggleFullscreen() else onClose()
                     return@onPreviewKeyEvent true
                 }
                 if (channelNavigationEnabled) {
-                    when (event.key) {
-                        Key.DirectionUp -> {
-                            onPreviousChannel?.invoke()
-                            return@onPreviewKeyEvent true
-                        }
-                        Key.DirectionDown -> {
-                            onNextChannel?.invoke()
-                            return@onPreviewKeyEvent true
-                        }
-                        else -> Unit
+                    if (matchesHotkey(event, DesktopPlaybackHotkeyAction.PREVIOUS_CHANNEL)) {
+                        onPreviousChannel?.invoke()
+                        showToast("Previous channel")
+                        return@onPreviewKeyEvent true
+                    }
+                    if (matchesHotkey(event, DesktopPlaybackHotkeyAction.NEXT_CHANNEL)) {
+                        onNextChannel?.invoke()
+                        showToast("Next channel")
+                        return@onPreviewKeyEvent true
                     }
                 }
                 val session = engine.session ?: return@onPreviewKeyEvent false
-                when (event.key) {
-                    Key.Spacebar -> { kotlinx.coroutines.runBlocking { if (engine.isPlaying()) engine.pause() else engine.play() }; true }
-                    Key.F -> { toggleFullscreen(); true }
-                    Key.DirectionLeft -> { kotlinx.coroutines.runBlocking { session.seekRelative(-seekStepMs) }; true }
-                    Key.DirectionRight -> { kotlinx.coroutines.runBlocking { session.seekRelative(seekStepMs) }; true }
-                    Key.DirectionUp -> { kotlinx.coroutines.runBlocking { session.setVolume(engine.getVolume() + 5) }; onVolumeChanged?.invoke(engine.getVolume()); true }
-                    Key.DirectionDown -> { kotlinx.coroutines.runBlocking { session.setVolume(engine.getVolume() - 5) }; onVolumeChanged?.invoke(engine.getVolume()); true }
-                    Key.M -> { kotlinx.coroutines.runBlocking { session.setMute(!engine.isMuted()) }; true }
+                when {
+                    matchesHotkey(event, DesktopPlaybackHotkeyAction.PLAY_PAUSE) -> {
+                        kotlinx.coroutines.runBlocking { if (engine.isPlaying()) engine.pause() else engine.play() }
+                        true
+                    }
+                    matchesHotkey(event, DesktopPlaybackHotkeyAction.TOGGLE_FULLSCREEN) -> { toggleFullscreen(); true }
+                    matchesHotkey(event, DesktopPlaybackHotkeyAction.SEEK_BACKWARD) -> {
+                        kotlinx.coroutines.runBlocking { session.seekRelative(-seekStepMs) }
+                        true
+                    }
+                    matchesHotkey(event, DesktopPlaybackHotkeyAction.SEEK_FORWARD) -> {
+                        kotlinx.coroutines.runBlocking { session.seekRelative(seekStepMs) }
+                        true
+                    }
+                    matchesHotkey(event, DesktopPlaybackHotkeyAction.VOLUME_UP) -> {
+                        val next = (engine.getVolume() + 5).coerceIn(0, 100)
+                        kotlinx.coroutines.runBlocking { session.setVolume(next) }
+                        onVolumeChanged?.invoke(next)
+                        true
+                    }
+                    matchesHotkey(event, DesktopPlaybackHotkeyAction.VOLUME_DOWN) -> {
+                        val next = (engine.getVolume() - 5).coerceIn(0, 100)
+                        kotlinx.coroutines.runBlocking { session.setVolume(next) }
+                        onVolumeChanged?.invoke(next)
+                        true
+                    }
+                    matchesHotkey(event, DesktopPlaybackHotkeyAction.CYCLE_SUBTITLES) -> { cycleSubtitleTrack(); true }
+                    matchesHotkey(event, DesktopPlaybackHotkeyAction.CYCLE_VIDEO_MODE) -> { cycleVideoMode(); true }
+                    matchesHotkey(event, DesktopPlaybackHotkeyAction.MUTE) -> {
+                        kotlinx.coroutines.runBlocking { session.setMute(!engine.isMuted()) }
+                        true
+                    }
+                    matchesHotkey(event, DesktopPlaybackHotkeyAction.STOP_PLAYBACK) -> {
+                        onStop()
+                        true
+                    }
                     else -> false
                 }
             },
@@ -796,7 +862,6 @@ fun VlcComposePlayerSurface(
             DropdownMenuItem(
                 text = { Text("Stop") },
                 onClick = {
-                    kotlinx.coroutines.runBlocking { engine.stop() }
                     onStop()
                     showContextMenu = false
                 },
@@ -990,7 +1055,7 @@ fun VlcComposePlayerSurface(
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             PBtn(Icons.AutoMirrored.Filled.ArrowBack) { onClose() }
                             PBtn(if (sessionState.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, primary = true) { kotlinx.coroutines.runBlocking { if (engine.isPlaying()) engine.pause() else engine.play() } }
-                            PBtn(Icons.Filled.Stop) { kotlinx.coroutines.runBlocking { engine.stop() }; onStop() }
+                            PBtn(Icons.Filled.Stop) { onStop() }
                             PBtn(Icons.Filled.FastRewind) { engine.session?.let { s -> kotlinx.coroutines.runBlocking { s.seekRelative(-seekStepMs) } } }
                             PBtn(Icons.Filled.FastForward) { engine.session?.let { s -> kotlinx.coroutines.runBlocking { s.seekRelative(seekStepMs) } } }
                         }
@@ -1523,4 +1588,3 @@ private fun CheckItem(text: String, checked: Boolean, onClick: () -> Unit) =
     DropdownMenuItem(text = { Text(text) }, onClick = onClick, leadingIcon = { if (checked) Icon(Icons.Filled.Check, null, tint = Accent) })
 
 private fun fmt(ms: Long): String { val t = (ms / 1000).coerceAtLeast(0); val h = t / 3600; val m = (t % 3600) / 60; val s = t % 60; return if (h > 0) String.format("%d:%02d:%02d", h, m, s) else String.format("%d:%02d", m, s) }
-

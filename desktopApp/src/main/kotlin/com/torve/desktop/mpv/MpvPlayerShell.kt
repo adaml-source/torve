@@ -51,9 +51,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.torve.desktop.playback.DesktopPlaybackEngineEvent
+import com.torve.desktop.playback.DesktopPlaybackHotkeyAction
 import com.torve.desktop.playback.DesktopPlayerController
 import com.torve.desktop.playback.DesktopPlayerPhase
+import com.torve.desktop.playback.bindingFor
+import com.torve.desktop.playback.toAwtPlaybackKeyCode
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
+import com.torve.domain.player.DesktopPlaybackHotkeys
 import kotlinx.coroutines.launch
 
 /**
@@ -87,10 +91,12 @@ fun MpvPlayerShell(
     preferredAudioLanguage: String? = null,
     preferredSubtitleLanguage: String? = null,
     windowState: androidx.compose.ui.window.WindowState? = null,
+    seekStepMs: Long = 10_000L,
     onSearchOnlineSubtitles: (() -> Unit)? = null,
     channelNavigationEnabled: Boolean = false,
     onPreviousChannel: (() -> Unit)? = null,
     onNextChannel: (() -> Unit)? = null,
+    hotkeys: DesktopPlaybackHotkeys = DesktopPlaybackHotkeys(),
     modifier: Modifier = Modifier,
 ) {
     val colors = TorveDesktopThemeTokens.colors
@@ -104,6 +110,8 @@ fun MpvPlayerShell(
     val volume = mpvVolume ?: initialVolume?.coerceIn(0, 100) ?: 100
     var seekDraft by remember { mutableStateOf<Double?>(null) }
     val tracks by engine.tracks.collectAsState()
+    val mpvVideoModes = remember { listOf("Default" to null, "16:9" to "16:9", "4:3" to "4:3", "21:9" to "21:9") }
+    var mpvVideoModeIndex by remember { mutableStateOf(0) }
 
     // Subtitle drag-drop - when a recognised subtitle file lands on the
     // window, mpv loads it and switches to it. Same pattern the VLC
@@ -198,37 +206,93 @@ fun MpvPlayerShell(
     val pausedRef by rememberUpdatedState(isPaused)
     val positionRef by rememberUpdatedState(positionSec)
     val fullscreenRef by rememberUpdatedState(userWantsFullscreen)
+    val volumeRef by rememberUpdatedState(volume)
+    val mutedRef by rememberUpdatedState(mpvMuted)
+    val tracksRef by rememberUpdatedState(tracks)
+    val hotkeysRef by rememberUpdatedState(hotkeys)
+    val seekStepMsRef by rememberUpdatedState(seekStepMs)
+    val onCloseRef by rememberUpdatedState(onClose)
+    val onVolumeChangedRef by rememberUpdatedState(onVolumeChanged)
     DisposableEffect(windowState, channelNavigationEnabled, onPreviousChannel, onNextChannel) {
-        val ws = windowState
+        fun code(action: DesktopPlaybackHotkeyAction): Int? =
+            hotkeysRef.bindingFor(action).toAwtPlaybackKeyCode()
+
         val dispatcher = java.awt.KeyEventDispatcher { e ->
             if (e.id != java.awt.event.KeyEvent.KEY_PRESSED) return@KeyEventDispatcher false
-            when (e.keyCode) {
-                java.awt.event.KeyEvent.VK_ESCAPE -> {
+            val key = e.keyCode
+            when {
+                key == code(DesktopPlaybackHotkeyAction.EXIT_PLAYBACK) -> {
                     if (fullscreenRef) {
                         userWantsFullscreen = false
                         true
-                    } else false
+                    } else {
+                        onCloseRef()
+                        true
+                    }
                 }
-                java.awt.event.KeyEvent.VK_UP -> {
-                    if (channelNavigationEnabled && onPreviousChannel != null) {
+                channelNavigationEnabled && key == code(DesktopPlaybackHotkeyAction.PREVIOUS_CHANNEL) -> {
+                    if (onPreviousChannel != null) {
                         onPreviousChannel(); true
                     } else false
                 }
-                java.awt.event.KeyEvent.VK_DOWN -> {
-                    if (channelNavigationEnabled && onNextChannel != null) {
+                channelNavigationEnabled && key == code(DesktopPlaybackHotkeyAction.NEXT_CHANNEL) -> {
+                    if (onNextChannel != null) {
                         onNextChannel(); true
                     } else false
                 }
-                java.awt.event.KeyEvent.VK_LEFT -> {
-                    scope.launch { engine.seekTo(((positionRef ?: 0.0) - 10.0).coerceAtLeast(0.0)) }
+                key == code(DesktopPlaybackHotkeyAction.SEEK_BACKWARD) -> {
+                    scope.launch { engine.seekTo(((positionRef ?: 0.0) - seekStepMsRef / 1000.0).coerceAtLeast(0.0)) }
                     true
                 }
-                java.awt.event.KeyEvent.VK_RIGHT -> {
-                    scope.launch { engine.seekTo((positionRef ?: 0.0) + 10.0) }
+                key == code(DesktopPlaybackHotkeyAction.SEEK_FORWARD) -> {
+                    scope.launch { engine.seekTo((positionRef ?: 0.0) + seekStepMsRef / 1000.0) }
                     true
                 }
-                java.awt.event.KeyEvent.VK_SPACE -> {
+                key == code(DesktopPlaybackHotkeyAction.VOLUME_UP) -> {
+                    val next = (volumeRef + 5).coerceIn(0, 100)
+                    scope.launch { engine.setVolume(next) }
+                    onVolumeChangedRef?.invoke(next)
+                    true
+                }
+                key == code(DesktopPlaybackHotkeyAction.VOLUME_DOWN) -> {
+                    val next = (volumeRef - 5).coerceIn(0, 100)
+                    scope.launch { engine.setVolume(next) }
+                    onVolumeChangedRef?.invoke(next)
+                    true
+                }
+                key == code(DesktopPlaybackHotkeyAction.PLAY_PAUSE) -> {
                     scope.launch { if (pausedRef) engine.play() else engine.pause() }
+                    true
+                }
+                key == code(DesktopPlaybackHotkeyAction.MUTE) -> {
+                    scope.launch { engine.setMuted(!mutedRef) }
+                    true
+                }
+                key == code(DesktopPlaybackHotkeyAction.STOP_PLAYBACK) -> {
+                    onStop()
+                    true
+                }
+                key == code(DesktopPlaybackHotkeyAction.CYCLE_SUBTITLES) -> {
+                    val subtitleTracks = tracksRef.filter { it.type == "sub" }
+                    if (subtitleTracks.isNotEmpty()) {
+                        val selectedIndex = subtitleTracks.indexOfFirst { it.selected }
+                        val nextId = when {
+                            selectedIndex < 0 -> subtitleTracks.first().id
+                            selectedIndex >= subtitleTracks.lastIndex -> null
+                            else -> subtitleTracks[selectedIndex + 1].id
+                        }
+                        scope.launch { engine.selectSubtitleTrack(nextId) }
+                    }
+                    true
+                }
+                key == code(DesktopPlaybackHotkeyAction.CYCLE_VIDEO_MODE) -> {
+                    val nextIndex = (mpvVideoModeIndex + 1) % mpvVideoModes.size
+                    mpvVideoModeIndex = nextIndex
+                    scope.launch { engine.setVideoAspectOverride(mpvVideoModes[nextIndex].second) }
+                    true
+                }
+                key == code(DesktopPlaybackHotkeyAction.TOGGLE_FULLSCREEN) -> {
+                    userWantsFullscreen = !userWantsFullscreen
                     true
                 }
                 else -> false

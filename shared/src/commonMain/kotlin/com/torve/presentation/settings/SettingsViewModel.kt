@@ -33,6 +33,7 @@ import com.torve.domain.model.RatingSource
 import com.torve.domain.model.defaultTorveWeights
 import com.torve.domain.model.StreamPreferences
 import com.torve.domain.model.StreamQuality
+import com.torve.domain.player.DesktopPlaybackHotkeys
 import com.torve.domain.repository.AddonRepository
 import com.torve.domain.repository.PreferencesRepository
 import com.torve.domain.repository.WatchHistoryRepository
@@ -139,6 +140,7 @@ class SettingsViewModel(
         const val KEY_PREFERRED_AUDIO_LANGUAGE = "preferred_audio_language"
         const val KEY_REMEMBER_VOLUME = "remember_volume"
         const val KEY_LAST_VOLUME = "last_volume"
+        const val KEY_DESKTOP_PLAYBACK_HOTKEYS = "desktop_playback_hotkeys"
         const val KEY_MOVIE_DOWNLOAD_PATH = "movie_download_path"
         const val KEY_SHOW_DOWNLOAD_PATH = "show_download_path"
         const val KEY_ADULT_DOWNLOAD_PATH = "adult_download_path"
@@ -369,6 +371,9 @@ class SettingsViewModel(
                 prefsRepo.getString(KEY_REMEMBER_VOLUME)?.toBooleanStrictOrNull() ?: true
             val lastVolume = prefsRepo.getString(KEY_LAST_VOLUME)
                 ?.toIntOrNull()?.coerceIn(0, 100) ?: 100
+            val desktopPlaybackHotkeys = prefsRepo.getString(KEY_DESKTOP_PLAYBACK_HOTKEYS)?.let {
+                try { jsonParser.decodeFromString<DesktopPlaybackHotkeys>(it).sanitized() } catch (_: Exception) { null }
+            } ?: DesktopPlaybackHotkeys()
             val movieDownloadPath = prefsRepo.getString(KEY_MOVIE_DOWNLOAD_PATH) ?: ""
             val showDownloadPath = prefsRepo.getString(KEY_SHOW_DOWNLOAD_PATH) ?: ""
             val adultDownloadPath = prefsRepo.getString(KEY_ADULT_DOWNLOAD_PATH) ?: ""
@@ -496,6 +501,7 @@ class SettingsViewModel(
                     preferredAudioLanguage = preferredAudioLanguage,
                     rememberVolume = rememberVolume,
                     lastVolume = lastVolume,
+                    desktopPlaybackHotkeys = desktopPlaybackHotkeys,
                     movieDownloadPath = movieDownloadPath,
                     showDownloadPath = showDownloadPath,
                     adultDownloadPath = adultDownloadPath,
@@ -1718,6 +1724,12 @@ class SettingsViewModel(
         val sanitized = volume.coerceIn(0, 100)
         _state.update { it.copy(lastVolume = sanitized) }
         scope.launch { prefsRepo.setString(KEY_LAST_VOLUME, sanitized.toString()) }
+    }
+
+    fun updateDesktopPlaybackHotkeys(hotkeys: DesktopPlaybackHotkeys) {
+        val sanitized = hotkeys.sanitized()
+        _state.update { it.copy(desktopPlaybackHotkeys = sanitized) }
+        scope.launch { prefsRepo.setString(KEY_DESKTOP_PLAYBACK_HOTKEYS, jsonParser.encodeToString(sanitized)) }
     }
 
     fun setMovieDownloadPath(path: String) {

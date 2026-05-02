@@ -368,6 +368,12 @@ class MpvPlaybackEngine : DesktopPlaybackEngine {
         mpv.mpv_set_property_string(handle, "mute", if (muted) "yes" else "no")
     }
 
+    suspend fun setVideoAspectOverride(ratio: String?) = withContext(Dispatchers.IO) {
+        val mpv = lib ?: return@withContext
+        val handle = ctx ?: return@withContext
+        mpv.mpv_set_property_string(handle, "video-aspect-override", ratio ?: "-1")
+    }
+
     /**
      * Add an external subtitle file and select it. Used by the drag-drop
      * pipeline. Path is escaped only by mpv's own argv parser since we

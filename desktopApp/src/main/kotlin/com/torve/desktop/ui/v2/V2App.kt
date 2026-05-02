@@ -816,10 +816,12 @@ fun V2App(
                             preferredAudioLanguage = settingsState.preferredAudioLanguage.takeIf { it.isNotBlank() },
                             preferredSubtitleLanguage = settingsState.preferredSubtitleLanguage.takeIf { it.isNotBlank() },
                             windowState = windowState,
+                            seekStepMs = playerController.getSeekStepMs(),
                             onSearchOnlineSubtitles = { showMpvSubtitleSearch = true },
                             channelNavigationEnabled = isLiveTvPlayback,
                             onPreviousChannel = { switchLiveChannel(-1) },
                             onNextChannel = { switchLiveChannel(1) },
+                            hotkeys = settingsState.desktopPlaybackHotkeys,
                             modifier = Modifier.fillMaxSize(),
                         )
                         if (showMpvSubtitleSearch) {
@@ -859,6 +861,7 @@ fun V2App(
                             onMinimizeToPip = { pipMode = true },
                             onSearchOnlineSubtitles = { showSubtitleSearch = true },
                             castController = castController,
+                            hotkeys = settingsState.desktopPlaybackHotkeys,
                             modifier = Modifier.fillMaxSize(),
                         )
                         // Panda/addon "still warming up" overlay. Stays mounted

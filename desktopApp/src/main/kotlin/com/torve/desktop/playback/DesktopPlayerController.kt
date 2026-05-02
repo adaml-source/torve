@@ -217,6 +217,8 @@ class DesktopPlayerController(
     private var subtitleJob: Job? = null
     private var runtimeWarmJob: Job? = null
     private var progressSyncJob: Job? = null
+    private var stopJob: Job? = null
+    private var closeJob: Job? = null
     private val engineEventJob: Job
     private var activeStartupTrace: PlaybackStartupTrace? = null
     private var recordedHistorySessionKey: String? = null
@@ -672,6 +674,8 @@ class DesktopPlayerController(
     }
 
     fun stop() {
+        if (closeJob?.isActive == true || stopJob?.isActive == true) return
+        if (_state.value.phase == DesktopPlayerPhase.STOPPED) return
         val preparedSession = _state.value.preparedSession
         if (preparedSession == null) {
             failRuntime(
@@ -680,16 +684,19 @@ class DesktopPlayerController(
             )
             return
         }
-        scope.launch {
+        stopJob = scope.launch {
             runCatching { playbackEngine.stop() }
                 .onFailure { failRuntime("ENGINE_STOP_FAILED", it.message ?: "Failed to stop playback.") }
         }
     }
 
     fun close() {
+        if (closeJob?.isActive == true) return
+        if (_state.value.phase == DesktopPlayerPhase.CLOSED && _state.value.lastCommand == DesktopPlayerCommand.CLOSE) return
+        stopJob?.cancel()
         resolutionJob?.cancel()
         progressSyncJob?.cancel()
-        scope.launch {
+        closeJob = scope.launch {
             // Save playback position and volume before closing
             savePlaybackProgress()
             stopTraktScrobble()

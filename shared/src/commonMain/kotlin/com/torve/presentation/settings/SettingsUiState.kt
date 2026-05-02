@@ -18,6 +18,7 @@ import com.torve.domain.model.RatingDisplayPrefs
 import com.torve.domain.model.RegexPattern
 import com.torve.domain.model.StreamGroup
 import com.torve.domain.model.StreamQuality
+import com.torve.domain.player.DesktopPlaybackHotkeys
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
@@ -114,6 +115,7 @@ data class SettingsUiState(
     val preferredAudioLanguage: String = "",
     val rememberVolume: Boolean = true,
     val lastVolume: Int = 100,
+    val desktopPlaybackHotkeys: DesktopPlaybackHotkeys = DesktopPlaybackHotkeys(),
     val movieDownloadPath: String = "",
     val showDownloadPath: String = "",
     /**
