@@ -327,9 +327,15 @@ Stable remains NO-GO until the blockers below are cleared.**
 
 **Update 2026-05-02:** B1 + B5 cleared (B1 was a filename-mismatch
 bug, not a missing page; B5 was already deployed under different
-naming in production). Remaining blockers: B2 + B3 (macOS / iOS,
-held back) and B4 (Windows clean-VM smoke, operator-only). Stable
-on Android + Desktop is now bottlenecked on B4 alone.
+naming in production).
+
+**Update 2026-05-03:** B4 cleared via Windows Sandbox smoke
+(install + launch + playback verified). Updater-handoff sub-step
+deferred — not exercised because no N-1 build was staged; non-
+blocking for beta but must run once before stable. Remaining
+blockers: B2 + B3 (macOS / iOS, held back). **Public desktop +
+Android beta is GO.** Stable remains gated on macOS host
+availability.
 
 ### Pre-release checks
 
@@ -351,7 +357,7 @@ delete-account page goes 404, plus any silent rename of privacy / terms
 | ~~B1~~ | ~~Web ops~~ | **CLEARED 2026-05-02.** The page was already live at `https://torve.app/account-deletion.html` (200, branded). The 404 was a string-mismatch bug — `LegalUrls.ACCOUNT_DELETION_WEB` pointed at `delete-account.html`. Constant is now `account-deletion.html`; `link-check.sh` returns 4 PASSED. |
 | B2 | Operator (macOS) | Run iOS build + simulator smoke against the Prompt 12 changes (`AccountScreen.swift`, `TorveAPIClient.swift`). |
 | B3 | Operator (macOS) | Run macOS sign + notarize round-trip on a packaged DMG. |
-| B4 | Operator (Windows) | Clean-VM install + launch + playback + update-handoff smoke. |
+| ~~B4~~ | ~~Operator (Windows)~~ | **CLEARED 2026-05-03.** Clean Windows Sandbox: installer ran, app launched, sign-in succeeded, sample item played. Caveat: Windows Sandbox is ephemeral and ships with services stripped — *more* hostile than a normal install for "missing runtime" classes of failure, so a pass here is meaningful, but it does not exercise user-profile persistence, AV interaction, or Windows Update mid-session. **Updater-handoff sub-step (install N-1, let in-app updater swap to latest) was not exercised** — no N-1 artifact was staged. Non-blocking for beta; must run at least once against a real release feed before stable. A snapshot-VM pass against Defender + one third-party AV is also recommended before stable. |
 | ~~B5~~ | ~~Backend ops~~ | **CLEARED 2026-05-02.** Production runs a more advanced backend than the local `server/` directory in this repo — `app/crypto.py` (server) is the equivalent of the planned `app/secret_wrap.py` (local) under a different name. Production already has `INTEGRATION_SECRET_KEY` set (with rotation support via `INTEGRATION_SECRET_KEY_PREVIOUS`) and `APP_ENV=production`. Verified by SSH-inspecting `/opt/torve-backend/.env` and tailing `journalctl -u torve-backend` for any wrap/crypto warnings (none in the last hour). The B5 wording was based on the local naming plan that never reached prod; reality matched the goal under different identifiers. **Important caveat:** the `server/` directory in this repo is OUT OF SYNC with production — do not naively `git pull` or rsync from local to `/opt/torve-backend/`; it would break the live deploy. Treat the local `server/` as documentation-only until it's reconciled. |
 
 ### Non-blockers (release notes)
