@@ -784,7 +784,11 @@ private fun SelectedChannelPane(
                 )
             } else {
                 Text(
-                    text = selectedChannel.url,
+                    // Redact Xtream username/password before showing the
+                    // stream URL — the raw URL surfaces credentials in
+                    // plain text on the channel detail pane (provider
+                    // path is `/live/<user>/<pass>/<id>.ts`).
+                    text = redactStreamUrlForDisplay(selectedChannel.url),
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.textSecondary,
                 )
@@ -800,8 +804,14 @@ private fun SelectedChannelPane(
                 }
                 if (programmes.isEmpty()) {
                     TorvePlaceholderState(
-                        title = "No guide entries",
-                        description = "This channel has no EPG data loaded yet.",
+                        // The previous copy ("This channel has no EPG
+                        // data loaded yet") implied the EPG itself
+                        // hadn't loaded — but the playlist's EPG is
+                        // loaded, this single channel just has no
+                        // matching tvg-id in the EPG source. Be honest
+                        // about which case it is.
+                        title = "No guide entries for this channel",
+                        description = "Either the EPG is still loading, or this channel's tvg-id doesn't match any entry in the EPG source.",
                     )
                 } else {
                     programmes.take(8).forEach { programme ->
@@ -830,3 +840,24 @@ private val ReminderTimeFormatter: DateTimeFormatter =
 
 private fun formatReminderTime(epochMs: Long): String =
     ReminderTimeFormatter.format(Instant.ofEpochMilli(epochMs))
+
+/**
+ * Strip Xtream username/password segments and `username=` /
+ * `password=` query parameters from a stream URL before showing it
+ * to the user. Without this, the channel-detail pane prints the raw
+ * URL including credentials in plain text — anyone glancing at the
+ * screen (or screen-sharing) walks away with the provider login.
+ *
+ * Visible in the live recording 2026-05-02 181744.mp4: the right
+ * pane showed `http://smatv.pro/live/c55e6450464d/53ec13d581/...`
+ * with the username and password readable.
+ */
+private val XTREAM_PATH_CREDS = Regex("(/(?:live|movie|series))/[^/]+/[^/]+/")
+private val URL_QUERY_CREDS = Regex("([?&])(username|password|api_key|apikey|token)=[^&]*", RegexOption.IGNORE_CASE)
+
+internal fun redactStreamUrlForDisplay(url: String): String {
+    if (url.isBlank()) return url
+    return url
+        .replace(XTREAM_PATH_CREDS, "$1/***/***/")
+        .replace(URL_QUERY_CREDS, "$1$2=***")
+}
