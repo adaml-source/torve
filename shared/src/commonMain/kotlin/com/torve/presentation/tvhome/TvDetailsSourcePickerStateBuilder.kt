@@ -39,6 +39,14 @@ object TvDetailsSourcePickerStateBuilder {
         networkMode: NetworkMode,
         wifiOnlyForLan: Boolean,
         providerIssue: String? = null,
+        /**
+         * Pass-through to [TvSourcePicker.build]. Default true keeps
+         * existing call sites working; the detail screens read this
+         * from the active [com.torve.domain.player.PlayerEngine.supportsRequestHeaders]
+         * flag and pass the live value so a header-incapable engine
+         * doesn't get the LAN row dangled in front of it.
+         */
+        engineSupportsLanHeaders: Boolean = true,
     ): TvSourcePickerState {
         val localFile = localFilePath
             ?.takeIf { it.isNotBlank() }
@@ -55,6 +63,7 @@ object TvDetailsSourcePickerStateBuilder {
             networkMode = networkMode,
             wifiOnlyForLan = wifiOnlyForLan,
             providerIssue = providerIssue,
+            engineSupportsLanHeaders = engineSupportsLanHeaders,
         )
     }
 

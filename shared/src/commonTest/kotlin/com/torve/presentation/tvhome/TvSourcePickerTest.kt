@@ -70,6 +70,56 @@ class TvSourcePickerTest {
     }
 
     @Test
+    fun `build suppresses LAN when active engine cannot stage headers`() {
+        // Prompt 24: an engine without setNextRequestHeaders support
+        // (default false) cannot send X-Torve-Lan-Auth, so the desktop
+        // hub would 401. The picker must not dangle a doomed LAN row
+        // in front of the user.
+        val state = TvSourcePicker.build(
+            localFile = localFile,
+            lanStream = lanStream,
+            providerStream = provider,
+            networkMode = NetworkMode.WIFI,
+            wifiOnlyForLan = true,
+            engineSupportsLanHeaders = false,
+        )
+        // LAN dropped; localFile and provider remain.
+        assertEquals(2, state.options.size)
+        assertEquals("Downloaded", state.options[0].label)
+        assertEquals("Provider", state.options[1].label)
+        assertTrue(state.options.none { it.label == "On desktop (LAN)" })
+    }
+
+    @Test
+    fun `engine-incapable plus cellular guard both suppress LAN independently`() {
+        // Either guard alone is enough to drop LAN; both together still
+        // produce the same outcome (no double-removal regression).
+        val state = TvSourcePicker.build(
+            localFile = localFile,
+            lanStream = lanStream,
+            providerStream = provider,
+            networkMode = NetworkMode.CELLULAR,
+            wifiOnlyForLan = true,
+            engineSupportsLanHeaders = false,
+        )
+        assertEquals(2, state.options.size)
+        assertTrue(state.options.none { it.label == "On desktop (LAN)" })
+    }
+
+    @Test
+    fun `engineSupportsLanHeaders defaults to true so existing call sites unchanged`() {
+        // Backwards-compat guard: any caller that hasn't yet wired the
+        // capability check should keep getting the LAN row, not lose it
+        // silently.
+        val state = TvSourcePicker.build(
+            lanStream = lanStream,
+            providerStream = provider,
+            networkMode = NetworkMode.WIFI,
+        )
+        assertEquals("On desktop (LAN)", state.options[0].label)
+    }
+
+    @Test
     fun `build retains LAN on cellular when wifi-only is false`() {
         val state = TvSourcePicker.build(
             lanStream = lanStream,

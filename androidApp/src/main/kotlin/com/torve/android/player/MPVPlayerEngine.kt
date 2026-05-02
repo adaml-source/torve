@@ -130,6 +130,10 @@ class MPVPlayerEngine(
         pendingRequestHeaders = if (headers.isEmpty()) emptyMap() else headers.toMap()
     }
 
+    // MPV applies the staged headers via the `http-header-fields`
+    // libmpv property right before loadfile (see play() below).
+    override val supportsRequestHeaders: Boolean = true
+
     override fun play(url: String) {
         if (!initialized) return
         rememberedTrackHintApplied = false

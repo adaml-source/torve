@@ -1676,6 +1676,10 @@ fun TvRoot(
                                         backdropUrl = item.backdropUrl.orEmpty(),
                                         showTmdbId = if (mediaType == "tv") item.tmdbId else null,
                                         showImdbId = item.imdbId,
+                                        // Prompt 24: if local playback fails (file moved /
+                                        // codec mismatch), let PlayerScreen advance through
+                                        // the chain instead of bouncing back to Home.
+                                        autoSourceSelection = true,
                                     ),
                                 )
                             },
@@ -1698,6 +1702,11 @@ fun TvRoot(
                                         backdropUrl = item.backdropUrl.orEmpty(),
                                         showTmdbId = if (mediaType == "tv") item.tmdbId else null,
                                         showImdbId = item.imdbId,
+                                        // Prompt 24: if LAN playback fails (desktop hub
+                                        // dropped, network blip), let PlayerScreen advance
+                                        // to provider/redownload via trySwitchToStableSource
+                                        // instead of dumping the user back to Home.
+                                        autoSourceSelection = true,
                                     ),
                                 )
                             },

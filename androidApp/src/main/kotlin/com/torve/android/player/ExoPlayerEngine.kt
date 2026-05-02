@@ -577,6 +577,10 @@ class ExoPlayerEngine(
         pendingRequestHeaders = if (headers.isEmpty()) emptyMap() else headers.toMap()
     }
 
+    // ExoPlayer attaches the staged headers via DefaultHttpDataSource —
+    // see line ~1257 where they're consumed before MediaSource build.
+    override val supportsRequestHeaders: Boolean = true
+
     override fun play(url: String) {
         currentUrl = url
         compatibleModeFallbackAttempted = false

@@ -29,8 +29,21 @@ object TvSourcePicker {
         networkMode: NetworkMode = NetworkMode.UNKNOWN,
         wifiOnlyForLan: Boolean = true,
         providerIssue: String? = null,
+        /**
+         * When false, suppress the LAN tier — the active player engine
+         * cannot stage the `X-Torve-Lan-Auth` header that the desktop
+         * hub requires, so picking LAN would 401 before any byte
+         * arrives. Default true preserves existing behaviour for
+         * engines that DO support headers (ExoPlayer, MPV).
+         *
+         * Drives Prompt 24's "if engine cannot honor headers, LAN
+         * option should be hidden or marked unavailable, not allowed
+         * to 401" requirement.
+         */
+        engineSupportsLanHeaders: Boolean = true,
     ): TvSourcePickerState {
-        val effectiveLan = if (wifiOnlyForLan && networkMode == NetworkMode.CELLULAR) null else lanStream
+        val cellularBlocked = wifiOnlyForLan && networkMode == NetworkMode.CELLULAR
+        val effectiveLan = if (cellularBlocked || !engineSupportsLanHeaders) null else lanStream
         val opts = mutableListOf<TvSourcePickerOption>()
         localFile?.let {
             opts += TvSourcePickerOption(

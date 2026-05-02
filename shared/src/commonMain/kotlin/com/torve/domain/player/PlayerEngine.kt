@@ -59,6 +59,21 @@ interface PlayerEngine {
         // no-op default
     }
 
+    /**
+     * Capability flag — true when this engine actually honors the
+     * headers staged via [setNextRequestHeaders]. The default is
+     * `false` so an engine that hasn't overridden the header method
+     * doesn't get LAN routes silently routed through it (they'd 401
+     * on the desktop hub side because the auth header is missing).
+     *
+     * Picker builders use this to suppress the LAN tier when the
+     * active engine can't authenticate. Engines that override
+     * [setNextRequestHeaders] should also override this to return
+     * true.
+     */
+    val supportsRequestHeaders: Boolean
+        get() = false
+
     fun pause()
     fun resume()
     fun stop()
