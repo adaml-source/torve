@@ -204,6 +204,54 @@ private val GERMAN = mapOf(
     "Seek, subtitle, audio, and volume preferences stored locally."
         to "Such-, Untertitel-, Audio- und Lautstärke-Einstellungen werden lokal gespeichert.",
     "Playback Engine" to "Wiedergabe-Engine",
+    // Settings - Account (AccountSection)
+    "Identity" to "Identität",
+    "Desktop account status, verification, and access are visible here."
+        to "Desktop-Kontostatus, Verifizierung und Zugriff sind hier sichtbar.",
+    "No signed-in account" to "Kein angemeldetes Konto",
+    "Verified" to "Verifiziert",
+    "Unverified" to "Nicht verifiziert",
+    "Access" to "Zugriff",
+    "View active devices, remove them, and free up slots."
+        to "Aktive Geräte anzeigen, entfernen und Slots freigeben.",
+    "Watch Stats" to "Wiedergabe-Statistik",
+    "Hours watched, streaks, and top genres across your history."
+        to "Stunden angesehen, Serien und Top-Genres aus Ihrem Verlauf.",
+    "Session Controls" to "Sitzungssteuerung",
+    "Everything needed to refresh or end the current session stays in-app."
+        to "Alles zum Aktualisieren oder Beenden der aktuellen Sitzung bleibt in der App.",
+    "Refresh Session" to "Sitzung aktualisieren",
+    "Refresh Access" to "Zugriff aktualisieren",
+    "Session issue" to "Sitzungsproblem",
+    // Settings - Integrations (Panda, Trakt, SIMKL)
+    "Panda (guided setup)" to "Panda (geführte Einrichtung)",
+    "Configure debrid providers, torrent sources, usenet, and quality - Panda installs itself as an add-on."
+        to "Konfigurieren Sie Debrid-Anbieter, Torrent-Quellen, Usenet und Qualität - Panda installiert sich selbst als Add-on.",
+    "Open Panda setup" to "Panda-Einrichtung öffnen",
+    "Connect Trakt from desktop, sync now, and control scrobbling locally."
+        to "Verbinden Sie Trakt vom Desktop, synchronisieren Sie jetzt und steuern Sie das Scrobbling lokal.",
+    "Connected" to "Verbunden",
+    "Disconnected" to "Getrennt",
+    "No Trakt account connected" to "Kein Trakt-Konto verbunden",
+    "Connect to sync watch history, ratings, and progress."
+        to "Verbinden, um Verlauf, Bewertungen und Fortschritt zu synchronisieren.",
+    "Last sync" to "Letzte Synchronisation",
+    "Scrobble Playback" to "Wiedergabe scrobbeln",
+    "Send live playback progress updates to Trakt."
+        to "Live-Wiedergabefortschritt an Trakt senden.",
+    "Connect Trakt" to "Trakt verbinden",
+    "Sync Now" to "Jetzt synchronisieren",
+    "Disconnect" to "Trennen",
+    "Trakt device auth" to "Trakt-Geräteautorisierung",
+    "Trakt status" to "Trakt-Status",
+    "Trakt error" to "Trakt-Fehler",
+    "Desktop can now configure the client ID and run SIMKL device auth without leaving the app."
+        to "Der Desktop kann jetzt die Client-ID konfigurieren und SIMKL-Geräteautorisierung ohne die App zu verlassen ausführen.",
+    "SIMKL Client ID" to "SIMKL-Client-ID",
+    "Connect SIMKL" to "SIMKL verbinden",
+    "SIMKL account connected" to "SIMKL-Konto verbunden",
+    "SIMKL device auth" to "SIMKL-Geräteautorisierung",
+    "SIMKL error" to "SIMKL-Fehler",
 )
 
 // ── Spanish ─────────────────────────────────────────────────────
@@ -354,6 +402,54 @@ private val SPANISH = mapOf(
     "Seek, subtitle, audio, and volume preferences stored locally."
         to "Las preferencias de búsqueda, subtítulos, audio y volumen se guardan localmente.",
     "Playback Engine" to "Motor de reproducción",
+    // Settings - Account (AccountSection)
+    "Identity" to "Identidad",
+    "Desktop account status, verification, and access are visible here."
+        to "El estado de la cuenta de escritorio, la verificación y el acceso son visibles aquí.",
+    "No signed-in account" to "Sin cuenta iniciada",
+    "Verified" to "Verificado",
+    "Unverified" to "Sin verificar",
+    "Access" to "Acceso",
+    "View active devices, remove them, and free up slots."
+        to "Ver dispositivos activos, eliminarlos y liberar espacios.",
+    "Watch Stats" to "Estadísticas de visualización",
+    "Hours watched, streaks, and top genres across your history."
+        to "Horas vistas, rachas y géneros principales en todo tu historial.",
+    "Session Controls" to "Controles de sesión",
+    "Everything needed to refresh or end the current session stays in-app."
+        to "Todo lo necesario para actualizar o cerrar la sesión actual permanece en la app.",
+    "Refresh Session" to "Actualizar sesión",
+    "Refresh Access" to "Actualizar acceso",
+    "Session issue" to "Problema de sesión",
+    // Settings - Integrations (Panda, Trakt, SIMKL)
+    "Panda (guided setup)" to "Panda (configuración guiada)",
+    "Configure debrid providers, torrent sources, usenet, and quality - Panda installs itself as an add-on."
+        to "Configura proveedores debrid, fuentes torrent, usenet y calidad - Panda se instala como un complemento.",
+    "Open Panda setup" to "Abrir configuración de Panda",
+    "Connect Trakt from desktop, sync now, and control scrobbling locally."
+        to "Conecta Trakt desde el escritorio, sincroniza ahora y controla el scrobbling localmente.",
+    "Connected" to "Conectado",
+    "Disconnected" to "Desconectado",
+    "No Trakt account connected" to "Sin cuenta de Trakt conectada",
+    "Connect to sync watch history, ratings, and progress."
+        to "Conecta para sincronizar historial, valoraciones y progreso.",
+    "Last sync" to "Última sincronización",
+    "Scrobble Playback" to "Scrobbling de reproducción",
+    "Send live playback progress updates to Trakt."
+        to "Enviar actualizaciones de progreso de reproducción en vivo a Trakt.",
+    "Connect Trakt" to "Conectar Trakt",
+    "Sync Now" to "Sincronizar ahora",
+    "Disconnect" to "Desconectar",
+    "Trakt device auth" to "Autorización de dispositivo Trakt",
+    "Trakt status" to "Estado de Trakt",
+    "Trakt error" to "Error de Trakt",
+    "Desktop can now configure the client ID and run SIMKL device auth without leaving the app."
+        to "El escritorio ahora puede configurar el ID de cliente y ejecutar la autorización de dispositivo SIMKL sin salir de la app.",
+    "SIMKL Client ID" to "ID de cliente SIMKL",
+    "Connect SIMKL" to "Conectar SIMKL",
+    "SIMKL account connected" to "Cuenta SIMKL conectada",
+    "SIMKL device auth" to "Autorización de dispositivo SIMKL",
+    "SIMKL error" to "Error de SIMKL",
 )
 
 // ── French ──────────────────────────────────────────────────────
@@ -504,6 +600,54 @@ private val FRENCH = mapOf(
     "Seek, subtitle, audio, and volume preferences stored locally."
         to "Les préférences de recherche, sous-titres, audio et volume sont stockées localement.",
     "Playback Engine" to "Moteur de lecture",
+    // Settings - Account (AccountSection)
+    "Identity" to "Identité",
+    "Desktop account status, verification, and access are visible here."
+        to "L'état du compte bureau, la vérification et l'accès sont visibles ici.",
+    "No signed-in account" to "Aucun compte connecté",
+    "Verified" to "Vérifié",
+    "Unverified" to "Non vérifié",
+    "Access" to "Accès",
+    "View active devices, remove them, and free up slots."
+        to "Afficher les appareils actifs, les supprimer et libérer des places.",
+    "Watch Stats" to "Statistiques de visionnage",
+    "Hours watched, streaks, and top genres across your history."
+        to "Heures regardées, séries et meilleurs genres de votre historique.",
+    "Session Controls" to "Contrôles de session",
+    "Everything needed to refresh or end the current session stays in-app."
+        to "Tout ce qu'il faut pour rafraîchir ou terminer la session actuelle reste dans l'app.",
+    "Refresh Session" to "Rafraîchir la session",
+    "Refresh Access" to "Rafraîchir l'accès",
+    "Session issue" to "Problème de session",
+    // Settings - Integrations (Panda, Trakt, SIMKL)
+    "Panda (guided setup)" to "Panda (configuration guidée)",
+    "Configure debrid providers, torrent sources, usenet, and quality - Panda installs itself as an add-on."
+        to "Configurez les fournisseurs debrid, sources torrent, usenet et qualité - Panda s'installe comme module.",
+    "Open Panda setup" to "Ouvrir la configuration de Panda",
+    "Connect Trakt from desktop, sync now, and control scrobbling locally."
+        to "Connectez Trakt depuis le bureau, synchronisez et contrôlez le scrobbling localement.",
+    "Connected" to "Connecté",
+    "Disconnected" to "Déconnecté",
+    "No Trakt account connected" to "Aucun compte Trakt connecté",
+    "Connect to sync watch history, ratings, and progress."
+        to "Connectez-vous pour synchroniser historique, notes et progression.",
+    "Last sync" to "Dernière synchronisation",
+    "Scrobble Playback" to "Scrobbling de la lecture",
+    "Send live playback progress updates to Trakt."
+        to "Envoyer les mises à jour de progression en direct à Trakt.",
+    "Connect Trakt" to "Connecter Trakt",
+    "Sync Now" to "Synchroniser maintenant",
+    "Disconnect" to "Déconnecter",
+    "Trakt device auth" to "Autorisation de l'appareil Trakt",
+    "Trakt status" to "État de Trakt",
+    "Trakt error" to "Erreur Trakt",
+    "Desktop can now configure the client ID and run SIMKL device auth without leaving the app."
+        to "Le bureau peut désormais configurer l'ID client et exécuter l'autorisation d'appareil SIMKL sans quitter l'application.",
+    "SIMKL Client ID" to "ID client SIMKL",
+    "Connect SIMKL" to "Connecter SIMKL",
+    "SIMKL account connected" to "Compte SIMKL connecté",
+    "SIMKL device auth" to "Autorisation de l'appareil SIMKL",
+    "SIMKL error" to "Erreur SIMKL",
 )
 
 // ── Italian ─────────────────────────────────────────────────────
@@ -653,6 +797,54 @@ private val ITALIAN = mapOf(
     "Seek, subtitle, audio, and volume preferences stored locally."
         to "Le preferenze di ricerca, sottotitoli, audio e volume sono salvate localmente.",
     "Playback Engine" to "Motore di riproduzione",
+    // Settings - Account (AccountSection)
+    "Identity" to "Identità",
+    "Desktop account status, verification, and access are visible here."
+        to "Lo stato dell'account desktop, la verifica e l'accesso sono visibili qui.",
+    "No signed-in account" to "Nessun account connesso",
+    "Verified" to "Verificato",
+    "Unverified" to "Non verificato",
+    "Access" to "Accesso",
+    "View active devices, remove them, and free up slots."
+        to "Visualizza i dispositivi attivi, rimuovili e libera slot.",
+    "Watch Stats" to "Statistiche di visione",
+    "Hours watched, streaks, and top genres across your history."
+        to "Ore guardate, serie e generi principali nella tua cronologia.",
+    "Session Controls" to "Controlli sessione",
+    "Everything needed to refresh or end the current session stays in-app."
+        to "Tutto il necessario per aggiornare o terminare la sessione corrente resta nell'app.",
+    "Refresh Session" to "Aggiorna sessione",
+    "Refresh Access" to "Aggiorna accesso",
+    "Session issue" to "Problema di sessione",
+    // Settings - Integrations (Panda, Trakt, SIMKL)
+    "Panda (guided setup)" to "Panda (configurazione guidata)",
+    "Configure debrid providers, torrent sources, usenet, and quality - Panda installs itself as an add-on."
+        to "Configura provider debrid, sorgenti torrent, usenet e qualità - Panda si installa come add-on.",
+    "Open Panda setup" to "Apri configurazione Panda",
+    "Connect Trakt from desktop, sync now, and control scrobbling locally."
+        to "Collega Trakt dal desktop, sincronizza ora e controlla lo scrobbling localmente.",
+    "Connected" to "Connesso",
+    "Disconnected" to "Disconnesso",
+    "No Trakt account connected" to "Nessun account Trakt connesso",
+    "Connect to sync watch history, ratings, and progress."
+        to "Connetti per sincronizzare cronologia, valutazioni e progressi.",
+    "Last sync" to "Ultima sincronizzazione",
+    "Scrobble Playback" to "Scrobbling della riproduzione",
+    "Send live playback progress updates to Trakt."
+        to "Invia aggiornamenti di progresso live a Trakt.",
+    "Connect Trakt" to "Collega Trakt",
+    "Sync Now" to "Sincronizza ora",
+    "Disconnect" to "Disconnetti",
+    "Trakt device auth" to "Autorizzazione dispositivo Trakt",
+    "Trakt status" to "Stato Trakt",
+    "Trakt error" to "Errore Trakt",
+    "Desktop can now configure the client ID and run SIMKL device auth without leaving the app."
+        to "Il desktop ora può configurare il client ID ed eseguire l'autorizzazione del dispositivo SIMKL senza uscire dall'app.",
+    "SIMKL Client ID" to "Client ID SIMKL",
+    "Connect SIMKL" to "Collega SIMKL",
+    "SIMKL account connected" to "Account SIMKL connesso",
+    "SIMKL device auth" to "Autorizzazione dispositivo SIMKL",
+    "SIMKL error" to "Errore SIMKL",
 )
 
 // ── Portuguese ──────────────────────────────────────────────────
@@ -802,6 +994,54 @@ private val PORTUGUESE = mapOf(
     "Seek, subtitle, audio, and volume preferences stored locally."
         to "As preferências de busca, legendas, áudio e volume são guardadas localmente.",
     "Playback Engine" to "Motor de reprodução",
+    // Settings - Account (AccountSection)
+    "Identity" to "Identidade",
+    "Desktop account status, verification, and access are visible here."
+        to "O estado da conta desktop, verificação e acesso são visíveis aqui.",
+    "No signed-in account" to "Sem conta iniciada",
+    "Verified" to "Verificado",
+    "Unverified" to "Não verificado",
+    "Access" to "Acesso",
+    "View active devices, remove them, and free up slots."
+        to "Ver dispositivos ativos, removê-los e libertar espaços.",
+    "Watch Stats" to "Estatísticas de visualização",
+    "Hours watched, streaks, and top genres across your history."
+        to "Horas assistidas, sequências e géneros principais do seu histórico.",
+    "Session Controls" to "Controlos de sessão",
+    "Everything needed to refresh or end the current session stays in-app."
+        to "Tudo o que é preciso para atualizar ou terminar a sessão atual fica na app.",
+    "Refresh Session" to "Atualizar sessão",
+    "Refresh Access" to "Atualizar acesso",
+    "Session issue" to "Problema de sessão",
+    // Settings - Integrations (Panda, Trakt, SIMKL)
+    "Panda (guided setup)" to "Panda (configuração guiada)",
+    "Configure debrid providers, torrent sources, usenet, and quality - Panda installs itself as an add-on."
+        to "Configure fornecedores debrid, fontes torrent, usenet e qualidade - Panda instala-se como extensão.",
+    "Open Panda setup" to "Abrir configuração do Panda",
+    "Connect Trakt from desktop, sync now, and control scrobbling locally."
+        to "Ligue Trakt a partir do ambiente de trabalho, sincronize agora e controle o scrobbling localmente.",
+    "Connected" to "Ligado",
+    "Disconnected" to "Desligado",
+    "No Trakt account connected" to "Sem conta Trakt ligada",
+    "Connect to sync watch history, ratings, and progress."
+        to "Ligue-se para sincronizar histórico, avaliações e progresso.",
+    "Last sync" to "Última sincronização",
+    "Scrobble Playback" to "Scrobbling da reprodução",
+    "Send live playback progress updates to Trakt."
+        to "Enviar atualizações de progresso de reprodução em direto para Trakt.",
+    "Connect Trakt" to "Ligar Trakt",
+    "Sync Now" to "Sincronizar agora",
+    "Disconnect" to "Desligar",
+    "Trakt device auth" to "Autorização de dispositivo Trakt",
+    "Trakt status" to "Estado de Trakt",
+    "Trakt error" to "Erro de Trakt",
+    "Desktop can now configure the client ID and run SIMKL device auth without leaving the app."
+        to "O ambiente de trabalho pode agora configurar o ID de cliente e executar a autorização de dispositivo SIMKL sem sair da app.",
+    "SIMKL Client ID" to "ID de cliente SIMKL",
+    "Connect SIMKL" to "Ligar SIMKL",
+    "SIMKL account connected" to "Conta SIMKL ligada",
+    "SIMKL device auth" to "Autorização de dispositivo SIMKL",
+    "SIMKL error" to "Erro de SIMKL",
 )
 
 // ── Turkish ─────────────────────────────────────────────────────
@@ -952,4 +1192,52 @@ private val TURKISH = mapOf(
     "Seek, subtitle, audio, and volume preferences stored locally."
         to "Arama, altyazı, ses ve ses seviyesi tercihleri yerel olarak saklanır.",
     "Playback Engine" to "Oynatma motoru",
+    // Settings - Account (AccountSection)
+    "Identity" to "Kimlik",
+    "Desktop account status, verification, and access are visible here."
+        to "Masaüstü hesap durumu, doğrulama ve erişim burada görüntülenir.",
+    "No signed-in account" to "Oturum açılmış hesap yok",
+    "Verified" to "Doğrulandı",
+    "Unverified" to "Doğrulanmadı",
+    "Access" to "Erişim",
+    "View active devices, remove them, and free up slots."
+        to "Aktif cihazları görüntüle, kaldır ve yer aç.",
+    "Watch Stats" to "İzleme istatistikleri",
+    "Hours watched, streaks, and top genres across your history."
+        to "Geçmişiniz boyunca izlenen saatler, seriler ve en iyi türler.",
+    "Session Controls" to "Oturum denetimleri",
+    "Everything needed to refresh or end the current session stays in-app."
+        to "Mevcut oturumu yenilemek veya sonlandırmak için gereken her şey uygulamada kalır.",
+    "Refresh Session" to "Oturumu yenile",
+    "Refresh Access" to "Erişimi yenile",
+    "Session issue" to "Oturum sorunu",
+    // Settings - Integrations (Panda, Trakt, SIMKL)
+    "Panda (guided setup)" to "Panda (rehberli kurulum)",
+    "Configure debrid providers, torrent sources, usenet, and quality - Panda installs itself as an add-on."
+        to "Debrid sağlayıcıları, torrent kaynakları, usenet ve kaliteyi yapılandırın - Panda kendini eklenti olarak yükler.",
+    "Open Panda setup" to "Panda kurulumunu aç",
+    "Connect Trakt from desktop, sync now, and control scrobbling locally."
+        to "Trakt'ı masaüstünden bağlayın, şimdi senkronize edin ve scrobbling'i yerel olarak kontrol edin.",
+    "Connected" to "Bağlı",
+    "Disconnected" to "Bağlantı kesildi",
+    "No Trakt account connected" to "Bağlı Trakt hesabı yok",
+    "Connect to sync watch history, ratings, and progress."
+        to "Geçmiş, derecelendirme ve ilerlemeyi senkronize etmek için bağlanın.",
+    "Last sync" to "Son senkronizasyon",
+    "Scrobble Playback" to "Oynatmayı scrobble et",
+    "Send live playback progress updates to Trakt."
+        to "Canlı oynatma ilerleme güncellemelerini Trakt'a gönder.",
+    "Connect Trakt" to "Trakt'ı bağla",
+    "Sync Now" to "Şimdi senkronize et",
+    "Disconnect" to "Bağlantıyı kes",
+    "Trakt device auth" to "Trakt cihaz kimlik doğrulaması",
+    "Trakt status" to "Trakt durumu",
+    "Trakt error" to "Trakt hatası",
+    "Desktop can now configure the client ID and run SIMKL device auth without leaving the app."
+        to "Masaüstü artık istemci kimliğini yapılandırabilir ve uygulamadan çıkmadan SIMKL cihaz kimlik doğrulaması çalıştırabilir.",
+    "SIMKL Client ID" to "SIMKL İstemci Kimliği",
+    "Connect SIMKL" to "SIMKL'i bağla",
+    "SIMKL account connected" to "SIMKL hesabı bağlı",
+    "SIMKL device auth" to "SIMKL cihaz kimlik doğrulaması",
+    "SIMKL error" to "SIMKL hatası",
 )

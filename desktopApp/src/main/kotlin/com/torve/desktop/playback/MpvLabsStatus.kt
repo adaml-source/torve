@@ -92,6 +92,39 @@ object MpvLabsStatus {
     }
 
     /**
+     * One-line "engine status row" copy for the Settings header that
+     * Prompt 18 specifies. The default-engine case is intentionally
+     * upbeat ("Default player ready") so a normal user sees a quiet,
+     * positive line — not a "fallback" framing. The advanced-engine
+     * case is informational, never alarming, even when libmpv is
+     * absent.
+     *
+     * Pure-string helper so tests can assert the wording without
+     * spinning up Compose.
+     */
+    fun engineStatusRow(snapshot: Snapshot): String {
+        // The default engine is whatever the user is actually about to
+        // play with — that's `effectiveMode`. VLC is the silent
+        // default. Render it explicitly as "ready" rather than naming
+        // the engine, because most users don't know or care which
+        // engine name is which.
+        val defaultLine = when (snapshot.effectiveMode) {
+            DesktopPlayerMode.VLC -> "Default player ready."
+            DesktopPlayerMode.MPV -> "Default player ready (Advanced MPV active)."
+        }
+        // The advanced-engine availability suffix. Hidden entirely
+        // when MPV is the active engine — there's no "Advanced
+        // unavailable" tail to add when Advanced is what they're
+        // already on.
+        val advancedSuffix = when {
+            snapshot.effectiveMode == DesktopPlayerMode.MPV -> ""
+            snapshot.state == State.AVAILABLE -> " Advanced MPV available."
+            else -> " Advanced MPV unavailable on this device."
+        }
+        return defaultLine + advancedSuffix
+    }
+
+    /**
      * Builds the body of the in-app setup guide. Pure-string helper so
      * tests can assert that the actionable copy is present.
      */

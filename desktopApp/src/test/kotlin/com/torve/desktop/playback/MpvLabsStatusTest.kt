@@ -113,6 +113,39 @@ class MpvLabsStatusTest {
     }
 
     @Test
+    fun `engine status row reads quiet and positive when default VLC ready and MPV unavailable`() {
+        // Prompt 18 acceptance: the default player path feels premium
+        // and quiet. A normal user with libmpv missing should see
+        // "Default player ready" first; the advanced-engine suffix
+        // names the unavailable state but never reads as alarm.
+        val snap = MpvLabsStatus.compute(discovery(found = false), DesktopPlayerMode.VLC)
+        val row = MpvLabsStatus.engineStatusRow(snap)
+        assertEquals("Default player ready. Advanced MPV unavailable on this device.", row)
+        // Negative-tone audit: must not call this a fallback or warn.
+        listOf("fallback", "warning", "missing", "failed", "broken", "error").forEach { word ->
+            assertTrue(!row.contains(word), "engine status row must not contain '$word': $row")
+        }
+    }
+
+    @Test
+    fun `engine status row says Advanced MPV available when libmpv discovered`() {
+        val snap = MpvLabsStatus.compute(discovery(found = true), DesktopPlayerMode.VLC)
+        val row = MpvLabsStatus.engineStatusRow(snap)
+        assertEquals("Default player ready. Advanced MPV available.", row)
+    }
+
+    @Test
+    fun `engine status row drops the advanced suffix when MPV is the active engine`() {
+        // No "Advanced unavailable" tail to add when Advanced IS what
+        // the user has selected — the row would read confusingly
+        // ("Default player ready (Advanced MPV active). Advanced MPV
+        // available.") otherwise.
+        val snap = MpvLabsStatus.compute(discovery(found = true), DesktopPlayerMode.MPV)
+        val row = MpvLabsStatus.engineStatusRow(snap)
+        assertEquals("Default player ready (Advanced MPV active).", row)
+    }
+
+    @Test
     fun `setup guide body still renders when no paths recorded`() {
         val snap = MpvLabsStatus.compute(discovery(found = false, paths = emptyList()), DesktopPlayerMode.VLC)
         val body = MpvLabsStatus.setupGuideBody(snap)

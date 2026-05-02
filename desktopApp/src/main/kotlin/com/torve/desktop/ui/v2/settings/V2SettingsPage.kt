@@ -517,6 +517,16 @@ private fun CustomizationSection(
                 }
             }
 
+            // Prompt 18: one-line engine status row above the picker.
+            // Reads as quiet/positive when defaults work — never as
+            // alarm — so a normal user doesn't see "fallback" /
+            // "warning" wording for the supported VLC path.
+            Text(
+                text = com.torve.desktop.playback.MpvLabsStatus.engineStatusRow(labsSnapshot),
+                style = MaterialTheme.typography.bodySmall,
+                color = TorveDesktopThemeTokens.colors.textSecondary,
+            )
+
             // Engine selector - VLC always selectable; MPV Labs always
             // visible but disabled when libmpv is unavailable. The
             // disabled row is the user's signal that MPV exists; the
@@ -964,71 +974,72 @@ private fun AccountSection(
     onOpenManageDevices: () -> Unit,
     onOpenStats: () -> Unit,
 ) {
+    val openLabel = ds("Open")
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         SubscriptionSection()
         TorveSectionCard(
-            title = "Identity",
-            supportingText = "Desktop account status, verification, and access are visible here.",
+            title = ds("Identity"),
+            supportingText = ds("Desktop account status, verification, and access are visible here."),
         ) {
             TorveListRow(
                 title = authState.user?.displayName?.takeIf { it.isNotBlank() }
                     ?: authState.user?.email
-                    ?: "No signed-in account",
+                    ?: ds("No signed-in account"),
                 subtitle = authState.statusMessage,
                 trailing = {
                     TorveBadge(
-                        text = if (authState.user?.isVerified == true) "Verified" else "Unverified",
+                        text = if (authState.user?.isVerified == true) ds("Verified") else ds("Unverified"),
                         tone = if (authState.user?.isVerified == true) TorveBadgeTone.Success else TorveBadgeTone.Warning,
                     )
                 },
             )
             TorveListRow(
-                title = "Access",
+                title = ds("Access"),
                 subtitle = authState.accessState.accessStatusLabel,
                 trailing = { TorveBadge(authState.accessState.accessStatusLabel, tone = TorveBadgeTone.Accent) },
             )
             TorveListRow(
-                title = "Manage Devices",
-                subtitle = "View active devices, remove them, and free up slots.",
+                title = ds("Manage Devices"),
+                subtitle = ds("View active devices, remove them, and free up slots."),
                 onClick = onOpenManageDevices,
                 trailing = {
-                    TorveGhostButton(text = "Open", onClick = onOpenManageDevices)
+                    TorveGhostButton(text = openLabel, onClick = onOpenManageDevices)
                 },
             )
             TorveListRow(
-                title = "Watch Stats",
-                subtitle = "Hours watched, streaks, and top genres across your history.",
+                title = ds("Watch Stats"),
+                subtitle = ds("Hours watched, streaks, and top genres across your history."),
                 onClick = onOpenStats,
                 trailing = {
-                    TorveGhostButton(text = "Open", onClick = onOpenStats)
+                    TorveGhostButton(text = openLabel, onClick = onOpenStats)
                 },
             )
         }
 
         TorveSectionCard(
-            title = "Session Controls",
-            supportingText = "Everything needed to refresh or end the current session stays in-app.",
+            title = ds("Session Controls"),
+            supportingText = ds("Everything needed to refresh or end the current session stays in-app."),
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 TorvePrimaryButton(
-                    text = "Refresh Session",
+                    text = ds("Refresh Session"),
                     onClick = authController::refreshSession,
                     enabled = authState.phase != DesktopAuthPhase.LOADING,
                 )
                 TorveSecondaryButton(
-                    text = "Refresh Access",
+                    text = ds("Refresh Access"),
                     onClick = authController::refreshAccess,
                     enabled = authState.phase != DesktopAuthPhase.LOADING,
                 )
                 TorveGhostButton(
-                    text = "Sign Out",
+                    text = ds("Sign Out"),
                     onClick = authController::signOut,
                     enabled = authState.phase != DesktopAuthPhase.LOADING,
                 )
             }
             authState.accountSessionState.lastError?.let {
                 TorveBanner(
-                    title = "Session issue",
+                    title = ds("Session issue"),
                     description = it,
                     tone = TorveBannerTone.Error,
                 )
