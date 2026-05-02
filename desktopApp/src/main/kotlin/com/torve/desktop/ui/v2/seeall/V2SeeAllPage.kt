@@ -224,7 +224,7 @@ fun V2SeeAllPage(
             },
     ) {
         Column(Modifier.fillMaxSize()) {
-            // Header — leave space on the right so sort button doesn't collide with user badge.
+            // Header - leave space on the right so sort button doesn't collide with user badge.
             Row(
                 Modifier.fillMaxWidth().padding(start = 72.dp, end = 200.dp, top = 20.dp, bottom = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,

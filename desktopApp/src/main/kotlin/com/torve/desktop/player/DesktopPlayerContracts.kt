@@ -2,7 +2,7 @@ package com.torve.desktop.player
 
 /**
  * Track information for audio, subtitle, and video tracks.
- * Torve-centric model — does not expose VLC internals.
+ * Torve-centric model - does not expose VLC internals.
  */
 data class DesktopTrackInfo(
     val id: Int,

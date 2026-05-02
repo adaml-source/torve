@@ -44,7 +44,7 @@ fun DownloadStatusOverlay(
 ) {
     val colors = TorveDesktopThemeTokens.colors
 
-    // Toast — shows whenever lastEvent changes, auto-dismisses after 4s.
+    // Toast - shows whenever lastEvent changes, auto-dismisses after 4s.
     var toastMessage by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(state.lastEvent) {
         val event = state.lastEvent?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
@@ -53,7 +53,7 @@ fun DownloadStatusOverlay(
         if (toastMessage == event) toastMessage = null
     }
 
-    // Thin progress bar — visible while a download is active.
+    // Thin progress bar - visible while a download is active.
     val activeTitle = state.activeDownloadTitle?.takeIf { it.isNotBlank() }
     val showProgress = activeTitle != null
 

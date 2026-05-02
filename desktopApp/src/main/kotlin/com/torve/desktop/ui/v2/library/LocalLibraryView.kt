@@ -47,11 +47,11 @@ import kotlinx.coroutines.launch
 import java.text.DecimalFormat
 
 /**
- * Local file library surface — Phase 2 first cut.
+ * Local file library surface - Phase 2 first cut.
  *
  * Lets the user add/remove root folders and lists every video file found
  * inside them. Click to play through the desktop player. No metadata
- * matching yet — entries display the cleaned filename. TMDB enrichment
+ * matching yet - entries display the cleaned filename. TMDB enrichment
  * (filename → search → poster + overview) is the next iteration.
  */
 @Composable
@@ -120,7 +120,7 @@ fun LocalLibraryView(
                 }
                 if (state.folders.isEmpty()) {
                     Text(
-                        text = "No folders yet — pick one of your media drives and Torve will index every video file inside.",
+                        text = "No folders yet - pick one of your media drives and Torve will index every video file inside.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.textSecondary,
                     )
@@ -171,11 +171,11 @@ fun LocalLibraryView(
             TorvePlaceholderState(
                 title = "Folders are empty",
                 description = "No recognised video files were found in any of the watched folders. " +
-                    "Supported extensions: mp4, mkv, avi, mov, m4v, webm, ts, vob, …",
+                    "Supported extensions: mp4, mkv, avi, mov, m4v, webm, ts, vob, ...",
                 emoji = "🎬",
             )
         } else if (state.entries.isNotEmpty()) {
-            // Composition summary — gives the user immediate library
+            // Composition summary - gives the user immediate library
             // shape at a glance. Disk usage is computed once over the
             // full set; cheap because each entry already carries size.
             val totalBytes = remember(state.entries) {
@@ -549,11 +549,11 @@ private fun LocalEntryRow(
 ) {
     val colors = TorveDesktopThemeTokens.colors
     // For series with a known episode title, the row title becomes
-    // "Show — Episode" so the user immediately recognises which one
+    // "Show - Episode" so the user immediately recognises which one
     // it is. Otherwise fall back to the show / cleaned filename.
     val title = when {
         entry.isSeries && !entry.episodeTitle.isNullOrBlank() ->
-            "${entry.matchedTitle ?: entry.displayName}  —  ${entry.episodeTitle}"
+            "${entry.matchedTitle ?: entry.displayName}  -  ${entry.episodeTitle}"
         else -> entry.matchedTitle ?: entry.displayName
     }
     val subtitle = buildList {
@@ -649,7 +649,7 @@ private fun LocalEntryRow(
 
 private val sizeFormatter = DecimalFormat("#.#")
 private fun formatBytes(bytes: Long): String {
-    if (bytes <= 0) return "—"
+    if (bytes <= 0) return "-"
     val gb = bytes / 1_000_000_000.0
     if (gb >= 1.0) return "${sizeFormatter.format(gb)} GB"
     val mb = bytes / 1_000_000.0
@@ -660,7 +660,7 @@ private fun formatBytes(bytes: Long): String {
 
 /**
  * AWT FileDialog with directory mode. Returns the picked absolute path
- * or null on cancel. Runs on the calling coroutine — caller is expected
+ * or null on cancel. Runs on the calling coroutine - caller is expected
  * to be on a UI dispatcher already.
  */
 private fun pickDirectory(): String? {

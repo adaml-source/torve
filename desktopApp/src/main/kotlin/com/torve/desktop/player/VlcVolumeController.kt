@@ -4,7 +4,7 @@ import uk.co.caprica.vlcj.player.base.MediaPlayer
 
 /**
  * Volume and mute policy for the VLC player.
- * Volume range: 0–200 (VLC allows up to 200% amplification).
+ * Volume range: 0-200 (VLC allows up to 200% amplification).
  * Default: 100 (100%).
  */
 class VlcVolumeController(private val mediaPlayerProvider: () -> MediaPlayer?) {

@@ -25,7 +25,7 @@ import kotlin.io.path.Path
  * we walk the tree once at registration time and re-walk when a new
  * sub-directory shows up.
  *
- * Debouncing: events are coalesced — any flurry within a 1.5s window
+ * Debouncing: events are coalesced - any flurry within a 1.5s window
  * triggers exactly one full rescan. Manual edits in a file manager
  * (drag-drop, batch rename) usually fire dozens of events; the debounce
  * keeps the rescan cost bounded.
@@ -45,7 +45,7 @@ class LibraryWatcher(
     private val registeredFolders = mutableSetOf<Path>()
 
     /**
-     * Begin watching. Idempotent for the same instance — safe to call
+     * Begin watching. Idempotent for the same instance - safe to call
      * once at app startup.
      */
     fun start() {
@@ -70,7 +70,7 @@ class LibraryWatcher(
         val targetSet = targets.toSet()
         // Drop registrations for folders that vanished.
         val gone = registeredFolders - targetSet.flatMap { walkDirs(it).toSet() }.toSet()
-        // (We don't try to cancel WatchKeys directly — the loop
+        // (We don't try to cancel WatchKeys directly - the loop
         // discards events for unknown roots. Cleanup happens naturally
         // when the WatchService closes.)
         registeredFolders.removeAll(gone.toSet())
@@ -126,7 +126,7 @@ class LibraryWatcher(
                 scheduleRescan()
             }
             if (!valid) {
-                // The watched directory was deleted — drop our record
+                // The watched directory was deleted - drop our record
                 // and let syncRegistrations re-add if needed.
                 registeredFolders.remove(key.watchable() as? Path)
             }

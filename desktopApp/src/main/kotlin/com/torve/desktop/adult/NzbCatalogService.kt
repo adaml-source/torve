@@ -73,7 +73,7 @@ class NzbCatalogService(
 
     /**
      * Bound concurrent TMDB lookups so we don't slam image.tmdb.org's
-     * search endpoint with 100 simultaneous requests on every page —
+     * search endpoint with 100 simultaneous requests on every page -
      * TMDB rate-limits at ~50 req/sec. 16 in-flight is the sweet spot
      * we observed for fast catalog hydration without 429s.
      */
@@ -81,7 +81,7 @@ class NzbCatalogService(
 
     companion object {
         const val PAGE_SIZE_RAW = 100
-        /** Stop expanding once we hit this many matched releases — beyond
+        /** Stop expanding once we hit this many matched releases - beyond
          *  here the grid scrolls long enough for any reasonable browse. */
         const val MAX_MATCHED = 1_000
     }
@@ -118,7 +118,7 @@ class NzbCatalogService(
         _state.value = emptyList()
         _hasMore.value = true
 
-        // Try disk cache first — instant paint while the network catches up.
+        // Try disk cache first - instant paint while the network catches up.
         val diskKey = catalogCacheKey(indexerType, target)
         val snapshot = NzbDiskCache.loadCatalog(diskKey)
         if (snapshot != null && snapshot.releases.isNotEmpty()) {
@@ -200,7 +200,7 @@ class NzbCatalogService(
                 // Persist the fresh state to disk so a subsequent
                 // restart / re-entry to this filter renders instantly.
                 persistCatalogSnapshot(indexerType, filter)
-                // Background enrichment — non-blocking. Items already
+                // Background enrichment - non-blocking. Items already
                 // visible in the grid get their ratings pills upgraded
                 // when each batch lands.
                 if (page.isNotEmpty()) enrichInBackground(scope, page, indexerType, filter)
@@ -284,7 +284,7 @@ class NzbCatalogService(
 
     /**
      * Run MdbList enrichment off the critical path. Items are already
-     * visible — we just patch their ratings in place as enrichment
+     * visible - we just patch their ratings in place as enrichment
      * batches return. Best-effort; rate limits / missing key just
      * leave the TMDB-only pill in place. Saves the enriched state to
      * disk too so reopens see the full pill stack instantly.
@@ -325,7 +325,7 @@ class NzbCatalogService(
 
     private fun NzbPosterCache.Match.Found.toMediaItem(): MediaItem = MediaItem(
         // TMDB id so the standard detail page resolves through existing
-        // TMDB plumbing — opens with the proper synopsis / cast / etc.
+        // TMDB plumbing - opens with the proper synopsis / cast / etc.
         id = "tmdb:movie:$tmdbId",
         tmdbId = tmdbId,
         type = MediaType.MOVIE,

@@ -5,7 +5,7 @@ package com.torve.desktop.library
  * and (for series) season/episode markers so we can hand a clean query
  * to TMDB.
  *
- * No attempt to be exhaustive — the rule set covers the common P2P /
+ * No attempt to be exhaustive - the rule set covers the common P2P /
  * release-group / Plex naming conventions:
  *
  *  - "The.Matrix.1999.1080p.BluRay.x264-FOO.mkv"
@@ -14,7 +14,7 @@ package com.torve.desktop.library
  *  - "Breaking.Bad.S01E01.Pilot.720p.WEB-DL.mkv"  → series
  *  - "[Group] Show Name - 01 [1080p].mkv"
  *
- * Anything obviously wrong falls back to a cleaned filename — TMDB's
+ * Anything obviously wrong falls back to a cleaned filename - TMDB's
  * fuzzy search handles a lot of slop.
  */
 object LibraryFilenameParser {
@@ -41,7 +41,7 @@ object LibraryFilenameParser {
         // Strip leading [Group Tag] prefixes used by anime releases.
         var working = withoutExt.replaceFirst(groupTagPattern, "")
 
-        // Detect series marker first — splits the title from episode metadata.
+        // Detect series marker first - splits the title from episode metadata.
         val seriesMatch = seriesPattern.find(working)
         val isSeries = seriesMatch != null
         val seasonNumber = seriesMatch?.groupValues?.getOrNull(1)?.toIntOrNull()
@@ -50,7 +50,7 @@ object LibraryFilenameParser {
             working = working.substring(0, seriesMatch.range.first).trimEnd('.', ' ', '_', '-')
         }
 
-        // Strip release tags and everything after the first one — those
+        // Strip release tags and everything after the first one - those
         // are quality/codec/group markers, not part of the title.
         working = working.replace(releaseTagPattern, "").trim()
         working = working.replace(releaseGroupSuffix, "").trim()

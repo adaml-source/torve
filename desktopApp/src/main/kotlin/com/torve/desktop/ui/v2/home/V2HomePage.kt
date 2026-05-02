@@ -156,7 +156,7 @@ fun V2HomePage(
                     }
                 }
 
-                // ── Shelves — continuous stage ──
+                // ── Shelves - continuous stage ──
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     if (homeState.continueWatching.size > 1 && isSectionVisible(HomeSection.CONTINUE_WATCHING)) {
                         // Group by mediaId (show TMDb ID for series, unique per movie)

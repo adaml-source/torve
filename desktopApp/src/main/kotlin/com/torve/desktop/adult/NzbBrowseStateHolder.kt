@@ -7,7 +7,7 @@ package com.torve.desktop.adult
  *  [com.torve.desktop.ui.v2.nzbmovies.V2NzbMoviesPage]).
  *
  * The composables themselves use `remember`, which is scoped to the
- * Compose call site — navigating away (e.g. when the user taps Play and
+ * Compose call site - navigating away (e.g. when the user taps Play and
  * the playback overlay swaps in) tears down the call site and discards
  * the search query and result list. Storing it here, in plain JVM
  * memory, lets the page rehydrate the same query + results + scroll

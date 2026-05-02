@@ -8,7 +8,7 @@ import com.sun.jna.Structure
 /**
  * JNA bindings for a minimal subset of libmpv's C API.
  *
- * We only bind the functions Torve actually drives — playback control,
+ * We only bind the functions Torve actually drives - playback control,
  * options, properties, and the event pump. Render-API (mpv's
  * GL/Direct3D embedded rendering) is intentionally omitted from this
  * Stage 1 binding; that's Stage 3 work because it requires a Compose
@@ -25,7 +25,7 @@ import com.sun.jna.Structure
 /**
  * Mirror of libmpv's `struct mpv_event` (client.h). Field order and
  * widths are stable ABI; we only read [event_id] and [error] in normal
- * flow — the others are present so the layout matches what mpv writes.
+ * flow - the others are present so the layout matches what mpv writes.
  */
 @Structure.FieldOrder("event_id", "error", "reply_userdata", "data")
 internal open class MpvEvent : Structure {
@@ -131,7 +131,7 @@ internal interface LibMpv : Library {
         const val END_FILE_REASON_REDIRECT: Int = 5
 
         /**
-         * Latest result from [loadOrNull] — exposed so the Settings UI can
+         * Latest result from [loadOrNull] - exposed so the Settings UI can
          * show a "libmpv detected at <path>" status row without redoing the
          * (cheap but synchronous) probe.
          */
@@ -142,7 +142,7 @@ internal interface LibMpv : Library {
         /**
          * Try the bundled / configured directories first (via
          * [MpvRuntimeLocator]) so the OS search path is only consulted as a
-         * last resort. Each OS spells the library differently — try every
+         * last resort. Each OS spells the library differently - try every
          * common variant.
          */
         fun loadOrNull(): LibMpv? {

@@ -23,7 +23,7 @@ object DesktopPremiumStateHolder {
     val hasPremium: StateFlow<Boolean> = _hasPremium
 
     private val _accessState = MutableStateFlow<com.torve.data.device.AccessStateDto?>(null)
-    /** Last fetched access-state — used by Settings to show tier + expiry. */
+    /** Last fetched access-state - used by Settings to show tier + expiry. */
     val accessState: StateFlow<com.torve.data.device.AccessStateDto?> = _accessState
 
     fun bind(state: DesktopPremiumState) {
@@ -46,7 +46,7 @@ object DesktopPremiumStateHolder {
         instance?.refreshNow()
     }
 
-    /** Switch to a fast-poll window for [seconds] (default 5min) — call after Upgrade click. */
+    /** Switch to a fast-poll window for [seconds] (default 5min) - call after Upgrade click. */
     fun pollAggressivelyFor(seconds: Int = 300) {
         instance?.pollAggressivelyFor(seconds)
     }

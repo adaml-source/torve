@@ -59,7 +59,7 @@ import kotlinx.coroutines.launch
 /**
  * Shell around [MpvComposePlayerSurface] that adds the chrome users need
  * to leave / control playback. Unlike the VLC surface, chrome sits *next*
- * to the canvas (top + bottom rows), not over it — Java AWT components
+ * to the canvas (top + bottom rows), not over it - Java AWT components
  * always paint above lightweight Compose content, so an overlay would be
  * hidden anyway. mpv's built-in OSC (enabled in [MpvPlaybackEngine]) draws
  * play/pause/seek inside the canvas when the user hovers, which gives
@@ -105,7 +105,7 @@ fun MpvPlayerShell(
     var seekDraft by remember { mutableStateOf<Double?>(null) }
     val tracks by engine.tracks.collectAsState()
 
-    // Subtitle drag-drop — when a recognised subtitle file lands on the
+    // Subtitle drag-drop - when a recognised subtitle file lands on the
     // window, mpv loads it and switches to it. Same pattern the VLC
     // surface uses, against the same global SubtitleDropBus.
     DisposableEffect(engine) {
@@ -157,13 +157,13 @@ fun MpvPlayerShell(
     val phase = playerState.phase
     val isPaused = phase == DesktopPlayerPhase.PAUSED
     val phaseLabel = when (phase) {
-        DesktopPlayerPhase.RESOLVING -> "Resolving source…"
-        DesktopPlayerPhase.OPENING -> "Opening stream…"
-        DesktopPlayerPhase.BUFFERING -> "Buffering…"
+        DesktopPlayerPhase.RESOLVING -> "Resolving source..."
+        DesktopPlayerPhase.OPENING -> "Opening stream..."
+        DesktopPlayerPhase.BUFFERING -> "Buffering..."
         else -> null
     }
 
-    // Fullscreen behaviour — track our own boolean instead of relying on
+    // Fullscreen behaviour - track our own boolean instead of relying on
     // WindowState.placement, because that doesn't always actually take
     // effect on JBR + Compose 1.7.3. Chrome auto-hides after 3s of
     // mouse idle while in fullscreen mode; canvas-area motion (via the
@@ -192,7 +192,7 @@ fun MpvPlayerShell(
     val mediaItem = playerState.preparedSession?.mediaItem
     val episodeContext = playerState.preparedSession?.episodeContext
     val logoBitmap = com.torve.desktop.ui.v2.components.rememberCachedBitmap(mediaItem?.logoUrl)
-    // Latest-value snapshots for the AWT dispatcher closure — without
+    // Latest-value snapshots for the AWT dispatcher closure - without
     // these the dispatcher would close over stale composition values
     // and Space/seek-keys would reference an old position/pause state.
     val pausedRef by rememberUpdatedState(isPaused)
@@ -247,7 +247,7 @@ fun MpvPlayerShell(
             .fillMaxSize()
             .background(Color.Black),
     ) {
-        // Top bar — back button + title. Hidden in fullscreen mode so
+        // Top bar - back button + title. Hidden in fullscreen mode so
         // the canvas owns the full screen; Esc reveals it again.
         if (showChrome) Row(
             modifier = Modifier
@@ -336,7 +336,7 @@ fun MpvPlayerShell(
                     )
                 }
             }
-            // Immersive toggle — hides chrome only. We deliberately do NOT
+            // Immersive toggle - hides chrome only. We deliberately do NOT
             // change WindowState.placement here: on JBR + Compose 1.7.3
             // toggling Fullscreen rebuilds the AWT canvas peer, which
             // breaks mpv's `wid` binding and shows a white window. Hiding
@@ -354,7 +354,7 @@ fun MpvPlayerShell(
             }
         }
 
-        // Canvas — defer mounting the SwingPanel until we're past the
+        // Canvas - defer mounting the SwingPanel until we're past the
         // RESOLVING phase. While resolving, we show a calm loading
         // surface (Compose-only, no AWT canvas to fight with) so the
         // user doesn't stare at a flat white area waiting for mpv to
@@ -380,7 +380,7 @@ fun MpvPlayerShell(
                         color = colors.accent,
                     )
                     Text(
-                        text = phaseLabel ?: "Preparing…",
+                        text = phaseLabel ?: "Preparing...",
                         style = MaterialTheme.typography.titleMedium,
                         color = colors.textPrimary,
                     )
@@ -394,7 +394,7 @@ fun MpvPlayerShell(
                 MpvComposePlayerSurface(
                     engine = engine,
                     onCanvasMotion = revealChrome,
-                    // Hide the OS cursor whenever the chrome is hidden —
+                    // Hide the OS cursor whenever the chrome is hidden -
                     // immersive viewing should fade pointer + controls
                     // together. In windowed mode chrome is always shown,
                     // so the cursor stays visible.
@@ -404,7 +404,7 @@ fun MpvPlayerShell(
             }
         }
 
-        // Bottom chrome — two stacked rows: seek slider on top, transport
+        // Bottom chrome - two stacked rows: seek slider on top, transport
         // + volume + track menus underneath. Hidden in fullscreen.
         if (showChrome) Column(
             modifier = Modifier
@@ -412,7 +412,7 @@ fun MpvPlayerShell(
                 .background(colors.stageSurface)
                 .padding(horizontal = 12.dp, vertical = 6.dp),
         ) {
-            // Seek slider — uses a draft value while dragging so playback
+            // Seek slider - uses a draft value while dragging so playback
             // continues smoothly until the user releases.
             val total = durationSec ?: 0.0
             val current = seekDraft ?: positionSec ?: 0.0
@@ -496,7 +496,7 @@ fun MpvPlayerShell(
 
                 Spacer(Modifier.width(8.dp))
 
-                // Volume — slider drives mpv; mpv's `volume` property
+                // Volume - slider drives mpv; mpv's `volume` property
                 // observer drives the slider back so OSC adjustments
                 // stay in sync.
                 IconButton(onClick = {
@@ -556,7 +556,7 @@ private fun AudioDeviceMenu(
     if (open) {
         FloatingMenuPopup(title = "Audio output", onDismiss = onDismiss) {
             if (devices.isEmpty()) {
-                MenuRow(label = "Loading audio devices…", enabled = false) {}
+                MenuRow(label = "Loading audio devices...", enabled = false) {}
             } else {
                 devices.forEach { d ->
                     val display = d.description?.takeIf { it.isNotBlank() } ?: d.name
@@ -603,7 +603,7 @@ private fun TrackMenu(
                         t.lang?.takeIf { it.isNotBlank() }?.uppercase(),
                         t.title?.takeIf { it.isNotBlank() },
                     )
-                    val display = if (titleParts.isEmpty()) "Track ${t.id}" else titleParts.joinToString(" — ")
+                    val display = if (titleParts.isEmpty()) "Track ${t.id}" else titleParts.joinToString(" - ")
                     MenuRow(label = if (t.selected) "✓ $display" else display) {
                         onSelect(t.id)
                         open = false
@@ -650,7 +650,7 @@ private fun FloatingMenuPopup(
         resizable = false,
     ) {
         // Auto-dismiss on focus loss so clicking back into the player
-        // closes the menu — same UX as a normal dropdown.
+        // closes the menu - same UX as a normal dropdown.
         DisposableEffect(Unit) {
             val listener = object : java.awt.event.WindowFocusListener {
                 override fun windowGainedFocus(e: java.awt.event.WindowEvent) {}

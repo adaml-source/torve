@@ -34,7 +34,7 @@ import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
  * Premium (Play, Save, Connect, etc.). Dimmed scrim + centered card
  * with the surface-specific reason and an Upgrade CTA.
  *
- * Caller controls visibility — render only when needed:
+ * Caller controls visibility - render only when needed:
  *
  * ```
  * if (showUpgrade) PremiumRequiredOverlay(
@@ -49,7 +49,7 @@ fun PremiumRequiredOverlay(
     onDismiss: () -> Unit,
 ) {
     val colors = TorveDesktopThemeTokens.colors
-    // Auto-dismiss when access becomes premium — covers the
+    // Auto-dismiss when access becomes premium - covers the
     // "user clicked Upgrade, payment succeeded, the aggressive poll
     // saw the new entitlement" path.
     val hasPremium by DesktopPremiumStateHolder.hasPremium.collectAsState()
@@ -93,7 +93,7 @@ fun PremiumRequiredOverlay(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "After purchase, gating clears automatically — Torve polls your account every few seconds for ~5 minutes after you click Upgrade.",
+                    text = "After purchase, gating clears automatically - Torve polls your account every few seconds for ~5 minutes after you click Upgrade.",
                     style = MaterialTheme.typography.labelSmall,
                     color = colors.textMuted,
                 )

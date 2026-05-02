@@ -69,7 +69,7 @@ data class CommandPaletteAction(
  * activates the highlighted item; ↑/↓ moves the highlight.
  *
  * Filtering: case-insensitive substring against label, hint, and the
- * action's [CommandPaletteAction.keywords]. Cheap and predictable —
+ * action's [CommandPaletteAction.keywords]. Cheap and predictable -
  * good enough for a small action set.
  */
 @Composable
@@ -150,7 +150,7 @@ fun CommandPalette(
                     OutlinedTextField(
                         value = query,
                         onValueChange = { query = it; highlight = 0 },
-                        placeholder = { Text("Type a command or page…", color = colors.textSecondary) },
+                        placeholder = { Text("Type a command or page...", color = colors.textSecondary) },
                         singleLine = true,
                         modifier = Modifier
                             .fillMaxWidth()

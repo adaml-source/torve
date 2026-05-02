@@ -67,7 +67,7 @@ class LanHubPublisher(
             val port = controller.serverPort
             val secret = controller.serverSecret
             val lanHost = pickLanHost()
-            // Skip the heartbeat when any precondition is missing —
+            // Skip the heartbeat when any precondition is missing -
             // the registry needs all four to function. Logging the
             // skip would leak intent; we just retry next interval.
             if (port > 0 && !secret.isNullOrBlank() && lanHost != null) {
@@ -92,7 +92,7 @@ class LanHubPublisher(
 
     /**
      * Best-effort pick of a non-loopback IPv4 address. Returns null
-     * when none can be enumerated — the publisher then skips the
+     * when none can be enumerated - the publisher then skips the
      * heartbeat for this round, deferring to the next interval.
      */
     internal fun pickLanHost(): String? = pickLanHostFromInterfaces()

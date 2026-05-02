@@ -2,7 +2,7 @@ package com.torve.desktop.player
 
 /**
  * Central policy for LibVLC initialization arguments and per-media options.
- * Every option has a named rationale — no scattered VLC flags.
+ * Every option has a named rationale - no scattered VLC flags.
  */
 object VlcMediaOptions {
 
@@ -37,7 +37,7 @@ object VlcMediaOptions {
     fun factoryArgs(): List<String> = buildList {
         // ── Video output ──
         // Let VLC choose the best available output (Direct3D11 on modern Windows)
-        // No forced vout — VLC auto-selects d3d11va or d3d9 as appropriate
+        // No forced vout - VLC auto-selects d3d11va or d3d9 as appropriate
 
         // ── Hardware decoding ──
         // Prefer hardware acceleration, fall back to software if GPU unavailable
@@ -57,7 +57,7 @@ object VlcMediaOptions {
         add("--network-caching=650")
         // Lower live cache so live/opening does not stall behind large buffers
         add("--live-caching=250")
-        // File caching — bumped to 1000ms for smooth sustained local playback
+        // File caching - bumped to 1000ms for smooth sustained local playback
         add("--file-caching=1000")
 
         // ── Reconnect ──
@@ -73,7 +73,7 @@ object VlcMediaOptions {
         add("--no-video-title-show")
         // No snapshot preview popup
         add("--no-snapshot-preview")
-        // Quiet mode — reduce VLC stderr noise
+        // Quiet mode - reduce VLC stderr noise
         add("--quiet")
 
         // ── Audio output ──

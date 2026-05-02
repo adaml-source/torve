@@ -42,7 +42,7 @@ import com.torve.presentation.setup.SetupWizardCoordinator
  * an aggregated "Ready to watch" banner, and per-intent
  * Set-up / Validate / Reset buttons.
  *
- * The hub never enters credentials itself — each Set-up button routes to
+ * The hub never enters credentials itself - each Set-up button routes to
  * the matching detail surface (legacy wizard step for Debrid/IPTV,
  * Settings for Plex/Jellyfin, Panda setup for Usenet) so we don't
  * duplicate per-intent forms. Validate hits the coordinator's validator
@@ -63,7 +63,7 @@ fun DesktopSetupIntentHub(
     modifier: Modifier = Modifier,
 ) {
     // Hydrate persisted per-intent state on first composition. Idempotent
-    // — load() short-circuits when state is already populated and
+    // - load() short-circuits when state is already populated and
     // downgrades any persisted VALIDATING entry to IN_PROGRESS so a
     // mid-validate process death never leaves the UI on a spinner.
     LaunchedEffect(coordinator) { coordinator.load() }
@@ -84,7 +84,7 @@ fun DesktopSetupIntentHub(
             color = colors.textPrimary,
         )
         Text(
-            text = "You can complete one path or all four — the hub remembers progress between launches.",
+            text = "You can complete one path or all four - the hub remembers progress between launches.",
             style = MaterialTheme.typography.bodyMedium,
             color = colors.textSecondary,
         )
@@ -165,11 +165,11 @@ private fun ReadyToWatchBanner(summary: ReadyToWatchSummary) {
     }
     val title = when {
         summary.canStartWatching && summary.attentionCount == 0 ->
-            "Ready to watch — ${summary.ready.size} path${if (summary.ready.size == 1) "" else "s"} green."
+            "Ready to watch - ${summary.ready.size} path${if (summary.ready.size == 1) "" else "s"} green."
         summary.canStartWatching ->
-            "Ready to watch — ${summary.ready.size} ready, ${summary.attentionCount} need attention."
+            "Ready to watch - ${summary.ready.size} ready, ${summary.attentionCount} need attention."
         summary.invalid.isNotEmpty() ->
-            "Setup incomplete — ${summary.invalid.size} path${if (summary.invalid.size == 1) "" else "s"} need fixing."
+            "Setup incomplete - ${summary.invalid.size} path${if (summary.invalid.size == 1) "" else "s"} need fixing."
         else -> "Pick a path to start."
     }
     val descriptionParts = buildList {
@@ -250,7 +250,7 @@ private fun SetupIntentStatus.toUiLabel(): String = when (this) {
     SetupIntentStatus.READY -> "Ready"
     SetupIntentStatus.NEEDS_ATTENTION -> "Attention"
     SetupIntentStatus.INVALID -> "Fix"
-    SetupIntentStatus.VALIDATING -> "Checking…"
+    SetupIntentStatus.VALIDATING -> "Checking..."
     SetupIntentStatus.IN_PROGRESS -> "In progress"
     SetupIntentStatus.NOT_STARTED -> "Not started"
 }

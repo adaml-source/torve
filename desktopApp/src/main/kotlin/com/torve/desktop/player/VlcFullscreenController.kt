@@ -78,7 +78,7 @@ class VlcFullscreenController {
         )
 
         if (device.isFullScreenSupported) {
-            // Exclusive fullscreen — no dispose required
+            // Exclusive fullscreen - no dispose required
             device.fullScreenWindow = frame
         } else {
             // Fallback: maximise the frame to cover the screen.

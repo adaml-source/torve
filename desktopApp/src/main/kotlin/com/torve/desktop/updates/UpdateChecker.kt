@@ -21,15 +21,15 @@ import java.net.URL
  *
  * Configuration is environment-driven so we don't hard-code a repo into
  * the binary:
- *  - `TORVE_UPDATE_REPO` — `owner/name` (e.g. `anthropics/torve`).
- *  - `TORVE_UPDATE_FEED` — full URL override; takes precedence over the
+ *  - `TORVE_UPDATE_REPO` - `owner/name` (e.g. `anthropics/torve`).
+ *  - `TORVE_UPDATE_FEED` - full URL override; takes precedence over the
  *    repo env var (lets you point at a custom appcast/manifest later).
  *
  * When neither is set the checker is a no-op so dev builds and sideloads
  * don't ping GitHub. Real distribution channels set the env at install
  * time.
  *
- * This is intentionally **just** a notifier — it does not download or
+ * This is intentionally **just** a notifier - it does not download or
  * apply updates. Native installers + Sparkle/WinSparkle are the next
  * Phase 2 step; this checker is the user-visible part shipped first.
  */
@@ -57,7 +57,7 @@ class UpdateChecker(
         /**
          * Optional SHA-256 hex from the appcast. When present, the
          * handoff verifies the downloaded installer matches before
-         * launching it. Null skips verification — the handoff still
+         * launching it. Null skips verification - the handoff still
          * launches but logs that the artifact wasn't checksum-pinned.
          */
         val installerSha256: String? = null,
@@ -68,7 +68,7 @@ class UpdateChecker(
         data object UpToDate : Result()
         /** An update was found and is newer than [UpdateChecker.currentVersion]. */
         data class Available(val info: UpdateInfo) : Result()
-        /** The check itself failed — network, rate limit, parse error. */
+        /** The check itself failed - network, rate limit, parse error. */
         data class Failed(val reason: String) : Result()
     }
 
@@ -83,7 +83,7 @@ class UpdateChecker(
      * Hit the configured update endpoint, parse the latest release, and
      * publish [Result.Available] when it's newer than the running
      * version. Designed to be called once at app startup and optionally
-     * again on a manual "Check for updates" click — never on a polling
+     * again on a manual "Check for updates" click - never on a polling
      * cadence.
      */
     suspend fun check(): Result = withContext(Dispatchers.IO) {
@@ -154,7 +154,7 @@ class UpdateChecker(
      * `sparkle:version` (or version-derived from the enclosure URL),
      * description body, and `enclosure[url]` for the download link.
      *
-     * Pure regex — no XML library — because appcast feeds are tiny and
+     * Pure regex - no XML library - because appcast feeds are tiny and
      * the Sparkle conventions use a fixed structure. If the feed is
      * unparseable we return null and the caller treats it as a failure.
      */
@@ -175,7 +175,7 @@ class UpdateChecker(
         val enclosureUrl = Regex("""\burl\s*=\s*"([^"]+)"""")
             .find(enclosure)?.groupValues?.getOrNull(1)
         // Sparkle's optional `sparkle:installerSha256` attr (or `sha256`,
-        // or `sparkle:edSignature` — last is technically Ed25519 not
+        // or `sparkle:edSignature` - last is technically Ed25519 not
         // SHA-256, so we ignore it for hash verification but accept it
         // as "feed signed" indicator). 64 hex chars only.
         val sha256 = Regex(
@@ -221,7 +221,7 @@ class UpdateChecker(
         return false
     }
 
-    /** GitHub's release JSON shape — only the fields we actually use. */
+    /** GitHub's release JSON shape - only the fields we actually use. */
     @Serializable
     private data class GithubRelease(
         @SerialName("tag_name") val tagName: String,

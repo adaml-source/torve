@@ -57,7 +57,7 @@ class DesktopFileSecretStore : IntegrationSecretStore, SecureStorage {
     override suspend fun clearAllSecrets() {
         synchronized(lock) {
             val knownPrefixes = IntegrationSecretKey.entries.map { it.name }.toSet()
-            // Walk once and drop every entry owned by an IntegrationSecretKey —
+            // Walk once and drop every entry owned by an IntegrationSecretKey -
             // covers bare name, "<KEY>:<subKey>" scoped entries, and "<KEY>_mode".
             val toRemove = properties.stringPropertyNames().filter { existing ->
                 val base = existing.substringBefore(':').removeSuffix("_mode")

@@ -8,7 +8,7 @@ import java.util.Properties
  * Tiny preferences store for the update checker. One file
  * (`update_prefs.properties`) under `desktopDataDir()`. Currently holds:
  *
- *  - `autoCheckOnLaunch` (default true) — whether [UpdateChecker.check] is
+ *  - `autoCheckOnLaunch` (default true) - whether [UpdateChecker.check] is
  *    fired automatically the first time the shell composes.
  *
  * Properties because there's literally one boolean today; promoting to

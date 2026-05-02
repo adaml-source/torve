@@ -4,7 +4,7 @@ package com.torve.desktop.diagnostics
  * Scrubs sensitive material out of diagnostics-bound text before it ends up
  * in a support zip.
  *
- * Conservative — over-redacts rather than leaks. Any caller that produces
+ * Conservative - over-redacts rather than leaks. Any caller that produces
  * a text artifact for the diagnostics export must run the content through
  * [redact] first; binary files are skipped at the exporter level.
  *
@@ -23,7 +23,7 @@ package com.torve.desktop.diagnostics
  *     deepseek/mdblist/omdb keys, etc.)
  *
  * The output keeps the surrounding shape (key names, scheme, host) so a
- * support reader can still see "this is an addon URL with a token" — they
+ * support reader can still see "this is an addon URL with a token" - they
  * just can't see the token.
  */
 object DiagnosticsRedactor {
@@ -79,9 +79,9 @@ object DiagnosticsRedactor {
         }
 
         // ── Stremio-style addon manifest URLs with embedded tokens ──
-        // /u/<token>/manifest.json — the user-bound addon shape.
+        // /u/<token>/manifest.json - the user-bound addon shape.
         add(Rule(Regex("""/u/([^/\s"']+)/manifest\.json"""), """/u/$MASK/manifest.json"""))
-        // /p/<token>/manifest.json — Panda-style manifest URLs.
+        // /p/<token>/manifest.json - Panda-style manifest URLs.
         add(Rule(Regex("""/p/([^/\s"']+)/manifest\.json"""), """/p/$MASK/manifest.json"""))
         // Generic /addons/<token>/configure or /catalog/<token>/...
         add(Rule(

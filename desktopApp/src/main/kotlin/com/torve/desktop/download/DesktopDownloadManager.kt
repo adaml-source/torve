@@ -164,7 +164,7 @@ class DesktopDownloadManager(
      * resolved the NZB to a TorBox-served stream URL.
      *
      * If the per-surface download folder isn't configured, returns
-     * [QueueResult.NeedsFolder] without enqueuing — the UI should
+     * [QueueResult.NeedsFolder] without enqueuing - the UI should
      * surface a prompt and route to Settings → Downloads. Otherwise
      * the download lands in the configured per-surface folder.
      */

@@ -681,7 +681,7 @@ fun VlcComposePlayerSurface(
             // Drag-and-drop subtitle handler is installed at JFrame level via
             // AWT (see Main.kt → SubtitleDropBus). Subscription happens in a
             // DisposableEffect below so it's tied to this composable's
-            // lifetime — when the player closes, the subscription clears.
+            // lifetime - when the player closes, the subscription clears.
             // Fix 3: Use onPointerEvent for Move so any mouse movement shows chrome
             .onPointerEvent(PointerEventType.Move) { onInteraction() }
             .onPointerEvent(PointerEventType.Press) { event ->
@@ -742,7 +742,7 @@ fun VlcComposePlayerSurface(
                 }
             },
     ) {
-        // Video — VLC writes RV32 frames into VlcFrameRenderer's double-
+        // Video - VLC writes RV32 frames into VlcFrameRenderer's double-
         // buffered BufferedImage and we draw the latest as a Compose Image.
         // Lightweight, so the chrome overlays below this block actually
         // render and accept input (a heavyweight AWT Canvas would paint over
@@ -899,28 +899,28 @@ fun VlcComposePlayerSurface(
                 },
             )
             DropdownMenuItem(
-                text = { Text("Audio Sync…") },
+                text = { Text("Audio Sync...") },
                 onClick = {
                     activePanel = AdvancedPanel.AUDIO_SYNC
                     showContextMenu = false
                 },
             )
             DropdownMenuItem(
-                text = { Text("Subtitle Sync…") },
+                text = { Text("Subtitle Sync...") },
                 onClick = {
                     activePanel = AdvancedPanel.SUBTITLE_SYNC
                     showContextMenu = false
                 },
             )
             DropdownMenuItem(
-                text = { Text("Equalizer…") },
+                text = { Text("Equalizer...") },
                 onClick = {
                     activePanel = AdvancedPanel.EQUALIZER
                     showContextMenu = false
                 },
             )
             DropdownMenuItem(
-                text = { Text("Media Info…") },
+                text = { Text("Media Info...") },
                 onClick = {
                     activePanel = AdvancedPanel.MEDIA_INFO
                     showContextMenu = false
@@ -1010,7 +1010,7 @@ fun VlcComposePlayerSurface(
                                     onSearchOnlineSubtitles?.let { search ->
                                         HorizontalDivider()
                                         DropdownMenuItem(
-                                            text = { Text("Search online…") },
+                                            text = { Text("Search online...") },
                                             onClick = { search(); showSubtitleMenu = false },
                                         )
                                     }
@@ -1033,10 +1033,10 @@ fun VlcComposePlayerSurface(
                                     sessionState.availableAudioTracks.forEach { t -> CheckItem(t.name, sessionState.selectedAudioTrack?.id == t.id) { engine.session?.let { s -> kotlinx.coroutines.runBlocking { s.selectAudioTrack(t.id); s.refreshTracks() } }; showSettingsMenu = false } }
                                     if (sessionState.availableAudioTracks.isEmpty()) DropdownMenuItem(text = { Text("No audio tracks", color = Color.Gray) }, onClick = {})
                                     SectionLabel("Panels")
-                                    DropdownMenuItem(text = { Text("Audio Sync…") }, onClick = { activePanel = AdvancedPanel.AUDIO_SYNC; showSettingsMenu = false })
-                                    DropdownMenuItem(text = { Text("Subtitle Sync…") }, onClick = { activePanel = AdvancedPanel.SUBTITLE_SYNC; showSettingsMenu = false })
-                                    DropdownMenuItem(text = { Text("Equalizer…") }, onClick = { activePanel = AdvancedPanel.EQUALIZER; showSettingsMenu = false })
-                                    DropdownMenuItem(text = { Text("Media Info…") }, onClick = { activePanel = AdvancedPanel.MEDIA_INFO; showSettingsMenu = false })
+                                    DropdownMenuItem(text = { Text("Audio Sync...") }, onClick = { activePanel = AdvancedPanel.AUDIO_SYNC; showSettingsMenu = false })
+                                    DropdownMenuItem(text = { Text("Subtitle Sync...") }, onClick = { activePanel = AdvancedPanel.SUBTITLE_SYNC; showSettingsMenu = false })
+                                    DropdownMenuItem(text = { Text("Equalizer...") }, onClick = { activePanel = AdvancedPanel.EQUALIZER; showSettingsMenu = false })
+                                    DropdownMenuItem(text = { Text("Media Info...") }, onClick = { activePanel = AdvancedPanel.MEDIA_INFO; showSettingsMenu = false })
                                 } }
                             // Cast (Chromecast / DLNA via VLC renderer discoverers)
                             if (castController != null) {
@@ -1056,7 +1056,7 @@ fun VlcComposePlayerSurface(
                                                     Text(
                                                         if (castState.activeDiscoverers.isEmpty())
                                                             "Cast not available in this VLC build"
-                                                        else "Searching for devices…",
+                                                        else "Searching for devices...",
                                                         color = Color.Gray,
                                                     )
                                                 },
@@ -1083,7 +1083,7 @@ fun VlcComposePlayerSurface(
                                     }
                                 }
                             }
-                            // Pin / Always-on-top — distinct from PiP. Pin keeps
+                            // Pin / Always-on-top - distinct from PiP. Pin keeps
                             // the full window on top of every other window.
                             PBtn(
                                 if (alwaysOnTop) Icons.Filled.PushPin else Icons.Outlined.PushPin,
@@ -1248,7 +1248,7 @@ private fun EqualizerPanel(engine: VlcPlaybackEngine) {
     Slider(value = preamp, onValueChange = { preamp = it; kotlinx.coroutines.runBlocking { session.setEqualizerPreamp(it) } },
         valueRange = -20f..20f, colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Accent, inactiveTrackColor = Color(0x40FFFFFF)))
 
-    // Bands — keyed on bandRefreshKey so they re-read after preset change
+    // Bands - keyed on bandRefreshKey so they re-read after preset change
     if (bandFreqs.isNotEmpty()) {
         Spacer(Modifier.height(16.dp))
         Text("Bands", color = Color(0xAAFFFFFF), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
@@ -1478,7 +1478,7 @@ private fun parseAspectRatio(label: String, sourceAspect: Float): Float = when (
     "4:3" -> 4f / 3f
     "21:9" -> 21f / 9f
     "Fit to Source" -> sourceAspect
-    else -> sourceAspect // "Default" — use the video's native aspect
+    else -> sourceAspect // "Default" - use the video's native aspect
 }
 
 private fun speedLabel(rate: Float): String = when {

@@ -60,7 +60,7 @@ class VlcEventBridge {
             refreshTracks(mediaPlayer)
             // Intentionally NOT calling refreshVolume here. VLC's
             // audio().volume()/isMute queries are racy when the device is
-            // still initialising — they often return 0/true even though
+            // still initialising - they often return 0/true even though
             // playback is unmuted. Bootstrap and any explicit
             // setVolume/setMute publishes are authoritative; the playing
             // event must not overwrite them with stale reads.

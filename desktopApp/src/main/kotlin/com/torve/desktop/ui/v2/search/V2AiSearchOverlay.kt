@@ -197,7 +197,7 @@ fun V2AiSearchOverlay(
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TorvePrimaryButton(
-                        text = if (loading) "Thinking…" else "Search",
+                        text = if (loading) "Thinking..." else "Search",
                         onClick = ::submit,
                         enabled = query.isNotBlank() && apiKey.isNotBlank() && !loading,
                     )

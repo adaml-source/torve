@@ -8,7 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 
 /**
- * Embedded player layout — video fills the entire area.
+ * Embedded player layout - video fills the entire area.
  * All controls are handled by the VlcPlayerChromeHost overlay in the Swing layer.
  */
 @Composable

@@ -8,7 +8,7 @@ import java.io.File
  * Behaviour pinned by SiblingSubtitleScannerTest:
  *  - Matches a fixed extension allow-list (.srt, .vtt, .ass, .ssa, .sub).
  *  - Stem matching is case-insensitive (Windows / macOS HFS+ ship subtitles
- *    in any case — `Movie.mkv` should match `movie.en.srt`).
+ *    in any case - `Movie.mkv` should match `movie.en.srt`).
  *  - Files in other directories are never picked up.
  *  - Returns an empty list (not null) when nothing matches or the parent
  *    directory is unreadable.
@@ -29,7 +29,7 @@ internal fun scanSiblingSubtitles(videoFile: File): List<DesktopPlaybackSubtitle
         .filter { it.nameWithoutExtension.startsWith(stem, ignoreCase = true) }
         .sortedBy { it.nameWithoutExtension.lowercase() }
         .map { subFile ->
-            // IMPORTANT: slice by length, not removePrefix — the prefix match is
+            // IMPORTANT: slice by length, not removePrefix - the prefix match is
             // case-insensitive but `removePrefix` is case-sensitive, which would
             // leave the original casing intact and pollute the language tag with
             // the start of the original filename.

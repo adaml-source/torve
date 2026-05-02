@@ -32,7 +32,7 @@ class DesktopSystemTray(
     private val onTogglePlayback: () -> Unit,
     private val onQuit: () -> Unit,
 ) {
-    /** Optional — set by the shell once the runtime is available. */
+    /** Optional - set by the shell once the runtime is available. */
     var onPlayContinueWatching: (TrayContinueWatchingItem) -> Unit = {}
     private var trayIcon: TrayIcon? = null
     private var continueWatching: List<TrayContinueWatchingItem> = emptyList()

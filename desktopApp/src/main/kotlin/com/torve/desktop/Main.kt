@@ -143,7 +143,7 @@ private sealed interface BootstrapState {
 internal val isMac: Boolean = System.getProperty("os.name", "")
     .startsWith("Mac", ignoreCase = true)
 
-/** Cmd on macOS, Ctrl on Windows/Linux — the platform "primary" modifier. */
+/** Cmd on macOS, Ctrl on Windows/Linux - the platform "primary" modifier. */
 internal fun primaryAccel(key: Key, shift: Boolean = false): KeyShortcut =
     KeyShortcut(key, meta = isMac, ctrl = !isMac, shift = shift)
 
@@ -196,7 +196,7 @@ internal val globalLocalLibrary: com.torve.desktop.library.LocalLibraryRepositor
 
 /**
  * Process-wide EpgReminderStore singleton. The Live page's EPG reminders
- * and the Settings reminder list page share this — toggle in one, see
+ * and the Settings reminder list page share this - toggle in one, see
  * the change in the other.
  */
 internal val globalReminderStore: com.torve.desktop.reminders.EpgReminderStore by lazy {
@@ -211,7 +211,7 @@ fun main() = application {
     val releaseInfo = DesktopReleaseInfo.current()
     // Sentry init must happen before the uncaught handler installs so the
     // first crash of the session has a place to go. DSN is read from
-    // TORVE_SENTRY_DSN — no DSN means the SDK is a no-op (zero network
+    // TORVE_SENTRY_DSN - no DSN means the SDK is a no-op (zero network
     // traffic, no events captured) which is what we want in dev / sideloads.
     com.torve.desktop.diagnostics.SentryBootstrap.install(
         releaseInfo = releaseInfo,
@@ -221,13 +221,13 @@ fun main() = application {
     globalUpdateChecker = com.torve.desktop.updates.UpdateChecker(
         currentVersion = releaseInfo.versionLabel,
     )
-    // Process-wide reminder scheduler — fires regardless of which page
+    // Process-wide reminder scheduler - fires regardless of which page
     // is mounted. Pulls from globalReminderStore, dispatches via tray.
     com.torve.desktop.reminders.ReminderScheduler(
         store = globalReminderStore,
         notifier = ::desktopNotify,
     ).start()
-    // Filesystem watcher for the local library — picks up files added
+    // Filesystem watcher for the local library - picks up files added
     // outside Torve so the user doesn't need to hit Rescan manually.
     com.torve.desktop.library.LibraryWatcher(repository = globalLocalLibrary).start()
     // Without a global handler, an uncaught exception in any UI/coroutine
@@ -278,7 +278,7 @@ fun main() = application {
 
     Window(
         onCloseRequest = {
-            // Close-to-tray, but tear playback down first — otherwise libvlc
+            // Close-to-tray, but tear playback down first - otherwise libvlc
             // keeps the audio output thread alive and the user hears phantom
             // sound from a window they can no longer see.
             (bootstrapStateHolder.value as? BootstrapState.Ready)
@@ -298,7 +298,7 @@ fun main() = application {
         DisposableEffect(Unit) {
             com.torve.desktop.dnd.installSubtitleDropTarget(window)
             // Refresh premium state whenever the user brings the window
-            // back to focus — covers the "left it open overnight, server
+            // back to focus - covers the "left it open overnight, server
             // revoked entitlement, user expects gating to update on the
             // next interaction" case.
             val focusListener = object : java.awt.event.WindowFocusListener {
@@ -318,7 +318,7 @@ fun main() = application {
             bootstrapStateHolder.value = value
         }
 
-        // Window-attached MenuBar — Compose Desktop maps this to native NSMenu
+        // Window-attached MenuBar - Compose Desktop maps this to native NSMenu
         // on macOS automatically. Keyboard accelerators MUST be declared
         // per-item via `shortcut = KeyShortcut(...)`. They are NOT inferred
         // from menu structure.
@@ -327,7 +327,7 @@ fun main() = application {
             val playPauseShortcut = if (isMac) KeyShortcut(Key.Spacebar) else primaryAccel(Key.K)
             MenuBar {
             Menu("File") {
-                Item("Check for Updates…", onClick = {
+                Item("Check for Updates...", onClick = {
                     @OptIn(DelicateCoroutinesApi::class)
                     globalUpdateChecker?.let { checker ->
                         GlobalScope.launch {

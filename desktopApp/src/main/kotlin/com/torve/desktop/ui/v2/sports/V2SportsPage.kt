@@ -58,7 +58,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Sports catalog. Fetches Newznab category 5060 (Sports — standard
+ * Sports catalog. Fetches Newznab category 5060 (Sports - standard
  * across all Newznab indexers) from whatever indexer is configured in
  * Panda. Releases are then classified client-side by title into sport
  * buckets (NFL, NBA, UFC, Soccer, F1, etc.) so the user can filter.
@@ -362,7 +362,7 @@ fun V2SportsPage(
                                 // inside torbox.resolve doesn't freeze the
                                 // Compose dispatcher for the duration of the
                                 // NZB download.
-                                resolveStatus = resolveStatus + (rowKey to "Starting…")
+                                resolveStatus = resolveStatus + (rowKey to "Starting...")
                                 println("TORVE SPORTS ┃ play clicked: ${ci.item.title}")
                                 scope.launch {
                                     val res = withContext(Dispatchers.IO) {
@@ -380,7 +380,7 @@ fun V2SportsPage(
                             },
                             onDownload = downloadManager?.let { dm ->
                                 {
-                                    resolveStatus = resolveStatus + (rowKey to "Starting…")
+                                    resolveStatus = resolveStatus + (rowKey to "Starting...")
                                     println("TORVE SPORTS ┃ download clicked: ${ci.item.title}")
                                     scope.launch {
                                         val res = withContext(Dispatchers.IO) {
@@ -501,7 +501,7 @@ private fun SportsRow(
                     )
                 }
                 TorvePrimaryButton(
-                    text = if (isWorking) "Working…" else "Play",
+                    text = if (isWorking) "Working..." else "Play",
                     onClick = onPlay,
                     enabled = torboxConfigured && !isWorking,
                 )

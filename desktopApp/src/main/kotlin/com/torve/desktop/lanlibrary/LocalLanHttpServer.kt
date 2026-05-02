@@ -18,19 +18,19 @@ import java.util.concurrent.atomic.AtomicInteger
 /**
  * JDK `HttpServer` exposing three routes:
  *
- *   GET  /local/manifest                  — JSON manifest, no paths
- *   POST /local/stream-token/{id}         — issues a per-id stream token
+ *   GET  /local/manifest                  - JSON manifest, no paths
+ *   POST /local/stream-token/{id}         - issues a per-id stream token
  *                                          (Prompt 9C). Hub auth header
  *                                          required; uniform 404 on
  *                                          unknown ids so a bystander
  *                                          can't probe the id space.
- *   GET  /local/stream/{id}?token=...     — ranged file stream
+ *   GET  /local/stream/{id}?token=...     - ranged file stream
  *
  * Bind model (Prompt 9):
- *   - Loopback by default — only the desktop talks to itself. This is
+ *   - Loopback by default - only the desktop talks to itself. This is
  *     what runs whenever the master `lanServingEnabled` toggle is on
  *     but the explicit LAN-bind toggle is off.
- *   - LAN-bind mode — when both toggles are on, the server binds to
+ *   - LAN-bind mode - when both toggles are on, the server binds to
  *     the wildcard address so peer devices on the same LAN can connect.
  *     Activated only via [start] with `bindToLan = true`.
  *
@@ -79,16 +79,16 @@ class LocalLanHttpServer(
     val secret: String? get() = currentSecret
 
     /**
-     * Start the server. Idempotent — calling twice is a no-op.
+     * Start the server. Idempotent - calling twice is a no-op.
      * @param desiredPort 0 to let the OS assign a free port.
      * @param bindToLan when true, bind the wildcard address so peers
      * on the same LAN can reach the server. When false, bind loopback
-     * only (the default — peers cannot reach the server).
+     * only (the default - peers cannot reach the server).
      */
     fun start(desiredPort: Int = 0, bindToLan: Boolean = false) {
         if (server != null) return
         val bindAddress = if (bindToLan) {
-            // 0.0.0.0 — let the OS bind every interface. The user
+            // 0.0.0.0 - let the OS bind every interface. The user
             // already opted in via the toggle; the auth secret + token
             // table are still required to pull anything off the wire.
             InetAddress.getByName("0.0.0.0")
@@ -111,7 +111,7 @@ class LocalLanHttpServer(
         server = null
         currentSecret = null
         s?.stop(0)
-        // Token table also gets cleared on lifecycle stop — caller's
+        // Token table also gets cleared on lifecycle stop - caller's
         // [LanServingController] does that explicitly so each component
         // owns its own memory.
     }

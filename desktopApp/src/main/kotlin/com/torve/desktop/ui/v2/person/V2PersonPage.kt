@@ -134,7 +134,7 @@ fun V2PersonPage(
                             horizontalArrangement = Arrangement.spacedBy(24.dp),
                             verticalAlignment = Alignment.Bottom,
                         ) {
-                            // Profile photo — elevated circle over backdrop
+                            // Profile photo - elevated circle over backdrop
                             val photo = rememberCachedBitmap(state.profileUrl)
                             Box {
                                 if (photo != null) {
@@ -186,7 +186,7 @@ fun V2PersonPage(
                         }
                     }
 
-                    // ── Content below hero — continuous stage ──
+                    // ── Content below hero - continuous stage ──
                     Column(
                         Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(20.dp),

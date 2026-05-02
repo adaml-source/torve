@@ -14,10 +14,10 @@ import java.io.File
 
 /**
  * JSON-on-disk recording repository. Modeled on the existing
- * [com.torve.desktop.reminders.EpgReminderStore] — same atomic-rename
+ * [com.torve.desktop.reminders.EpgReminderStore] - same atomic-rename
  * persistence, same per-process mutex, same lazy-load-on-first-call.
  *
- * No SQLDelight table this slice — recordings are bounded (typically
+ * No SQLDelight table this slice - recordings are bounded (typically
  * tens of rows on a real install) and the file shape lets the user
  * inspect/clean it in the OS file explorer when triaging a problem.
  */

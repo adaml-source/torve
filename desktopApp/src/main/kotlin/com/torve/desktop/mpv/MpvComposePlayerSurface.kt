@@ -31,10 +31,10 @@ import kotlinx.coroutines.launch
  *    chroma negotiation still work because mpv owns the surface.
  *
  * Platform support:
- *  - **Windows** — [Native.getComponentPointer] returns the HWND. Works.
- *  - **Linux/X11** — returns the X Window XID. Works for libmpv built
+ *  - **Windows** - [Native.getComponentPointer] returns the HWND. Works.
+ *  - **Linux/X11** - returns the X Window XID. Works for libmpv built
  *    against `--enable-x11`.
- *  - **macOS** — returns an NSView pointer; needs libmpv built with
+ *  - **macOS** - returns an NSView pointer; needs libmpv built with
  *    `--enable-cocoa` (the libmpv published with default brew has
  *    `--enable-cocoa-cb` instead, which is render-API-only). Standalone
  *    fallback kicks in if attach silently no-ops, so users on macOS see
@@ -62,7 +62,7 @@ fun MpvComposePlayerSurface(
 
     // Hide / restore the AWT cursor over the canvas when chrome
     // auto-hides. Uses a 1x1 transparent BufferedImage as a "blank"
-    // cursor — Java's standard idiom for hiding the cursor on a
+    // cursor - Java's standard idiom for hiding the cursor on a
     // component while keeping it active for input.
     DisposableEffect(canvas, cursorHidden) {
         if (cursorHidden) {

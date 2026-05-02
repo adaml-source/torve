@@ -7,7 +7,7 @@ package com.torve.desktop.sports
  * they care about.
  *
  * Match priority is keyword-first, then league/team hints. Order matters
- * for ambiguous cases — e.g. "F1" must check before generic
+ * for ambiguous cases - e.g. "F1" must check before generic
  * substring "1" sneaks in. The classifier walks buckets in declaration
  * order so put the most specific keywords first.
  */
@@ -15,7 +15,7 @@ enum class SportBucket(
     val label: String,
     /**
      * Lowercase substrings that, when present in the title, classify
-     * the release into this bucket. Keep them specific to the sport —
+     * the release into this bucket. Keep them specific to the sport -
      * avoid words like "match" that mean nothing on their own.
      */
     val keywords: List<String>,

@@ -71,7 +71,7 @@ class DesktopRecordingService(
         }
     }
 
-    /** Externally observable in tests — picks up new schedules. */
+    /** Externally observable in tests - picks up new schedules. */
     suspend fun tick() {
         val now = nowMs()
         val due = repository.listByStatus(RecordingStatus.SCHEDULED)
@@ -138,7 +138,7 @@ class DesktopRecordingService(
             )
             return
         }
-        // The configured root must itself be in the allowlist —
+        // The configured root must itself be in the allowlist -
         // catches misconfiguration where the user pointed at something
         // outside their declared download folders.
         if (allowlist.roots().none { it.canonicalPath.equals(root.canonicalPath, ignoreCase = pathIsCaseInsensitive()) }) {
@@ -255,7 +255,7 @@ class DesktopRecordingService(
 }
 
 /**
- * Test-friendly seam — the production path uses
+ * Test-friendly seam - the production path uses
  * [DesktopRecordingService.defaultConnection], tests substitute an
  * in-memory stream.
  */

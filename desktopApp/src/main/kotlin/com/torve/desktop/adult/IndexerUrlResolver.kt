@@ -7,7 +7,7 @@ package com.torve.desktop.adult
  * `type=custom`, so the desktop side has to reconstitute the URL from
  * the type alone.
  *
- * Keep this in sync with the indexer list Panda's schema accepts —
+ * Keep this in sync with the indexer list Panda's schema accepts -
  * currently `nzbgeek`, `scenenzbs`, `dognzb`, `nzbplanet`, `custom`.
  */
 object IndexerUrlResolver {

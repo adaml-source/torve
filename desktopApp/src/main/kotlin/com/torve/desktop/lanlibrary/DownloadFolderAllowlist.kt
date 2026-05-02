@@ -4,11 +4,11 @@ import java.io.File
 import java.io.IOException
 
 /**
- * Phase 3 Slice C — storage safety primitive.
+ * Phase 3 Slice C - storage safety primitive.
  *
  * A path is "allowed" if its canonical (symlink-resolved) form sits
  * underneath the canonical form of one of the configured download
- * folders. Anything else is rejected — including paths that try to
+ * folders. Anything else is rejected - including paths that try to
  * escape via `..`, paths that resolve through a symlink to a sibling
  * directory, and paths to system locations.
  *
@@ -27,7 +27,7 @@ class DownloadFolderAllowlist(
     /**
      * @return true iff [path] (after symlink resolution) is the same
      * file as, or a descendant of, one of [roots]. Returns false on
-     * any IO error — fail-closed.
+     * any IO error - fail-closed.
      */
     fun isAllowed(path: File): Boolean {
         val resolved = runCatching { path.canonicalFile }.getOrNull() ?: return false

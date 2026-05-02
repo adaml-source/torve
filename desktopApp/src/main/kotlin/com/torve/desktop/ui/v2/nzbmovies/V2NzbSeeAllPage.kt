@@ -57,11 +57,11 @@ import com.torve.domain.model.hasValueFor
 /**
  * "See all" surface for the Latest-on-Usenet shelf. Shows every TMDB-
  * matched NZB release in a poster grid, filterable by:
- *   • Language — drives the Newznab `cat=` parameter via
+ *   • Language - drives the Newznab `cat=` parameter via
  *     IndexerCategoryMap. Triggers a refetch.
- *   • Search — drives the Newznab `q=` parameter. Triggers a refetch.
- *   • Year — client-side filter on TMDB release year.
- *   • Genre — client-side filter on TMDB genre IDs.
+ *   • Search - drives the Newznab `q=` parameter. Triggers a refetch.
+ *   • Year - client-side filter on TMDB release year.
+ *   • Genre - client-side filter on TMDB genre IDs.
  *
  * Posters use the standard [V2PosterCard] so click-to-detail and the
  * eventual play/watched indicators behave identically to the rest of
@@ -125,7 +125,7 @@ fun V2NzbSeeAllPage(
 
     // Re-trigger fetch whenever the indexer-driven filters (language /
     // search) change. Year + genre are client-side and don't require a
-    // network round trip — they filter [items] in place. When the
+    // network round trip - they filter [items] in place. When the
     // filtered subset is too thin, the load-more effect below still
     // pulls more pages so the user gets a deep enough corpus.
     //
@@ -148,7 +148,7 @@ fun V2NzbSeeAllPage(
 
     // Compute the visible (post-client-filter) count *first* so the
     // load-more effect below can chase it. Mirrors the [visible] memo
-    // below — keep the predicate identical.
+    // below - keep the predicate identical.
     val filteredSize = remember(items, yearFilter, genreFilter, minRating, requiredRatingSource) {
         items.count { rel -> matchesClientFilters(rel, yearFilter, genreFilter, minRating, requiredRatingSource) }
     }
@@ -156,7 +156,7 @@ fun V2NzbSeeAllPage(
     // Lazy load triggers in two cases:
     //   1. User scrolls near the bottom of the grid.
     //   2. A client-side filter (year / genre) leaves too few visible
-    //      posters — the indexer's first page might only contain a few
+    //      posters - the indexer's first page might only contain a few
     //      titles for "German + 2025", so we keep pulling pages until
     //      either the filtered count hits TARGET or the indexer's out.
     LaunchedEffect(gridState, items.size, filteredSize, hasMore, loading) {
@@ -173,7 +173,7 @@ fun V2NzbSeeAllPage(
     }
 
     // Available years + genres are derived from whatever's loaded right
-    // now — the chip set updates as the indexer feed changes.
+    // now - the chip set updates as the indexer feed changes.
     val availableYears = remember(items) {
         items.mapNotNull { it.match.year }.distinct().sortedDescending()
     }
@@ -194,7 +194,7 @@ fun V2NzbSeeAllPage(
             .background(colors.shellBackground),
     ) {
         Row(
-            // 72.dp clears the left nav rail — same as the rest of the
+            // 72.dp clears the left nav rail - same as the rest of the
             // V2 surface pages.
             modifier = Modifier.fillMaxWidth().padding(start = 72.dp, end = 24.dp, top = 16.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -216,7 +216,7 @@ fun V2NzbSeeAllPage(
             )
         }
 
-        // Search row — tight against the filter rows below so the
+        // Search row - tight against the filter rows below so the
         // entire control band reads as one premium strip.
         Row(
             modifier = Modifier.fillMaxWidth().padding(start = 72.dp, end = 24.dp, top = 2.dp, bottom = 6.dp),
@@ -251,7 +251,7 @@ fun V2NzbSeeAllPage(
             }
         }
 
-        // Year filter — only render the row if anything's loaded.
+        // Year filter - only render the row if anything's loaded.
         if (availableYears.isNotEmpty()) {
             FilterRow(label = "Year") {
                 CompactFilterChip(text = "Any", selected = yearFilter == null, onClick = { yearFilter = null })
@@ -280,7 +280,7 @@ fun V2NzbSeeAllPage(
             }
         }
 
-        // Min rating — common quality cutoffs. Filter is client-side
+        // Min rating - common quality cutoffs. Filter is client-side
         // and uses the highest available source-normalized score per
         // item (IMDb preferred, then TMDB, then anything else
         // converted to a 0-10 scale).
@@ -295,7 +295,7 @@ fun V2NzbSeeAllPage(
             }
         }
 
-        // Rating source — only show items that have a verified rating
+        // Rating source - only show items that have a verified rating
         // from the chosen provider. Useful for finding TMDB-curated
         // titles vs. ones with full IMDb / RT coverage.
         FilterRow(label = "Rating source") {
@@ -397,7 +397,7 @@ private fun FilterRow(
 }
 
 /**
- * Slim capsule filter chip — the whole point of replacing
+ * Slim capsule filter chip - the whole point of replacing
  * TorveFilterChip on the see-all page. Gives the filter band a clean,
  * almost text-link feel: no fill when inactive (just colour), accent
  * underline-pill when active. Significantly less vertical real-estate
@@ -431,7 +431,7 @@ private fun CompactFilterChip(
 
 /**
  * TMDB movie genre id → display name. Mirrors TMDB's `/genre/movie/list`
- * fixed list as of 2026 — matches the genre IDs returned in
+ * fixed list as of 2026 - matches the genre IDs returned in
  * [com.torve.data.metadata.TmdbMultiResult.genreIds]. Hard-coded to
  * avoid an extra API call just to label chips.
  */
@@ -442,7 +442,7 @@ private fun CompactFilterChip(
 private const val TARGET_VISIBLE = 100
 
 /** Subset of rating sources surfaced as filter chips. TORVE is a
- *  computed score, not a real provider — no point filtering by it.
+ *  computed score, not a real provider - no point filtering by it.
  *  RT_AUDIENCE is excluded because it follows the same API path as
  *  ROTTEN_TOMATOES and adds noise to the chip row. */
 private val RATING_SOURCE_FILTERS: List<com.torve.domain.model.RatingSource> = listOf(
@@ -485,7 +485,7 @@ private fun matchesClientFilters(
  * Best-effort 0-10 score from a [com.torve.domain.model.MediaRatings].
  * IMDb takes priority (most users align mental rankings to it), then
  * TMDB, then RT/Metacritic/Trakt/MDBList normalised /10. Returns null
- * if the item carries no rating at all — those rows are filtered out
+ * if the item carries no rating at all - those rows are filtered out
  * when a min-rating threshold is active.
  */
 private fun bestNormalizedScore(r: com.torve.domain.model.MediaRatings?): Float? {

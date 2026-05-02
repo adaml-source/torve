@@ -30,7 +30,7 @@ import java.io.File
  *     in-flight LAN clients lose access.
  *
  * Default state is **off**. When the master toggle flips on but the
- * LAN-bind toggle is still off, the server runs on loopback only —
+ * LAN-bind toggle is still off, the server runs on loopback only -
  * matching pre-Prompt-9 behavior so existing tests stay valid.
  */
 class LanServingController(
@@ -42,7 +42,7 @@ class LanServingController(
     private val authClient: AuthClient,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
-    /** The HTTP server. Constructed lazily — only bound after `start()`. */
+    /** The HTTP server. Constructed lazily - only bound after `start()`. */
     private val server: LocalLanHttpServer = LocalLanHttpServer(
         manifestProvider = { snapshotManifestBlocking() },
         tokenTable = tokenTable,
@@ -52,9 +52,9 @@ class LanServingController(
     @Volatile
     private var started: Boolean = false
 
-    /** For tests / diagnostics — the bound port, or -1 when stopped. */
+    /** For tests / diagnostics - the bound port, or -1 when stopped. */
     val serverPort: Int get() = server.port
-    /** For tests / diagnostics — the in-process auth secret, or null when stopped. */
+    /** For tests / diagnostics - the in-process auth secret, or null when stopped. */
     val serverSecret: String? get() = server.secret
 
     fun start() {
@@ -103,7 +103,7 @@ class LanServingController(
 
     /**
      * The HTTP server's worker thread calls this once per `/local/manifest`
-     * request. Blocking is fine — the worker pool is JDK HttpServer's, not
+     * request. Blocking is fine - the worker pool is JDK HttpServer's, not
      * a coroutine dispatcher.
      */
     private fun snapshotManifestBlocking(): LanLibraryManifest = runBlocking { currentManifest() }

@@ -49,7 +49,7 @@ import kotlinx.coroutines.launch
 /**
  * Combined catalogue + AI search page.
  *
- * The AI mode is an inline toggle on the same search bar — no extra
+ * The AI mode is an inline toggle on the same search bar - no extra
  * window, no overlay. Pressing the toggle:
  *   * with a configured AI provider → switches the search to natural-
  *     language mode. The TMDB results pane is replaced with AI-resolved
@@ -71,7 +71,7 @@ fun V2SearchPage(
     onOpenDetail: (MediaItem) -> Unit,
     /** Currently configured AI provider from Settings. */
     aiProvider: AiProvider,
-    /** Active API key for that provider — blank means "not set up". */
+    /** Active API key for that provider - blank means "not set up". */
     aiApiKey: String,
     /**
      * Caller jumps the user to the AI provider section in Settings. Wired
@@ -186,10 +186,10 @@ fun V2SearchPage(
                         value = aiQuery,
                         onValueChange = { aiQuery = it },
                         modifier = Modifier.fillMaxWidth(0.5f),
-                        placeholder = "Ask Torve in plain English…",
+                        placeholder = "Ask Torve in plain English...",
                     )
                     com.torve.desktop.ui.components.TorvePrimaryButton(
-                        text = if (aiLoading) "Asking…" else "Ask",
+                        text = if (aiLoading) "Asking..." else "Ask",
                         onClick = { runAiSearch(aiQuery) },
                         enabled = !aiLoading && aiQuery.isNotBlank(),
                     )
@@ -216,12 +216,12 @@ fun V2SearchPage(
                             aiMode = true
                             notConfiguredNotice = false
                         } else {
-                            // Refused — render the banner below.
+                            // Refused - render the banner below.
                             notConfiguredNotice = true
                         }
                     },
                 )
-                // Provider status badge — visible whenever a provider is
+                // Provider status badge - visible whenever a provider is
                 // configured, so the user always sees who would answer.
                 if (providerConfigured) {
                     TorveBadge(
@@ -260,7 +260,7 @@ fun V2SearchPage(
                 }
             }
 
-            // Filter chips — only meaningful for catalogue search; the
+            // Filter chips - only meaningful for catalogue search; the
             // AI flow infers the media type from the prompt itself.
             if (!aiMode) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -301,7 +301,7 @@ fun V2SearchPage(
                         val bannerTitle = r.title.takeIf { it.isNotBlank() } ?: "No matches"
                         TorveBanner(
                             title = bannerTitle,
-                            description = "Try rephrasing — the AI couldn't surface a confident match.",
+                            description = "Try rephrasing - the AI couldn't surface a confident match.",
                             tone = TorveBannerTone.Info,
                         )
                     }

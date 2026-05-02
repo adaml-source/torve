@@ -12,10 +12,10 @@ import kotlinx.serialization.json.Json
 import java.io.File
 
 /**
- * Local file library — Phase 2 first cut.
+ * Local file library - Phase 2 first cut.
  *
  * Tracks a list of root folders (configured by the user) and surfaces the
- * video files found inside them. No metadata matching yet — entries are
+ * video files found inside them. No metadata matching yet - entries are
  * keyed by absolute path and labelled with their filename. Real
  * TMDB-backed enrichment is a follow-up; the bones (data model, scan,
  * persistence, UI surface) come first.
@@ -140,10 +140,10 @@ class LocalLibraryRepository(rootDir: File = desktopDataDir()) {
     /**
      * Walk every entry that hasn't yet been matched (or whose previous
      * match attempt is older than [retryAfterMs]) and look it up via
-     * TMDB. Single-flight, polite — one entry at a time, with a small
+     * TMDB. Single-flight, polite - one entry at a time, with a small
      * inter-call delay so we never blast the API.
      *
-     * Cancellable via the calling coroutine — partial progress is
+     * Cancellable via the calling coroutine - partial progress is
      * persisted as we go so a kill mid-walk doesn't lose work.
      */
     suspend fun enrichAllNeeded(
@@ -160,7 +160,7 @@ class LocalLibraryRepository(rootDir: File = desktopDataDir()) {
         _enrichmentProgress.value = EnrichmentProgress(done = 0, total = candidates.size)
 
         for ((index, entry) in candidates.withIndex()) {
-            // Re-read state — earlier iterations may have updated it,
+            // Re-read state - earlier iterations may have updated it,
             // and folder removal could have nuked this entry mid-loop.
             val live = _state.value.entries.firstOrNull { it.absolutePath == entry.absolutePath }
                 ?: continue
@@ -194,7 +194,7 @@ class LocalLibraryRepository(rootDir: File = desktopDataDir()) {
             val results = repo.searchMultiPaged(query = parsed.title, page = 1, type = type).items
             // Prefer matches whose year matches the parsed year, falling
             // back to the first result. TMDB's relevance ranking is
-            // already pretty good — this just nudges it toward the right
+            // already pretty good - this just nudges it toward the right
             // re-release year when the user has specifically tagged one.
             val byYear = parsed.year?.let { y -> results.firstOrNull { it.year == y } }
             byYear ?: results.firstOrNull()
@@ -207,7 +207,7 @@ class LocalLibraryRepository(rootDir: File = desktopDataDir()) {
      * Resolve TMDB episode names for any series entry that's been
      * matched (tmdbId set) but doesn't yet have [LibraryEntry.episodeTitle].
      *
-     * Batched by (tmdbId, seasonNumber) — one TMDB `getSeasonDetail`
+     * Batched by (tmdbId, seasonNumber) - one TMDB `getSeasonDetail`
      * call covers the whole season's episodes. 100ms inter-call delay
      * to stay polite. Cancel-safe: persists per batch.
      */
@@ -258,7 +258,7 @@ class LocalLibraryRepository(rootDir: File = desktopDataDir()) {
         val refreshed = current.folders.flatMap { scanFolder(File(it.path)) }
             .distinctBy { it.absolutePath }
             .map { fresh ->
-                // Carry TMDB metadata across — file size / mtime can
+                // Carry TMDB metadata across - file size / mtime can
                 // change without invalidating the match.
                 previous[fresh.absolutePath]?.let { old ->
                     fresh.copy(
@@ -284,7 +284,7 @@ class LocalLibraryRepository(rootDir: File = desktopDataDir()) {
         val rootAbs = root.absolutePath
         // Walk all files, filter to recognised video extensions. Hidden
         // files and dot-directories skipped. Capped at MAX_ENTRIES per
-        // root to keep the in-memory list manageable on huge libraries —
+        // root to keep the in-memory list manageable on huge libraries -
         // metadata-matching upgrade can lift this once entries become
         // queryable rather than fully loaded.
         val out = ArrayList<LibraryEntry>()

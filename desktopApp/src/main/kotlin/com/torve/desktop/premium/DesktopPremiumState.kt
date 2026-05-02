@@ -28,7 +28,7 @@ import kotlinx.coroutines.launch
  *  - Every 60s while we're signed in (the polling job)
  *
  * Premium gates throughout the UI subscribe to [hasPremium] (a
- * StateFlow<Boolean>) — flipping false routes the action to the
+ * StateFlow<Boolean>) - flipping false routes the action to the
  * upgrade screen rather than executing.
  */
 class DesktopPremiumState(
@@ -52,7 +52,7 @@ class DesktopPremiumState(
     private var aggressiveJob: Job? = null
 
     /**
-     * Force a refresh now — call after sign-in completes, after purchase
+     * Force a refresh now - call after sign-in completes, after purchase
      * verification, or when the user manually requests a re-check.
      * No-op when no access token is available (signed out).
      */
@@ -100,7 +100,7 @@ class DesktopPremiumState(
      * Poll every 3s for the next [windowSeconds] seconds, then stop.
      * Used right after the user clicks Upgrade so the moment the
      * backend records the entitlement, gating clears without waiting
-     * up to 60s for the regular poll. Idempotent — replaces any prior
+     * up to 60s for the regular poll. Idempotent - replaces any prior
      * aggressive window.
      */
     fun pollAggressivelyFor(windowSeconds: Int = 300) {

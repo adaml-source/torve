@@ -23,7 +23,7 @@ import java.math.BigInteger
  *
  * Public-key wire format here is the **raw 32-byte little-endian
  * u-coordinate**, matching RFC 7748 §5. JDK exposes that via
- * [XECPublicKey.getU] (a [BigInteger]) — we serialize/deserialize by
+ * [XECPublicKey.getU] (a [BigInteger]) - we serialize/deserialize by
  * hand to keep the wire format compatible with non-Java receivers
  * (CryptoKit on iOS, libsodium etc.).
  */
@@ -64,7 +64,7 @@ class JvmTransferCryptoEngine : TransferCryptoEngine {
 
         return hkdfSha256(
             inputKeyingMaterial = sharedSecret,
-            salt = ByteArray(32),  // explicit zero-salt — RFC 5869 § 2.2 default
+            salt = ByteArray(32),  // explicit zero-salt - RFC 5869 § 2.2 default
             info = info,
             length = 32,
         )

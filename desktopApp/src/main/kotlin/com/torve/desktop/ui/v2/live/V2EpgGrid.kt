@@ -89,7 +89,7 @@ fun V2EpgGrid(
     isReminderSet: (Channel, EpgProgramme) -> Boolean = { _, _ -> false },
     onToggleReminder: (Channel, EpgProgramme) -> Unit = { _, _ -> },
     /**
-     * Per-slot recording status — drives the small pill on the row and
+     * Per-slot recording status - drives the small pill on the row and
      * the Record / Cancel-recording label in the programme dropdown.
      * Defaults to NONE so callers that don't wire DVR keep working.
      */
@@ -122,7 +122,7 @@ fun V2EpgGrid(
             verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
         ) {
             CircularProgressIndicator()
-            Text("Building guide…", color = colors.textSecondary)
+            Text("Building guide...", color = colors.textSecondary)
             Text(
                 "Loading channels and matching them to EPG entries.",
                 color = colors.textSecondary,
@@ -134,7 +134,7 @@ fun V2EpgGrid(
 
     if (guideChannels.isEmpty() || playlistId == null) {
         // Distinguish "EPG arrived but no channels matched" from "no EPG at all"
-        // — the recovery action is different. With matched programmes, the user
+        // - the recovery action is different. With matched programmes, the user
         // needs to surface channels (load via Channels mode); without, they
         // need to configure an EPG URL.
         val hasEpg = epgProgrammeCount > 0
@@ -203,7 +203,7 @@ fun V2EpgGrid(
 
         Spacer(Modifier.height(8.dp))
 
-        // Time header — fixed at top, scrolls horizontally with the grid.
+        // Time header - fixed at top, scrolls horizontally with the grid.
         Row(Modifier.fillMaxWidth()) {
             Spacer(Modifier.width(ChannelColumnWidth).height(TimeHeaderHeight))
             Box(
@@ -276,7 +276,7 @@ fun V2EpgGrid(
                 }
             }
 
-            // Now-indicator overlay — rendered on top of the grid, offset by scroll.
+            // Now-indicator overlay - rendered on top of the grid, offset by scroll.
             NowIndicatorOverlay(
                 nowMs = nowMs,
                 gridStartMs = gridStartMs,
@@ -629,7 +629,7 @@ private fun ProgrammeCell(
             }
         }
 
-        // Programme context menu — Play, catchup, favorite, reminder, find
+        // Programme context menu - Play, catchup, favorite, reminder, find
         // repeats, copy info. Anchored to the cell; auto-dismisses on outside
         // click.
         DropdownMenu(
@@ -677,7 +677,7 @@ private fun ProgrammeCell(
                     com.torve.presentation.recording.RecordingSlotStatus.COMPLETED ->
                         "✓  Recording saved"
                     com.torve.presentation.recording.RecordingSlotStatus.FAILED ->
-                        "⚠  Recording failed — try again"
+                        "⚠  Recording failed - try again"
                     com.torve.presentation.recording.RecordingSlotStatus.CANCELLED ->
                         "⏺  Record this programme"
                 }
@@ -696,7 +696,7 @@ private fun ProgrammeCell(
                 text = { Text("📋  Copy show info") },
                 onClick = { menuOpen = false; onCopyInfo() },
             )
-            // Read-only context — reminds the user what they're acting on.
+            // Read-only context - reminds the user what they're acting on.
             HorizontalDivider()
             DropdownMenuItem(
                 text = {
@@ -916,7 +916,7 @@ private fun formatTimeRange(startMs: Long, endMs: Long): String {
     val zone = ZoneId.systemDefault()
     val start = HourMinuteFormatter.format(Instant.ofEpochMilli(startMs).atZone(zone))
     val end = HourMinuteFormatter.format(Instant.ofEpochMilli(endMs).atZone(zone))
-    return "$start–$end"
+    return "$start-$end"
 }
 
 private fun formatDayLabel(ms: Long): String {

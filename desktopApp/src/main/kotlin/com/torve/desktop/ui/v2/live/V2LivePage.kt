@@ -80,7 +80,7 @@ fun V2LivePage(
     // File-backed store under desktopDataDir; survives restarts. Each active
     // reminder has a coroutine that fires a tray notification ~1 minute
     // before the show starts.
-    // (Reminder firing now lives in the global ReminderScheduler — see Main.)
+    // (Reminder firing now lives in the global ReminderScheduler - see Main.)
     val reminderStore = remember {
         // Process-wide singleton; the Settings reminder list page reads
         // the same instance so changes here propagate immediately.
@@ -256,7 +256,7 @@ fun V2LivePage(
             return
         }
 
-        // Inline EPG error banner — surfaces the upstream message and offers a
+        // Inline EPG error banner - surfaces the upstream message and offers a
         // one-click retry without forcing the user into Guide mode to see it.
         channelsState.guideError?.let { msg ->
             EpgErrorBanner(
@@ -424,7 +424,7 @@ private fun ChannelListPane(
     ) {
         // IPTV catalogues frequently emit duplicates (same tvg-id across
         // multiple providers, identical URLs in stitched playlists). Keys
-        // must include the index or LazyColumn crashes the composition —
+        // must include the index or LazyColumn crashes the composition -
         // which on Compose Desktop kills the whole app.
         itemsIndexed(
             items = visibleChannels,

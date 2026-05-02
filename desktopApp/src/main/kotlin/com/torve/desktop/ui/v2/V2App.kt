@@ -142,14 +142,14 @@ fun V2App(
     // Navigation state
     var destination by remember { mutableStateOf(V2Destination.HOME) }
     var settingsOpen by remember { mutableStateOf(false) }
-    // Adult-mode toggle — surfaces a dedicated nav rail entry. Persisted
+    // Adult-mode toggle - surfaces a dedicated nav rail entry. Persisted
     // locally via AdultModePreferences so it survives across launches
     // independently of the server-driven content policy state.
     var adultModeEnabled by remember {
         mutableStateOf(com.torve.desktop.adult.AdultModePreferences.isEnabled())
     }
     var aiSearchOpen by remember { mutableStateOf(false) }
-    // Premium gate — when a free user attempts a gated action we set
+    // Premium gate - when a free user attempts a gated action we set
     // [premiumGateReason]; the overlay below intercepts. nulls = no gate.
     var premiumGateReason by remember { mutableStateOf<String?>(null) }
     val hasPremium = com.torve.desktop.premium.rememberHasPremium()
@@ -205,7 +205,7 @@ fun V2App(
     // Source picker is opened for download intent (keeps the embedded player from flashing).
     var downloadIntent by remember { mutableStateOf(false) }
 
-    // Shared NZB poster cache — both movies and TV go through the
+    // Shared NZB poster cache - both movies and TV go through the
     // same TMDB lookup cache. Held at this level so all NZB-driven
     // surfaces benefit from a hit on either type.
     val nzbPosterCache = remember {
@@ -226,7 +226,7 @@ fun V2App(
             ratingsEnricher = org.koin.java.KoinJavaComponent.get<com.torve.data.mdblist.RatingsEnricher>(
                 com.torve.data.mdblist.RatingsEnricher::class.java,
             ),
-            // Lambda so the lookup happens lazily — gives the user time
+            // Lambda so the lookup happens lazily - gives the user time
             // to enter a key in Settings without restarting.
             mdbListApiKey = {
                 kotlinx.coroutines.runBlocking {
@@ -240,7 +240,7 @@ fun V2App(
         )
     }
 
-    // TV-show counterpart to nzbCatalogService — separate state, same
+    // TV-show counterpart to nzbCatalogService - separate state, same
     // poster cache + ratings enricher.
     val nzbTvCatalogService = remember {
         com.torve.desktop.adult.NzbTvCatalogService(
@@ -291,7 +291,7 @@ fun V2App(
         if (authState.user != null) deviceGovernanceViewModel.fetchAccessState()
     }
 
-    // EPG prefetch — keep the live guide fresh without the user having to
+    // EPG prefetch - keep the live guide fresh without the user having to
     // open settings to refresh. Runs every 30 min while the app is open and
     // a playlist is selected. Idle-safe: skips when refresh is already in
     // flight (ensureEpgLoaded checks `epgRefreshJob?.isActive`).
@@ -436,7 +436,7 @@ fun V2App(
             val torbox = com.torve.desktop.adult.TorBoxUsenetClient()
             val res = torbox.resolve(hint.nzbUrl, torboxKey) { _ -> }
             res.onSuccess { resolved ->
-                // Best-effort logo fetch — TMDB's /tv/{id}/images
+                // Best-effort logo fetch - TMDB's /tv/{id}/images
                 // endpoint returns the show's branded title art. If
                 // the MediaItem already carries one (because the
                 // detail page hydrated it), we reuse that and skip
@@ -546,7 +546,7 @@ fun V2App(
         tray.setContinueWatching(
             homeState.continueWatching.take(5).map { wp ->
                 val episodeTag = if (wp.seasonNumber != null && wp.episodeNumber != null) {
-                    " — S${wp.seasonNumber}E${wp.episodeNumber}"
+                    " - S${wp.seasonNumber}E${wp.episodeNumber}"
                 } else ""
                 com.torve.desktop.tray.TrayContinueWatchingItem(
                     mediaId = wp.mediaId,
@@ -643,7 +643,7 @@ fun V2App(
     LaunchedEffect(playerController) { playerController.probeRuntime() }
     LaunchedEffect(playerState.phase, playerState.currentRequest?.mediaId) {
         // Reset the dismiss flag when the underlying state is neither RESUMABLE
-        // nor FAILED — those are the two states where the user is allowed to
+        // nor FAILED - those are the two states where the user is allowed to
         // dismiss the dock. Resetting here keeps a fresh dock visible the next
         // time playback transitions into a dismissable state.
         val undismissed = desktopDockVisualState(playerState, dismissed = false)
@@ -653,7 +653,7 @@ fun V2App(
         }
         // Only close the source picker once playback is actually under way.
         // RESOLVING/OPENING/BUFFERING are EXPECTED states while the picker is
-        // up — `prepareSourcePicker` itself transitions to RESOLVING, so
+        // up - `prepareSourcePicker` itself transitions to RESOLVING, so
         // closing on those phases swallowed the user's first click.
         if (playerState.phase in setOf(DesktopPlayerPhase.PLAYING, DesktopPlayerPhase.PAUSED)) {
             sourcePickerRoute = null
@@ -674,11 +674,11 @@ fun V2App(
         // Safety timeout: if the playlist DB is genuinely empty and a
         // background refresh fails silently (no error, no data), the sync
         // overlay would otherwise spin forever. After 8s we proceed to the
-        // Live TV page anyway — V2LivePage shows "No channels loaded"
+        // Live TV page anyway - V2LivePage shows "No channels loaded"
         // which is far more actionable than an infinite spinner.
         kotlinx.coroutines.delay(8000)
         if (liveTvNavigationPending) {
-            println("V2App: liveTvNavigationPending overlay timed out — proceeding without data")
+            println("V2App: liveTvNavigationPending overlay timed out - proceeding without data")
             settingsOpen = false
             fullDetailRoute = null
             personRouteId = null
@@ -753,9 +753,9 @@ fun V2App(
         return false
     }
 
-    // Update checker — kicks off once on first composition. State is held
+    // Update checker - kicks off once on first composition. State is held
     // on the global UpdateChecker singleton so the File menu's "Check for
-    // updates…" item shares the same instance and result.
+    // updates..." item shares the same instance and result.
     val updateState by (com.torve.desktop.globalUpdateChecker?.state
         ?: kotlinx.coroutines.flow.MutableStateFlow(com.torve.desktop.updates.UpdateChecker.Result.UpToDate))
         .collectAsState()
@@ -766,7 +766,7 @@ fun V2App(
         }
     }
 
-    // Local library TMDB enrichment — fires once on first composition,
+    // Local library TMDB enrichment - fires once on first composition,
     // then again whenever a folder is added (state.folders.size changes).
     // The repository handles its own change detection (skips entries
     // matched within the last 24h), so we don't need to debounce here.
@@ -774,7 +774,7 @@ fun V2App(
     LaunchedEffect(localLibraryState.folders.size, localLibraryState.entries.size) {
         com.torve.desktop.globalLocalLibrary.enrichAllNeeded(metadataRepository)
         // Once series matches are settled, fetch episode names per
-        // season so the library shows "S01E01 — Pilot" instead of
+        // season so the library shows "S01E01 - Pilot" instead of
         // just the marker. Cheap when there's nothing new to fetch.
         com.torve.desktop.globalLocalLibrary.enrichEpisodeTitles(metadataRepository)
     }
@@ -796,7 +796,7 @@ fun V2App(
                 // In PiP mode we fall through to the shell and float the video
                 // as a small overlay so the user can keep browsing.
                 if (isEmbeddedActive && !pipMode && mpvEngine != null) {
-                    // MPV path — chrome around the canvas (heavyweight z-order
+                    // MPV path - chrome around the canvas (heavyweight z-order
                     // prevents Compose overlay; mpv's OSC handles in-frame).
                     var showMpvSubtitleSearch by remember { mutableStateOf(false) }
                     Box(Modifier.fillMaxSize()) {
@@ -1191,7 +1191,7 @@ fun V2App(
                                 },
                             )
                             V2Destination.SPORTS -> {
-                                // Same indexer + TorBox plumbing as Adult — read
+                                // Same indexer + TorBox plumbing as Adult - read
                                 // straight from Panda config, no separate setup.
                                 val pandaState by pandaSetupViewModel.state.collectAsState()
                                 fun String.isUsableSecret(): Boolean =
@@ -1251,7 +1251,7 @@ fun V2App(
                             }
                             V2Destination.ADULT -> {
                                 // Both the indexer credentials and the TorBox API key live
-                                // inside Panda's config — re-asking would duplicate setup.
+                                // inside Panda's config - re-asking would duplicate setup.
                                 // Pull them straight from Panda's state.
                                 val pandaState by pandaSetupViewModel.state.collectAsState()
                                 val torboxKey = if (pandaState.downloadClient == "torbox")
@@ -1259,7 +1259,7 @@ fun V2App(
                                 // Multi-indexer rows first; fall back to the legacy single-
                                 // indexer fields for older Panda deploys whose config
                                 // predates the nzbIndexers array. Panda redacts
-                                // secrets on manifest-token reads — treat the
+                                // secrets on manifest-token reads - treat the
                                 // literal "[redacted]" as effectively missing.
                                 fun String.isUsableSecret(): Boolean =
                                     isNotBlank() && !contains("redact", ignoreCase = true)
@@ -1282,7 +1282,7 @@ fun V2App(
                                     indexerKey = ""
                                 }
                                 // Detect the case where Panda has indexers but the secrets
-                                // are masked — surface a different message than "no indexer".
+                                // are masked - surface a different message than "no indexer".
                                 val indexerSecretsRedacted = indexerKey.isBlank() && (
                                     pandaState.nzbIndexers.any { it.type != "none" } ||
                                     pandaState.nzbIndexer != "none"
@@ -1290,7 +1290,7 @@ fun V2App(
                                 val torboxKeyUsable = if (pandaState.downloadClient == "torbox" &&
                                     pandaState.downloadClientApiKey.isUsableSecret()
                                 ) pandaState.downloadClientApiKey else ""
-                                println("TORVE ADULT ┃ indexer type=${activeIndexer?.type ?: pandaState.nzbIndexer} url=$indexerUrl keyPrefix=${indexerKey.take(6)}… redacted=$indexerSecretsRedacted")
+                                println("TORVE ADULT ┃ indexer type=${activeIndexer?.type ?: pandaState.nzbIndexer} url=$indexerUrl keyPrefix=${indexerKey.take(6)}... redacted=$indexerSecretsRedacted")
                                 com.torve.desktop.ui.v2.adult.V2AdultPage(
                                     newznab = remember { com.torve.desktop.adult.NewznabClient() },
                                     torbox = remember { com.torve.desktop.adult.TorBoxUsenetClient() },
@@ -1340,7 +1340,7 @@ fun V2App(
                     // ── Picture-in-Picture overlay ────────────────────
                     // Floats in the bottom-right while the rest of the shell
                     // stays interactive. Same AWT Canvas as the full-screen
-                    // surface — the outer `if` above ensures only one mounts.
+                    // surface - the outer `if` above ensures only one mounts.
                     if (isEmbeddedActive && pipMode && vlcEngine != null) {
                         com.torve.desktop.ui.v2.playback.V2PipOverlay(
                             engine = vlcEngine,
@@ -1404,8 +1404,8 @@ fun V2App(
                         modifier = Modifier.align(Alignment.CenterStart).zIndex(2f),
                     )
 
-                    // Update-available banner — slim pill at top-center.
-                    // Auto-dismissable; the File → "Check for Updates…"
+                    // Update-available banner - slim pill at top-center.
+                    // Auto-dismissable; the File → "Check for Updates..."
                     // menu item is the manual entry point.
                     val available = updateState as? com.torve.desktop.updates.UpdateChecker.Result.Available
                     if (available != null && !updateBannerDismissed && !settingsOpen) {
@@ -1445,7 +1445,7 @@ fun V2App(
                         }
                     }
 
-                    // User badge — compact circular avatar at top-right.
+                    // User badge - compact circular avatar at top-right.
                     // Used to be a wide email-bearing pill; that overlapped
                     // page chrome on every surface. Now it's a 36dp circle
                     // showing initials. Click expands a dropdown with the
@@ -1479,7 +1479,7 @@ fun V2App(
                                     onDismissRequest = { accessMenuExpanded = false },
                                     containerColor = colors.drawerSurface,
                                 ) {
-                                    // Identity header — disabled item so it
+                                    // Identity header - disabled item so it
                                     // reads as context, not a tap target.
                                     androidx.compose.material3.DropdownMenuItem(
                                         text = {
@@ -1623,7 +1623,7 @@ fun V2App(
             }
         }
 
-        // Command palette overlay — sits above everything when open so it
+        // Command palette overlay - sits above everything when open so it
         // works regardless of which page or modal the user is on.
         if (commandPaletteOpen) {
             val paletteActions = remember(destination, settingsOpen) {
@@ -1676,7 +1676,7 @@ fun V2App(
                     add(
                         com.torve.desktop.ui.v2.palette.CommandPaletteAction(
                             id = "check_updates",
-                            label = "Check for updates…",
+                            label = "Check for updates...",
                             hint = "Query the configured update channel",
                             keywords = listOf("upgrade", "release", "version"),
                             action = {
@@ -1722,7 +1722,7 @@ fun V2App(
             )
         }
 
-        // Keyboard help overlay — Cmd+/ from anywhere, plus exposed via
+        // Keyboard help overlay - Cmd+/ from anywhere, plus exposed via
         // command palette as "Keyboard shortcuts".
         if (keyboardHelpOpen) {
             com.torve.desktop.ui.v2.help.KeyboardHelpOverlay(
@@ -1730,7 +1730,7 @@ fun V2App(
             )
         }
 
-        // Premium-required modal — surfaced by `premiumGuard` when a
+        // Premium-required modal - surfaced by `premiumGuard` when a
         // free user attempts a gated action (Play, Save, Connect, etc.).
         premiumGateReason?.let { reason ->
             com.torve.desktop.premium.PremiumRequiredOverlay(
@@ -1739,7 +1739,7 @@ fun V2App(
             )
         }
 
-        // AI search overlay — natural-language → KeywordSearchService → results.
+        // AI search overlay - natural-language → KeywordSearchService → results.
         if (aiSearchOpen) {
             com.torve.desktop.ui.v2.search.V2AiSearchOverlay(
                 keywordSearch = org.koin.java.KoinJavaComponent.get(
@@ -1791,7 +1791,7 @@ private fun userBadgeInitials(label: String): String {
 /**
  * Snapshot of the active Newznab indexer pulled from Panda config.
  * Used by the Movies-tab "Latest on Usenet" shelf and the dedicated
- * see-all page so they share the same resolution logic — multi-indexer
+ * see-all page so they share the same resolution logic - multi-indexer
  * rows preferred, with the legacy single-indexer fields as a fallback
  * for older Panda configs. Filters redacted secrets out so the catalog
  * service doesn't fire requests with `[redacted]` as an apiKey.

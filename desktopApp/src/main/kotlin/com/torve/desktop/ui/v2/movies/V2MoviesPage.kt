@@ -157,7 +157,7 @@ fun V2MoviesPage(
 
                 // Rails (10 total: 3 core + 7 extra).
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    // Skeleton state — shown while the catalog is still
+                    // Skeleton state - shown while the catalog is still
                     // hydrating and no rails have data yet.
                     if (state.trendingItems.isEmpty() && state.popularItems.isEmpty() && state.topRatedItems.isEmpty()) {
                         repeat(3) {
@@ -186,12 +186,12 @@ fun V2MoviesPage(
                         }
                     }
 
-                    // "Latest on Usenet" — fresh NZB releases TMDB-matched
+                    // "Latest on Usenet" - fresh NZB releases TMDB-matched
                     // and rendered as normal movie posters. Click opens
                     // the standard detail page; before opening, we
                     // register the original NZB in NzbPlaybackHints so
                     // the next Play for this tmdbId resolves through
-                    // TorBox (the NZB *is* the playable source — we
+                    // TorBox (the NZB *is* the playable source - we
                     // already know it exists on the indexer). Without
                     // the hint, the standard Stremio-addon source
                     // resolver might return zero candidates and the

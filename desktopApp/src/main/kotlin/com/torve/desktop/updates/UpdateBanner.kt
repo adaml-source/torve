@@ -29,7 +29,7 @@ import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
  *
  *   * When the appcast feed includes a direct `<enclosure url=...>`
  *     installer URL, render **Download & install** as the primary
- *     action — wired by the caller to [UpdateInstallerHandoff.start].
+ *     action - wired by the caller to [UpdateInstallerHandoff.start].
  *   * Otherwise fall back to **View release** (open the release page
  *     in the OS browser).
  *
@@ -65,7 +65,7 @@ fun UpdateBanner(
                     color = colors.textPrimary,
                 )
                 Text(
-                    text = "${info.name} — you're on $currentVersion",
+                    text = "${info.name} - you're on $currentVersion",
                     style = MaterialTheme.typography.labelSmall,
                     color = colors.textSecondary,
                     maxLines = 1,

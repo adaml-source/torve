@@ -9,7 +9,7 @@ import java.util.concurrent.TimeUnit
 /**
  * Optional YouTube URL resolver backed by the `yt-dlp` command-line tool.
  *
- * yt-dlp is the de-facto standard YouTube extractor in 2026 — it gets
+ * yt-dlp is the de-facto standard YouTube extractor in 2026 - it gets
  * weekly releases tracking YouTube's player changes, and works where
  * NewPipeExtractor and VLC's bundled `youtube.luac` both regularly fail.
  *
@@ -17,9 +17,9 @@ import java.util.concurrent.TimeUnit
  * binary with its own update cadence and security posture). Instead we
  * detect it in two places:
  *
- *  1. `desktopDataDir()/yt-dlp(.exe)` — the user can drop a binary here
+ *  1. `desktopDataDir()/yt-dlp(.exe)` - the user can drop a binary here
  *     manually and Torve will use it for trailers.
- *  2. The system PATH — for users who already have yt-dlp installed via
+ *  2. The system PATH - for users who already have yt-dlp installed via
  *     `brew install yt-dlp`, `pip install yt-dlp`, etc.
  *
  * If neither is present this resolver returns null and TrailerOverlay
@@ -87,7 +87,7 @@ object YtDlpResolver {
     /** Whether a usable yt-dlp binary is reachable right now. */
     fun isAvailable(): Boolean = locateBinary() != null
 
-    /** Public entry for the installer — same as [locateBinary] but exposed. */
+    /** Public entry for the installer - same as [locateBinary] but exposed. */
     fun locate(): String? = locateBinary()
 
     /**

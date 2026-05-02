@@ -13,7 +13,7 @@ package com.torve.desktop.ui.onboarding
  * The holder is bound as a Koin `single` so both the onboarding shell
  * and V2App see the same instance.
  *
- * Carries no secrets — only an enum-tagged target.
+ * Carries no secrets - only an enum-tagged target.
  */
 class DesktopOnboardingDeepLink {
 

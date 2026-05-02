@@ -206,8 +206,8 @@ fun V2SettingsPage(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             TorvePageHeader(
-                title = "Settings",
-                subtitle = "Desktop should expose the same control surface as the rest of Torve.",
+                title = ds("Settings"),
+                subtitle = ds("Desktop should expose the same control surface as the rest of Torve."),
             )
             SettingsCategory.entries.forEach { category ->
                 TorveSidebarItem(
@@ -228,10 +228,10 @@ fun V2SettingsPage(
         ) {
             TorvePageHeader(
                 title = ds(selectedCategory.label),
-                subtitle = selectedCategory.description,
+                subtitle = ds(selectedCategory.description),
             )
 
-            // Persistent (until-dismissed) Panda nudge — easiest path to
+            // Persistent (until-dismissed) Panda nudge - easiest path to
             // wiring debrid + indexer access. Only shown to users who can
             // actually finish the flow (signed in + email verified +
             // premium entitlement); Panda's addon catalog is premium-
@@ -515,7 +515,7 @@ private fun CustomizationSection(
                 }
             }
 
-            // Engine selector — VLC always selectable; MPV Labs always
+            // Engine selector - VLC always selectable; MPV Labs always
             // visible but disabled when libmpv is unavailable. The
             // disabled row is the user's signal that MPV exists; the
             // premium info card below explains WHY it's disabled.
@@ -533,7 +533,7 @@ private fun CustomizationSection(
                     trailingNote = when {
                         mode == DesktopPlayerMode.VLC -> "Active"
                         mode == DesktopPlayerMode.MPV && !isSelectable -> "Unavailable on this device"
-                        mode == DesktopPlayerMode.MPV -> "Available — Labs"
+                        mode == DesktopPlayerMode.MPV -> "Available - Labs"
                         else -> null
                     },
                     onClick = {
@@ -544,7 +544,7 @@ private fun CustomizationSection(
                     },
                 )
             }
-            // Reset notice — only shown when the saved preference was
+            // Reset notice - only shown when the saved preference was
             // MPV and got normalized to VLC. Replaces the old playback
             // overlay/banner that used to ride along on every launch.
             labsSnapshot.resetNotice?.let { msg ->
@@ -596,7 +596,7 @@ private fun CustomizationSection(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 )
                 Text(
-                    text = "5–60 seconds per seek press.",
+                    text = "5-60 seconds per seek press.",
                     style = MaterialTheme.typography.bodySmall,
                     color = TorveDesktopThemeTokens.colors.textSecondary,
                     modifier = Modifier.padding(top = 14.dp),
@@ -636,7 +636,7 @@ private fun CustomizationSection(
                         onValueChange = { input ->
                             input.toIntOrNull()?.let { settingsViewModel.setLastVolume(it) }
                         },
-                        label = "Saved Volume (0–100)",
+                        label = "Saved Volume (0-100)",
                         modifier = Modifier.width(200.dp),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     )
@@ -715,7 +715,7 @@ private fun CustomizationSection(
 
         TorveSectionCard(
             title = "Adult Catalog",
-            supportingText = "Surface a dedicated 'Adult' tab that queries TMDB with adult=true. Public torrent addons mostly will not have these titles — works best with a Panda Usenet indexer.",
+            supportingText = "Surface a dedicated 'Adult' tab that queries TMDB with adult=true. Public torrent addons mostly will not have these titles - works best with a Panda Usenet indexer.",
         ) {
             var adultEnabled by remember {
                 mutableStateOf(com.torve.desktop.adult.AdultModePreferences.isEnabled())
@@ -766,7 +766,7 @@ private fun FolderPickerRow(
         ) {
             Box(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = path.ifBlank { "Not set — click Browse to choose" },
+                    text = path.ifBlank { "Not set - click Browse to choose" },
                     style = MaterialTheme.typography.bodyMedium,
                     color = if (path.isBlank()) colors.textMuted else colors.textPrimary,
                 )
@@ -829,7 +829,7 @@ private fun RatingsSection(
                 onValueChange = { input ->
                     input.toIntOrNull()?.coerceIn(0, 9)?.let { update { copy(maxRatingsOnCard = it) } }
                 },
-                label = "Max Ratings on Card (0–9)",
+                label = "Max Ratings on Card (0-9)",
                 modifier = Modifier.width(200.dp),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             )
@@ -889,7 +889,7 @@ private fun SubscriptionSection() {
             subtitle = listOfNotNull(
                 source?.let { "via ${it.replaceFirstChar { c -> c.uppercase() }}" },
                 if (autoRenew == true) "auto-renew on" else if (autoRenew == false) "auto-renew off" else null,
-            ).joinToString(" · ").ifBlank { "—" },
+            ).joinToString(" · ").ifBlank { "-" },
             trailing = {
                 TorveBadge(
                     text = tierLabel,
@@ -944,7 +944,7 @@ private fun SubscriptionSection() {
 
 private fun formatIsoDateForDisplay(iso: String): String {
     // Backend returns ISO-8601 (e.g. "2026-05-27T10:15:00Z"). Trim to date for display
-    // unless the time-of-day is meaningful — keep "yyyy-MM-dd HH:mm" so renewals
+    // unless the time-of-day is meaningful - keep "yyyy-MM-dd HH:mm" so renewals
     // showing the same day stay distinguishable.
     return runCatching {
         val instant = java.time.Instant.parse(iso)
@@ -1052,7 +1052,7 @@ private fun IntegrationsSection(
         if (!hasPremium) {
             com.torve.desktop.premium.PremiumLockedSection(
                 title = "Premium required to save integrations",
-                description = "Trakt, Simkl, debrid, Panda, and Kodi credentials sync to your Torve account on a Premium plan. Read-only access to already-saved integrations remains available — saving / connecting new ones is gated. Upgrade at torve.app.",
+                description = "Trakt, Simkl, debrid, Panda, and Kodi credentials sync to your Torve account on a Premium plan. Read-only access to already-saved integrations remains available - saving / connecting new ones is gated. Upgrade at torve.app.",
                 onUpgrade = {
                     runCatching {
                         java.awt.Desktop.getDesktop().browse(
@@ -1085,7 +1085,7 @@ private fun IntegrationsSection(
 private fun PandaSection(onOpenPandaSetup: () -> Unit) {
     TorveSectionCard(
         title = "Panda (guided setup)",
-        supportingText = "Configure debrid providers, torrent sources, usenet, and quality — Panda installs itself as an add-on.",
+        supportingText = "Configure debrid providers, torrent sources, usenet, and quality - Panda installs itself as an add-on.",
     ) {
         TorvePrimaryButton(
             text = "Open Panda setup",
@@ -1810,9 +1810,9 @@ private fun PlaylistsSection(
                     description = "Select a playlist and let desktop load the IPTV category catalog first.",
                 )
             } else {
-                // Group by country indicator — IPTV providers often ship
+                // Group by country indicator - IPTV providers often ship
                 // hundreds of categories (DE: News, DE: Sports, AT: News,
-                // …). Flat rendering scrolls forever, so collapse into
+                // ...). Flat rendering scrolls forever, so collapse into
                 // per-country sections with the count visible. Categories
                 // without a code fall under "Other" at the bottom.
                 val grouped = remember(channelsState.allCategories) {
@@ -1834,7 +1834,7 @@ private fun PlaylistsSection(
                     val countryLabel = if (countryCode.isEmpty()) "Other" else countryCode
                     val isExpanded = countryCode in expandedCountries
                     val totalChannels = categories.sumOf { it.channelCount }
-                    // Group-level hidden state — drives the Hide-All /
+                    // Group-level hidden state - drives the Hide-All /
                     // Show-All button label and the per-group status
                     // badge. Mixed = some hidden, some visible.
                     val hiddenInGroup = categories.count { it.name in channelsState.hiddenCategories }
@@ -1874,7 +1874,7 @@ private fun PlaylistsSection(
                                 )
                                 // Bulk toggle for the entire country
                                 // group. Clicking does NOT expand the
-                                // group — keeps the click target tight
+                                // group - keeps the click target tight
                                 // so the user can flip a group on/off
                                 // without scrolling.
                                 TorveGhostButton(
@@ -2042,7 +2042,7 @@ private fun PlaylistRow(
                     )
                 }
                 TorveGhostButton(
-                    text = if (isRefreshing) "Refreshing…" else "Refresh",
+                    text = if (isRefreshing) "Refreshing..." else "Refresh",
                     onClick = onRefresh,
                     enabled = !isRefreshing,
                 )
@@ -2314,7 +2314,7 @@ private fun AboutSection(
         TorveSectionCard(
             title = "Diagnostics & Updates",
             supportingText = "Crash reporting and the in-app update channel are configured " +
-                "via environment variables at launch. This section shows the live state — " +
+                "via environment variables at launch. This section shows the live state - " +
                 "set these on the launcher script or system env to enable.",
         ) {
             // Sentry
@@ -2322,7 +2322,7 @@ private fun AboutSection(
                 ?.takeIf { it.isNotBlank() } != null
             TorveListRow(
                 title = "Crash reporting (Sentry)",
-                subtitle = if (sentryEnabled) "Enabled" else "Disabled — DSN not set",
+                subtitle = if (sentryEnabled) "Enabled" else "Disabled - DSN not set",
                 trailing = {
                     TorveBadge(
                         text = if (sentryEnabled) "On" else "Off",
@@ -2354,7 +2354,7 @@ private fun AboutSection(
             val updateChannel = updateFeed ?: updateRepo?.let { "github.com/$it" }
             TorveListRow(
                 title = "Update channel",
-                subtitle = updateChannel ?: "Disabled — no repo or feed configured",
+                subtitle = updateChannel ?: "Disabled - no repo or feed configured",
                 trailing = {
                     TorveBadge(
                         text = if (updateChannel != null) "On" else "Off",
@@ -2365,12 +2365,12 @@ private fun AboutSection(
             TorveListRow(
                 title = "Update env vars",
                 subtitle = "${com.torve.desktop.updates.UpdateChecker.REPO_ENV} (owner/name) or " +
-                    "${com.torve.desktop.updates.UpdateChecker.FEED_ENV} (full URL — appcast XML or GitHub JSON)",
+                    "${com.torve.desktop.updates.UpdateChecker.FEED_ENV} (full URL - appcast XML or GitHub JSON)",
             )
 
             // Auto-check toggle. Persisted in Properties under
             // desktopDataDir(). Reads from the file each composition for
-            // simplicity — switching it off doesn't have an immediate
+            // simplicity - switching it off doesn't have an immediate
             // effect (the launch-time check has already fired) but it
             // takes effect on the next launch.
             var autoCheck by remember {
@@ -2445,7 +2445,7 @@ private fun AboutSection(
                     onClick = settingsViewModel::clearCache,
                 )
                 TorveGhostButton(
-                    text = "Export diagnostics…",
+                    text = "Export diagnostics...",
                     onClick = {
                         @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
                         kotlinx.coroutines.GlobalScope.launch {
@@ -2559,7 +2559,7 @@ private fun AboutSection(
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 TorveGhostButton(
-                    text = "Delete account…",
+                    text = "Delete account...",
                     onClick = { showDeleteAccountDialog = true },
                 )
             }
@@ -2618,7 +2618,7 @@ private fun formatTimestamp(value: Long): String {
 @Composable
 @androidx.compose.runtime.ReadOnlyComposable
 private fun formatPlaylistProgress(progress: PlaylistAddProgress?): String {
-    if (progress == null) return "Fetching playlist…"
+    if (progress == null) return "Fetching playlist..."
     return when (progress.phase) {
         PlaylistAddProgress.Phase.DOWNLOADING -> {
             val read = formatBytes(progress.bytesRead)
@@ -2627,8 +2627,8 @@ private fun formatPlaylistProgress(progress: PlaylistAddProgress?): String {
             if (total != null && total > 0) "$label $read / ${formatBytes(total)}"
             else "$label $read"
         }
-        PlaylistAddProgress.Phase.PARSING -> ds("Parsing channels…")
-        PlaylistAddProgress.Phase.SAVING -> ds("Saving to database…")
+        PlaylistAddProgress.Phase.PARSING -> ds("Parsing channels...")
+        PlaylistAddProgress.Phase.SAVING -> ds("Saving to database...")
     }
 }
 
@@ -2746,7 +2746,7 @@ private fun HomeShelfEditorCard(
     ) {
         if (ordered.isEmpty()) {
             Text(
-                text = "Loading…",
+                text = "Loading...",
                 style = MaterialTheme.typography.bodyMedium,
                 color = TorveDesktopThemeTokens.colors.textSecondary,
             )
@@ -2981,7 +2981,7 @@ private fun CardStylePresetEditorCard(
     ) {
         if (selectedPreset == null) {
             Text(
-                text = "No presets yet — create one to start editing.",
+                text = "No presets yet - create one to start editing.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.textSecondary,
             )
@@ -3323,7 +3323,7 @@ private fun SourcesSection(
     if (setupIntentsViewModel == null) {
         TorveSectionCard(
             title = "Setup & Sources",
-            supportingText = "Provider health is initializing…",
+            supportingText = "Provider health is initializing...",
         ) {}
         return
     }
@@ -3412,7 +3412,7 @@ private fun SourcesSection(
     var recoverySnap by remember {
         mutableStateOf<com.torve.presentation.providerhealth.ProviderHealthRecoverySnapshot?>(null)
     }
-    // Recompute when health rows change OR a new import lands — both
+    // Recompute when health rows change OR a new import lands - both
     // paths can cause the recovery card to need to disappear.
     LaunchedEffect(rawEntries, lastImportEpochMs) {
         recoverySnap = recoveryProvider.snapshot(healthEntries = rawEntries)
@@ -3425,7 +3425,7 @@ private fun SourcesSection(
         }
     }
     recoverySnap?.takeIf { it.shouldShowRecoveryCard }?.let { snap ->
-        // Human-readable category list — replaces the opaque
+        // Human-readable category list - replaces the opaque
         // "3 categories" count. Each chip names the affected provider
         // family AND a one-line impact statement so the user sees what's
         // blocked before deciding between transfer vs manual setup.
@@ -3467,7 +3467,7 @@ private fun SourcesSection(
                 )
                 Text(
                     text = "Why: provider credentials (Trakt, Plex, debrid keys, etc.) are " +
-                        "stored only on the device that authorized them — they never reach " +
+                        "stored only on the device that authorized them - they never reach " +
                         "Torve servers, by design. So they don't sync down when you sign in " +
                         "on a new device. Watch history and watchlist do sync; connections " +
                         "themselves do not.",
@@ -3480,7 +3480,7 @@ private fun SourcesSection(
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.textSecondary,
                 )
-                // Per-category impact list — gives the user the
+                // Per-category impact list - gives the user the
                 // "what's affected" answer without scrolling away.
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     missingDetails.forEach { (label, impact) ->
@@ -3511,7 +3511,7 @@ private fun SourcesSection(
                 }
                 Text(
                     text = "Fix options: (1) receive an encrypted credential bundle from a " +
-                        "device that already has these set up — Torve servers never see the " +
+                        "device that already has these set up - Torve servers never see the " +
                         "decrypted contents; or (2) open each provider's setup card above " +
                         "and re-authenticate / re-enter the credential here. Either path " +
                         "resolves the same items.",
@@ -3523,7 +3523,7 @@ private fun SourcesSection(
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // "Set up manually" used to just close the card —
+                    // "Set up manually" used to just close the card -
                     // now it dismisses the recovery card AND nudges the
                     // user to use the per-provider Setup & Sources rows
                     // above. The card naturally re-appears on next
@@ -3532,7 +3532,7 @@ private fun SourcesSection(
                         text = "Set up manually",
                         onClick = {
                             recoverySnap = null
-                            redirectNotice = "Use the Setup & Sources cards above — " +
+                            redirectNotice = "Use the Setup & Sources cards above - " +
                                 "tap \"Open setup\" on each row that says \"Not set up\"."
                         },
                     )
@@ -3578,7 +3578,7 @@ private fun SourcesSection(
                 // a human-readable hint about where the credentials
                 // actually live. Debrid (Real-Debrid / AllDebrid /
                 // Premiumize / TorBox) is configured inside the Panda
-                // setup wizard, NOT in Account — surfacing the wrong
+                // setup wizard, NOT in Account - surfacing the wrong
                 // destination silently was the cause of the previous
                 // confusion.
                 val routeToCategorySettings: (com.torve.domain.providerhealth.ProviderHealthCategory) -> Unit = { cat ->
@@ -3646,7 +3646,7 @@ private fun SourcesSection(
         }
     }
 
-    // Modal dialog hosting the receive screen — opened by the
+    // Modal dialog hosting the receive screen - opened by the
     // Provider Health row buttons. Visible immediately on click
     // regardless of scroll position.
     if (transferReceiveDialogOpen) {
@@ -3692,9 +3692,9 @@ private fun SourcesSection(
 
     // ── LAN library serving (Phase 3 Slice C / Prompt 9B) ─────────
     val lanStatusLabel = when {
-        !settingsState.lanServingEnabled -> "Off — desktop talks only to itself."
-        !settingsState.lanServingBindToLan -> "Loopback only — peers on this LAN cannot connect."
-        else -> "LAN published — peers on this network can authenticate and stream."
+        !settingsState.lanServingEnabled -> "Off - desktop talks only to itself."
+        !settingsState.lanServingBindToLan -> "Loopback only - peers on this LAN cannot connect."
+        else -> "LAN published - peers on this network can authenticate and stream."
     }
     TorveSectionCard(
         title = "LAN library",
@@ -3721,7 +3721,7 @@ private fun SourcesSection(
             subtitle = if (settingsState.lanServingBindToLan)
                 "Server is bound to your LAN interface; the hub is published to the registry. Disable to revert to loopback only."
             else
-                "Loopback only — flip to allow LAN-discovered TV / mobile to authenticate and stream.",
+                "Loopback only - flip to allow LAN-discovered TV / mobile to authenticate and stream.",
             checked = settingsState.lanServingBindToLan,
             onCheckedChange = settingsViewModel::setLanServingBindToLan,
         )
@@ -3745,7 +3745,7 @@ private fun SourcesSection(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TorveSecondaryButton(
-                text = if (cleanupRunning) "Working…" else "Free up space (watched downloads)",
+                text = if (cleanupRunning) "Working..." else "Free up space (watched downloads)",
                 onClick = {
                     cleanupRunning = true
                     cleanupSummary = null
@@ -3831,7 +3831,7 @@ private fun SourcesSection(
         }
     }
 
-    // Read-only diagnostics — closed-shape values only, no secrets.
+    // Read-only diagnostics - closed-shape values only, no secrets.
     com.torve.desktop.transfer.TransferDiagnosticsCard()
 }
 
@@ -3891,7 +3891,7 @@ private fun ProviderHealthRow(
         com.torve.presentation.providerhealth.ProviderRepairMapper.actionsFor(entry)
     }
     // Permanent location hint on rows whose credentials don't live in
-    // a Settings tab — surfaces "Configured in Panda setup" right next
+    // a Settings tab - surfaces "Configured in Panda setup" right next
     // to the row label so the user knows where to go even before
     // they click any repair button.
     val locationHint = when (entry.category) {
@@ -3950,7 +3950,7 @@ private fun ProviderHealthRow(
                 color = colors.textMuted,
             )
         }
-        // Inline repair actions — only when the row is unhealthy AND
+        // Inline repair actions - only when the row is unhealthy AND
         // at least one action applies. Transfer-from-another-device
         // routes to the existing receive screen.
         if (actions.isNotEmpty()) {
@@ -4002,7 +4002,7 @@ private fun StatusPill(
         com.torve.domain.providerhealth.ProviderHealthStatus.RED ->
             Triple("Action needed", colors.error.copy(alpha = 0.18f), colors.error)
         com.torve.domain.providerhealth.ProviderHealthStatus.UNKNOWN ->
-            Triple("Checking…", colors.info.copy(alpha = 0.18f), colors.info)
+            Triple("Checking...", colors.info.copy(alpha = 0.18f), colors.info)
         com.torve.domain.providerhealth.ProviderHealthStatus.UNCONFIGURED ->
             Triple("Not set up", colors.borderStrong.copy(alpha = 0.45f), colors.textSecondary)
     }
@@ -4104,7 +4104,7 @@ private fun EpgCorrectionCard(
         }
         if (allCategories.isEmpty()) {
             Text(
-                text = "No categories detected yet — load the channel list first.",
+                text = "No categories detected yet - load the channel list first.",
                 style = MaterialTheme.typography.bodySmall,
                 color = TorveDesktopThemeTokens.colors.textSecondary,
             )
@@ -4126,7 +4126,7 @@ private fun EpgCorrectionCard(
             }
         }
 
-        // Manual tvg-id remap — minimal text-based form for now.
+        // Manual tvg-id remap - minimal text-based form for now.
         Spacer(Modifier.height(12.dp))
         Text(
             text = "Channel id remap",
@@ -4189,7 +4189,7 @@ private fun EpgCorrectionCard(
             }
         }
 
-        // Stale-EPG banner — only when the VM has been told.
+        // Stale-EPG banner - only when the VM has been told.
         state.health?.takeIf { it.isStale }?.let {
             Spacer(Modifier.height(10.dp))
             TorveBanner(
@@ -4204,10 +4204,10 @@ private fun EpgCorrectionCard(
 
 /**
  * Engine selector row used by Settings → Desktop Playback. Renders the
- * engine name + a trailing status note ("Active", "Available — Labs",
+ * engine name + a trailing status note ("Active", "Available - Labs",
  * "Unavailable on this device") with an explicit disabled state. The
  * disabled state is the user-visible signal that MPV exists, even when
- * libmpv is missing — keeping the row visible (instead of hiding it
+ * libmpv is missing - keeping the row visible (instead of hiding it
  * entirely) is the premium behaviour the spec asks for.
  */
 @Composable
@@ -4241,7 +4241,7 @@ private fun EnginePickerRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // Custom radio dot — keeps the disabled visual neutral instead
+        // Custom radio dot - keeps the disabled visual neutral instead
         // of the platform RadioButton's "muted blue" which reads as
         // a yellow-warning to some users in our palette.
         Box(
@@ -4277,7 +4277,7 @@ private fun EnginePickerRow(
 
 /**
  * Premium info card for the MPV Labs engine. Replaces the old playback
- * overlay/warning that used to ride along during playback — the user
+ * overlay/warning that used to ride along during playback - the user
  * only sees this when they explicitly inspect Settings.
  */
 @Composable
@@ -4307,7 +4307,7 @@ private fun MpvLabsInfoCard(
                 color = colors.textPrimary,
                 modifier = Modifier.weight(1f),
             )
-            // Neutral pill — explicitly NOT yellow/warning. Premium
+            // Neutral pill - explicitly NOT yellow/warning. Premium
             // visual hierarchy: state is information, not alarm.
             TorveBadge(
                 text = snapshot.stateLabel,
@@ -4373,7 +4373,7 @@ private fun MpvLabsSetupGuideDialog(
                     )
                     TorveGhostButton(text = "Close", onClick = onDismiss)
                 }
-                // Plain-text scrollable body — preserves whitespace from
+                // Plain-text scrollable body - preserves whitespace from
                 // the helper so the path list reads correctly.
                 Box(
                     modifier = Modifier

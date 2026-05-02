@@ -176,7 +176,7 @@ private fun DeviceRow(
                 }
                 if (!device.is_current) {
                     TorveGhostButton(
-                        text = if (isRemoving) ds("Removing…") else ds("Remove"),
+                        text = if (isRemoving) ds("Removing...") else ds("Remove"),
                         onClick = { showConfirm = true },
                         enabled = !isRemoving,
                     )

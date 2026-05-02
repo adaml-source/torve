@@ -32,7 +32,7 @@ import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
 /**
  * Convenience helpers for premium-gating UI surfaces. Two patterns:
  *
- *  - [premiumGated] wraps an action lambda — invokes it when the user
+ *  - [premiumGated] wraps an action lambda - invokes it when the user
  *    has premium, otherwise calls [onUpgradeRequired] (which the page
  *    routes to its upgrade screen).
  *  - [PremiumLockedSection] replaces an entire section's content with
@@ -53,7 +53,7 @@ fun premiumGated(
 }
 
 /**
- * Compose-side check. Use in `enabled = …` props or to decide which
+ * Compose-side check. Use in `enabled = ...` props or to decide which
  * branch to render.
  */
 @Composable

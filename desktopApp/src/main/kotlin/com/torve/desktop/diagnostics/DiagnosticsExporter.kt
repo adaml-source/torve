@@ -15,11 +15,11 @@ import java.util.zip.ZipOutputStream
  * into a single zip file the user can attach to a bug report.
  *
  * Includes:
- *  - `system.txt` — OS, JVM, app version, env-var presence (no values)
+ *  - `system.txt` - OS, JVM, app version, env-var presence (no values)
  *  - Every JSON / Properties file under `desktopDataDir()` that doesn't
  *    look like a secret (so: window state, reminders, library catalogue,
- *    update prefs — but NOT the `desktop-secrets.properties` file)
- *  - `feature_inventory.txt` — pointer to the FEATURES.md doc location
+ *    update prefs - but NOT the `desktop-secrets.properties` file)
+ *  - `feature_inventory.txt` - pointer to the FEATURES.md doc location
  *
  * Excluded by design:
  *  - `desktop-secrets.properties` (debrid keys, addon tokens)
@@ -44,7 +44,7 @@ object DiagnosticsExporter {
     suspend fun exportTo(target: File): File = withContext(Dispatchers.IO) {
         target.parentFile?.mkdirs()
         ZipOutputStream(target.outputStream()).use { zip ->
-            // system.txt is generated text — redact before writing.
+            // system.txt is generated text - redact before writing.
             zip.putNextEntry(ZipEntry("system.txt"))
             zip.write(DiagnosticsRedactor.redact(systemSummary()).toByteArray(Charsets.UTF_8))
             zip.closeEntry()
@@ -60,7 +60,7 @@ object DiagnosticsExporter {
                     runCatching {
                         // Read as text and run through the redactor before
                         // archiving. Anything that fails to decode as UTF-8
-                        // is skipped — we only ship inspectable text.
+                        // is skipped - we only ship inspectable text.
                         val raw = f.readBytes()
                         val text = runCatching { raw.toString(Charsets.UTF_8) }.getOrNull()
                             ?: return@runCatching
@@ -78,7 +78,7 @@ object DiagnosticsExporter {
     }
 
     /**
-     * Default destination for an export — a timestamped zip on the
+     * Default destination for an export - a timestamped zip on the
      * user's Desktop if it exists, otherwise the home directory.
      */
     fun defaultTargetFile(): File {

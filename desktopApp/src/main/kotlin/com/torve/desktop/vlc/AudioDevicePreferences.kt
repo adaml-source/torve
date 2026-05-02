@@ -12,10 +12,10 @@ import java.util.Properties
  * next launch.
  *
  * Two fields stored:
- *  - `outputName` — e.g. `mmdevice`, `directsound`, `pulse`
- *  - `deviceId` — backend-specific GUID / ALSA name / Core Audio uid
+ *  - `outputName` - e.g. `mmdevice`, `directsound`, `pulse`
+ *  - `deviceId` - backend-specific GUID / ALSA name / Core Audio uid
  *
- * Both must match for the restore to fire — devices vanish/rename when
+ * Both must match for the restore to fire - devices vanish/rename when
  * the user unplugs hardware, so we silently skip restore on a miss
  * rather than half-applying.
  */

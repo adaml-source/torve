@@ -102,7 +102,7 @@ fun V2DeviceLimitReachedScreen(
             val activeDevices = state.devices.filter { it.is_active && it.removed_at == null }
             if (activeDevices.isEmpty()) {
                 TorvePlaceholderState(
-                    title = "Loading devices…",
+                    title = "Loading devices...",
                     description = "Fetching your current device list from the backend.",
                 )
             } else {
@@ -121,7 +121,7 @@ fun V2DeviceLimitReachedScreen(
         Spacer(Modifier.height(4.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TorvePrimaryButton(
-                text = if (state.isActivating) ds("Activating…") else ds("Try to activate now"),
+                text = if (state.isActivating) ds("Activating...") else ds("Try to activate now"),
                 onClick = { viewModel.activateCurrentDevice() },
                 enabled = !state.isActivating,
             )
@@ -157,7 +157,7 @@ private fun DeviceSlotRow(
                     TorveBadge(ds("This device"), tone = TorveBadgeTone.Accent)
                 } else {
                     TorveGhostButton(
-                        text = if (isRemoving) ds("Removing…") else ds("Remove & activate here"),
+                        text = if (isRemoving) ds("Removing...") else ds("Remove & activate here"),
                         onClick = { showConfirm = true },
                         enabled = !isRemoving,
                     )

@@ -48,7 +48,7 @@ import kotlinx.coroutines.launch
  * access tokens are structurally unable to reach this view.
  *
  * The "Probe relay now" button fires a single non-destructive
- * `getSession` against a deliberately bogus session id — it confirms
+ * `getSession` against a deliberately bogus session id - it confirms
  * the route family is mounted without consuming the user's quota.
  */
 @Composable
@@ -84,7 +84,7 @@ fun TransferDiagnosticsCard(
 
             val current = snapshot
             if (current == null) {
-                Text("Loading…", color = TorveDesktopThemeTokens.colors.textSecondary)
+                Text("Loading...", color = TorveDesktopThemeTokens.colors.textSecondary)
             } else {
                 StatusRow("Crypto engine", if (current.cryptoEngineAvailable) "available" else "unavailable", current.cryptoEngineAvailable)
                 StatusRow("Signed in", if (current.signedIn) "yes" else "no", current.signedIn)
@@ -111,7 +111,7 @@ fun TransferDiagnosticsCard(
                 )
                 Spacer(Modifier.width(8.dp))
                 TorvePrimaryButton(
-                    text = if (probing) "Probing relay…" else "Probe relay now",
+                    text = if (probing) "Probing relay..." else "Probe relay now",
                     enabled = !probing,
                     onClick = {
                         scope.launch {

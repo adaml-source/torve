@@ -36,7 +36,7 @@ import org.koin.mp.KoinPlatform
 /**
  * "My Recordings" desktop surface (Prompt 10B).
  *
- * Three sections — active, completed, failed — sourced from
+ * Three sections - active, completed, failed - sourced from
  * [RecordingsViewModel.state]. Each row carries title, channel,
  * window, duration, and action buttons:
  *
@@ -180,5 +180,5 @@ private fun formatWindow(startMs: Long, endMs: Long): String {
         .withZone(java.time.ZoneId.systemDefault())
     val start = fmt.format(java.time.Instant.ofEpochMilli(startMs))
     val end = fmt.format(java.time.Instant.ofEpochMilli(endMs))
-    return "$start – $end"
+    return "$start - $end"
 }

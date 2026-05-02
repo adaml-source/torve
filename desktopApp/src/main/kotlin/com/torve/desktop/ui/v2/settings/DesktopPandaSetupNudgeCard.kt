@@ -41,7 +41,7 @@ private const val PREF_KEY_PANDA_NUDGE_DISMISSED = "panda_setup_nudge_dismissed"
 
 /**
  * Desktop counterpart to the mobile PandaSetupNudgeCard. Visibility
- * predicates — all must be true:
+ * predicates - all must be true:
  *  - [eligible] = true. Panda completion needs the addon catalog, which
  *    is premium-gated, so nudging users who can't actually finish the
  *    flow is misleading. Callers usually compute this as
@@ -99,7 +99,7 @@ fun DesktopPandaSetupNudgeCard(
             )
             Spacer(Modifier.height(2.dp))
             Text(
-                text = "Easiest way to enable Torve's core source discovery — a guided wizard wires debrid + Usenet for you.",
+                text = "Easiest way to enable Torve's core source discovery - a guided wizard wires debrid + Usenet for you.",
                 color = colors.textSecondary,
             )
             Spacer(Modifier.height(10.dp))

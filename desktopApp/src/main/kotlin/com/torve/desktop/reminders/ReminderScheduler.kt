@@ -12,13 +12,13 @@ import kotlinx.coroutines.launch
  *
  * Subscribes to [EpgReminderStore.state] and (re-)schedules a single
  * `delay(...)` coroutine per reminder. Re-arms whenever the set
- * changes — adds, removes, snoozes (which mutate `startMs`).
+ * changes - adds, removes, snoozes (which mutate `startMs`).
  *
  * Was previously a per-V2LivePage scope which meant snoozing from
  * Settings (where the page isn't mounted) couldn't reschedule. The
  * scheduler now lives for the lifetime of the app, so reminders fire
  * regardless of which page the user is on (or even if the window is
- * minimised — the tray notification still appears).
+ * minimised - the tray notification still appears).
  *
  * Each fire dispatches via [com.torve.desktop.desktopNotify] which
  * routes to the AWT tray icon's `displayMessage`.
@@ -34,7 +34,7 @@ class ReminderScheduler(
 
     /**
      * Start observing the store. Call once at app startup. Idempotent
-     * for the same instance — subsequent calls are no-ops.
+     * for the same instance - subsequent calls are no-ops.
      */
     fun start() {
         scope.launch {
@@ -42,7 +42,7 @@ class ReminderScheduler(
                 synchronized(jobs) {
                     val activeKeys = reminders.map { it.key }.toSet()
                     // Cancel jobs for reminders that vanished or were
-                    // changed — re-arm fresh below.
+                    // changed - re-arm fresh below.
                     val toCancel = jobs.keys - activeKeys
                     toCancel.forEach { jobs.remove(it)?.cancel() }
                     reminders.forEach { reminder ->

@@ -24,7 +24,7 @@ import java.security.MessageDigest
  *     and WinSparkle on Windows are large native dependencies and
  *     out of scope for this slice.
  *   * Authenticode / Developer ID signature verification of the
- *     downloaded installer. The OS does that during install — but if
+ *     downloaded installer. The OS does that during install - but if
  *     the feed is unsigned and HTTPS is broken at the user's network,
  *     the installer Torve hands off could be tampered. Real release
  *     channels MUST sign the installer (covered by the operator
@@ -36,7 +36,7 @@ import java.security.MessageDigest
  *     Start menu.
  *
  * Contract:
- *   * Single-shot — one [start] call per [UpdateChecker.UpdateInfo].
+ *   * Single-shot - one [start] call per [UpdateChecker.UpdateInfo].
  *   * Cancelable via the returned coroutine job.
  *   * Idempotent on the temp file: re-downloads cleanly if the prior
  *     attempt was interrupted; refuses to launch a partial file.
@@ -72,7 +72,7 @@ class UpdateInstallerHandoff(
             return@withContext fail("Update feed didn't include a direct installer URL.")
         }
         if (!supportsHandoffOn(osNameSupplier())) {
-            return@withContext fail("Installer handoff not supported on this OS yet — use the View release link.")
+            return@withContext fail("Installer handoff not supported on this OS yet - use the View release link.")
         }
 
         // Refuse non-HTTPS to avoid handing off an unauthenticated

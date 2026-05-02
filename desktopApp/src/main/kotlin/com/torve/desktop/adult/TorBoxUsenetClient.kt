@@ -25,7 +25,7 @@ import java.util.UUID
  *
  * Uses the JDK HttpClient so we don't drag Ktor into desktopApp just
  * for this. All errors collapse to a [Result.failure] with a short
- * human-readable reason — the caller surfaces them to the user.
+ * human-readable reason - the caller surfaces them to the user.
  */
 class TorBoxUsenetClient {
 
@@ -39,7 +39,7 @@ class TorBoxUsenetClient {
     /**
      * Resolve a Newznab NZB URL to a TorBox-served stream URL. [onStatus]
      * is fired with short status updates (the user sees them in the
-     * Adult page row) — e.g. "Uploading NZB", "TorBox preparing 35%",
+     * Adult page row) - e.g. "Uploading NZB", "TorBox preparing 35%",
      * "Resolving link".
      */
     suspend fun resolve(
@@ -50,11 +50,11 @@ class TorBoxUsenetClient {
         require(nzbUrl.isNotBlank()) { "NZB URL is empty" }
         require(torboxApiKey.isNotBlank()) { "TorBox API key not set" }
 
-        onStatus("Downloading NZB from indexer…")
+        onStatus("Downloading NZB from indexer...")
         val nzbBytes = fetchBytes(nzbUrl)
             ?: error("Could not download NZB file from indexer")
 
-        onStatus("Uploading NZB to TorBox…")
+        onStatus("Uploading NZB to TorBox...")
         val createResp = uploadNzbMultipart(torboxApiKey, nzbBytes)
         val usenetId = parseCreateResponse(createResp)
             ?: run {
@@ -62,7 +62,7 @@ class TorBoxUsenetClient {
                 if (friendly != null) error(friendly) else error("TorBox upload failed (response: ${createResp.take(160)})")
             }
 
-        onStatus("TorBox queued · waiting…")
+        onStatus("TorBox queued · waiting...")
         val info = pollUntilReady(torboxApiKey, usenetId, onStatus)
         val files = info.files
         require(files.isNotEmpty()) { "TorBox download has no files" }
@@ -73,7 +73,7 @@ class TorBoxUsenetClient {
             ?: files.maxByOrNull { it.size }
             ?: files.first()
 
-        onStatus("Resolving stream link…")
+        onStatus("Resolving stream link...")
         val streamUrl = requestDownloadUrl(torboxApiKey, usenetId, target.id)
             ?: error("TorBox returned no download URL for file id ${target.id}")
 
@@ -133,7 +133,7 @@ class TorBoxUsenetClient {
         }
     }.getOrNull()
 
-    /** Heuristic — was the failure an auth issue the user can fix by rotating their key? */
+    /** Heuristic - was the failure an auth issue the user can fix by rotating their key? */
     fun isAuthError(message: String?): Boolean {
         if (message.isNullOrBlank()) return false
         val lower = message.lowercase()

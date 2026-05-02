@@ -10,7 +10,7 @@ import java.net.URI
  * Discovery order mirrors [com.torve.desktop.player.VlcRuntimeLocator]:
  * 1. Bundled Torve runtime under `runtime/<platform>/mpv/` next to the
  *    project root, dev classpath, or jpackage-built app dir.
- * 2. JVM property `torve.desktop.mpv.path` — explicit override.
+ * 2. JVM property `torve.desktop.mpv.path` - explicit override.
  * 3. Environment variable `TORVE_MPV_PATH`.
  * 4. Standard install paths (Windows: `C:\Program Files\mpv`).
  *
@@ -32,7 +32,7 @@ object MpvRuntimeLocator {
     fun discover(): DiscoveryResult {
         val attempted = mutableListOf<String>()
 
-        // 1. Bundled Torve runtime — same layout convention as VLC.
+        // 1. Bundled Torve runtime - same layout convention as VLC.
         for (baseDir in discoverBaseDirectories()) {
             for (relativePath in listOf(
                 "runtime/${osFolder()}/mpv",

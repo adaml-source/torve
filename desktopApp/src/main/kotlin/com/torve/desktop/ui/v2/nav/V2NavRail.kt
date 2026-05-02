@@ -122,7 +122,7 @@ fun V2NavRail(
         ) {
             // App icon with adaptive grounding ring on bright heroes
             Box(contentAlignment = Alignment.Center) {
-                // Dark backing ring — only visible on bright heroes
+                // Dark backing ring - only visible on bright heroes
                 if (iconRingAlpha > 0.01f) {
                     Box(
                         Modifier.size(34.dp).clip(CircleShape)

@@ -45,7 +45,7 @@ private val SUBTITLE_EXTENSIONS = setOf("srt", "ass", "ssa", "vtt", "sub", "sbv"
  * are forwarded to [SubtitleDropBus]; everything else is silently rejected
  * so a stray .mp4 can't replace the live media URL.
  *
- * Idempotent — subsequent calls replace the previous DropTarget.
+ * Idempotent - subsequent calls replace the previous DropTarget.
  */
 fun installSubtitleDropTarget(window: Window) {
     val root = (window as? javax.swing.RootPaneContainer)?.rootPane ?: return

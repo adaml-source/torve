@@ -17,7 +17,7 @@ import uk.co.caprica.vlcj.player.renderer.RendererItem
  * Represents a castable device discovered by VLC.
  */
 data class DesktopCastDevice(
-    /** Stable identity — VLC doesn't expose IDs, so we key off (type, name). */
+    /** Stable identity - VLC doesn't expose IDs, so we key off (type, name). */
     val id: String,
     val name: String,
     val type: String,
@@ -37,7 +37,7 @@ data class DesktopCastState(
  * Manages Chromecast / DLNA / AirPlay device discovery and active-renderer
  * selection via VLC's libvlc_renderer_discoverer_* APIs.
  *
- * On most VLC builds the relevant discoverer is `microdns` (mDNS-based —
+ * On most VLC builds the relevant discoverer is `microdns` (mDNS-based -
  * covers Chromecast, AirPlay, some DLNA renderers). We opportunistically
  * start every discoverer VLC exposes so behaviour degrades gracefully on
  * custom builds.
@@ -54,7 +54,7 @@ class DesktopCastController(
 
     /**
      * Enumerate and start every available renderer discoverer. Safe to call
-     * multiple times — subsequent calls are no-ops once discovery is running.
+     * multiple times - subsequent calls are no-ops once discovery is running.
      */
     fun startDiscovery() {
         if (started) return
@@ -137,7 +137,7 @@ class DesktopCastController(
         }
     }
 
-    /** Stop casting — resume local playback. */
+    /** Stop casting - resume local playback. */
     fun disconnect() {
         scope.launch {
             runCatching { engine.session?.setRenderer(null) }

@@ -6,12 +6,12 @@ package com.torve.desktop.adult
  * Background:
  *  - The Newznab spec defines `2000=Movies`, `2010=Movies/Foreign`,
  *    `2020=Movies/Other`, `2030=SD`, `2040=HD`, `2045=UHD`,
- *    `2050=BluRay`, `2060=3D`. None of these are language-coded — the
+ *    `2050=BluRay`, `2060=3D`. None of these are language-coded - the
  *    spec assumes a single language pool ("Foreign" = "not English").
  *  - Some indexers extend the spec with their own language-specific
  *    movie sub-categories. scenenzbs is the most explicit: 2100=German,
  *    2200=Spanish, etc. Others (NZBgeek, dognzb, NZBplanet) stick to
- *    the spec — for those we use cat=2000 and rely on title-based
+ *    the spec - for those we use cat=2000 and rely on title-based
  *    filtering (`GERMAN`/`DEUTSCH`/`MULTi` tags) downstream.
  *
  * If you support a new indexer, add a row here with whatever language
@@ -186,7 +186,7 @@ object IndexerCategoryMap {
     }
 
     /**
-     * Heuristic title-based language filter — used as a fallback when
+     * Heuristic title-based language filter - used as a fallback when
      * the indexer doesn't separate languages by category (NZBgeek etc.)
      * so we can still narrow results after the fetch. Returns true if
      * the title's language tags match any of the selected languages.

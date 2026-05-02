@@ -77,7 +77,7 @@ fun DesktopPandaSetupScreen(
 
     // Close wizard automatically once the addon is installed and the user clicks done
     LaunchedEffect(state.addonInstalled) {
-        // surfaced via review step — no-op here
+        // surfaced via review step - no-op here
     }
 
     val stepIndex = PandaSetupStep.entries.indexOf(state.currentStep)
@@ -119,11 +119,11 @@ fun DesktopPandaSetupScreen(
             modifier = Modifier.fillMaxWidth(),
         )
 
-        // Recovery banner removed (2026-04-27) — Panda configs are now
+        // Recovery banner removed (2026-04-27) - Panda configs are now
         // bound to the Torve account on the backend (Panda commit 972fa4a),
         // so management_token recovery is no longer needed for the owner's
         // own configs. Edit operations authenticate via the Torve JWT plus
-        // the X-Panda-Config-Id header — see PandaApiClient.
+        // the X-Panda-Config-Id header - see PandaApiClient.
 
         when (state.currentStep) {
             PandaSetupStep.PROVIDER -> ProviderStep(state, viewModel)
@@ -213,7 +213,7 @@ private fun ProviderStep(state: PandaSetupUiState, viewModel: PandaSetupViewMode
                                 fontWeight = FontWeight.SemiBold,
                             )
                             val subtitle = if (provider.id == "none") {
-                                "No debrid — configure Usenet on the next steps"
+                                "No debrid - configure Usenet on the next steps"
                             } else {
                                 provider.authMethods.joinToString(" / ") { method ->
                                     when (method) {
@@ -319,7 +319,7 @@ private fun OAuthSection(state: PandaSetupUiState, viewModel: PandaSetupViewMode
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
                 Spacer(Modifier.width(8.dp))
-                Text("Waiting for authorization…", style = MaterialTheme.typography.bodySmall)
+                Text("Waiting for authorization...", style = MaterialTheme.typography.bodySmall)
             }
         }
     } else {
@@ -337,7 +337,7 @@ private fun ApiKeySection(state: PandaSetupUiState, viewModel: PandaSetupViewMod
             modifier = Modifier.fillMaxWidth(),
         )
         TorvePrimaryButton(
-            text = if (state.authLoading) "Validating…" else "Validate & connect",
+            text = if (state.authLoading) "Validating..." else "Validate & connect",
             onClick = { viewModel.validateApiKey() },
             enabled = state.apiKeyInput.isNotBlank() && !state.authLoading,
         )
@@ -365,7 +365,7 @@ private fun SourcesStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel
                 }
             }
         }
-        // Surface the language picker here too — the website shows it
+        // Surface the language picker here too - the website shows it
         // alongside debrid/quality at the top, but the desktop wizard
         // splits each section across steps. Putting it on Sources gives
         // users a chance to pick languages without having to walk all
@@ -454,7 +454,7 @@ private fun UsenetStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel)
                 label = "Password",
                 modifier = Modifier.fillMaxWidth(),
                 placeholder = if ("usenet_password" in state.serverHasSecrets) {
-                    "Saved on server — type to replace"
+                    "Saved on server - type to replace"
                 } else null,
             )
             if (state.usenetProvider == "generic") {
@@ -485,7 +485,7 @@ private fun UsenetStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel)
                     },
                     onRemove = { viewModel.removeIndexer(index) },
                     canRemove = state.nzbIndexers.size > 1,
-                    indexerKeyPlaceholder = if (keyOnServer) "Saved on server — type to replace" else null,
+                    indexerKeyPlaceholder = if (keyOnServer) "Saved on server - type to replace" else null,
                 )
             }
             Spacer(Modifier.height(8.dp))
@@ -596,7 +596,7 @@ private fun BandwidthSaverSection(state: PandaSetupUiState, viewModel: PandaSetu
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    "Bandwidth saver — use NZB path when available",
+                    "Bandwidth saver - use NZB path when available",
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -652,7 +652,7 @@ private fun DownloadClientFields(state: PandaSetupUiState, viewModel: PandaSetup
                 label = "Password",
                 modifier = Modifier.fillMaxWidth(),
                 placeholder = if ("download_client_password" in state.serverHasSecrets) {
-                    "Saved on server — type to replace"
+                    "Saved on server - type to replace"
                 } else null,
             )
             "apiKey" -> PandaSecretField(
@@ -661,7 +661,7 @@ private fun DownloadClientFields(state: PandaSetupUiState, viewModel: PandaSetup
                 label = "API key",
                 modifier = Modifier.fillMaxWidth(),
                 placeholder = if ("download_client_api_key" in state.serverHasSecrets) {
-                    "Saved on server — type to replace"
+                    "Saved on server - type to replace"
                 } else null,
             )
         }
@@ -785,7 +785,7 @@ private fun ReviewStep(
     TorveSectionCard(title = "Review & save") {
         TorveListRow(
             title = "Provider",
-            subtitle = state.selectedProvider?.name ?: "—",
+            subtitle = state.selectedProvider?.name ?: "-",
         )
         TorveListRow(
             title = "Auth",
@@ -812,14 +812,14 @@ private fun ReviewStep(
 
         Spacer(Modifier.height(12.dp))
 
-        // Show a success banner whenever a save just completed — works
+        // Show a success banner whenever a save just completed - works
         // for both initial install AND edit-mode updates so the user
         // always gets confirmation. The auto-close LaunchedEffect above
         // will close the screen ~1.2s later.
         if (saveJustCompleted) {
             TorveBanner(
                 title = if (state.isEditMode) "Panda updated" else "Panda installed",
-                description = "Saved. Closing setup…",
+                description = "Saved. Closing setup...",
                 tone = TorveBannerTone.Success,
             )
             Spacer(Modifier.height(12.dp))
@@ -832,7 +832,7 @@ private fun ReviewStep(
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 TorvePrimaryButton(
                     text = when {
-                        state.isSaving -> "Saving…"
+                        state.isSaving -> "Saving..."
                         state.isEditMode -> "Update Panda"
                         else -> "Install Panda"
                     },
@@ -867,7 +867,7 @@ private fun openUrl(url: String) {
  * mistake the blank input for a wiped credential. The placeholder
  * inside the field stays as a secondary cue.
  *
- * The reveal state lives inside the composable — each field tracks its
+ * The reveal state lives inside the composable - each field tracks its
  * own visibility independently so toggling one doesn't expose the
  * others.
  */

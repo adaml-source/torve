@@ -7,12 +7,12 @@ import com.torve.domain.repository.DownloadRepository
 import java.io.File
 
 /**
- * Phase 3 Slice C — playback routing.
+ * Phase 3 Slice C - playback routing.
  *
  * Given an existing provider URL, ask the desktop's
  * [DownloadRepository] whether the same item is already on disk under
  * the [DownloadFolderAllowlist]. If so, the preferred route is the
- * local file — zero network, instant start, offline-safe. If not, the
+ * local file - zero network, instant start, offline-safe. If not, the
  * provider URL stays the preferred route.
  *
  * In a future slice the LAN streaming URL slot is filled in too; for

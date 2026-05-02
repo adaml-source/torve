@@ -10,7 +10,7 @@ import kotlinx.coroutines.sync.withLock
  * grid instead of plain text rows.
  *
  * Caches both hits and misses (negative-cache as `Match.None`) so we
- * don't re-query TMDB for releases that have no match — common for
+ * don't re-query TMDB for releases that have no match - common for
  * non-English/regional uploads or scene names with no canonical TMDB
  * entry. Lookup keys are `<title>|<year>` so different years of the
  * same title don't collide.
@@ -28,7 +28,7 @@ class NzbPosterCache(
             val backdropUrl: String?,
             val voteAverage: Double?,
             val overview: String?,
-            /** TMDB genre IDs — fed into the genre filter chips on the
+            /** TMDB genre IDs - fed into the genre filter chips on the
              *  Latest-on-Usenet see-all page. */
             val genreIds: List<Int> = emptyList(),
         ) : Match

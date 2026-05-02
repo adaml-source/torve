@@ -140,7 +140,7 @@ fun SubtitleSearchOverlay(
                 when {
                     loading && results.isEmpty() -> {
                         Text(
-                            "Querying subtitle addons…",
+                            "Querying subtitle addons...",
                             color = colors.textSecondary,
                             style = MaterialTheme.typography.bodyMedium,
                         )

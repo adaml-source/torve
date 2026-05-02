@@ -64,7 +64,7 @@ import kotlinx.coroutines.withContext
 
 /**
  * Movies catalog sourced directly from a Newznab indexer (e.g. scenenzbs)
- * with language-aware category routing — see [IndexerCategoryMap].
+ * with language-aware category routing - see [IndexerCategoryMap].
  *
  * Three filter dimensions:
  *  1. **Language pills** drive the `cat=` parameter via the indexer map.
@@ -137,7 +137,7 @@ fun V2NzbMoviesPage(
         loading = true
         errorText = null
         try {
-            // Pull up to 1,000 items — paginated and date-sorted by
+            // Pull up to 1,000 items - paginated and date-sorted by
             // NewznabClient. IO dispatcher so the blocking http.send
             // doesn't lock the Compose dispatcher.
             val raw = withContext(Dispatchers.IO) {
@@ -364,7 +364,7 @@ fun V2NzbMoviesPage(
                             downloadEnabled = downloadManager != null,
                             onReconfigure = onOpenPandaSetup,
                             onPlay = {
-                                resolveStatus = resolveStatus + (rowKey to "Starting…")
+                                resolveStatus = resolveStatus + (rowKey to "Starting...")
                                 println("TORVE NZBMOVIES ┃ play clicked: ${item.title}")
                                 scope.launch {
                                     val res = withContext(Dispatchers.IO) {
@@ -382,7 +382,7 @@ fun V2NzbMoviesPage(
                             },
                             onDownload = downloadManager?.let { dm ->
                                 {
-                                    resolveStatus = resolveStatus + (rowKey to "Starting…")
+                                    resolveStatus = resolveStatus + (rowKey to "Starting...")
                                     println("TORVE NZBMOVIES ┃ download clicked: ${item.title}")
                                     scope.launch {
                                         val res = withContext(Dispatchers.IO) {
@@ -394,7 +394,7 @@ fun V2NzbMoviesPage(
                                             resolveStatus = resolveStatus - rowKey
                                             // Look up TMDB for a poster URL we
                                             // can attach to the local Download
-                                            // row — gives the Library a poster
+                                            // row - gives the Library a poster
                                             // even before the file finishes.
                                             val parsed = NzbReleaseTitleParser.parse(item.title)
                                             val posterUrl = parsed?.let {
@@ -439,7 +439,7 @@ private fun NzbMoviePosterCard(
     val colors = TorveDesktopThemeTokens.colors
 
     // Resolve the TMDB match in the background. produceState gives the
-    // grid responsive scrolling — cards render with a placeholder
+    // grid responsive scrolling - cards render with a placeholder
     // immediately and swap to the poster once the lookup lands.
     val parsed = remember(item.title) { NzbReleaseTitleParser.parse(item.title) }
     val match by produceState<NzbPosterCache.Match?>(initialValue = null, parsed) {
@@ -555,7 +555,7 @@ private fun NzbMoviePosterCard(
                             )
                         }
                         TorvePrimaryButton(
-                            text = if (isWorking) "Working…" else "Play",
+                            text = if (isWorking) "Working..." else "Play",
                             onClick = onPlay,
                             enabled = torboxConfigured && !isWorking,
                         )

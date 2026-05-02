@@ -9,13 +9,13 @@ import kotlinx.serialization.encodeToString
 /**
  * Two-layer on-disk cache for the Latest-on-Usenet pipeline.
  *
- *   1. **Poster lookups** — the `<title>|<year>` → TMDB Match.Found map
+ *   1. **Poster lookups** - the `<title>|<year>` → TMDB Match.Found map
  *      built up by [NzbPosterCache]. Persists positive hits only;
  *      negative cache stays in-memory because it's cheap to recompute.
  *      TTL: 24h. Saving is debounced so a 100-row page doesn't fsync
  *      100 times.
  *
- *   2. **Catalog pages** — the matched-release list per
+ *   2. **Catalog pages** - the matched-release list per
  *      `(indexerType, language, query)` tuple maintained by
  *      [NzbCatalogService]. TTL: 1h. On stale hit we still hydrate
  *      from disk for instant rendering then fire a background refresh.
@@ -59,7 +59,7 @@ internal object NzbDiskCache {
         if (!file.exists()) return emptyMap()
         return runCatching {
             val parsed = json.decodeFromString<PosterCacheFile>(file.readText())
-            // Drop the whole map if it's older than the TTL — a stale
+            // Drop the whole map if it's older than the TTL - a stale
             // cache risks pinning posters to renamed/removed TMDB rows.
             if (System.currentTimeMillis() - parsed.savedAtMs > POSTER_TTL_MS) emptyMap()
             else parsed.entries

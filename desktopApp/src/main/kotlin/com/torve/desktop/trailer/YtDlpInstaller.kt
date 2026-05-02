@@ -14,7 +14,7 @@ import java.net.URL
 /**
  * Downloads the official yt-dlp binary from GitHub Releases on demand.
  *
- * yt-dlp is the only YouTube extractor that stays working in 2026 — every
+ * yt-dlp is the only YouTube extractor that stays working in 2026 - every
  * other approach (NewPipeExtractor, VLC's youtube.luac) breaks within a
  * month or two of every YouTube player update. The yt-dlp project ships
  * weekly releases tracking those changes; embedding it as a side-binary
@@ -49,7 +49,7 @@ object YtDlpInstaller {
      * absolute path on success, null on failure (network error, GitHub
      * rate limit, write failure, etc.).
      *
-     * Idempotent — if the binary is already cached or already on PATH,
+     * Idempotent - if the binary is already cached or already on PATH,
      * returns immediately without re-downloading.
      */
     suspend fun ensureInstalled(): String? = withContext(Dispatchers.IO) {

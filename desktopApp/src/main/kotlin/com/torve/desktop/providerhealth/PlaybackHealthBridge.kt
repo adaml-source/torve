@@ -20,7 +20,7 @@ import kotlinx.coroutines.launch
  *
  * Kept off the [DesktopPlayerController] constructor surface to keep the
  * controller free of provider-health concerns. Started once at app
- * startup; idempotent — calling [start] more than once is a no-op.
+ * startup; idempotent - calling [start] more than once is a no-op.
  */
 class PlaybackHealthBridge(
     private val controller: DesktopPlayerController,
@@ -42,7 +42,7 @@ class PlaybackHealthBridge(
                         DesktopPlayerPhase.PLAYING -> recordSuccess(state.runtimeInfo.activeMediaPath)
                         DesktopPlayerPhase.RUNTIME_ERROR,
                         DesktopPlayerPhase.RESOLUTION_FAILED -> recordFailure(state.engineMessage, state.phase)
-                        else -> { /* transient phases — no health update */ }
+                        else -> { /* transient phases - no health update */ }
                     }
                 }
         }
@@ -82,5 +82,5 @@ class PlaybackHealthBridge(
 
     /** Trim long URLs to keep the support row readable; never logs secrets. */
     private fun truncate(text: String): String =
-        if (text.length <= 80) text else text.take(77) + "…"
+        if (text.length <= 80) text else text.take(77) + "..."
 }

@@ -59,7 +59,7 @@ import kotlinx.coroutines.withContext
 
 /**
  * Adult catalog sourced from a Newznab indexer (e.g. scenenzbs.com).
- * Defaults to category 6010 — XXX/Movies — which contains single-movie
+ * Defaults to category 6010 - XXX/Movies - which contains single-movie
  * releases rather than clip megapacks.
  *
  * Each result is the raw NZB title from the indexer; we don't try to
@@ -70,7 +70,7 @@ import kotlinx.coroutines.withContext
  */
 /**
  * scenenzbs / standard Newznab XXX subcategories. The filter chips let
- * the user toggle multiple at once — Newznab APIs accept a comma-
+ * the user toggle multiple at once - Newznab APIs accept a comma-
  * separated `cat=` list, so combining them is a one-line concat.
  */
 private data class AdultCategoryPreset(val id: String, val label: String)
@@ -99,7 +99,7 @@ fun V2AdultPage(
     val colors = TorveDesktopThemeTokens.colors
     val scope = rememberCoroutineScope()
 
-    // Persistent state slot — survives composition teardown when the
+    // Persistent state slot - survives composition teardown when the
     // user taps Play and the player overlay swaps in. See
     // [NzbBrowseStateHolder] for the rationale.
     val pageKey = "adult"
@@ -134,7 +134,7 @@ fun V2AdultPage(
 
     /**
      * When no chip is selected we want a search to span *all* preset
-     * adult categories instead of falling back to a single default —
+     * adult categories instead of falling back to a single default -
      * otherwise a search like "blue" against an empty selection would
      * miss every release that lives outside Movies (6010).
      */
@@ -183,7 +183,7 @@ fun V2AdultPage(
     }
 
     LaunchedEffect(indexerUrl, indexerApiKey) {
-        // Skip the auto-reload if we already have a cached snapshot —
+        // Skip the auto-reload if we already have a cached snapshot -
         // the page should resume exactly where the user left it.
         if (configured && items.isEmpty()) reload()
     }
@@ -211,7 +211,7 @@ fun V2AdultPage(
             )
 
             // Only surface the configuration hint when playback is unavailable
-            // (TorBox key missing). When everything's set, no banner — just go.
+            // (TorBox key missing). When everything's set, no banner - just go.
             if (torboxApiKey.isBlank()) {
                 Spacer(Modifier.height(8.dp))
                 Surface(
@@ -239,7 +239,7 @@ fun V2AdultPage(
             }
 
             Spacer(Modifier.height(12.dp))
-            // Category chips — Panda already supplied the indexer URL +
+            // Category chips - Panda already supplied the indexer URL +
             // API key, so this is the only knob the user needs here.
             // Toggling fires a reload when the indexer is configured.
             androidx.compose.foundation.layout.FlowRow(
@@ -433,13 +433,13 @@ fun V2AdultPage(
                             downloadEnabled = downloadManager != null,
                             onPlay = {
                                 // Set status synchronously BEFORE the launch so the
-                                // Play button flips to "Working…" on the same frame
+                                // Play button flips to "Working..." on the same frame
                                 // as the click. Critical: dispatch the resolve onto
                                 // IO so the blocking HTTP send (`http.send` is sync
                                 // in java.net.http) doesn't freeze the Compose
-                                // dispatcher — without this, the UI is dead for
+                                // dispatcher - without this, the UI is dead for
                                 // ~30s while the NZB downloads from the indexer.
-                                resolveStatus = resolveStatus + (rowKey to "Starting…")
+                                resolveStatus = resolveStatus + (rowKey to "Starting...")
                                 println("TORVE ADULT ┃ play clicked: ${item.title}")
                                 scope.launch {
                                     val res = withContext(Dispatchers.IO) {
@@ -463,7 +463,7 @@ fun V2AdultPage(
                                     // gates on the per-surface folder being
                                     // configured; if not, surface a banner
                                     // that routes to Settings.
-                                    resolveStatus = resolveStatus + (rowKey to "Starting…")
+                                    resolveStatus = resolveStatus + (rowKey to "Starting...")
                                     println("TORVE ADULT ┃ download clicked: ${item.title}")
                                     scope.launch {
                                         val res = withContext(Dispatchers.IO) {
@@ -581,7 +581,7 @@ private fun NewznabRow(
                     )
                 }
                 TorvePrimaryButton(
-                    text = if (isWorking) "Working…" else "Play",
+                    text = if (isWorking) "Working..." else "Play",
                     onClick = onPlay,
                     enabled = torboxConfigured && !isWorking,
                 )

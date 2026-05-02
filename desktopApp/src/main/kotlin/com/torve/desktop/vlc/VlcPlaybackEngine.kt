@@ -66,7 +66,7 @@ class VlcPlaybackEngine : DesktopPlaybackEngine {
     }
 
     /**
-     * Create a new renderer discoverer by name. Caller owns the lifecycle —
+     * Create a new renderer discoverer by name. Caller owns the lifecycle -
      * must call `start()` / `stop()` / `release()`. Returns null if VLC isn't
      * ready or the name isn't supported.
      */

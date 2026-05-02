@@ -203,7 +203,7 @@ private fun ActiveReceiver(
 
             TorveBanner(
                 title = "End-to-end encrypted",
-                description = "The QR holds this device's one-time public key — it's safe to share " +
+                description = "The QR holds this device's one-time public key - it's safe to share " +
                     "with the other Torve device. The private half of this handshake never leaves " +
                     "this device, and the Torve backend never sees credentials in the clear.",
                 tone = TorveBannerTone.Info,
@@ -212,7 +212,7 @@ private fun ActiveReceiver(
             RelayStatusBanner(state.relayStatus)
 
             // When the relay registered the session, auto-import is on
-            // and the paste field is no longer the primary action — hide
+            // and the paste field is no longer the primary action - hide
             // it behind an "Advanced" toggle so the surface stays focused
             // on the QR. Always reachable regardless of relay state.
             val relayRegistered = state.relayStatus is RelayStatus.Registered
@@ -436,11 +436,11 @@ private fun importDescription(result: TransferImportResult): String = when (resu
 private fun RelayStatusBanner(status: RelayStatus) {
     when (status) {
         RelayStatus.NotConfigured -> {
-            // Nothing to surface — there's no relay; UI shows only the
+            // Nothing to surface - there's no relay; UI shows only the
             // local-only banner and the paste flow as primary action.
         }
         RelayStatus.Registering -> TorveBanner(
-            title = "Setting up auto-import…",
+            title = "Setting up auto-import...",
             description = "Asking the Torve backend to forward a encrypted bundle to this device.",
             tone = TorveBannerTone.Info,
         )

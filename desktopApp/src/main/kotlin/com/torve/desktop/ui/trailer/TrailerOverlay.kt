@@ -70,11 +70,11 @@ import kotlinx.coroutines.isActive
  * Spins up its own dedicated [VlcPlaybackEngine] so trailer playback never
  * disturbs (or competes with) any active main playback session. The engine
  * is released on dismiss. VLC's built-in `youtube.luac` resolver turns the
- * YouTube watch URL into a playable HLS/MP4 stream — no embedded WebView
+ * YouTube watch URL into a playable HLS/MP4 stream - no embedded WebView
  * needed, no Chromium dep, and no JxBrowser/JCEF native bundle.
  *
  * The overlay uses callback rendering (RV32 → ImageBitmap) just like the
- * main player surface; the chrome is tiny — a title, a centred 16:9 video
+ * main player surface; the chrome is tiny - a title, a centred 16:9 video
  * area, and a Close button.
  */
 @Composable
@@ -86,7 +86,7 @@ fun TrailerOverlay(
 ) {
     val colors = TorveDesktopThemeTokens.colors
     val engine = remember { VlcPlaybackEngine() }
-    // engine.sessionState is `currentSession?.eventBridge?.state` — null
+    // engine.sessionState is `currentSession?.eventBridge?.state` - null
     // until open() runs. Capturing it at composition time freezes us to a
     // placeholder flow that never emits, so the chrome looks stale.
     // Mirror it into a stable local MutableStateFlow once the session
@@ -104,7 +104,7 @@ fun TrailerOverlay(
     var currentFrame by remember { mutableStateOf<ImageBitmap?>(null) }
     var lastFrameCount by remember { mutableLongStateOf(0L) }
     var loadFailed by remember { mutableStateOf(false) }
-    // Quality selector — null = "Auto" (highest combined mp4 ≤1080p).
+    // Quality selector - null = "Auto" (highest combined mp4 ≤1080p).
     // When the user picks a specific resolution, the resolution-effect is
     // re-keyed and we restart playback at the chosen height.
     var qualityCap by remember { mutableStateOf<Int?>(null) }
@@ -150,7 +150,7 @@ fun TrailerOverlay(
                 // Carry over playback position + audio state across the URL
                 // swap. VLC's :start-time media option seeks the new
                 // stream; volume/mute must be re-applied AFTER VLC has
-                // reinitialised its audio device. Order matters — see
+                // reinitialised its audio device. Order matters - see
                 // the analogous block in the open() branch below.
                 val savedPositionMs = existing.getTime().coerceAtLeast(0L)
                 val savedVolume = existing.getVolume().takeIf { it > 0 } ?: TRAILER_DEFAULT_VOLUME
@@ -187,12 +187,12 @@ fun TrailerOverlay(
                 )
                 engine.open(session = session, autoPlay = true, startupTrace = null, resumePositionMs = null)
                 // VLC's bootstrap publishes whatever the audio device
-                // reports during initial open — often `mute=true,
+                // reports during initial open - often `mute=true,
                 // volume=0` while the device is still initialising.
                 // Order matters here: VlcPlayerSession.setVolume publishes
-                // refreshVolume(volumeParam, audio.isMute) — queries the
+                // refreshVolume(volumeParam, audio.isMute) - queries the
                 // mute. setMute publishes refreshVolume(audio.volume,
-                // muteParam) — queries the volume. So if we call
+                // muteParam) - queries the volume. So if we call
                 // setVolume(N) then setMute(b), the second call overwrites
                 // our N with VLC's stale audio.volume (still 0). Calling
                 // setMute first, then setVolume, ends with the volume
@@ -219,7 +219,7 @@ fun TrailerOverlay(
         }
     }
 
-    // Frame poller — same pattern as VlcComposePlayerSurface. Stops when the
+    // Frame poller - same pattern as VlcComposePlayerSurface. Stops when the
     // composable leaves the tree.
     LaunchedEffect(engine) {
         while (isActive) {
@@ -259,7 +259,7 @@ fun TrailerOverlay(
     // (Force-correct of mute/volume now happens explicitly inside the
     // resolve LaunchedEffect's open + play branches, after a 400-500ms
     // grace for VLC's audio device to settle. The state-keyed approach
-    // here was racy — it fired once on isPlaying transition but the
+    // here was racy - it fired once on isPlaying transition but the
     // bad state often arrived after.)
 
     val isFullscreen = windowState?.placement == WindowPlacement.Fullscreen
@@ -334,7 +334,7 @@ fun TrailerOverlay(
 }
 
 /**
- * Popup layout — Surface auto-sizes to content (no fillMaxSize wrapper)
+ * Popup layout - Surface auto-sizes to content (no fillMaxSize wrapper)
  * so the panel hugs the column and there is no dead space below the
  * chrome bar.
  */
@@ -437,7 +437,7 @@ private fun PopupTrailerLayout(
 }
 
 /**
- * Fullscreen layout — video fills the entire window via fillMaxSize +
+ * Fullscreen layout - video fills the entire window via fillMaxSize +
  * ContentScale.Fit, and chrome floats over the video at the bottom on a
  * translucent background. Top-right floating cluster replaces the popup
  * header.
@@ -537,7 +537,7 @@ private fun FullscreenTrailerLayout(
 }
 
 /**
- * Inner surface — either the live VLC frame, the failure recovery card,
+ * Inner surface - either the live VLC frame, the failure recovery card,
  * or the loading / installer-progress state. Used by both popup and
  * fullscreen layouts.
  */
@@ -566,7 +566,7 @@ private fun VideoOrPlaceholder(
                 )
                 Text(
                     text = if (ytDlpAvailable) {
-                        "yt-dlp couldn't fetch the stream (likely a YouTube update — yt-dlp may need an upgrade). Opening the trailer on YouTube as a workaround."
+                        "yt-dlp couldn't fetch the stream (likely a YouTube update - yt-dlp may need an upgrade). Opening the trailer on YouTube as a workaround."
                     } else {
                         "YouTube blocks generic scrapers, and our bundled extractor is currently broken. Install yt-dlp for reliable in-app trailers (drop yt-dlp.exe into Torve's data folder, or `brew install yt-dlp`). For now, open on YouTube."
                     },
@@ -607,10 +607,10 @@ private fun VideoOrPlaceholder(
                     text = if (installerState == com.torve.desktop.trailer.YtDlpInstaller.State.DOWNLOADING) {
                         val mb = installerProgress / 1_000_000
                         val totalMb = installerTotal?.let { it / 1_000_000 }
-                        if (totalMb != null) "Installing trailer helper…  $mb / $totalMb MB"
-                        else "Installing trailer helper…  $mb MB"
+                        if (totalMb != null) "Installing trailer helper...  $mb / $totalMb MB"
+                        else "Installing trailer helper...  $mb MB"
                     } else {
-                        "Loading trailer…"
+                        "Loading trailer..."
                     },
                     color = Color.White.copy(alpha = 0.85f),
                     style = MaterialTheme.typography.bodySmall,
@@ -697,7 +697,7 @@ private fun TrailerChrome(
                 )
             }
 
-            // Quality picker — when the user changes resolution we
+            // Quality picker - when the user changes resolution we
             // re-trigger the LaunchedEffect upstream to re-resolve the
             // stream URL at that height. Restarts from the beginning;
             // position-keeping isn't worth the complexity for trailers.
@@ -782,7 +782,7 @@ private fun qualityLabel(cap: Int?): String = when (cap) {
 
 /**
  * Initial volume the trailer player snaps to once VLC's audio device
- * settles. Polite default — louder than 50% (which feels weak for short
+ * settles. Polite default - louder than 50% (which feels weak for short
  * trailers) but not slamming at 100%. User can drag the slider to any
  * value in [0, 200] from there.
  */

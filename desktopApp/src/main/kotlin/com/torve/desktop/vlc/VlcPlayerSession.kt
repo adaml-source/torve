@@ -33,7 +33,7 @@ class VlcPlayerSession(
     private var currentMediaOptions: List<String> = emptyList()
 
     /**
-     * Legacy AWT Canvas field — kept for binary compatibility with anything
+     * Legacy AWT Canvas field - kept for binary compatibility with anything
      * still reading the property, but not used as the rendering surface
      * anymore. We render via [VlcFrameRenderer]'s callback path instead, so
      * Compose chrome is no longer occluded by a heavyweight peer.
@@ -117,7 +117,7 @@ class VlcPlayerSession(
         commandChannel.execute {
             val clamped = volume.coerceIn(0, 200)
             requirePlayer().audio().setVolume(clamped)
-            // Use the value we just set; never query audio.isMute here —
+            // Use the value we just set; never query audio.isMute here -
             // VLC's audio queries are racy during init and would
             // overwrite a fresh mute state with a stale read.
             eventBridge.refreshVolume(clamped, eventBridge.state.value.isMuted)
@@ -127,7 +127,7 @@ class VlcPlayerSession(
     suspend fun setMute(muted: Boolean) {
         commandChannel.execute {
             requirePlayer().audio().setMute(muted)
-            // Same reasoning as setVolume — keep the volume from current
+            // Same reasoning as setVolume - keep the volume from current
             // state; don't re-query VLC.
             eventBridge.refreshVolume(eventBridge.state.value.volume, muted)
         }
@@ -396,7 +396,7 @@ class VlcPlayerSession(
             player.audio().setVolume(targetVolume)
 
             // Publish the values we just SET, not what audio() reports.
-            // VLC's audio queries are racy on first init — they often
+            // VLC's audio queries are racy on first init - they often
             // return mute=true / volume=0 for a few hundred ms after the
             // setters are issued. Trusting those reads here used to leave
             // the chrome stuck on a mute icon with a zero slider while

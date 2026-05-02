@@ -114,7 +114,7 @@ class EpgReminderStore(rootDir: File) {
             json.decodeFromString(listSerializer, file.readText())
         }.getOrElse { t ->
             println("TORVE REMINDERS | corrupt store, ignoring: ${t.message}")
-            // Don't delete — keep the bad file around for inspection. Next
+            // Don't delete - keep the bad file around for inspection. Next
             // write will overwrite it with a valid one.
             emptyList()
         }

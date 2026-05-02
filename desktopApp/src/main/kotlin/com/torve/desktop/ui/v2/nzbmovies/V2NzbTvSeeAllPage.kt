@@ -140,7 +140,7 @@ fun V2NzbTvSeeAllPage(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = colors.textPrimary)
             }
             Text(
-                text = "Latest on Usenet — TV",
+                text = "Latest on Usenet - TV",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = colors.textPrimary,

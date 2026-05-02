@@ -427,7 +427,7 @@ fun DesktopPlaybackDock(
                 else -> "Playback"
             },
         )
-        // Surface S/E first — "Ready to resume • S1E1 • Piya Wiconi"
+        // Surface S/E first - "Ready to resume • S1E1 • Piya Wiconi"
         // beats "Ready to resume • shows • auto" for context.
         if (!episodeLabel.isNullOrBlank()) {
             append(" • ")
@@ -486,7 +486,7 @@ fun DesktopPlaybackDock(
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     // Hide the text title when the branded logo is
-                    // rendered — duplicate naming clutters the dock.
+                    // rendered - duplicate naming clutters the dock.
                     if (dockLogo == null) {
                         Text(
                             text = title,
@@ -537,7 +537,7 @@ fun DesktopPlaybackDock(
                     DesktopDockVisualState.FAILED -> {
                         TorveSecondaryButton(text = "Retry", onClick = onRetry)
                         TorveGhostButton(text = "Choose Source", onClick = onChooseSource)
-                        // Same dismiss action as the resumable state — without
+                        // Same dismiss action as the resumable state - without
                         // it, a failed dock had no close affordance and stuck
                         // around until the user navigated away or retried.
                         TorveGhostButton(text = "Dismiss", onClick = onDismissResumable)

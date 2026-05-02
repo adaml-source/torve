@@ -231,7 +231,7 @@ private fun DesktopOnboardingBackground(modifier: Modifier = Modifier) {
 }
 
 /**
- * Legacy single-card login retained for fallback only — replaced at
+ * Legacy single-card login retained for fallback only - replaced at
  * the entry point by DesktopPremiumAuthScreen (see DesktopAuthScreen.kt).
  * Kept private to avoid accidental external use; safe to delete in a
  * follow-up.
@@ -254,7 +254,7 @@ private fun DesktopPremiumLoginScreenLegacy(
             .fillMaxSize()
             .background(
                 // Two-stop dark vignette tinted with the brand accent
-                // — feels cinematic without committing a hero image.
+                // - feels cinematic without committing a hero image.
                 Brush.radialGradient(
                     colors = listOf(
                         colors.accent.copy(alpha = 0.18f),
@@ -300,7 +300,7 @@ private fun DesktopPremiumLoginScreenLegacy(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(20.dp),
                 ) {
-                    // Brand logo — TV-asset PNG of the Torve wordmark.
+                    // Brand logo - TV-asset PNG of the Torve wordmark.
                     androidx.compose.foundation.Image(
                         painter = androidx.compose.ui.res.painterResource("torve_logo.png"),
                         contentDescription = "Torve",
@@ -348,7 +348,7 @@ private fun DesktopPremiumLoginScreenLegacy(
                         },
                     )
 
-                    // Inline error — only when there's something to say,
+                    // Inline error - only when there's something to say,
                     // and styled as a single-line message rather than
                     // the chunky banner the old design used.
                     authState.authError?.takeIf { it.isNotBlank() }?.let { msg ->
@@ -377,7 +377,7 @@ private fun DesktopPremiumLoginScreenLegacy(
                     }
 
                     // Mode toggle as a quiet text link rather than a
-                    // sibling button — the primary action stays the
+                    // sibling button - the primary action stays the
                     // visual focus.
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -415,7 +415,7 @@ private fun DesktopPremiumLoginScreenLegacy(
             }
         }
 
-        // Tiny build chip in the corner — keeps the version visible
+        // Tiny build chip in the corner - keeps the version visible
         // for support without intruding on the centerpiece.
         Text(
             text = "${releaseInfo.versionLabel} · ${releaseInfo.channel}",

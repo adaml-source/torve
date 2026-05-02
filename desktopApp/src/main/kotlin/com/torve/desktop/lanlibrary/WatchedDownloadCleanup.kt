@@ -13,7 +13,7 @@ import java.io.File
  * the only files this helper deletes are those whose canonical path
  * sits strictly under one of the [DownloadFolderAllowlist] roots. A
  * download row whose `filePath` somehow drifted outside the allowlist
- * is left alone — we surface a [SkipReason] instead of attempting
+ * is left alone - we surface a [SkipReason] instead of attempting
  * deletion. This is the same fail-closed posture the LAN HTTP server
  * uses for streams.
  *
@@ -66,7 +66,7 @@ class WatchedDownloadCleanup(
             if (candidatePath.isNullOrBlank()) {
                 return@map CleanupOutcome.Skipped(row.mediaId, row.title, SkipReason.FILE_MISSING)
             }
-            // Strict allowlist gate — fail-closed. Even a stale row
+            // Strict allowlist gate - fail-closed. Even a stale row
             // pointing at a system path is left untouched.
             if (!allowlist.isAllowed(candidatePath)) {
                 return@map CleanupOutcome.Skipped(row.mediaId, row.title, SkipReason.OUTSIDE_ALLOWLIST)

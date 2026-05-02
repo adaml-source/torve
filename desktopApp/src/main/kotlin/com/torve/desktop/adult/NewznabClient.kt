@@ -40,7 +40,7 @@ class NewznabClient {
         limit: Int = 100,
     ): List<NewznabItem> {
         if (baseUrl.isBlank() || apiKey.isBlank()) return emptyList()
-        // `o=xml` is the *output format* (vs json) — distinct from sort
+        // `o=xml` is the *output format* (vs json) - distinct from sort
         // order, which Newznab keys as `attrs=` / sort. Pubdate-desc is
         // the default for movie/search, but we re-sort client-side too
         // so older indexers without that default still hand back the
@@ -135,7 +135,7 @@ class NewznabClient {
 
     /**
      * Sort by RSS `pubDate` parsed as RFC-1123 / 822 (Newznab's wire
-     * format). Items without a parseable date sink to the bottom — they
+     * format). Items without a parseable date sink to the bottom - they
      * almost always represent stale or malformed releases.
      */
     private fun List<NewznabItem>.sortedByDateDesc(): List<NewznabItem> =
@@ -172,7 +172,7 @@ class NewznabClient {
             .build()
         val resp = http.send(req, HttpResponse.BodyHandlers.ofString())
         val body = resp.body().orEmpty()
-        // Log so we can debug "0 results" cases — print URL, status, and
+        // Log so we can debug "0 results" cases - print URL, status, and
         // the first 200 chars of the body. Newznab error responses come
         // back as `<error code="..." description="..."/>`; visible in
         // the body so the user / dev can copy-paste it.
@@ -205,7 +205,7 @@ class NewznabClient {
             val files = newznabAttr(body, "files")?.toIntOrNull()
             val grabs = newznabAttr(body, "grabs")?.toIntOrNull()
             // Newznab attaches the category id (e.g. "6010") via
-            // <newznab:attr name="category" value="6010" /> — sometimes
+            // <newznab:attr name="category" value="6010" /> - sometimes
             // multiple times for items that span subcategories.
             val category = newznabAttr(body, "category")
             out += NewznabItem(

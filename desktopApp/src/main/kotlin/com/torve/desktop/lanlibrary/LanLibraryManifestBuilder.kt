@@ -8,7 +8,7 @@ import java.io.File
 import java.security.MessageDigest
 
 /**
- * Phase 3 Slice C — manifest assembly.
+ * Phase 3 Slice C - manifest assembly.
  *
  * Walks the desktop's known local-media set, filters every candidate
  * through [DownloadFolderAllowlist], and produces a [LanLibraryManifest]
@@ -17,7 +17,7 @@ import java.security.MessageDigest
  * the real path.
  *
  * The opaque id is `sha256(canonical-path || sizeBytes)` truncated to
- * 32 hex chars — stable across publisher restarts so peers can dedupe.
+ * 32 hex chars - stable across publisher restarts so peers can dedupe.
  *
  * The builder is platform-light: it takes a sequence of (file, label,
  * metadata) inputs, the allowlist, and the token table; it doesn't talk
@@ -85,7 +85,7 @@ class LanLibraryManifestBuilder(
     }
 
     /**
-     * Bare-bones extension → MIME map. Kept tiny on purpose — covers
+     * Bare-bones extension → MIME map. Kept tiny on purpose - covers
      * the formats Torve actually downloads; everything else falls
      * through to a generic octet-stream so range streaming still works.
      */

@@ -65,7 +65,7 @@ fun V2ShowsPage(
     onPlay: (MediaItem) -> Unit,
     onOpenDetail: (MediaItem) -> Unit,
     onSeeAll: (SeeAllRequest) -> Unit = {},
-    /** TV "Latest on Usenet" shelf — mirrors movies but groups
+    /** TV "Latest on Usenet" shelf - mirrors movies but groups
      *  per-episode NZBs under a single show poster via tmdbId. */
     nzbTvCatalogService: com.torve.desktop.adult.NzbTvCatalogService? = null,
     nzbIndexerType: String = "",
@@ -186,7 +186,7 @@ fun V2ShowsPage(
                         }
                     }
 
-                    // "Latest on Usenet" — NZB releases aggregated by
+                    // "Latest on Usenet" - NZB releases aggregated by
                     // show. Click → standard show detail page (with
                     // seasons / episodes from TMDB). Episode-level NZB
                     // playback hints are deferred to the next session
@@ -195,7 +195,7 @@ fun V2ShowsPage(
                         V2Shelf(
                             title = "Latest on Usenet",
                             modifier = Modifier.padding(start = 72.dp),
-                            onSeeAll = { onSeeAll(SeeAllRequest("LATEST_ON_USENET_TV", "Latest on Usenet — TV")) },
+                            onSeeAll = { onSeeAll(SeeAllRequest("LATEST_ON_USENET_TV", "Latest on Usenet - TV")) },
                         ) {
                             nzbShows.take(20).forEach { card ->
                                 V2PosterCard(

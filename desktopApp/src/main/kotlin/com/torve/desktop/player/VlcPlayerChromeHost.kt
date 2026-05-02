@@ -488,7 +488,7 @@ private class ControlBar(
         popup.addSeparator()
         popup.add(actionItem("Audio Delay -50 ms") { engine.audio.decreaseDelay(); onShowToast("Audio delay ${engine.audio.getDelay()} ms") })
         popup.add(actionItem("Audio Delay +50 ms") { engine.audio.increaseDelay(); onShowToast("Audio delay ${engine.audio.getDelay()} ms") })
-        popup.add(actionItem("Audio Sync…") { openDelayDialog(true) })
+        popup.add(actionItem("Audio Sync...") { openDelayDialog(true) })
         popup.show(anchor, 0, -popup.preferredSize.height)
     }
 
@@ -500,7 +500,7 @@ private class ControlBar(
         popup.addSeparator()
         popup.add(actionItem("Subtitle Delay -50 ms") { engine.subtitle.decreaseDelay(); onShowToast("Sub delay ${engine.subtitle.getDelay()} ms") })
         popup.add(actionItem("Subtitle Delay +50 ms") { engine.subtitle.increaseDelay(); onShowToast("Sub delay ${engine.subtitle.getDelay()} ms") })
-        popup.add(actionItem("Subtitle Sync…") { openDelayDialog(false) })
+        popup.add(actionItem("Subtitle Sync...") { openDelayDialog(false) })
         popup.show(anchor, 0, -popup.preferredSize.height)
     }
 
@@ -513,10 +513,10 @@ private class ControlBar(
         DesktopBufferingPreset.entries.forEach { p -> bufferMenu.add(radioMenuItem(p.label, p == engine.getBufferingPreset()) { engine.setBufferingPreset(p); onShowToast("${p.label} selected") }) }
         bufferMenu.addSeparator(); bufferMenu.add(disabledItem("Applies when next stream opens"))
         popup.add(bufferMenu)
-        popup.add(actionItem("Audio Sync…") { openDelayDialog(true) })
-        popup.add(actionItem("Subtitle Sync…") { openDelayDialog(false) })
-        popup.add(actionItem("Equalizer…") { openEqualizerDialog() })
-        popup.add(actionItem("Media Info…") { openDiagnosticsDialog() })
+        popup.add(actionItem("Audio Sync...") { openDelayDialog(true) })
+        popup.add(actionItem("Subtitle Sync...") { openDelayDialog(false) })
+        popup.add(actionItem("Equalizer...") { openEqualizerDialog() })
+        popup.add(actionItem("Media Info...") { openDiagnosticsDialog() })
         popup.add(actionItem("Take Snapshot") {
             val snap = runCatching { engine.captureSnapshotToLibrary() }.getOrNull()
             onShowToast(if (snap != null) "Snapshot saved" else "Snapshot failed")

@@ -12,7 +12,7 @@ import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.ui.graphics.vector.ImageVector
 
 // NZB_MOVIES (formerly "Movies via Usenet") was removed in favor of a
-// "Latest on Usenet" shelf inside the regular Movies tab — the source
+// "Latest on Usenet" shelf inside the regular Movies tab - the source
 // picker already surfaces NZB candidates so a separate destination was
 // redundant. See V2NzbSeeAllPage for the dedicated filter grid that
 // replaces it.

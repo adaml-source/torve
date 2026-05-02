@@ -56,7 +56,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
  * a small fixed-size frame while the main shell content remains interactive.
  *
  * Reuses the same AWT Canvas as the full-screen surface. Only one of the two
- * surfaces may mount the canvas at a time — the host composition is
+ * surfaces may mount the canvas at a time - the host composition is
  * responsible for switching between them via the `pipMode` flag.
  */
 @Composable

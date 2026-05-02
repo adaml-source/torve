@@ -12,7 +12,7 @@ import io.sentry.protocol.User
  *  - When [DSN_ENV] (or the value passed to [install]) is blank or null, all
  *    methods on this object become no-ops and the SDK is never initialised.
  *    That means a developer build with no DSN configured produces zero
- *    network traffic and zero events — equivalent to Sentry being absent.
+ *    network traffic and zero events - equivalent to Sentry being absent.
  *  - When a DSN is present, every uncaught Throwable routed through
  *    [captureUncaught] is sent to Sentry with the active thread name, the
  *    Torve release tag, and the configured environment.
@@ -34,7 +34,7 @@ object SentryBootstrap {
     ) {
         val effectiveDsn = dsn?.takeIf { it.isNotBlank() }
         if (effectiveDsn == null) {
-            println("TORVE SENTRY | DSN not set ($DSN_ENV) — crash reporting disabled")
+            println("TORVE SENTRY | DSN not set ($DSN_ENV) - crash reporting disabled")
             return
         }
         try {
@@ -52,7 +52,7 @@ object SentryBootstrap {
                 // for every navigation; tune up later when there's signal.
                 options.tracesSampleRate = 0.0
             }
-            // The user identity is just an opaque hash of the email — we're
+            // The user identity is just an opaque hash of the email - we're
             // tagging crashes per-user without storing the email itself.
             // Email comes from the auto-memory's known userEmail; if not
             // available, we skip user context altogether.
@@ -99,7 +99,7 @@ object SentryBootstrap {
 
     /**
      * Record a low-noise breadcrumb that gets attached to the next crash
-     * report. No-op when disabled. Use sparingly — there's a 50-crumb
+     * report. No-op when disabled. Use sparingly - there's a 50-crumb
      * cap (set in [install]) so high-frequency events drown out anything
      * useful.
      *

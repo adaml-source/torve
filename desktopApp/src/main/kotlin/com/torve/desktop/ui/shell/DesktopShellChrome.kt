@@ -117,7 +117,7 @@ fun DesktopSidebar(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Icon-only navigation — no labels
+            // Icon-only navigation - no labels
             DesktopDestination.entries.filter { it.showInNav }.forEach { destination ->
                 DesktopNavIcon(
                     icon = destination.icon(),
@@ -129,7 +129,7 @@ fun DesktopSidebar(
 
             Spacer(modifier = Modifier.weight(1f))
 
-            // Settings utility icon at bottom — icon only
+            // Settings utility icon at bottom - icon only
             DesktopNavIcon(
                 icon = Icons.Filled.Settings,
                 contentDescription = "Settings",

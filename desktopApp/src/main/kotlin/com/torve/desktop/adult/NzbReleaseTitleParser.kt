@@ -12,8 +12,8 @@ package com.torve.desktop.adult
  * left as the title, normalise separators (`.`/`_`) into spaces, drop
  * trailing junk (square-bracketed scene tags, group suffix after a `-`).
  *
- * Year is a strong matching signal — TMDB queries with a `year=` filter
- * disambiguate same-title remakes — so when we can extract one we always
+ * Year is a strong matching signal - TMDB queries with a `year=` filter
+ * disambiguate same-title remakes - so when we can extract one we always
  * pass it along. Returns `null` if no year can be found, in which case
  * the release row falls back to text-only rendering.
  */
@@ -33,7 +33,7 @@ object NzbReleaseTitleParser {
         val rawTitle = cleaned.substring(0, yearMatch.range.first)
         val title = rawTitle
             .replace(SEPARATORS, " ")
-            // Remove anything in brackets/parens — usually scene tags or
+            // Remove anything in brackets/parens - usually scene tags or
             // language hints we don't want in the search query.
             .replace(Regex("""[\[\(\{].*?[\]\)\}]"""), " ")
             // Trim any trailing dash-group, dash-language, etc.

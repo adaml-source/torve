@@ -12,7 +12,7 @@ import java.util.concurrent.ConcurrentHashMap
  * Design choices:
  *   - The mapping `id → path` is established at manifest-build time.
  *   - The mapping `(id, token) → path` is established only when the
- *     publisher is actively serving — issued via [issueAccessToken],
+ *     publisher is actively serving - issued via [issueAccessToken],
  *     consumed via [resolveTokenForId].
  *   - Tokens have a short TTL (default 30 minutes) so a leak via logs
  *     doesn't grant indefinite access.
@@ -42,7 +42,7 @@ class LanMediaTokenTable(
         tokenExpiry.keys.removeAll { it.id == id }
     }
 
-    /** Drop everything — used on sign-out / allowlist change. */
+    /** Drop everything - used on sign-out / allowlist change. */
     fun clearAll() {
         idToPath.clear()
         tokenExpiry.clear()
@@ -77,7 +77,7 @@ class LanMediaTokenTable(
         return File(path)
     }
 
-    /** Expose for diagnostics — count of currently-registered ids. */
+    /** Expose for diagnostics - count of currently-registered ids. */
     fun registeredEntryCount(): Int = idToPath.size
 
     private fun freshToken(): String {

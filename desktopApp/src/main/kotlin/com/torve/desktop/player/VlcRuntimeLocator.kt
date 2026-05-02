@@ -146,7 +146,7 @@ object VlcRuntimeLocator {
             found = false,
             attemptedPaths = attempted.distinct(),
             diagnosticMessage = buildString {
-                // End-user copy first — what they should DO. The path list
+                // End-user copy first - what they should DO. The path list
                 // and `Searched N locations.` detail still ride in
                 // `attemptedPaths` so a support reader can see them
                 // without exposing dev-style paths in the UI banner.

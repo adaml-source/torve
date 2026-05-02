@@ -21,12 +21,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
 /**
- * MPV-backed [DesktopPlaybackEngine] — Stage 1 implementation.
+ * MPV-backed [DesktopPlaybackEngine] - Stage 1 implementation.
  *
  * This wraps libmpv via JNA and handles every method on the engine
  * interface. **Render path note:** this Stage 1 cut runs mpv with
  * `--force-window=yes` so it opens its own native window for the video
- * surface. That's intentional and explicit — proper in-Compose
+ * surface. That's intentional and explicit - proper in-Compose
  * rendering needs the libmpv render API + a Skia/GL interop layer,
  * which is Stage 3 work.
  *
@@ -55,7 +55,7 @@ class MpvPlaybackEngine : DesktopPlaybackEngine {
         "Install mpv (https://mpv.io) so the libmpv shared library is on the system path."
 
     /**
-     * Always true — the MPV engine *intends* to render in-Compose. The
+     * Always true - the MPV engine *intends* to render in-Compose. The
      * V2App shell uses this to decide whether to mount the embedded
      * surface; if we returned `embeddedHandle != null` we'd hit a
      * chicken-and-egg loop (surface only mounts when embedded is true,
@@ -72,7 +72,7 @@ class MpvPlaybackEngine : DesktopPlaybackEngine {
     override val events: Flow<DesktopPlaybackEngineEvent> = _events
 
     /**
-     * Live track list — updated whenever mpv emits a `track-list`
+     * Live track list - updated whenever mpv emits a `track-list`
      * property change. UI surfaces collect from this so the audio /
      * subtitle menus refresh the moment a new file finishes loading.
      */
@@ -91,7 +91,7 @@ class MpvPlaybackEngine : DesktopPlaybackEngine {
     val muted: StateFlow<Boolean> = _muted.asStateFlow()
 
     /**
-     * Live audio-device list — refreshed on `audio-device-list` property
+     * Live audio-device list - refreshed on `audio-device-list` property
      * changes (USB DAC plug/unplug, default-device change). Empty until
      * the first observation lands.
      */
@@ -107,7 +107,7 @@ class MpvPlaybackEngine : DesktopPlaybackEngine {
     /**
      * Native window handle (HWND on Windows, XID on X11, NSView pointer
      * on macOS) the mpv backend should paint into via the legacy `wid`
-     * property. `null` means standalone — mpv pops its own window.
+     * property. `null` means standalone - mpv pops its own window.
      */
     @Volatile
     private var embeddedHandle: Long? = null
@@ -177,7 +177,7 @@ class MpvPlaybackEngine : DesktopPlaybackEngine {
      * attached to the supplied window handle. Used by the Compose
      * surface's `onDispose` so a re-mount with a new canvas resets
      * engine state and the next [open] correctly waits for the new
-     * canvas's [attachToWindow]. Idempotent — does nothing if the
+     * canvas's [attachToWindow]. Idempotent - does nothing if the
      * engine has moved on to a different handle.
      */
     fun detachIf(handle: Long) {
@@ -199,7 +199,7 @@ class MpvPlaybackEngine : DesktopPlaybackEngine {
     /**
      * Bind mpv's video output to a native window (HWND/XID/NSView). Must
      * be called **before** the first [open] for embedded rendering to
-     * work — wid is a pre-init option in libmpv. If called after
+     * work - wid is a pre-init option in libmpv. If called after
      * initialize, the handle is reset and a fresh init runs.
      */
     suspend fun attachToWindow(handle: Long) = withContext(Dispatchers.IO) {
@@ -217,7 +217,7 @@ class MpvPlaybackEngine : DesktopPlaybackEngine {
     }
 
     /**
-     * Standalone fallback — when no surface attaches, mpv opens its own
+     * Standalone fallback - when no surface attaches, mpv opens its own
      * window via `force-window=yes` so the user still sees video.
      */
     private fun ensureInitialized() {
@@ -240,7 +240,7 @@ class MpvPlaybackEngine : DesktopPlaybackEngine {
             return
         }
         initialized = true
-        // Subscribe to libmpv's own log stream at warn+ — these land in
+        // Subscribe to libmpv's own log stream at warn+ - these land in
         // Sentry breadcrumbs alongside Torve's own diagnostics.
         runCatching { mpv.mpv_request_log_messages(handle, "warn") }
         // Restore last-used audio device, scoped to MPV by storing
@@ -305,7 +305,7 @@ class MpvPlaybackEngine : DesktopPlaybackEngine {
         // property is a flag; "yes"/"no" works.
         mpv.mpv_set_property_string(handle, "pause", if (autoPlay) "no" else "yes")
 
-        // Issue the loadfile command — replaces any current media.
+        // Issue the loadfile command - replaces any current media.
         val rc = mpv.mpv_command(handle, arrayOf("loadfile", url, "replace", null))
         if (rc < 0) {
             emit(
@@ -345,7 +345,7 @@ class MpvPlaybackEngine : DesktopPlaybackEngine {
     }
 
     /**
-     * Set output volume in mpv's native 0–100 scale. Soft-volume above 100
+     * Set output volume in mpv's native 0-100 scale. Soft-volume above 100
      * is supported but Torve clamps to 0..100 to match the VLC slider.
      */
     suspend fun setVolume(percent: Int) = withContext(Dispatchers.IO) {
@@ -426,7 +426,7 @@ class MpvPlaybackEngine : DesktopPlaybackEngine {
 
     /**
      * Read the current list of audio + subtitle tracks. Parses mpv's
-     * `track-list` property — returned as a JSON array. We do a minimal
+     * `track-list` property - returned as a JSON array. We do a minimal
      * regex-based parse rather than pull in a JSON library because the
      * structure is fixed and well-known.
      */
@@ -445,7 +445,7 @@ class MpvPlaybackEngine : DesktopPlaybackEngine {
      * Force-refresh the [tracks] StateFlow with a synchronous read of the
      * current track-list. The pump's property-change observer is the
      * usual driver, but mpv occasionally skips the *initial* change
-     * notification — this gives the UI a way to re-poll on demand
+     * notification - this gives the UI a way to re-poll on demand
      * (e.g. when a menu opens) so the user never sees an empty list
      * during a session that actually has tracks.
      */
@@ -493,7 +493,7 @@ class MpvPlaybackEngine : DesktopPlaybackEngine {
 
     /**
      * Push a freshly-fetched device list into the StateFlow. Used by the
-     * shell to seed the flow on entry — mpv doesn't always emit a change
+     * shell to seed the flow on entry - mpv doesn't always emit a change
      * event for the *initial* value, so we read once explicitly.
      */
     internal fun refreshAudioDevicesNow(list: List<MpvAudioDevice>) {
@@ -518,7 +518,7 @@ class MpvPlaybackEngine : DesktopPlaybackEngine {
         // Walk the string with a brace-depth counter so nested objects
         // (some mpv builds embed `albumart`/`decoder-desc` substructures)
         // don't truncate the slice. Earlier regex `\{[^{}]*\}` failed on
-        // those — explaining "0 subs" when 54 were really there.
+        // those - explaining "0 subs" when 54 were really there.
         val out = mutableListOf<MpvTrack>()
         var depth = 0
         var start = -1
@@ -579,7 +579,7 @@ class MpvPlaybackEngine : DesktopPlaybackEngine {
      * `mpv_wait_event` with a short timeout so cancellation lands
      * quickly. Most events we just translate to telemetry; only a
      * handful (`property-change` for time-pos / pause / etc.) drive
-     * UI state — those are added incrementally when needed.
+     * UI state - those are added incrementally when needed.
      */
     private fun startEventPump(handle: Pointer, mpv: LibMpv) {
         eventLoop?.cancel()
@@ -587,7 +587,7 @@ class MpvPlaybackEngine : DesktopPlaybackEngine {
             mpv.mpv_observe_property(handle, 1L, "time-pos", LibMpv.FORMAT_DOUBLE)
             mpv.mpv_observe_property(handle, 2L, "duration", LibMpv.FORMAT_DOUBLE)
             mpv.mpv_observe_property(handle, 3L, "pause", LibMpv.FORMAT_FLAG)
-            // Observe track-list as STRING — we re-fetch via property
+            // Observe track-list as STRING - we re-fetch via property
             // get on change so we don't have to decode the union node.
             mpv.mpv_observe_property(handle, 4L, "track-list", LibMpv.FORMAT_STRING)
             mpv.mpv_observe_property(handle, 5L, "volume", LibMpv.FORMAT_DOUBLE)
@@ -671,7 +671,7 @@ class MpvPlaybackEngine : DesktopPlaybackEngine {
                     }
                     else -> Unit
                 }
-                // Pull positions from properties — cheaper than decoding
+                // Pull positions from properties - cheaper than decoding
                 // the property-change union and good enough for a 1Hz UI.
                 runCatching {
                     val posStr = mpv.mpv_get_property_string(handle, "time-pos")

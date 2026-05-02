@@ -24,7 +24,7 @@ object MpvLabsStatus {
         val effectiveMode: DesktopPlayerMode,
         /**
          * True iff the saved preference was MPV but libmpv is missing
-         * — Main.kt rewrites the saved pref to VLC silently; this lets
+         * - Main.kt rewrites the saved pref to VLC silently; this lets
          * Settings explain WHY the rail says VLC.
          */
         val wasResetFromMpv: Boolean,
@@ -61,13 +61,13 @@ object MpvLabsStatus {
             State.AVAILABLE -> "Available"
             State.UNAVAILABLE -> "Unavailable on this device"
         }
-        // Premium copy — neutral + actionable. Avoids "missing" /
+        // Premium copy - neutral + actionable. Avoids "missing" /
         // "failed" / "warning" wording the playback surface used to
         // surface to all users.
         val description = when (state) {
             State.AVAILABLE ->
                 "MPV Labs is available. Selectable in the engine list above. " +
-                    "Experimental — VLC remains recommended for the public beta."
+                    "Experimental - VLC remains recommended for the public beta."
             State.UNAVAILABLE ->
                 "VLC is active and recommended. MPV Labs requires libmpv to be " +
                     "installed or staged with Torve."
@@ -97,7 +97,7 @@ object MpvLabsStatus {
      */
     fun setupGuideBody(snapshot: Snapshot): String {
         return buildString {
-            append("MPV Labs is optional. Torve ships VLC as the default desktop engine — ")
+            append("MPV Labs is optional. Torve ships VLC as the default desktop engine - ")
             append("VLC is the recommended choice for the public beta and works without ")
             append("any extra setup.")
             append("\n\n")
@@ -105,7 +105,7 @@ object MpvLabsStatus {
             append("On launch, Torve searches these locations in order:")
             append("\n")
             if (snapshot.attemptedPaths.isEmpty()) {
-                append("  • (no paths recorded — re-check after restarting)\n")
+                append("  • (no paths recorded - re-check after restarting)\n")
             } else {
                 snapshot.attemptedPaths.forEach { p ->
                     append("  • ").append(p).append('\n')

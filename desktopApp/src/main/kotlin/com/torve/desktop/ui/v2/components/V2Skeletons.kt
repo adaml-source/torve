@@ -24,7 +24,7 @@ import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
 
 /**
  * Pulsing placeholder for a poster card. Used while a shelf is fetching
- * its initial data — five of these in a row beats a blank stripe of
+ * its initial data - five of these in a row beats a blank stripe of
  * empty space.
  *
  * Animation: opacity oscillates between 0.4 and 0.8 over 900ms via an
@@ -73,7 +73,7 @@ fun V2PosterCardSkeleton(modifier: Modifier = Modifier) {
 }
 
 /**
- * A row of [V2PosterCardSkeleton]s with a faded section header on top —
+ * A row of [V2PosterCardSkeleton]s with a faded section header on top -
  * mimics what a real shelf will look like once data loads. Drop into a
  * page where you'd otherwise have a blank gap.
  */

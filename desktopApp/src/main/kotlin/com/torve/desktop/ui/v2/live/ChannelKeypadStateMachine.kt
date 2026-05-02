@@ -3,7 +3,7 @@ package com.torve.desktop.ui.v2.live
 /**
  * Pure state machine driving the Live-TV channel-number keypad. Extracted
  * from V2LivePage's Composable scope so behaviour can be unit-tested with
- * a virtual clock — the Composable wrapper still owns the focus + idle
+ * a virtual clock - the Composable wrapper still owns the focus + idle
  * timer, but every keystroke decision routes through here.
  *
  * Behaviour pinned by ChannelKeypadStateMachineTest:
@@ -35,7 +35,7 @@ class ChannelKeypadStateMachine(
     sealed interface Outcome {
         /** Buffer changed (typed digit or cleared). UI should redraw. */
         data object Consumed : Outcome
-        /** Enter on a numeric buffer — caller should jump to [channelNumber]. */
+        /** Enter on a numeric buffer - caller should jump to [channelNumber]. */
         data class Commit(val channelNumber: Int) : Outcome
         /** Event was ignored (e.g. Esc on empty buffer). */
         data object Ignored : Outcome
@@ -47,7 +47,7 @@ class ChannelKeypadStateMachine(
      * `System.currentTimeMillis()`.
      */
     fun handle(event: Event, nowMs: Long): Outcome {
-        // Idle clear — if it's been more than the timeout since the last
+        // Idle clear - if it's been more than the timeout since the last
         // keystroke, drop the buffer before processing this event.
         if (buffer.isNotEmpty() && nowMs - lastKeystrokeAt >= idleTimeoutMs) {
             buffer = ""

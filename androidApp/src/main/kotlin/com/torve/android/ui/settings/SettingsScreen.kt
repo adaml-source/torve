@@ -658,16 +658,35 @@ fun SettingsScreen(
 
         if (subscriptionState.isLoggedIn) {
             Spacer(Modifier.height(8.dp))
-            // Provider-health rows render only when the coordinator has
-            // entries — no fake green/red. Today Android registers no
-            // checkers, so this section is silent on mobile until an
-            // AndroidProviderHealthInit lands.
-            ProviderHealthSection(
-                onTransferReceive = onReceiveCredentialsClick,
-                onOpenSettings = { entry ->
+            // ─── Settings IA: Status & Repair (Prompt 16) ──────────
+            // Unified provider status section. Sources its truth from
+            // the shared ProviderStatusMapper so cards here can never
+            // disagree with status text rendered elsewhere. Each card
+            // gets exactly one CTA — no second button parsed out of a
+            // message field.
+            ProviderStatusSection(
+                onConfigure = { entry ->
                     providerSettingsRouteFor(entry.category)?.let(onOpenProviderRoute)
                 },
-                onOpenDiagnostics = onDiagnosticsClick,
+                onRefresh = { entry ->
+                    // Re-run the matching checker. Today the
+                    // ProviderHealthCoordinator runs all checkers; a
+                    // per-entry refresh pings the same coordinator so
+                    // the user's row updates without forcing a global
+                    // re-check of every other provider.
+                    providerSettingsRouteFor(entry.category)?.let(onOpenProviderRoute)
+                },
+                onDiagnose = { onDiagnosticsClick() },
+            )
+            Spacer(Modifier.height(16.dp))
+            // ─── Configure Sources ──────────────────────────────────
+            // The actual credential editors. Status/repair lives above
+            // — these rows are configuration-only, no inline status.
+            Text(
+                text = "Configure Sources",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = Snow,
             )
             Spacer(Modifier.height(8.dp))
             RestoreSetupRecoveryCard(

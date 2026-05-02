@@ -22,7 +22,7 @@ import java.util.Locale
  *
  * The resolver picks the highest-resolution muxed (audio+video) stream so
  * VLC doesn't have to demux a separate audio track. If no muxed stream is
- * available it falls back to the highest video stream — VLC then plays
+ * available it falls back to the highest video stream - VLC then plays
  * silent video, which is rare but still better than failing entirely.
  */
 object YouTubeResolver {
@@ -35,7 +35,7 @@ object YouTubeResolver {
         synchronized(this) {
             if (initialised) return
             // NewPipe needs a Downloader implementation. We use a tiny
-            // HttpURLConnection-backed one — no need to drag the project's
+            // HttpURLConnection-backed one - no need to drag the project's
             // Ktor client in; this code path runs at most once per trailer
             // open.
             NewPipe.init(JvmHttpDownloader, defaultLocalization())
@@ -54,7 +54,7 @@ object YouTubeResolver {
      * Fetch a direct stream URL for [youtubeKey]. Suspends; runs on
      * [Dispatchers.IO] so callers can launch from any context.
      *
-     * Returns null when extraction failed for any reason — caller should
+     * Returns null when extraction failed for any reason - caller should
      * fall back (e.g. open in browser, or hand the raw watch URL to VLC
      * for one last attempt).
      */
@@ -83,7 +83,7 @@ object YouTubeResolver {
 }
 
 /**
- * Minimal Downloader that NewPipeExtractor can plug into — straight
+ * Minimal Downloader that NewPipeExtractor can plug into - straight
  * HttpURLConnection, no third-party HTTP client. Adds a Chrome-ish UA so
  * YouTube serves the page we expect.
  */

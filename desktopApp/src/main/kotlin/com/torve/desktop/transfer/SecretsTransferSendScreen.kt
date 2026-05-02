@@ -49,7 +49,7 @@ fun SecretsTransferSendScreen(
     val status = state.status
     val colors = TorveDesktopThemeTokens.colors
 
-    // Disclosures default to collapsed — the spec calls for reduced
+    // Disclosures default to collapsed - the spec calls for reduced
     // visual noise and a clear three-step main flow. Power users can
     // open the privacy explainer + the category list inline.
     var privacyOpen by remember { mutableStateOf(false) }
@@ -91,7 +91,7 @@ fun SecretsTransferSendScreen(
             StepHeader(text = TransferCopy.SEND_STEP2_HEADER)
             val selectedSummary = remember(state.selectedCategories) {
                 if (state.selectedCategories.isEmpty()) {
-                    "Nothing selected — tap to choose categories."
+                    "Nothing selected - tap to choose categories."
                 } else {
                     state.selectedCategories.joinToString { TransferSecretCatalog.titleFor(it) }
                 }
@@ -271,7 +271,7 @@ private fun SenderEnvelopeOutput(status: SenderStatus.Ready) {
 
         RelayDeliveryBanner(status.relayDelivery)
 
-        // Manual sealed-code paste fallback — moved into a collapsed
+        // Manual sealed-code paste fallback - moved into a collapsed
         // Advanced disclosure per the new flow. Still reachable.
         var advancedOpen by remember { mutableStateOf(false) }
         Row(
@@ -312,7 +312,7 @@ private fun RelayDeliveryBanner(state: RelayDeliveryState) {
             // only path; nothing extra to surface.
         }
         RelayDeliveryState.Posting -> TorveBanner(
-            title = "Delivering through relay…",
+            title = "Delivering through relay...",
             description = "Posting the encrypted bundle to the Torve backend so the receiver " +
                 "can pull it automatically.",
             tone = TorveBannerTone.Info,

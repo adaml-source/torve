@@ -117,7 +117,7 @@ data class DesktopPlaybackSourceCandidate(
     val directUrl: String? = null,
     // The originating addon's manifest URL. Required so the resolver can tell
     // an addon-hosted stream (Panda's /u/<token>/...) from a hoster URL that
-    // needs debrid unrestrict — without this, every Panda Usenet/NZB stream
+    // needs debrid unrestrict - without this, every Panda Usenet/NZB stream
     // gets misclassified as a torrent and routed through whatever debrid is
     // (or isn't) configured.
     val addonBaseUrl: String? = null,
@@ -253,7 +253,7 @@ class DesktopPlayerController(
         title: String,
         sizeBytes: Long? = null,
         sourceSurface: String = "adult",
-        /** Optional full MediaItem — when present, its logoUrl,
+        /** Optional full MediaItem - when present, its logoUrl,
          *  posterUrl, backdropUrl, ratings, and type (MOVIE / SERIES)
          *  flow through to the player chrome and the playback dock.
          *  Without this, the player renders "title" as plain text and
@@ -586,7 +586,7 @@ class DesktopPlayerController(
     }
 
     fun play() {
-        println("TORVE CONTROLLER ┃ play() — engine=${playbackEngine::class.simpleName}, isEmbedded=$isEmbedded, phase=${_state.value.phase}")
+        println("TORVE CONTROLLER ┃ play() - engine=${playbackEngine::class.simpleName}, isEmbedded=$isEmbedded, phase=${_state.value.phase}")
         val currentRequest = _state.value.currentRequest
         if (currentRequest == null) {
             _state.update {
@@ -711,7 +711,7 @@ class DesktopPlayerController(
     /**
      * Cancel an in-flight Panda/addon "still preparing" poll loop. Called from
      * the preparing overlay's Cancel button. The poll runs inside
-     * [resolutionJob], so [close] is enough to tear it down — it cancels the
+     * [resolutionJob], so [close] is enough to tear it down - it cancels the
      * job and clears [DesktopPreparingStreamState] alongside the session.
      */
     fun cancelPreparing() {
@@ -752,7 +752,7 @@ class DesktopPlayerController(
      * Compose preparing overlay can render an elapsed-time spinner.
      *
      * Returns the (possibly redirected) Ready URL, or null when the loop
-     * resolved into Cancel/Failed/Timeout — the caller already had the
+     * resolved into Cancel/Failed/Timeout - the caller already had the
      * failure surfaced via [_state] and should bail out cleanly.
      */
     private suspend fun awaitStreamReady(
@@ -1211,7 +1211,7 @@ class DesktopPlayerController(
         command: DesktopPlayerCommand,
         startupTrace: PlaybackStartupTrace?,
     ) {
-        println("TORVE CONTROLLER ┃ launchPreparedSession — engine=${playbackEngine::class.simpleName}, isEmbedded=$isEmbedded, autoPlay=$autoPlay")
+        println("TORVE CONTROLLER ┃ launchPreparedSession - engine=${playbackEngine::class.simpleName}, isEmbedded=$isEmbedded, autoPlay=$autoPlay")
         ensurePlaybackEngineWarm(startupTrace)
         val resolvedSession = resolveSelectedCandidate(session, startupTrace) ?: return
 
@@ -1352,7 +1352,7 @@ class DesktopPlayerController(
         // Mirror the Android player flow: addon-hosted URLs (Panda's
         // /u/<token>/nzb/...) may legitimately answer 504 with `nzb_not_ready`
         // while the upstream Usenet download warms up. Handing that straight to
-        // VLC produces an opaque "VLC encountered a playback error" — instead,
+        // VLC produces an opaque "VLC encountered a playback error" - instead,
         // probe the URL and, when Preparing, drive a polling overlay that
         // ticks every 15 s until Ready / Failed / cancelled.
         val parsedSelected = selectedCandidate.toParsedStream()
@@ -1661,7 +1661,7 @@ class DesktopPlayerController(
                         bufferingPercent = event.cachePercent,
                         requirementText = playbackEngine.runtimeRequirement,
                     ),
-                    engineMessage = "Buffering stream…",
+                    engineMessage = "Buffering stream...",
                     error = null,
                 )
 

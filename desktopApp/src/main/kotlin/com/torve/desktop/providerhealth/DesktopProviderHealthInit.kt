@@ -67,7 +67,7 @@ class DesktopProviderHealthInit(
     /**
      * Bridges live [com.torve.desktop.playback.DesktopPlayerController]
      * phase transitions into the health repo. Started by V2App once it
-     * has the controller reference (the controller isn't in Koin —
+     * has the controller reference (the controller isn't in Koin -
      * it's constructed at desktop runtime). Idempotent.
      */
     fun startPlaybackBridge(controller: com.torve.desktop.playback.DesktopPlayerController) {
@@ -131,7 +131,7 @@ class DesktopProviderHealthInit(
             ),
         )
 
-        // ── IPTV (state projection — no extra fetches) ────────────────
+        // ── IPTV (state projection - no extra fetches) ────────────────
         coordinator.register(
             IptvProviderHealthChecker(stateSource = { channelsViewModel.state.value }),
         )

@@ -356,7 +356,7 @@ fun V2PosterCard(
                         contentScale = ContentScale.Crop,
                     )
                 }
-                // Backdrop layered on top — invisible at rest, fades in on
+                // Backdrop layered on top - invisible at rest, fades in on
                 // hover. Only present when caller passed a backdropUrl.
                 backdrop?.let {
                     Image(
@@ -373,7 +373,7 @@ fun V2PosterCard(
                         color = colors.textPrimary.copy(alpha = 0.8f), maxLines = 2, overflow = TextOverflow.Ellipsis,
                     )
                 }
-                // Bottom scrim + overview snippet — fades in with the
+                // Bottom scrim + overview snippet - fades in with the
                 // hover backdrop so the text is only visible while hovering.
                 if (!overview.isNullOrBlank()) {
                     Box(

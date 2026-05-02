@@ -126,7 +126,7 @@ fun DesktopPreparingOverlay(
                         fontWeight = FontWeight.Medium,
                     )
 
-                    // Attempt-progress bar — gives a visual sense of how long
+                    // Attempt-progress bar - gives a visual sense of how long
                     // we've been polling vs the max budget. It is intentionally
                     // an attempt indicator (not download %) because Panda's
                     // server doesn't report download progress for /u/<token>/nzb.

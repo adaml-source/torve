@@ -131,7 +131,7 @@ fun V2DetailPage(
                 Box(Modifier.fillMaxWidth().height(vpH).background(colors.shellBackground)) {
                     backdrop?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
                 }
-                // Long gradient that fades backdrop into shell — extends past hero into content area
+                // Long gradient that fades backdrop into shell - extends past hero into content area
                 Box(
                     Modifier.fillMaxWidth().height(vpH).background(
                         Brush.verticalGradient(
@@ -189,7 +189,7 @@ fun V2DetailPage(
                             item.overview?.takeIf { it.isNotBlank() }?.let { overview ->
                                 DetailSummary(overview = overview, colors = colors)
                             }
-                            // Actions — for series, show the currently-selected episode label
+                            // Actions - for series, show the currently-selected episode label
                             // next to the Play button so users can see exactly what will play.
                             if (item.type == MediaType.SERIES) {
                                 val selectedSeasonNum = detailState.selectedSeasonNumber
@@ -271,7 +271,7 @@ fun V2DetailPage(
                         }
                     }
 
-                    // ── Content flows continuously below hero — same stage ──
+                    // ── Content flows continuously below hero - same stage ──
                     Column(
                         Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(20.dp),

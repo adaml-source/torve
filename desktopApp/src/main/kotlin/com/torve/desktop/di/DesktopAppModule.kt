@@ -30,7 +30,7 @@ val desktopAppModule = module {
         com.torve.desktop.security.JvmTransferCryptoEngine()
     }
     single { com.torve.domain.transfer.SecretsTransferProtocol(engine = get()) }
-    // Receiver and sender VM bindings now live in SharedModule — both
+    // Receiver and sender VM bindings now live in SharedModule - both
     // desktop and mobile/TV consume the same factories.
 
     // ── Phase 3 Slice C: LAN library plumbing ────────────────────────

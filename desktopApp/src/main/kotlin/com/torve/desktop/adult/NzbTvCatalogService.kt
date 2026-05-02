@@ -28,7 +28,7 @@ import kotlinx.coroutines.withContext
  *     language sub-cats aren't well-documented for TV so we always
  *     query 5000 and rely on title-based language filtering.
  *   • Releases are per-episode (or per-season) on the wire, but the
- *     UI surface is per-show — we aggregate by TMDB show id and keep
+ *     UI surface is per-show - we aggregate by TMDB show id and keep
  *     a count of how many episodes / season-packs we've seen for each
  *     show so the poster card can render a "12 episodes" badge.
  *   • TMDB lookup forces media kind = TV through
@@ -45,7 +45,7 @@ class NzbTvCatalogService(
     private val ratingsEnricher: com.torve.data.mdblist.RatingsEnricher? = null,
     private val mdbListApiKey: () -> String = { "" },
 ) {
-    /** Aggregated TV show — one card represents many episode releases. */
+    /** Aggregated TV show - one card represents many episode releases. */
     data class ShowCard(
         val match: NzbPosterCache.Match.Found,
         val mediaItem: MediaItem,
@@ -129,7 +129,7 @@ class NzbTvCatalogService(
                     nextOffset = offset + PAGE_SIZE_RAW
                     if (newReleases.isEmpty()) _hasMore.value = false
                     if (newReleases.isNotEmpty()) {
-                        // Aggregate by tmdbId — fold each new release
+                        // Aggregate by tmdbId - fold each new release
                         // into the existing show card, or create a new
                         // card if first sighting.
                         val byId = _state.value.associateBy { it.match.tmdbId }.toMutableMap()
@@ -224,7 +224,7 @@ class NzbTvCatalogService(
     private fun enrichInBackground(scope: CoroutineScope, matches: List<NzbPosterCache.Match.Found>) {
         val key = mdbListApiKey().trim()
         if (ratingsEnricher == null || key.isBlank()) return
-        // Dedupe by tmdbId — many NZB releases can share a show.
+        // Dedupe by tmdbId - many NZB releases can share a show.
         val unique = matches.distinctBy { it.tmdbId }
         if (unique.isEmpty()) return
         scope.launch(Dispatchers.IO) {
