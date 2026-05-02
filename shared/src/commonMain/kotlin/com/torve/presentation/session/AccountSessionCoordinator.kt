@@ -50,6 +50,17 @@ data class AccountSessionBootstrapResult(
     val settingsResult: AccountSettingsRefreshResult? = null,
 )
 
+internal fun String?.isDeviceLimitRegistrationError(): Boolean {
+    val normalized = this?.lowercase().orEmpty()
+    if (normalized.isBlank()) return false
+    return "device limit" in normalized ||
+        "device cap" in normalized ||
+        "active device" in normalized ||
+        "activation slot" in normalized ||
+        "no activation slots" in normalized ||
+        "swap limit" in normalized
+}
+
 // ── Post-login restore progress (user-visible) ─────────────
 
 enum class RestorePhase {
@@ -392,13 +403,13 @@ class AccountSessionCoordinator(
             val deviceList = runCatching { deviceApi.getDevices(token) }
                 .getOrElse { DeviceListDto(emptyList(), 0, DEFAULT_MAX_ACTIVE_DEVICES, 0) }
             val maxActiveDevices = deviceList.max_active.takeIf { it > 0 } ?: DEFAULT_MAX_ACTIVE_DEVICES
-            val deviceLimitReached = deviceList.active_count >= maxActiveDevices
+            val deviceLimitReached = registrationError.isDeviceLimitRegistrationError()
 
             _state.update {
                 it.copy(
                     deviceLimitReached = deviceLimitReached,
                     deviceLimitMessage = if (deviceLimitReached) {
-                        "You have reached your 5-device limit. Remove an existing device to continue."
+                        "You have reached your $maxActiveDevices-device limit. Remove an existing device to continue."
                     } else null,
                     activeDevices = deviceList.devices,
                     lastError = registrationError,

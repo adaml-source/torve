@@ -210,7 +210,13 @@ class AuthClient(
     suspend fun getValidAccessToken(): String? {
         return authStateMutex.withLock {
             migrateTokensIfNeededLocked()
-            val currentAccessToken = secureStorage.getString(KEY_AUTH_ACCESS_TOKEN) ?: return@withLock null
+            val currentAccessToken = secureStorage.getString(KEY_AUTH_ACCESS_TOKEN)
+                ?: return@withLock if (!secureStorage.getString(KEY_AUTH_REFRESH_TOKEN).isNullOrBlank()) {
+                    val refreshResult = refreshTokensLocked()
+                    if (refreshResult.success) secureStorage.getString(KEY_AUTH_ACCESS_TOKEN) else null
+                } else {
+                    null
+                }
             val expiresAt = secureStorage.getString(KEY_TOKEN_EXPIRES_AT)?.toLongOrNull() ?: 0L
             val now = Clock.System.now().toEpochMilliseconds()
             if (expiresAt > 0 && now >= expiresAt - REFRESH_BUFFER_MS) {

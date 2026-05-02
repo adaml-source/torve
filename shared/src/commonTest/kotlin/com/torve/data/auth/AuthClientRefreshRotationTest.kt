@@ -105,6 +105,34 @@ class AuthClientRefreshRotationTest {
     }
 
     @Test
+    fun getValidAccessToken_refreshes_when_access_token_missing_but_refresh_token_exists() = runTest {
+        val storage = FakeSecureStorage(
+            mutableMapOf(
+                AuthClient.KEY_AUTH_REFRESH_TOKEN to "refresh_1",
+            ),
+        )
+        val settings = FakeDeviceLocalSettingsRepository(
+            mutableMapOf(
+                AuthClient.KEY_AUTH_EMAIL to "user@torve.app",
+                AuthClient.KEY_AUTH_USER_ID to "user-1",
+            ),
+        )
+        var refreshCallCount = 0
+        val client = buildAuthClient(storage, settings) { request ->
+            refreshCallCount += 1
+            val payload = parseRequestBody(request)
+            assertEquals("refresh_1", payload["refresh_token"])
+            authResponse("access_2", "refresh_2")
+        }
+
+        val token = client.getValidAccessToken()
+
+        assertEquals("access_2", token)
+        assertEquals(1, refreshCallCount)
+        assertEquals("refresh_2", storage.values[AuthClient.KEY_AUTH_REFRESH_TOKEN])
+    }
+
+    @Test
     fun refreshTokens_revoked_family_clears_auth_and_emits_event() = runTest {
         val storage = FakeSecureStorage(
             mutableMapOf(

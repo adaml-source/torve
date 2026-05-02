@@ -43,4 +43,15 @@ class AccountSessionBootstrapResultTest {
         assertFalse(result.deviceLimitReached)
         assertTrue(!result.error.isNullOrBlank())
     }
+
+    @Test
+    fun registration_error_classifier_only_flags_real_device_limit_errors() {
+        assertFalse(null.isDeviceLimitRegistrationError())
+        assertFalse("Failed to refresh account settings".isDeviceLimitRegistrationError())
+        assertFalse("Network error while registering device".isDeviceLimitRegistrationError())
+
+        assertTrue("Device limit reached".isDeviceLimitRegistrationError())
+        assertTrue("No activation slots remain".isDeviceLimitRegistrationError())
+        assertTrue("swap limit reached".isDeviceLimitRegistrationError())
+    }
 }

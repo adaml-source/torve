@@ -56,11 +56,12 @@ class MobilePostAuthRouterTest {
     }
 
     @Test
-    fun `verified new account routes to Setup Choice`() {
-        // User just verified email and lands back in the app. The
-        // onboarding-required flag (set by AuthEvent.Registered) is
-        // still true and they don't have a setup yet — they belong on
-        // the setup choice hub, not on a blank Home.
+    fun `stale onboarding-required flag on app shell still lands on Home`() {
+        // Prompt 22: stale persisted onboarding flags must not bounce
+        // returning/configured users into setup from the app shell.
+        // The login / verify-email routes own first-run setup routing.
+        // Once the user is in the app shell, this router must not infer
+        // setup from stale flags or temporarily-empty provider state.
         val result = MobilePostAuthRouter.decide(
             base().copy(
                 isEmailVerified = true,
@@ -71,7 +72,7 @@ class MobilePostAuthRouterTest {
                 isDeviceActivated = false,
             ),
         )
-        assertEquals(PostAuthDestination.SETUP_CHOICE, result)
+        assertEquals(PostAuthDestination.HOME, result)
     }
 
     @Test
@@ -111,7 +112,7 @@ class MobilePostAuthRouterTest {
 
     @Test
     fun `activation_slot_exhausted routes to Manage Devices`() {
-        // Soft block — there's no free activation slot but the cap
+        // Soft block: there's no free activation slot but the cap
         // isn't reached either. Send the user to the device manager
         // so they can free a slot deliberately.
         val result = MobilePostAuthRouter.decide(
@@ -152,7 +153,7 @@ class MobilePostAuthRouterTest {
     fun `no entitlement does NOT trigger device management even when not activated`() {
         // Free-tier user can't be device-blocked because there's no
         // entitlement to gate. Sending them to Manage Devices would
-        // be confusing — they have no devices to manage.
+        // be confusing because they have no devices to manage.
         val result = MobilePostAuthRouter.decide(
             base().copy(
                 hasEntitlement = false,
@@ -178,9 +179,9 @@ class MobilePostAuthRouterTest {
     @Test
     fun `user already on protected route is left alone`() {
         // Mid-flow on verify-email or device-limit-reached must not
-        // be re-routed by the router — those screens own their own
+        // be re-routed by the router; those screens own their own
         // exit conditions.
-        for (route in listOf("login", "verify_email", "device_limit_reached")) {
+        for (route in listOf("login", "verify_email", "setup_choice", "setup", "setup_guided", "device_limit_reached")) {
             val result = MobilePostAuthRouter.decide(base().copy(currentRoute = route))
             assertEquals(
                 PostAuthDestination.STAY,
@@ -194,7 +195,7 @@ class MobilePostAuthRouterTest {
     fun `new account that already configured setup elsewhere skips Setup Choice`() {
         // A user who registered on device A, configured Panda there,
         // then signs in on device B should NOT see the setup choice
-        // hub — their setup-summary already reports ready. The
+        // hub because their setup-summary already reports ready. The
         // canStartWatching guard is what protects this case.
         val result = MobilePostAuthRouter.decide(
             base().copy(

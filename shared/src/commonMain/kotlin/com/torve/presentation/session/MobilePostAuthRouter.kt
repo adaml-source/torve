@@ -2,22 +2,26 @@ package com.torve.presentation.session
 
 /**
  * Pure decision function for "after a successful auth event, where
- * should the user land?" — extracted from NavGraph so the rules can be
+ * should the user land?" extracted from NavGraph so the rules can be
  * unit-tested without spinning up Compose. Mirrors the
  * `LaunchedEffect(authUser?.id, ...)` block in
  * `androidApp/src/main/kotlin/com/torve/android/ui/navigation/NavGraph.kt`.
  *
  * The contract Prompt 15 codifies:
- *  - New account (just registered, mobileOnboardingRequired = true,
- *    not yet completed): Verify email → Setup choice → Wizard/manual
- *    → Home.
+ *  - New account setup is entered directly from the login /
+ *    verify-email routes: Verify email -> Setup choice ->
+ *    Wizard/manual -> Home.
+ *  - This background router must not force setup from the normal app
+ *    shell, because persisted onboarding flags can outlive provider
+ *    readiness during startup.
+ *
  *  - Existing configured account: always land on Home unless email
  *    unverified or a real device-cap block applies.
  *  - Manage Devices only opens for explicit backend reasons:
  *    device_cap_reached / activation_slot_exhausted /
  *    no_activation_slots / swap_limit_reached.
  *
- * Anything not in those rules degrades to "go Home" — the UI must not
+ * Anything not in those rules degrades to "go Home"; the UI must not
  * surprise the user with a setup or device-management screen for
  * reasons the backend hasn't explicitly named.
  */
@@ -29,7 +33,7 @@ enum class PostAuthDestination {
     STAY,
     /** Force the user to verify their email before doing anything else. */
     VERIFY_EMAIL,
-    /** New-account first-run hub — pick guided wizard vs manual setup. */
+    /** New-account first-run hub: pick guided wizard vs manual setup. */
     SETUP_CHOICE,
     /** The app shell (movies / channels / etc.). */
     HOME,
@@ -63,7 +67,7 @@ data class PostAuthInputs(
     /** True iff this device is currently activated for this account. */
     val isDeviceActivated: Boolean,
     /** Backend-provided reason for device block. Only specific values
-     * trigger device-management routing — anything else is treated as
+     * trigger device-management routing; anything else is treated as
      * "no block" and the user lands on Home. */
     val deviceBlockReason: String?,
     /** True when the backend explicitly says the device cap is full. */
@@ -78,7 +82,7 @@ object MobilePostAuthRouter {
     /** Backend reasons that warrant routing to the device-management
      * surface. Other reasons (e.g. `device_not_registered`) are
      * recoverable via a refresh and must NOT trigger a device-cap
-     * navigation — they'd just confuse the user. */
+     * navigation because that would just confuse the user. */
     private val MANAGE_DEVICES_REASONS = setOf(
         "device_cap_reached",
         "activation_slot_exhausted",
@@ -86,11 +90,14 @@ object MobilePostAuthRouter {
         "swap_limit_reached",
     )
 
-    /** Routes the post-auth decision should not interfere with — these
+    /** Routes the post-auth decision should not interfere with; these
      * are auth/onboarding screens the user is mid-flow on. */
     private val PROTECTED_ROUTES = setOf(
         "login",
         "verify_email",
+        "setup_choice",
+        "setup",
+        "setup_guided",
         "device_limit_reached",
     )
 
@@ -115,20 +122,10 @@ object MobilePostAuthRouter {
             return PostAuthDestination.MANAGE_DEVICES
         }
 
-        // New-account onboarding gate — only fires for users we've
-        // explicitly marked as needing onboarding (i.e. just registered)
-        // AND haven't completed it yet AND don't already have a
-        // configured setup. The last clause means a user who registered
-        // on device A and configured Panda there won't be force-routed
-        // to setup choice on a fresh sign-in on device B — their
-        // setup-summary already says "ready".
-        if (inputs.mobileOnboardingRequired &&
-            !inputs.mobileOnboardingComplete &&
-            !inputs.canStartWatching
-        ) {
-            return PostAuthDestination.SETUP_CHOICE
-        }
-
+        // New-account setup is owned by the login / verify-email
+        // routes. The shell router intentionally defaults to Home so a
+        // stale persisted onboarding flag cannot trap returning users in
+        // setup after a normal sign-in.
         return PostAuthDestination.HOME
     }
 }
