@@ -144,9 +144,9 @@ class ProviderEvidenceBuildersTest {
     )
 
     @Test
-    fun `transfer evidence with no attempt says No attempt recorded explicitly`() {
-        // Prompt 17 acceptance: "No attempt recorded" says what
-        // attempt means. The wording must not read as "transfer
+    fun `transfer evidence with no attempt explains credential transfer explicitly`() {
+        // Prompt 20 acceptance: "attempt" by itself is not enough.
+        // The wording must name credential transfer and must not read as "transfer
         // failed" — the user has done nothing yet and the row
         // shouldn't sound like an error.
         val facet = transferFacetFrom(snapshotWithReachability(RelayReachability.UNKNOWN))
@@ -154,8 +154,8 @@ class ProviderEvidenceBuildersTest {
         val evidence = transferEvidenceFrom(facet)
         assertEquals(ProviderHealthStatus.UNCONFIGURED, evidence.status)
         assertTrue(
-            evidence.evidenceSummary.contains("No transfer attempt has been recorded", ignoreCase = true),
-            "summary must explain what 'no attempt' means, got: ${evidence.evidenceSummary}",
+            evidence.evidenceSummary.contains("No credential transfer has been started", ignoreCase = true),
+            "summary must explain what has not happened, got: ${evidence.evidenceSummary}",
         )
         assertFalse(evidence.canRefresh, "refresh on a never-attempted state would do nothing")
     }

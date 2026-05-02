@@ -133,7 +133,7 @@ fun V2HomePage(
                             val isResume = homeState.continueWatching.any { it.mediaId == heroItem.id }
                             if (isResume) {
                                 Surface(color = colors.accent.copy(alpha = 0.25f), shape = RoundedCornerShape(4.dp)) {
-                                    Text("Resume", Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
+                                    Text(ds("Resume"), Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
                                         style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = colors.accent)
                                 }
                             }
@@ -149,8 +149,8 @@ fun V2HomePage(
                                 if (desc.isNotBlank()) Text(desc, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                TorvePrimaryButton(text = if (isResume) "Resume" else "Play", onClick = { onPlay(heroItem) })
-                                TorveGhostButton(text = "Details", onClick = { onOpenDetail(heroItem) })
+                                TorvePrimaryButton(text = if (isResume) ds("Resume") else ds("Play"), onClick = { onPlay(heroItem) })
+                                TorveGhostButton(text = ds("Details"), onClick = { onOpenDetail(heroItem) })
                             }
                         }
                     }

@@ -26,6 +26,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.torve.android.R
+import com.torve.presentation.providerhealth.ProviderHealthCoordinator
 import com.torve.presentation.providerhealth.ProviderHealthRecoverySnapshot
 import com.torve.presentation.providerhealth.ProviderHealthRecoveryStateProvider
 import com.torve.presentation.transfer.TransferImportCompletionNotifier
@@ -48,6 +49,7 @@ import org.koin.compose.koinInject
 fun RestoreSetupRecoveryCard(
     onReceive: () -> Unit,
     provider: ProviderHealthRecoveryStateProvider = koinInject(),
+    coordinator: ProviderHealthCoordinator = koinInject(),
     completionNotifier: TransferImportCompletionNotifier = koinInject(),
 ) {
     var snapshot by remember { mutableStateOf<ProviderHealthRecoverySnapshot?>(null) }
@@ -57,8 +59,9 @@ fun RestoreSetupRecoveryCard(
     // snapshot in the same recomposition that surfaces the success
     // banner — the card vanishes without the user reopening Settings.
     val lastImport by completionNotifier.lastImportEpochMs.collectAsState()
-    LaunchedEffect(lastImport) {
-        snapshot = provider.snapshot()
+    val healthEntries by coordinator.entries.collectAsState()
+    LaunchedEffect(lastImport, healthEntries) {
+        snapshot = provider.snapshot(healthEntries = healthEntries)
     }
 
     val show = !dismissed && (snapshot?.shouldShowRecoveryCard == true)

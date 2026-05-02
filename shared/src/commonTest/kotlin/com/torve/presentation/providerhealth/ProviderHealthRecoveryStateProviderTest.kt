@@ -53,6 +53,21 @@ class ProviderHealthRecoveryStateProviderTest {
     }
 
     @Test
+    fun greenProviderHealthRowsSuppressRecoveryCardEvenWhenSecretStoreIsEmpty() = runTest {
+        val provider = ProviderHealthRecoveryStateProvider(secretStore = RecoveryFakeStore())
+        val snap = provider.snapshot(
+            healthEntries = listOf(
+                entry(ProviderHealthCategory.SIMKL, ProviderHealthStatus.GREEN),
+            ),
+        )
+
+        assertFalse(
+            snap.shouldShowRecoveryCard,
+            "a green provider row means this device is already partly configured; got $snap",
+        )
+    }
+
+    @Test
     fun singleMissingCategoryDoesNotTriggerCard() = runTest {
         // Only Trakt missing — that's normal partial setup, not the
         // "fresh device" signal. Threshold is 2.

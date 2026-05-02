@@ -116,7 +116,13 @@ fun TransferDiagnosticsScreen(
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !probing,
             ) {
-                Text(if (probing) "Probing relay…" else "Probe relay now")
+                Text(
+                    if (probing) {
+                        stringResource(R.string.diag_transfer_probing)
+                    } else {
+                        stringResource(R.string.diag_transfer_probe)
+                    },
+                )
             }
 
             Spacer(Modifier.height(16.dp))
@@ -146,8 +152,17 @@ private fun StatusCard(s: TransferDiagnosticsSnapshot) {
             }
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.diag_transfer_relay), modifier = Modifier.weight(1f))
-                StatusPill(relayLabel(s.relayReachable), s.relayReachable == RelayReachability.REACHABLE)
+                StatusPill(
+                    relayLabel(s.relayReachable),
+                    ok = s.relayReachable == RelayReachability.REACHABLE,
+                    neutral = s.relayReachable == RelayReachability.UNKNOWN,
+                )
             }
+            Text(
+                text = relayHelp(s.relayReachable),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -199,11 +214,17 @@ private fun LastAttemptCard(record: TransferAttemptRecord?) {
 }
 
 @Composable
-private fun StatusPill(label: String, ok: Boolean) {
-    val container = if (ok) MaterialTheme.colorScheme.tertiaryContainer
-    else MaterialTheme.colorScheme.errorContainer
-    val onContainer = if (ok) MaterialTheme.colorScheme.onTertiaryContainer
-    else MaterialTheme.colorScheme.onErrorContainer
+private fun StatusPill(label: String, ok: Boolean, neutral: Boolean = false) {
+    val container = when {
+        neutral -> MaterialTheme.colorScheme.surface
+        ok -> MaterialTheme.colorScheme.tertiaryContainer
+        else -> MaterialTheme.colorScheme.errorContainer
+    }
+    val onContainer = when {
+        neutral -> MaterialTheme.colorScheme.onSurfaceVariant
+        ok -> MaterialTheme.colorScheme.onTertiaryContainer
+        else -> MaterialTheme.colorScheme.onErrorContainer
+    }
     androidx.compose.material3.Surface(
         color = container,
         shape = RoundedCornerShape(999.dp),
@@ -226,6 +247,17 @@ private fun relayLabel(r: RelayReachability): String = when (r) {
     RelayReachability.NETWORK_ERROR -> "network error"
     RelayReachability.NOT_SIGNED_IN -> "not signed in"
     RelayReachability.NO_CRYPTO_ENGINE -> "no crypto engine"
+}
+
+@Composable
+private fun relayHelp(r: RelayReachability): String = when (r) {
+    RelayReachability.UNKNOWN -> stringResource(R.string.diag_transfer_relay_unknown)
+    RelayReachability.REACHABLE -> stringResource(R.string.diag_transfer_relay_reachable)
+    RelayReachability.UNAVAILABLE -> stringResource(R.string.diag_transfer_relay_unavailable)
+    RelayReachability.UNAUTHORIZED -> stringResource(R.string.diag_transfer_relay_unauthorized)
+    RelayReachability.NETWORK_ERROR -> stringResource(R.string.diag_transfer_relay_network)
+    RelayReachability.NOT_SIGNED_IN -> stringResource(R.string.diag_transfer_relay_not_signed_in)
+    RelayReachability.NO_CRYPTO_ENGINE -> stringResource(R.string.diag_transfer_relay_no_crypto)
 }
 
 private fun roleLabel(role: AttemptRole): String = when (role) {

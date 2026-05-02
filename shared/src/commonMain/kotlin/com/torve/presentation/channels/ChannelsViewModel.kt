@@ -334,6 +334,12 @@ class ChannelsViewModel(
         private const val STALE_THRESHOLD_MS = 60 * 60 * 1000L // 1 hour
     }
 
+    private fun ChannelsUiState.hasUsableCatalogFor(playlistId: String): Boolean {
+        val storedCount = playlists.firstOrNull { it.id == playlistId }?.channelCount ?: 0
+        return selectedPlaylistId == playlistId &&
+            (channels.isNotEmpty() || categories.isNotEmpty() || groupedChannels.isNotEmpty() || storedCount > 0)
+    }
+
     private suspend fun migrateOldPreferenceKeys() {
         val oldKeys = listOf(
             "iptv_country_filter" to "channels_country_filter",
@@ -1284,7 +1290,16 @@ class ChannelsViewModel(
                     showLoadingUntilRefresh = false,
                 )
             } catch (e: Exception) {
-                _state.update { it.copy(isLoadingChannels = false, error = com.torve.presentation.error.UserFacingError.CHANNEL_LOAD_FAILED.messageKey) }
+                _state.update { current ->
+                    current.copy(
+                        isLoadingChannels = false,
+                        error = if (current.hasUsableCatalogFor(playlistId)) {
+                            null
+                        } else {
+                            com.torve.presentation.error.UserFacingError.CHANNEL_LOAD_FAILED.messageKey
+                        },
+                    )
+                }
             }
         }
     }
@@ -1522,7 +1537,14 @@ class ChannelsViewModel(
                 }
             } catch (e: Exception) {
                 _state.update { current ->
-                    current.copy(isLoadingChannels = false, error = com.torve.presentation.error.UserFacingError.CHANNEL_LOAD_FAILED.messageKey)
+                    current.copy(
+                        isLoadingChannels = false,
+                        error = if (current.hasUsableCatalogFor(playlistId)) {
+                            null
+                        } else {
+                            com.torve.presentation.error.UserFacingError.CHANNEL_LOAD_FAILED.messageKey
+                        },
+                    )
                 }
             }
         }

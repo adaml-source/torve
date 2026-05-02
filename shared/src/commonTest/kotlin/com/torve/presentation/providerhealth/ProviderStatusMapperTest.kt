@@ -31,11 +31,11 @@ class ProviderStatusMapperTest {
     )
 
     @Test
-    fun `GREEN maps to CONNECTED with Refresh CTA`() {
+    fun `GREEN maps to CONNECTED with Check again CTA`() {
         val view = ProviderStatusMapper.map(entry(ProviderHealthStatus.GREEN, "Real-Debrid ready."))
         assertEquals(ProviderStatusKind.CONNECTED, view.kind)
         assertEquals("Connected", view.headline)
-        assertEquals("Refresh now", view.primaryActionLabel)
+        assertEquals("Check again", view.primaryActionLabel)
         assertEquals(ProviderActionKind.REFRESH, view.primaryActionKind)
         // Generic "ready" is suppressed — the "Connected" headline already
         // says it. Detail should only carry surprises.
@@ -50,7 +50,7 @@ class ProviderStatusMapperTest {
         assertEquals(ProviderStatusKind.CONFIGURED_NOT_VERIFIED, view.kind)
         assertEquals("Configured but not verified", view.headline)
         assertEquals("Indexer responded but no key on file.", view.detail)
-        assertEquals("Refresh now", view.primaryActionLabel)
+        assertEquals("Check again", view.primaryActionLabel)
         assertEquals(ProviderActionKind.REFRESH, view.primaryActionKind)
     }
 

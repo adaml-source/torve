@@ -1097,11 +1097,11 @@ private fun IntegrationsSection(
 @Composable
 private fun PandaSection(onOpenPandaSetup: () -> Unit) {
     TorveSectionCard(
-        title = "Panda (guided setup)",
-        supportingText = "Configure debrid providers, torrent sources, usenet, and quality - Panda installs itself as an add-on.",
+        title = ds("Panda (guided setup)"),
+        supportingText = ds("Configure debrid providers, torrent sources, usenet, and quality - Panda installs itself as an add-on."),
     ) {
         TorvePrimaryButton(
-            text = "Open Panda setup",
+            text = ds("Open Panda setup"),
             onClick = onOpenPandaSetup,
         )
     }
@@ -1112,59 +1112,63 @@ private fun TraktSection(
     settingsState: SettingsUiState,
     settingsViewModel: SettingsViewModel,
 ) {
+    val connectedLabel = ds("Connected")
+    val disconnectedLabel = ds("Disconnected")
+    val connectPrompt = ds("Connect to sync watch history, ratings, and progress.")
+    val lastSyncLabel = ds("Last sync")
     TorveSectionCard(
         title = "Trakt",
-        supportingText = "Connect Trakt from desktop, sync now, and control scrobbling locally.",
+        supportingText = ds("Connect Trakt from desktop, sync now, and control scrobbling locally."),
         trailing = {
             TorveBadge(
-                text = if (settingsState.traktConnected) "Connected" else "Disconnected",
+                text = if (settingsState.traktConnected) connectedLabel else disconnectedLabel,
                 tone = if (settingsState.traktConnected) TorveBadgeTone.Success else TorveBadgeTone.Neutral,
             )
         },
     ) {
         TorveListRow(
-            title = settingsState.traktUser?.username ?: "No Trakt account connected",
+            title = settingsState.traktUser?.username ?: ds("No Trakt account connected"),
             subtitle = buildString {
-                append(settingsState.traktStats?.let { "${it.moviesWatched} movies, ${it.episodesWatched} episodes" } ?: "Connect to sync watch history, ratings, and progress.")
-                settingsState.traktLastSyncTime?.let { append(" • Last sync ${formatTimestamp(it)}") }
+                append(settingsState.traktStats?.let { "${it.moviesWatched} movies, ${it.episodesWatched} episodes" } ?: connectPrompt)
+                settingsState.traktLastSyncTime?.let { append(" • $lastSyncLabel ${formatTimestamp(it)}") }
             },
         )
         PreferenceToggleRow(
-            title = "Scrobble Playback",
-            subtitle = "Send live playback progress updates to Trakt.",
+            title = ds("Scrobble Playback"),
+            subtitle = ds("Send live playback progress updates to Trakt."),
             checked = settingsState.traktScrobbleEnabled,
             onCheckedChange = settingsViewModel::setTraktScrobbleEnabled,
         )
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             TorvePrimaryButton(
-                text = "Connect Trakt",
+                text = ds("Connect Trakt"),
                 onClick = settingsViewModel::startTraktDeviceAuth,
                 enabled = !settingsState.traktLoading,
             )
             TorveSecondaryButton(
-                text = "Sync Now",
+                text = ds("Sync Now"),
                 onClick = settingsViewModel::syncTraktNow,
                 enabled = settingsState.traktConnected && !settingsState.traktSyncing,
             )
             TorveGhostButton(
-                text = "Disconnect",
+                text = ds("Disconnect"),
                 onClick = settingsViewModel::disconnectTrakt,
                 enabled = settingsState.traktConnected,
             )
         }
         settingsState.traktDeviceCode?.let {
             DeviceCodeBanner(
-                title = "Trakt device auth",
+                title = ds("Trakt device auth"),
                 userCode = it.userCode,
                 verificationUrl = it.verificationUrl,
                 waiting = settingsState.isPollingTrakt,
             )
         }
         settingsState.traktApiStatus?.let {
-            TorveBanner(title = "Trakt status", description = it, tone = TorveBannerTone.Info)
+            TorveBanner(title = ds("Trakt status"), description = it, tone = TorveBannerTone.Info)
         }
         settingsState.traktError?.let {
-            TorveBanner(title = "Trakt error", description = it, tone = TorveBannerTone.Error)
+            TorveBanner(title = ds("Trakt error"), description = it, tone = TorveBannerTone.Error)
         }
         if (settingsState.traktLoading || settingsState.traktSyncing) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -1177,12 +1181,14 @@ private fun SimklSection(
     settingsState: SettingsUiState,
     settingsViewModel: SettingsViewModel,
 ) {
+    val connectedLabel = ds("Connected")
+    val disconnectedLabel = ds("Disconnected")
     TorveSectionCard(
         title = "SIMKL",
-        supportingText = "Desktop can now configure the client ID and run SIMKL device auth without leaving the app.",
+        supportingText = ds("Desktop can now configure the client ID and run SIMKL device auth without leaving the app."),
         trailing = {
             TorveBadge(
-                text = if (settingsState.simklConnected) "Connected" else "Disconnected",
+                text = if (settingsState.simklConnected) connectedLabel else disconnectedLabel,
                 tone = if (settingsState.simklConnected) TorveBadgeTone.Success else TorveBadgeTone.Neutral,
             )
         },
@@ -1190,34 +1196,34 @@ private fun SimklSection(
         TorveTextField(
             value = settingsState.simklClientId,
             onValueChange = settingsViewModel::setSimklClientId,
-            label = "SIMKL Client ID",
+            label = ds("SIMKL Client ID"),
             modifier = Modifier.fillMaxWidth(),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             TorvePrimaryButton(
-                text = "Connect SIMKL",
+                text = ds("Connect SIMKL"),
                 onClick = settingsViewModel::startSimklDeviceAuth,
                 enabled = !settingsState.simklLoading,
             )
             TorveGhostButton(
-                text = "Disconnect",
+                text = ds("Disconnect"),
                 onClick = settingsViewModel::disconnectSimkl,
                 enabled = settingsState.simklConnected,
             )
         }
         settingsState.simklUser?.let {
-            TorveListRow(title = it.username, subtitle = "SIMKL account connected")
+            TorveListRow(title = it.username, subtitle = ds("SIMKL account connected"))
         }
         settingsState.simklDeviceCode?.let {
             DeviceCodeBanner(
-                title = "SIMKL device auth",
+                title = ds("SIMKL device auth"),
                 userCode = it.userCode,
                 verificationUrl = it.verificationUrl,
                 waiting = settingsState.isPollingSimkl,
             )
         }
         settingsState.simklError?.let {
-            TorveBanner(title = "SIMKL error", description = it, tone = TorveBannerTone.Error)
+            TorveBanner(title = ds("SIMKL error"), description = it, tone = TorveBannerTone.Error)
         }
         if (settingsState.simklLoading) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -1231,11 +1237,11 @@ private fun AiSection(
     settingsViewModel: SettingsViewModel,
 ) {
     TorveSectionCard(
-        title = "AI Services",
-        supportingText = "Provider selection and API key validation are available directly on desktop.",
+        title = ds("AI Services"),
+        supportingText = ds("Provider selection and API key validation are available directly on desktop."),
     ) {
         SelectorBlock(
-            label = "Provider",
+            label = ds("Provider"),
             options = AiProvider.entries,
             selected = settingsState.aiProvider,
             optionLabel = { it.label },
@@ -1244,20 +1250,20 @@ private fun AiSection(
         TorveTextField(
             value = settingsState.activeAiApiKey,
             onValueChange = settingsViewModel::updateActiveAiApiKeyInput,
-            label = "${settingsState.aiProvider.label} API Key",
+            label = "${settingsState.aiProvider.label} ${ds("API Key")}",
             modifier = Modifier.fillMaxWidth(),
             visualTransformation = PasswordVisualTransformation(),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             TorvePrimaryButton(
-                text = "Save and Validate",
+                text = ds("Save and Validate"),
                 onClick = settingsViewModel::saveAndValidateAiApiKey,
                 enabled = settingsState.activeAiApiKey.isNotBlank() && !settingsState.aiKeyValidating,
             )
         }
         settingsState.aiKeyValidationResult?.let {
             TorveBanner(
-                title = if (it == "valid") "AI key validated" else "AI key status",
+                title = if (it == "valid") ds("AI key validated") else ds("AI key status"),
                 description = it,
                 tone = if (it == "valid") TorveBannerTone.Success else TorveBannerTone.Info,
             )
@@ -1274,26 +1280,26 @@ private fun MetadataKeysSection(
     settingsViewModel: SettingsViewModel,
 ) {
     TorveSectionCard(
-        title = "Metadata APIs",
-        supportingText = "OMDb and MDBList keys are editable on desktop instead of being website-only.",
+        title = ds("Metadata APIs"),
+        supportingText = ds("OMDb and MDBList keys are editable on desktop instead of being website-only."),
     ) {
         TorveTextField(
             value = settingsState.omdbApiKey,
             onValueChange = settingsViewModel::updateOmdbApiKeyInput,
-            label = "OMDb API Key",
+            label = ds("OMDb API Key"),
             modifier = Modifier.fillMaxWidth(),
             visualTransformation = PasswordVisualTransformation(),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             TorvePrimaryButton(
-                text = "Save and Validate OMDb",
+                text = ds("Save and Validate OMDb"),
                 onClick = settingsViewModel::saveAndValidateOmdbApiKey,
                 enabled = settingsState.omdbApiKey.isNotBlank() && !settingsState.omdbValidating,
             )
         }
         settingsState.omdbValidationResult?.let {
             TorveBanner(
-                title = if (it == "valid") "OMDb key validated" else "OMDb status",
+                title = if (it == "valid") ds("OMDb key validated") else ds("OMDb status"),
                 description = it,
                 tone = if (it == "valid") TorveBannerTone.Success else TorveBannerTone.Info,
             )
@@ -1301,12 +1307,12 @@ private fun MetadataKeysSection(
         TorveTextField(
             value = settingsState.mdblistApiKey,
             onValueChange = settingsViewModel::setMdblistApiKey,
-            label = "MDBList API Key",
+            label = ds("MDBList API Key"),
             modifier = Modifier.fillMaxWidth(),
             visualTransformation = PasswordVisualTransformation(),
         )
         Text(
-            text = "MDBList is saved directly as you edit the field.",
+            text = ds("MDBList is saved directly as you edit the field."),
             style = MaterialTheme.typography.bodySmall,
             color = TorveDesktopThemeTokens.colors.textSecondary,
         )
@@ -1318,75 +1324,76 @@ private fun MediaServersSection(
     settingsState: SettingsUiState,
     settingsViewModel: SettingsViewModel,
 ) {
+    val noneLabel = ds("None")
     TorveSectionCard(
-        title = "Jellyfin and Plex",
-        supportingText = "Server URLs and auth tokens are configurable directly in the desktop shell.",
+        title = ds("Jellyfin and Plex"),
+        supportingText = ds("Server URLs and auth tokens are configurable directly in the desktop shell."),
     ) {
         TorveTextField(
             value = settingsState.jellyfinServerUrl,
             onValueChange = settingsViewModel::setJellyfinServerUrl,
-            label = "Jellyfin Server URL",
+            label = ds("Jellyfin Server URL"),
             modifier = Modifier.fillMaxWidth(),
         )
         TorveTextField(
             value = settingsState.jellyfinApiKey,
             onValueChange = settingsViewModel::updateJellyfinApiKeyInput,
-            label = "Jellyfin API Key",
+            label = ds("Jellyfin API Key"),
             modifier = Modifier.fillMaxWidth(),
             visualTransformation = PasswordVisualTransformation(),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             TorvePrimaryButton(
-                text = "Save and Test Jellyfin",
+                text = ds("Save and Test Jellyfin"),
                 onClick = settingsViewModel::saveAndTestJellyfinConnection,
                 enabled = settingsState.jellyfinServerUrl.isNotBlank() && settingsState.jellyfinApiKey.isNotBlank(),
             )
         }
         settingsState.jellyfinStatusMessage?.let {
             TorveBanner(
-                title = "Jellyfin status",
+                title = ds("Jellyfin status"),
                 description = it,
                 tone = if (it.contains("successful", ignoreCase = true)) TorveBannerTone.Success else TorveBannerTone.Info,
             )
         }
         settingsState.jellyfinProfiles.takeIf { it.isNotEmpty() }?.let { profiles ->
             SelectorBlock(
-                label = "Jellyfin Profile",
+                label = ds("Jellyfin Profile"),
                 options = profiles,
                 selected = profiles.firstOrNull { it.id == settingsState.selectedJellyfinUserId },
                 optionLabel = { it.name },
                 allowNoSelection = true,
-                noSelectionLabel = "None",
+                noSelectionLabel = noneLabel,
                 onSelectNullable = { settingsViewModel.selectJellyfinProfile(it?.id) },
             )
         }
         TorveTextField(
             value = settingsState.plexServerUrl,
             onValueChange = settingsViewModel::setPlexServerUrl,
-            label = "Plex Server URL",
+            label = ds("Plex Server URL"),
             modifier = Modifier.fillMaxWidth(),
         )
         TorveTextField(
             value = settingsState.plexAccessToken,
             onValueChange = settingsViewModel::updatePlexAccessTokenInput,
-            label = "Plex Access Token",
+            label = ds("Plex Access Token"),
             modifier = Modifier.fillMaxWidth(),
             visualTransformation = PasswordVisualTransformation(),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             TorvePrimaryButton(
-                text = "Save and Connect Plex",
+                text = ds("Save and Connect Plex"),
                 onClick = settingsViewModel::saveAndConnectPlex,
                 enabled = settingsState.plexServerUrl.isNotBlank() && settingsState.plexAccessToken.isNotBlank() && !settingsState.plexLoading,
             )
             TorveGhostButton(
-                text = "Disconnect Plex",
+                text = ds("Disconnect Plex"),
                 onClick = settingsViewModel::disconnectPlex,
                 enabled = settingsState.plexConnected,
             )
         }
         settingsState.plexError?.let {
-            TorveBanner(title = "Plex error", description = it, tone = TorveBannerTone.Error)
+            TorveBanner(title = ds("Plex error"), description = it, tone = TorveBannerTone.Error)
         }
         if (settingsState.plexLoading) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -1406,8 +1413,8 @@ private fun KodiSection(
     onKodiPortChange: (String) -> Unit,
 ) {
     TorveSectionCard(
-        title = "Kodi Hosts",
-        supportingText = "Add, test, and remove Kodi endpoints locally from desktop.",
+        title = ds("Kodi Hosts"),
+        supportingText = ds("Add, test, and remove Kodi endpoints locally from desktop."),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1416,26 +1423,26 @@ private fun KodiSection(
             TorveTextField(
                 value = kodiName,
                 onValueChange = onKodiNameChange,
-                label = "Name",
+                label = ds("Name"),
                 modifier = Modifier.weight(1f),
             )
             TorveTextField(
                 value = kodiIp,
                 onValueChange = onKodiIpChange,
-                label = "IP / Host",
+                label = ds("IP / Host"),
                 modifier = Modifier.weight(1f),
             )
             TorveTextField(
                 value = kodiPort,
                 onValueChange = onKodiPortChange,
-                label = "Port",
+                label = ds("Port"),
                 modifier = Modifier.width(120.dp),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             TorvePrimaryButton(
-                text = "Add Kodi Host",
+                text = ds("Add Kodi Host"),
                 onClick = {
                     val port = kodiPort.toIntOrNull()
                     if (kodiName.isNotBlank() && kodiIp.isNotBlank() && port != null) {
@@ -1450,8 +1457,8 @@ private fun KodiSection(
         }
         if (settingsState.kodiHosts.isEmpty()) {
             TorvePlaceholderState(
-                title = "No Kodi hosts",
-                description = "Add at least one Kodi box if you want remote playback control or testing.",
+                title = ds("No Kodi hosts"),
+                description = ds("Add at least one Kodi box if you want remote playback control or testing."),
             )
         } else {
             settingsState.kodiHosts.forEach { host ->
@@ -1481,11 +1488,17 @@ private fun AddonsSection(
     onConfigurePanda: () -> Unit = {},
 ) {
     val hasPremium = com.torve.desktop.premium.rememberHasPremium()
+    val enabledLabel = ds("Enabled")
+    val disabledLabel = ds("Disabled")
+    val configureLabel = ds("Configure")
+    val enableLabel = ds("Enable")
+    val disableLabel = ds("Disable")
+    val removeLabel = ds("Remove")
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         if (!hasPremium) {
             com.torve.desktop.premium.PremiumLockedSection(
-                title = "Premium required to install add-ons",
-                description = "Free accounts can browse and use already-installed add-ons. Installing new add-ons, saving credentials, and cross-device sync need a Torve subscription. Upgrade at torve.app.",
+                title = ds("Premium required to install add-ons"),
+                description = ds("Free accounts can browse and use already-installed add-ons. Installing new add-ons, saving credentials, and cross-device sync need a Torve subscription. Upgrade at torve.app."),
                 onUpgrade = {
                     runCatching {
                         java.awt.Desktop.getDesktop().browse(
@@ -1496,32 +1509,32 @@ private fun AddonsSection(
             )
         }
         TorveSectionCard(
-            title = "Install Add-ons",
-            supportingText = "Paste a Stremio-compatible manifest URL and install it directly on desktop.",
+            title = ds("Install Add-ons"),
+            supportingText = ds("Paste a Stremio-compatible manifest URL and install it directly on desktop."),
         ) {
             TorveTextField(
                 value = addonManifestUrl,
                 onValueChange = onAddonManifestUrlChange,
-                label = "Manifest URL",
+                label = ds("Manifest URL"),
                 modifier = Modifier.fillMaxWidth(),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 TorvePrimaryButton(
-                    text = "Install",
+                    text = ds("Install"),
                     onClick = onInstall,
                     enabled = addonManifestUrl.isNotBlank() && !addonBusy && hasPremium,
                 )
                 TorveGhostButton(
-                    text = "Refresh",
+                    text = ds("Refresh"),
                     onClick = onRefresh,
                     enabled = !addonBusy,
                 )
             }
             addonMessage?.let {
-                TorveBanner(title = "Add-on status", description = it, tone = TorveBannerTone.Success)
+                TorveBanner(title = ds("Add-on status"), description = it, tone = TorveBannerTone.Success)
             }
             addonError?.let {
-                TorveBanner(title = "Add-on error", description = it, tone = TorveBannerTone.Error)
+                TorveBanner(title = ds("Add-on error"), description = it, tone = TorveBannerTone.Error)
             }
             if (addonBusy) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -1529,13 +1542,13 @@ private fun AddonsSection(
         }
 
         TorveSectionCard(
-            title = "Installed Add-ons",
-            supportingText = "Enable, disable, or remove source extensions without using the website.",
+            title = ds("Installed Add-ons"),
+            supportingText = ds("Enable, disable, or remove source extensions without using the website."),
         ) {
             if (installedAddons.isEmpty()) {
                 TorvePlaceholderState(
-                    title = "No add-ons installed",
-                    description = "Install a manifest URL above to populate desktop sources.",
+                    title = ds("No add-ons installed"),
+                    description = ds("Install a manifest URL above to populate desktop sources."),
                 )
             } else {
                 installedAddons.forEach { addon ->
@@ -1555,7 +1568,7 @@ private fun AddonsSection(
                         trailing = {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 TorveBadge(
-                                    text = if (addon.isEnabled) "Enabled" else "Disabled",
+                                    text = if (addon.isEnabled) enabledLabel else disabledLabel,
                                     tone = if (addon.isEnabled) TorveBadgeTone.Success else TorveBadgeTone.Neutral,
                                 )
                                 // Panda is the only configurable add-on; hand off to the
@@ -1566,18 +1579,18 @@ private fun AddonsSection(
                                     addon.manifestUrl.contains("panda.torve.app")
                                 if (isPanda) {
                                     TorveGhostButton(
-                                        text = "Configure",
+                                        text = configureLabel,
                                         onClick = onConfigurePanda,
                                         enabled = !addonBusy,
                                     )
                                 }
                                 TorveGhostButton(
-                                    text = if (addon.isEnabled) "Disable" else "Enable",
+                                    text = if (addon.isEnabled) disableLabel else enableLabel,
                                     onClick = { onToggleAddon(addon) },
                                     enabled = !addonBusy,
                                 )
                                 TorveGhostButton(
-                                    text = "Remove",
+                                    text = removeLabel,
                                     onClick = { onRemoveAddon(addon) },
                                     enabled = !addonBusy,
                                 )
@@ -1613,8 +1626,8 @@ private fun PlaylistsSection(
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         if (!hasPremium) {
             com.torve.desktop.premium.PremiumLockedSection(
-                title = "Premium required to manage playlists",
-                description = "Reading existing playlists is free. Adding, syncing, or storing IPTV credentials needs Torve Premium. Upgrade at torve.app.",
+                title = ds("Premium required to manage playlists"),
+                description = ds("Reading existing playlists is free. Adding, syncing, or storing IPTV credentials needs Torve Premium. Upgrade at torve.app."),
                 onUpgrade = {
                     runCatching {
                         java.awt.Desktop.getDesktop().browse(
@@ -1631,11 +1644,11 @@ private fun PlaylistsSection(
         // tvg-id remap, hidden categories).
         val recordingsPlaylistId = channelsState.selectedPlaylistId
         TorveSectionCard(
-            title = "Live TV recordings",
-            supportingText = "Schedule recordings from the EPG. They land in your movies download folder.",
+            title = ds("Live TV recordings"),
+            supportingText = ds("Schedule recordings from the EPG. They land in your movies download folder."),
         ) {
             TorvePrimaryButton(
-                text = "Open My Recordings",
+                text = ds("Open My Recordings"),
                 onClick = onOpenRecordings,
             )
         }
@@ -1646,9 +1659,11 @@ private fun PlaylistsSection(
             )
         }
 
+        val addingLabel = ds("Adding...")
+        val addPlaylistLabel = ds("Add Playlist")
         TorveSectionCard(
-            title = "Add Playlist",
-            supportingText = "Desktop can now create M3U or Xtream playlists directly in settings.",
+            title = addPlaylistLabel,
+            supportingText = ds("Desktop can now create M3U or Xtream playlists directly in settings."),
             trailing = {
                 TorveBadge(
                     text = channelsState.newPlaylistType.uppercase(),
@@ -1657,7 +1672,7 @@ private fun PlaylistsSection(
             },
         ) {
             SelectorBlock(
-                label = "Playlist Type",
+                label = ds("Playlist Type"),
                 options = listOf("m3u", "xtream"),
                 selected = channelsState.newPlaylistType,
                 optionLabel = { if (it == "xtream") "Xtream" else "M3U" },
@@ -1666,14 +1681,14 @@ private fun PlaylistsSection(
             TorveTextField(
                 value = channelsState.newPlaylistName,
                 onValueChange = channelsViewModel::setNewPlaylistName,
-                label = "Playlist Name",
+                label = ds("Playlist Name"),
                 modifier = Modifier.fillMaxWidth(),
             )
             if (channelsState.newPlaylistType == "xtream") {
                 TorveTextField(
                     value = channelsState.newXtreamServer,
                     onValueChange = channelsViewModel::setNewXtreamServer,
-                    label = "Xtream Server",
+                    label = ds("Xtream Server"),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Row(
@@ -1683,13 +1698,13 @@ private fun PlaylistsSection(
                     TorveTextField(
                         value = channelsState.newXtreamUsername,
                         onValueChange = channelsViewModel::setNewXtreamUsername,
-                        label = "Username",
+                        label = ds("Username"),
                         modifier = Modifier.weight(1f),
                     )
                     TorveTextField(
                         value = channelsState.newXtreamPassword,
                         onValueChange = channelsViewModel::setNewXtreamPassword,
-                        label = "Password",
+                        label = ds("Password"),
                         modifier = Modifier.weight(1f),
                         visualTransformation = PasswordVisualTransformation(),
                     )
@@ -1698,13 +1713,13 @@ private fun PlaylistsSection(
                 TorveTextField(
                     value = channelsState.newPlaylistUrl,
                     onValueChange = channelsViewModel::setNewPlaylistUrl,
-                    label = "M3U URL",
+                    label = ds("M3U URL"),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 TorveTextField(
                     value = channelsState.newPlaylistEpgUrl,
                     onValueChange = channelsViewModel::setNewPlaylistEpgUrl,
-                    label = "EPG URL",
+                    label = ds("EPG URL"),
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -1713,7 +1728,7 @@ private fun PlaylistsSection(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 TorvePrimaryButton(
-                    text = if (channelsState.isAddingPlaylist) "Adding..." else "Add Playlist",
+                    text = if (channelsState.isAddingPlaylist) addingLabel else addPlaylistLabel,
                     onClick = channelsViewModel::addPlaylist,
                     enabled = !channelsState.isAddingPlaylist,
                 )
@@ -1729,18 +1744,18 @@ private fun PlaylistsSection(
                 }
             }
             channelsState.error?.let {
-                TorveBanner(title = "Playlist error", description = it, tone = TorveBannerTone.Error)
+                TorveBanner(title = ds("Playlist error"), description = it, tone = TorveBannerTone.Error)
             }
         }
 
         TorveSectionCard(
-            title = "Saved Playlists",
-            supportingText = "Select, refresh, and remove live TV playlists from desktop.",
+            title = ds("Saved Playlists"),
+            supportingText = ds("Select, refresh, and remove live TV playlists from desktop."),
         ) {
             if (channelsState.playlists.isEmpty()) {
                 TorvePlaceholderState(
-                    title = "No playlists saved",
-                    description = "Add an M3U or Xtream source above to populate Live TV.",
+                    title = ds("No playlists saved"),
+                    description = ds("Add an M3U or Xtream source above to populate Live TV."),
                 )
             } else {
                 channelsState.playlists.forEach { playlist ->
@@ -1761,12 +1776,13 @@ private fun PlaylistsSection(
             }
         }
 
+        val refreshEpgLabel = ds("Refresh EPG")
         TorveSectionCard(
-            title = "EPG Status",
-            supportingText = "EPG loading now starts automatically for the selected playlist and can be retried here.",
+            title = ds("EPG Status"),
+            supportingText = ds("EPG loading now starts automatically for the selected playlist and can be retried here."),
         ) {
             TorveListRow(
-                title = selectedPlaylist?.name ?: "No playlist selected",
+                title = selectedPlaylist?.name ?: ds("No playlist selected"),
                 subtitle = describeEpgState(channelsState.epgState),
                 trailing = {
                     Row(
@@ -1784,7 +1800,7 @@ private fun PlaylistsSection(
                             )
                         }
                         TorveGhostButton(
-                            text = "Refresh EPG",
+                            text = refreshEpgLabel,
                             onClick = { channelsViewModel.ensureEpgLoaded(forceRefresh = true) },
                             enabled = channelsState.selectedPlaylistId != null &&
                                 channelsState.epgState !is EpgState.Loading,
@@ -1794,33 +1810,42 @@ private fun PlaylistsSection(
             )
             channelsState.guideError?.takeIf { it.isNotBlank() }?.let { message ->
                 TorveBanner(
-                    title = "EPG issue",
+                    title = ds("EPG issue"),
                     description = message,
                     tone = TorveBannerTone.Error,
                 )
             }
         }
 
+        val showAllLabel = ds("Show all")
+        val hideAllLabel = ds("Hide all")
+        val allHiddenLabel = ds("All hidden")
+        val allVisibleLabel = ds("All visible")
+        val showLabel = ds("Show")
+        val hideLabel = ds("Hide")
+        val hiddenBadge = ds("Hidden")
+        val visibleBadge = ds("Visible")
+        val ungroupedLabel = ds("Ungrouped")
         TorveSectionCard(
-            title = "Manage Channel Lists",
-            supportingText = "Pick the IPTV category lists you want to keep. Country codes are shown ahead of each list when detected.",
+            title = ds("Manage Channel Lists"),
+            supportingText = ds("Pick the IPTV category lists you want to keep. Country codes are shown ahead of each list when detected."),
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 TorveGhostButton(
-                    text = "Show All Lists",
+                    text = ds("Show All Lists"),
                     onClick = channelsViewModel::showAllCategories,
                     enabled = channelsState.allCategories.isNotEmpty(),
                 )
                 TorveGhostButton(
-                    text = "Hide All Lists",
+                    text = ds("Hide All Lists"),
                     onClick = channelsViewModel::hideAllCategories,
                     enabled = channelsState.allCategories.isNotEmpty(),
                 )
             }
             if (channelsState.allCategories.isEmpty()) {
                 TorvePlaceholderState(
-                    title = "No channel lists loaded",
-                    description = "Select a playlist and let desktop load the IPTV category catalog first.",
+                    title = ds("No channel lists loaded"),
+                    description = ds("Select a playlist and let desktop load the IPTV category catalog first."),
                 )
             } else {
                 // Group by country indicator - IPTV providers often ship
@@ -1843,8 +1868,9 @@ private fun PlaylistsSection(
                         )
                 }
                 var expandedCountries by remember(grouped) { mutableStateOf(setOf<String>()) }
+                val otherLabel = ds("Other")
                 grouped.forEach { (countryCode, categories) ->
-                    val countryLabel = if (countryCode.isEmpty()) "Other" else countryCode
+                    val countryLabel = if (countryCode.isEmpty()) otherLabel else countryCode
                     val isExpanded = countryCode in expandedCountries
                     val totalChannels = categories.sumOf { it.channelCount }
                     // Group-level hidden state - drives the Hide-All /
@@ -1875,8 +1901,8 @@ private fun PlaylistsSection(
                             ) {
                                 TorveBadge(
                                     text = when {
-                                        groupAllHidden -> "All hidden"
-                                        groupAllVisible -> "All visible"
+                                        groupAllHidden -> allHiddenLabel
+                                        groupAllVisible -> allVisibleLabel
                                         else -> "$hiddenInGroup hidden"
                                     },
                                     tone = when {
@@ -1891,7 +1917,7 @@ private fun PlaylistsSection(
                                 // so the user can flip a group on/off
                                 // without scrolling.
                                 TorveGhostButton(
-                                    text = if (groupAllHidden) "Show all" else "Hide all",
+                                    text = if (groupAllHidden) showAllLabel else hideAllLabel,
                                     onClick = {
                                         if (groupAllHidden) {
                                             channelsViewModel.showCountryCategories(countryCode)
@@ -1915,18 +1941,18 @@ private fun PlaylistsSection(
                             categories.forEach { category ->
                                 val hidden = category.name in channelsState.hiddenCategories
                                 TorveListRow(
-                                    title = category.name.takeIf { it.isNotBlank() } ?: "Ungrouped",
+                                    title = category.name.takeIf { it.isNotBlank() } ?: ungroupedLabel,
                                     subtitle = "${category.channelCount} channels",
                                     selected = channelsState.selectedGroup == category.name,
                                     onClick = { channelsViewModel.loadCategoryChannels(category.name) },
                                     trailing = {
                                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                             TorveBadge(
-                                                text = if (hidden) "Hidden" else "Visible",
+                                                text = if (hidden) hiddenBadge else visibleBadge,
                                                 tone = if (hidden) TorveBadgeTone.Warning else TorveBadgeTone.Success,
                                             )
                                             TorveGhostButton(
-                                                text = if (hidden) "Show" else "Hide",
+                                                text = if (hidden) showLabel else hideLabel,
                                                 onClick = { channelsViewModel.toggleHiddenCategory(category.name) },
                                             )
                                         }
@@ -1940,20 +1966,20 @@ private fun PlaylistsSection(
         }
 
         TorveSectionCard(
-            title = "Manage Channels",
-            supportingText = "Select a list above, then hide the individual channels you do not want in Live TV.",
+            title = ds("Manage Channels"),
+            supportingText = ds("Select a list above, then hide the individual channels you do not want in Live TV."),
         ) {
             when {
                 channelsState.selectedGroup == null -> {
                     TorvePlaceholderState(
-                        title = "No list selected",
-                        description = "Select a channel list from the section above to manage its channels.",
+                        title = ds("No list selected"),
+                        description = ds("Select a channel list from the section above to manage its channels."),
                     )
                 }
 
                 channelsState.categoryChannels.isEmpty() -> {
                     TorvePlaceholderState(
-                        title = "No channels loaded",
+                        title = ds("No channels loaded"),
                         description = "Desktop is still loading channels for ${channelsState.selectedGroup}.",
                     )
                 }
@@ -1978,11 +2004,11 @@ private fun PlaylistsSection(
                             trailing = {
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     TorveBadge(
-                                        text = if (hidden) "Hidden" else "Visible",
+                                        text = if (hidden) hiddenBadge else visibleBadge,
                                         tone = if (hidden) TorveBadgeTone.Warning else TorveBadgeTone.Success,
                                     )
                                     TorveGhostButton(
-                                        text = if (hidden) "Show" else "Hide",
+                                        text = if (hidden) showLabel else hideLabel,
                                         onClick = { channelsViewModel.toggleHiddenChannel(stableChannelId(channel)) },
                                     )
                                 }
@@ -2030,6 +2056,10 @@ private fun PlaylistRow(
     onRefresh: () -> Unit,
     onRemove: () -> Unit,
 ) {
+    val activeBadge = ds("Active")
+    val refreshLabel = ds("Refresh")
+    val refreshingLabel = ds("Refreshing...")
+    val removeLabel = ds("Remove")
     TorveListRow(
         title = playlist.name,
         subtitle = buildString {
@@ -2046,7 +2076,7 @@ private fun PlaylistRow(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (selected) {
-                    TorveBadge("Active", tone = TorveBadgeTone.Accent)
+                    TorveBadge(activeBadge, tone = TorveBadgeTone.Accent)
                 }
                 if (isRefreshing) {
                     CircularProgressIndicator(
@@ -2055,11 +2085,11 @@ private fun PlaylistRow(
                     )
                 }
                 TorveGhostButton(
-                    text = if (isRefreshing) "Refreshing..." else "Refresh",
+                    text = if (isRefreshing) refreshingLabel else refreshLabel,
                     onClick = onRefresh,
                     enabled = !isRefreshing,
                 )
-                TorveGhostButton(text = "Remove", onClick = onRemove)
+                TorveGhostButton(text = removeLabel, onClick = onRemove)
             }
         },
     )
@@ -2255,41 +2285,50 @@ private fun AboutSection(
         "${System.getProperty("java.vm.name")} ${System.getProperty("java.version")}"
     }
 
+    val foundLabel = ds("Found")
+    val notFoundLabel = ds("Not found")
+    val missingLabel = ds("Missing")
+    val unknownLabel = ds("Unknown")
+    val enabledLabel = ds("Enabled")
+    val disabledLabel = ds("Disabled")
+    val notSetLabel = ds("Not set")
+    val yesLabel = ds("Yes")
+    val noLabel = ds("No")
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         TorveSectionCard(
             title = releaseInfo.appName,
             supportingText = releaseInfo.description,
         ) {
-            TorveListRow(title = "Version", subtitle = releaseInfo.version)
+            TorveListRow(title = ds("Version"), subtitle = releaseInfo.version)
             TorveListRow(title = "Channel", subtitle = releaseInfo.channel)
             TorveListRow(title = "Vendor", subtitle = releaseInfo.vendor)
         }
 
         TorveSectionCard(
-            title = "Runtime",
-            supportingText = "Platform and playback engine information.",
+            title = ds("Runtime"),
+            supportingText = ds("Platform and playback engine information."),
         ) {
-            TorveListRow(title = "OS", subtitle = osInfo)
-            TorveListRow(title = "Java Runtime", subtitle = javaVersion)
+            TorveListRow(title = ds("OS"), subtitle = osInfo)
+            TorveListRow(title = ds("Java Runtime"), subtitle = javaVersion)
             TorveListRow(
-                title = "VLC Runtime",
-                subtitle = if (vlcResult.found) vlcResult.vlcDirectory ?: "Found" else "Not found",
+                title = ds("VLC Runtime"),
+                subtitle = if (vlcResult.found) vlcResult.vlcDirectory ?: foundLabel else notFoundLabel,
                 trailing = {
                     TorveBadge(
-                        text = if (vlcResult.found) "Found" else "Missing",
+                        text = if (vlcResult.found) foundLabel else missingLabel,
                         tone = if (vlcResult.found) TorveBadgeTone.Success else TorveBadgeTone.Warning,
                     )
                 },
             )
             if (vlcResult.found) {
                 TorveListRow(
-                    title = "VLC Source",
-                    subtitle = vlcResult.discoverySource ?: "Unknown",
+                    title = ds("VLC Source"),
+                    subtitle = vlcResult.discoverySource ?: unknownLabel,
                 )
             }
             if (!vlcResult.found) {
                 TorveBanner(
-                    title = "VLC not found",
+                    title = ds("VLC not found"),
                     description = vlcResult.diagnosticMessage,
                     tone = TorveBannerTone.Warning,
                 )
@@ -2297,24 +2336,24 @@ private fun AboutSection(
         }
 
         TorveSectionCard(
-            title = "Effective Playback Settings",
-            supportingText = "Current runtime playback configuration snapshot.",
+            title = ds("Effective Playback Settings"),
+            supportingText = ds("Current runtime playback configuration snapshot."),
         ) {
-            TorveListRow(title = "Seek Step", subtitle = "${settingsState.seekStepSeconds}s")
-            TorveListRow(title = "Subtitles by Default", subtitle = if (settingsState.subtitlesEnabledByDefault) "Enabled" else "Disabled")
-            TorveListRow(title = "Preferred Subtitle Language", subtitle = settingsState.preferredSubtitleLanguage.ifBlank { "Not set" })
-            TorveListRow(title = "Preferred Audio Language", subtitle = settingsState.preferredAudioLanguage.ifBlank { "Not set" })
-            TorveListRow(title = "Remember Volume", subtitle = if (settingsState.rememberVolume) "Yes (${settingsState.lastVolume}%)" else "No")
+            TorveListRow(title = ds("Seek Step"), subtitle = "${settingsState.seekStepSeconds}s")
+            TorveListRow(title = ds("Subtitles by Default"), subtitle = if (settingsState.subtitlesEnabledByDefault) enabledLabel else disabledLabel)
+            TorveListRow(title = ds("Preferred Subtitle Language"), subtitle = settingsState.preferredSubtitleLanguage.ifBlank { notSetLabel })
+            TorveListRow(title = ds("Preferred Audio Language"), subtitle = settingsState.preferredAudioLanguage.ifBlank { notSetLabel })
+            TorveListRow(title = ds("Remember Volume"), subtitle = if (settingsState.rememberVolume) "$yesLabel (${settingsState.lastVolume}%)" else noLabel)
         }
 
         TorveSectionCard(
-            title = "Storage",
-            supportingText = "Local data and configuration paths.",
+            title = ds("Storage"),
+            supportingText = ds("Local data and configuration paths."),
         ) {
-            TorveListRow(title = "Data Directory", subtitle = dataDir)
+            TorveListRow(title = ds("Data Directory"), subtitle = dataDir)
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 TorveGhostButton(
-                    text = "Open Data Folder",
+                    text = ds("Open Data Folder"),
                     onClick = {
                         runCatching {
                             java.awt.Desktop.getDesktop().open(java.io.File(dataDir))
@@ -2324,8 +2363,10 @@ private fun AboutSection(
             }
         }
 
+        val onLabel = ds("On")
+        val offLabel = ds("Off")
         TorveSectionCard(
-            title = "Diagnostics & Updates",
+            title = ds("Diagnostics & Updates"),
             supportingText = "Crash reporting and the in-app update channel are configured " +
                 "via environment variables at launch. This section shows the live state - " +
                 "set these on the launcher script or system env to enable.",
@@ -2338,7 +2379,7 @@ private fun AboutSection(
                 subtitle = if (sentryEnabled) "Enabled" else "Disabled - DSN not set",
                 trailing = {
                     TorveBadge(
-                        text = if (sentryEnabled) "On" else "Off",
+                        text = if (sentryEnabled) onLabel else offLabel,
                         tone = if (sentryEnabled) TorveBadgeTone.Success else TorveBadgeTone.Neutral,
                     )
                 },
@@ -2348,7 +2389,7 @@ private fun AboutSection(
                 subtitle = com.torve.desktop.diagnostics.SentryBootstrap.DSN_ENV,
                 trailing = {
                     TorveGhostButton(
-                        text = "Copy",
+                        text = ds("Copy"),
                         onClick = {
                             runCatching {
                                 val sel = java.awt.datatransfer.StringSelection(
@@ -2370,7 +2411,7 @@ private fun AboutSection(
                 subtitle = updateChannel ?: "Disabled - no repo or feed configured",
                 trailing = {
                     TorveBadge(
-                        text = if (updateChannel != null) "On" else "Off",
+                        text = if (updateChannel != null) onLabel else offLabel,
                         tone = if (updateChannel != null) TorveBadgeTone.Success else TorveBadgeTone.Neutral,
                     )
                 },
@@ -2405,7 +2446,7 @@ private fun AboutSection(
 
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 TorveGhostButton(
-                    text = "Check for updates now",
+                    text = ds("Check for updates now"),
                     onClick = {
                         @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
                         kotlinx.coroutines.GlobalScope.launch {
@@ -2426,7 +2467,7 @@ private fun AboutSection(
                 reminders.filter { it.startMs > now }.sortedBy { it.startMs }
             }
             TorveSectionCard(
-                title = "EPG reminders",
+                title = ds("EPG reminders"),
                 supportingText = "Programmes you've asked Torve to remind you about. " +
                     "Reminders fire as a tray notification one minute before air time.",
             ) {
@@ -2448,17 +2489,17 @@ private fun AboutSection(
         }
 
         TorveSectionCard(
-            title = "Maintenance",
-            supportingText = "Cache and data management.",
+            title = ds("Maintenance"),
+            supportingText = ds("Cache and data management."),
         ) {
             var exportStatus by remember { mutableStateOf<String?>(null) }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 TorveGhostButton(
-                    text = "Clear Metadata Cache",
+                    text = ds("Clear Metadata Cache"),
                     onClick = settingsViewModel::clearCache,
                 )
                 TorveGhostButton(
-                    text = "Export diagnostics...",
+                    text = ds("Export diagnostics..."),
                     onClick = {
                         @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
                         kotlinx.coroutines.GlobalScope.launch {
@@ -2490,16 +2531,17 @@ private fun AboutSection(
         // Required by every store policy and by general public-release
         // hygiene. URLs are sourced from the shared LegalUrls module so
         // a copy change is one PR, not seven.
+        val openLabel = ds("Open")
         TorveSectionCard(
-            title = "Legal & support",
-            supportingText = "Privacy, terms, and how to reach us.",
+            title = ds("Legal & support"),
+            supportingText = ds("Privacy, terms, and how to reach us."),
         ) {
             TorveListRow(
-                title = "Privacy Policy",
+                title = ds("Privacy Policy"),
                 subtitle = com.torve.presentation.legal.LegalUrls.PRIVACY_POLICY,
                 trailing = {
                     TorveGhostButton(
-                        text = "Open",
+                        text = openLabel,
                         onClick = {
                             runCatching {
                                 java.awt.Desktop.getDesktop().browse(
@@ -2511,11 +2553,11 @@ private fun AboutSection(
                 },
             )
             TorveListRow(
-                title = "Terms of Service",
+                title = ds("Terms of Service"),
                 subtitle = com.torve.presentation.legal.LegalUrls.TERMS_OF_SERVICE,
                 trailing = {
                     TorveGhostButton(
-                        text = "Open",
+                        text = openLabel,
                         onClick = {
                             runCatching {
                                 java.awt.Desktop.getDesktop().browse(
@@ -2527,11 +2569,11 @@ private fun AboutSection(
                 },
             )
             TorveListRow(
-                title = "Help & support",
+                title = ds("Help & support"),
                 subtitle = com.torve.presentation.legal.LegalUrls.HELP,
                 trailing = {
                     TorveGhostButton(
-                        text = "Open",
+                        text = openLabel,
                         onClick = {
                             runCatching {
                                 java.awt.Desktop.getDesktop().browse(
@@ -2543,11 +2585,11 @@ private fun AboutSection(
                 },
             )
             TorveListRow(
-                title = "Email support",
+                title = ds("Email support"),
                 subtitle = com.torve.presentation.legal.LegalUrls.SUPPORT_EMAIL,
                 trailing = {
                     TorveGhostButton(
-                        text = "Email",
+                        text = ds("Email"),
                         onClick = {
                             runCatching {
                                 java.awt.Desktop.getDesktop().mail(
@@ -2566,13 +2608,12 @@ private fun AboutSection(
         var showDeleteAccountDialog by remember { mutableStateOf(false) }
         var deleteAccountStatus by remember { mutableStateOf<String?>(null) }
         TorveSectionCard(
-            title = "Delete account",
-            supportingText = "Permanently remove your Torve account and associated data " +
-                "from our servers. This action cannot be undone.",
+            title = ds("Delete account"),
+            supportingText = ds("Permanently remove your Torve account and associated data from our servers. This action cannot be undone."),
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 TorveGhostButton(
-                    text = "Delete account...",
+                    text = ds("Delete account..."),
                     onClick = { showDeleteAccountDialog = true },
                 )
             }
@@ -2587,12 +2628,10 @@ private fun AboutSection(
         if (showDeleteAccountDialog) {
             androidx.compose.material3.AlertDialog(
                 onDismissRequest = { showDeleteAccountDialog = false },
-                title = { Text("Delete your Torve account?") },
+                title = { Text(ds("Delete your Torve account?")) },
                 text = {
                     Text(
-                        "This permanently deletes your account, devices, watch history, " +
-                            "playlists, and entitlements on the Torve servers. Local " +
-                            "downloads on this computer are not affected.",
+                        ds("This permanently deletes your account, devices, watch history, playlists, and entitlements on the Torve servers. Local downloads on this computer are not affected."),
                     )
                 },
                 confirmButton = {
@@ -2609,11 +2648,11 @@ private fun AboutSection(
                                 "Could not delete account: ${result.error ?: "unknown error"}"
                             }
                         }
-                    }) { Text("Delete account") }
+                    }) { Text(ds("Delete account")) }
                 },
                 dismissButton = {
                     androidx.compose.material3.TextButton(onClick = { showDeleteAccountDialog = false }) {
-                        Text("Cancel")
+                        Text(ds("Cancel"))
                     }
                 },
             )
@@ -3335,8 +3374,8 @@ private fun SourcesSection(
     val colors = TorveDesktopThemeTokens.colors
     if (setupIntentsViewModel == null) {
         TorveSectionCard(
-            title = "Setup & Sources",
-            supportingText = "Provider health is initializing...",
+            title = ds("Setup & Sources"),
+            supportingText = ds("Provider health is initializing..."),
         ) {}
         return
     }
@@ -3344,8 +3383,8 @@ private fun SourcesSection(
     val rawEntries by setupIntentsViewModel.rawEntries.collectAsState()
 
     TorveSectionCard(
-        title = "Setup & Sources",
-        supportingText = "Tell Torve what you have. Each path is tested as soon as you save credentials.",
+        title = ds("Setup & Sources"),
+        supportingText = ds("Tell Torve what you have. Each path is tested as soon as you save credentials."),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             summaries.forEach { summary ->
@@ -3381,7 +3420,7 @@ private fun SourcesSection(
                 horizontalArrangement = Arrangement.End,
             ) {
                 TorveGhostButton(
-                    text = "Re-check everything",
+                    text = ds("Re-check everything"),
                     onClick = { setupIntentsViewModel.refreshAll() },
                 )
             }
@@ -3465,9 +3504,8 @@ private fun SourcesSection(
             }
         }
         TorveSectionCard(
-            title = "Restore setup from another device",
-            supportingText = "Transfer encrypted credentials from a device that already works. " +
-                "Faster than re-entering each one by hand.",
+            title = ds("Restore setup from another device"),
+            supportingText = ds("Transfer encrypted credentials from a device that already works. Faster than re-entering each one by hand."),
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
@@ -3542,7 +3580,7 @@ private fun SourcesSection(
                     // above. The card naturally re-appears on next
                     // refresh if categories are still missing.
                     TorveGhostButton(
-                        text = "Set up manually",
+                        text = ds("Set up manually"),
                         onClick = {
                             recoverySnap = null
                             redirectNotice = "Use the Setup & Sources cards above - " +
@@ -3551,7 +3589,7 @@ private fun SourcesSection(
                     )
                     Spacer(Modifier.width(8.dp))
                     TorvePrimaryButton(
-                        text = "Receive credentials",
+                        text = ds("Receive credentials"),
                         // Open the MODAL dialog (same one the per-row
                         // Transfer button uses). Flipping just the inline
                         // expander far below the page gave the user no
@@ -3567,8 +3605,8 @@ private fun SourcesSection(
     }
 
     TorveSectionCard(
-        title = "Provider Health",
-        supportingText = "Per-provider status and last check time.",
+        title = ds("Provider Health"),
+        supportingText = ds("Per-provider status and last check time."),
     ) {
         if (rawEntries.isEmpty()) {
             Text(

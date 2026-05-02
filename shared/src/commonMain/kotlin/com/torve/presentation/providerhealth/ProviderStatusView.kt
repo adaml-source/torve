@@ -143,8 +143,8 @@ object ProviderStatusMapper {
     }
 
     private fun primaryAction(kind: ProviderStatusKind): Pair<String?, ProviderActionKind> = when (kind) {
-        ProviderStatusKind.CONNECTED -> "Refresh now" to ProviderActionKind.REFRESH
-        ProviderStatusKind.CONFIGURED_NOT_VERIFIED -> "Refresh now" to ProviderActionKind.REFRESH
+        ProviderStatusKind.CONNECTED -> "Check again" to ProviderActionKind.REFRESH
+        ProviderStatusKind.CONFIGURED_NOT_VERIFIED -> "Check again" to ProviderActionKind.REFRESH
         ProviderStatusKind.NEEDS_CREDENTIALS -> "Configure" to ProviderActionKind.CONFIGURE
         ProviderStatusKind.LAST_CHECK_FAILED -> "Re-enter credentials" to ProviderActionKind.REENTER
         ProviderStatusKind.CHECKING -> null to ProviderActionKind.NONE

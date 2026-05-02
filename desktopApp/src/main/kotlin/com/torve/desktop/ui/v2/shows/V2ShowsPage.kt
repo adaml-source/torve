@@ -2,6 +2,7 @@ package com.torve.desktop.ui.v2.shows
 
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
+import com.torve.desktop.ui.l10n.ds
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
@@ -124,7 +125,7 @@ fun V2ShowsPage(
                     if (heroItem != null) {
                         Column(Modifier.align(Alignment.BottomStart).fillMaxWidth(0.5f).padding(start = 72.dp, bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Surface(color = colors.accent.copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
-                                Text("TV Show", Modifier.padding(horizontal = 8.dp, vertical = 3.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = colors.accent)
+                                Text(ds("TV Show"), Modifier.padding(horizontal = 8.dp, vertical = 3.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = colors.accent)
                             }
                             val meta = listOfNotNull(heroItem.year?.toString(), heroItem.rating?.let { String.format("%.1f", it) })
                             if (meta.isNotEmpty()) Text(meta.joinToString("  \u00B7  "), style = MaterialTheme.typography.bodySmall, color = colors.textPrimary.copy(alpha = 0.6f))
@@ -136,8 +137,8 @@ fun V2ShowsPage(
                             }
                             heroItem.overview?.take(160)?.let { if (it.isNotBlank()) Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis) }
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                TorvePrimaryButton(text = "Play", onClick = { onPlay(heroItem) })
-                                TorveGhostButton(text = "Details", onClick = { onOpenDetail(heroItem) })
+                                TorvePrimaryButton(text = ds("Play"), onClick = { onPlay(heroItem) })
+                                TorveGhostButton(text = ds("Details"), onClick = { onOpenDetail(heroItem) })
                             }
                         }
                     }
@@ -193,7 +194,7 @@ fun V2ShowsPage(
                     // when the source-picker injection lands.
                     if (nzbShows.isNotEmpty()) {
                         V2Shelf(
-                            title = "Latest on Usenet",
+                            title = ds("Latest on Usenet"),
                             modifier = Modifier.padding(start = 72.dp),
                             onSeeAll = { onSeeAll(SeeAllRequest("LATEST_ON_USENET_TV", "Latest on Usenet - TV")) },
                         ) {
@@ -274,7 +275,7 @@ private fun FilteredShowsGrid(
         if (state.items.isEmpty() && !state.isLoading) {
             item {
                 Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) {
-                    Text(text = "No results for these filters.", color = colors.textSecondary)
+                    Text(text = ds("No results for these filters."), color = colors.textSecondary)
                 }
             }
         }

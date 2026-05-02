@@ -180,8 +180,8 @@ fun transferEvidenceFrom(facet: TransferHealthFacet): ProviderHealthEvidence = w
         status = ProviderHealthStatus.UNCONFIGURED,
         lastCheckedAt = null,
         sourceOfTruth = "TransferAttemptTracker",
-        evidenceSummary = "No transfer attempt has been recorded on this device. " +
-            "Receive credentials from another device or send credentials TO another device to populate.",
+        evidenceSummary = "No credential transfer has been started on this device. " +
+            "Use Send credentials or Receive credentials when you set up another device.",
         recommendedAction = "Receive from another device",
         canRefresh = false,
     )

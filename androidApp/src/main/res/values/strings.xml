@@ -101,10 +101,19 @@
     <string name="diag_transfer_title">Credential transfer status</string>
     <string name="diag_transfer_crypto">Crypto engine</string>
     <string name="diag_transfer_signed_in">Signed in</string>
-    <string name="diag_transfer_relay">Backend relay</string>
-    <string name="diag_transfer_last_attempt">Last attempt</string>
-    <string name="diag_transfer_no_attempt">No attempt recorded yet on this device.</string>
+    <string name="diag_transfer_relay">Automatic transfer</string>
+    <string name="diag_transfer_last_attempt">Last credential transfer</string>
+    <string name="diag_transfer_no_attempt">No credential transfer has been started on this device yet.</string>
     <string name="diag_transfer_redaction_note">No credentials, tokens, session strings, or envelope bytes appear on this screen.</string>
+    <string name="diag_transfer_probe">Check automatic transfer</string>
+    <string name="diag_transfer_probing">Checking automatic transfer...</string>
+    <string name="diag_transfer_relay_unknown">Automatic transfer has not been checked yet. This is normal until you send or receive credentials.</string>
+    <string name="diag_transfer_relay_reachable">Automatic transfer is reachable. QR transfer can complete without manual paste.</string>
+    <string name="diag_transfer_relay_unavailable">Automatic transfer is not available from this backend. Use the Advanced manual code paste fallback.</string>
+    <string name="diag_transfer_relay_unauthorized">Sign in again to use automatic transfer. The Advanced manual code paste fallback still works.</string>
+    <string name="diag_transfer_relay_network">This phone could not reach the Torve backend for automatic transfer. Use the Advanced manual code paste fallback.</string>
+    <string name="diag_transfer_relay_not_signed_in">Sign in to use automatic transfer. The Advanced manual code paste fallback still works.</string>
+    <string name="diag_transfer_relay_no_crypto">Encrypted transfer is not available on this device. Update the app or set up credentials manually.</string>
 
     <string name="settings_cloud_service">Streaming Service</string>
     <string name="settings_provider">Provider</string>

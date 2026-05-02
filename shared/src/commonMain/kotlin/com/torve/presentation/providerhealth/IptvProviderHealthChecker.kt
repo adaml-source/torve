@@ -63,7 +63,7 @@ class IptvProviderHealthChecker(
             // even when the user is actively browsing channels.
             hasLoadedContent -> playlistEntry(
                 status = ProviderHealthStatus.GREEN,
-                message = "\"$activeName\" — $channelCount channels.",
+                message = "\"$activeName\": $channelCount channels loaded.",
                 nextAction = null,
             )
             parseError != null -> playlistEntry(

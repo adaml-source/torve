@@ -103,7 +103,6 @@ import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Steel
 import com.torve.android.ui.theme.Torve
-import com.torve.android.ui.transfer.ProviderHealthSection
 import com.torve.android.ui.transfer.RestoreSetupRecoveryCard
 import com.torve.android.ui.transfer.providerSettingsRouteFor
 import com.torve.data.account.AccountSettingsRepository
@@ -668,14 +667,7 @@ fun SettingsScreen(
                 onConfigure = { entry ->
                     providerSettingsRouteFor(entry.category)?.let(onOpenProviderRoute)
                 },
-                onRefresh = { entry ->
-                    // Re-run the matching checker. Today the
-                    // ProviderHealthCoordinator runs all checkers; a
-                    // per-entry refresh pings the same coordinator so
-                    // the user's row updates without forcing a global
-                    // re-check of every other provider.
-                    providerSettingsRouteFor(entry.category)?.let(onOpenProviderRoute)
-                },
+                onRefresh = {},
                 onDiagnose = { onDiagnosticsClick() },
             )
             Spacer(Modifier.height(16.dp))

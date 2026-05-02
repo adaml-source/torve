@@ -59,7 +59,7 @@ import org.koin.compose.koinInject
 @Composable
 fun ProviderStatusSection(
     onConfigure: (ProviderHealthEntry) -> Unit,
-    onRefresh: (ProviderHealthEntry) -> Unit,
+    onRefresh: (ProviderHealthEntry) -> Unit = {},
     onDiagnose: (ProviderHealthEntry) -> Unit,
     coordinator: ProviderHealthCoordinator = koinInject(),
     modifier: Modifier = Modifier,
@@ -89,7 +89,10 @@ fun ProviderStatusSection(
             ProviderStatusCard(
                 view = view,
                 onConfigure = { onConfigure(view.entry) },
-                onRefresh = { onRefresh(view.entry) },
+                onRefresh = {
+                    coordinator.runCheck(view.entry.providerKey) ?: coordinator.runAll()
+                    onRefresh(view.entry)
+                },
                 onDiagnose = { onDiagnose(view.entry) },
             )
         }
