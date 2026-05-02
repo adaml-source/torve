@@ -98,6 +98,52 @@ class SetupWizardCoordinator(
     }
 
     /**
+     * Seeds READY status in-memory for intents the admission snapshot has
+     * already detected — DEBRID when a provider is connected, IPTV when a
+     * playlist exists in the local DB. Called immediately after [load] so
+     * the hub banner reflects detected paths on first show without requiring
+     * the user to open the guided wizard.
+     *
+     * Contract:
+     * - Only promotes NOT_STARTED intents; never downgrades a persisted status.
+     * - NOT persisted — hints are re-seeded from live admission state each
+     *   launch so they always track the real source-of-truth.
+     */
+    suspend fun applyAdmissionHints(hasVodPath: Boolean, hasLivePath: Boolean) {
+        mutex.withLock {
+            val current = _state.value.toMutableMap()
+            var changed = false
+            if (hasVodPath) {
+                val existing = current[SetupIntent.DEBRID]?.status ?: SetupIntentStatus.NOT_STARTED
+                if (existing == SetupIntentStatus.NOT_STARTED) {
+                    current[SetupIntent.DEBRID] = SetupIntentState(
+                        intent = SetupIntent.DEBRID,
+                        status = SetupIntentStatus.READY,
+                        message = "Detected from your Torve account.",
+                        updatedAtMs = nowMs(),
+                    )
+                    changed = true
+                }
+            }
+            if (hasLivePath) {
+                val existing = current[SetupIntent.IPTV]?.status ?: SetupIntentStatus.NOT_STARTED
+                if (existing == SetupIntentStatus.NOT_STARTED) {
+                    current[SetupIntent.IPTV] = SetupIntentState(
+                        intent = SetupIntent.IPTV,
+                        status = SetupIntentStatus.READY,
+                        message = "Detected from your Torve account.",
+                        updatedAtMs = nowMs(),
+                    )
+                    changed = true
+                }
+            }
+            if (changed) _state.value = current
+            // No persist() — hints are re-seeded from admission on every cold
+            // start and must not survive coordinator reloads as persisted state.
+        }
+    }
+
+    /**
      * Mark the intent as IN_PROGRESS without running the validator. Use
      * this when the user opens the path's detail screen — it lets the
      * "Ready to watch" summary distinguish "user is working on this"

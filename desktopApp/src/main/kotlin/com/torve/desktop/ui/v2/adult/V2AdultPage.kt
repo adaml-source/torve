@@ -43,8 +43,8 @@ import com.torve.desktop.adult.AdultModePreferences
 import com.torve.desktop.adult.NewznabClient
 import com.torve.desktop.adult.NewznabItem
 import com.torve.desktop.adult.NzbBrowseStateHolder
-import com.torve.desktop.adult.TorBoxUsenetClient
 import com.torve.desktop.download.DesktopDownloadManager
+import com.torve.domain.nzb.NzbResolver
 import com.torve.desktop.ui.components.TorveBanner
 import com.torve.desktop.ui.components.TorveBannerTone
 import com.torve.desktop.ui.components.TorveFilterChip
@@ -87,8 +87,7 @@ private val ADULT_CATEGORY_PRESETS = listOf(
 @Composable
 fun V2AdultPage(
     newznab: NewznabClient,
-    torbox: TorBoxUsenetClient,
-    torboxApiKey: String,
+    resolver: NzbResolver,
     indexerUrl: String,
     indexerApiKey: String,
     indexerSecretsRedacted: Boolean = false,
@@ -211,9 +210,8 @@ fun V2AdultPage(
                 subtitle = "Sourced from your Newznab indexer · categories ${activeCategoryParam()}",
             )
 
-            // Only surface the configuration hint when playback is unavailable
-            // (TorBox key missing). When everything's set, no banner - just go.
-            if (torboxApiKey.isBlank()) {
+            // Surface a setup prompt when no download client is configured.
+            if (!resolver.isConfigured) {
                 Spacer(Modifier.height(8.dp))
                 Surface(
                     color = colors.elevatedSurface,
@@ -221,13 +219,13 @@ fun V2AdultPage(
                 ) {
                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
-                            text = ds("TorBox not configured"),
+                            text = ds("Download client not configured"),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
                             color = colors.textPrimary,
                         )
                         Text(
-                            text = "Direct in-app playback needs a TorBox API key. Settings → Add-ons → Panda → Configure → Download client = TorBox.",
+                            text = "Direct in-app playback needs a download client. In Panda, set Download client = TorBox (cloud) or enable Usenet with an NzbDAV integration.",
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.textSecondary,
                         )
@@ -425,11 +423,11 @@ fun V2AdultPage(
                     items(items, key = { it.guid ?: it.nzbUrl }) { item ->
                         val rowKey = item.guid ?: item.nzbUrl
                         val status = resolveStatus[rowKey]
-                        val isAuthFailure = status?.let { torbox.isAuthError(it) } == true
+                        val isAuthFailure = status?.let { resolver.isAuthError(it) } == true
                         NewznabRow(
                             item = item,
                             statusText = status,
-                            torboxConfigured = torboxApiKey.isNotBlank(),
+                            torboxConfigured = resolver.isConfigured,
                             showReconfigure = isAuthFailure,
                             downloadEnabled = downloadManager != null,
                             onPlay = {
@@ -440,11 +438,12 @@ fun V2AdultPage(
                                 // in java.net.http) doesn't freeze the Compose
                                 // dispatcher - without this, the UI is dead for
                                 // ~30s while the NZB downloads from the indexer.
+                                if (resolveStatus[rowKey] != null) return@NewznabRow
                                 resolveStatus = resolveStatus + (rowKey to "Starting...")
                                 println("TORVE ADULT ┃ play clicked: ${item.title}")
                                 scope.launch {
                                     val res = withContext(Dispatchers.IO) {
-                                        torbox.resolve(item.nzbUrl, torboxApiKey) { msg ->
+                                        resolver.resolve(item.nzbUrl) { msg ->
                                             resolveStatus = resolveStatus + (rowKey to msg)
                                         }
                                     }
@@ -464,11 +463,12 @@ fun V2AdultPage(
                                     // gates on the per-surface folder being
                                     // configured; if not, surface a banner
                                     // that routes to Settings.
+                                    if (resolveStatus[rowKey] != null) return@let
                                     resolveStatus = resolveStatus + (rowKey to "Starting...")
                                     println("TORVE ADULT ┃ download clicked: ${item.title}")
                                     scope.launch {
                                         val res = withContext(Dispatchers.IO) {
-                                            torbox.resolve(item.nzbUrl, torboxApiKey) { msg ->
+                                            resolver.resolve(item.nzbUrl) { msg ->
                                                 resolveStatus = resolveStatus + (rowKey to msg)
                                             }
                                         }

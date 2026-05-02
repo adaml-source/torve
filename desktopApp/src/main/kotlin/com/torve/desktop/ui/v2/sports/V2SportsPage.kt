@@ -40,8 +40,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import com.torve.data.usenet.NewznabClient
 import com.torve.data.usenet.NewznabItem
-import com.torve.data.usenet.TorBoxUsenetClient
 import com.torve.desktop.download.DesktopDownloadManager
+import com.torve.domain.nzb.NzbResolver
 import com.torve.domain.sports.SportBucket
 import com.torve.presentation.usenet.NzbBrowseStateHolder
 import com.torve.desktop.ui.components.TorveBanner
@@ -71,8 +71,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun V2SportsPage(
     newznab: NewznabClient,
-    torbox: TorBoxUsenetClient,
-    torboxApiKey: String,
+    resolver: NzbResolver,
     indexerType: String = "",
     indexerUrl: String,
     indexerApiKey: String,
@@ -349,12 +348,12 @@ fun V2SportsPage(
                     items(visible, key = { it.item.guid ?: it.item.nzbUrl }) { ci ->
                         val rowKey = ci.item.guid ?: ci.item.nzbUrl
                         val status = resolveStatus[rowKey]
-                        val isAuth = status?.let { torbox.isAuthError(it) } == true
+                        val isAuth = status?.let { resolver.isAuthError(it) } == true
                         SportsRow(
                             item = ci.item,
                             bucket = ci.bucket,
                             statusText = status,
-                            torboxConfigured = torboxApiKey.isNotBlank(),
+                            torboxConfigured = resolver.isConfigured,
                             showReconfigure = isAuth,
                             downloadEnabled = downloadManager != null,
                             onReconfigure = onOpenPandaSetup,
@@ -363,11 +362,12 @@ fun V2SportsPage(
                                 // inside torbox.resolve doesn't freeze the
                                 // Compose dispatcher for the duration of the
                                 // NZB download.
+                                if (resolveStatus[rowKey] != null) return@SportsRow
                                 resolveStatus = resolveStatus + (rowKey to "Starting...")
                                 println("TORVE SPORTS ┃ play clicked: ${ci.item.title}")
                                 scope.launch {
                                     val res = withContext(Dispatchers.IO) {
-                                        torbox.resolve(ci.item.nzbUrl, torboxApiKey) { msg ->
+                                        resolver.resolve(ci.item.nzbUrl) { msg ->
                                             resolveStatus = resolveStatus + (rowKey to msg)
                                         }
                                     }
@@ -381,11 +381,12 @@ fun V2SportsPage(
                             },
                             onDownload = downloadManager?.let { dm ->
                                 {
+                                    if (resolveStatus[rowKey] != null) return@let
                                     resolveStatus = resolveStatus + (rowKey to "Starting...")
                                     println("TORVE SPORTS ┃ download clicked: ${ci.item.title}")
                                     scope.launch {
                                         val res = withContext(Dispatchers.IO) {
-                                            torbox.resolve(ci.item.nzbUrl, torboxApiKey) { msg ->
+                                            resolver.resolve(ci.item.nzbUrl) { msg ->
                                                 resolveStatus = resolveStatus + (rowKey to msg)
                                             }
                                         }

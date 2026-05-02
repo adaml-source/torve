@@ -41,10 +41,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import com.torve.desktop.DesktopReleaseInfo
 import com.torve.desktop.admission.DesktopAdmissionRequirement
 import com.torve.desktop.admission.DesktopAdmissionSnapshot
 import com.torve.desktop.auth.DesktopAuthController
+import com.torve.desktop.transfer.SecretsTransferReceiveScreen
+import com.torve.presentation.transfer.SecretsTransferReceiverViewModel
 import com.torve.desktop.auth.DesktopAuthPhase
 import com.torve.desktop.auth.DesktopAuthUiState
 import com.torve.desktop.ui.components.TorveBadge
@@ -685,6 +688,7 @@ private fun DesktopSetupPane(
     var completionError by remember { mutableStateOf<String?>(null) }
     var isCompleting by remember { mutableStateOf(false) }
     var mode by remember { mutableStateOf(DesktopSetupMode.HUB) }
+    var showQrReceive by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier,
@@ -740,6 +744,7 @@ private fun DesktopSetupPane(
                 }
             DesktopSetupIntentHub(
                 coordinator = setupWizardCoordinator,
+                admission = admission,
                 onOpenDebridSetup = {
                     setupWizardViewModel.jumpToStep(SetupStep.DEBRID)
                     mode = DesktopSetupMode.GUIDED
@@ -761,6 +766,7 @@ private fun DesktopSetupPane(
                     )
                 },
                 onUseGuidedWizard = { mode = DesktopSetupMode.GUIDED },
+                onShowQrReceive = { showQrReceive = true },
                 onContinueToDesktop = {
                     completionError = null
                     scope.launch {
@@ -777,6 +783,51 @@ private fun DesktopSetupPane(
                     .weight(1f, fill = false)
                     .fillMaxWidth(),
             )
+
+            if (showQrReceive) {
+                val receiverVm: SecretsTransferReceiverViewModel = remember {
+                    org.koin.java.KoinJavaComponent.get(
+                        SecretsTransferReceiverViewModel::class.java,
+                    )
+                }
+                Dialog(onDismissRequest = { showQrReceive = false }) {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = colors.cardSurface,
+                        modifier = Modifier
+                            .widthIn(min = 480.dp, max = 720.dp)
+                            .padding(8.dp),
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "Receive setup from another device",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = colors.textPrimary,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TorveGhostButton(
+                                    text = "Close",
+                                    onClick = { showQrReceive = false },
+                                )
+                            }
+                            SecretsTransferReceiveScreen(
+                                viewModel = receiverVm,
+                                onClose = { showQrReceive = false },
+                            )
+                        }
+                    }
+                }
+            }
+
             return@Column
         }
 

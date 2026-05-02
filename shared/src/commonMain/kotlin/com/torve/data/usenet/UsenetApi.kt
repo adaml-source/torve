@@ -10,6 +10,7 @@ import com.torve.data.usenet.model.UsenetCancelRequestDto
 import com.torve.data.usenet.model.UsenetCancelResponseDto
 import com.torve.data.usenet.model.UsenetCandidateDto
 import com.torve.data.usenet.model.UsenetJobStatusResponseDto
+import com.torve.data.usenet.model.UsenetResolveNzbRequestDto
 import com.torve.data.usenet.model.UsenetResolveRequestDto
 import com.torve.data.usenet.model.UsenetResolveResponseDto
 import com.torve.data.usenet.model.UsenetWarmRequestDto
@@ -164,6 +165,34 @@ class UsenetApi(
             throw UsenetApiException(
                 errorCode = "resolve_failed",
                 message = "POST /resolver/usenet/resolve failed (${response.status.value})",
+                httpStatus = response.status.value,
+                body = runCatching { response.bodyAsText() }.getOrDefault(""),
+            )
+        }
+        return response.body()
+    }
+
+    /**
+     * Resolve a bare NZB URL to a stream. Backed by
+     * `POST /resolver/usenet/resolve-nzb`. The server derives a stable
+     * dedup key from sha256(nzb_url) so repeated calls for the same URL
+     * reuse any in-progress or cached job rather than creating a duplicate.
+     *
+     * Returns the same [UsenetResolveResponseDto] shape as [resolve].
+     * Throws [UsenetApiException] with errorCode "nzbdav_not_configured"
+     * (HTTP 422) when the user has no active NzbDAV integration registered.
+     */
+    suspend fun resolveBarNzb(nzbUrl: String, title: String): UsenetResolveResponseDto {
+        val token = requireAccessToken()
+        val response = httpClient.post("${baseUrl()}/resolver/usenet/resolve-nzb") {
+            bearerAuth(token)
+            contentType(ContentType.Application.Json)
+            setBody(UsenetResolveNzbRequestDto(nzbUrl = nzbUrl, title = title))
+        }
+        if (!response.status.isSuccess()) {
+            throw UsenetApiException(
+                errorCode = "resolve_nzb_failed",
+                message = "POST /resolver/usenet/resolve-nzb failed (${response.status.value})",
                 httpStatus = response.status.value,
                 body = runCatching { response.bodyAsText() }.getOrDefault(""),
             )

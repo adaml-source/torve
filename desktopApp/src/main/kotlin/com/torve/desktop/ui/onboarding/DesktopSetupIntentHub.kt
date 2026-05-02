@@ -16,11 +16,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.torve.desktop.admission.DesktopAdmissionSnapshot
 import com.torve.desktop.ui.components.TorveBadge
 import com.torve.desktop.ui.components.TorveBadgeTone
 import com.torve.desktop.ui.components.TorveBanner
@@ -52,21 +57,38 @@ import com.torve.presentation.setup.SetupWizardCoordinator
 @Composable
 fun DesktopSetupIntentHub(
     coordinator: SetupWizardCoordinator,
+    admission: DesktopAdmissionSnapshot?,
     onOpenDebridSetup: () -> Unit,
     onOpenIptvSetup: () -> Unit,
     onOpenPlexJellyfinSetup: () -> Unit,
     onOpenUsenetSetup: () -> Unit,
     onUseGuidedWizard: () -> Unit,
+    onShowQrReceive: () -> Unit,
     onContinueToDesktop: () -> Unit,
     isCompleting: Boolean = false,
     completionError: String? = null,
     modifier: Modifier = Modifier,
 ) {
-    // Hydrate persisted per-intent state on first composition. Idempotent
-    // - load() short-circuits when state is already populated and
-    // downgrades any persisted VALIDATING entry to IN_PROGRESS so a
-    // mid-validate process death never leaves the UI on a spinner.
-    LaunchedEffect(coordinator) { coordinator.load() }
+    // Use rememberUpdatedState so the effect always sees the most recent
+    // admission when it runs, without re-triggering the effect on each
+    // recomposition (which would fight user resets).
+    val currentAdmission = rememberUpdatedState(admission)
+    var hubReady by remember { mutableStateOf(false) }
+
+    // Load persisted per-intent state from prefs, downgrade any stuck
+    // VALIDATING rows to IN_PROGRESS, then seed any admission-detected paths
+    // as READY so the hub immediately reflects what the account already has
+    // configured — no guided-wizard visit required.
+    LaunchedEffect(coordinator) {
+        coordinator.load()
+        currentAdmission.value?.let { snap ->
+            coordinator.applyAdmissionHints(
+                hasVodPath = snap.hasVodPlaybackPath,
+                hasLivePath = snap.hasLivePlaybackPath,
+            )
+        }
+        hubReady = true
+    }
 
     val state by coordinator.state.collectAsState()
     val summary by coordinator.summary.collectAsState()
@@ -89,7 +111,11 @@ fun DesktopSetupIntentHub(
             color = colors.textSecondary,
         )
 
-        ReadyToWatchBanner(summary = summary)
+        ReadyToWatchBanner(
+            summary = summary,
+            admission = admission,
+            isLoading = !hubReady,
+        )
 
         completionError?.let {
             TorveBanner(
@@ -110,6 +136,7 @@ fun DesktopSetupIntentHub(
                 SetupIntentCard(
                     intent = intent,
                     intentState = state[intent] ?: SetupIntentState(intent = intent),
+                    summary = summary,
                     onSetUp = {
                         when (intent) {
                             SetupIntent.DEBRID -> onOpenDebridSetup()
@@ -129,11 +156,18 @@ fun DesktopSetupIntentHub(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TorveGhostButton(
-                text = "Use guided wizard instead",
-                onClick = onUseGuidedWizard,
-                enabled = !isCompleting,
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TorveGhostButton(
+                    text = "Use guided wizard instead",
+                    onClick = onUseGuidedWizard,
+                    enabled = !isCompleting,
+                )
+                TorveGhostButton(
+                    text = "Receive from another device",
+                    onClick = onShowQrReceive,
+                    enabled = !isCompleting,
+                )
+            }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -156,7 +190,20 @@ fun DesktopSetupIntentHub(
 }
 
 @Composable
-private fun ReadyToWatchBanner(summary: ReadyToWatchSummary) {
+private fun ReadyToWatchBanner(
+    summary: ReadyToWatchSummary,
+    admission: DesktopAdmissionSnapshot?,
+    isLoading: Boolean,
+) {
+    if (isLoading) {
+        TorveBanner(
+            title = "Checking your Torve account...",
+            description = "Looking for existing playback paths and account sync.",
+            tone = TorveBannerTone.Info,
+        )
+        return
+    }
+
     val tone = when {
         summary.canStartWatching && summary.attentionCount == 0 -> TorveBannerTone.Success
         summary.canStartWatching -> TorveBannerTone.Info
@@ -177,9 +224,18 @@ private fun ReadyToWatchBanner(summary: ReadyToWatchSummary) {
         if (summary.warnings.isNotEmpty()) add("Warnings: " + summary.warnings.joinToString(", ") { it.shortName() })
         if (summary.invalid.isNotEmpty()) add("Fix: " + summary.invalid.joinToString(", ") { it.shortName() })
     }
+    // "No paths configured yet." only appears after detection completes AND
+    // no paths were found. If admission detects paths that the coordinator
+    // didn't absorb (edge case: hints not applied yet), surface a retry
+    // prompt instead of the misleading "no paths" message.
+    val emptyDescription = if (admission?.hasUsablePlaybackPath == true) {
+        "Paths detected — click Validate on a path card to confirm, or Continue if ready."
+    } else {
+        "No paths configured yet."
+    }
     TorveBanner(
         title = title,
-        description = descriptionParts.joinToString(" • ").ifBlank { "No paths configured yet." },
+        description = descriptionParts.joinToString(" • ").ifBlank { emptyDescription },
         tone = tone,
     )
 }
@@ -188,13 +244,17 @@ private fun ReadyToWatchBanner(summary: ReadyToWatchSummary) {
 private fun SetupIntentCard(
     intent: SetupIntent,
     intentState: SetupIntentState,
+    summary: ReadyToWatchSummary,
     onSetUp: () -> Unit,
     onValidate: () -> Unit,
     onReset: () -> Unit,
 ) {
     val colors = TorveDesktopThemeTokens.colors
-    val tone = intentState.status.toBadgeTone()
-    val statusLabel = intentState.status.toUiLabel()
+    // Use the summary's resolved status so the badge always agrees with
+    // the "Ready to watch" banner (health rows can override optimistic state).
+    val resolvedStatus = summary.resolvedStatusFor(intent)
+    val tone = resolvedStatus.toBadgeTone()
+    val statusLabel = resolvedStatus.toUiLabel()
     val message = intentState.message
 
     TorveSectionCard(
@@ -215,18 +275,18 @@ private fun SetupIntentCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TorvePrimaryButton(
-                text = if (intentState.status == SetupIntentStatus.READY) "Edit" else "Set up",
+                text = if (resolvedStatus == SetupIntentStatus.READY) "Edit" else "Set up",
                 onClick = onSetUp,
             )
             TorveGhostButton(
                 text = "Validate",
                 onClick = onValidate,
-                enabled = intentState.status != SetupIntentStatus.VALIDATING,
+                enabled = resolvedStatus != SetupIntentStatus.VALIDATING,
             )
-            if (intentState.status != SetupIntentStatus.NOT_STARTED) {
+            if (resolvedStatus != SetupIntentStatus.NOT_STARTED) {
                 TorveGhostButton(text = "Reset", onClick = onReset)
             }
-            if (intentState.status == SetupIntentStatus.VALIDATING) {
+            if (resolvedStatus == SetupIntentStatus.VALIDATING) {
                 CircularProgressIndicator(
                     modifier = Modifier.height(16.dp),
                     strokeWidth = 2.dp,

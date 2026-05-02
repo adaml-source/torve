@@ -1212,6 +1212,16 @@ fun V2App(
                                 // Same indexer + TorBox plumbing as Adult - read
                                 // straight from Panda config, no separate setup.
                                 val pandaState by pandaSetupViewModel.state.collectAsState()
+                                val nzbdavVmSports: com.torve.presentation.usenet.NzbdavSetupViewModel = remember {
+                                    org.koin.java.KoinJavaComponent.get(
+                                        com.torve.presentation.usenet.NzbdavSetupViewModel::class.java,
+                                    )
+                                }
+                                val nzbdavStateSports by nzbdavVmSports.state.collectAsState()
+                                val nzbdavConfiguredSports = nzbdavStateSports.status.let {
+                                    it !is com.torve.presentation.usenet.NzbdavStatus.NotConfigured &&
+                                        it !is com.torve.presentation.usenet.NzbdavStatus.ConnectionFailed
+                                }
                                 fun String.isUsableSecret(): Boolean =
                                     isNotBlank() && !contains("redact", ignoreCase = true)
                                 val activeIndexer = pandaState.nzbIndexers
@@ -1239,13 +1249,11 @@ fun V2App(
                                     pandaState.nzbIndexers.any { it.type != "none" } ||
                                     pandaState.nzbIndexer != "none"
                                 )
-                                val sTorboxKey = if (pandaState.downloadClient == "torbox" &&
-                                    pandaState.downloadClientApiKey.isUsableSecret()
-                                ) pandaState.downloadClientApiKey else ""
                                 com.torve.desktop.ui.v2.sports.V2SportsPage(
                                     newznab = org.koin.java.KoinJavaComponent.get(com.torve.data.usenet.NewznabClient::class.java),
-                                    torbox = org.koin.java.KoinJavaComponent.get(com.torve.data.usenet.TorBoxUsenetClient::class.java),
-                                    torboxApiKey = sTorboxKey,
+                                    resolver = remember(pandaState.downloadClient, pandaState.downloadClientApiKey, pandaState.enableUsenet, nzbdavConfiguredSports) {
+                                        buildNzbResolver(pandaState, nzbdavConfiguredSports)
+                                    },
                                     indexerType = sIndexerType,
                                     indexerUrl = sIndexerUrl,
                                     indexerApiKey = sIndexerKey,
@@ -1272,6 +1280,16 @@ fun V2App(
                                 // inside Panda's config - re-asking would duplicate setup.
                                 // Pull them straight from Panda's state.
                                 val pandaState by pandaSetupViewModel.state.collectAsState()
+                                val nzbdavVmAdult: com.torve.presentation.usenet.NzbdavSetupViewModel = remember {
+                                    org.koin.java.KoinJavaComponent.get(
+                                        com.torve.presentation.usenet.NzbdavSetupViewModel::class.java,
+                                    )
+                                }
+                                val nzbdavStateAdult by nzbdavVmAdult.state.collectAsState()
+                                val nzbdavConfiguredAdult = nzbdavStateAdult.status.let {
+                                    it !is com.torve.presentation.usenet.NzbdavStatus.NotConfigured &&
+                                        it !is com.torve.presentation.usenet.NzbdavStatus.ConnectionFailed
+                                }
                                 val torboxKey = if (pandaState.downloadClient == "torbox")
                                     pandaState.downloadClientApiKey else ""
                                 // Multi-indexer rows first; fall back to the legacy single-
@@ -1305,14 +1323,12 @@ fun V2App(
                                     pandaState.nzbIndexers.any { it.type != "none" } ||
                                     pandaState.nzbIndexer != "none"
                                 )
-                                val torboxKeyUsable = if (pandaState.downloadClient == "torbox" &&
-                                    pandaState.downloadClientApiKey.isUsableSecret()
-                                ) pandaState.downloadClientApiKey else ""
                                 println("TORVE ADULT ┃ indexer type=${activeIndexer?.type ?: pandaState.nzbIndexer} url=$indexerUrl keyPrefix=${indexerKey.take(6)}... redacted=$indexerSecretsRedacted")
                                 com.torve.desktop.ui.v2.adult.V2AdultPage(
                                     newznab = remember { com.torve.desktop.adult.NewznabClient() },
-                                    torbox = remember { com.torve.desktop.adult.TorBoxUsenetClient() },
-                                    torboxApiKey = torboxKeyUsable,
+                                    resolver = remember(pandaState.downloadClient, pandaState.downloadClientApiKey, pandaState.enableUsenet, nzbdavConfiguredAdult) {
+                                        buildNzbResolver(pandaState, nzbdavConfiguredAdult)
+                                    },
                                     indexerUrl = indexerUrl,
                                     indexerApiKey = indexerKey,
                                     indexerSecretsRedacted = indexerSecretsRedacted,
@@ -1815,6 +1831,45 @@ private fun userBadgeInitials(label: String): String {
  * service doesn't fire requests with `[redacted]` as an apiKey.
  */
 private data class ActiveNzbIndexer(val type: String, val url: String, val apiKey: String)
+
+/**
+ * Picks the right [NzbResolver] for the browse surfaces (Adult, Sports)
+ * based on what the user has configured in Panda:
+ *  - TorBox download client with a usable key → [TorBoxNzbResolver]
+ *  - Usenet enabled (NzbDAV integration) → [BackendNzbResolver]
+ *  - Neither → disabled [TorBoxNzbResolver] with blank key (isConfigured=false)
+ */
+private fun buildNzbResolver(
+    pandaState: com.torve.presentation.panda.PandaSetupUiState,
+    nzbdavConfigured: Boolean,
+): com.torve.domain.nzb.NzbResolver {
+    fun String.isUsableSecret(): Boolean =
+        isNotBlank() && !contains("redact", ignoreCase = true)
+    if (pandaState.downloadClient == "torbox" &&
+        pandaState.downloadClientApiKey.isUsableSecret()
+    ) {
+        return com.torve.domain.nzb.TorBoxNzbResolver(
+            client = org.koin.java.KoinJavaComponent.get(
+                com.torve.data.usenet.TorBoxUsenetClient::class.java,
+            ),
+            apiKey = pandaState.downloadClientApiKey,
+        )
+    }
+    if (pandaState.enableUsenet) {
+        return com.torve.domain.nzb.BackendNzbResolver(
+            repository = org.koin.java.KoinJavaComponent.get(
+                com.torve.data.usenet.UsenetRepository::class.java,
+            ),
+            configured = nzbdavConfigured,
+        )
+    }
+    return com.torve.domain.nzb.TorBoxNzbResolver(
+        client = org.koin.java.KoinJavaComponent.get(
+            com.torve.data.usenet.TorBoxUsenetClient::class.java,
+        ),
+        apiKey = "",
+    )
+}
 
 private fun resolveActiveNzbIndexer(
     pandaState: com.torve.presentation.panda.PandaSetupUiState,

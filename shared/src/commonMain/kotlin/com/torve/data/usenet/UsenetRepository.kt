@@ -75,6 +75,14 @@ interface UsenetRepository {
         candidate: UsenetCandidateDto,
     ): UsenetResolveResponseDto
 
+    /**
+     * Resolve a bare NZB URL for the browse surfaces (Adult, Sports).
+     * Calls `POST /resolver/usenet/resolve-nzb`. The backend derives a
+     * stable dedup key from the URL so double-clicks don't create duplicate
+     * jobs. Returns the same shape as [resolveUsenetCandidate].
+     */
+    suspend fun resolveBarNzb(nzbUrl: String, title: String): UsenetResolveResponseDto
+
     /** Poll a warming job. Callers are responsible for cadence + lifecycle. */
     suspend fun getUsenetJobStatus(jobId: String): UsenetJobStatusResponseDto
 
@@ -143,6 +151,11 @@ class UsenetRepositoryImpl(
         contentId: String,
         candidate: UsenetCandidateDto,
     ): UsenetResolveResponseDto = api.resolve(contentId = contentId, candidate = candidate)
+
+    override suspend fun resolveBarNzb(
+        nzbUrl: String,
+        title: String,
+    ): UsenetResolveResponseDto = api.resolveBarNzb(nzbUrl = nzbUrl, title = title)
 
     override suspend fun getUsenetJobStatus(jobId: String): UsenetJobStatusResponseDto =
         api.getJobStatus(jobId)

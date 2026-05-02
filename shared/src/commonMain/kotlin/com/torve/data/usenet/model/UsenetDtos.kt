@@ -123,6 +123,17 @@ data class UsenetWarmResponseDto(
 )
 
 // ─────────────────────────────────────────────────────────────────────────
+// Resolver: /resolver/usenet/resolve-nzb  (bare-URL path for browse surfaces)
+// ─────────────────────────────────────────────────────────────────────────
+
+@Serializable
+data class UsenetResolveNzbRequestDto(
+    @SerialName("nzb_url") val nzbUrl: String,
+    /** Human-readable title forwarded to the backend for logging/dedup. */
+    val title: String = "",
+)
+
+// ─────────────────────────────────────────────────────────────────────────
 // Resolver: /resolver/usenet/resolve + /jobs/{id}
 // ─────────────────────────────────────────────────────────────────────────
 
