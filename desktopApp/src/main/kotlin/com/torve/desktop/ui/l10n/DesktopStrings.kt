@@ -150,6 +150,60 @@ private val GERMAN = mapOf(
     "New" to "Neu",
     "Out now" to "Jetzt verfügbar",
     "Soon" to "Bald",
+    // Settings - Preferences (CustomizationSection)
+    "Appearance" to "Erscheinungsbild",
+    "Theme, language, and region for this device." to "Design, Sprache und Region für dieses Gerät.",
+    "Theme" to "Design",
+    "Content Language" to "Inhaltssprache",
+    "Region Code" to "Regionscode",
+    "Availability and metadata use this region." to "Verfügbarkeit und Metadaten nutzen diese Region.",
+    "Content language only" to "Nur Inhaltssprache",
+    "Changes the language used for movie and TV metadata from TMDb."
+        to "Ändert die Sprache der Film- und Serien-Metadaten von TMDb.",
+    "Home Layout" to "Startseiten-Layout",
+    "Choose whether desktop mirrors your mobile home layout or keeps its own."
+        to "Wählen Sie, ob der Desktop Ihr mobiles Startseiten-Layout spiegelt oder ein eigenes behält.",
+    "Source" to "Quelle",
+    "Use desktop layout" to "Desktop-Layout verwenden",
+    "Use mobile layout" to "Mobiles Layout verwenden",
+    "Desktop layout is independent" to "Desktop-Layout ist unabhängig",
+    "Editing the layout shared with mobile" to "Sie bearbeiten das mit Mobil geteilte Layout",
+    "Changes below only affect desktop." to "Änderungen unten betreffen nur den Desktop.",
+    "Changes below also apply to your mobile home screen."
+        to "Änderungen unten gelten auch für Ihren mobilen Startbildschirm.",
+    "Playback Strategy" to "Wiedergabe-Strategie",
+    "Quality filters and automation now apply directly from desktop."
+        to "Qualitätsfilter und Automatisierung gelten jetzt direkt vom Desktop.",
+    "Max Quality" to "Maximale Qualität",
+    "Min Quality" to "Minimale Qualität",
+    "Auto Source" to "Automatische Quelle",
+    "Codec Preference" to "Codec-Präferenz",
+    "HDR Mode" to "HDR-Modus",
+    "Automation and Browse Filters" to "Automatisierung und Filter",
+    "Desktop can now control autoplay, cache rules, and browse behavior."
+        to "Der Desktop kann jetzt Autoplay, Cache-Regeln und Browsing-Verhalten steuern.",
+    "Cached Only" to "Nur zwischengespeicherte",
+    "Only keep cached-capable streams in the auto source pool."
+        to "Nur cache-fähige Streams im automatischen Quellenpool behalten.",
+    "Auto Play" to "Automatisch abspielen",
+    "Start the selected stream immediately after resolution."
+        to "Den ausgewählten Stream sofort nach Auflösung starten.",
+    "Auto Play Next Episode" to "Nächste Episode automatisch",
+    "Continue TV playback without reopening the episode picker."
+        to "TV-Wiedergabe fortsetzen ohne den Episodenwähler erneut zu öffnen.",
+    "Dedupe Results" to "Duplikate entfernen",
+    "Collapse duplicate source candidates from multiple add-ons."
+        to "Doppelte Quellenkandidaten aus mehreren Add-ons zusammenfassen.",
+    "Allow 4K in Auto Mode" to "4K im Automatik-Modus erlauben",
+    "Permit automatic source selection to choose 4K streams when appropriate."
+        to "Erlauben, dass die automatische Quellenauswahl bei Bedarf 4K-Streams wählt.",
+    "Prefer Compatible Codecs" to "Kompatible Codecs bevorzugen",
+    "Bias selection away from files that are more likely to fail on the current player stack."
+        to "Auswahl von Dateien fernhalten, die im aktuellen Player-Stack eher fehlschlagen.",
+    "Desktop Playback" to "Desktop-Wiedergabe",
+    "Seek, subtitle, audio, and volume preferences stored locally."
+        to "Such-, Untertitel-, Audio- und Lautstärke-Einstellungen werden lokal gespeichert.",
+    "Playback Engine" to "Wiedergabe-Engine",
 )
 
 // ── Spanish ─────────────────────────────────────────────────────
@@ -245,6 +299,61 @@ private val SPANISH = mapOf(
     "New" to "Nuevo",
     "Out now" to "Ya disponible",
     "Soon" to "Pronto",
+    // Settings - Preferences (CustomizationSection)
+    "Appearance" to "Apariencia",
+    "Theme, language, and region for this device." to "Tema, idioma y región para este dispositivo.",
+    "Theme" to "Tema",
+    "Content Language" to "Idioma del contenido",
+    "Region Code" to "Código de región",
+    "Availability and metadata use this region."
+        to "La disponibilidad y los metadatos usan esta región.",
+    "Content language only" to "Solo idioma de contenido",
+    "Changes the language used for movie and TV metadata from TMDb."
+        to "Cambia el idioma usado para los metadatos de películas y series desde TMDb.",
+    "Home Layout" to "Diseño de inicio",
+    "Choose whether desktop mirrors your mobile home layout or keeps its own."
+        to "Elige si el escritorio refleja el diseño móvil o mantiene el suyo propio.",
+    "Source" to "Origen",
+    "Use desktop layout" to "Usar diseño de escritorio",
+    "Use mobile layout" to "Usar diseño móvil",
+    "Desktop layout is independent" to "El diseño de escritorio es independiente",
+    "Editing the layout shared with mobile" to "Editando el diseño compartido con móvil",
+    "Changes below only affect desktop." to "Los cambios a continuación solo afectan al escritorio.",
+    "Changes below also apply to your mobile home screen."
+        to "Los cambios a continuación también se aplican a tu pantalla de inicio móvil.",
+    "Playback Strategy" to "Estrategia de reproducción",
+    "Quality filters and automation now apply directly from desktop."
+        to "Los filtros de calidad y la automatización ahora se aplican directamente desde el escritorio.",
+    "Max Quality" to "Calidad máxima",
+    "Min Quality" to "Calidad mínima",
+    "Auto Source" to "Origen automático",
+    "Codec Preference" to "Preferencia de códec",
+    "HDR Mode" to "Modo HDR",
+    "Automation and Browse Filters" to "Automatización y filtros",
+    "Desktop can now control autoplay, cache rules, and browse behavior."
+        to "El escritorio ahora puede controlar la reproducción automática, las reglas de caché y el comportamiento de navegación.",
+    "Cached Only" to "Solo en caché",
+    "Only keep cached-capable streams in the auto source pool."
+        to "Mantener solo streams con capacidad de caché en el grupo de origen automático.",
+    "Auto Play" to "Reproducción automática",
+    "Start the selected stream immediately after resolution."
+        to "Iniciar el stream seleccionado inmediatamente después de la resolución.",
+    "Auto Play Next Episode" to "Siguiente episodio automático",
+    "Continue TV playback without reopening the episode picker."
+        to "Continuar la reproducción de TV sin reabrir el selector de episodios.",
+    "Dedupe Results" to "Eliminar duplicados",
+    "Collapse duplicate source candidates from multiple add-ons."
+        to "Agrupar candidatos de origen duplicados de varios complementos.",
+    "Allow 4K in Auto Mode" to "Permitir 4K en modo automático",
+    "Permit automatic source selection to choose 4K streams when appropriate."
+        to "Permitir que la selección automática de origen elija streams 4K cuando corresponda.",
+    "Prefer Compatible Codecs" to "Preferir códecs compatibles",
+    "Bias selection away from files that are more likely to fail on the current player stack."
+        to "Sesgar la selección lejos de archivos que probablemente fallen en el reproductor actual.",
+    "Desktop Playback" to "Reproducción de escritorio",
+    "Seek, subtitle, audio, and volume preferences stored locally."
+        to "Las preferencias de búsqueda, subtítulos, audio y volumen se guardan localmente.",
+    "Playback Engine" to "Motor de reproducción",
 )
 
 // ── French ──────────────────────────────────────────────────────
@@ -340,6 +449,61 @@ private val FRENCH = mapOf(
     "New" to "Nouveau",
     "Out now" to "Disponible",
     "Soon" to "Bientôt",
+    // Settings - Preferences (CustomizationSection)
+    "Appearance" to "Apparence",
+    "Theme, language, and region for this device." to "Thème, langue et région pour cet appareil.",
+    "Theme" to "Thème",
+    "Content Language" to "Langue du contenu",
+    "Region Code" to "Code de région",
+    "Availability and metadata use this region."
+        to "La disponibilité et les métadonnées utilisent cette région.",
+    "Content language only" to "Langue du contenu uniquement",
+    "Changes the language used for movie and TV metadata from TMDb."
+        to "Modifie la langue utilisée pour les métadonnées de films et séries depuis TMDb.",
+    "Home Layout" to "Disposition de l'accueil",
+    "Choose whether desktop mirrors your mobile home layout or keeps its own."
+        to "Choisissez si le bureau reflète la disposition mobile ou conserve la sienne.",
+    "Source" to "Source",
+    "Use desktop layout" to "Utiliser la disposition bureau",
+    "Use mobile layout" to "Utiliser la disposition mobile",
+    "Desktop layout is independent" to "La disposition bureau est indépendante",
+    "Editing the layout shared with mobile" to "Modification de la disposition partagée avec mobile",
+    "Changes below only affect desktop." to "Les modifications ci-dessous n'affectent que le bureau.",
+    "Changes below also apply to your mobile home screen."
+        to "Les modifications ci-dessous s'appliquent aussi à votre écran d'accueil mobile.",
+    "Playback Strategy" to "Stratégie de lecture",
+    "Quality filters and automation now apply directly from desktop."
+        to "Les filtres de qualité et l'automatisation s'appliquent désormais directement depuis le bureau.",
+    "Max Quality" to "Qualité max",
+    "Min Quality" to "Qualité min",
+    "Auto Source" to "Source auto",
+    "Codec Preference" to "Préférence de codec",
+    "HDR Mode" to "Mode HDR",
+    "Automation and Browse Filters" to "Automatisation et filtres",
+    "Desktop can now control autoplay, cache rules, and browse behavior."
+        to "Le bureau peut désormais contrôler la lecture automatique, les règles de cache et la navigation.",
+    "Cached Only" to "En cache uniquement",
+    "Only keep cached-capable streams in the auto source pool."
+        to "Conserver uniquement les flux compatibles cache dans le pool de sources auto.",
+    "Auto Play" to "Lecture automatique",
+    "Start the selected stream immediately after resolution."
+        to "Démarrer le flux sélectionné immédiatement après la résolution.",
+    "Auto Play Next Episode" to "Épisode suivant auto",
+    "Continue TV playback without reopening the episode picker."
+        to "Continuer la lecture TV sans rouvrir le sélecteur d'épisodes.",
+    "Dedupe Results" to "Dédupliquer les résultats",
+    "Collapse duplicate source candidates from multiple add-ons."
+        to "Regrouper les sources candidates en double de plusieurs modules.",
+    "Allow 4K in Auto Mode" to "Autoriser 4K en mode auto",
+    "Permit automatic source selection to choose 4K streams when appropriate."
+        to "Permettre à la sélection automatique des sources de choisir des flux 4K lorsque cela convient.",
+    "Prefer Compatible Codecs" to "Préférer les codecs compatibles",
+    "Bias selection away from files that are more likely to fail on the current player stack."
+        to "Éloigner la sélection des fichiers susceptibles d'échouer avec le lecteur actuel.",
+    "Desktop Playback" to "Lecture bureau",
+    "Seek, subtitle, audio, and volume preferences stored locally."
+        to "Les préférences de recherche, sous-titres, audio et volume sont stockées localement.",
+    "Playback Engine" to "Moteur de lecture",
 )
 
 // ── Italian ─────────────────────────────────────────────────────
@@ -435,6 +599,60 @@ private val ITALIAN = mapOf(
     "New" to "Nuovo",
     "Out now" to "Disponibile",
     "Soon" to "Presto",
+    // Settings - Preferences (CustomizationSection)
+    "Appearance" to "Aspetto",
+    "Theme, language, and region for this device." to "Tema, lingua e regione per questo dispositivo.",
+    "Theme" to "Tema",
+    "Content Language" to "Lingua del contenuto",
+    "Region Code" to "Codice regione",
+    "Availability and metadata use this region." to "Disponibilità e metadati usano questa regione.",
+    "Content language only" to "Solo lingua del contenuto",
+    "Changes the language used for movie and TV metadata from TMDb."
+        to "Cambia la lingua usata per i metadati di film e serie da TMDb.",
+    "Home Layout" to "Layout della home",
+    "Choose whether desktop mirrors your mobile home layout or keeps its own."
+        to "Scegli se il desktop riflette il layout mobile o ne mantiene uno proprio.",
+    "Source" to "Sorgente",
+    "Use desktop layout" to "Usa layout desktop",
+    "Use mobile layout" to "Usa layout mobile",
+    "Desktop layout is independent" to "Il layout desktop è indipendente",
+    "Editing the layout shared with mobile" to "Modifica del layout condiviso con mobile",
+    "Changes below only affect desktop." to "Le modifiche sotto influenzano solo il desktop.",
+    "Changes below also apply to your mobile home screen."
+        to "Le modifiche sotto si applicano anche alla tua schermata home mobile.",
+    "Playback Strategy" to "Strategia di riproduzione",
+    "Quality filters and automation now apply directly from desktop."
+        to "I filtri di qualità e l'automazione ora si applicano direttamente dal desktop.",
+    "Max Quality" to "Qualità massima",
+    "Min Quality" to "Qualità minima",
+    "Auto Source" to "Sorgente automatica",
+    "Codec Preference" to "Preferenza codec",
+    "HDR Mode" to "Modalità HDR",
+    "Automation and Browse Filters" to "Automazione e filtri",
+    "Desktop can now control autoplay, cache rules, and browse behavior."
+        to "Il desktop ora può controllare la riproduzione automatica, le regole della cache e il comportamento di navigazione.",
+    "Cached Only" to "Solo in cache",
+    "Only keep cached-capable streams in the auto source pool."
+        to "Mantieni nel pool delle sorgenti automatiche solo gli stream con cache.",
+    "Auto Play" to "Riproduzione automatica",
+    "Start the selected stream immediately after resolution."
+        to "Avvia lo stream selezionato subito dopo la risoluzione.",
+    "Auto Play Next Episode" to "Prossimo episodio automatico",
+    "Continue TV playback without reopening the episode picker."
+        to "Continua la riproduzione TV senza riaprire il selettore episodi.",
+    "Dedupe Results" to "Rimuovi duplicati",
+    "Collapse duplicate source candidates from multiple add-ons."
+        to "Unisci i candidati sorgente duplicati da più add-on.",
+    "Allow 4K in Auto Mode" to "Consenti 4K in modalità auto",
+    "Permit automatic source selection to choose 4K streams when appropriate."
+        to "Consenti alla selezione automatica delle sorgenti di scegliere stream 4K quando appropriato.",
+    "Prefer Compatible Codecs" to "Preferisci codec compatibili",
+    "Bias selection away from files that are more likely to fail on the current player stack."
+        to "Allontana la selezione da file che potrebbero fallire con il player attuale.",
+    "Desktop Playback" to "Riproduzione desktop",
+    "Seek, subtitle, audio, and volume preferences stored locally."
+        to "Le preferenze di ricerca, sottotitoli, audio e volume sono salvate localmente.",
+    "Playback Engine" to "Motore di riproduzione",
 )
 
 // ── Portuguese ──────────────────────────────────────────────────
@@ -530,6 +748,60 @@ private val PORTUGUESE = mapOf(
     "New" to "Novo",
     "Out now" to "Disponível",
     "Soon" to "Em breve",
+    // Settings - Preferences (CustomizationSection)
+    "Appearance" to "Aparência",
+    "Theme, language, and region for this device." to "Tema, idioma e região para este dispositivo.",
+    "Theme" to "Tema",
+    "Content Language" to "Idioma do conteúdo",
+    "Region Code" to "Código de região",
+    "Availability and metadata use this region." to "A disponibilidade e os metadados usam esta região.",
+    "Content language only" to "Apenas idioma do conteúdo",
+    "Changes the language used for movie and TV metadata from TMDb."
+        to "Altera o idioma usado para metadados de filmes e séries do TMDb.",
+    "Home Layout" to "Esquema da página inicial",
+    "Choose whether desktop mirrors your mobile home layout or keeps its own."
+        to "Escolha se o ambiente de trabalho reflete o esquema móvel ou mantém o seu.",
+    "Source" to "Origem",
+    "Use desktop layout" to "Usar esquema de ambiente de trabalho",
+    "Use mobile layout" to "Usar esquema móvel",
+    "Desktop layout is independent" to "O esquema de ambiente de trabalho é independente",
+    "Editing the layout shared with mobile" to "A editar o esquema partilhado com móvel",
+    "Changes below only affect desktop." to "As alterações abaixo só afetam o ambiente de trabalho.",
+    "Changes below also apply to your mobile home screen."
+        to "As alterações abaixo também se aplicam ao seu ecrã inicial móvel.",
+    "Playback Strategy" to "Estratégia de reprodução",
+    "Quality filters and automation now apply directly from desktop."
+        to "Os filtros de qualidade e a automatização agora aplicam-se diretamente a partir do ambiente de trabalho.",
+    "Max Quality" to "Qualidade máxima",
+    "Min Quality" to "Qualidade mínima",
+    "Auto Source" to "Origem automática",
+    "Codec Preference" to "Preferência de codec",
+    "HDR Mode" to "Modo HDR",
+    "Automation and Browse Filters" to "Automatização e filtros",
+    "Desktop can now control autoplay, cache rules, and browse behavior."
+        to "O ambiente de trabalho pode agora controlar a reprodução automática, regras de cache e comportamento de navegação.",
+    "Cached Only" to "Apenas em cache",
+    "Only keep cached-capable streams in the auto source pool."
+        to "Manter apenas streams com cache no conjunto de origens automáticas.",
+    "Auto Play" to "Reprodução automática",
+    "Start the selected stream immediately after resolution."
+        to "Iniciar o stream selecionado imediatamente após a resolução.",
+    "Auto Play Next Episode" to "Próximo episódio automático",
+    "Continue TV playback without reopening the episode picker."
+        to "Continuar a reprodução de TV sem reabrir o seletor de episódios.",
+    "Dedupe Results" to "Remover duplicados",
+    "Collapse duplicate source candidates from multiple add-ons."
+        to "Agrupar candidatos de origem duplicados de várias extensões.",
+    "Allow 4K in Auto Mode" to "Permitir 4K no modo automático",
+    "Permit automatic source selection to choose 4K streams when appropriate."
+        to "Permitir que a seleção automática de origem escolha streams 4K quando apropriado.",
+    "Prefer Compatible Codecs" to "Preferir codecs compatíveis",
+    "Bias selection away from files that are more likely to fail on the current player stack."
+        to "Afastar a seleção de ficheiros que provavelmente falham no leitor atual.",
+    "Desktop Playback" to "Reprodução no ambiente de trabalho",
+    "Seek, subtitle, audio, and volume preferences stored locally."
+        to "As preferências de busca, legendas, áudio e volume são guardadas localmente.",
+    "Playback Engine" to "Motor de reprodução",
 )
 
 // ── Turkish ─────────────────────────────────────────────────────
@@ -625,4 +897,59 @@ private val TURKISH = mapOf(
     "New" to "Yeni",
     "Out now" to "Yayında",
     "Soon" to "Yakında",
+    // Settings - Preferences (CustomizationSection)
+    "Appearance" to "Görünüm",
+    "Theme, language, and region for this device." to "Bu cihaz için tema, dil ve bölge.",
+    "Theme" to "Tema",
+    "Content Language" to "İçerik dili",
+    "Region Code" to "Bölge kodu",
+    "Availability and metadata use this region."
+        to "Kullanılabilirlik ve meta veriler bu bölgeyi kullanır.",
+    "Content language only" to "Yalnızca içerik dili",
+    "Changes the language used for movie and TV metadata from TMDb."
+        to "TMDb'den film ve dizi meta verileri için kullanılan dili değiştirir.",
+    "Home Layout" to "Ana sayfa düzeni",
+    "Choose whether desktop mirrors your mobile home layout or keeps its own."
+        to "Masaüstünün mobil düzenini yansıtmasını mı yoksa kendi düzenini korumasını mı seçin.",
+    "Source" to "Kaynak",
+    "Use desktop layout" to "Masaüstü düzenini kullan",
+    "Use mobile layout" to "Mobil düzeni kullan",
+    "Desktop layout is independent" to "Masaüstü düzeni bağımsız",
+    "Editing the layout shared with mobile" to "Mobil ile paylaşılan düzen düzenleniyor",
+    "Changes below only affect desktop." to "Aşağıdaki değişiklikler yalnızca masaüstünü etkiler.",
+    "Changes below also apply to your mobile home screen."
+        to "Aşağıdaki değişiklikler mobil ana ekranınız için de geçerli.",
+    "Playback Strategy" to "Oynatma stratejisi",
+    "Quality filters and automation now apply directly from desktop."
+        to "Kalite filtreleri ve otomasyon artık doğrudan masaüstünden uygulanır.",
+    "Max Quality" to "Maksimum kalite",
+    "Min Quality" to "Minimum kalite",
+    "Auto Source" to "Otomatik kaynak",
+    "Codec Preference" to "Codec tercihi",
+    "HDR Mode" to "HDR modu",
+    "Automation and Browse Filters" to "Otomasyon ve filtreler",
+    "Desktop can now control autoplay, cache rules, and browse behavior."
+        to "Masaüstü artık otomatik oynatma, önbellek kuralları ve gezinti davranışını kontrol edebilir.",
+    "Cached Only" to "Yalnızca önbelleğe alınmış",
+    "Only keep cached-capable streams in the auto source pool."
+        to "Otomatik kaynak havuzunda yalnızca önbelleklenebilir akışları tut.",
+    "Auto Play" to "Otomatik oynat",
+    "Start the selected stream immediately after resolution."
+        to "Çözümlemeden sonra seçili akışı hemen başlat.",
+    "Auto Play Next Episode" to "Sonraki bölümü otomatik oynat",
+    "Continue TV playback without reopening the episode picker."
+        to "Bölüm seçiciyi yeniden açmadan TV oynatmaya devam et.",
+    "Dedupe Results" to "Tekrarları kaldır",
+    "Collapse duplicate source candidates from multiple add-ons."
+        to "Birden çok eklentiden gelen yinelenen kaynak adaylarını birleştir.",
+    "Allow 4K in Auto Mode" to "Otomatik modda 4K'ya izin ver",
+    "Permit automatic source selection to choose 4K streams when appropriate."
+        to "Uygun olduğunda otomatik kaynak seçiminin 4K akışları seçmesine izin ver.",
+    "Prefer Compatible Codecs" to "Uyumlu codec'leri tercih et",
+    "Bias selection away from files that are more likely to fail on the current player stack."
+        to "Mevcut oynatıcı yığınında başarısız olma olasılığı daha yüksek dosyalardan uzak seç.",
+    "Desktop Playback" to "Masaüstü oynatma",
+    "Seek, subtitle, audio, and volume preferences stored locally."
+        to "Arama, altyazı, ses ve ses seviyesi tercihleri yerel olarak saklanır.",
+    "Playback Engine" to "Oynatma motoru",
 )

@@ -329,18 +329,18 @@ private fun CustomizationSection(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         TorveSectionCard(
-            title = "Appearance",
-            supportingText = "Theme and region are now consumed locally. Desktop UI text translation is not wired yet.",
+            title = ds("Appearance"),
+            supportingText = ds("Theme, language, and region for this device."),
         ) {
             SelectorBlock(
-                label = "Theme",
+                label = ds("Theme"),
                 options = ThemeMode.entries,
                 selected = settingsState.themeMode,
                 optionLabel = { it.name.lowercase().replaceFirstChar(Char::uppercase) },
                 onSelect = settingsViewModel::setThemeMode,
             )
             SelectorBlock(
-                label = "Content Language",
+                label = ds("Content Language"),
                 options = AppLanguage.entries,
                 selected = settingsState.appLanguage,
                 optionLabel = { it.displayName },
@@ -353,45 +353,47 @@ private fun CustomizationSection(
                 TorveTextField(
                     value = settingsState.regionCode,
                     onValueChange = { settingsViewModel.setRegionCode(it.uppercase()) },
-                    label = "Region Code",
+                    label = ds("Region Code"),
                     modifier = Modifier.width(200.dp),
                 )
                 Text(
-                    text = "Availability and metadata use this region.",
+                    text = ds("Availability and metadata use this region."),
                     style = MaterialTheme.typography.bodySmall,
                     color = TorveDesktopThemeTokens.colors.textSecondary,
                     modifier = Modifier.padding(top = 14.dp),
                 )
             }
             TorveBanner(
-                title = "Content language only",
-                description = "Changes the language used for movie and TV metadata from TMDb. Desktop UI text remains English-only.",
+                title = ds("Content language only"),
+                description = ds("Changes the language used for movie and TV metadata from TMDb."),
                 tone = TorveBannerTone.Info,
             )
         }
 
         TorveSectionCard(
-            title = "Home Layout",
-            supportingText = "Choose whether desktop mirrors your mobile home layout or keeps its own.",
+            title = ds("Home Layout"),
+            supportingText = ds("Choose whether desktop mirrors your mobile home layout or keeps its own."),
         ) {
+            val useDesktopLayoutLabel = ds("Use desktop layout")
+            val useMobileLayoutLabel = ds("Use mobile layout")
             SelectorBlock(
-                label = "Source",
+                label = ds("Source"),
                 options = listOf("SHARED_WITH_MOBILE", "DESKTOP_OWN"),
                 selected = settingsState.homeLayoutSource,
                 optionLabel = {
-                    if (it == "DESKTOP_OWN") "Use desktop layout" else "Use mobile layout"
+                    if (it == "DESKTOP_OWN") useDesktopLayoutLabel else useMobileLayoutLabel
                 },
                 onSelect = settingsViewModel::setHomeLayoutSource,
             )
             TorveBanner(
                 title = if (settingsState.homeLayoutSource == "DESKTOP_OWN")
-                    "Desktop layout is independent"
+                    ds("Desktop layout is independent")
                 else
-                    "Editing the layout shared with mobile",
+                    ds("Editing the layout shared with mobile"),
                 description = if (settingsState.homeLayoutSource == "DESKTOP_OWN")
-                    "Changes below only affect desktop."
+                    ds("Changes below only affect desktop.")
                 else
-                    "Changes below also apply to your mobile home screen.",
+                    ds("Changes below also apply to your mobile home screen."),
                 tone = TorveBannerTone.Info,
             )
         }
@@ -407,39 +409,39 @@ private fun CustomizationSection(
         )
 
         TorveSectionCard(
-            title = "Playback Strategy",
-            supportingText = "Quality filters and automation now apply directly from desktop.",
+            title = ds("Playback Strategy"),
+            supportingText = ds("Quality filters and automation now apply directly from desktop."),
         ) {
             SelectorBlock(
-                label = "Max Quality",
+                label = ds("Max Quality"),
                 options = StreamQuality.selectable,
                 selected = settingsState.maxQuality,
                 optionLabel = { it.label },
                 onSelect = settingsViewModel::setMaxQuality,
             )
             SelectorBlock(
-                label = "Min Quality",
+                label = ds("Min Quality"),
                 options = StreamQuality.selectable,
                 selected = settingsState.minQuality,
                 optionLabel = { it.label },
                 onSelect = settingsViewModel::setMinQuality,
             )
             SelectorBlock(
-                label = "Auto Source",
+                label = ds("Auto Source"),
                 options = AutoSourceMode.entries,
                 selected = settingsState.autoSourceMode,
                 optionLabel = { it.label },
                 onSelect = settingsViewModel::setAutoSourceMode,
             )
             SelectorBlock(
-                label = "Codec Preference",
+                label = ds("Codec Preference"),
                 options = CodecPreference.entries,
                 selected = settingsState.codecPreference,
                 optionLabel = { it.label },
                 onSelect = settingsViewModel::setCodecPreference,
             )
             SelectorBlock(
-                label = "HDR Mode",
+                label = ds("HDR Mode"),
                 options = HdrMode.entries,
                 selected = settingsState.hdrMode,
                 optionLabel = { it.label },
@@ -448,50 +450,50 @@ private fun CustomizationSection(
         }
 
         TorveSectionCard(
-            title = "Automation and Browse Filters",
-            supportingText = "Desktop can now control autoplay, cache rules, and browse behavior.",
+            title = ds("Automation and Browse Filters"),
+            supportingText = ds("Desktop can now control autoplay, cache rules, and browse behavior."),
         ) {
             PreferenceToggleRow(
-                title = "Cached Only",
-                subtitle = "Only keep cached-capable streams in the auto source pool.",
+                title = ds("Cached Only"),
+                subtitle = ds("Only keep cached-capable streams in the auto source pool."),
                 checked = settingsState.cachedOnly,
                 onCheckedChange = settingsViewModel::setCachedOnly,
             )
             PreferenceToggleRow(
-                title = "Auto Play",
-                subtitle = "Start the selected stream immediately after resolution.",
+                title = ds("Auto Play"),
+                subtitle = ds("Start the selected stream immediately after resolution."),
                 checked = settingsState.autoPlayEnabled,
                 onCheckedChange = settingsViewModel::setAutoPlayEnabled,
             )
             PreferenceToggleRow(
-                title = "Auto Play Next Episode",
-                subtitle = "Continue TV playback without reopening the episode picker.",
+                title = ds("Auto Play Next Episode"),
+                subtitle = ds("Continue TV playback without reopening the episode picker."),
                 checked = settingsState.autoPlayNextEpisodeEnabled,
                 onCheckedChange = settingsViewModel::setAutoPlayNextEpisodeEnabled,
             )
             PreferenceToggleRow(
-                title = "Dedupe Results",
-                subtitle = "Collapse duplicate source candidates from multiple add-ons.",
+                title = ds("Dedupe Results"),
+                subtitle = ds("Collapse duplicate source candidates from multiple add-ons."),
                 checked = settingsState.dedupeResults,
                 onCheckedChange = settingsViewModel::setDedupeResultsEnabled,
             )
             PreferenceToggleRow(
-                title = "Allow 4K in Auto Mode",
-                subtitle = "Permit automatic source selection to choose 4K streams when appropriate.",
+                title = ds("Allow 4K in Auto Mode"),
+                subtitle = ds("Permit automatic source selection to choose 4K streams when appropriate."),
                 checked = settingsState.allow4kAuto,
                 onCheckedChange = settingsViewModel::setAllow4kAuto,
             )
             PreferenceToggleRow(
-                title = "Prefer Compatible Codecs",
-                subtitle = "Bias selection away from files that are more likely to fail on the current player stack.",
+                title = ds("Prefer Compatible Codecs"),
+                subtitle = ds("Bias selection away from files that are more likely to fail on the current player stack."),
                 checked = settingsState.preferCompatibleCodecs,
                 onCheckedChange = settingsViewModel::setPreferCompatibleCodecs,
             )
         }
 
         TorveSectionCard(
-            title = "Desktop Playback",
-            supportingText = "Seek, subtitle, audio, and volume preferences stored locally.",
+            title = ds("Desktop Playback"),
+            supportingText = ds("Seek, subtitle, audio, and volume preferences stored locally."),
         ) {
             // Discovery is mutable here so the Re-check button can refresh
             // it without restarting the app. Snapshot derives the
@@ -520,7 +522,7 @@ private fun CustomizationSection(
             // disabled row is the user's signal that MPV exists; the
             // premium info card below explains WHY it's disabled.
             Text(
-                text = "Playback Engine",
+                text = ds("Playback Engine"),
                 style = MaterialTheme.typography.labelLarge,
                 color = TorveDesktopThemeTokens.colors.textPrimary,
             )
