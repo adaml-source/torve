@@ -1,6 +1,7 @@
 package com.torve.desktop.ui.v2.seeall
 
 import androidx.compose.animation.Crossfade
+import com.torve.desktop.ui.l10n.ds
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -333,7 +334,7 @@ fun V2SeeAllPage(
                 Box(Modifier.weight(1f).fillMaxHeight()) {
                     if (locallyFiltered.isEmpty() && !state.isLoading) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("No items match your filters.", style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
+                            Text(ds("No items match your filters."), style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
                         }
                     } else {
                         BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -404,7 +405,7 @@ private fun InfoPanel(
     val colors = TorveDesktopThemeTokens.colors
     if (item == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Select an item", color = colors.textMuted)
+            Text(ds("Select an item"), color = colors.textMuted)
         }
         return
     }
@@ -532,7 +533,7 @@ private fun InfoPanel(
 
             if (!item.director.isNullOrBlank() && item.directorId != null) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Director", style = MaterialTheme.typography.labelLarge, color = colors.textMuted)
+                    Text(ds("Director"), style = MaterialTheme.typography.labelLarge, color = colors.textMuted)
                     PersonTile(
                         name = item.director!!,
                         subtitle = null,
@@ -544,7 +545,7 @@ private fun InfoPanel(
 
             if (item.cast.isNotEmpty()) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Cast", style = MaterialTheme.typography.labelLarge, color = colors.textMuted)
+                    Text(ds("Cast"), style = MaterialTheme.typography.labelLarge, color = colors.textMuted)
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         item.cast.take(5).forEach { member ->
                             PersonTile(
@@ -568,7 +569,7 @@ private fun InfoPanel(
                 shape = RoundedCornerShape(10.dp),
             ) {
                 Text(
-                    text = "Open details",
+                    text = ds("Open details"),
                     modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,

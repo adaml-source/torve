@@ -3,6 +3,7 @@
 package com.torve.desktop.ui.v2.nzbmovies
 
 import androidx.compose.foundation.background
+import com.torve.desktop.ui.l10n.ds
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -192,7 +193,7 @@ fun V2NzbMoviesPage(
     ) {
         Column(modifier = Modifier.fillMaxSize().padding(start = 72.dp, end = 24.dp, top = 16.dp, bottom = 16.dp)) {
             TorvePageHeader(
-                title = "Movies via Usenet",
+                title = ds("Movies via Usenet"),
                 subtitle = if (configured) {
                     val indexerLabel = indexerType.takeIf { it.isNotBlank() } ?: "indexer"
                     "From $indexerLabel · cat=$categoryParam · sorted newest first"
@@ -231,11 +232,11 @@ fun V2NzbMoviesPage(
                 TorveTextField(
                     value = query,
                     onValueChange = { query = it },
-                    label = "Search movies (Enter)",
+                    label = ds("Search movies (Enter)"),
                     modifier = Modifier.weight(1f),
                     onSubmit = ::runSearch,
                 )
-                TorvePrimaryButton(text = "Search", onClick = ::runSearch)
+                TorvePrimaryButton(text = ds("Search"), onClick = ::runSearch)
             }
 
             needsFolderPrompt?.let { msg ->
@@ -251,7 +252,7 @@ fun V2NzbMoviesPage(
                     ) {
                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(
-                                text = "Download folder not set",
+                                text = ds("Download folder not set"),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = colors.textPrimary,
@@ -263,14 +264,14 @@ fun V2NzbMoviesPage(
                             )
                         }
                         TorvePrimaryButton(
-                            text = "Open Settings",
+                            text = ds("Open Settings"),
                             onClick = {
                                 needsFolderPrompt = null
                                 onOpenDownloadSettings()
                             },
                         )
                         TorveGhostButton(
-                            text = "Dismiss",
+                            text = ds("Dismiss"),
                             onClick = { needsFolderPrompt = null },
                         )
                     }
@@ -328,7 +329,7 @@ fun V2NzbMoviesPage(
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.textSecondary,
                         )
-                        TorvePrimaryButton(text = "Open Panda setup", onClick = onOpenPandaSetup)
+                        TorvePrimaryButton(text = ds("Open Panda setup"), onClick = onOpenPandaSetup)
                     }
                 }
                 loading -> Box(
@@ -336,12 +337,12 @@ fun V2NzbMoviesPage(
                     contentAlignment = Alignment.Center,
                 ) { CircularProgressIndicator(color = colors.accent) }
                 errorText != null -> TorveBanner(
-                    title = "Couldn't load",
+                    title = ds("Couldn't load"),
                     description = errorText!!,
                     tone = TorveBannerTone.Info,
                 )
                 allItems.isEmpty() -> Text(
-                    text = "No results.",
+                    text = ds("No results."),
                     color = colors.textSecondary,
                 )
                 else -> LazyVerticalGrid(
@@ -542,14 +543,14 @@ private fun NzbMoviePosterCard(
                 Spacer(Modifier.height(4.dp))
                 if (showReconfigure) {
                     TorvePrimaryButton(
-                        text = "Reconfigure Panda",
+                        text = ds("Reconfigure Panda"),
                         onClick = onReconfigure,
                     )
                 } else {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         if (downloadEnabled && onDownload != null) {
                             TorveSecondaryButton(
-                                text = "Download",
+                                text = ds("Download"),
                                 onClick = onDownload,
                                 enabled = torboxConfigured && !isWorking,
                             )
@@ -561,7 +562,7 @@ private fun NzbMoviePosterCard(
                         )
                     }
                     TorveGhostButton(
-                        text = "Copy NZB",
+                        text = ds("Copy NZB"),
                         onClick = {
                             runCatching {
                                 java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(

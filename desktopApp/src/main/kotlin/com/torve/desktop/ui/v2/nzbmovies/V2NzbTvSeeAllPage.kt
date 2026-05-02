@@ -3,6 +3,7 @@
 package com.torve.desktop.ui.v2.nzbmovies
 
 import androidx.compose.foundation.background
+import com.torve.desktop.ui.l10n.ds
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -140,7 +141,7 @@ fun V2NzbTvSeeAllPage(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = colors.textPrimary)
             }
             Text(
-                text = "Latest on Usenet - TV",
+                text = ds("Latest on Usenet - TV"),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = colors.textPrimary,
@@ -160,7 +161,7 @@ fun V2NzbTvSeeAllPage(
             TorveTextField(
                 value = query,
                 onValueChange = { query = it },
-                label = "Search Usenet TV shows (Enter)",
+                label = ds("Search Usenet TV shows (Enter)"),
                 modifier = Modifier.weight(1f),
                 onSubmit = { /* LaunchedEffect picks it up */ },
                 trailingIcon = if (query.isNotBlank()) {
@@ -171,33 +172,33 @@ fun V2NzbTvSeeAllPage(
                     }
                 } else null,
             )
-            TorvePrimaryButton(text = "Search", onClick = { /* LaunchedEffect picks it up */ })
+            TorvePrimaryButton(text = ds("Search"), onClick = { /* LaunchedEffect picks it up */ })
         }
 
-        TvFilterRow(label = "Language") {
+        TvFilterRow(label = ds("Language")) {
             MovieLanguage.entries.forEach { lang ->
                 TvCompactFilterChip(text = lang.label, selected = lang == language) { language = lang }
             }
         }
         if (availableYears.isNotEmpty()) {
-            TvFilterRow(label = "Year") {
-                TvCompactFilterChip(text = "Any", selected = yearFilter == null) { yearFilter = null }
+            TvFilterRow(label = ds("Year")) {
+                TvCompactFilterChip(text = ds("Any"), selected = yearFilter == null) { yearFilter = null }
                 availableYears.take(20).forEach { year ->
                     TvCompactFilterChip(text = year.toString(), selected = yearFilter == year) { yearFilter = year }
                 }
             }
         }
         if (availableGenres.isNotEmpty()) {
-            TvFilterRow(label = "Genre") {
-                TvCompactFilterChip(text = "Any", selected = genreFilter == null) { genreFilter = null }
+            TvFilterRow(label = ds("Genre")) {
+                TvCompactFilterChip(text = ds("Any"), selected = genreFilter == null) { genreFilter = null }
                 availableGenres.forEach { id ->
                     val name = TMDB_TV_GENRES[id] ?: return@forEach
                     TvCompactFilterChip(text = name, selected = genreFilter == id) { genreFilter = id }
                 }
             }
         }
-        TvFilterRow(label = "Min rating") {
-            TvCompactFilterChip(text = "Any", selected = minRating == null) { minRating = null }
+        TvFilterRow(label = ds("Min rating")) {
+            TvCompactFilterChip(text = ds("Any"), selected = minRating == null) { minRating = null }
             listOf(5f, 6f, 7f, 8f, 9f).forEach { threshold ->
                 TvCompactFilterChip(
                     text = "${threshold.toInt()}+",
@@ -205,8 +206,8 @@ fun V2NzbTvSeeAllPage(
                 ) { minRating = threshold }
             }
         }
-        TvFilterRow(label = "Rating source") {
-            TvCompactFilterChip(text = "Any", selected = requiredRatingSource == null) { requiredRatingSource = null }
+        TvFilterRow(label = ds("Rating source")) {
+            TvCompactFilterChip(text = ds("Any"), selected = requiredRatingSource == null) { requiredRatingSource = null }
             TV_RATING_SOURCE_FILTERS.forEach { source ->
                 TvCompactFilterChip(
                     text = source.displayName,

@@ -52,6 +52,7 @@ import com.torve.desktop.ui.components.TorvePageHeader
 import com.torve.desktop.ui.components.TorvePrimaryButton
 import com.torve.desktop.ui.components.TorveSecondaryButton
 import com.torve.desktop.ui.components.TorveTextField
+import com.torve.desktop.ui.l10n.ds
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -177,8 +178,8 @@ fun V2SportsPage(
     ) {
         Column(modifier = Modifier.fillMaxSize().padding(start = 72.dp, end = 24.dp, top = 16.dp, bottom = 16.dp)) {
             TorvePageHeader(
-                title = "Sports",
-                subtitle = "Newznab sports categories · classified client-side by release name",
+                title = ds("Sports"),
+                subtitle = ds("Newznab sports categories · classified client-side by release name"),
             )
 
             Spacer(Modifier.height(12.dp))
@@ -215,7 +216,7 @@ fun V2SportsPage(
                 TorveTextField(
                     value = query,
                     onValueChange = { query = it },
-                    label = "Search sports (Enter)",
+                    label = ds("Search sports (Enter)"),
                     modifier = Modifier.weight(1f),
                     onSubmit = ::runSearch,
                     trailingIcon = if (query.isNotBlank()) {
@@ -229,7 +230,7 @@ fun V2SportsPage(
                         }
                     } else null,
                 )
-                TorvePrimaryButton(text = "Search", onClick = ::runSearch)
+                TorvePrimaryButton(text = ds("Search"), onClick = ::runSearch)
             }
 
             needsFolderPrompt?.let { msg ->
@@ -245,7 +246,7 @@ fun V2SportsPage(
                     ) {
                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(
-                                text = "Download folder not set",
+                                text = ds("Download folder not set"),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = colors.textPrimary,
@@ -257,14 +258,14 @@ fun V2SportsPage(
                             )
                         }
                         TorvePrimaryButton(
-                            text = "Open Settings",
+                            text = ds("Open Settings"),
                             onClick = {
                                 needsFolderPrompt = null
                                 onOpenDownloadSettings()
                             },
                         )
                         TorveGhostButton(
-                            text = "Dismiss",
+                            text = ds("Dismiss"),
                             onClick = { needsFolderPrompt = null },
                         )
                     }
@@ -322,7 +323,7 @@ fun V2SportsPage(
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.textSecondary,
                         )
-                        TorvePrimaryButton(text = "Open Panda setup", onClick = onOpenPandaSetup)
+                        TorvePrimaryButton(text = ds("Open Panda setup"), onClick = onOpenPandaSetup)
                     }
                 }
                 loading -> Box(
@@ -330,7 +331,7 @@ fun V2SportsPage(
                     contentAlignment = Alignment.Center,
                 ) { CircularProgressIndicator(color = colors.accent) }
                 errorText != null -> TorveBanner(
-                    title = "Couldn't load",
+                    title = ds("Couldn't load"),
                     description = errorText!!,
                     tone = TorveBannerTone.Info,
                 )
@@ -478,7 +479,7 @@ private fun SportsRow(
                 }
             }
             TorveGhostButton(
-                text = "Copy NZB",
+                text = ds("Copy NZB"),
                 onClick = {
                     runCatching {
                         java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(
@@ -489,13 +490,13 @@ private fun SportsRow(
                 },
             )
             if (showReconfigure) {
-                TorvePrimaryButton(text = "Reconfigure Panda", onClick = onReconfigure)
+                TorvePrimaryButton(text = ds("Reconfigure Panda"), onClick = onReconfigure)
             } else {
                 val isWorking = statusText != null && !statusText.startsWith("Failed") &&
                     !statusText.startsWith("TorBox error")
                 if (downloadEnabled && onDownload != null) {
                     TorveSecondaryButton(
-                        text = "Download",
+                        text = ds("Download"),
                         onClick = onDownload,
                         enabled = torboxConfigured && !isWorking,
                     )

@@ -39,6 +39,7 @@ import com.torve.desktop.ui.components.TorveGhostButton
 import com.torve.desktop.ui.components.TorveListRow
 import com.torve.desktop.ui.components.TorvePlaceholderState
 import com.torve.desktop.ui.components.TorveSectionCard
+import com.torve.desktop.ui.l10n.ds
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
 import com.torve.desktop.ui.v2.components.V2PosterCard
 import com.torve.desktop.ui.v2.components.V2Shelf
@@ -113,7 +114,7 @@ fun V2LibraryPage(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         Text(
-                            "Library",
+                            ds("Library"),
                             style = MaterialTheme.typography.displaySmall,
                             fontWeight = FontWeight.Bold,
                             color = colors.textPrimary,
@@ -121,7 +122,7 @@ fun V2LibraryPage(
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             LibraryViewTab.entries.forEach { tab ->
                                 TorveFilterChip(
-                                    text = tab.label,
+                                    text = ds(tab.label),
                                     selected = tab == selectedTab,
                                     onClick = { selectedTab = tab },
                                 )
@@ -241,7 +242,7 @@ private fun LibraryOverview(
         !homeState.isLoading
     ) {
         Text(
-            text = "Your library is empty. Start watching to build your collection.",
+            text = ds("Your library is empty. Start watching to build your collection."),
             modifier = Modifier.padding(start = 72.dp),
             style = MaterialTheme.typography.bodyLarge,
             color = TorveDesktopThemeTokens.colors.textSecondary,
@@ -269,8 +270,8 @@ private fun StoredMediaView(
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         TorveSectionCard(
-            title = "Stored Media",
-            supportingText = "Torve downloads stay manageable here, and extra folders are shown with their source path.",
+            title = ds("Stored Media"),
+            supportingText = ds("Torve downloads stay manageable here, and extra folders are shown with their source path."),
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TorveBadge(
@@ -282,7 +283,7 @@ private fun StoredMediaView(
                     tone = TorveBadgeTone.Neutral,
                 )
                 TorveGhostButton(
-                    text = "Refresh",
+                    text = ds("Refresh"),
                     onClick = onRefreshStoredMedia,
                 )
             }
@@ -297,8 +298,8 @@ private fun StoredMediaView(
 
         if (downloadState.activeDownloads.isNotEmpty() || desktopDownloadState.isProcessing) {
             TorveSectionCard(
-                title = "Active Downloads",
-                supportingText = "Downloads for shows are processed sequentially, one file at a time.",
+                title = ds("Active Downloads"),
+                supportingText = ds("Downloads for shows are processed sequentially, one file at a time."),
             ) {
                 if (desktopDownloadState.activeDownloadTitle != null) {
                     TorveListRow(
@@ -306,7 +307,7 @@ private fun StoredMediaView(
                         subtitle = "${(desktopDownloadState.activeProgress * 100f).toInt()}% complete",
                         trailing = {
                             TorveBadge(
-                                text = "Running",
+                                text = ds("Running"),
                                 tone = TorveBadgeTone.Accent,
                             )
                         },
@@ -328,13 +329,13 @@ private fun StoredMediaView(
         }
 
         TorveSectionCard(
-            title = "Torve Downloads",
-            supportingText = "Only Torve-managed files can be deleted from here.",
+            title = ds("Torve Downloads"),
+            supportingText = ds("Only Torve-managed files can be deleted from here."),
         ) {
             if (groups.isEmpty()) {
                 TorvePlaceholderState(
-                    title = "No Torve downloads yet",
-                    description = "Download a movie from the source picker or queue episodes from a show detail page.",
+                    title = ds("No Torve downloads yet"),
+                    description = ds("Download a movie from the source picker or queue episodes from a show detail page."),
                     emoji = "📥",
                 )
             } else {
@@ -352,11 +353,11 @@ private fun StoredMediaView(
                         trailing = {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 TorveBadge(
-                                    text = "Downloaded by Torve",
+                                    text = ds("Downloaded by Torve"),
                                     tone = TorveBadgeTone.Success,
                                 )
                                 TorveGhostButton(
-                                    text = "Delete",
+                                    text = ds("Delete"),
                                     onClick = { onDeleteDownloadGroup(group) },
                                 )
                             }
@@ -369,7 +370,7 @@ private fun StoredMediaView(
                                 subtitle = "${season.episodes.size} episode(s) - ${formatBytes(season.totalSizeBytes)}",
                                 trailing = {
                                     TorveGhostButton(
-                                        text = "Delete Season",
+                                        text = ds("Delete Season"),
                                         onClick = { onDeleteDownloadSeason(group.mediaId, season.seasonNumber) },
                                     )
                                 },
@@ -390,7 +391,7 @@ private fun StoredMediaView(
                                     },
                                     trailing = {
                                         TorveGhostButton(
-                                            text = "Delete Episode",
+                                            text = ds("Delete Episode"),
                                             onClick = { onDeleteDownloadEpisode(episode.id) },
                                         )
                                     },
@@ -401,7 +402,7 @@ private fun StoredMediaView(
                         group.movie?.let { movie ->
                             val moviePath = movie.filePath
                             TorveListRow(
-                                title = "Play",
+                                title = ds("Play"),
                                 subtitle = buildString {
                                     append(moviePath ?: "Torve download")
                                     if (movie.fileSizeBytes > 0) {
@@ -420,13 +421,13 @@ private fun StoredMediaView(
         }
 
         TorveSectionCard(
-            title = "Extra Local Folders",
-            supportingText = "These folders are scanned read-only. Source path stays visible so Jellyfin-linked folders are distinguishable from Torve downloads.",
+            title = ds("Extra Local Folders"),
+            supportingText = ds("These folders are scanned read-only. Source path stays visible so Jellyfin-linked folders are distinguishable from Torve downloads."),
         ) {
             if (desktopDownloadState.scannedGroups.isEmpty()) {
                 TorvePlaceholderState(
-                    title = "No extra folders scanned",
-                    description = "Add scan folders in Settings to surface existing local media here.",
+                    title = ds("No extra folders scanned"),
+                    description = ds("Add scan folders in Settings to surface existing local media here."),
                     emoji = "📁",
                 )
             } else {

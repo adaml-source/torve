@@ -169,19 +169,19 @@ fun V2MoviesPage(
                     }
                     if (state.trendingItems.size > 1) {
                         val trending = state.trendingItems.drop(1)
-                        V2Shelf("Trending Movies", Modifier.padding(start = 72.dp), onSeeAll = { onSeeAll(SeeAllRequest("TRENDING_MOVIES", "Trending Movies")) }) { trending.take(20).forEach { V2PosterCard(it.title, it.posterUrl, Modifier.width(150.dp), it.year?.toString(), it.rating?.let { r -> String.format("%.1f", r) }, ratings = it.ratings, backdropUrl = it.backdropUrl, overview = it.overview) { onOpenDetail(it) } } }
+                        V2Shelf(ds("Trending Movies"), Modifier.padding(start = 72.dp), onSeeAll = { onSeeAll(SeeAllRequest("TRENDING_MOVIES", "Trending Movies")) }) { trending.take(20).forEach { V2PosterCard(it.title, it.posterUrl, Modifier.width(150.dp), it.year?.toString(), it.rating?.let { r -> String.format("%.1f", r) }, ratings = it.ratings, backdropUrl = it.backdropUrl, overview = it.overview) { onOpenDetail(it) } } }
                     }
                     if (state.popularItems.isNotEmpty()) {
-                        V2Shelf("Popular", Modifier.padding(start = 72.dp), onSeeAll = { onSeeAll(SeeAllRequest("POPULAR_MOVIES", "Popular Movies")) }) { state.popularItems.take(20).forEach { V2PosterCard(it.title, it.posterUrl, Modifier.width(150.dp), it.year?.toString(), it.rating?.let { r -> String.format("%.1f", r) }, ratings = it.ratings, backdropUrl = it.backdropUrl, overview = it.overview) { onOpenDetail(it) } } }
+                        V2Shelf(ds("Popular"), Modifier.padding(start = 72.dp), onSeeAll = { onSeeAll(SeeAllRequest("POPULAR_MOVIES", "Popular Movies")) }) { state.popularItems.take(20).forEach { V2PosterCard(it.title, it.posterUrl, Modifier.width(150.dp), it.year?.toString(), it.rating?.let { r -> String.format("%.1f", r) }, ratings = it.ratings, backdropUrl = it.backdropUrl, overview = it.overview) { onOpenDetail(it) } } }
                     }
                     if (state.topRatedItems.isNotEmpty()) {
-                        V2Shelf("Top Rated", Modifier.padding(start = 72.dp), onSeeAll = { onSeeAll(SeeAllRequest("TOP_RATED_MOVIES", "Top Rated Movies")) }) { state.topRatedItems.take(20).forEach { V2PosterCard(it.title, it.posterUrl, Modifier.width(150.dp), it.year?.toString(), it.rating?.let { r -> String.format("%.1f", r) }, ratings = it.ratings, backdropUrl = it.backdropUrl, overview = it.overview) { onOpenDetail(it) } } }
+                        V2Shelf(ds("Top Rated"), Modifier.padding(start = 72.dp), onSeeAll = { onSeeAll(SeeAllRequest("TOP_RATED_MOVIES", "Top Rated Movies")) }) { state.topRatedItems.take(20).forEach { V2PosterCard(it.title, it.posterUrl, Modifier.width(150.dp), it.year?.toString(), it.rating?.let { r -> String.format("%.1f", r) }, ratings = it.ratings, backdropUrl = it.backdropUrl, overview = it.overview) { onOpenDetail(it) } } }
                     }
 
                     movieExtraRails.forEach { def ->
                         val items = extraRails[def.sectionId].orEmpty()
                         if (items.isNotEmpty()) {
-                            V2Shelf(def.title, Modifier.padding(start = 72.dp), onSeeAll = { onSeeAll(SeeAllRequest(def.sectionId, def.title)) }) {
+                            V2Shelf(ds(def.title), Modifier.padding(start = 72.dp), onSeeAll = { onSeeAll(SeeAllRequest(def.sectionId, def.title)) }) {
                                 items.take(20).forEach { V2PosterCard(it.title, it.posterUrl, Modifier.width(150.dp), it.year?.toString(), it.rating?.let { r -> String.format("%.1f", r) }, ratings = it.ratings, backdropUrl = it.backdropUrl, overview = it.overview) { onOpenDetail(it) } }
                             }
                         }

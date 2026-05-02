@@ -1,6 +1,7 @@
 package com.torve.desktop.ui.v2.live
 
 import androidx.compose.foundation.background
+import com.torve.desktop.ui.l10n.ds
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -102,13 +103,13 @@ fun V2EpgGrid(
     if (error != null && guideChannels.isEmpty()) {
         Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             TorvePlaceholderState(
-                title = "Guide failed to load",
+                title = ds("Guide failed to load"),
                 description = error,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TorveGhostButton(text = "Retry", onClick = onRetry)
+                TorveGhostButton(text = ds("Retry"), onClick = onRetry)
                 onSwitchToChannels?.let {
-                    TorveGhostButton(text = "Open Channels", onClick = it)
+                    TorveGhostButton(text = ds("Open Channels"), onClick = it)
                 }
             }
         }
@@ -122,7 +123,7 @@ fun V2EpgGrid(
             verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
         ) {
             CircularProgressIndicator()
-            Text("Building guide...", color = colors.textSecondary)
+            Text(ds("Building guide..."), color = colors.textSecondary)
             Text(
                 "Loading channels and matching them to EPG entries.",
                 color = colors.textSecondary,
@@ -156,9 +157,9 @@ fun V2EpgGrid(
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 onSwitchToChannels?.let {
-                    TorveGhostButton(text = "Open Channels", onClick = it)
+                    TorveGhostButton(text = ds("Open Channels"), onClick = it)
                 }
-                TorveGhostButton(text = "Retry EPG", onClick = onRetry)
+                TorveGhostButton(text = ds("Retry EPG"), onClick = onRetry)
             }
         }
         return
@@ -329,8 +330,8 @@ private fun GuideControlsRow(
                 strokeWidth = 2.dp,
             )
         }
-        TorveGhostButton(text = "Jump to Now", onClick = onJumpToNow)
-        TorveGhostButton(text = "Refresh", onClick = onRefresh, enabled = !isLoading)
+        TorveGhostButton(text = ds("Jump to Now"), onClick = onJumpToNow)
+        TorveGhostButton(text = ds("Refresh"), onClick = onRefresh, enabled = !isLoading)
     }
 }
 
@@ -776,7 +777,7 @@ private fun OtherAiringsSheet(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
-                    text = "Other airings",
+                    text = ds("Other airings"),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = colors.textPrimary,
@@ -788,7 +789,7 @@ private fun OtherAiringsSheet(
                 )
                 if (matches.isEmpty()) {
                     Text(
-                        text = "No other airings of this title were found in the loaded EPG window.",
+                        text = ds("No other airings of this title were found in the loaded EPG window."),
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.textSecondary,
                     )
@@ -839,7 +840,7 @@ private fun OtherAiringsSheet(
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Spacer(Modifier.weight(1f))
-                    TorveGhostButton(text = "Close", onClick = onDismiss)
+                    TorveGhostButton(text = ds("Close"), onClick = onDismiss)
                 }
             }
         }

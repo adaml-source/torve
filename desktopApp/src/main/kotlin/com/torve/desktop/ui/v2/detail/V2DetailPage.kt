@@ -1,6 +1,7 @@
 package com.torve.desktop.ui.v2.detail
 
 import androidx.compose.animation.animateColorAsState
+import com.torve.desktop.ui.l10n.ds
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -111,7 +112,7 @@ fun V2DetailPage(
 
         if (item == null) {
             Box(Modifier.fillMaxSize().background(colors.shellBackground), contentAlignment = Alignment.Center) {
-                Text("Select a title to view details", style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
+                Text(ds("Select a title to view details"), style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
             }
             return@Box
         }
@@ -124,7 +125,7 @@ fun V2DetailPage(
 
             Box(Modifier.fillMaxSize()) {
                 Box(Modifier.align(Alignment.TopStart).zIndex(2f).padding(start = 72.dp, top = 18.dp)) {
-                    TorveGhostButton(text = "Back", onClick = onBack)
+                    TorveGhostButton(text = ds("Back"), onClick = onBack)
                 }
 
                 // Full-bleed backdrop pinned behind everything
@@ -214,21 +215,21 @@ fun V2DetailPage(
                                 }
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                TorvePrimaryButton(text = "Play", onClick = { onPlay(item) })
+                                TorvePrimaryButton(text = ds("Play"), onClick = { onPlay(item) })
                                 item.trailerKey?.let { key ->
-                                    TorveGhostButton(text = "Trailer", onClick = { trailerKey = key })
+                                    TorveGhostButton(text = ds("Trailer"), onClick = { trailerKey = key })
                                 }
-                                TorveSecondaryButton(text = "Sources", onClick = { onChooseSource(item) })
+                                TorveSecondaryButton(text = ds("Sources"), onClick = { onChooseSource(item) })
                                 if (item.type == MediaType.MOVIE) {
                                     TorveSecondaryButton(
-                                        text = "Download",
+                                        text = ds("Download"),
                                         onClick = { onDownloadMovie(item) },
                                         enabled = canDownloadMovies,
                                     )
                                 } else {
                                     Box {
                                         TorveSecondaryButton(
-                                            text = "Download",
+                                            text = ds("Download"),
                                             onClick = { showDownloadMenu = true },
                                             enabled = canDownloadShows,
                                         )
@@ -337,7 +338,7 @@ fun V2DetailPage(
                                     }
                                 }
                                 Column {
-                                    Text("Directed by", style = MaterialTheme.typography.labelSmall, color = colors.textMuted)
+                                    Text(ds("Directed by"), style = MaterialTheme.typography.labelSmall, color = colors.textMuted)
                                     Text(
                                         director, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold,
                                         color = if (item.directorId != null) colors.accent else colors.textPrimary,
@@ -348,7 +349,7 @@ fun V2DetailPage(
 
                         // Cast row
                         if (item.cast.isNotEmpty()) {
-                            Text("Cast", Modifier.padding(start = 72.dp, end = 16.dp), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+                            Text(ds("Cast"), Modifier.padding(start = 72.dp, end = 16.dp), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
                             Row(
                                 Modifier.padding(horizontal = 36.dp).horizontalScroll(rememberScrollState()),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -397,7 +398,7 @@ fun V2DetailPage(
 
                         // Seasons / Episodes
                         if (item.type == MediaType.SERIES && item.seasons.isNotEmpty()) {
-                            Text("Seasons", Modifier.padding(start = 72.dp, end = 16.dp), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+                            Text(ds("Seasons"), Modifier.padding(start = 72.dp, end = 16.dp), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
                             Row(Modifier.padding(horizontal = 36.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 item.seasons.forEach { season ->
                                     TorveFilterChip(text = season.name ?: "Season ${season.seasonNumber}", selected = detailState.selectedSeasonNumber == season.seasonNumber, onClick = { onSelectSeason(season.seasonNumber) })
@@ -438,7 +439,7 @@ fun V2DetailPage(
 
                         // Related
                         if (detailState.similarItems.isNotEmpty()) {
-                            V2Shelf(title = "Related", modifier = Modifier.padding(start = 72.dp, end = 16.dp)) {
+                            V2Shelf(title = ds("Related"), modifier = Modifier.padding(start = 72.dp, end = 16.dp)) {
                                 detailState.similarItems.take(15).forEach { related ->
                                     V2PosterCard(related.title, related.posterUrl, Modifier.width(160.dp), related.year?.toString(), related.rating?.let { String.format("%.1f", it) }, ratings = related.ratings, backdropUrl = related.backdropUrl, overview = related.overview, onClick = { onOpenRelated(related) })
                                 }

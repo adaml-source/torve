@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import com.torve.desktop.ui.l10n.ds
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,7 +74,7 @@ fun KeyboardHelpOverlay(onDismiss: () -> Unit) {
                         color = colors.textPrimary,
                         modifier = Modifier.weight(1f),
                     )
-                    TorveGhostButton(text = "Close", onClick = onDismiss)
+                    TorveGhostButton(text = ds("Close"), onClick = onDismiss)
                 }
 
                 LazyColumn(

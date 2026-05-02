@@ -3,6 +3,7 @@
 package com.torve.desktop.ui.v2.adult
 
 import androidx.compose.foundation.background
+import com.torve.desktop.ui.l10n.ds
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -206,7 +207,7 @@ fun V2AdultPage(
     ) {
         Column(modifier = Modifier.fillMaxSize().padding(start = 72.dp, end = 24.dp, top = 16.dp, bottom = 16.dp)) {
             TorvePageHeader(
-                title = "Adult",
+                title = ds("Adult"),
                 subtitle = "Sourced from your Newznab indexer · categories ${activeCategoryParam()}",
             )
 
@@ -220,7 +221,7 @@ fun V2AdultPage(
                 ) {
                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
-                            text = "TorBox not configured",
+                            text = ds("TorBox not configured"),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
                             color = colors.textPrimary,
@@ -231,7 +232,7 @@ fun V2AdultPage(
                             color = colors.textSecondary,
                         )
                         TorvePrimaryButton(
-                            text = "Open Panda setup",
+                            text = ds("Open Panda setup"),
                             onClick = onOpenPandaSetup,
                         )
                     }
@@ -275,7 +276,7 @@ fun V2AdultPage(
                 TorveTextField(
                     value = query,
                     onValueChange = { query = it },
-                    label = "Filter results (Enter to search)",
+                    label = ds("Filter results (Enter to search)"),
                     modifier = Modifier.weight(1f),
                     onSubmit = ::runSearch,
                     trailingIcon = if (query.isNotBlank()) {
@@ -289,7 +290,7 @@ fun V2AdultPage(
                         }
                     } else null,
                 )
-                TorvePrimaryButton(text = "Search", onClick = ::runSearch)
+                TorvePrimaryButton(text = ds("Search"), onClick = ::runSearch)
             }
 
             needsFolderPrompt?.let { msg ->
@@ -305,7 +306,7 @@ fun V2AdultPage(
                     ) {
                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(
-                                text = "Download folder not set",
+                                text = ds("Download folder not set"),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = colors.textPrimary,
@@ -317,14 +318,14 @@ fun V2AdultPage(
                             )
                         }
                         TorvePrimaryButton(
-                            text = "Open Settings",
+                            text = ds("Open Settings"),
                             onClick = {
                                 needsFolderPrompt = null
                                 onOpenDownloadSettings()
                             },
                         )
                         TorveGhostButton(
-                            text = "Dismiss",
+                            text = ds("Dismiss"),
                             onClick = { needsFolderPrompt = null },
                         )
                     }
@@ -374,7 +375,7 @@ fun V2AdultPage(
                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         if (indexerSecretsRedacted) {
                             Text(
-                                text = "Panda credentials are masked",
+                                text = ds("Panda credentials are masked"),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = colors.textPrimary,
@@ -386,7 +387,7 @@ fun V2AdultPage(
                             )
                         } else {
                             Text(
-                                text = "No NZB indexer configured in Panda",
+                                text = ds("No NZB indexer configured in Panda"),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = colors.textPrimary,
@@ -398,7 +399,7 @@ fun V2AdultPage(
                             )
                         }
                         TorvePrimaryButton(
-                            text = "Open Panda setup",
+                            text = ds("Open Panda setup"),
                             onClick = onOpenPandaSetup,
                         )
                     }
@@ -408,7 +409,7 @@ fun V2AdultPage(
                     contentAlignment = Alignment.Center,
                 ) { CircularProgressIndicator(color = colors.accent) }
                 errorText != null -> TorveBanner(
-                    title = "Couldn't load",
+                    title = ds("Couldn't load"),
                     description = errorText!!,
                     tone = TorveBannerTone.Info,
                 )
@@ -553,7 +554,7 @@ private fun NewznabRow(
                 }
             }
             TorveGhostButton(
-                text = "Copy NZB",
+                text = ds("Copy NZB"),
                 onClick = {
                     runCatching {
                         java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(
@@ -565,7 +566,7 @@ private fun NewznabRow(
             )
             if (showReconfigure) {
                 TorvePrimaryButton(
-                    text = "Reconfigure Panda",
+                    text = ds("Reconfigure Panda"),
                     onClick = onReconfigure,
                 )
             } else {
@@ -575,7 +576,7 @@ private fun NewznabRow(
                     !statusText.startsWith("Failed") && !statusText.startsWith("TorBox error")
                 if (downloadEnabled && onDownload != null) {
                     TorveSecondaryButton(
-                        text = "Download",
+                        text = ds("Download"),
                         onClick = onDownload,
                         enabled = torboxConfigured && !isWorking,
                     )

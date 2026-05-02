@@ -56,7 +56,7 @@ fun V2StatsPage(
     ) {
         TorvePageHeader(
             title = ds("Stats"),
-            subtitle = "Your watching at a glance.",
+            subtitle = ds("Your watching at a glance."),
             trailing = {
                 TorveGhostButton(text = ds("Back"), onClick = onBack)
             },
@@ -101,7 +101,7 @@ fun V2StatsPage(
 
         TorveSectionCard(
             title = ds("Recent activity"),
-            supportingText = "Last 7 vs last 30 days.",
+            supportingText = ds("Last 7 vs last 30 days."),
         ) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                 Column {
@@ -128,7 +128,7 @@ fun V2StatsPage(
         if (state.topGenres.isNotEmpty()) {
             TorveSectionCard(
                 title = ds("Top genres"),
-                supportingText = "Most-watched genres across your history.",
+                supportingText = ds("Most-watched genres across your history."),
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     val max = state.topGenres.maxOf { it.count }.coerceAtLeast(1)
@@ -164,7 +164,7 @@ fun V2StatsPage(
         if (state.activityByDay.isNotEmpty()) {
             TorveSectionCard(
                 title = ds("By day of week"),
-                supportingText = "When you watch most.",
+                supportingText = ds("When you watch most."),
             ) {
                 val orderedDays = listOf(
                     "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",

@@ -1,6 +1,7 @@
 package com.torve.desktop.ui.v2.person
 
 import androidx.compose.animation.animateColorAsState
+import com.torve.desktop.ui.l10n.ds
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -78,7 +79,7 @@ fun V2PersonPage(
             Box(Modifier.fillMaxSize().background(colors.shellBackground), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(error, style = MaterialTheme.typography.bodyLarge, color = colors.error)
-                    TorveGhostButton(text = "Back", onClick = onBack)
+                    TorveGhostButton(text = ds("Back"), onClick = onBack)
                 }
             }
             return@Box
@@ -102,7 +103,7 @@ fun V2PersonPage(
 
             Box(Modifier.fillMaxSize()) {
                 Box(Modifier.align(Alignment.TopStart).zIndex(2f).padding(start = 72.dp, top = 18.dp)) {
-                    TorveGhostButton(text = "Back", onClick = onBack)
+                    TorveGhostButton(text = ds("Back"), onClick = onBack)
                 }
 
                 // Full-bleed backdrop pinned behind everything
@@ -205,7 +206,7 @@ fun V2PersonPage(
                         }
 
                         if (actingOnly.isNotEmpty()) {
-                            V2Shelf(title = "Acting", modifier = Modifier.padding(start = 60.dp, end = 16.dp)) {
+                            V2Shelf(title = ds("Acting"), modifier = Modifier.padding(start = 60.dp, end = 16.dp)) {
                                 actingOnly.take(25).forEach { credit ->
                                     V2PosterCard(credit.title, credit.posterUrl, Modifier.width(160.dp), credit.year?.toString(), credit.rating?.let { String.format("%.1f", it) }, backdropUrl = credit.backdropUrl, overview = credit.overview, onClick = { onOpenDetail(credit) })
                                 }
@@ -213,7 +214,7 @@ fun V2PersonPage(
                         }
 
                         if (directingCredits.isNotEmpty()) {
-                            V2Shelf(title = "Directing", modifier = Modifier.padding(start = 60.dp, end = 16.dp)) {
+                            V2Shelf(title = ds("Directing"), modifier = Modifier.padding(start = 60.dp, end = 16.dp)) {
                                 directingCredits.take(25).forEach { credit ->
                                     V2PosterCard(credit.title, credit.posterUrl, Modifier.width(160.dp), credit.year?.toString(), credit.rating?.let { String.format("%.1f", it) }, backdropUrl = credit.backdropUrl, overview = credit.overview, onClick = { onOpenDetail(credit) })
                                 }
@@ -222,7 +223,7 @@ fun V2PersonPage(
 
                         // Fallback: show all if no clear split
                         if (actingOnly.isEmpty() && directingCredits.isEmpty() && state.credits.isNotEmpty()) {
-                            V2Shelf(title = "Known For", modifier = Modifier.padding(start = 60.dp, end = 16.dp)) {
+                            V2Shelf(title = ds("Known For"), modifier = Modifier.padding(start = 60.dp, end = 16.dp)) {
                                 state.credits.take(25).forEach { credit ->
                                     V2PosterCard(credit.title, credit.posterUrl, Modifier.width(160.dp), credit.year?.toString(), credit.rating?.let { String.format("%.1f", it) }, backdropUrl = credit.backdropUrl, overview = credit.overview, onClick = { onOpenDetail(credit) })
                                 }

@@ -26,6 +26,7 @@ import com.torve.desktop.ui.components.TorveGhostButton
 import com.torve.desktop.ui.components.TorvePageHeader
 import com.torve.desktop.ui.components.TorvePrimaryButton
 import com.torve.desktop.ui.components.TorveSectionCard
+import com.torve.desktop.ui.l10n.ds
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
 import com.torve.domain.recording.Recording
 import com.torve.domain.recording.RecordingFailureReason
@@ -63,15 +64,18 @@ fun V2RecordingsPage(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        val backLabel = ds("Back")
+        val cancelLabel = ds("Cancel")
+        val playLocalLabel = ds("Play local")
         TorvePageHeader(
-            title = "My Recordings",
-            subtitle = "Scheduled, active, completed, and failed IPTV recordings.",
-            trailing = { TorveGhostButton(text = "Back", onClick = onBack) },
+            title = ds("My Recordings"),
+            subtitle = ds("Scheduled, active, completed, and failed IPTV recordings."),
+            trailing = { TorveGhostButton(text = backLabel, onClick = onBack) },
         )
 
         if (state.totalCount == 0) {
             Text(
-                text = "No recordings yet. Schedule one from the EPG by right-clicking a programme.",
+                text = ds("No recordings yet. Schedule one from the EPG by right-clicking a programme."),
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.textSecondary,
             )
@@ -80,21 +84,21 @@ fun V2RecordingsPage(
 
         if (state.active.isNotEmpty()) {
             RecordingSection(
-                title = "Scheduled and recording",
+                title = ds("Scheduled and recording"),
                 rows = state.active,
                 action = { row ->
-                    TorveGhostButton(text = "Cancel", onClick = { vm.cancel(row.id) })
+                    TorveGhostButton(text = cancelLabel, onClick = { vm.cancel(row.id) })
                 },
             )
         }
         if (state.completed.isNotEmpty()) {
             RecordingSection(
-                title = "Completed",
+                title = ds("Completed"),
                 rows = state.completed,
                 action = { row ->
                     val canPlay = row.filePath != null
                     TorvePrimaryButton(
-                        text = "Play local",
+                        text = playLocalLabel,
                         onClick = { onPlayLocal(row) },
                         enabled = canPlay,
                     )
@@ -103,7 +107,7 @@ fun V2RecordingsPage(
         }
         if (state.failed.isNotEmpty()) {
             RecordingSection(
-                title = "Failed and cancelled",
+                title = ds("Failed and cancelled"),
                 rows = state.failed,
                 action = { /* read-only */ },
             )

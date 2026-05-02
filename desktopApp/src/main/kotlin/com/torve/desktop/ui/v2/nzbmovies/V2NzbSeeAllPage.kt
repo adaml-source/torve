@@ -3,6 +3,7 @@
 package com.torve.desktop.ui.v2.nzbmovies
 
 import androidx.compose.foundation.background
+import com.torve.desktop.ui.l10n.ds
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -204,7 +205,7 @@ fun V2NzbSeeAllPage(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = colors.textPrimary)
             }
             Text(
-                text = "Latest on Usenet",
+                text = ds("Latest on Usenet"),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = colors.textPrimary,
@@ -226,7 +227,7 @@ fun V2NzbSeeAllPage(
             TorveTextField(
                 value = query,
                 onValueChange = { query = it },
-                label = "Search Usenet movies (Enter)",
+                label = ds("Search Usenet movies (Enter)"),
                 modifier = Modifier.weight(1f),
                 onSubmit = { /* LaunchedEffect picks it up */ },
                 trailingIcon = if (query.isNotBlank()) {
@@ -237,11 +238,11 @@ fun V2NzbSeeAllPage(
                     }
                 } else null,
             )
-            TorvePrimaryButton(text = "Search", onClick = { /* LaunchedEffect picks it up */ })
+            TorvePrimaryButton(text = ds("Search"), onClick = { /* LaunchedEffect picks it up */ })
         }
 
         // Language pills.
-        FilterRow(label = "Language") {
+        FilterRow(label = ds("Language")) {
             MovieLanguage.entries.forEach { lang ->
                 CompactFilterChip(
                     text = lang.label,
@@ -253,8 +254,8 @@ fun V2NzbSeeAllPage(
 
         // Year filter - only render the row if anything's loaded.
         if (availableYears.isNotEmpty()) {
-            FilterRow(label = "Year") {
-                CompactFilterChip(text = "Any", selected = yearFilter == null, onClick = { yearFilter = null })
+            FilterRow(label = ds("Year")) {
+                CompactFilterChip(text = ds("Any"), selected = yearFilter == null, onClick = { yearFilter = null })
                 availableYears.take(20).forEach { year ->
                     CompactFilterChip(
                         text = year.toString(),
@@ -267,8 +268,8 @@ fun V2NzbSeeAllPage(
 
         // Genre filter.
         if (availableGenres.isNotEmpty()) {
-            FilterRow(label = "Genre") {
-                CompactFilterChip(text = "Any", selected = genreFilter == null, onClick = { genreFilter = null })
+            FilterRow(label = ds("Genre")) {
+                CompactFilterChip(text = ds("Any"), selected = genreFilter == null, onClick = { genreFilter = null })
                 availableGenres.forEach { id ->
                     val name = TMDB_MOVIE_GENRES[id] ?: return@forEach
                     CompactFilterChip(
@@ -284,8 +285,8 @@ fun V2NzbSeeAllPage(
         // and uses the highest available source-normalized score per
         // item (IMDb preferred, then TMDB, then anything else
         // converted to a 0-10 scale).
-        FilterRow(label = "Min rating") {
-            CompactFilterChip(text = "Any", selected = minRating == null, onClick = { minRating = null })
+        FilterRow(label = ds("Min rating")) {
+            CompactFilterChip(text = ds("Any"), selected = minRating == null, onClick = { minRating = null })
             listOf(5f, 6f, 7f, 8f, 9f).forEach { threshold ->
                 CompactFilterChip(
                     text = "${threshold.toInt()}+",
@@ -298,8 +299,8 @@ fun V2NzbSeeAllPage(
         // Rating source - only show items that have a verified rating
         // from the chosen provider. Useful for finding TMDB-curated
         // titles vs. ones with full IMDb / RT coverage.
-        FilterRow(label = "Rating source") {
-            CompactFilterChip(text = "Any", selected = requiredRatingSource == null, onClick = { requiredRatingSource = null })
+        FilterRow(label = ds("Rating source")) {
+            CompactFilterChip(text = ds("Any"), selected = requiredRatingSource == null, onClick = { requiredRatingSource = null })
             RATING_SOURCE_FILTERS.forEach { source ->
                 CompactFilterChip(
                     text = source.displayName,

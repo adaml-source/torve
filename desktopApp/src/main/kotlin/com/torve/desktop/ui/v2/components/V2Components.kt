@@ -1,6 +1,7 @@
 package com.torve.desktop.ui.v2.components
 
 import androidx.compose.animation.core.animateFloatAsState
+import com.torve.desktop.ui.l10n.ds
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Image
@@ -469,7 +470,7 @@ fun V2Shelf(
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 onSeeAll?.let {
-                    Text("See all", style = MaterialTheme.typography.labelSmall, color = colors.accent,
+                    Text(ds("See all"), style = MaterialTheme.typography.labelSmall, color = colors.accent,
                         modifier = Modifier.clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,

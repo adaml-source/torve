@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
+import com.torve.desktop.ui.l10n.ds
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -150,7 +151,7 @@ fun CommandPalette(
                     OutlinedTextField(
                         value = query,
                         onValueChange = { query = it; highlight = 0 },
-                        placeholder = { Text("Type a command or page...", color = colors.textSecondary) },
+                        placeholder = { Text(ds("Type a command or page..."), color = colors.textSecondary) },
                         singleLine = true,
                         modifier = Modifier
                             .fillMaxWidth()

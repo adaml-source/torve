@@ -219,7 +219,7 @@ fun V2HomePage(
                     val curatedItems = homeState.becauseYouWatched.firstOrNull()?.items ?: homeState.recommendedItems.map { it.item }
                     val curatedSection = if (homeState.becauseYouWatched.isNotEmpty()) HomeSection.BECAUSE_YOU_WATCHED else HomeSection.RECOMMENDED
                     if (curatedItems.isNotEmpty() && isSectionVisible(curatedSection)) {
-                        val curatedTitle = if (homeState.becauseYouWatched.isNotEmpty()) "Because You Watched" else "Recommended"
+                        val curatedTitle = if (homeState.becauseYouWatched.isNotEmpty()) ds("Because You Watched") else ds("Recommended")
                         val curatedShelfKey = "shelf:recommended_${curatedTitle.hashCode()}"
                         val curatedStyle = cardStyleForOrDefault(curatedSection)
                         val curatedWidth = widthFor(curatedSection)
@@ -284,7 +284,7 @@ fun V2HomePage(
                         val rwStyle = cardStyleForOrDefault(HomeSection.RECENTLY_WATCHED)
                         val rwWidth = widthFor(HomeSection.RECENTLY_WATCHED)
                         V2Shelf(
-                            "Recently Watched",
+                            ds("Recently Watched"),
                             modifier = Modifier.padding(start = 72.dp),
                             onSeeAll = { onSeeAll(SeeAllRequest("recently_watched", "Recently Watched")) },
                         ) {

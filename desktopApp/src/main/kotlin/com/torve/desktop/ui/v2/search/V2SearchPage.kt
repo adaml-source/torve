@@ -39,6 +39,7 @@ import com.torve.desktop.ui.components.TorveBannerTone
 import com.torve.desktop.ui.components.TorveFilterChip
 import com.torve.desktop.ui.components.TorveGhostButton
 import com.torve.desktop.ui.components.TorveSearchField
+import com.torve.desktop.ui.l10n.ds
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
 import com.torve.desktop.ui.v2.components.V2Atmosphere
 import com.torve.desktop.ui.v2.components.V2PosterCard
@@ -186,7 +187,7 @@ fun V2SearchPage(
                         value = aiQuery,
                         onValueChange = { aiQuery = it },
                         modifier = Modifier.fillMaxWidth(0.5f),
-                        placeholder = "Ask Torve in plain English...",
+                        placeholder = ds("Ask Torve in plain English..."),
                     )
                     com.torve.desktop.ui.components.TorvePrimaryButton(
                         text = if (aiLoading) "Asking..." else "Ask",
@@ -198,7 +199,7 @@ fun V2SearchPage(
                         value = searchState.query,
                         onValueChange = onQueryChange,
                         modifier = Modifier.fillMaxWidth(0.55f),
-                        placeholder = "Search movies, shows, people...",
+                        placeholder = ds("Search movies, shows, people..."),
                     )
                 }
 
@@ -230,7 +231,7 @@ fun V2SearchPage(
                     )
                 } else {
                     TorveBadge(
-                        text = "AI not set up",
+                        text = ds("AI not set up"),
                         tone = TorveBadgeTone.Warning,
                     )
                 }
@@ -238,22 +239,21 @@ fun V2SearchPage(
 
             if (notConfiguredNotice && !providerConfigured) {
                 TorveBanner(
-                    title = "AI search needs a provider",
-                    description = "Set up an AI provider (Claude, ChatGPT, Gemini, Perplexity, or DeepSeek) " +
-                        "in Settings → Integrations → AI Provider before turning AI search on.",
+                    title = ds("AI search needs a provider"),
+                    description = ds("Set up an AI provider (Claude, ChatGPT, Gemini, Perplexity, or DeepSeek) in Settings → Integrations → AI Provider before turning AI search on."),
                     tone = TorveBannerTone.Warning,
                 )
                 onOpenAiProviderSettings?.let { open ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         TorveGhostButton(
-                            text = "Open AI provider settings",
+                            text = ds("Open AI provider settings"),
                             onClick = {
                                 notConfiguredNotice = false
                                 open()
                             },
                         )
                         TorveGhostButton(
-                            text = "Dismiss",
+                            text = ds("Dismiss"),
                             onClick = { notConfiguredNotice = false },
                         )
                     }
@@ -265,17 +265,17 @@ fun V2SearchPage(
             if (!aiMode) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TorveFilterChip(
-                        text = "All",
+                        text = ds("All"),
                         selected = searchState.filter.mediaType == null,
                         onClick = { onApplyFilter(null) },
                     )
                     TorveFilterChip(
-                        text = "Movies",
+                        text = ds("Movies"),
                         selected = searchState.filter.mediaType == "movie",
                         onClick = { onApplyFilter("movie") },
                     )
                     TorveFilterChip(
-                        text = "TV Shows",
+                        text = ds("TV Shows"),
                         selected = searchState.filter.mediaType == "tv",
                         onClick = { onApplyFilter("tv") },
                     )
@@ -291,7 +291,7 @@ fun V2SearchPage(
                 }
                 aiError?.let { err ->
                     TorveBanner(
-                        title = "AI search failed",
+                        title = ds("AI search failed"),
                         description = err,
                         tone = TorveBannerTone.Error,
                     )
@@ -301,7 +301,7 @@ fun V2SearchPage(
                         val bannerTitle = r.title.takeIf { it.isNotBlank() } ?: "No matches"
                         TorveBanner(
                             title = bannerTitle,
-                            description = "Try rephrasing - the AI couldn't surface a confident match.",
+                            description = ds("Try rephrasing - the AI couldn't surface a confident match."),
                             tone = TorveBannerTone.Info,
                         )
                     }
@@ -373,14 +373,14 @@ fun V2SearchPage(
             } else if (!searchState.isSearching && searchState.query.isNotBlank()) {
                 Spacer(Modifier.height(32.dp))
                 com.torve.desktop.ui.components.TorvePlaceholderState(
-                    title = "No results",
+                    title = ds("No results"),
                     description = "Nothing matched \"${searchState.query}\". Try a different spelling, or browse Discover below.",
                     emoji = "🔎",
                 )
             }
             if (searchState.discoverResults.isNotEmpty() && searchState.query.isBlank()) {
                 Text(
-                    text = "Discover",
+                    text = ds("Discover"),
                     style = MaterialTheme.typography.titleMedium,
                     color = colors.textPrimary,
                 )
