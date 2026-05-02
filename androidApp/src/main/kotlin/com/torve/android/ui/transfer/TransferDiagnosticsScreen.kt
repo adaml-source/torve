@@ -144,11 +144,11 @@ private fun StatusCard(s: TransferDiagnosticsSnapshot) {
         ) {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.diag_transfer_crypto), modifier = Modifier.weight(1f))
-                StatusPill(if (s.cryptoEngineAvailable) "available" else "missing", s.cryptoEngineAvailable)
+                StatusPill(if (s.cryptoEngineAvailable) "Ready" else "Missing", s.cryptoEngineAvailable)
             }
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.diag_transfer_signed_in), modifier = Modifier.weight(1f))
-                StatusPill(if (s.signedIn) "yes" else "no", s.signedIn)
+                StatusPill(if (s.signedIn) "Signed in" else "Signed out", s.signedIn)
             }
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.diag_transfer_relay), modifier = Modifier.weight(1f))
@@ -190,11 +190,11 @@ private fun LastAttemptCard(record: TransferAttemptRecord?) {
                 )
             } else {
                 Text(
-                    text = "Role: ${roleLabel(record.role)}",
+                    text = "Direction: ${roleLabel(record.role)}",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Text(
-                    text = "Outcome: ${outcomeLabel(record.outcome)}",
+                    text = "Status: ${outcomeLabel(record.outcome)}",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 record.errorCategory?.let {
@@ -239,14 +239,19 @@ private fun StatusPill(label: String, ok: Boolean, neutral: Boolean = false) {
     }
 }
 
+// Pill labels stay short; the full user-language explanation lives in
+// `relayHelp` below. The wording centres on the three concepts the user
+// hears in the Restore / Transfer flows: "automatic transfer" (the
+// credential relay), "credential transfer" (the act itself), and
+// "manual fallback" (paste-between-devices when the relay can't help).
 private fun relayLabel(r: RelayReachability): String = when (r) {
-    RelayReachability.UNKNOWN -> "unknown"
-    RelayReachability.REACHABLE -> "reachable"
-    RelayReachability.UNAVAILABLE -> "unavailable"
-    RelayReachability.UNAUTHORIZED -> "unauthorized"
-    RelayReachability.NETWORK_ERROR -> "network error"
-    RelayReachability.NOT_SIGNED_IN -> "not signed in"
-    RelayReachability.NO_CRYPTO_ENGINE -> "no crypto engine"
+    RelayReachability.UNKNOWN -> "Checking"
+    RelayReachability.REACHABLE -> "Automatic transfer ready"
+    RelayReachability.UNAVAILABLE -> "Manual fallback only"
+    RelayReachability.UNAUTHORIZED -> "Sign in needed"
+    RelayReachability.NETWORK_ERROR -> "Network error"
+    RelayReachability.NOT_SIGNED_IN -> "Sign in needed"
+    RelayReachability.NO_CRYPTO_ENGINE -> "Encryption engine missing"
 }
 
 @Composable
@@ -261,14 +266,14 @@ private fun relayHelp(r: RelayReachability): String = when (r) {
 }
 
 private fun roleLabel(role: AttemptRole): String = when (role) {
-    AttemptRole.SENDER -> "sender"
-    AttemptRole.RECEIVER -> "receiver"
+    AttemptRole.SENDER -> "Sending credentials"
+    AttemptRole.RECEIVER -> "Receiving credentials"
 }
 
 private fun outcomeLabel(outcome: AttemptOutcome): String = when (outcome) {
-    AttemptOutcome.REGISTERED -> "registered"
-    AttemptOutcome.DELIVERED -> "delivered"
-    AttemptOutcome.IMPORTED -> "imported"
-    AttemptOutcome.FAILED -> "failed"
-    AttemptOutcome.RELAY_UNAVAILABLE -> "relay unavailable"
+    AttemptOutcome.REGISTERED -> "Ready"
+    AttemptOutcome.DELIVERED -> "Delivered"
+    AttemptOutcome.IMPORTED -> "Imported"
+    AttemptOutcome.FAILED -> "Failed — try manual fallback"
+    AttemptOutcome.RELAY_UNAVAILABLE -> "Automatic transfer unavailable — use manual fallback"
 }

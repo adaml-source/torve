@@ -31,6 +31,8 @@ import io.ktor.utils.io.readAvailable
 import kotlinx.datetime.Clock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 class ChannelRepositoryImpl(
@@ -131,6 +133,29 @@ class ChannelRepositoryImpl(
     private val epgCache = mutableMapOf<String, EpgData>()
     private val epgErrorCache = mutableMapOf<String, String?>()
     private val epgProgressCache = mutableMapOf<String, EpgBatchProgress>()
+
+    /**
+     * Per-playlist mutex guarding [refreshEpg]. Five+ call sites in
+     * ChannelsViewModel can each invoke `refreshEpg` for the same
+     * playlistId within a few hundred milliseconds (init recovery,
+     * loadPlaylists callback, selectPlaylist, selectCategory,
+     * background refresh). Without this, the inner Ktor `prepareGet`
+     * fires once per call and the device pulls a 40MB+ XMLTV file
+     * **N times in parallel** — surfaced live as the user's mobile
+     * emulator hanging on "Importing playlist" with 6+ concurrent
+     * downloads triggering 60-72MB GC pauses.
+     *
+     * The first caller wins; subsequent callers suspend on the lock
+     * and, when they wake, see the populated [epgCache] so the
+     * existing `programmesByChannelKey.isNotEmpty()` early-return at
+     * the ViewModel layer keeps them from re-triggering work. Holding
+     * the lock for the duration of the fetch is intentional — a
+     * cancel-and-replace would tear down a download that's about to
+     * finish in favour of one that's about to repeat the same work.
+     */
+    private val refreshEpgMutexes = mutableMapOf<String, Mutex>()
+    private fun refreshEpgMutexFor(playlistId: String): Mutex =
+        refreshEpgMutexes.getOrPut(playlistId) { Mutex() }
     private val epgHttpClient: HttpClient by lazy {
         HttpClientFactory.createEpgStreamingClient(
             forceIdentityEncoding = EPG_FORCE_IDENTITY_ACCEPT_ENCODING,
@@ -419,25 +444,35 @@ class ChannelRepositoryImpl(
     }
 
     override suspend fun refreshEpg(playlistId: String, hiddenChannelIds: Set<String>) {
-        val playlist = database.torveQueries.getPlaylist(userId = uid(), playlistId = playlistId).executeAsOneOrNull()
-            ?: return
-        val epgXtreamPw = if (playlist.type == "xtream") loadXtreamPassword(playlistId) else null
-        val sourceUrl = playlist.epg_url?.trim()?.takeIf { it.isNotEmpty() }
-            ?: if (
-                playlist.type == "xtream" &&
-                playlist.server != null &&
-                playlist.username != null &&
-                epgXtreamPw != null
-            ) {
-                buildXtreamEpgUrl(
-                    server = playlist.server,
-                    username = playlist.username,
-                    password = epgXtreamPw,
-                )
-            } else {
-                null
+        refreshEpgMutexFor(playlistId).withLock {
+            // Fast path: while we waited for the lock, an earlier caller
+            // may have already populated the cache. Skip the network
+            // round trip in that case so two callers never download the
+            // same 40MB XMLTV file back-to-back.
+            if (epgCache[playlistId]?.programmes?.isNotEmpty() == true) {
+                println("ChannelsEPG: refreshEpg skipped — cache already populated playlistId=$playlistId")
+                return
             }
-        refreshEpgForPlaylist(playlistId, sourceUrl, hiddenChannelIds)
+            val playlist = database.torveQueries.getPlaylist(userId = uid(), playlistId = playlistId).executeAsOneOrNull()
+                ?: return
+            val epgXtreamPw = if (playlist.type == "xtream") loadXtreamPassword(playlistId) else null
+            val sourceUrl = playlist.epg_url?.trim()?.takeIf { it.isNotEmpty() }
+                ?: if (
+                    playlist.type == "xtream" &&
+                    playlist.server != null &&
+                    playlist.username != null &&
+                    epgXtreamPw != null
+                ) {
+                    buildXtreamEpgUrl(
+                        server = playlist.server,
+                        username = playlist.username,
+                        password = epgXtreamPw,
+                    )
+                } else {
+                    null
+                }
+            refreshEpgForPlaylist(playlistId, sourceUrl, hiddenChannelIds)
+        }
     }
 
     override suspend fun getChannels(playlistId: String): List<Channel> {
