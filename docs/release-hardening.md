@@ -342,7 +342,7 @@ delete-account page goes 404, plus any silent rename of privacy / terms
 
 | ID | Owner | Description |
 | --- | --- | --- |
-| B1 | Web ops | Publish `https://torve.app/delete-account.html` (web mirror of in-app deletion) before public stable. Draft page copy lives at `web/delete-account.html` — host operator publishes verbatim or with branding tweaks. |
+| ~~B1~~ | ~~Web ops~~ | **CLEARED 2026-05-02.** The page was already live at `https://torve.app/account-deletion.html` (200, branded). The 404 was a string-mismatch bug — `LegalUrls.ACCOUNT_DELETION_WEB` pointed at `delete-account.html`. Constant is now `account-deletion.html`; `link-check.sh` returns 4 PASSED. |
 | B2 | Operator (macOS) | Run iOS build + simulator smoke against the Prompt 12 changes (`AccountScreen.swift`, `TorveAPIClient.swift`). |
 | B3 | Operator (macOS) | Run macOS sign + notarize round-trip on a packaged DMG. |
 | B4 | Operator (Windows) | Clean-VM install + launch + playback + update-handoff smoke. |

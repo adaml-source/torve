@@ -32,6 +32,12 @@ object LegalUrls {
      * Web mirror of the in-app account-deletion flow. Required by app
      * stores so users without the app installed can still request
      * deletion. The in-app DELETE action is the primary path.
+     *
+     * Filename matches the live page hosted at torve.app — the slug
+     * convention there is `<noun>-<verb>.html` (`account-deletion`,
+     * not `delete-account`). The previous `delete-account.html` value
+     * was a 404 only because the constant didn't match the actual
+     * published filename.
      */
-    const val ACCOUNT_DELETION_WEB: String = "https://torve.app/delete-account.html"
+    const val ACCOUNT_DELETION_WEB: String = "https://torve.app/account-deletion.html"
 }
