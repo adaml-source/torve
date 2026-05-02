@@ -168,6 +168,7 @@ import com.torve.domain.repository.WatchProgressRepository
 import com.torve.presentation.channels.ChannelsViewModel
 import com.torve.presentation.player.TraktScrobbler
 import com.torve.presentation.settings.SettingsViewModel
+import com.torve.presentation.streampicker.StreamFallbackOrdering
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -717,10 +718,15 @@ fun PlayerScreen(
                 preferences = preferences,
                 fetchPolicy = StreamFetchPolicy.FULL,
             )
-            val ranked = streamSelector.rankPlayableVariants(
+            val rankedBySelector = streamSelector.rankPlayableVariants(
                 streams = candidates,
                 preferences = preferences,
                 deviceCaps = deviceCaps,
+            )
+            val ranked = StreamFallbackOrdering.streamsInTryOrder(
+                streams = rankedBySelector,
+                startupCandidates = startupSelection.snapshot.candidates,
+                keyOf = ::playerStreamKey,
             )
             if (ranked.isEmpty()) return false
 
@@ -3863,10 +3869,15 @@ private suspend fun resolveAndPlayNextEpisode(
                 onFailed()
                 return
             }
-            val ranked = streamSelector.rankPlayableVariants(
+            val rankedBySelector = streamSelector.rankPlayableVariants(
                 streams = fullStreams,
                 preferences = preferences,
                 deviceCaps = deviceCaps,
+            )
+            val ranked = StreamFallbackOrdering.streamsInTryOrder(
+                streams = rankedBySelector,
+                startupCandidates = startupSelection.snapshot.candidates,
+                keyOf = ::playerStreamKey,
             )
             val fallbackSelected = ranked.firstOrNull() ?: run {
                 onFailed()

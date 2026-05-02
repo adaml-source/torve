@@ -1391,7 +1391,7 @@ fun TorveNavGraph(
                     id = detailId,
                     accessTier = accessTier,
                     onLockedFeatureClick = requestLifetimeUnlock,
-                    onPlayClick = { url, fallbackUrl, season, episode, imdbId ->
+                    onPlayClick = { url, fallbackUrl, season, episode, imdbId, autoSourceSelection ->
                         navController.navigate(
                             "player?url=${Uri.encode(url)}" +
                                 "&title=${Uri.encode("")}" +
@@ -1403,7 +1403,8 @@ fun TorveNavGraph(
                                 "&episodeNumber=${episode ?: -1}" +
                                 "&showTmdbId=${if (detailType == "tv") detailId else -1}" +
                                 "&showImdbId=${Uri.encode(imdbId ?: "")}" +
-                                "&fallbackUrl=${Uri.encode(fallbackUrl)}",
+                                "&fallbackUrl=${Uri.encode(fallbackUrl)}" +
+                                "&autoSourceSelection=$autoSourceSelection",
                         )
                     },
                     onBack = { navController.popBackStack() },
@@ -1449,7 +1450,7 @@ fun TorveNavGraph(
                     "&posterUrl={posterUrl}&backdropUrl={backdropUrl}" +
                     "&seasonNumber={seasonNumber}&episodeNumber={episodeNumber}" +
                     "&showTmdbId={showTmdbId}&showImdbId={showImdbId}" +
-                    "&fallbackUrl={fallbackUrl}",
+                    "&fallbackUrl={fallbackUrl}&autoSourceSelection={autoSourceSelection}",
                 arguments = listOf(
                     navArgument("url") { type = NavType.StringType; defaultValue = "" },
                     navArgument("title") { type = NavType.StringType; defaultValue = "" },
@@ -1462,6 +1463,7 @@ fun TorveNavGraph(
                     navArgument("showTmdbId") { type = NavType.IntType; defaultValue = -1 },
                     navArgument("showImdbId") { type = NavType.StringType; defaultValue = "" },
                     navArgument("fallbackUrl") { type = NavType.StringType; defaultValue = "" },
+                    navArgument("autoSourceSelection") { type = NavType.BoolType; defaultValue = false },
                 ),
             ) { backStackEntry ->
                 if (isLocked(PremiumFeature.STREAM_PLAYBACK)) {
@@ -1475,6 +1477,7 @@ fun TorveNavGraph(
                     PlayerScreen(
                         url = backStackEntry.arguments?.getString("url") ?: "",
                         fallbackUrl = backStackEntry.arguments?.getString("fallbackUrl") ?: "",
+                        autoSourceSelection = backStackEntry.arguments?.getBoolean("autoSourceSelection") ?: false,
                         title = backStackEntry.arguments?.getString("title") ?: "",
                         mediaId = backStackEntry.arguments?.getString("mediaId") ?: "",
                         mediaType = backStackEntry.arguments?.getString("mediaType") ?: "movie",

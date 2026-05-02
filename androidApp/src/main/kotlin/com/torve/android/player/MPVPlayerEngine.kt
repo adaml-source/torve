@@ -25,6 +25,14 @@ class MPVPlayerEngine(
 
     private val listeners = mutableListOf<PlayerListener>()
     private var initialized = false
+    /**
+     * Headers staged via [setNextRequestHeaders] for the next [play]
+     * call only. Mirrors the ExoPlayer pattern so LAN-library URLs that
+     * require `X-Torve-Lan-Auth` (and any other authenticated HTTP
+     * source) work the same on either engine. One-shot so headers don't
+     * leak into the next, unrelated stream.
+     */
+    private var pendingRequestHeaders: Map<String, String> = emptyMap()
     private var audioPassthroughEnabled = false
     private var preferSurroundCodecs = true
     private var liveAudioOutputMode = LiveAudioOutputMode.PREFER_COMPATIBLE
@@ -116,6 +124,12 @@ class MPVPlayerEngine(
         return true
     }
 
+    override fun setNextRequestHeaders(headers: Map<String, String>) {
+        // Defensive copy - caller may reuse / mutate their map after
+        // staging without affecting the captured value.
+        pendingRequestHeaders = if (headers.isEmpty()) emptyMap() else headers.toMap()
+    }
+
     override fun play(url: String) {
         if (!initialized) return
         rememberedTrackHintApplied = false
@@ -150,6 +164,19 @@ class MPVPlayerEngine(
                 "preferSurround=$preferSurroundCodecs " +
                 "sync=${activePlaybackProfile?.videoSyncMode ?: (MPVRuntimeOverrides.liveVideoSyncModeOverride ?: LIVE_VIDEO_SYNC_MODE)}",
         )
+        // Apply staged HTTP headers (e.g. LAN auth) before loadfile so
+        // libmpv attaches them to the request. Clear immediately so the
+        // next, unrelated stream doesn't inherit them.
+        val headers = pendingRequestHeaders
+        pendingRequestHeaders = emptyMap()
+        if (headers.isNotEmpty()) {
+            val joined = formatHttpHeaderFields(headers)
+            setStringPropertySafely("http-header-fields", joined)
+        } else {
+            // Reset so a previously-set header doesn't bleed into a
+            // play() that intentionally has none.
+            setStringPropertySafely("http-header-fields", "")
+        }
         MPVLib.loadFile(url)
         mainHandler.postDelayed(promoteSteadyStateRunnable, STEADY_STATE_PROMOTION_DELAY_MS)
     }
@@ -892,4 +919,25 @@ class MPVPlayerEngine(
 internal object MPVRuntimeOverrides {
     @Volatile
     var liveVideoSyncModeOverride: String? = null
+}
+
+/**
+ * Encode an HTTP header map into the comma-separated `Name: value`
+ * form mpv expects for the `http-header-fields` property.
+ *
+ * Strips CR and LF from header names and values so a malformed header
+ * cannot inject extra fields (defense-in-depth - callers already
+ * sanitise, but mpv silently truncates on a stray newline). Trims the
+ * name; preserves intentional whitespace inside the value.
+ *
+ * Internal so [MPVPlayerEngineHeaderTest] can exercise it without a
+ * real libmpv.
+ */
+internal fun formatHttpHeaderFields(headers: Map<String, String>): String {
+    if (headers.isEmpty()) return ""
+    return headers.entries.joinToString(",") { (rawName, rawValue) ->
+        val name = rawName.replace("\r", "").replace("\n", "").trim()
+        val value = rawValue.replace("\r", "").replace("\n", "")
+        "$name: $value"
+    }
 }

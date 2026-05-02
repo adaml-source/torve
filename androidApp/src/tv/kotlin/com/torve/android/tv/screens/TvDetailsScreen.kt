@@ -1,4 +1,4 @@
-package com.torve.android.tv.screens
+﻿package com.torve.android.tv.screens
 
 import android.content.Context
 import android.content.Intent
@@ -118,6 +118,7 @@ import com.torve.presentation.lanlibrary.LanLibraryConsumer
 import com.torve.presentation.lanlibrary.PendingLanPlaybackHandoff
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.subscription.SubscriptionViewModel
+import com.torve.presentation.tvhome.DetailSourcePickerLookup
 import com.torve.presentation.tvhome.TvDetailsSourcePickerStateBuilder
 import com.torve.presentation.tvhome.TvSourcePicker
 import com.torve.presentation.tvhome.TvSourcePickerOption
@@ -204,6 +205,8 @@ fun TvDetailsScreen(
     // selection routes either directly to the player (LocalFile/LAN)
     // or falls back to fetchStreams() (Provider). Cleared on dismiss.
     var sourcePickerState by remember { mutableStateOf<TvSourcePickerState?>(null) }
+    var sourcePickerSeason by remember { mutableStateOf<Int?>(null) }
+    var sourcePickerEpisode by remember { mutableStateOf<Int?>(null) }
     val watchlistModalRestoreController = rememberTvModalFocusRestoreController(
         key = "details_watchlist_${type}_$id",
     )
@@ -320,8 +323,8 @@ fun TvDetailsScreen(
     }
 
     // Usenet source-sheet warmup hook. Mirrors the phone DetailScreen
-    // wiring exactly — keyed on the boolean only so it fires once per
-    // false→true transition of showStreamPicker, not on incidental
+    // wiring exactly â€” keyed on the boolean only so it fires once per
+    // falseâ†’true transition of showStreamPicker, not on incidental
     // recomposition. No-op when there are no Usenet candidates.
     LaunchedEffect(state.showStreamPicker) {
         if (state.showStreamPicker) {
@@ -434,7 +437,7 @@ fun TvDetailsScreen(
     ) {
         if (mediaItem != null) {
             val item = mediaItem
-            // ── Hero backdrop + title + buttons ──
+            // â”€â”€ Hero backdrop + title + buttons â”€â”€
             item(key = "hero") {
                 Box(
                     modifier = Modifier
@@ -500,7 +503,7 @@ fun TvDetailsScreen(
                             )
                         }
 
-                        // ── Library status indicator ──
+                        // â”€â”€ Library status indicator â”€â”€
                         if (state.isInLibrary) {
                             Text(
                                 text = stringResource(R.string.tv_detail_in_library),
@@ -514,7 +517,7 @@ fun TvDetailsScreen(
                         }
 
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            // ── Play button with debrid check + loading phases ──
+                            // â”€â”€ Play button with debrid check + loading phases â”€â”€
                             val streamLocked = isLockedFeature(TvEntitledFeature.STREAM_PLAYBACK)
                             val playText = when {
                                 streamLocked -> TvPremiumAccess.UNLOCK_WITH_LIFETIME_LABEL
@@ -551,25 +554,54 @@ fun TvDetailsScreen(
                                     runPremiumAction(TvEntitledFeature.STREAM_PLAYBACK) {
                                         // Movies: surface the source picker if there's
                                         // a non-Provider option (LocalFile or LAN). For
-                                        // series, the next-episode flow stays as-is —
+                                        // series, the next-episode flow stays as-is â€”
                                         // route disambiguation per-episode is too rich
                                         // to hang on the picker without an episode
                                         // context map. Series picker integration is a
                                         // follow-up.
                                         if (item.type == MediaType.SERIES) {
-                                            detailViewModel.playNextEpisode()
+                                            val ctxS = state.streamContextSeason
+                                            val ctxE = state.streamContextEpisode
+                                            if (ctxS == null || ctxE == null) {
+                                                detailViewModel.playNextEpisode()
+                                                return@runPremiumAction
+                                            }
+                                            coroutineScope.launch {
+                                                val picker = buildDetailPickerState(
+                                                    item = item,
+                                                    seasonNumber = ctxS,
+                                                    episodeNumber = ctxE,
+                                                    downloadRepository = downloadRepository,
+                                                    lanLibraryConsumer = lanLibraryConsumer,
+                                                    networkMonitor = networkMonitor,
+                                                    wifiOnlyForLan = settingsState.lanPlaybackWifiOnly,
+                                                )
+                                                val hasNonProvider = picker.options.any { opt ->
+                                                    opt.route is PlaybackRoute.LocalFile ||
+                                                        opt.route is PlaybackRoute.LanDesktopStream
+                                                }
+                                                if (!hasNonProvider) {
+                                                    detailViewModel.fetchStreams(season = ctxS, episode = ctxE)
+                                                } else {
+                                                    sourcePickerSeason = ctxS
+                                                    sourcePickerEpisode = ctxE
+                                                    sourcePickerState = picker
+                                                }
+                                            }
                                             return@runPremiumAction
                                         }
                                         coroutineScope.launch {
-                                            val picker = buildMoviePickerState(
+                                            val picker = buildDetailPickerState(
                                                 item = item,
+                                                seasonNumber = null,
+                                                episodeNumber = null,
                                                 downloadRepository = downloadRepository,
                                                 lanLibraryConsumer = lanLibraryConsumer,
                                                 networkMonitor = networkMonitor,
                                                 wifiOnlyForLan = settingsState.lanPlaybackWifiOnly,
                                             )
                                             // If the only option is Provider (or no real
-                                            // options at all), skip the sheet — preserve
+                                            // options at all), skip the sheet â€” preserve
                                             // existing behavior.
                                             val hasNonProvider = picker.options.any { opt ->
                                                 opt.route is PlaybackRoute.LocalFile ||
@@ -578,6 +610,8 @@ fun TvDetailsScreen(
                                             if (!hasNonProvider) {
                                                 detailViewModel.fetchStreams()
                                             } else {
+                                                sourcePickerSeason = null
+                                                sourcePickerEpisode = null
                                                 sourcePickerState = picker
                                             }
                                         }
@@ -641,7 +675,7 @@ fun TvDetailsScreen(
                                 },
                             )
 
-                            // ── Mark Watched + Rate (Trakt only) ──
+                            // â”€â”€ Mark Watched + Rate (Trakt only) â”€â”€
                             if (settingsState.traktConnected) {
                                 TvActionButton(
                                     text = if (state.isMarkedWatched) {
@@ -684,13 +718,13 @@ fun TvDetailsScreen(
                                 )
                             }
 
-                            // Download buttons removed — TV is stream-only
+                            // Download buttons removed â€” TV is stream-only
                         }
                     }
                 }
             }
 
-            // ── Tagline ──
+            // â”€â”€ Tagline â”€â”€
             if (!item.tagline.isNullOrBlank()) {
                 item(key = "tagline") {
                     Text(
@@ -703,7 +737,7 @@ fun TvDetailsScreen(
                 }
             }
 
-            // ── Genre pills ──
+            // â”€â”€ Genre pills â”€â”€
             if (item.genres.isNotEmpty()) {
                 item(key = "genres") {
                     Row(
@@ -724,7 +758,7 @@ fun TvDetailsScreen(
                 }
             }
 
-            // ── Multi-source ratings ──
+            // â”€â”€ Multi-source ratings â”€â”€
             val ratingPrefs = settingsState.ratingPrefs
             val detailRatings = item.ratings.withFallbackTmdbScore(item.rating)
             if (detailRatings != null &&
@@ -762,7 +796,7 @@ fun TvDetailsScreen(
                 }
             }
 
-            // ── Overview ──
+            // â”€â”€ Overview â”€â”€
             if (!item.overview.isNullOrBlank()) {
                 item(key = "overview") {
                     Text(
@@ -776,7 +810,7 @@ fun TvDetailsScreen(
                 }
             }
 
-            // ── Where to Watch ──
+            // â”€â”€ Where to Watch â”€â”€
             item(key = "where_to_watch") {
                 val offers = state.availability?.offers.orEmpty()
                 val grouped = offers.groupBy { it.offerType }
@@ -846,7 +880,7 @@ fun TvDetailsScreen(
                                                     chipFocused = it.isFocused
                                                     if (it.isFocused) onContentFocused(chipReq)
                                                 }
-                                                // Info-only — no external links
+                                                // Info-only â€” no external links
                                                 .padding(horizontal = 12.dp, vertical = 6.dp),
                                         ) {
                                             Row(
@@ -892,7 +926,7 @@ fun TvDetailsScreen(
                 }
             }
 
-            // ── Director ──
+            // â”€â”€ Director â”€â”€
             if (!item.director.isNullOrBlank()) {
                 item(key = "director") {
                     Row(modifier = Modifier.padding(bottom = 10.dp)) {
@@ -911,7 +945,7 @@ fun TvDetailsScreen(
                 }
             }
 
-            // ── Cast ──
+            // â”€â”€ Cast â”€â”€
             if (item.cast.isNotEmpty()) {
                 item(key = "cast") {
                     Text(
@@ -937,7 +971,7 @@ fun TvDetailsScreen(
                 }
             }
 
-            // ── Episode picker for series ──
+            // â”€â”€ Episode picker for series â”€â”€
             if (item.type == MediaType.SERIES && item.seasons.isNotEmpty()) {
                 item(key = "episodes") {
                     Spacer(modifier = Modifier.height(4.dp))
@@ -954,7 +988,28 @@ fun TvDetailsScreen(
                             detailViewModel.loadSeasonDetail(tvId, seasonNumber)
                         },
                         onEpisodeSelected = { season, episode ->
-                            detailViewModel.fetchStreams(season = season, episode = episode)
+                            coroutineScope.launch {
+                                val picker = buildDetailPickerState(
+                                    item = item,
+                                    seasonNumber = season,
+                                    episodeNumber = episode,
+                                    downloadRepository = downloadRepository,
+                                    lanLibraryConsumer = lanLibraryConsumer,
+                                    networkMonitor = networkMonitor,
+                                    wifiOnlyForLan = settingsState.lanPlaybackWifiOnly,
+                                )
+                                val hasNonProvider = picker.options.any { opt ->
+                                    opt.route is PlaybackRoute.LocalFile ||
+                                        opt.route is PlaybackRoute.LanDesktopStream
+                                }
+                                if (!hasNonProvider) {
+                                    detailViewModel.fetchStreams(season = season, episode = episode)
+                                } else {
+                                    sourcePickerSeason = season
+                                    sourcePickerEpisode = episode
+                                    sourcePickerState = picker
+                                }
+                            }
                         },
                         onSeasonDownload = { },
                         onToggleEpisodeWatched = { season, episode ->
@@ -966,7 +1021,7 @@ fun TvDetailsScreen(
                 }
             }
 
-            // ── Similar titles ──
+            // â”€â”€ Similar titles â”€â”€
             if (state.similar.isNotEmpty()) {
                 item(key = "similar") {
                     Text(
@@ -990,7 +1045,7 @@ fun TvDetailsScreen(
                 }
             }
 
-            // ── Watchlist service picker ──
+            // â”€â”€ Watchlist service picker â”€â”€
             if (showWatchlistPicker && mediaItem != null) {
                 item(key = "watchlist_picker_header") {
                     Text(
@@ -1113,7 +1168,7 @@ fun TvDetailsScreen(
                 }
             }
 
-            // ── Auto-play status ──
+            // â”€â”€ Auto-play status â”€â”€
             if (state.autoPlayMessage != null) {
                 item(key = "autoplay_status") {
                     Column(modifier = Modifier.padding(top = 14.dp)) {
@@ -1136,7 +1191,7 @@ fun TvDetailsScreen(
                 }
             }
 
-            // ── Resolve error ──
+            // â”€â”€ Resolve error â”€â”€
             if (state.isLoadingStreams || state.isResolving || state.streams.isNotEmpty()) {
                 item(key = "playback_readiness") {
                     DetailPlaybackReadinessCard(
@@ -1152,7 +1207,7 @@ fun TvDetailsScreen(
             }
 
             // Preparing is now a full-screen overlay rendered outside the
-            // lazy list — see the overlay block at the end of this scope.
+            // lazy list â€” see the overlay block at the end of this scope.
             if (state.resolveError != null) {
                 item(key = "resolve_error") {
                     Text(
@@ -1164,7 +1219,7 @@ fun TvDetailsScreen(
                 }
             }
 
-            // ── Stream Picker (when auto-play is off or auto-play failed) ──
+            // â”€â”€ Stream Picker (when auto-play is off or auto-play failed) â”€â”€
             if (state.showStreamPicker && state.streams.isNotEmpty()) {
                 val groups = groupPlaybackOptionStreams(state.streams, state.startupCandidates)
                 val startupCandidateMap = state.startupCandidates.associateBy { it.streamKey }
@@ -1278,11 +1333,11 @@ fun TvDetailsScreen(
                                 Text(
                                     text = buildString {
                                         append(stream.quality)
-                                        stream.codec?.let { append(" · $it") }
-                                        stream.hdr?.let { append(" · $it") }
-                                        stream.size?.let { append(" · $it") }
+                                        stream.codec?.let { append(" Â· $it") }
+                                        stream.hdr?.let { append(" Â· $it") }
+                                        stream.size?.let { append(" Â· $it") }
                                         if (stream.languages.isNotEmpty()) {
-                                            append(" · \uD83D\uDDE3 ")
+                                            append(" Â· \uD83D\uDDE3 ")
                                             append(stream.languages.joinToString(", "))
                                         }
                                     },
@@ -1314,8 +1369,8 @@ fun TvDetailsScreen(
                                 Text(
                                     text = buildString {
                                         append(stream.addonName)
-                                        stream.source?.let { append(" · $it") }
-                                        stream.seeds?.let { if (it > 0) append(" · $it seeds") }
+                                        stream.source?.let { append(" Â· $it") }
+                                        stream.seeds?.let { if (it > 0) append(" Â· $it seeds") }
                                     },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Amber,
@@ -1343,7 +1398,7 @@ fun TvDetailsScreen(
                 }
             }
 
-            // ── Error ──
+            // â”€â”€ Error â”€â”€
             if (state.streamsError != null) {
                 item(key = "error") {
                     Text(
@@ -1369,10 +1424,10 @@ fun TvDetailsScreen(
 
     } // end LazyColumn
 
-    // Preparing overlay — rendered inside the Box but outside the
+    // Preparing overlay â€” rendered inside the Box but outside the
     // LazyColumn so it always layers above the detail surface, blocking
     // D-pad interaction with the rest of the UI until the probe resolves
-    // or the user cancels. Must live in a @Composable scope (Box) — not
+    // or the user cancels. Must live in a @Composable scope (Box) â€” not
     // in the LazyColumn's LazyListScope lambda.
     val preparing = state.preparing
     if (preparing != null) {
@@ -1382,14 +1437,12 @@ fun TvDetailsScreen(
         )
     }
 
-    // ── Source picker (Prompt 11C) ──
+    // â”€â”€ Source picker (Prompt 11C) â”€â”€
     // Sits above the rest of the detail content. D-pad OK on a row
     // either launches the player directly (LocalFile / LAN) or
     // dismisses the sheet and re-enters the existing fetchStreams
-    // flow (Provider). Route failure is surfaced by the player
-    // engine; we keep the picker state around in [pendingPickerForFallback]
-    // so the caller can call TvSourcePicker.fallbackAfter(...) on a
-    // failed route — those fallbacks are wired by the player itself.
+    // flow (Provider). Route failures are handled by PlayerScreen's
+    // auto-source fallback path when launched with autoSourceSelection.
     sourcePickerState?.let { picker ->
         val mediaItem = state.mediaItem
         TvSourcePickerSheet(
@@ -1398,7 +1451,7 @@ fun TvDetailsScreen(
                 sourcePickerState = null
                 if (mediaItem == null) return@TvSourcePickerSheet
                 if (TvDetailsSourcePickerStateBuilder.isProviderFetchSentinel(option)) {
-                    detailViewModel.fetchStreams()
+                    detailViewModel.fetchStreams(season = sourcePickerSeason, episode = sourcePickerEpisode)
                     return@TvSourcePickerSheet
                 }
                 when (val route = option.route) {
@@ -1407,39 +1460,43 @@ fun TvDetailsScreen(
                             "file://${route.absolutePath}",
                             "",
                             mediaItem,
-                            null,
-                            null,
-                            false,
+                            sourcePickerSeason,
+                            sourcePickerEpisode,
+                            true,
                         )
                     }
                     is PlaybackRoute.LanDesktopStream -> {
-                        // Stage headers BEFORE navigating — PlayerScreen
+                        // Stage headers BEFORE navigating â€” PlayerScreen
                         // attaches X-Torve-Lan-Auth before play().
                         PendingLanPlaybackHandoff.stage(route)
                         onPlayResolved(
                             route.url,
                             "",
                             mediaItem,
-                            null,
-                            null,
-                            false,
+                            sourcePickerSeason,
+                            sourcePickerEpisode,
+                            true,
                         )
                     }
                     is PlaybackRoute.ProviderStream -> {
                         // Synthetic "Provider" sentinel handled above.
                         // A real ProviderStream URL here would be
-                        // unusual — fall back to fetchStreams to keep
+                        // unusual â€” fall back to fetchStreams to keep
                         // the source disambiguation flow.
-                        detailViewModel.fetchStreams()
+                        detailViewModel.fetchStreams(season = sourcePickerSeason, episode = sourcePickerEpisode)
                     }
                     PlaybackRoute.ReDownload -> {
-                        // No-op — the picker only emits ReDownload when
+                        // No-op â€” the picker only emits ReDownload when
                         // there's nothing else, and the build pre-check
                         // already filters those out.
                     }
                 }
             },
-            onDismiss = { sourcePickerState = null },
+            onDismiss = {
+                sourcePickerState = null
+                sourcePickerSeason = null
+                sourcePickerEpisode = null
+            },
         )
     }
 
@@ -1447,31 +1504,36 @@ fun TvDetailsScreen(
 }
 
 /**
- * Build the source picker for a movie. Probes the local download repo
- * + LAN library snapshot for this title and folds them through
+ * Build the source picker for a movie or concrete episode. Probes the
+ * local download repo + LAN library snapshot and folds them through
  * [TvDetailsSourcePickerStateBuilder]. Cellular guard mirrors the
  * preference applied elsewhere.
  */
-private suspend fun buildMoviePickerState(
+private suspend fun buildDetailPickerState(
     item: MediaItem,
+    seasonNumber: Int?,
+    episodeNumber: Int?,
     downloadRepository: DownloadRepository,
     lanLibraryConsumer: LanLibraryConsumer,
     networkMonitor: NetworkMonitor,
     wifiOnlyForLan: Boolean,
 ): TvSourcePickerState {
-    val mediaIdLookup = item.tmdbId?.toString()
-    val download = mediaIdLookup?.let {
-        runCatching { downloadRepository.getDownloadByMediaId(it) }.getOrNull()
+    val mediaIds = buildSet {
+        item.tmdbId?.toString()?.let(::add)
+        item.id.takeIf { it.isNotBlank() }?.let(::add)
     }
-    val localFilePath = download
-        ?.takeIf { it.status == DownloadStatus.COMPLETED }
-        ?.filePath
-        ?.takeIf { it.isNotBlank() }
+    val downloads = runCatching { downloadRepository.getAllDownloads() }.getOrDefault(emptyList())
+    val localFilePath = DetailSourcePickerLookup.completedLocalFilePath(
+        downloads = downloads,
+        mediaIds = mediaIds,
+        seasonNumber = seasonNumber,
+        episodeNumber = episodeNumber,
+    )
     val lanRoute = runCatching {
         lanLibraryConsumer.findLanRoute(
             title = item.title,
-            seasonNumber = null,
-            episodeNumber = null,
+            seasonNumber = seasonNumber,
+            episodeNumber = episodeNumber,
         )
     }.getOrNull()
     val networkMode = when (networkMonitor.currentNetworkType()) {
@@ -1484,7 +1546,7 @@ private suspend fun buildMoviePickerState(
         localFilePath = localFilePath,
         lanRoute = lanRoute,
         // The detail screen always assumes provider streams might
-        // resolve — the existing fetchStreams() will tell the user if
+        // resolve â€” the existing fetchStreams() will tell the user if
         // none are actually available.
         providerAvailable = true,
         networkMode = networkMode,
@@ -1568,7 +1630,7 @@ private fun TvActionButton(
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
             }
-            // Always focusable — guard click internally so focus is never ejected
+            // Always focusable â€” guard click internally so focus is never ejected
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -1702,7 +1764,7 @@ private fun TvRatingChip(label: String, value: String, iconRes: Int? = null) {
 /**
  * TV-friendly full-screen overlay for the preparing state. D-pad focus
  * defaults to the Cancel button so the user always has an obvious exit.
- * Sized for couch viewing — larger spinner, bigger type, centered panel.
+ * Sized for couch viewing â€” larger spinner, bigger type, centered panel.
  */
 @Composable
 internal fun TvStreamPreparingOverlay(

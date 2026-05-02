@@ -117,9 +117,19 @@ import com.torve.domain.model.calculateTorveScore
 import com.torve.domain.model.withFallbackTmdbScore
 import com.torve.android.player.DeviceCodecProbe
 import kotlinx.coroutines.launch
+import com.torve.domain.lanlibrary.NetworkMode
+import com.torve.domain.lanlibrary.PlaybackRoute
+import com.torve.domain.repository.DownloadRepository
+import com.torve.platform.NetworkMonitor
+import com.torve.platform.NetworkType
 import com.torve.presentation.detail.DetailViewModel
 import com.torve.presentation.download.DownloadViewModel
+import com.torve.presentation.lanlibrary.LanLibraryConsumer
+import com.torve.presentation.lanlibrary.PendingLanPlaybackHandoff
 import com.torve.presentation.settings.SettingsViewModel
+import com.torve.presentation.tvhome.DetailSourcePickerLookup
+import com.torve.presentation.tvhome.TvDetailsSourcePickerStateBuilder
+import com.torve.presentation.tvhome.TvSourcePickerState
 import com.torve.presentation.watchlist.WatchlistViewModel
 import com.torve.util.FormatUtil
 import org.koin.compose.koinInject
@@ -131,7 +141,7 @@ fun DetailScreen(
     id: Int,
     accessTier: AccessTier = AccessTier.FREE,
     onLockedFeatureClick: (PremiumFeature) -> Unit = {},
-    onPlayClick: (url: String, fallbackUrl: String, season: Int?, episode: Int?, imdbId: String?) -> Unit,
+    onPlayClick: (url: String, fallbackUrl: String, season: Int?, episode: Int?, imdbId: String?, autoSourceSelection: Boolean) -> Unit,
     onBack: () -> Unit,
     onMediaClick: (MediaItem) -> Unit,
     onPersonClick: ((Int) -> Unit)? = null,
@@ -142,6 +152,9 @@ fun DetailScreen(
     downloadViewModel: DownloadViewModel = koinInject(),
     watchlistViewModel: WatchlistViewModel = koinInject(),
     addonViewModel: com.torve.presentation.addon.AddonViewModel = koinInject(),
+    downloadRepository: DownloadRepository = koinInject(),
+    lanLibraryConsumer: LanLibraryConsumer = koinInject(),
+    networkMonitor: NetworkMonitor = koinInject(),
 ) {
     val bulkDownloadManager: BulkDownloadManager = koinInject()
     val bulkProgress by bulkDownloadManager.progress.collectAsState()
@@ -166,9 +179,37 @@ fun DetailScreen(
     var showActionSheet by remember { mutableStateOf(false) }
     var resolvedUrl by remember { mutableStateOf("") }
     var showTrailer by remember { mutableStateOf(false) }
+    var sourcePickerState by remember { mutableStateOf<TvSourcePickerState?>(null) }
+    var sourcePickerSeason by remember { mutableStateOf<Int?>(null) }
+    var sourcePickerEpisode by remember { mutableStateOf<Int?>(null) }
     // Tracks whether the current stream resolution is for download (not playback)
     var pendingEpisodeDownload by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     val context = LocalContext.current
+
+    fun openSourcePickerOrProvider(season: Int? = null, episode: Int? = null) {
+        val item = state.mediaItem ?: return
+        coroutineScope.launch {
+            val picker = buildMobileDetailPickerState(
+                item = item,
+                seasonNumber = season,
+                episodeNumber = episode,
+                downloadRepository = downloadRepository,
+                lanLibraryConsumer = lanLibraryConsumer,
+                networkMonitor = networkMonitor,
+                wifiOnlyForLan = settingsState.lanPlaybackWifiOnly,
+            )
+            val hasDirectSource = picker.options.any { opt ->
+                opt.route is PlaybackRoute.LocalFile || opt.route is PlaybackRoute.LanDesktopStream
+            }
+            if (!hasDirectSource) {
+                viewModel.fetchStreams(season = season, episode = episode)
+            } else {
+                sourcePickerSeason = season
+                sourcePickerEpisode = episode
+                sourcePickerState = picker
+            }
+        }
+    }
 
     // Wire download callbacks to trigger WorkManager
     LaunchedEffect(downloadViewModel) {
@@ -231,6 +272,7 @@ fun DetailScreen(
             /* season = */ state.streamContextSeason,
             /* episode = */ state.streamContextEpisode,
             /* imdbId = */ item?.imdbId,
+            /* autoSourceSelection = */ false,
         )
         viewModel.consumeUsenetPlaybackIntent()
     }
@@ -488,12 +530,12 @@ fun DetailScreen(
                                             val ctxS = state.streamContextSeason
                                             val ctxE = state.streamContextEpisode
                                             if (ctxS != null && ctxE != null) {
-                                                viewModel.fetchStreams(season = ctxS, episode = ctxE)
+                                                openSourcePickerOrProvider(ctxS, ctxE)
                                             } else {
                                                 viewModel.playNextEpisode()
                                             }
                                         } else {
-                                            viewModel.fetchStreams()
+                                            openSourcePickerOrProvider()
                                         }
                                     }
                                 },
@@ -792,7 +834,7 @@ fun DetailScreen(
                                     if (!hasAnyAddon) {
                                         onOpenAddonCatalog?.invoke()
                                     } else {
-                                        viewModel.fetchStreams(season = season, episode = episode)
+                                        openSourcePickerOrProvider(season, episode)
                                     }
                                 },
                                 onEpisodeDownload = { season, episode ->
@@ -987,6 +1029,53 @@ fun DetailScreen(
                     )
                 }
 
+                sourcePickerState?.let { picker ->
+                    val item = state.mediaItem
+                    MobileSourcePickerSheet(
+                        state = picker,
+                        onSelect = { option ->
+                            sourcePickerState = null
+                            if (item == null) return@MobileSourcePickerSheet
+                            if (TvDetailsSourcePickerStateBuilder.isProviderFetchSentinel(option)) {
+                                viewModel.fetchStreams(season = sourcePickerSeason, episode = sourcePickerEpisode)
+                                return@MobileSourcePickerSheet
+                            }
+                            when (val route = option.route) {
+                                is PlaybackRoute.LocalFile -> {
+                                    onPlayClick(
+                                        "file://${route.absolutePath}",
+                                        "",
+                                        sourcePickerSeason,
+                                        sourcePickerEpisode,
+                                        item.imdbId,
+                                        true,
+                                    )
+                                }
+                                is PlaybackRoute.LanDesktopStream -> {
+                                    PendingLanPlaybackHandoff.stage(route)
+                                    onPlayClick(
+                                        route.url,
+                                        "",
+                                        sourcePickerSeason,
+                                        sourcePickerEpisode,
+                                        item.imdbId,
+                                        true,
+                                    )
+                                }
+                                is PlaybackRoute.ProviderStream -> {
+                                    viewModel.fetchStreams(season = sourcePickerSeason, episode = sourcePickerEpisode)
+                                }
+                                PlaybackRoute.ReDownload -> Unit
+                            }
+                        },
+                        onDismiss = {
+                            sourcePickerState = null
+                            sourcePickerSeason = null
+                            sourcePickerEpisode = null
+                        },
+                    )
+                }
+
                 // Action sheet after resolution
                 if (showActionSheet && resolvedUrl.isNotBlank()) {
                     val item = state.mediaItem
@@ -1001,7 +1090,7 @@ fun DetailScreen(
                         url = resolvedUrl,
                         title = dlTitle,
                         posterUrl = item?.posterUrl ?: "",
-                        onPlayInApp = { onPlayClick(resolvedUrl, resolvedFallbackUrl, ctxSeason, ctxEpisode, item?.imdbId) },
+                        onPlayInApp = { onPlayClick(resolvedUrl, resolvedFallbackUrl, ctxSeason, ctxEpisode, item?.imdbId, false) },
                         onDownload = {
                             if (item != null) {
                                 downloadViewModel.enqueueDownload(
@@ -1237,6 +1326,48 @@ private fun launchTrailer(context: android.content.Context, youtubeKey: String) 
     } catch (_: Exception) {
         context.startActivity(webIntent)
     }
+}
+
+private suspend fun buildMobileDetailPickerState(
+    item: MediaItem,
+    seasonNumber: Int?,
+    episodeNumber: Int?,
+    downloadRepository: DownloadRepository,
+    lanLibraryConsumer: LanLibraryConsumer,
+    networkMonitor: NetworkMonitor,
+    wifiOnlyForLan: Boolean,
+): TvSourcePickerState {
+    val mediaIds = buildSet {
+        item.tmdbId?.toString()?.let(::add)
+        item.id.takeIf { it.isNotBlank() }?.let(::add)
+    }
+    val downloads = runCatching { downloadRepository.getAllDownloads() }.getOrDefault(emptyList())
+    val localFilePath = DetailSourcePickerLookup.completedLocalFilePath(
+        downloads = downloads,
+        mediaIds = mediaIds,
+        seasonNumber = seasonNumber,
+        episodeNumber = episodeNumber,
+    )
+    val lanRoute = runCatching {
+        lanLibraryConsumer.findLanRoute(
+            title = item.title,
+            seasonNumber = seasonNumber,
+            episodeNumber = episodeNumber,
+        )
+    }.getOrNull()
+    val networkMode = when (networkMonitor.currentNetworkType()) {
+        NetworkType.WIFI -> NetworkMode.WIFI
+        NetworkType.CELLULAR -> NetworkMode.CELLULAR
+        NetworkType.ETHERNET -> NetworkMode.ETHERNET
+        NetworkType.UNKNOWN, NetworkType.NONE -> NetworkMode.UNKNOWN
+    }
+    return TvDetailsSourcePickerStateBuilder.build(
+        localFilePath = localFilePath,
+        lanRoute = lanRoute,
+        providerAvailable = true,
+        networkMode = networkMode,
+        wifiOnlyForLan = wifiOnlyForLan,
+    )
 }
 
 @Composable
