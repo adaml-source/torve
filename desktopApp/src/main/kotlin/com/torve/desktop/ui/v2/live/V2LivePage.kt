@@ -484,17 +484,18 @@ private fun channelRowKey(enriched: EnrichedChannel): String {
 }
 
 private fun sectionTitleFor(tab: ChannelsSubTab): String = when (tab) {
-    ChannelsSubTab.LIVE -> "Channels"
+    ChannelsSubTab.LIVE, ChannelsSubTab.GUIDE -> "Channels"
     ChannelsSubTab.FAVOURITES -> "Favorite Channels"
 }
 
 private fun emptyTitleFor(tab: ChannelsSubTab): String = when (tab) {
-    ChannelsSubTab.LIVE -> "No channels loaded"
+    ChannelsSubTab.LIVE, ChannelsSubTab.GUIDE -> "No channels loaded"
     ChannelsSubTab.FAVOURITES -> "No favorites yet"
 }
 
 private fun emptyDescriptionFor(tab: ChannelsSubTab): String = when (tab) {
-    ChannelsSubTab.LIVE -> "Choose a category or enter at least two characters in search."
+    ChannelsSubTab.LIVE, ChannelsSubTab.GUIDE ->
+        "Choose a category or enter at least two characters in search."
     ChannelsSubTab.FAVOURITES -> "Save channels from the Live tab to see them here."
 }
 

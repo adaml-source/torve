@@ -67,6 +67,16 @@ data class AuthResult(
 
 sealed interface AuthEvent {
     data class SessionExpired(val message: String) : AuthEvent
+    /**
+     * Fired exactly once after a successful [AuthClient.register]. Used
+     * by the navigation layer to mark the user as needing onboarding —
+     * a fresh register is the only signal we have that "this is a new
+     * account that should land in the setup choice flow," because plain
+     * sign-in could be a returning user with everything already
+     * configured. Carries the user id for callsites that key per-user
+     * onboarding flags.
+     */
+    data class Registered(val userId: String) : AuthEvent
 }
 
 /**
@@ -371,6 +381,12 @@ class AuthClient(
             authStateMutex.withLock {
                 persistAuthLocked(authResp, fallbackDisplayName = displayName)
             }
+            // Fire AuthEvent.Registered exactly once on successful
+            // register so the navigation layer can mark the user as
+            // needing onboarding. This is the ONLY place that emits it
+            // — plain sign-in (login + signInViaPairing) doesn't, since
+            // a returning user shouldn't be force-routed into setup.
+            _authEvents.emit(AuthEvent.Registered(userId = authResp.user.id))
             authResp.toAuthResult()
         } catch (e: Exception) {
             AuthResult(success = false, error = "Network error: ${e.message}")

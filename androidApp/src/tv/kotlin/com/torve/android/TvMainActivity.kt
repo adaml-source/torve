@@ -140,6 +140,10 @@ class TvMainActivity : AppCompatActivity() {
                     is AuthEvent.SessionExpired -> {
                         Toast.makeText(this@TvMainActivity, event.message, Toast.LENGTH_LONG).show()
                     }
+                    // No TV-side onboarding equivalent today; the
+                    // event is observed on mobile to mark
+                    // mobileOnboardingRequired. Ignore on TV.
+                    is AuthEvent.Registered -> Unit
                 }
             }
         }

@@ -450,31 +450,100 @@ fun TorveNavGraph(
         }
     }
 
-    LaunchedEffect(authUser?.id, authUser?.isVerified, mobileOnboardingComplete, mobileOnboardingRequired, setupSummary.canStartWatching, currentRoute, isTvMode) {
-        if (isTvMode) return@LaunchedEffect
-        val user = authUser ?: return@LaunchedEffect
-        if (currentRoute == "login" || currentRoute == "device_limit_reached") return@LaunchedEffect
-        if (!user.isVerified) {
-            if (currentRoute != VERIFY_EMAIL_ROUTE) {
-                navController.navigate(VERIFY_EMAIL_ROUTE) {
-                    launchSingleTop = true
+    // A successful register emits AuthEvent.Registered exactly once;
+    // mark onboarding required so the post-verify routing lands the
+    // user on the setup choice instead of straight on Home. Plain
+    // login doesn't emit this event — a returning configured user
+    // should never see the setup flow as a side effect of signing in.
+    LaunchedEffect(Unit) {
+        authClient.authEvents.collect { event ->
+            if (event is com.torve.data.auth.AuthEvent.Registered) {
+                mobileOnboardingRequired = true
+                navScope.launch {
+                    prefsRepo.setString(mobileOnboardingRequiredKey(event.userId), "true")
                 }
             }
-            return@LaunchedEffect
         }
-        if (currentRoute == VERIFY_EMAIL_ROUTE) {
-            val target = if (mobileOnboardingRequired && !mobileOnboardingComplete) SETUP_CHOICE_ROUTE else MOBILE_ROOT_ROUTE
-            navController.navigate(target) {
-                popUpTo(VERIFY_EMAIL_ROUTE) { inclusive = true }
-                launchSingleTop = true
+    }
+
+    LaunchedEffect(
+        authUser?.id,
+        authUser?.isVerified,
+        mobileOnboardingComplete,
+        mobileOnboardingRequired,
+        setupSummary.canStartWatching,
+        subscriptionState.hasEntitlement,
+        subscriptionState.isDeviceActivated,
+        subscriptionState.deviceBlockReason,
+        subscriptionState.deviceCapReached,
+        currentRoute,
+        isTvMode,
+    ) {
+        if (isTvMode) return@LaunchedEffect
+        val user = authUser ?: return@LaunchedEffect
+
+        // Delegate the destination decision to the pure router so
+        // production matches the tested rules in
+        // shared/.../MobilePostAuthRouter. Anything trust-leak related
+        // (forced-setup-route on returning users, accidental device
+        // management on stale device_not_registered) regresses against
+        // MobilePostAuthRouterTest before the user ever sees it.
+        val destination = com.torve.presentation.session.MobilePostAuthRouter.decide(
+            com.torve.presentation.session.PostAuthInputs(
+                isSignedIn = true,
+                isEmailVerified = user.isVerified,
+                mobileOnboardingRequired = mobileOnboardingRequired,
+                mobileOnboardingComplete = mobileOnboardingComplete,
+                canStartWatching = setupSummary.canStartWatching,
+                hasEntitlement = subscriptionState.hasEntitlement,
+                isDeviceActivated = subscriptionState.isDeviceActivated,
+                deviceBlockReason = subscriptionState.deviceBlockReason,
+                deviceCapReached = subscriptionState.deviceCapReached,
+                currentRoute = currentRoute,
+            ),
+        )
+
+        when (destination) {
+            com.torve.presentation.session.PostAuthDestination.STAY -> Unit
+            com.torve.presentation.session.PostAuthDestination.VERIFY_EMAIL -> {
+                if (currentRoute != VERIFY_EMAIL_ROUTE) {
+                    navController.navigate(VERIFY_EMAIL_ROUTE) {
+                        launchSingleTop = true
+                    }
+                }
             }
-            return@LaunchedEffect
-        }
-        if (mobileOnboardingRequired && !mobileOnboardingComplete && !setupSummary.canStartWatching && currentRoute == MOBILE_ROOT_ROUTE) {
-            navController.navigate(SETUP_CHOICE_ROUTE) {
-                launchSingleTop = true
+            com.torve.presentation.session.PostAuthDestination.SETUP_CHOICE -> {
+                if (currentRoute != SETUP_CHOICE_ROUTE) {
+                    navController.navigate(SETUP_CHOICE_ROUTE) {
+                        if (currentRoute == VERIFY_EMAIL_ROUTE) {
+                            popUpTo(VERIFY_EMAIL_ROUTE) { inclusive = true }
+                        }
+                        launchSingleTop = true
+                    }
+                }
+            }
+            com.torve.presentation.session.PostAuthDestination.HOME -> {
+                if (currentRoute == VERIFY_EMAIL_ROUTE) {
+                    navController.navigate(MOBILE_ROOT_ROUTE) {
+                        popUpTo(VERIFY_EMAIL_ROUTE) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                }
+            }
+            com.torve.presentation.session.PostAuthDestination.DEVICE_LIMIT_REACHED -> {
+                if (currentRoute != "device_limit_reached") {
+                    navController.navigate("device_limit_reached") { launchSingleTop = true }
+                }
+            }
+            com.torve.presentation.session.PostAuthDestination.MANAGE_DEVICES -> {
+                if (currentRoute != "manage_devices") {
+                    navController.navigate("manage_devices") { launchSingleTop = true }
+                }
             }
         }
+
+        // Once setup is actually complete, retire the onboarding-required
+        // flag so future cold starts land the user on Home.
         if (mobileOnboardingRequired && setupSummary.canStartWatching) {
             markMobileOnboardingComplete()
         }

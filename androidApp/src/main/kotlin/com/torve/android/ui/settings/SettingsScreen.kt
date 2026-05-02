@@ -679,7 +679,7 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
             ) {
-                ButtonLabel("Start setup guide")
+                ButtonLabel("Start setup again")
             }
             Spacer(Modifier.height(8.dp))
             OutlinedButton(

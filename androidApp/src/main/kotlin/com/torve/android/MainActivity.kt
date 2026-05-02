@@ -112,6 +112,10 @@ class MainActivity : AppCompatActivity() {
                     is AuthEvent.SessionExpired -> {
                         Toast.makeText(this@MainActivity, event.message, Toast.LENGTH_LONG).show()
                     }
+                    // Handled by NavGraph's AuthEvent observer (sets the
+                    // mobile-onboarding-required flag); nothing to do
+                    // at the activity level.
+                    is AuthEvent.Registered -> Unit
                 }
             }
         }

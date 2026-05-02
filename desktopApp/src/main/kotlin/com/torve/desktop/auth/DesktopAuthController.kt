@@ -498,6 +498,11 @@ class DesktopAuthController(
                             )
                         }
                     }
+                    // Desktop has its own admission flow that drops a
+                    // freshly-registered user into Onboarding via
+                    // DesktopShellState; the Registered event is
+                    // observed by the AdmissionController, not here.
+                    is AuthEvent.Registered -> Unit
                 }
             }
         }
