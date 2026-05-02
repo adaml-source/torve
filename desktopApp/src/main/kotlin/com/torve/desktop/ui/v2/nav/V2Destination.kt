@@ -1,6 +1,7 @@
 package com.torve.desktop.ui.v2.nav
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.LocalFireDepartment
@@ -26,6 +27,7 @@ enum class V2Destination(
     SEARCH(Icons.Filled.Search, "Search"),
     LIBRARY(Icons.Filled.VideoLibrary, "Library"),
     LIVE_TV(Icons.Filled.LiveTv, "Live"),
+    RECORDINGS(Icons.Filled.FiberManualRecord, "Recordings"),
     SPORTS(Icons.Filled.SportsSoccer, "Sports"),
     ADULT(Icons.Filled.LocalFireDepartment, "Adult"),
 }

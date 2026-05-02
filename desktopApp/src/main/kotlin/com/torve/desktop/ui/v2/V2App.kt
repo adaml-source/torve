@@ -374,6 +374,7 @@ fun V2App(
         V2Destination.SEARCH -> com.torve.desktop.ui.navigation.DesktopDestination.SEARCH
         V2Destination.LIBRARY -> com.torve.desktop.ui.navigation.DesktopDestination.LIBRARY
         V2Destination.LIVE_TV -> com.torve.desktop.ui.navigation.DesktopDestination.LIVE_TV
+        V2Destination.RECORDINGS -> com.torve.desktop.ui.navigation.DesktopDestination.LIBRARY
         V2Destination.ADULT -> com.torve.desktop.ui.navigation.DesktopDestination.MOVIES
         V2Destination.SPORTS -> com.torve.desktop.ui.navigation.DesktopDestination.MOVIES
     }
@@ -1188,6 +1189,20 @@ fun V2App(
                                 playerController = playerController,
                                 onPremiumBlocked = {
                                     premiumGateReason = "Live TV playback is a Premium feature."
+                                },
+                            )
+                            V2Destination.RECORDINGS -> com.torve.desktop.ui.v2.recording.V2RecordingsPage(
+                                onBack = { destination = V2Destination.HOME },
+                                onPlayLocal = { recording ->
+                                    val path = recording.filePath
+                                    if (!path.isNullOrBlank()) {
+                                        playerController.playDirectStream(
+                                            title = recording.programmeTitle,
+                                            url = "file://$path",
+                                            artworkUrl = null,
+                                            sourceSurface = "iptv_recording",
+                                        )
+                                    }
                                 },
                             )
                             V2Destination.SPORTS -> {

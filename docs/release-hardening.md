@@ -325,11 +325,24 @@ checkpoint `79844ed` (`Checkpoint Prompt 6-12B public beta release
 work`). iOS remains NO-GO until macOS build and simulator smoke pass.
 Stable remains NO-GO until the blockers below are cleared.**
 
+### Pre-release checks
+
+Run before cutting a stable artifact:
+
+```bash
+bash scripts/release-checks/link-check.sh
+```
+
+The script greps every URL constant out of `LegalUrls.kt` and HEAD/GETs
+each. Exits non-zero on any 4xx/5xx — catches **B1** the moment the
+delete-account page goes 404, plus any silent rename of privacy / terms
+/ help pages. `mailto:` constants are listed but not probed.
+
 ### Blockers (must clear before public stable)
 
 | ID | Owner | Description |
 | --- | --- | --- |
-| B1 | Web ops | Publish `https://torve.app/delete-account.html` (web mirror of in-app deletion) before public stable. |
+| B1 | Web ops | Publish `https://torve.app/delete-account.html` (web mirror of in-app deletion) before public stable. Draft page copy lives at `web/delete-account.html` — host operator publishes verbatim or with branding tweaks. |
 | B2 | Operator (macOS) | Run iOS build + simulator smoke against the Prompt 12 changes (`AccountScreen.swift`, `TorveAPIClient.swift`). |
 | B3 | Operator (macOS) | Run macOS sign + notarize round-trip on a packaged DMG. |
 | B4 | Operator (Windows) | Clean-VM install + launch + playback + update-handoff smoke. |
