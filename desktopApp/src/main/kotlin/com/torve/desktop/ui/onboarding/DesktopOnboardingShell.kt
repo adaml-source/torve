@@ -157,11 +157,8 @@ fun DesktopOnboardingShell(
                     ) {
                         DesktopSetupPane(
                             authState = authState,
-                            setupState = setupState,
-                            setupWizardViewModel = setupWizardViewModel,
                             setupWizardCoordinator = setupWizardCoordinator,
                             onboardingDeepLink = onboardingDeepLink,
-                            admission = admission,
                             onCompleteOnboarding = onCompleteOnboarding,
                             onSignOut = authController::signOut,
                             modifier = Modifier
@@ -676,11 +673,8 @@ private fun DesktopAuthEntryPane(
 @Composable
 private fun DesktopSetupPane(
     authState: DesktopAuthUiState,
-    setupState: SetupUiState,
-    setupWizardViewModel: SetupWizardViewModel,
     setupWizardCoordinator: SetupWizardCoordinator,
     onboardingDeepLink: DesktopOnboardingDeepLink,
-    admission: DesktopAdmissionSnapshot?,
     onCompleteOnboarding: suspend () -> Result<Unit>,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,

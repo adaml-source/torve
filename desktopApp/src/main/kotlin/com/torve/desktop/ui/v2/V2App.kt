@@ -1097,6 +1097,15 @@ fun V2App(
                                     onSeeAll = { req -> seeAllRoute = req },
                                     sectionConfigs = homeSectionConfigs,
                                     cardStyleFor = cardStyleResolver,
+                                    // Zero-source empty-state CTAs (Fix B
+                                    // follow-up). Both currently route to
+                                    // the same place — Settings, where
+                                    // Integrations + Panda live. Once the
+                                    // settings shell grows section-deep
+                                    // links these can split into more
+                                    // specific destinations.
+                                    onSetUpSources = { settingsOpen = true },
+                                    onConnectTrakt = { settingsOpen = true },
                                 )
                             }
                             V2Destination.MOVIES -> {

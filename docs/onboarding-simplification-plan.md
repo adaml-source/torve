@@ -1,8 +1,7 @@
 # Desktop Onboarding Simplification Plan
 
-Status: scoped 2026-05-03, **execution pending**. Plan revised
-2026-05-03 (afternoon) after product direction. This is a plan, not
-work done.
+Status: **executed 2026-05-03 evening.** A + B + C + D + E all
+landed. Residue list at the bottom captures what's still loose.
 
 ## Product critique we're trying to satisfy
 
@@ -217,15 +216,50 @@ deep-links survive, add a dialog at `DesktopSetupIntentHub.kt:756-766`.
 
 ---
 
-## Suggested execution order
+## Execution status (2026-05-03)
 
-1. **Fix C** (1 hr, zero risk, future-proofs legal). Ship anytime.
-2. **Fix D** (1-2 hr, no risk, real UX win). Ship anytime — applies to current Trakt step AND post-Fix-E Settings location, so it's safe regardless of A/B/E.
-3. **Fix A + Fix B + Fix E together** as one focused session (1.5-2 days). They're tightly coupled — A deletes the wizard which contains TRAKT (E), and A's zero-source admission requires B's empty-state. Doing them piecemeal would ship a half-broken onboarding.
-4. **Fix F** if any deep-links survive. Probably zero work.
+All five fixes landed in one day. Commits:
 
-C and D are safe to ship today or tomorrow without further input.
-A+B+E need a coordinated push.
+  - `4e69a14` — Fix C (versioned terms) + Fix D (copy-link buttons)
+  - `302fa79` — Fix A (Panda-primary onboarding) + Fix B (Home
+    empty state) + Fix E (Trakt out of onboarding, subsumed by A)
+  - (this commit) — V2App callbacks wired + DesktopSetupPane
+    unused params removed + plan marked executed
+
+Fix F (block per-intent deep-link state loss) was rendered moot by
+A's structural change — there are no more in-onboarding deep-links
+that can lose field state silently.
+
+## Residue (what's still loose)
+
+  1. **Legacy wizard step composables stay in `DesktopOnboardingShell.kt`
+     as dead code** — `WelcomeStep`, `TermsStep`, `DebridStep`,
+     `TraktStep` (with the Fix D copy-link buttons preserved),
+     `QualityStep`, `ChannelsStep`, `DoneStep`, plus
+     `DesktopSetupFlowCard` and `DesktopSetupFooter`. They're
+     harmless (compiler warnings only) and `TraktStep` will be
+     useful when Settings → Integrations grows a Trakt OAuth
+     surface. Deletion is a low-risk follow-up.
+  2. **`SetupStep` enum values + `SetupWizardViewModel` methods**
+     for the deleted steps (DEBRID, TRAKT, QUALITY, CHANNELS, etc.)
+     are still present in `shared/`. Not deleted because some
+     methods (Trakt OAuth start, debrid client wiring) will be
+     reused by Settings → Integrations once that surface picks
+     them up. Same low-risk follow-up applies.
+  3. **No Sandbox smoke** of the new flow yet. Compile-clean but
+     untested end-to-end. Worth a manual smoke before the next
+     desktop release.
+  4. **V2App "Set up sources" CTA routes to Settings**, not to
+     Panda directly. That's a placeholder — when V2App's settings
+     shell grows section-deep links (`Integrations`, `Panda`,
+     `Trakt`), the empty-state callbacks should be tightened to
+     route to specific destinations instead of just toggling
+     `settingsOpen = true`.
+  5. **`DesktopSetupIntentHub`'s old per-intent helpers are gone**
+     (`SetupIntentCard`, `ReadyToWatchBanner`, status badge
+     mapping). If Settings → Integrations later wants the same
+     visual cards, they can come back as a dedicated component
+     file rather than living inside the onboarding hub.
 
 ## Out of scope
 
