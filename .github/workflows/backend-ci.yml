@@ -23,6 +23,16 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    # Job-level env so every step (alembic, pytest) inherits it.
+    # `app/config.py` constructs `Settings()` at import time and
+    # requires DATABASE_URL + JWT_SECRET — without these, even
+    # `alembic upgrade head` can't load env.py.
+    env:
+      DATABASE_URL: postgresql+psycopg2://torve_test:torve_test@localhost:5432/torve_test
+      JWT_SECRET: ci-only-jwt-secret-do-not-use-in-prod
+      INTEGRATION_SECRET_KEY: ci-only-integration-secret-do-not-use-in-prod
+      APP_ENV: test
+
     services:
       postgres:
         image: postgres:16
@@ -60,8 +70,6 @@ jobs:
           pip install pytest pytest-asyncio
 
       - name: Alembic migrations apply against an empty database
-        env:
-          DATABASE_URL: postgresql+psycopg2://torve_test:torve_test@localhost:5432/torve_test
         run: |
           alembic upgrade head
           # Verify head matches latest migration file (catches drift
@@ -69,13 +77,6 @@ jobs:
           alembic current
 
       - name: Run pytest
-        env:
-          DATABASE_URL: postgresql+psycopg2://torve_test:torve_test@localhost:5432/torve_test
-          # Minimal env — tests should mock or skip features needing
-          # real secrets (Paddle, Resend, Google Play, Sentry).
-          JWT_SECRET: ci-only-jwt-secret-do-not-use-in-prod
-          INTEGRATION_SECRET_KEY: ci-only-integration-secret-do-not-use-in-prod
-          APP_ENV: test
         run: |
           pytest -v --tb=short
 
@@ -84,6 +85,14 @@ jobs:
     # run, so even if tests are slow / flaky this stays fast and
     # gives a clear "your code doesn't even import" signal.
     runs-on: ubuntu-latest
+    env:
+      # Settings() validates at import time — these dummies satisfy
+      # the required-field check so we can confirm every module
+      # imports cleanly. Real DB / real secrets aren't used here.
+      DATABASE_URL: postgresql+psycopg2://nobody:nobody@localhost:5432/nobody
+      JWT_SECRET: import-check-only
+      INTEGRATION_SECRET_KEY: import-check-only
+      APP_ENV: test
     defaults:
       run:
         working-directory: server
