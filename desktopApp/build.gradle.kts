@@ -316,10 +316,10 @@ tasks.register("packageMsiCloseApp") {
     group = "distribution"
     description = "Builds the Torve MSI with a util:CloseApplication element so the in-app updater can upgrade without 'Files in Use' prompts. Override version with -PtorveMsiVersion=X.Y.Z."
     dependsOn("verifyWindowsPackagingPrereqs", "createDistributable")
-    // Default version matches the package version configured in
-    // compose.desktop.application.nativeDistributions; override at the
-    // CLI for one-off builds, e.g. `:desktopApp:packageMsiCloseApp -PtorveMsiVersion=1.0.6`.
-    val torveVersion = (project.findProperty("torveMsiVersion") as String?) ?: "1.0.7"
+    // Single source of truth shared with compose.desktop.application
+    // (jvmArgs `-Dtorve.desktop.version` + packageVersion). Override per
+    // build via `-PtorveMsiVersion=X.Y.Z`.
+    val torveVersion = (project.findProperty("torveMsiVersion") as String?) ?: "1.0.6"
     val wixResourceDir = layout.projectDirectory.dir("wix-resources")
     val outDir = layout.buildDirectory.dir("compose/binaries/main-closeapp/msi")
     inputs.dir(wixResourceDir)
@@ -451,6 +451,13 @@ compose.desktop {
         val releaseChannel = providers.environmentVariable("TORVE_RELEASE_CHANNEL")
             .orElse("internal-preview")
             .get()
+        // Single source of truth for the desktop app version. Overridable
+        // per-build via `-PtorveMsiVersion=X.Y.Z` so packaging is idempotent
+        // without having to edit this file each release. Same property is
+        // consumed by the packageMsiCloseApp task and the Compose Desktop
+        // packageVersion below, so the JVM-reported version, the MSI's
+        // ProductVersion, and the in-app About panel all stay in lockstep.
+        val torveAppVersion = (project.findProperty("torveMsiVersion") as String?) ?: "1.0.6"
         // Auto-update feed URL — baked into the packaged build so the
         // in-app updater works out of the box for end users without
         // any TORVE_UPDATE_FEED env-var ceremony. The runtime resolver
@@ -472,7 +479,7 @@ compose.desktop {
         jvmArgs += listOf(
             "-DTMDB_API_KEY=${readTmdbApiKey()}",
             "-Dtorve.desktop.appName=Torve",
-            "-Dtorve.desktop.version=1.0.6",
+            "-Dtorve.desktop.version=$torveAppVersion",
             "-Dtorve.desktop.vendor=Torve",
             "-Dtorve.desktop.description=Torve desktop for Windows with embedded VLC playback.",
             "-Dtorve.desktop.channel=$releaseChannel",
@@ -510,7 +517,7 @@ compose.desktop {
                 TargetFormat.AppImage,
             )
             packageName = "Torve"
-            packageVersion = "1.0.6"
+            packageVersion = torveAppVersion
             vendor = "Torve"
             description = "Torve cross-platform media hub. Browse. Pick. Watch."
             copyright = "Â© 2026 Torve"
