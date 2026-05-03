@@ -171,8 +171,19 @@ def _handle_completed(db: Session, data: dict, event_type: str, event_id: str, p
 
     user_id, intent_id = _resolve_user_id(data, db)
     product_class = classify_paddle_product(fields["price_id"])
-    # Fallback for unconfigured envs (dev/test): treat any product as lifetime
-    if product_class is None and settings.APP_ENV != "production":
+    # Fallback for unconfigured envs (dev/test): treat any product as
+    # lifetime so local dev doesn't need real Paddle config. Only fires
+    # when Paddle is *genuinely* unconfigured (no PADDLE_PRICE_ID and no
+    # PADDLE_SUBSCRIPTION_PRICE_ID), not when it's configured but the
+    # webhook references a different price. Without this tightening,
+    # any non-prod env (APP_ENV=test/staging/dev) would silently grant
+    # lifetime to wrong-product webhooks. Caught by Backend CI 2026-05-03
+    # via tests/test_payments.py::test_wrong_product_no_entitlement.
+    paddle_unconfigured = (
+        not settings.PADDLE_PRICE_ID
+        and not settings.PADDLE_SUBSCRIPTION_PRICE_ID
+    )
+    if product_class is None and settings.APP_ENV != "production" and paddle_unconfigured:
         product_class = "lifetime"
 
     # Record payment
