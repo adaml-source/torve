@@ -170,17 +170,24 @@ class UpdateChecker(
         val link = Regex("<link>([\\s\\S]*?)</link>", RegexOption.IGNORE_CASE).find(itemBlock)
             ?.groupValues?.getOrNull(1)?.trim()
         val enclosure = Regex("<enclosure\\b[^>]*>", RegexOption.IGNORE_CASE).find(itemBlock)?.value.orEmpty()
-        val sparkleVersion = Regex("""sparkle:version\s*=\s*"([^"]+)"""")
-            .find(enclosure)?.groupValues?.getOrNull(1)
-        val enclosureUrl = Regex("""\burl\s*=\s*"([^"]+)"""")
-            .find(enclosure)?.groupValues?.getOrNull(1)
+        // Extract all `name="value"` attribute pairs from the enclosure
+        // tag into a map. Attribute lookup by name is then a simple map
+        // hit, so we don't depend on attribute *order* or on regex word
+        // boundaries (an earlier `\burl=...` regex silently failed to
+        // match in some attribute orderings — caught by B4 smoke
+        // 2026-05-03 when the Download & install button never appeared).
+        val attrs = Regex("""([\w:]+)\s*=\s*"([^"]*)"""")
+            .findAll(enclosure)
+            .associate { it.groupValues[1].lowercase() to it.groupValues[2] }
+        val sparkleVersion = attrs["sparkle:version"]
+        val enclosureUrl = attrs["url"]
         // Sparkle's optional `sparkle:installerSha256` attr (or `sha256`,
         // or `sparkle:edSignature` - last is technically Ed25519 not
         // SHA-256, so we ignore it for hash verification but accept it
         // as "feed signed" indicator). 64 hex chars only.
-        val sha256 = Regex(
-            """(?:sparkle:installerSha256|sha256)\s*=\s*"([0-9a-fA-F]{64})"""",
-        ).find(enclosure)?.groupValues?.getOrNull(1)?.lowercase()
+        val sha256 = (attrs["sparkle:installersha256"] ?: attrs["sha256"])
+            ?.takeIf { it.matches(Regex("[0-9a-fA-F]{64}")) }
+            ?.lowercase()
         val tag = sparkleVersion ?: title?.substringAfterLast(' ')?.trim() ?: return null
         return UpdateInfo(
             tag = tag,

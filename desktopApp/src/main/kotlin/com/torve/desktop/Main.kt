@@ -218,8 +218,13 @@ fun main() = application {
         dsn = System.getenv("TORVE_SENTRY_DSN"),
         environment = System.getenv("TORVE_SENTRY_ENV") ?: "production",
     )
+    // Pass the raw `version` ("1.0.6") here, NOT `versionLabel` ("Version
+    // 1.0.6"). UpdateChecker.isStrictlyNewer splits on `.`/`-`/`+` then
+    // compares parts numerically; a "Version " prefix forces a string
+    // compare that always returns false, silently breaking the in-app
+    // updater for every installed build. Caught by B4 smoke 2026-05-03.
     globalUpdateChecker = com.torve.desktop.updates.UpdateChecker(
-        currentVersion = releaseInfo.versionLabel,
+        currentVersion = releaseInfo.version,
     )
     // Process-wide reminder scheduler - fires regardless of which page
     // is mounted. Pulls from globalReminderStore, dispatches via tray.

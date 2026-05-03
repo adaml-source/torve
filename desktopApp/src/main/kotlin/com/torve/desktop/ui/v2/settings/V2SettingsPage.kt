@@ -2507,16 +2507,60 @@ private fun AboutSection(
                 },
             )
 
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            // Track local "in progress" state separately from the global
+            // checker's StateFlow — `check()` doesn't expose an in-flight
+            // signal, and the StateFlow only reflects the *result*. Without
+            // this the button used to fire-and-forget with zero feedback;
+            // caught by B4 smoke 2026-05-03 as a UX bug.
+            val updaterState by (com.torve.desktop.globalUpdateChecker?.state
+                ?: kotlinx.coroutines.flow.MutableStateFlow(
+                    com.torve.desktop.updates.UpdateChecker.Result.UpToDate,
+                ))
+                .collectAsState()
+            var checkInProgress by remember { mutableStateOf(false) }
+            var lastCheckedAt by remember { mutableStateOf<Long?>(null) }
+            val checkScope = rememberCoroutineScope()
+            val checkerEnabled = com.torve.desktop.globalUpdateChecker?.isEnabled == true
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 TorveGhostButton(
-                    text = ds("Check for updates now"),
+                    text = if (checkInProgress) ds("Checking…") else ds("Check for updates now"),
+                    enabled = !checkInProgress && checkerEnabled,
                     onClick = {
-                        @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
-                        kotlinx.coroutines.GlobalScope.launch {
-                            com.torve.desktop.globalUpdateChecker?.check()
+                        val checker = com.torve.desktop.globalUpdateChecker ?: return@TorveGhostButton
+                        checkInProgress = true
+                        checkScope.launch {
+                            try {
+                                checker.check()
+                            } finally {
+                                lastCheckedAt = System.currentTimeMillis()
+                                checkInProgress = false
+                            }
                         }
                     },
                 )
+                val statusText: String? = when {
+                    !checkerEnabled -> "Disabled — set TORVE_UPDATE_REPO or TORVE_UPDATE_FEED."
+                    checkInProgress -> null  // button label already conveys this
+                    lastCheckedAt == null -> null  // never run yet from this button
+                    else -> when (val s = updaterState) {
+                        is com.torve.desktop.updates.UpdateChecker.Result.Available ->
+                            "Update available: ${s.info.tag}"
+                        is com.torve.desktop.updates.UpdateChecker.Result.UpToDate ->
+                            "You're on the latest version."
+                        is com.torve.desktop.updates.UpdateChecker.Result.Failed ->
+                            "Check failed: ${s.reason}"
+                    }
+                }
+                if (statusText != null) {
+                    Text(
+                        text = statusText,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = TorveDesktopThemeTokens.colors.textSecondary,
+                    )
+                }
             }
         }
 

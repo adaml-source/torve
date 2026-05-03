@@ -1,4 +1,4 @@
-import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+﻿import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import java.io.FileInputStream
 import java.time.Instant
 import java.time.ZoneId
@@ -49,13 +49,13 @@ dependencies {
     implementation(libs.vlcj)
     implementation(libs.qrcode.kotlin)
     implementation(libs.kotlinx.serialization.json)
-    // NewPipeExtractor — pure-JVM YouTube URL resolver, used as the
+    // NewPipeExtractor â€” pure-JVM YouTube URL resolver, used as the
     // first-line fallback in TrailerOverlay. YouTube periodically breaks
     // its parser; bump this pin when trailers stop playing. The
     // user-facing path also tries yt-dlp first (when installed) which is
     // the most reliable resolver in 2026.
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.24.6")
-    // Sentry — DSN is read from TORVE_SENTRY_DSN at runtime, so the SDK is
+    // Sentry â€” DSN is read from TORVE_SENTRY_DSN at runtime, so the SDK is
     // a no-op until ops sets it. We add the dependency unconditionally so we
     // never have a build matrix where crashes can land in a binary that has
     // nothing to send them with.
@@ -69,7 +69,7 @@ dependencies {
 val bundledVlcDirectory = layout.projectDirectory.dir("runtime/windows/vlc")
 val packagingChecklistDoc = layout.projectDirectory.file("WINDOWS_PACKAGING.md")
 
-// Optional bundled libmpv runtime — see desktopApp/MPV_BUNDLING.md.
+// Optional bundled libmpv runtime â€” see desktopApp/MPV_BUNDLING.md.
 // `appResourcesRootDir` is already wired to `runtime/`, so anything
 // dropped under `runtime/<os>/mpv/` ships with the package automatically;
 // these tasks just verify and document the drop.
@@ -91,14 +91,14 @@ tasks.register("verifyWindowsPackagingPrereqs") {
             )
         }
 
-        // ── Bundled VLC runtime: hard gate ───────────────────────────
+        // â”€â”€ Bundled VLC runtime: hard gate â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         // A release Torve package must ship a working VLC runtime; users
         // shouldn't have to install VLC, mpv, or set env vars. Set
         // `TORVE_PACKAGE_ALLOW_MISSING_RUNTIME=1` to downgrade this to a
         // warning for local dev packaging dry-runs only.
         //
         // **Release-build override**: when `TORVE_RELEASE_BUILD=1` is
-        // set the bypass is refused — release builds MUST have a
+        // set the bypass is refused â€” release builds MUST have a
         // complete runtime even if a tired engineer typed
         // `TORVE_PACKAGE_ALLOW_MISSING_RUNTIME=1` two terminals ago. CI
         // for `release/*` branches sets `TORVE_RELEASE_BUILD=1`.
@@ -136,7 +136,7 @@ tasks.register("verifyWindowsPackagingPrereqs") {
                 if (pluginCount < pluginFloor) {
                     problems += "VLC plugins/ directory only contains $pluginCount .dll files; " +
                         "expected at least $pluginFloor (a clean VLC 3.x install ships ~280). " +
-                        "Re-copy the full plugins/ tree — partial drops break codecs at runtime."
+                        "Re-copy the full plugins/ tree â€” partial drops break codecs at runtime."
                 }
                 // Spot-check that the required plugin families exist.
                 // A pruned plugins/ tree compiles fine through jpackage
@@ -161,12 +161,12 @@ tasks.register("verifyWindowsPackagingPrereqs") {
             }
         }
 
-        // ── Bundled MPV runtime: licensing gate ──────────────────────
+        // â”€â”€ Bundled MPV runtime: licensing gate â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         // appResourcesRootDir copies the entire `runtime/` tree into the
         // installer, so any binaries left in `runtime/windows/mpv/` ship
         // whether MPV is the active engine or not. MPV (libmpv) is
         // LGPL-2.1+; bundling it without the upstream COPYING is a
-        // licensing leak. Default state today is "no MPV bundled" — this
+        // licensing leak. Default state today is "no MPV bundled" â€” this
         // check just refuses to release if someone re-stages MPV
         // binaries without a license file.
         val mpvDir = bundledMpvWindowsDir.asFile
@@ -179,20 +179,20 @@ tasks.register("verifyWindowsPackagingPrereqs") {
             if (!hasMpvLicense) {
                 problems += "MPV binary bundled at ${mpvDir.absolutePath} (${mpvBinaries.joinToString(", ") { it.name }}) " +
                     "without a license notice. libmpv is LGPL-2.1+; drop LICENSE-MPV.txt or remove the binaries. " +
-                    "Default release shape is no MPV bundled — see runtime/windows/mpv/README.txt."
+                    "Default release shape is no MPV bundled â€” see runtime/windows/mpv/README.txt."
             }
         }
 
         if (problems.isNotEmpty()) {
             val summary = buildString {
                 appendLine("Bundled playback runtime is not release-ready:")
-                problems.forEach { appendLine("  • $it") }
+                problems.forEach { appendLine("  â€¢ $it") }
                 appendLine()
-                appendLine("Easiest path — run the staging script:")
+                appendLine("Easiest path â€” run the staging script:")
                 appendLine("  Windows: powershell desktopApp/scripts/stage-windows-vlc-runtime.ps1")
                 appendLine("  Linux/macOS CI: TORVE_VLC_PORTABLE=<dir> desktopApp/scripts/stage-windows-vlc-runtime.sh")
                 appendLine()
-                appendLine("Manual path — stage VLC runtime under ${vlcDir.absolutePath}:")
+                appendLine("Manual path â€” stage VLC runtime under ${vlcDir.absolutePath}:")
                 appendLine("  - Copy libvlc.dll, libvlccore.dll, and plugins/ from a clean")
                 appendLine("    install of VLC 64-bit (e.g. C:\\Program Files\\VideoLAN\\VLC).")
                 appendLine("  - Drop the upstream COPYING.txt next to libvlc.dll.")
@@ -206,7 +206,7 @@ tasks.register("verifyWindowsPackagingPrereqs") {
             }
             if (allowMissing) {
                 logger.warn(summary)
-                logger.warn("TORVE_PACKAGE_ALLOW_MISSING_RUNTIME=1 is set — continuing without a release-ready runtime.")
+                logger.warn("TORVE_PACKAGE_ALLOW_MISSING_RUNTIME=1 is set â€” continuing without a release-ready runtime.")
             } else {
                 throw GradleException(summary)
             }
@@ -236,7 +236,7 @@ tasks.register("verifyMpvRuntime") {
         println("  windows: ${if (win) "OK" else "missing"} (${bundledMpvWindowsDir.asFile.absolutePath})")
         println("  macos:   ${if (mac) "OK" else "missing"} (${bundledMpvMacosDir.asFile.absolutePath})")
         println("  linux:   ${if (linux) "OK" else "missing"} (${bundledMpvLinuxDir.asFile.absolutePath})")
-        println("MPV is optional — Torve falls back to VLC when absent. " +
+        println("MPV is optional â€” Torve falls back to VLC when absent. " +
             "See desktopApp/MPV_BUNDLING.md for drop instructions.")
     }
 }
@@ -322,6 +322,15 @@ compose.desktop {
 
         nativeDistributions {
             appResourcesRootDir.set(layout.projectDirectory.dir("runtime"))
+            // java.sql       - SQLDelight + JDBC drivers
+            // java.net.http  - HttpClient used by Newznab / TorBox NZB clients
+            //                  (regression: B4 smoke 2026-05-03 caught a
+            //                  NoClassDefFoundError post-wizard because this
+            //                  module was missing from the runtime image)
+            // jdk.crypto.ec  - Elliptic-curve TLS cipher suites for HTTPS to
+            //                  ngrok / GitHub / generic CDNs
+            // jdk.unsupported - sun.misc.Unsafe used transitively by some libs
+            modules("java.sql", "java.net.http", "jdk.crypto.ec", "jdk.unsupported")
             // All three host families. The Compose Gradle plugin only
             // produces formats it can actually build on the current host
             // (Windows can't sign a DMG; Linux can't make MSIs), but
@@ -331,11 +340,11 @@ compose.desktop {
                 // Windows
                 TargetFormat.Exe,
                 TargetFormat.Msi,
-                // macOS — DMG is the canonical install bundle. Notarization
+                // macOS â€” DMG is the canonical install bundle. Notarization
                 // requires Developer ID + altool; not part of this task,
                 // see release/ for the wiring once certs are provisioned.
                 TargetFormat.Dmg,
-                // Linux — Deb covers Debian/Ubuntu, AppImage is the
+                // Linux â€” Deb covers Debian/Ubuntu, AppImage is the
                 // distro-agnostic single-file path.
                 TargetFormat.Deb,
                 TargetFormat.AppImage,
@@ -344,7 +353,7 @@ compose.desktop {
             packageVersion = "1.0.6"
             vendor = "Torve"
             description = "Torve cross-platform media hub. Browse. Pick. Watch."
-            copyright = "© 2026 Torve"
+            copyright = "Â© 2026 Torve"
             licenseFile.set(layout.projectDirectory.file("LICENSE"))
 
             windows {
@@ -355,7 +364,7 @@ compose.desktop {
                 menuGroup = "Torve"
                 shortcut = true
                 dirChooser = true
-                // Stable upgrade UUID — required for MSI to recognise an
+                // Stable upgrade UUID â€” required for MSI to recognise an
                 // upgrade vs a fresh install. Generate once, never change
                 // for the lifetime of the product.
                 upgradeUuid = "1f2a4b80-3a87-4d52-9c6f-9b9c2d1f5b30"
@@ -395,3 +404,5 @@ compose.desktop {
         }
     }
 }
+
+
