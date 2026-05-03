@@ -80,6 +80,13 @@ RSYNC_FLAGS=(
     --exclude=node_modules
     --exclude=.coverage
     --exclude=htmlcov
+    # Repo-only artifacts. Prod runs under systemd, not Docker — these
+    # files have never existed on the VPS and shouldn't get pushed.
+    # They're kept in the repo for local-dev reference only. Caught by
+    # the first Option B dry-run 2026-05-03.
+    --exclude=Dockerfile
+    --exclude=docker-compose.yml
+    --exclude=docker-compose.yaml
 )
 
 if [[ "$MODE" == "dry" ]]; then
