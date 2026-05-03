@@ -127,7 +127,85 @@ class UpdateInstallerHandoff(
         }
         val final = Phase.HandedOff(installerFile)
         _phase.value = final
+
+        // Belt-and-suspenders: WiX's util:CloseApplication + msiexec /qb
+        // is the gentle path. But on environments where Restart Manager
+        // can't actually close us (Sandbox SID mismatch, weird policy
+        // configs), MSI falls back to "replace files on reboot" — which
+        // can land a half-replaced install if some operations queue and
+        // others don't. Sidestep the whole question by exiting Torve
+        // ourselves a moment after the installer's elevated child has
+        // had time to start. msiexec spawns its own elevated process;
+        // our exit doesn't take it down with us.
+        //
+        // Before exiting, spawn a detached PowerShell watchdog that
+        // waits for our PID to disappear, gives msiexec time to finish
+        // file replacement, then re-launches Torve.exe at the same
+        // path. Result: user sees Torve close, brief gap while the
+        // upgrade lands, then Torve reopens at the new version — no
+        // Start-Menu hop required (Fix C).
+        if (System.getProperty("os.name").orEmpty().lowercase().contains("windows")) {
+            runCatching { spawnWindowsRelaunchWatchdog() }
+            try {
+                Thread.sleep(1_500)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+            kotlin.system.exitProcess(0)
+        }
+
         final
+    }
+
+    /**
+     * Spawns a detached PowerShell process that waits for the current
+     * Torve PID to exit, sleeps long enough for msiexec to finish
+     * replacing files (~12 s — the bulk of msiexec's file-copy phase
+     * for a ~200 MB MSI on a typical SSD), then launches the freshly-
+     * installed `Torve.exe` from the same path the running process
+     * was loaded from. The watchdog inherits no stdio so it survives
+     * our `exitProcess(0)` call.
+     */
+    private fun spawnWindowsRelaunchWatchdog() {
+        val currentPid = ProcessHandle.current().pid()
+        val torveExePath = ProcessHandle.current().info().command().orElse(null)
+            ?: defaultInstalledTorveExePath()
+        // PowerShell single-quoted strings escape internal quotes by
+        // doubling them. Defensive even though our paths shouldn't
+        // contain quotes in practice.
+        val safePath = torveExePath.replace("'", "''")
+        val script = buildString {
+            appendLine("\$ErrorActionPreference = 'SilentlyContinue'")
+            // Wait for Torve to die (max 30 s; if Torve never exits the
+            // upgrade can't proceed and the watchdog is moot anyway).
+            appendLine("\$deadline = (Get-Date).AddSeconds(30)")
+            appendLine("while ((Get-Process -Id $currentPid -ErrorAction SilentlyContinue) -and (Get-Date) -lt \$deadline) { Start-Sleep -Milliseconds 250 }")
+            // Give msiexec time to finish file replacement. Empirically
+            // 8–12 s is plenty for a ~200 MB install on SSD; longer is
+            // harmless because the user just sees a slightly delayed
+            // relaunch.
+            appendLine("Start-Sleep -Seconds 12")
+            // Launch the freshly-installed exe. Detached so this watchdog
+            // exits cleanly afterwards.
+            appendLine("Start-Process -FilePath '$safePath'")
+        }
+        ProcessBuilder(
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle", "Hidden",
+            "-Command", script,
+        ).apply {
+            // Detach stdio so the watchdog isn't dragged down with us.
+            redirectInput(ProcessBuilder.Redirect.from(File("NUL")))
+            redirectOutput(ProcessBuilder.Redirect.to(File("NUL")))
+            redirectError(ProcessBuilder.Redirect.to(File("NUL")))
+        }.start()
+    }
+
+    private fun defaultInstalledTorveExePath(): String {
+        val pf = System.getenv("ProgramFiles") ?: "C:\\Program Files"
+        return "$pf\\Torve\\Torve.exe"
     }
 
     private fun fail(reason: String): Phase {
@@ -201,7 +279,16 @@ class UpdateInstallerHandoff(
             val isWindows = "windows" in n
             val isMsi = file.name.endsWith(".msi", ignoreCase = true)
             return if (isWindows && isMsi) {
-                listOf("msiexec.exe", "/i", file.absolutePath)
+                // /qb = basic UI: progress bar only, no interactive prompts.
+                // Without this, msiexec defaults to full UI and surfaces the
+                // "Files in Use" dialog the moment Restart Manager spots
+                // the running Torve.exe — before WixCloseApplications gets
+                // to close it. /qb lets the basic-UI sequence run through
+                // and our util:CloseApplication action terminates Torve
+                // silently. Full silent (/qn) would also work but hides
+                // any genuine install errors from the user; /qb is the
+                // standard "in-app updater" balance.
+                listOf("msiexec.exe", "/i", file.absolutePath, "/qb")
             } else {
                 null
             }

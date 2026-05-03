@@ -1,4 +1,5 @@
 ﻿import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import java.io.File
 import java.io.FileInputStream
 import java.time.Instant
 import java.time.ZoneId
@@ -301,6 +302,145 @@ listOf(
     }
 }
 
+// Custom MSI build that injects a `util:CloseApplication` element via a
+// hand-rolled WiX template. Compose Desktop's bundled `packageMsi` task
+// has no hook for `--resource-dir`, so we drive `jpackage` directly here
+// after the app image has been produced by `createDistributable`. The
+// resulting MSI's Restart Manager force-closes any running Torve.exe
+// before file copy, which fixes the "Files in Use" dialog the in-app
+// updater handoff would otherwise trigger on upgrade.
+//
+// Use this task — NOT `packageMsi` — for any release that ships the
+// updater. CI for `release/*` branches must call `packageMsiCloseApp`.
+tasks.register("packageMsiCloseApp") {
+    group = "distribution"
+    description = "Builds the Torve MSI with a util:CloseApplication element so the in-app updater can upgrade without 'Files in Use' prompts. Override version with -PtorveMsiVersion=X.Y.Z."
+    dependsOn("verifyWindowsPackagingPrereqs", "createDistributable")
+    // Default version matches the package version configured in
+    // compose.desktop.application.nativeDistributions; override at the
+    // CLI for one-off builds, e.g. `:desktopApp:packageMsiCloseApp -PtorveMsiVersion=1.0.6`.
+    val torveVersion = (project.findProperty("torveMsiVersion") as String?) ?: "1.0.7"
+    val wixResourceDir = layout.projectDirectory.dir("wix-resources")
+    val outDir = layout.buildDirectory.dir("compose/binaries/main-closeapp/msi")
+    inputs.dir(wixResourceDir)
+    outputs.dir(outDir)
+
+    doLast {
+        val outDirFile = outDir.get().asFile
+        outDirFile.mkdirs()
+
+        val appImage = layout.buildDirectory
+            .dir("compose/binaries/main/app/Torve")
+            .get().asFile
+        if (!appImage.exists()) {
+            throw GradleException(
+                "Compose Desktop app image missing at ${appImage.absolutePath}. " +
+                    "Run :desktopApp:createDistributable first.",
+            )
+        }
+
+        val jpackage = locateJpackage()
+        val args = mutableListOf(
+            jpackage.absolutePath,
+            "--type", "msi",
+            "--app-image", appImage.absolutePath,
+            "--dest", outDirFile.absolutePath,
+            "--name", "Torve",
+            "--app-version", torveVersion,
+            "--vendor", "Torve",
+            "--description", "Torve cross-platform media hub. Browse. Pick. Watch.",
+            "--copyright", "© 2026 Torve",
+            "--license-file", layout.projectDirectory.file("LICENSE").asFile.absolutePath,
+            "--resource-dir", wixResourceDir.asFile.absolutePath,
+            "--icon", layout.projectDirectory
+                .file("src/main/resources/torve.ico").asFile.absolutePath,
+            "--win-menu",
+            "--win-menu-group", "Torve",
+            "--win-shortcut",
+            "--win-shortcut-prompt",
+            "--win-dir-chooser",
+            "--win-upgrade-uuid", "1f2a4b80-3a87-4d52-9c6f-9b9c2d1f5b30",
+            // NOTE: omitting --win-per-user-install gives a perMachine
+            // install, matching `perUserInstall = false` in the Compose
+            // windows{} block. Required so the elevated MSI can close
+            // any running Torve.exe via util:CloseApplication.
+        )
+
+        // jpackage needs WiX 3.x's candle.exe + light.exe on PATH. The
+        // Compose Desktop plugin already downloads WiX 3.11 to
+        // <rootProject>/build/wix311 (see :downloadWix / :unzipWix);
+        // we prepend that to PATH so jpackage finds the tools without
+        // requiring a system-wide WiX install.
+        val wixDir = rootProject.layout.buildDirectory
+            .dir("wix311")
+            .get().asFile
+        if (!wixDir.resolve("candle.exe").exists()) {
+            throw GradleException(
+                "WiX tools missing at ${wixDir.absolutePath}. " +
+                    "Run :downloadWix / :unzipWix first (these run automatically " +
+                    "via createDistributable's normal pipeline; if you see this, " +
+                    "the Compose Desktop WiX bundle download was skipped).",
+            )
+        }
+
+        logger.lifecycle("Running jpackage to build MSI with CloseApplication: ${args.drop(1).joinToString(" ")}")
+        val process = ProcessBuilder(args)
+            .redirectErrorStream(true)
+            .also { pb ->
+                val env = pb.environment()
+                val existingPath = env["PATH"] ?: env["Path"] ?: ""
+                env["PATH"] = "${wixDir.absolutePath}${File.pathSeparator}$existingPath"
+            }
+            .start()
+        process.inputStream.bufferedReader().useLines { lines ->
+            lines.forEach { logger.lifecycle("[jpackage] $it") }
+        }
+        val exit = process.waitFor()
+        if (exit != 0) {
+            throw GradleException("jpackage failed with exit code $exit")
+        }
+
+        val produced = outDirFile.listFiles { f -> f.name.endsWith(".msi") }?.firstOrNull()
+        if (produced == null) {
+            throw GradleException("jpackage finished but no .msi found in ${outDirFile.absolutePath}")
+        }
+        logger.lifecycle("packageMsiCloseApp produced: ${produced.absolutePath}")
+    }
+}
+
+// Locate a JDK that ships jpackage. JBR (the Android Studio bundled JDK
+// used for everyday gradle work) does NOT include the jdk.jpackage
+// module, so we fall back to a discovered JDK 21+ install. Override
+// with TORVE_JPACKAGE_JDK if you have a non-default location.
+fun locateJpackage(): File {
+    val override = System.getenv("TORVE_JPACKAGE_JDK")
+    if (!override.isNullOrBlank()) {
+        val candidate = File(override).resolve("bin/jpackage.exe")
+        if (candidate.exists()) return candidate
+        throw GradleException("TORVE_JPACKAGE_JDK is set but $candidate does not exist")
+    }
+    val javaHome = File(System.getProperty("java.home"))
+    val onPath = javaHome.resolve("bin/jpackage.exe")
+    if (onPath.exists()) return onPath
+    val pf = System.getenv("ProgramFiles") ?: "C:/Program Files"
+    val candidates = listOf(
+        File(pf, "Java"),
+        File(pf, "Eclipse Adoptium"),
+        File(pf, "Microsoft"),
+    )
+    for (base in candidates) {
+        if (!base.exists()) continue
+        val match = base.listFiles()
+            ?.filter { it.isDirectory && it.resolve("bin/jpackage.exe").exists() }
+            ?.maxByOrNull { it.name }
+        if (match != null) return match.resolve("bin/jpackage.exe")
+    }
+    throw GradleException(
+        "No JDK with jpackage.exe found. JBR doesn't ship jdk.jpackage. " +
+            "Install JDK 21+ from https://adoptium.net or set TORVE_JPACKAGE_JDK.",
+    )
+}
+
 compose.desktop {
     application {
         mainClass = "com.torve.desktop.MainKt"
@@ -368,6 +508,7 @@ compose.desktop {
                 // upgrade vs a fresh install. Generate once, never change
                 // for the lifetime of the product.
                 upgradeUuid = "1f2a4b80-3a87-4d52-9c6f-9b9c2d1f5b30"
+                iconFile.set(layout.projectDirectory.file("src/main/resources/torve.ico"))
             }
 
             macOS {

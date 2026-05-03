@@ -166,7 +166,11 @@ class UpdateInstallerHandoffTest {
     fun resolveLauncher_windowsMsi_returnsMsiexecCommand() {
         val file = File("C:/foo/torve-update.msi")
         val cmd = UpdateInstallerHandoff.resolveLauncherCommand(file, "Windows 11")
-        assertEquals(listOf("msiexec.exe", "/i", file.absolutePath), cmd)
+        // /qb suppresses Restart Manager's "Files in Use" dialog so the
+        // baked-in WiX util:CloseApplication custom action can close
+        // the running Torve.exe silently. Without /qb msiexec defaults
+        // to full UI and the dialog fires before our action runs.
+        assertEquals(listOf("msiexec.exe", "/i", file.absolutePath, "/qb"), cmd)
     }
 
     @Test

@@ -128,3 +128,17 @@ __pycache__/
 # Extracted/disassembled JAR contents that landed at repo root
 /docs_extract/
 /uk/
+
+# Sandbox smoke kit — runtime artefacts (huge MSIs, cloudflared.exe,
+# generated appcast.xml, feed-url.txt, cloudflared.log). Scripts in
+# this directory are committed under their own paths; the kit folder
+# itself is operator scratch.
+smoke-kit/Torve-*.msi
+smoke-kit/cloudflared.exe
+smoke-kit/cloudflared.log
+smoke-kit/appcast.xml
+smoke-kit/feed-url.txt
+
+# Stray VLC runtime that landed at the repo root rather than under
+# the structured runtime/windows/vlc/ tree (recovered from previous
+# packaging troubleshooting).

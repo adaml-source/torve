@@ -1,0 +1,12 @@
+<Configuration>
+  <MappedFolders>
+    <MappedFolder>
+      <HostFolder>C:\Users\Anwender\StudioProjects\streamvault\smoke-kit</HostFolder>
+      <SandboxFolder>C:\smoke</SandboxFolder>
+      <ReadOnly>false</ReadOnly>
+    </MappedFolder>
+  </MappedFolders>
+  <Networking>Default</Networking>
+  <ClipboardRedirection>true</ClipboardRedirection>
+  <MemoryInMB>4096</MemoryInMB>
+</Configuration>
