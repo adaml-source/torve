@@ -451,6 +451,24 @@ compose.desktop {
         val releaseChannel = providers.environmentVariable("TORVE_RELEASE_CHANNEL")
             .orElse("internal-preview")
             .get()
+        // Auto-update feed URL — baked into the packaged build so the
+        // in-app updater works out of the box for end users without
+        // any TORVE_UPDATE_FEED env-var ceremony. The runtime resolver
+        // (UpdateChecker.resolveDefaultFeed) still prefers the env var
+        // when set, so dev / QA can point a packaged build at a
+        // Sandbox cloudflared tunnel or staging feed without rebuilding.
+        //
+        // Set at build time via `-PtorveUpdateFeed=…` or the
+        // TORVE_UPDATE_FEED env var. Empty string by default — dev
+        // builds with no feed configured stay no-op (no ping).
+        val updateFeedUrl = providers.environmentVariable("TORVE_UPDATE_FEED")
+            .orElse(providers.gradleProperty("torveUpdateFeed"))
+            .orElse("")
+            .get()
+        val updateRepo = providers.environmentVariable("TORVE_UPDATE_REPO")
+            .orElse(providers.gradleProperty("torveUpdateRepo"))
+            .orElse("")
+            .get()
         jvmArgs += listOf(
             "-DTMDB_API_KEY=${readTmdbApiKey()}",
             "-Dtorve.desktop.appName=Torve",
@@ -458,6 +476,8 @@ compose.desktop {
             "-Dtorve.desktop.vendor=Torve",
             "-Dtorve.desktop.description=Torve desktop for Windows with embedded VLC playback.",
             "-Dtorve.desktop.channel=$releaseChannel",
+            "-Dtorve.update.feed=$updateFeedUrl",
+            "-Dtorve.update.repo=$updateRepo",
         )
 
         nativeDistributions {

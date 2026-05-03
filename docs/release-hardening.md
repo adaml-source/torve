@@ -56,7 +56,9 @@ rotation requires an explicit re-encryption/re-wrap migration; there is
 | `TORVE_RELEASE_CHANNEL` | Release packaging | Tags the build's `Channel` field. Default `internal-preview`. Stable releases pass `stable`. |
 | `TORVE_RELEASE_BUILD=1` | CI release pipelines | Refuses to bypass missing-VLC gate via `TORVE_PACKAGE_ALLOW_MISSING_RUNTIME` |
 | `TORVE_PACKAGE_ALLOW_MISSING_RUNTIME=1` | Local dev only | Downgrades the VLC-runtime gate to a warning. Refused when `TORVE_RELEASE_BUILD=1`. |
-| `TORVE_UPDATE_FEED` *or* `TORVE_UPDATE_REPO` | In-app updater enabled | Updater idle without either |
+| `TORVE_UPDATE_FEED` *or* `TORVE_UPDATE_REPO` | In-app updater enabled (runtime override) | Wins over the baked-in URL. Use for dev / QA / Sandbox smoke. Updater idle when neither this nor a baked-in URL is set. |
+| `-PtorveUpdateFeed=…` *or* `TORVE_UPDATE_FEED` at packaging time | **Production builds** | Baked into `Torve.cfg` as `-Dtorve.update.feed=…` so the in-app updater works for end users without any env-var ceremony. Example: `./gradlew :desktopApp:packageMsiCloseApp -PtorveUpdateFeed=https://torve.example/releases/appcast.xml`. The runtime resolver (`UpdateChecker.resolveDefaultFeed`) prefers the env var when present so a packaged build can still be redirected at runtime. |
+| `-PtorveUpdateRepo=…` | Optional GitHub-Releases fallback | Same precedence as the feed flag. Compiled into `-Dtorve.update.repo=…`. Used when the feed URL is unset and the user wants the GitHub `releases/latest` JSON path. |
 | `TORVE_TELEMETRY_SINK` | Optional | `println` for dev logging; unset = NoOp. **All sinks are wrapped in a redacting decorator.** |
 | `SENTRY_DSN` (or whatever `SentryBootstrap.DSN_ENV` resolves to) | Crash reporting | Reporting disabled when unset |
 

@@ -35,8 +35,8 @@ import java.net.URL
  */
 class UpdateChecker(
     val currentVersion: String,
-    private val repo: String? = System.getenv(REPO_ENV),
-    private val feedOverride: String? = System.getenv(FEED_ENV),
+    private val repo: String? = resolveDefaultRepo(),
+    private val feedOverride: String? = resolveDefaultFeed(),
 ) {
 
     @Serializable
@@ -241,5 +241,30 @@ class UpdateChecker(
     companion object {
         const val REPO_ENV: String = "TORVE_UPDATE_REPO"
         const val FEED_ENV: String = "TORVE_UPDATE_FEED"
+        const val FEED_PROPERTY: String = "torve.update.feed"
+        const val REPO_PROPERTY: String = "torve.update.repo"
+
+        /**
+         * Resolves the feed URL the running app should poll. Precedence:
+         *
+         *   1. `TORVE_UPDATE_FEED` environment variable — for dev / QA
+         *      who need to point a packaged build at a Sandbox tunnel
+         *      or staging feed without rebuilding.
+         *   2. `-Dtorve.update.feed=…` system property — baked into the
+         *      packaged build by the gradle `application { jvmArgs }`
+         *      block at packaging time. This is what ships to end users
+         *      so auto-update works out of the box without any env-var
+         *      ceremony.
+         *   3. null — checker becomes a no-op (matches the dev-build
+         *      contract: unconfigured Torve doesn't ping any URL).
+         */
+        fun resolveDefaultFeed(): String? =
+            System.getenv(FEED_ENV)?.takeIf { it.isNotBlank() }
+                ?: System.getProperty(FEED_PROPERTY)?.takeIf { it.isNotBlank() }
+
+        /** Same precedence as [resolveDefaultFeed] for the GitHub-repo fallback. */
+        fun resolveDefaultRepo(): String? =
+            System.getenv(REPO_ENV)?.takeIf { it.isNotBlank() }
+                ?: System.getProperty(REPO_PROPERTY)?.takeIf { it.isNotBlank() }
     }
 }

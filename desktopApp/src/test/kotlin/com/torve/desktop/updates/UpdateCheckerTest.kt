@@ -237,4 +237,41 @@ class UpdateCheckerTest {
         )
         assertTrue(withFeed.isEnabled)
     }
+
+    // ── default-resolver precedence ────────────────────────────
+    // The packaged build sets `-Dtorve.update.feed=…` so end users
+    // get auto-update without env-var fiddling. The env var still
+    // wins for dev / QA who need to swap feeds at runtime.
+
+    @Test
+    fun resolveDefaultFeed_picksUpSystemPropertyWhenEnvUnset() {
+        val key = UpdateChecker.FEED_PROPERTY
+        val previous = System.getProperty(key)
+        try {
+            System.setProperty(key, "https://torve.example/appcast.xml")
+            // Note: this test assumes TORVE_UPDATE_FEED is not set in
+            // the test environment. CI must not set it.
+            assertEquals(
+                "https://torve.example/appcast.xml",
+                UpdateChecker.resolveDefaultFeed(),
+            )
+        } finally {
+            if (previous == null) System.clearProperty(key) else System.setProperty(key, previous)
+        }
+    }
+
+    @Test
+    fun resolveDefaultFeed_returnsNullWhenBlank() {
+        val key = UpdateChecker.FEED_PROPERTY
+        val previous = System.getProperty(key)
+        try {
+            // Empty string is the build.gradle default when no feed
+            // is configured at packaging time. The resolver must
+            // treat "" as unconfigured, not as a real URL.
+            System.setProperty(key, "")
+            assertEquals(null, UpdateChecker.resolveDefaultFeed())
+        } finally {
+            if (previous == null) System.clearProperty(key) else System.setProperty(key, previous)
+        }
+    }
 }
