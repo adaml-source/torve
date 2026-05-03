@@ -1456,10 +1456,12 @@ fun V2App(
                             val handoff = remember(available.info) {
                                 com.torve.desktop.updates.UpdateInstallerHandoff()
                             }
+                            val handoffPhase by handoff.phase.collectAsState()
                             com.torve.desktop.updates.UpdateBanner(
                                 info = available.info,
                                 currentVersion = com.torve.desktop.globalUpdateChecker
                                     ?.currentVersion ?: "",
+                                handoffPhase = handoffPhase,
                                 onView = {
                                     runCatching {
                                         java.awt.Desktop.getDesktop().browse(
