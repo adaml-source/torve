@@ -1,30 +1,60 @@
 """
-Server-side policy for account settings.
+Server-side policy for account settings: silent-strip of secret-bearing keys.
 
-Defines which keys are FORBIDDEN from being stored in account settings.
-This is the authoritative server-side denylist. Third-party API secrets,
-OAuth tokens, and credential material must never be persisted in
-account settings — even if a stale or malicious client tries to push them.
+Threat model
+------------
+The /me/account-settings endpoint is a cross-device sync store. A stale,
+buggy, or malicious client could push credentials (debrid API keys, Trakt /
+SIMKL OAuth tokens, AI-provider API keys, Jellyfin / Plex credentials) into
+it. Those would then:
+  - sit in the `account_settings.settings` JSON blob at rest
+  - sync to every signed-in device
+  - leak through any future DB dump / backup / read-only share
 
-Enforcement behavior: SILENT STRIP.
-- Forbidden keys are removed from incoming PATCH payloads before persistence.
-- GET responses also strip forbidden keys from legacy data for defense in depth.
-- Safe keys in a mixed payload are still persisted normally.
-- This is chosen over 4xx rejection because:
-  - Old clients may still push mixed payloads (graceful degradation).
-  - Users should not lose safe settings because one forbidden key was included.
-  - Silent stripping is a safe, non-breaking enforcement boundary.
+The right place to enforce "never persist secrets here" is server-side, not
+client-side, because clients can't be trusted to all be current and the
+sync store itself is the attack surface.
+
+Enforcement
+-----------
+Silent strip. Forbidden keys are removed from incoming PATCH payloads
+before persistence AND from stored rows on GET (defense in depth for
+legacy rows written before this policy existed). Reasons for strip-not-
+reject:
+  - Old clients may send mixed payloads (safe keys + a stray secret);
+    we don't want to break their safe-key persistence.
+  - User-visible 4xx would be confusing for a client-side bug.
+  - Silent strip + structured log line gives the operator a trail
+    without breaking the user.
+
+Membership
+----------
+Two tiers:
+  1. Explicit denylist (FORBIDDEN_ACCOUNT_SETTINGS_KEYS) — known
+     secret-bearing keys the Android client currently ships. Verified
+     against the client source at port time.
+  2. Pattern denylist (_SECRET_PATTERNS) — catch-all for future keys
+     the client may add without remembering to update the explicit list.
+     Covers the standard shapes (_api_key, _access_token, _refresh_token,
+     _client_secret, _password, _cookie, _bearer, _webhook_secret,
+     _auth_header).
+
+Adding to the explicit list is cheap — a non-secret key added by mistake
+just loses user convenience. Missing a secret key leaks credentials.
+Err generous.
 """
+from __future__ import annotations
 
 import logging
 import re
+import uuid
 
-logger = logging.getLogger(__name__)
+_log = logging.getLogger(__name__)
 
-# ── Explicit denylist of secret-bearing keys ──
-# Any key in this set will be stripped from incoming PATCH payloads
-# and from GET responses (for legacy rows).
 
+# Explicit denylist of known secret-bearing keys. Verified against the
+# Android client source at port time; any key matching a client-shipped
+# credential field should be listed here.
 FORBIDDEN_ACCOUNT_SETTINGS_KEYS: frozenset[str] = frozenset({
     # Debrid credentials
     "debrid_api_key",
@@ -53,17 +83,24 @@ FORBIDDEN_ACCOUNT_SETTINGS_KEYS: frozenset[str] = frozenset({
     "jellyfin_api_key",
     "plex_access_token",
     "kodi_hosts_json",  # may contain auth credentials in host entries
-    # Auth tokens (should never be in account settings)
+    # Auth tokens (should never be synced via account settings)
     "auth_access_token",
     "auth_refresh_token",
     "auth_token_expires_at",
-    # Legacy secret transport blob
+    # Legacy secret-transport blob
     "_sync_payload",
 })
 
-# ── Pattern-based denylist for catch-all safety ──
-# Matches keys that look like secrets even if not explicitly listed.
-_SECRET_PATTERNS: list[re.Pattern] = [
+# Allowlist of keys that match a pattern below but are NOT secrets.
+# Think carefully before adding here — a mistaken allowlist entry leaks.
+_ALLOWED_OVERRIDE_KEYS: frozenset[str] = frozenset({
+    "has_password",   # boolean flag — whether the user has a password set.
+                      # Matches .*_password$ but is not the password itself.
+})
+
+# Pattern denylist — catches new keys the client may add without
+# remembering to update the explicit list above. Ordered by likelihood.
+_SECRET_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r".*_api_key$", re.IGNORECASE),
     re.compile(r".*_access_token$", re.IGNORECASE),
     re.compile(r".*_refresh_token$", re.IGNORECASE),
@@ -79,43 +116,63 @@ _SECRET_PATTERNS: list[re.Pattern] = [
 
 
 def is_forbidden_key(key: str) -> bool:
-    """Check if a key is forbidden from account settings storage."""
+    """True when `key` must not be persisted in account settings."""
+    if key in _ALLOWED_OVERRIDE_KEYS:
+        return False
     if key in FORBIDDEN_ACCOUNT_SETTINGS_KEYS:
         return True
-    for pattern in _SECRET_PATTERNS:
-        if pattern.match(key):
-            return True
-    return False
+    return any(p.match(key) for p in _SECRET_PATTERNS)
 
 
-def strip_forbidden_keys(settings: dict[str, str | None]) -> dict[str, str | None]:
+def strip_forbidden_keys(
+    settings: dict[str, object],
+    *,
+    user_id: uuid.UUID | None = None,
+    context: str = "patch",
+) -> dict[str, object]:
+    """Return a new dict with forbidden keys removed. Logs stripped keys.
+
+    `context` = "patch" (write path), "get" (read-side scrub of legacy
+    rows), or "backfill" (one-shot cleanup script). Used in the audit
+    log line so an operator can tell where a strip happened.
     """
-    Remove forbidden keys from a settings dict.
-    Returns a new dict with only safe keys.
-    Logs stripped keys for audit trail.
-    """
-    safe = {}
-    stripped = []
+    safe: dict[str, object] = {}
+    stripped: list[str] = []
     for key, value in settings.items():
         if is_forbidden_key(key):
             stripped.append(key)
         else:
             safe[key] = value
     if stripped:
-        logger.warning("Stripped forbidden keys from account settings: %s", stripped)
+        _log.warning(
+            "ACCOUNT_SETTINGS_SECRET_STRIPPED user=%s context=%s count=%d keys=%s",
+            user_id, context, len(stripped), sorted(stripped),
+        )
     return safe
 
 
-def scrub_stored_settings(settings_json: dict) -> tuple[dict, list[str]]:
+def scrub_stored_settings(
+    settings_json: dict[str, object],
+    *,
+    user_id: uuid.UUID | None = None,
+    context: str = "get",
+) -> tuple[dict[str, object], list[str]]:
+    """Scrub an existing stored-settings blob.
+
+    Returns (scrubbed_dict, list_of_removed_keys). The caller decides
+    whether to persist the scrubbed dict back to the DB or just hide the
+    forbidden keys from the current response; both are valid uses.
     """
-    Remove forbidden keys from an existing stored settings blob.
-    Returns (scrubbed_dict, list_of_removed_keys).
-    """
-    scrubbed = {}
-    removed = []
+    scrubbed: dict[str, object] = {}
+    removed: list[str] = []
     for key, value in settings_json.items():
         if is_forbidden_key(key):
             removed.append(key)
         else:
             scrubbed[key] = value
+    if removed:
+        _log.warning(
+            "ACCOUNT_SETTINGS_LEGACY_SCRUB user=%s context=%s count=%d keys=%s",
+            user_id, context, len(removed), sorted(removed),
+        )
     return scrubbed, removed

@@ -1,384 +1,469 @@
+import uuid
 from datetime import datetime
+
 from pydantic import BaseModel, EmailStr, Field
 
 
-class DeviceRegistration(BaseModel):
-    installation_id: str = Field(min_length=8, max_length=128)
-    device_name: str = Field(min_length=1, max_length=120)
-    device_type: str = Field(min_length=1, max_length=40)
-    platform: str = Field(min_length=1, max_length=40)
+# ── User ──────────────────────────────────────────────────────────────────────
 
-
-class AuthRegisterRequest(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=8, max_length=256)
-    device: DeviceRegistration
-
-
-class AuthLoginRequest(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=8, max_length=256)
-    device: DeviceRegistration
-
-
-class AuthRefreshRequest(BaseModel):
-    refresh_token: str
-
-
-class AuthLogoutRequest(BaseModel):
-    refresh_token: str | None = None
-
-
-class PairingCodeRequest(BaseModel):
-    # `installation_id` is the canonical device identifier across the
-    # codebase (Device.installation_id has the unique constraint and
-    # /auth/register uses DeviceRegistration without device_id).
-    # The pairing endpoint only reads installation_id + name/type/platform;
-    # an additional device_id was schema bloat that broke the API contract
-    # for clients that follow the same pattern as register/login.
-    installation_id: str = Field(min_length=8, max_length=128)
-    device_name: str = Field(min_length=1, max_length=120)
-    device_type: str = Field(min_length=1, max_length=40)
-    platform: str = Field(min_length=1, max_length=40)
-
-
-class PairingClaimRequest(BaseModel):
-    code: str = Field(min_length=4, max_length=12)
-    installation_id: str | None = Field(default=None, min_length=8, max_length=128)
-    device_name: str | None = Field(default=None, min_length=1, max_length=120)
-    device_type: str | None = Field(default=None, min_length=1, max_length=40)
-    platform: str | None = Field(default=None, min_length=1, max_length=40)
-
-
-class PairingStatusRequest(BaseModel):
-    code: str = Field(min_length=4, max_length=12)
-    installation_id: str = Field(min_length=8, max_length=128)
-
-
-class UserResponse(BaseModel):
-    id: str
+class UserOut(BaseModel):
+    id: uuid.UUID
     email: str
+    display_name: str | None
+    is_active: bool
     is_verified: bool
+    has_lifetime_access: bool
+    has_premium_access: bool
     created_at: datetime
 
-
-class DeviceResponse(BaseModel):
-    id: str
-    installation_id: str
-    device_name: str
-    device_type: str
-    platform: str
-    last_seen_at: datetime
-    revoked_at: datetime | None = None
+    model_config = {"from_attributes": True}
 
 
-class TokensResponse(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
-    expires_in: int
-
-
-class AuthResponse(BaseModel):
-    user: UserResponse
-    device: DeviceResponse
-    tokens: TokensResponse
-
-
-class PairingCodeResponse(BaseModel):
-    code: str
-    expires_at: datetime
-
-
-class PairingStatusResponse(BaseModel):
-    status: str
-    paired_device: DeviceResponse | None = None
-    user: UserResponse | None = None
-    tokens: TokensResponse | None = None
-
-
-class PairingClaimResponse(BaseModel):
-    status: str
-    device: DeviceResponse
-
-
-class HealthResponse(BaseModel):
-    status: str
-    database: str
-    redis: str
-
-
-class SearchPushPayload(BaseModel):
-    query: str = Field(min_length=1, max_length=300)
-    filters: dict[str, str] = Field(default_factory=dict)
-    issued_by_device_id: str | None = None
-
-
-class SearchPushRequest(BaseModel):
-    target_device_id: str = Field(min_length=8, max_length=64)
-    payload: SearchPushPayload
-
-
-class PlaybackIntentPayload(BaseModel):
-    content_id: str = Field(min_length=1, max_length=128)
-    provider_target: str = Field(min_length=1, max_length=80)
-    position_ms: int = Field(ge=0)
-    media_type: str | None = Field(default=None, max_length=16)
-    audio: str | None = Field(default=None, max_length=80)
-    subtitles: str | None = Field(default=None, max_length=80)
-    issued_by_device_id: str | None = None
-
-
-class PlaybackIntentRequest(BaseModel):
-    target_device_id: str = Field(min_length=8, max_length=64)
-    payload: PlaybackIntentPayload
-
-
-class EventDispatchResponse(BaseModel):
-    status: str
-    event_id: str
-    target_device_id: str
-    event_type: str
-
-
-class WatchStateReportRequest(BaseModel):
-    content_id: str = Field(min_length=1, max_length=128)
-    provider: str = Field(min_length=1, max_length=80)
-    position_ms: int = Field(ge=0)
-
-
-class WatchStateReportResponse(BaseModel):
-    status: str
-    reported_at: datetime
-
-
-class WatchStateLatestResponse(BaseModel):
-    content_id: str
-    provider: str
-    position_ms: int
-    reported_at: datetime
-    device_id: str
-
-
-# ── Purchase & Entitlement Schemas ──
-
-
-class AppleVerifyRequest(BaseModel):
-    transaction_jws: str = Field(min_length=10, description="StoreKit 2 JWS signed transaction")
-    product_id: str = Field(min_length=1, max_length=128)
-    platform: str = Field(default="ios", max_length=40)
-
-
-class GoogleVerifyRequest(BaseModel):
-    product_id: str = Field(min_length=1, max_length=128)
-    purchase_token: str = Field(min_length=1)
-    platform: str = Field(default="google_play_mobile", max_length=40)
-
-
-class AmazonVerifyRequest(BaseModel):
-    receipt_id: str = Field(min_length=1, max_length=512)
-    amazon_user_id: str = Field(min_length=1, max_length=256)
-    product_id: str = Field(min_length=1, max_length=128)
-    platform: str = Field(default="amazon_fire_tv", max_length=40)
-
-
-class RestorePurchasesRequest(BaseModel):
-    store: str = Field(pattern="^(apple|google_play|amazon)$")
-    platform: str = Field(max_length=40)
-    receipt_data: str | None = None
-    purchase_token: str | None = None
-    amazon_user_id: str | None = None
-
-
-class EntitlementResponse(BaseModel):
-    key: str
-    status: str
-    source_store: str
-    starts_at: datetime
-    ends_at: datetime | None = None
-
-
-class EntitlementStateResponse(BaseModel):
-    user: UserResponse
-    entitlements: list[EntitlementResponse]
-    premium_access: bool
-
-
-class PurchaseResponse(BaseModel):
-    id: str
-    store: str
-    product_id: str
-    purchase_type: str
-    verification_status: str
-    purchased_at: datetime | None = None
-    created_at: datetime
-
-
-class PurchaseVerifyResponse(BaseModel):
-    status: str
-    purchase: PurchaseResponse
-    entitlements: list[EntitlementResponse]
-    premium_access: bool
-
-
-class PasswordResetRequestPayload(BaseModel):
-    email: EmailStr
-
-
-class PasswordResetConfirmPayload(BaseModel):
-    token: str = Field(min_length=1)
-    new_password: str = Field(min_length=8, max_length=256)
+class AccessStateOut(BaseModel):
+    has_premium_access: bool
+    access_tier: str  # "free", "premium_subscription", "premium_lifetime"
+    entitlement_type: str | None = None
+    source: str | None = None
+    granted_at: str | None = None
+    expires_at: str | None = None
+    auto_renew: bool | None = None
+    is_device_activated: bool | None = None
+    device_block_reason: str | None = None
+    # Pattern B: true when the user has an active entitlement that is
+    # hidden from THIS device because the email is not yet verified.
+    # Surfaces the "verify your email to use premium here" UX hint to
+    # the client without it computing the gate locally.
+    needs_verification: bool = False
 
 
 class MeResponse(BaseModel):
-    user: UserResponse
-    entitlements: list[EntitlementResponse]
-    premium_access: bool
+    """Canonical /me response: user profile + inline access state.
 
-
-# ── Device Governance Schemas ──
-
-
-class ManagedDeviceResponse(BaseModel):
-    id: str
-    device_name: str
-    device_type: str
-    platform: str
-    is_current: bool = False
-    is_active: bool = False
-    last_seen_at: datetime
-    activated_at: datetime | None = None
-    removed_at: datetime | None = None
-    removal_reason: str | None = None
-    first_seen_at: datetime
-
-
-class PremiumStateResponse(BaseModel):
-    has_entitlement: bool
-    premium_access: bool
-    reason: str
-    entitlements: list[EntitlementResponse]
-
-
-class DeviceStateResponse(BaseModel):
-    id: str
-    name: str
+    Clients should prefer access_tier and has_premium_access for gating.
+    has_lifetime_access is retained for backward compatibility only.
+    """
+    # User profile fields
+    id: uuid.UUID
+    email: str
+    display_name: str | None
     is_active: bool
-    active_device_count: int
-    max_active_devices: int
-    platform: str
+    is_verified: bool
+    created_at: datetime
+
+    # Legacy boolean flags (backward compat — clients should migrate to access_tier)
+    has_lifetime_access: bool
+    has_premium_access: bool
+
+    # Canonical access state
+    access_tier: str  # "free", "premium_subscription", "premium_lifetime"
+    entitlement_source: str | None = None
+    entitlement_expires_at: str | None = None
+    auto_renew: bool | None = None
+
+
+# ── Profile ──────────────────────────────────────────────────────────────────
+
+class ProfileUpdateRequest(BaseModel):
+    display_name: str | None = Field(default=None, max_length=100)
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=8)
+
+
+# ── Auth requests ─────────────────────────────────────────────────────────────
+
+class DeviceInfo(BaseModel):
+    """Nested device object as sent by Android/iOS clients."""
+    device_type: str | None = Field(default=None, max_length=20)
+    device_name: str | None = Field(default=None, max_length=200)
+    platform: str | None = Field(default=None, max_length=50)
+    installation_id: str | None = Field(default=None, max_length=255)
+    stable_device_id: str | None = Field(default=None, max_length=255)
+    app_version: str | None = Field(default=None, max_length=50)
+
+
+class SignupRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8)
+    display_name: str | None = Field(default=None, max_length=100)
+    # Flat device fields (backward compat)
+    device_name: str | None = Field(default=None, max_length=200)
+    platform: str | None = Field(default=None, max_length=50)
+    device_type: str | None = Field(default=None, max_length=20)
+    installation_id: str | None = Field(default=None, max_length=255)
+    stable_device_id: str | None = Field(default=None, max_length=255)
+    app_version: str | None = Field(default=None, max_length=50)
+    # Nested device object (Android/iOS clients)
+    device: DeviceInfo | None = None
+
+    def resolved_device_type(self) -> str | None:
+        return self.device_type or (self.device.device_type if self.device else None)
+
+    def resolved_platform(self) -> str | None:
+        return self.platform or (self.device.platform if self.device else None)
+
+    def resolved_device_name(self) -> str | None:
+        return self.device_name or (self.device.device_name if self.device else None)
+
+    def resolved_installation_id(self) -> str | None:
+        return self.installation_id or (self.device.installation_id if self.device else None)
+
+    def resolved_stable_device_id(self) -> str | None:
+        return self.stable_device_id or (self.device.stable_device_id if self.device else None)
+
+    def resolved_app_version(self) -> str | None:
+        return self.app_version or (self.device.app_version if self.device else None)
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+    # Flat device fields (backward compat)
+    device_name: str | None = Field(default=None, max_length=200)
+    platform: str | None = Field(default=None, max_length=50)
+    device_type: str | None = Field(default=None, max_length=20)
+    installation_id: str | None = Field(default=None, max_length=255)
+    stable_device_id: str | None = Field(default=None, max_length=255)
+    app_version: str | None = Field(default=None, max_length=50)
+    # Nested device object (Android/iOS clients)
+    device: DeviceInfo | None = None
+
+    def resolved_device_type(self) -> str | None:
+        return self.device_type or (self.device.device_type if self.device else None)
+
+    def resolved_platform(self) -> str | None:
+        return self.platform or (self.device.platform if self.device else None)
+
+    def resolved_device_name(self) -> str | None:
+        return self.device_name or (self.device.device_name if self.device else None)
+
+    def resolved_installation_id(self) -> str | None:
+        return self.installation_id or (self.device.installation_id if self.device else None)
+
+    def resolved_stable_device_id(self) -> str | None:
+        return self.stable_device_id or (self.device.stable_device_id if self.device else None)
+
+    def resolved_app_version(self) -> str | None:
+        return self.app_version or (self.device.app_version if self.device else None)
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+    # Optional device fields so refresh can register/upsert a device
+    device_name: str | None = Field(default=None, max_length=200)
+    platform: str | None = Field(default=None, max_length=50)
+    device_type: str | None = Field(default=None, max_length=20)
+    installation_id: str | None = Field(default=None, max_length=255)
+    stable_device_id: str | None = Field(default=None, max_length=255)
+    app_version: str | None = Field(default=None, max_length=50)
+    # Nested device object (Android/iOS clients)
+    device: DeviceInfo | None = None
+
+    def resolved_device_type(self) -> str | None:
+        return self.device_type or (self.device.device_type if self.device else None)
+
+    def resolved_platform(self) -> str | None:
+        return self.platform or (self.device.platform if self.device else None)
+
+    def resolved_device_name(self) -> str | None:
+        return self.device_name or (self.device.device_name if self.device else None)
+
+    def resolved_installation_id(self) -> str | None:
+        return self.installation_id or (self.device.installation_id if self.device else None)
+
+    def resolved_stable_device_id(self) -> str | None:
+        return self.stable_device_id or (self.device.stable_device_id if self.device else None)
+
+    def resolved_app_version(self) -> str | None:
+        return self.app_version or (self.device.app_version if self.device else None)
+
+
+# ── Auth responses ────────────────────────────────────────────────────────────
+
+class TokensOut(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+
+
+class AuthResponse(BaseModel):
+    tokens: TokensOut
+    user: UserOut
+    device: "DeviceOut | None" = None
+
+
+class RefreshTokensOut(BaseModel):
+    access_token: str
+    refresh_token: str | None = None  # New refresh token (rotation)
+    token_type: str = "bearer"
+
+
+class RefreshResponse(BaseModel):
+    tokens: RefreshTokensOut
+    user: UserOut
+    device: "DeviceOut | None" = None
+
+
+# ── Password reset ────────────────────────────────────────────────────────────
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirm(BaseModel):
+    token: str
+    new_password: str = Field(min_length=8)
+
+
+class MessageResponse(BaseModel):
+    message: str
+
+
+# ── Email verification ────────────────────────────────────────────────────────
+
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
+
+
+# ── Devices ──────────────────────────────────────────────────────────────────
+
+class DeviceRegisterRequest(BaseModel):
+    device_type: str = Field(max_length=20)  # phone, tablet, tv, desktop
+    platform: str | None = Field(default=None, max_length=50)
+    display_name: str | None = Field(default=None, max_length=200)
+    installation_id: str | None = Field(default=None, max_length=255)
+    stable_device_id: str | None = Field(default=None, max_length=255)
+    app_version: str | None = Field(default=None, max_length=50)
+
+
+class DeviceOut(BaseModel):
+    id: uuid.UUID
     device_type: str
+    platform: str | None
+    display_name: str | None
+    installation_id: str | None
+    stable_device_id: str | None = None
+    app_version: str | None
+    last_seen_at: datetime
+    is_active: bool
+    revoked_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
 
-
-class DeviceLimitResponse(BaseModel):
-    cap_reached: bool
-    swaps_remaining: int
-    stale_devices_pruned: int
-    active_devices: list[ManagedDeviceResponse] = []
-
-
-class AccessStateResponse(BaseModel):
-    user: UserResponse
-    premium: PremiumStateResponse
-    device: DeviceStateResponse
-    device_limit: DeviceLimitResponse
-
-
-class DeviceRemoveResponse(BaseModel):
-    removed: bool
-    reason: str
-    swaps_remaining: int
-
-
-class DeviceActivateResponse(BaseModel):
-    activated: bool
-    reason: str
-    active_device_count: int
-    stale_devices_pruned: int
-    swaps_remaining: int
+    model_config = {"from_attributes": True}
 
 
 class DeviceRenameRequest(BaseModel):
-    device_name: str = Field(min_length=1, max_length=120)
+    display_name: str = Field(max_length=200)
 
 
-class DeviceListResponse(BaseModel):
-    devices: list[ManagedDeviceResponse]
-    active_count: int
-    max_active: int
-    swaps_remaining: int
+class DeviceHeartbeatRequest(BaseModel):
+    app_version: str | None = Field(default=None, max_length=50)
 
 
-class AccountSettingsResponse(BaseModel):
-    settings: dict[str, str] = {}
-    updated_at: str | None = None
-    updated_by_device_id: str | None = None
+class ApiError(BaseModel):
+    """Structured error contract for all user-facing API failures.
+
+    Clients should switch on `code` (machine-readable, stable) and display
+    `message` (safe, localizable). `detail` is optional internal context
+    that should NOT be shown to end users.
+    """
+    code: str       # Stable machine-readable code (e.g. "device_cap_reached")
+    message: str    # Safe user-facing message
+    detail: str | None = None  # Internal debug context (never show to users)
 
 
-class AccountSettingsPatchRequest(BaseModel):
-    settings: dict[str, str | None]
+class DeviceLimitError(BaseModel):
+    code: str = "device_cap_reached"
+    message: str = "You have reached your device limit."
+    active_devices: list[DeviceOut]
+    max_devices: int = 5
 
 
-# ── Playlist Schemas ──
+# ── Pairings ─────────────────────────────────────────────────────────────────
+
+class PairingCreateRequest(BaseModel):
+    controller_device_id: uuid.UUID
+    target_device_id: uuid.UUID
 
 
-class PlaylistSaveRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
-    url: str = Field(default="", max_length=2000)
-    epg_url: str | None = Field(default=None, max_length=2000)
-    playlist_type: str = Field(default="m3u", pattern="^(m3u|xtream)$")
-    server: str | None = Field(default=None, max_length=500)
-    username: str | None = Field(default=None, max_length=200)
-    password: str | None = Field(default=None, max_length=500)
+class PairingOut(BaseModel):
+    id: uuid.UUID
+    controller_device_id: uuid.UUID
+    target_device_id: uuid.UUID
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
 
 
-class PlaylistResponse(BaseModel):
-    id: str
-    name: str
-    url: str
-    epg_url: str | None = None
-    playlist_type: str
-    server: str | None = None
-    username: str | None = None
-    has_password: bool = False
+# ── Pairing codes ───────────────────────────────────────────────────────────
+
+class PairingCodeRequest(BaseModel):
+    device_id: uuid.UUID  # TV device generating the code
+
+
+class PairingCodeOut(BaseModel):
+    code: str
+    expires_at: datetime
+    target_device_id: uuid.UUID
+
+    model_config = {"from_attributes": True}
+
+
+class PairingClaimRequest(BaseModel):
+    code: str = Field(max_length=10)
+    device_id: uuid.UUID  # Phone device claiming the code
+
+
+# ── Account settings ────────────────────────────────────────────────────────
+
+class AccountSettingsOut(BaseModel):
+    settings: dict
+    version: int
+    updated_at: datetime
+    updated_by_device_id: uuid.UUID | None
+
+    model_config = {"from_attributes": True}
+
+
+class AccountSettingsPatch(BaseModel):
+    settings: dict
+    device_id: uuid.UUID | None = None
+
+
+# ── Integrations ─────────────────────────────────────────────────────────
+
+class IntegrationSaveRequest(BaseModel):
+    """Save or update an integration.
+
+    storage_mode:
+      - "account": credentials encrypted and stored server-side, restored on login
+      - "device_only": only metadata/config stored server-side, secrets stay on device
+
+    credentials can be a dict (e.g. {"api_key": "abc"}) or a plain string
+    (e.g. "abc"). If a string is provided, it is wrapped as {"value": "..."}.
+    """
+    integration_type: str = Field(max_length=50)
+    credentials: dict | str = Field(default_factory=dict)
+    config: dict = Field(default_factory=dict)
+    display_identifier: str | None = Field(default=None, max_length=255)
+    storage_mode: str = Field(default="account", pattern="^(account|device_only)$")
+
+    def resolved_credentials(self) -> dict:
+        if isinstance(self.credentials, str):
+            return {"value": self.credentials} if self.credentials else {}
+        return self.credentials
+
+
+class IntegrationCredentialsPatchRequest(BaseModel):
+    """Merge new keys into an existing integration's credentials.
+
+    Use case: a recovery flow that wants to fill in a single missing
+    field (e.g. Panda's management_token, when the original create flow
+    only stored the manifest token) without nuking the rest of the
+    blob, which a full PUT replacement would do.
+
+    The new keys overwrite existing keys with the same name. Keys not
+    in the patch are preserved. Empty patch is a no-op.
+    """
+    credentials: dict = Field(default_factory=dict)
+
+
+class IntegrationOut(BaseModel):
+    """Integration response. Never returns raw secrets."""
+    id: uuid.UUID
+    integration_type: str
+    storage_mode: str
+    display_identifier: str | None
+    config: dict
+    is_connected: bool
+    has_credentials: bool  # True if server holds encrypted credentials (account mode)
+    last_verified_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
 
-# ── LAN hub registry (Prompt 9B) ──────────────────────────────────────
+class IntegrationTestResult(BaseModel):
+    integration_type: str
+    success: bool
+    message: str
 
 
-class LanHubPublishRequest(BaseModel):
-    """Body the publisher sends to POST /me/lan/hubs.
+# ── Playlists ────────────────────────────────────────────────────────────
 
-    Privacy contract: `auth_secret` lives only in this request and the
-    same-user-only secret endpoint response. The `LanHubResponse`
-    listing schema has no place for it.
-    """
-
-    publisher_id: str = Field(min_length=1, max_length=64)
-    device_label: str = Field(min_length=1, max_length=120)
-    lan_host: str = Field(min_length=1, max_length=64)
-    lan_port: int = Field(ge=1, le=65535)
-    protocol_version: int = Field(default=1, ge=1)
-    auth_secret: str = Field(min_length=1, max_length=512)
-
-
-class LanHubResponse(BaseModel):
-    """Listing schema. Carries no auth_secret and no filesystem paths."""
-
-    publisher_id: str
-    device_label: str
-    lan_host: str
-    lan_port: int
-    protocol_version: int
-    published_at_epoch_ms: int
+class PlaylistSaveRequest(BaseModel):
+    """Save or update a playlist backup. Xtream passwords are encrypted at rest."""
+    playlist_id: str = Field(max_length=255)
+    name: str = Field(max_length=255)
+    playlist_type: str = Field(pattern="^(m3u|xtream)$")
+    # M3U fields
+    url: str | None = None
+    epg_url: str | None = None
+    # Xtream fields
+    server: str | None = None
+    username: str | None = None
+    password: str | None = None  # Encrypted before storage, never returned
 
 
-class LanHubListResponse(BaseModel):
-    hubs: list[LanHubResponse]
+class PlaylistOut(BaseModel):
+    """Playlist metadata response. Never returns raw Xtream password."""
+    id: uuid.UUID
+    playlist_id: str
+    name: str
+    playlist_type: str
+    url: str | None
+    epg_url: str | None
+    server: str | None
+    username: str | None
+    has_password: bool  # True if Xtream password is stored
+    created_at: datetime
+    updated_at: datetime
 
 
-class LanHubSecretResponse(BaseModel):
-    publisher_id: str
-    auth_secret: str
+# ── Addons / Extensions ──────────────────────────────────────────────────
+
+class AddonInstallRequest(BaseModel):
+    """Install an addon by manifest URL."""
+    manifest_url: str = Field(max_length=2000)
+    # Optional: client can send parsed manifest metadata
+    addon_id: str | None = Field(default=None, max_length=255)
+    name: str | None = Field(default=None, max_length=255)
+    description: str | None = Field(default=None, max_length=1000)
+    version: str | None = Field(default=None, max_length=50)
+    has_catalog: bool = False
+    has_streams: bool = False
+    installed_from: str = Field(default="app", pattern="^(app|web|sync)$")
+
+
+class AddonUpdateRequest(BaseModel):
+    """Update addon metadata or state."""
+    name: str | None = Field(default=None, max_length=255)
+    description: str | None = Field(default=None, max_length=1000)
+    version: str | None = Field(default=None, max_length=50)
+    has_catalog: bool | None = None
+    has_streams: bool | None = None
+    is_enabled: bool | None = None
+    sort_order: int | None = None
+
+
+class AddonOut(BaseModel):
+    id: uuid.UUID
+    manifest_url: str
+    addon_id: str | None
+    name: str | None
+    description: str | None
+    version: str | None
+    logo_url: str | None = None
+    has_catalog: bool
+    has_streams: bool
+    is_enabled: bool
+    sort_order: int
+    installed_from: str
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}

@@ -1,76 +1,52 @@
 import hashlib
-import uuid
+import secrets
 from datetime import datetime, timedelta, timezone
+
+import bcrypt
 from jose import JWTError, jwt
-from passlib.context import CryptContext
-from .config import get_settings
+
+from app.config import settings
 
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-settings = get_settings()
+# ── Password ──────────────────────────────────────────────────────────────────
+
+def hash_password(plain: str) -> str:
+    return bcrypt.hashpw(plain.encode(), bcrypt.gensalt()).decode()
 
 
-def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+def verify_password(plain: str, hashed: str) -> bool:
+    return bcrypt.checkpw(plain.encode(), hashed.encode())
 
 
-def verify_password(password: str, password_hash: str) -> bool:
-    return pwd_context.verify(password, password_hash)
+# ── Refresh token (opaque) ────────────────────────────────────────────────────
+
+def generate_refresh_token() -> str:
+    """Returns a URL-safe 48-byte random token (64 hex chars)."""
+    return secrets.token_hex(48)
 
 
-def hash_token(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+def hash_refresh_token(token: str) -> str:
+    """SHA-256 of the raw token — stored in DB, never the raw value."""
+    return hashlib.sha256(token.encode()).hexdigest()
 
 
-def create_access_token(user_id: str, device_id: str) -> tuple[str, int]:
-    now = datetime.now(timezone.utc)
-    expires_delta = timedelta(minutes=settings.access_token_ttl_minutes)
-    payload = {
-        "sub": user_id,
-        "device_id": device_id,
-        "type": "access",
-        "iat": int(now.timestamp()),
-        "exp": int((now + expires_delta).timestamp()),
-        "iss": settings.jwt_issuer,
-        "jti": str(uuid.uuid4()),
-    }
-    token = jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
-    return token, int(expires_delta.total_seconds())
+def refresh_token_expiry() -> datetime:
+    return datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
 
 
-def create_refresh_token(user_id: str, device_id: str) -> tuple[str, datetime]:
-    now = datetime.now(timezone.utc)
-    expires_at = now + timedelta(days=settings.refresh_token_ttl_days)
-    payload = {
-        "sub": user_id,
-        "device_id": device_id,
-        "type": "refresh",
-        "iat": int(now.timestamp()),
-        "exp": int(expires_at.timestamp()),
-        "iss": settings.jwt_issuer,
-        "jti": str(uuid.uuid4()),
-    }
-    token = jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
-    return token, expires_at
+# ── JWT access token ──────────────────────────────────────────────────────────
+
+def create_access_token(subject: str) -> str:
+    """subject = str(user.id)"""
+    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    payload = {"sub": subject, "exp": expire}
+    return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 
-def decode_token(token: str, expected_type: str) -> dict:
-    try:
-        payload = jwt.decode(
-            token,
-            settings.jwt_secret,
-            algorithms=["HS256"],
-            options={"verify_aud": False},
-            issuer=settings.jwt_issuer,
-        )
-    except JWTError as exc:
-        raise ValueError("Invalid token") from exc
-
-    token_type = payload.get("type")
-    if token_type != expected_type:
-        raise ValueError("Invalid token type")
-    if not payload.get("sub"):
-        raise ValueError("Invalid token subject")
-    if not payload.get("device_id"):
-        raise ValueError("Invalid token device")
-    return payload
+def decode_access_token(token: str) -> str:
+    """Returns the subject (user id) or raises JWTError."""
+    payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+    sub: str | None = payload.get("sub")
+    if sub is None:
+        raise JWTError("Missing subject in token")
+    return sub
