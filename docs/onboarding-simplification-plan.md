@@ -1,9 +1,8 @@
 # Desktop Onboarding Simplification Plan
 
-Status: scoped 2026-05-03, **execution pending**. This is a plan, not work
-done. Each item below names files + lines, expected effort, and risk.
-The intent is that the operator (or me, in a fresh session) picks 1-3 to
-execute next without re-investigating.
+Status: scoped 2026-05-03, **execution pending**. Plan revised
+2026-05-03 (afternoon) after product direction. This is a plan, not
+work done.
 
 ## Product critique we're trying to satisfy
 
@@ -13,187 +12,239 @@ execute next without re-investigating.
 > credentials once, Torve picks the best source, plays it on the couch,
 > and explains what broke when it cannot."**
 
-## Current shape (audit summary)
+## Product decisions made (locks in the plan shape)
 
-The desktop first-run flow has two co-existing paths, both reachable from
-`DesktopOnboardingShell`:
+These came from the operator on 2026-05-03 in response to the
+audit:
 
-1. **Hub-first** (default): `DesktopSetupIntentHub` shows **4 source-category
-   cards** — Debrid, IPTV, Plex/Jellyfin, Usenet — each with a "Set up"
-   button. User can configure any subset and click "Continue to Torve" once
-   one path is green.
-2. **Guided wizard** (legacy, behind "Use guided wizard instead" button):
-   7 linear steps: Welcome → Terms → Debrid → Trakt → Quality → Channels
-   (IPTV) → Done.
+1. **Usenet is a power-user niche but is *required* for the Adult and
+   Sports surfaces.** It can't be deleted from the product. But
+   asking a first-time desktop user to configure NZB indexers
+   themselves is wrong.
+2. **Panda is the answer.** When a user sets up Panda, they have
+   everything ready (debrid + NZB + Newznab indexers + provider
+   handled in one flow). Make Panda the **primary recommended
+   onboarding action**, not a hidden deep-link.
+3. **Zero-source admission: YES.** Users who skip setup can enter
+   the platform — they just can't stream from debrid/NZB sources
+   until they configure something. Built-in addons + Plex/Jellyfin
+   (when discovered) still work.
+4. **Trakt is user preference, not required setup.** Move it out of
+   onboarding entirely. Surface as an optional integration in
+   Settings + a Home empty-state CTA.
+5. **OAuth device-code flows on desktop must offer "Copy link".**
+   Today the Trakt step shows a verification URL the user has to
+   manually retype into a browser. Need a Copy button (and ideally
+   "Open in browser") next to every device-code URL.
 
-`DesktopShellAdmissionController` admits the user to V2App when
-`onboardingCompleted && (hasVodPlaybackPath || hasLivePlaybackPath)`.
+## Current shape (audit summary, unchanged)
 
-## Three diagnoses
+- **Hub-first** (`DesktopSetupIntentHub.kt`): 4 source-category cards —
+  Debrid, IPTV, Plex/Jellyfin, Usenet. User picks any subset, clicks
+  "Continue to Torve" once one path is green.
+- **Guided wizard** (legacy, behind "Use guided wizard instead"): 7
+  linear steps — Welcome → Terms → Debrid → Trakt → Quality → Channels
+  (IPTV) → Done.
+- `DesktopShellAdmissionController` admits to V2App when
+  `onboardingCompleted && (hasVodPlaybackPath || hasLivePlaybackPath)`.
 
-1. **Categories instead of credentials.** The hub surfaces *source types*
-   (Debrid, IPTV, Plex, Usenet) as the unit of decision. The user has to
-   know what category their thing is in before configuring. The pitch is
-   credential-first, not category-first.
+## Three diagnoses (unchanged)
+
+1. **Categories instead of credentials.** The hub surfaces *source
+   types* as the unit of decision. The user has to know what
+   category their thing is in.
 2. **Wizard is a parallel reality.** It re-asks for terms, asks for
-   Quality (which has fine defaults), asks for Welcome (no decision).
-   Users who toggle in/out of the wizard get inconsistent state.
-3. **Two dark patterns.** (a) Per-intent deep-links from the hub
-   silently complete onboarding and lose any in-progress field state.
-   (b) Terms acceptance is persisted forever — versioned re-consent
+   Quality (defaults are fine), asks for Welcome (no decision).
+   Toggling between hub and wizard creates inconsistent state.
+3. **Two real dark patterns.** (a) Per-intent deep-links from the
+   hub silently complete onboarding and lose any in-progress field
+   state. (b) Terms acceptance is forever — versioned re-consent
    isn't possible without manually clearing the flag.
 
-## Prioritised fix list
+## Revised fix list
 
-Sorted by leverage / cost ratio.
-
----
-
-### Fix A — Drop Usenet from first-run, retire the guided wizard
-
-**Why:** Usenet is the highest-friction, lowest-fit-with-pitch card.
-It's already a deep-link to post-onboarding Panda setup, so removing
-it from the hub doesn't lose any capability — power users find it in
-Settings. The guided wizard duplicates the hub plus three steps that
-add no value (Welcome, Quality, Done).
-
-**Scope:**
-- `desktopApp/src/main/kotlin/com/torve/desktop/ui/onboarding/DesktopSetupIntentHub.kt` — drop the Usenet card from the four-card layout.
-- `desktopApp/src/main/kotlin/com/torve/desktop/ui/onboarding/SetupIntent.kt` — remove the `USENET` enum value (or mark deprecated; check that the DI module / coordinator handles its absence).
-- `desktopApp/src/main/kotlin/com/torve/desktop/ui/onboarding/DesktopOnboardingShell.kt` — remove the "Use guided wizard instead" button (`851-855`), remove the `mode` toggle, remove the `GUIDED` branch from the `when` (`881-1040` area), delete the WELCOME / TERMS / DEBRID / TRAKT / QUALITY / CHANNELS / DONE step composables. Keep just the hub render path.
-- `desktopApp/src/main/kotlin/com/torve/desktop/ui/onboarding/SetupWizardViewModel.kt` — remove `SetupStep.WELCOME`, `QUALITY`, `DONE`. Remove `mode`-related state. Probably also remove `pendingPostTermsJump` since terms-from-deep-link still works.
-- Add a small "Advanced sources" link at the bottom of the hub that opens Settings → Integrations (Usenet lives there).
-
-**Effort:** Half a day. Lots of mechanical deletions but the wizard touches a lot of state. Test risk is moderate — kill the wizard tests too.
-
-**Risk:** Some users may have learned to rely on the wizard. Mitigation: keep the underlying step composables one commit, then delete after a release.
-
-**Expected user-visible result:** Hub is the only flow. Three cards instead of four. No "guided wizard" toggle anywhere.
+Sorted by execution-readiness. Items lower in the list are still
+solid but depend on a decision above them.
 
 ---
 
-### Fix B — Re-frame the hub from "source categories" to "what do you already have?"
+### Fix A (revised) — Reshape onboarding to "Panda primary"
 
-**Why:** The current hub asks "configure X". The pitch is "tell us what you
-have, we'll figure out the rest." Re-copying the cards moves toward that
-without yet doing the architectural credential-wallet rewrite.
+**Why:** User decision (above). Panda is a meta-setup that handles
+debrid + NZB + indexers in one flow. Surfacing it as the primary
+CTA replaces the four-card "pick a category" decision with a single
+"set up everything" decision. Users who want category-by-category
+control still have it post-onboarding in Settings → Integrations.
+
+**Target shape:**
+
+```
+Auth (existing, unchanged)
+  ↓
+Terms (existing, simplified — see Fix C)
+  ↓
+Single onboarding screen:
+  Headline:   "One last step — connect your sources"
+  Subheading: "Panda configures your debrid + Usenet + indexers
+              in one flow. Skip if you want to explore first or
+              set things up manually."
+
+  [ Set up with Panda ]              ← primary CTA, large
+   small text below: "Recommended — handles debrid, Newznab,
+                     and Usenet provider in one go"
+
+  [ Skip for now ]                   ← secondary, smaller
+   small text: "You can browse the app and use addons / Plex
+               immediately. Add a streaming source later in
+               Settings → Integrations."
+
+  Optional, smaller still:
+  [ Configure individual sources → Settings ]
+```
 
 **Scope:**
-- `desktopApp/src/main/kotlin/com/torve/desktop/ui/onboarding/SetupIntent.kt` — rewrite the `title` / `subtitle` strings.
-  - DEBRID: "Real-Debrid / AllDebrid / Premiumize / TorBox" → "I have a streaming subscription" / subtitle: "Real-Debrid, AllDebrid, Premiumize, or TorBox — paste your API key once."
-  - IPTV: "M3U or Xtream credentials for live TV" → "I have an IPTV provider" / subtitle: "M3U URL or Xtream login. Live TV + EPG."
-  - PLEX: "Plex or Jellyfin" → "I have a media server" / subtitle: "Plex or Jellyfin. We'll use it as a source when available."
-- `desktopApp/src/main/kotlin/com/torve/desktop/ui/onboarding/DesktopSetupIntentHub.kt` — change the page title above the cards from "Set up Torve" to "What do you have?" Change the subtitle from a generic intro to "Each of these is optional. Add what you've got, leave the rest. You can always set up more later in Settings."
-- Re-frame the "Continue to Torve" button copy when no source is configured: "Continue without a source" instead of the current "Set up at least one path" disabled state. Add explanatory text below: "Torve will use built-in addons + your Plex/Jellyfin server when you connect one. You can add a streaming source any time."
-- This requires actually allowing zero-source admission. Today, `completeOnboarding()` requires `(hasVodPlaybackPath || hasLivePlaybackPath)`. **This is a real architectural decision** — see "Open product question" below.
+- `desktopApp/src/main/kotlin/com/torve/desktop/ui/onboarding/DesktopSetupIntentHub.kt` — replace the four-card grid with the two-CTA layout above. Drop the per-intent cards from the hub UI. The card composables can stay in the file (used by the post-onboarding Settings → Integrations surface).
+- `desktopApp/src/main/kotlin/com/torve/desktop/ui/onboarding/DesktopOnboardingShell.kt` — remove the "Use guided wizard instead" button (lines `851-855`) and the entire `mode` toggle. Remove the `GUIDED` branch from the `when` (`881-1040`).
+- Same file — delete the WELCOME / DEBRID / TRAKT / QUALITY / CHANNELS / DONE step composables (lines `1043-1335`). TERMS stays (see Fix C).
+- `desktopApp/src/main/kotlin/com/torve/desktop/ui/onboarding/SetupWizardViewModel.kt` — remove `SetupStep.WELCOME`, `DEBRID`, `TRAKT`, `QUALITY`, `CHANNELS`, `DONE`. Keep `TERMS`. Remove `mode`-related state. Remove `pendingPostTermsJump` (no longer needed).
+- `DesktopShellAdmissionController` — relax the admission condition. Today: `onboardingCompleted && (hasVodPlaybackPath || hasLivePlaybackPath)`. New: `onboardingCompleted` only. The "no playback path" state becomes an empty-state on Home, not an admission gate.
 
-**Effort:** 2 hours for copy + layout. The zero-source admission question is the gating decision. If we don't relax that, this fix becomes "copy-only" and doesn't ship the pitch.
+**Effort:** 1 day. Most of the work is deletion + the admission relaxation. The new two-CTA screen is small.
 
-**Risk:** Allowing zero-source admission creates a "you have an empty app" state. Mitigation: addons + watchlist still work; clear empty-state messaging on Home; follow-up "Add a source" CTA on Home.
+**Risk:** Low for the deletion. Moderate for the admission change — users who land on Home with no source need a decent empty state (see "Home empty-state" follow-up, below).
 
-**Expected user-visible result:** Hub feels like a wallet, not a wizard. User who already has just a Trakt account (no debrid, no IPTV) can still enter the app.
+**Expected user-visible result:** First-run is auth → terms → one decision → Home. No four-card hub, no guided wizard. Power users still configure individual sources via Settings.
+
+---
+
+### Fix B (revised) — Home empty-state for zero-source users
+
+**Why:** Fix A ships zero-source admission. Without a Home empty-state,
+those users land on a blank Home with no obvious next step. The
+empty-state is also where Trakt prompts live (Fix E).
+
+**Scope:**
+- `desktopApp/src/main/kotlin/com/torve/desktop/ui/v2/home/V2HomePage.kt` — add an empty-state composable that renders when `!hasVodPlaybackPath && !hasLivePlaybackPath && noPlexJellyfinDiscovered`. Show:
+  - A "Set up sources" CTA → opens Settings → Integrations or relaunches Panda setup
+  - A "Sync your watchlist with Trakt" CTA (Fix E) → opens Settings → Integrations → Trakt
+  - Optional: a "What can I do without setup?" tooltip explaining addons + Plex auto-discovery still work
+
+**Effort:** Half a day.
+
+**Risk:** Low.
+
+**Expected user-visible result:** The "Skip for now" flow lands somewhere useful.
 
 ---
 
 ### Fix C — Versioned terms acceptance
 
-**Why:** Today, ticking the terms box once is forever. If legal/TMDB/Trakt
-disclosures change, returning users don't re-consent. This is a real
-compliance gap, not just UX polish.
+**Why:** Today, ticking the terms box once is forever. If legal /
+TMDB / Trakt disclosures change, returning users don't re-consent.
+This is a real compliance gap.
 
 **Scope:**
-- `desktopApp/src/main/kotlin/com/torve/desktop/ui/onboarding/SetupWizardViewModel.kt` — change `KEY_TERMS_ACCEPTED` (currently a boolean) to `KEY_TERMS_ACCEPTED_VERSION` (an int). Add a `CURRENT_TERMS_VERSION = 1` constant.
+- `desktopApp/src/main/kotlin/com/torve/desktop/ui/onboarding/SetupWizardViewModel.kt` — change `KEY_TERMS_ACCEPTED` from boolean to `KEY_TERMS_ACCEPTED_VERSION` int. Add `CURRENT_TERMS_VERSION = 1` constant.
 - `needsTermsAccepted()` returns `true` when persisted version `< CURRENT_TERMS_VERSION`.
-- `setTermsAccepted()` writes `CURRENT_TERMS_VERSION` not `"true"`.
-- Migration: existing `"true"` value → treat as version 1.
-- When you ever change terms copy, bump `CURRENT_TERMS_VERSION` and the next launch surfaces the consent screen again.
+- `setTermsAccepted()` writes `CURRENT_TERMS_VERSION`.
+- Migration: existing `"true"` → version 1.
+- Bump `CURRENT_TERMS_VERSION` whenever terms copy materially changes.
 
 **Effort:** 1 hour.
 
-**Risk:** Almost none. Migration is straightforward.
+**Risk:** Almost none.
 
-**Expected user-visible result:** No change today. Future-proofed for legal updates.
+**Expected user-visible result:** No change today. Future-proofed.
 
 ---
 
-### Fix D — Block per-intent deep-links from silently completing onboarding
+### Fix D — "Copy link" on OAuth device-code URLs
 
-**Why:** The audit found a real dark pattern: clicking "Set up Plex"
-while mid-Debrid setup wipes the in-progress Debrid state with no
-confirmation. The user lands in Settings → Integrations with no
-breadcrumb back.
+**Why:** Trakt and similar device-code OAuth flows show a verification
+URL (`https://trakt.tv/activate`) and a code. On desktop, the user
+has to alt-tab to a browser and retype. Add a Copy button (and
+ideally Open-in-browser) so it's one click.
 
-**Scope:**
-- `desktopApp/src/main/kotlin/com/torve/desktop/ui/onboarding/DesktopSetupIntentHub.kt:756-766` — change `deepLinkAndComplete()` to check whether any field state is unsaved. If there is, show an "Are you sure? You'll lose unsaved changes" dialog before deep-linking.
-- Better long-term: the hub should not complete onboarding on a deep-link at all. Plex/Jellyfin and Usenet should be configurable from inside onboarding (or after onboarding) without requiring "I'm done with onboarding" as a side effect.
+**Scope (Trakt is the immediate one, but applies anywhere we have a
+device-code flow):**
+- The Trakt step composable lives in `DesktopOnboardingShell.kt:1148-1194` (until Fix A deletes it). Then it moves to `Settings → Integrations → Trakt` per Fix E.
+- Add two buttons next to the verification URL display: `[ Copy link ]` and `[ Open in browser ]`.
+- Pattern is already in the codebase — `V2SettingsPage.kt:2457-2462` uses `java.awt.datatransfer.StringSelection` + `Toolkit.getDefaultToolkit().systemClipboard.setContents`. Reuse that.
+- "Open in browser" uses `java.awt.Desktop.getDesktop().browse(java.net.URI(url))` — same pattern as the View Release button in `UpdateBanner`.
+- Audit for other device-code flows: Plex (plex.tv/link), Simkl, possibly Panda. Apply the same buttons everywhere.
 
-**Effort:** 2-3 hours. The cleaner version (don't complete onboarding on deep-link) is more invasive because it requires the deep-link target to know how to return to onboarding.
+**Effort:** 1-2 hours.
 
-**Risk:** If we just add a dialog, it's a 30-minute change with low risk. If we do the cleaner version, it touches the admission state machine.
+**Risk:** None.
 
-**Expected user-visible result:** No silent state loss. Either confirm-before-leave dialog or stay-in-onboarding flow.
+**Expected user-visible result:** OAuth flows feel like 2 clicks instead of "manually retype this URL".
 
 ---
 
 ### Fix E — Move Trakt out of onboarding entirely
 
-**Why:** Trakt is a sync/personalization layer, not a source. The pitch
-is "watch anything legal" — Trakt doesn't help with watching. It helps
-with discovery + watch tracking, both of which are post-watching
-concerns. Putting it in onboarding gates a user's first watch behind a
-Trakt OAuth flow they may not need.
+**Why:** Trakt is a sync layer, not a source. Putting it in onboarding
+gates first watch behind an OAuth flow some users don't need.
 
 **Scope:**
-- `desktopApp/src/main/kotlin/com/torve/desktop/ui/onboarding/SetupWizardViewModel.kt` — remove `SetupStep.TRAKT`.
-- `DesktopOnboardingShell.kt` — delete the TRAKT step composable (`1148-1194`).
-- Add a Trakt prompt in Home → first-time empty state: "Sync your watchlist and progress" CTA → opens existing Trakt OAuth in Settings → Integrations.
+- Subsumed by Fix A — the TRAKT step gets deleted along with the rest of the wizard.
+- Add a Trakt prompt in the Home empty-state (Fix B) and in Settings → Integrations.
+- The existing Trakt OAuth machinery in `SetupWizardViewModel` stays — just move the *UI* surface from onboarding to Settings.
 
-**Effort:** 1-2 hours. Most of the work is wiring the Home empty-state CTA, which is also a Fix B follow-up (the empty-state needs to exist anyway if we allow zero-source admission).
+**Effort:** Subsumed by Fix A + Fix B. Net cost: small.
 
-**Risk:** Existing Trakt users who liked the current onboarding step will discover Trakt later. No functional loss; it's a discoverability question.
+**Risk:** Low.
 
-**Expected user-visible result:** One fewer step in any path. Trakt becomes optional polish, not a gate.
+**Expected user-visible result:** Trakt becomes optional polish, not a gate.
+
+---
+
+### Fix F — Block per-intent deep-links from silently completing onboarding
+
+**Why:** Today's hub deep-links to Plex/Jellyfin and Usenet silently
+mark onboarding complete and dump the user into Settings with no
+breadcrumb back. After Fix A this dark pattern *largely goes away*
+because the deep-links live in Settings, not onboarding. But if we
+keep any in-onboarding deep-link (e.g., a "Set up Plex now" branch),
+add a confirm dialog before leaving.
+
+**Scope:** mostly resolved by Fix A's structural change. If any
+deep-links survive, add a dialog at `DesktopSetupIntentHub.kt:756-766`.
+
+**Effort:** 30 minutes if needed, possibly zero if Fix A makes it moot.
+
+**Risk:** None.
 
 ---
 
 ## Suggested execution order
 
-1. **Fix A** first. It's the biggest visible simplification and unblocks B by removing the wizard's parallel-reality problem.
-2. **Fix C**. 1 hour, zero risk, future-proofs legal.
-3. **Fix D (dialog version)**. 30 minutes, closes a real dark-pattern gap.
-4. **Open product decision: zero-source admission?** This is the gate for Fix B's full scope. Two paths:
-   - **Yes, allow zero source.** Fix B can fully ship. User can enter Torve with just an account.
-   - **No, require ≥1 source.** Fix B becomes copy-only. Useful but smaller.
-5. **Fix B** (depending on the decision in step 4).
-6. **Fix E** if/when product team agrees Trakt-on-Home is preferable to Trakt-in-onboarding.
+1. **Fix C** (1 hr, zero risk, future-proofs legal). Ship anytime.
+2. **Fix D** (1-2 hr, no risk, real UX win). Ship anytime — applies to current Trakt step AND post-Fix-E Settings location, so it's safe regardless of A/B/E.
+3. **Fix A + Fix B + Fix E together** as one focused session (1.5-2 days). They're tightly coupled — A deletes the wizard which contains TRAKT (E), and A's zero-source admission requires B's empty-state. Doing them piecemeal would ship a half-broken onboarding.
+4. **Fix F** if any deep-links survive. Probably zero work.
 
-A and C and D are safe to do in any order without further product input.
-B and E need a product call first.
+C and D are safe to ship today or tomorrow without further input.
+A+B+E need a coordinated push.
 
-## Out of scope for this plan
+## Out of scope
 
-- The full **credential-wallet** architecture (one screen, all integration
-  credentials, app figures out sources). That's a multi-week rework
-  touching `SetupIntent`, `IntegrationStorage`, `PreferencesRepository`,
-  every router that consumes credentials. Worth doing eventually but
-  doesn't fit here.
-- **First-watch onboarding** (post-source-config: "here's what you can
-  watch right now"). Would dramatically improve the "watch anything
-  legal" pitch but requires real source-resolution work in V2Home.
-- **Mobile / Android / Android TV onboarding parity.** Different code
-  base, different shell. Whatever lands here should inform a similar
-  audit for mobile, but they're separate engineering tracks.
+- The full **credential-wallet** architecture (one screen, all
+  integration credentials auto-mapped to providers). Multi-week
+  rewrite. Worth doing eventually.
+- **First-watch onboarding** (post-config: "here's what you can
+  watch right now"). Bigger product investment.
+- **Mobile / Android TV onboarding parity.** Different code base.
+  Whatever lands on desktop should inform a mobile audit, but
+  separate engineering track.
 
 ## Estimated total
 
-If A + C + D + B(copy-only) + E ship: ~2-3 days of focused work.
-If we also do B(full) with the zero-source admission decision: +1 day for
-admission state + Home empty state.
-
-Compare to "do nothing": product critique persists; first-run keeps
-forcing source-category decisions.
+If C + D + (A+B+E) all ship: ~2-3 days of focused work.
+F is contingency — likely zero.
 
 ## Related docs
 
 - `docs/market-readiness-assessment.md` — drives the "set up once" pitch.
-- `docs/release-hardening.md` — onboarding fixes don't gate any release blocker, they just close the product clarity gap.
+- `docs/release-hardening.md` — onboarding fixes don't gate any
+  release blocker; they close the product clarity gap.
