@@ -30,7 +30,12 @@ jobs:
     env:
       DATABASE_URL: postgresql+psycopg2://torve_test:torve_test@localhost:5432/torve_test
       JWT_SECRET: ci-only-jwt-secret-do-not-use-in-prod
-      INTEGRATION_SECRET_KEY: ci-only-integration-secret-do-not-use-in-prod
+      # Must be a valid Fernet key (32 raw bytes urlsafe-b64-encoded = 44 chars
+      # ending in '='). Zero-bytes is fine for CI — these envs never encrypt
+      # anything that survives the job. Using a non-Fernet-shaped string here
+      # crashes every test that imports app.crypto with "Fernet key must be 32
+      # url-safe base64-encoded bytes". Caught by Backend CI 2026-05-03.
+      INTEGRATION_SECRET_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
       APP_ENV: test
 
     services:
