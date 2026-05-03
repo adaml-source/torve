@@ -666,8 +666,11 @@ private fun DesktopAuthEntryPane(
     }
 }
 
-/** Modes for the desktop setup pane. Default is the credential-first hub. */
-private enum class DesktopSetupMode { HUB, GUIDED }
+// `DesktopSetupMode` and the legacy guided-wizard branch were removed
+// 2026-05-03 (onboarding simplification, Fix A in
+// docs/onboarding-simplification-plan.md). The Panda-primary hub is
+// the only onboarding surface now; individual source configuration
+// happens post-admission in Settings → Integrations.
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -684,10 +687,8 @@ private fun DesktopSetupPane(
 ) {
     val scope = rememberCoroutineScope()
     val colors = TorveDesktopThemeTokens.colors
-    val currentStepIndex = SetupStep.entries.indexOf(setupState.currentStep)
     var completionError by remember { mutableStateOf<String?>(null) }
     var isCompleting by remember { mutableStateOf(false) }
-    var mode by remember { mutableStateOf(DesktopSetupMode.HUB) }
     var showQrReceive by remember { mutableStateOf(false) }
 
     Column(
@@ -719,16 +720,14 @@ private fun DesktopSetupPane(
             )
         }
 
-        if (mode == DesktopSetupMode.HUB) {
-            // Credential-first hub. Per-card "Set up" routes to the
-            // matching legacy step (Debrid/IPTV) or completes onboarding
-            // with a deep-link slot pre-set so V2App opens the relevant
-            // post-onboarding surface (Settings → Integrations for
-            // Plex/Jellyfin, Panda setup for Usenet). Avoids duplicating
-            // per-feature credential forms inside the onboarding shell.
-            //
-            // Helper: deep-link + complete onboarding. Errors land on
-            // completionError so the hub banner shows them.
+        // Panda-primary hub. Onboarding is now a single decision:
+        // "Set up with Panda" (recommended), "Skip for now", or
+        // "Configure individual sources" (deep-links to Settings →
+        // Integrations post-admission). The legacy four-card hub
+        // and seven-step guided wizard were retired 2026-05-03.
+        //
+        // Helper: deep-link + complete onboarding. Errors land on
+        // completionError so the hub banner shows them.
             val deepLinkAndComplete: (DesktopOnboardingDeepLink.Target, SetupIntent) -> Unit =
                 { target, intent ->
                     setupWizardCoordinator.beginIntent(intent)
@@ -743,31 +742,13 @@ private fun DesktopSetupPane(
                     }
                 }
             DesktopSetupIntentHub(
-                coordinator = setupWizardCoordinator,
-                admission = admission,
-                onOpenDebridSetup = {
-                    setupWizardViewModel.jumpToStep(SetupStep.DEBRID)
-                    mode = DesktopSetupMode.GUIDED
-                },
-                onOpenIptvSetup = {
-                    setupWizardViewModel.jumpToStep(SetupStep.CHANNELS)
-                    mode = DesktopSetupMode.GUIDED
-                },
-                onOpenPlexJellyfinSetup = {
-                    deepLinkAndComplete(
-                        DesktopOnboardingDeepLink.Target.Integrations,
-                        SetupIntent.PLEX_JELLYFIN,
-                    )
-                },
-                onOpenUsenetSetup = {
+                onSetUpWithPanda = {
                     deepLinkAndComplete(
                         DesktopOnboardingDeepLink.Target.PandaSetup,
                         SetupIntent.USENET,
                     )
                 },
-                onUseGuidedWizard = { mode = DesktopSetupMode.GUIDED },
-                onShowQrReceive = { showQrReceive = true },
-                onContinueToDesktop = {
+                onSkipForNow = {
                     completionError = null
                     scope.launch {
                         isCompleting = true
@@ -777,6 +758,13 @@ private fun DesktopSetupPane(
                         isCompleting = false
                     }
                 },
+                onConfigureSourcesIndividually = {
+                    deepLinkAndComplete(
+                        DesktopOnboardingDeepLink.Target.Integrations,
+                        SetupIntent.PLEX_JELLYFIN,
+                    )
+                },
+                onShowQrReceive = { showQrReceive = true },
                 isCompleting = isCompleting,
                 completionError = completionError,
                 modifier = Modifier
@@ -828,92 +816,6 @@ private fun DesktopSetupPane(
                 }
             }
 
-            return@Column
-        }
-
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            SetupStep.entries.forEachIndexed { index, step ->
-                TorvePill(
-                    text = "${index + 1}. ${step.desktopLabel()}",
-                    backgroundColor = if (index == currentStepIndex) {
-                        colors.accentContainer
-                    } else {
-                        colors.fieldSurface
-                    },
-                    contentColor = if (index == currentStepIndex) colors.textPrimary else colors.textSecondary,
-                )
-            }
-        }
-
-        TorveGhostButton(
-            text = "Back to credential-first hub",
-            onClick = { mode = DesktopSetupMode.HUB },
-            enabled = !isCompleting,
-        )
-
-        admission?.takeIf { it.hasUsablePlaybackPath }?.let { snapshot ->
-            TorveBanner(
-                title = "Playback path detected",
-                description = when {
-                    snapshot.hasVodPlaybackPath && snapshot.hasLivePlaybackPath ->
-                        "This desktop already has both a VOD source and at least one IPTV playlist."
-
-                    snapshot.hasVodPlaybackPath ->
-                        "A VOD playback path is already configured. You can finish onboarding after the remaining steps."
-
-                    else ->
-                        "An IPTV playlist is already configured. You can use it as the minimum playback path for desktop admission."
-                },
-                tone = TorveBannerTone.Success,
-            )
-        }
-
-        completionError?.let {
-            TorveBanner(
-                title = "Setup incomplete",
-                description = it,
-                tone = TorveBannerTone.Error,
-            )
-        }
-
-        Column(
-            modifier = Modifier
-                .weight(1f, fill = false)
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            when (setupState.currentStep) {
-                SetupStep.WELCOME -> WelcomeStep()
-                SetupStep.TERMS -> TermsStep(setupState, setupWizardViewModel)
-                SetupStep.DEBRID -> DebridStep(setupState, setupWizardViewModel)
-                SetupStep.TRAKT -> TraktStep(setupState, setupWizardViewModel)
-                SetupStep.QUALITY -> QualityStep(setupState, setupWizardViewModel)
-                SetupStep.CHANNELS -> ChannelsStep(setupState, setupWizardViewModel)
-                SetupStep.DONE -> DoneStep()
-            }
-        }
-
-        DesktopSetupFooter(
-            setupState = setupState,
-            isCompleting = isCompleting,
-            onBack = setupWizardViewModel::previousStep,
-            onNext = setupWizardViewModel::nextStep,
-            onSkip = setupWizardViewModel::skipStep,
-            onComplete = {
-                completionError = null
-                scope.launch {
-                    isCompleting = true
-                    completionError = onCompleteOnboarding()
-                        .exceptionOrNull()
-                        ?.message
-                    isCompleting = false
-                }
-            },
-        )
     }
 }
 

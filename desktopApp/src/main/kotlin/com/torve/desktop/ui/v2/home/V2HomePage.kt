@@ -57,6 +57,15 @@ fun V2HomePage(
     onSeeAll: (SeeAllRequest) -> Unit = {},
     sectionConfigs: List<HomeSectionConfig> = emptyList(),
     cardStyleFor: (HomeSection?) -> CardStyle = { CardStyle() },
+    // Optional CTA hooks for the zero-source empty state. When the
+    // user skipped onboarding without configuring any source, Home
+    // has nothing to render — these callbacks let the empty-state
+    // route to Panda setup or Settings → Integrations. Default to
+    // no-ops; V2App is expected to wire them up. Added for the
+    // onboarding simplification (Fix B in
+    // docs/onboarding-simplification-plan.md).
+    onSetUpSources: () -> Unit = {},
+    onConnectTrakt: () -> Unit = {},
 ) {
     val colors = TorveDesktopThemeTokens.colors
 
@@ -154,6 +163,30 @@ fun V2HomePage(
                             }
                         }
                     }
+                }
+
+                // ── Zero-source empty state ──
+                // When the user skipped onboarding (no sources
+                // configured) and the home data is genuinely empty,
+                // surface CTAs instead of a silent blank stage. The
+                // emptiness check uses heroItem because heroItem
+                // resolves from any of: shelves, recommended,
+                // watchlist, recentlyWatched, continueWatching — so
+                // null heroItem means none of those are populated.
+                val isHomeEmpty = heroItem == null &&
+                    homeState.shelves.isEmpty() &&
+                    homeState.watchlistItems.isEmpty() &&
+                    homeState.continueWatching.isEmpty() &&
+                    homeState.recommendedItems.isEmpty() &&
+                    homeState.recentlyWatched.isEmpty()
+                if (isHomeEmpty) {
+                    HomeZeroSourceEmptyState(
+                        onSetUpSources = onSetUpSources,
+                        onConnectTrakt = onConnectTrakt,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 72.dp, vertical = 32.dp),
+                    )
                 }
 
                 // ── Shelves - continuous stage ──
@@ -356,4 +389,69 @@ private fun shelfToSeeAllRequest(shelfId: String, title: String, items: List<Med
         else -> "shelf:$shelfId"
     }
     return SeeAllRequest(sectionId, title, items)
+}
+
+/**
+ * Empty state shown on Home when the user skipped source setup
+ * during onboarding and there's nothing to render — no shelves, no
+ * watchlist, no continue-watching, no recommendations, no hero. The
+ * post-Fix-A onboarding allows zero-source admission, so we have to
+ * surface a useful next-step here instead of a blank stage.
+ *
+ * Two CTAs:
+ *   1. **Set up sources** — primary, routes to Panda setup (or
+ *      Settings → Integrations if Panda is unavailable). Wired by
+ *      the V2App caller via `onSetUpSources`.
+ *   2. **Sync your watchlist with Trakt** — secondary, routes to
+ *      Trakt OAuth in Settings → Integrations. Wired via
+ *      `onConnectTrakt`.
+ *
+ * If the callbacks are no-ops (default) the buttons render but
+ * clicking does nothing — that's a temporary state until V2App
+ * passes real navigation hooks. The messaging itself still helps.
+ */
+@Composable
+private fun HomeZeroSourceEmptyState(
+    onSetUpSources: () -> Unit,
+    onConnectTrakt: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = TorveDesktopThemeTokens.colors
+    Surface(
+        modifier = modifier,
+        color = colors.cardSurface,
+        shape = RoundedCornerShape(14.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(28.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text(
+                text = "Welcome to Torve",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.textPrimary,
+            )
+            Text(
+                text = "You're signed in, but no streaming source is connected yet. " +
+                    "Built-in addons + Plex/Jellyfin auto-discovery will populate Home as soon as they find content. " +
+                    "To unlock debrid / Newznab / Usenet sources, set up Panda or configure them in Settings.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textSecondary,
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TorvePrimaryButton(
+                    text = "Set up sources",
+                    onClick = onSetUpSources,
+                )
+                TorveGhostButton(
+                    text = "Sync with Trakt",
+                    onClick = onConnectTrakt,
+                )
+            }
+        }
+    }
 }

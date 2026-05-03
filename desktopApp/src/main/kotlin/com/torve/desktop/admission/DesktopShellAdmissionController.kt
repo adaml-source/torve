@@ -80,16 +80,22 @@ class DesktopShellAdmissionController(
         val setupState = setupWizardViewModel.state.value
 
         return runCatching {
-            val persistedPlaylist = persistPlaylistDraft(setupState)
-            val willHaveVodPath = settingsViewModel.state.value.debridConnected || setupState.debridConnected
-            val willHaveLivePath = channelsViewModel.state.value.playlists.isNotEmpty() || persistedPlaylist
+            // Persist any IPTV playlist draft the user typed into the
+            // (now legacy) wizard. Harmless when the flow no longer
+            // surfaces that step — `persistPlaylistDraft` is a no-op
+            // when the draft fields are empty.
+            persistPlaylistDraft(setupState)
 
-            if (!willHaveVodPath && !willHaveLivePath) {
-                throw IllegalStateException(
-                    "Connect a debrid provider or add an IPTV playlist before entering desktop.",
-                )
-            }
-
+            // Zero-source admission: per the onboarding simplification
+            // plan (docs/onboarding-simplification-plan.md, Fix A), a
+            // user who skips source setup can still enter Torve. They
+            // get the Home empty-state with a "Set up sources" CTA;
+            // built-in addons + Plex / Jellyfin auto-discovery still
+            // work without any explicit source config. The previous
+            // gate ("Connect a debrid provider or add an IPTV
+            // playlist before entering desktop") was the main thing
+            // forcing the four-card "pick a category" friction the
+            // assessment kept calling out.
             setupWizardViewModel.completeSetupNow()
             prefsRepo.setString(onboardingCompletedKey(user.id), "true")
             settingsViewModel.refreshSettings()
@@ -116,7 +122,14 @@ class DesktopShellAdmissionController(
             channelsState = channelsState,
         )
 
-        if (admission.onboardingCompleted && admission.hasUsablePlaybackPath) {
+        // Zero-source admission: onboarding completion alone admits
+        // the user to Main. The Home empty-state surfaces a "Set up
+        // sources" CTA for users who skip during onboarding. The
+        // previous gate also required a usable playback path, which
+        // forced the four-card "pick a category" friction even
+        // though the rest of Torve (addons, Plex auto-discovery)
+        // works without any explicit source config.
+        if (admission.onboardingCompleted) {
             if (!admission.wasPreviouslyAdmitted) {
                 prefsRepo.setString(shellAdmittedKey(authState.user.id), "true")
             }
@@ -126,6 +139,10 @@ class DesktopShellAdmissionController(
             )
         }
 
+        // A previously-admitted user landing in this code path means
+        // their onboarding flag got cleared somehow (manual prefs
+        // wipe, account switch). Re-admit them in recovery mode so
+        // they aren't dumped back into the onboarding shell.
         if (admission.wasPreviouslyAdmitted) {
             return DesktopShellState.Main(
                 authState = authState,
