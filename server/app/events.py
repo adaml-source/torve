@@ -88,10 +88,20 @@ class EventBus:
 
     def _listen_loop(self) -> None:
         """Background thread: connect to pg, LISTEN, and dispatch notifications."""
+        # SQLAlchemy URLs ("postgresql+psycopg2://...") carry a driver
+        # suffix that psycopg2.connect() can't parse — it expects a libpq
+        # DSN (no "+psycopg2"). Strip the suffix before handing the URL
+        # to psycopg2 so the listener actually starts. Without this,
+        # psycopg2 raises ProgrammingError and the loop reconnects every
+        # 2s forever, silently breaking the SSE / pg-NOTIFY path in any
+        # deploy where DATABASE_URL uses the SQLAlchemy form.
+        # Caught by Backend CI 2026-05-03 (the listener spammed errors
+        # in every test setup).
+        dsn = settings.DATABASE_URL.replace("postgresql+psycopg2://", "postgresql://", 1)
         while not self._stop_event.is_set():
             conn = None
             try:
-                conn = psycopg2.connect(settings.DATABASE_URL)
+                conn = psycopg2.connect(dsn)
                 conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
                 cur = conn.cursor()
                 cur.execute(f"LISTEN {_PG_CHANNEL};")
