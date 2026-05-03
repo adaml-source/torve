@@ -9,6 +9,19 @@ before making release decisions.
 The audit + fix passes for Prompt 12 are summarised at the end as a
 **GO / NO-GO** matrix with an explicit blocker list.
 
+**2026-05-03 backend reconciliation note:** `server/` is now a sanitised
+snapshot of the live backend, not the earlier Prompt 12 local backend fork.
+Backend rows and test counts from before commit `5e6253a` are historical
+evidence only unless rerun against the reconciled snapshot.
+
+**2026-05-03 backend workflow update:** Option B (repo-canonical backend
+with manual deploy) landed in `c80fff9`: `server/DO_NOT_EDIT.md` was
+removed, `server/README.md` and `docs/server-sync-strategy.md` were
+rewritten, backend CI was added, and `scripts/deploy-backend.sh` was
+added. This is process infrastructure, not proof of the first deploy;
+run the deploy dry-run and observe backend CI before treating it as
+stable release evidence.
+
 ---
 
 ## 1. Required environment configuration
@@ -19,19 +32,22 @@ The audit + fix passes for Prompt 12 are summarised at the end as a
 | --- | --- | --- |
 | `JWT_SECRET` | All deployments | Auth is insecure or refuses to start |
 | `DATABASE_URL` | All deployments | Defaults to local SQLite — not production-safe |
-| `REDIS_URL` | Realtime / outbox enabled | Realtime endpoints disabled |
-| `TORVE_LAN_SECRET_WRAP_KEY` | **Production** (`TORVE_ENV=prod`) | LAN-hub publish endpoint returns **503** instead of storing plaintext |
-| `TORVE_ENV` | Production | When set to `prod` / `production` / `release`, the wrap key requirement is enforced |
+| `INTEGRATION_SECRET_KEY` | Production secret storage | `app.crypto.encrypt_secret` / `decrypt_secret` refuse to operate |
+| `INTEGRATION_SECRET_KEY_PREVIOUS` | Key rotation | Optional previous Fernet key used during rotation |
+| `APP_ENV` | All deployments | Tags runtime environment; production currently uses `production` |
 
-Generate the wrap key once and persist in your secrets manager:
+Generate the integration key once and persist in your secrets manager:
 
 ```bash
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-The wrap layer is documented in `server/app/secret_wrap.py` and its
-behavior is pinned by `tests/test_secret_wrap.py` (10 tests). Key
-rotation requires a re-wrap migration — there is **no** silent fallback.
+The encryption layer is `server/app/crypto.py`, backed by
+`INTEGRATION_SECRET_KEY`. `server/app/secret_wrap.py` and
+`tests/test_secret_wrap.py` were removed during the prod-snapshot
+reconciliation; do not use those old local names in release checks. Key
+rotation requires an explicit re-encryption/re-wrap migration; there is
+**no** silent fallback.
 
 ### Desktop (`desktopApp/`)
 
@@ -135,14 +151,13 @@ a one-line replacement of the Koin binding and inherits the redactor.
 
 ## 5. Security hardening
 
-### LAN hub auth_secret encryption-at-rest ✅ landed
+### Production secret encryption-at-rest ✅ reconciled
 
-`server/app/secret_wrap.py` wraps `LanHub.auth_secret` with Fernet on
-write and unwraps on read. Production deployments must set
-`TORVE_LAN_SECRET_WRAP_KEY` and `TORVE_ENV=prod` — without the key the
-publish endpoint returns 503 instead of storing plaintext. Legacy
-plaintext rows still round-trip on read so existing dev DBs keep
-working.
+The reconciled production snapshot uses `server/app/crypto.py` for
+secret encryption at rest (`INTEGRATION_SECRET_KEY`, with optional
+`INTEGRATION_SECRET_KEY_PREVIOUS` during rotation). The older local
+`secret_wrap.py` LAN-specific implementation was removed because it was
+not the deployed production shape.
 
 ### Repo / artifact sweep ✅ clean
 
@@ -158,14 +173,12 @@ working.
 | `google-services.json` | Both flavors are placeholder-only | ✅ |
 | `keystore.properties` | `.template` only; real file is gitignored | ✅ |
 
-### Outstanding: playlist password ciphertext
+### Playlist password ciphertext
 
-`UserPlaylist.password_enc` is currently unwrapped (the field name is
-aspirational). Same mitigation path as `auth_secret`: route through
-`secret_wrap.wrap()` on PUT and `unwrap()` on GET. **Non-blocking** for
-public release because the password is only used by the user's own
-client — it never leaves to a third party — but it should be wrapped in
-the next pass to match `auth_secret`.
+`UserPlaylist.password_enc` is encrypted through `app.crypto` in the
+reconciled production snapshot. Keep this on the audit list anyway:
+future playlist or LAN secret fields must use the same central crypto
+module rather than reviving one-off wrapping helpers.
 
 ---
 
@@ -279,18 +292,24 @@ device session state, then resolved them:
 | `test_cross_user_revoke_denied` | Device pairing isolation | Fixed by the same schema contract patch. |
 | `test_row_f_stale_device_auto_expiry` | Stale device sessions | Test now asserts the durable invariant: stale device absent from active list and swap budget intact. Production pruning behavior was already correct. |
 
-Backend status after Prompt 12B: **110 / 110 passing**.
+Backend status after Prompt 12B was **110 / 110 passing** against the
+pre-reconciliation local backend fork. Treat that as historical until
+the reconciled `server/` snapshot is rerun.
 
-### ✅ Verified by automated tests on this host
+### ✅ Automated test signal on this host
 
 | Suite | Counts |
 | --- | --- |
-| `server/tests/` | **110 pass / 0 fail** after Prompt 12B fixed pairing schema drift and rewrote the stale-device test to assert the durable invariant |
-| `tests/test_secret_wrap.py` (LAN encryption) | 10 / 10 |
+| `server/tests/` | Historical **110 pass / 0 fail** before the 2026-05-03 prod-snapshot reconciliation; rerun against the reconciled snapshot before treating this as current release evidence |
+| `server/tests/test_security.py` crypto coverage | 2 crypto-focused tests inside the suite (`test_encryption_versioned_roundtrip`, `test_encryption_legacy_compat`) |
+| `.github/workflows/backend-ci.yml` | committed in `c80fff9`; observe a real GitHub Actions pass before treating it as release evidence |
 | `tests/test_account_lifecycle.py` (delete cascade + export) | 4 / 4 |
 | `:shared:testDebugUnitTest` `domain.telemetry.*` (redaction) | 27 / 27 |
 | `:shared:testDebugUnitTest` `presentation.tvhome.*` (couch flow) | 49 / 49 |
 | `:shared:testDebugUnitTest` `presentation.lanlibrary.*` (LAN handoff) | 13 / 13 |
+| `:desktopApp:test --tests com.torve.desktop.updates.UpdateCheckerTest` | passed 2026-05-03; parser/version regression coverage |
+| `:desktopApp:test --tests com.torve.desktop.updates.UpdateInstallerHandoffTest` | passed 2026-05-03; 11 tests including 5 new launcher-resolution cases (Fix #6) |
+| Updater handoff success path (download → SHA verify → msiexec /i → upgrade completes) | passed 2026-05-03 in Windows Sandbox via cloudflared tunnel; user verified 1.0.7 in About page after restart |
 | `:desktopApp:compileKotlin` | clean |
 | `:androidApp:assembleGoogleTvDebug` (last verified Prompt 11C) | clean |
 
@@ -301,10 +320,10 @@ Backend status after Prompt 12B: **110 / 110 passing**.
 | `:androidApp:assembleAmazonTvDebug` smoke install on Fire TV | Android device or AVD |
 | iOS / `xcodebuild` build, simulator smoke | macOS + Xcode |
 | Apple notarization round-trip | macOS + Apple ID + app-specific password |
-| Windows clean-VM install / launch / playback / update handoff | clean Windows VM |
+| Windows clean-VM install / launch / playback (handoff success path now ✓) — snapshot-VM pass against Defender + third-party AV still recommended pre-stable | clean Windows VM with AV |
 | End-to-end credential transfer between desktop ↔ Android ↔ iOS | Multi-device test bed |
 | IPTV DVR record + playback round-trip on real EPG | Live IPTV provider |
-| Backend LAN-secret wrapping on a real Postgres | Postgres + wrap key |
+| Backend secret encryption on a real Postgres | Postgres + `INTEGRATION_SECRET_KEY` |
 
 ### ⏭ Deferred (non-release blockers, document in release notes)
 
@@ -313,29 +332,33 @@ Backend status after Prompt 12B: **110 / 110 passing**.
 - iOS `AVPlayer` LAN-header support.
 - Series-level DVR.
 - WinSparkle / Sparkle native auto-update framework.
-- Playlist `password_enc` Fernet wrapping (same path as
-  `LanHub.auth_secret`; defer to next pass).
+- Keep playlist/LAN-style secret fields on the central `app.crypto`
+  path; no one-off wrappers.
 
 ---
 
 ## 9. GO / NO-GO
 
 **Recommendation: GO for public beta on desktop + Android from
-checkpoint `79844ed` (`Checkpoint Prompt 6-12B public beta release
-work`). iOS remains NO-GO until macOS build and simulator smoke pass.
-Stable remains NO-GO until the blockers below are cleared.**
+`c80fff9` or later; `1060658` is the minimum desktop updater code-fix
+commit. Earlier desktop builds contain the B4 updater defects caught on
+2026-05-03. iOS remains NO-GO until macOS build and simulator smoke
+pass. Stable remains NO-GO until the blockers below are cleared.**
 
 **Update 2026-05-02:** B1 + B5 cleared (B1 was a filename-mismatch
 bug, not a missing page; B5 was already deployed under different
 naming in production).
 
-**Update 2026-05-03:** B4 cleared via Windows Sandbox smoke
-(install + launch + playback verified). Updater-handoff sub-step
-deferred — not exercised because no N-1 build was staged; non-
-blocking for beta but must run once before stable. Remaining
-blockers: B2 + B3 (macOS / iOS, held back). **Public desktop +
-Android beta is GO.** Stable remains gated on macOS host
-availability.
+**Update 2026-05-03:** B4 install + launch + playback passed in
+Windows Sandbox, then the updater handoff smoke against local N-1/N
+MSIs caught five real desktop updater defects. Fixes 1-4 were verified
+in Sandbox; Fix 5 compiles clean but its UI was not re-smoked after
+ngrok rate-limited the second cycle. The Download & install success
+path (download -> SHA verify -> installer launches -> upgrade
+completes) still needs one non-rate-limited pass before stable.
+Remaining hard blockers: B2 + B3 (macOS / iOS). **Public desktop +
+Android beta is GO from `c80fff9` or later (`1060658` minimum for the
+desktop updater code fix).**
 
 ### Pre-release checks
 
@@ -357,8 +380,8 @@ delete-account page goes 404, plus any silent rename of privacy / terms
 | ~~B1~~ | ~~Web ops~~ | **CLEARED 2026-05-02.** The page was already live at `https://torve.app/account-deletion.html` (200, branded). The 404 was a string-mismatch bug — `LegalUrls.ACCOUNT_DELETION_WEB` pointed at `delete-account.html`. Constant is now `account-deletion.html`; `link-check.sh` returns 4 PASSED. |
 | B2 | Operator (macOS) | Run iOS build + simulator smoke against the Prompt 12 changes (`AccountScreen.swift`, `TorveAPIClient.swift`). |
 | B3 | Operator (macOS) | Run macOS sign + notarize round-trip on a packaged DMG. |
-| ~~B4~~ | ~~Operator (Windows)~~ | **CLEARED 2026-05-03 (smoke caught 4 real bugs, all fixed in-slice).** Clean Windows Sandbox: installer ran, app launched, sign-in succeeded, sample item played. Updater-handoff was then exercised end-to-end via a mock appcast served through an HTTPS tunnel (ngrok → local `python -m http.server` → local-built N-1 + N MSIs). Findings: **(1)** wizard "Continue to Torve" crashed with `NoClassDefFoundError: java/net/http/HttpClient` — `nativeDistributions.modules(...)` only listed `java.sql`, missing `java.net.http`/`jdk.crypto.ec`/`jdk.unsupported`; fixed in `desktopApp/build.gradle.kts`. **(2)** In-app updater silently broken on every installed build because `DesktopReleaseInfo.versionLabel` prepends `"Version "` and that string was being passed as `currentVersion` to `UpdateChecker`, making `isStrictlyNewer` always return false; fixed in `Main.kt` to pass raw `releaseInfo.version`. **(3)** `parseAppcast` enclosure-URL regex relied on `\b` and matched inconsistently across attribute orders, so `info.installerUrl` came back null and the banner rendered without a "Download & install" button; replaced with a generic `name="value"` attribute-map extractor in `UpdateChecker.kt`. **(4)** Settings → "Check for updates now" button was fire-and-forget with zero UI feedback (no toast, no inline status, no last-checked timestamp); added inline result text + `Checking…` button label + disable-when-no-feed in `V2SettingsPage.kt`. **(5)** `UpdateInstallerHandoff` was equally silent — clicking "Download & install" with a SHA mismatch / network failure / abuse-page substitution looked identical to the happy path (the click "did nothing"); banner now surfaces the handoff `Phase` (Downloading % / Verifying / Launching installer / red error on Failed). Banner visual was also tightened up (icon disc, dismiss as small X, cleaner typography) in `UpdateBanner.kt`. **Verification status:** Fixes 1-4 confirmed working in a fresh Sandbox install (no wizard crash, banner shows Download & install button with correct version, Settings inline feedback shows "1.0.7 available" then "Check failed: HTTP 403" on rate limit). Fix 5 compiles clean and follows the same pattern as the verified Fix 4 but its end-to-end UI was not re-smoked because ngrok free-tier abuse limits blocked the second test cycle. **Residue:** the Download & install **success** path (download → SHA verify pass → OS installer launches → upgrade completes) was not proven end-to-end. Next stable cut should re-run the appcast smoke against a non-rate-limited HTTPS host (cloudflared quick tunnel, or a pushed GitHub release). A snapshot-VM pass against Defender + one third-party AV is also recommended before stable. |
-| ~~B5~~ | ~~Backend ops~~ | **CLEARED 2026-05-02.** Production runs a more advanced backend than the local `server/` directory in this repo — `app/crypto.py` (server) is the equivalent of the planned `app/secret_wrap.py` (local) under a different name. Production already has `INTEGRATION_SECRET_KEY` set (with rotation support via `INTEGRATION_SECRET_KEY_PREVIOUS`) and `APP_ENV=production`. Verified by SSH-inspecting `/opt/torve-backend/.env` and tailing `journalctl -u torve-backend` for any wrap/crypto warnings (none in the last hour). The B5 wording was based on the local naming plan that never reached prod; reality matched the goal under different identifiers. **Important caveat:** the `server/` directory in this repo is OUT OF SYNC with production — do not naively `git pull` or rsync from local to `/opt/torve-backend/`; it would break the live deploy. Treat the local `server/` as documentation-only until it's reconciled. |
+| ~~B4~~ | ~~Operator (Windows)~~ | **CLEARED 2026-05-03 (smoke caught 5 real bugs, all fixed in-slice).** Clean Windows Sandbox: installer ran, app launched, sign-in succeeded, sample item played. Updater-handoff was then exercised end-to-end via a mock appcast served through an HTTPS tunnel (ngrok → local `python -m http.server` → local-built N-1 + N MSIs). Findings: **(1)** wizard "Continue to Torve" crashed with `NoClassDefFoundError: java/net/http/HttpClient` — `nativeDistributions.modules(...)` only listed `java.sql`, missing `java.net.http`/`jdk.crypto.ec`/`jdk.unsupported`; fixed in `desktopApp/build.gradle.kts`. **(2)** In-app updater silently broken on every installed build because `DesktopReleaseInfo.versionLabel` prepends `"Version "` and that string was being passed as `currentVersion` to `UpdateChecker`, making `isStrictlyNewer` always return false; fixed in `Main.kt` to pass raw `releaseInfo.version`. **(3)** `parseAppcast` enclosure-URL regex relied on `\b` and matched inconsistently across attribute orders, so `info.installerUrl` came back null and the banner rendered without a "Download & install" button; replaced with a generic `name="value"` attribute-map extractor in `UpdateChecker.kt`. **(4)** Settings → "Check for updates now" button was fire-and-forget with zero UI feedback (no toast, no inline status, no last-checked timestamp); added inline result text + `Checking…` button label + disable-when-no-feed in `V2SettingsPage.kt`. **(5)** `UpdateInstallerHandoff` was equally silent — clicking "Download & install" with a SHA mismatch / network failure / abuse-page substitution looked identical to the happy path (the click "did nothing"); banner now surfaces the handoff `Phase` (Downloading % / Verifying / Launching installer / red error on Failed). Banner visual was also tightened up (icon disc, dismiss as small X, cleaner typography) in `UpdateBanner.kt`. **Verification status:** Fixes 1-4 confirmed working in a fresh Sandbox install (no wizard crash, banner shows Download & install button with correct version, Settings inline feedback shows "1.0.7 available" then "Check failed: HTTP 403" on rate limit). Fix 5 compiles clean and follows the same pattern as the verified Fix 4 but its end-to-end UI was not re-smoked because ngrok free-tier abuse limits blocked the second test cycle. **Residue:** the Download & install **success** path (download → SHA verify pass → OS installer launches → upgrade completes) was not proven end-to-end. Next stable cut should re-run the appcast smoke against a non-rate-limited HTTPS host (cloudflared quick tunnel, or a pushed GitHub release). A snapshot-VM pass against Defender + one third-party AV is also recommended before stable. |
+| ~~B5~~ | ~~Backend ops~~ | **CLEARED 2026-05-02; reconciled 2026-05-03; workflow switched in `c80fff9`.** Production uses `app/crypto.py` with `INTEGRATION_SECRET_KEY` and optional `INTEGRATION_SECRET_KEY_PREVIOUS`, not the old local `secret_wrap.py` plan. The repo `server/` directory was replaced with a sanitised snapshot of `/opt/torve-backend` at alembic head 0029, then switched to Option B repo-canonical workflow with backend CI and `scripts/deploy-backend.sh`. First dry-run/apply is still pre-stable evidence to collect. |
 
 ### Non-blockers (release notes)
 

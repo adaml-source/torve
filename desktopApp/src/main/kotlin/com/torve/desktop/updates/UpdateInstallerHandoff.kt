@@ -167,13 +167,57 @@ class UpdateInstallerHandoff(
 
     companion object {
         /**
-         * `Desktop.open` is the universal "let the OS handle it" call:
-         * Windows runs the .exe / .msi via Windows Installer; macOS
-         * mounts a .dmg; Linux hands the .deb to the configured
-         * package manager. This is intentionally not a `Runtime.exec`
-         * so we never embed shell-quoting logic.
+         * Hand the downloaded installer to the OS.
+         *
+         * Originally just `Desktop.open(file)` on the assumption that
+         * AWT's "let the OS handle it" call would route any platform-
+         * native installer to the registered handler. Two problems
+         * surfaced:
+         *
+         *   1. Inside Windows Sandbox the .msi filetype handler isn't
+         *      registered the same way as on a normal install, so
+         *      `Desktop.open` fails with "Unsupported URI content".
+         *      Reproduced by B4 success-path smoke 2026-05-03.
+         *   2. Some Java/AWT builds on real Windows treat `.msi` as a
+         *      data-only association and refuse to invoke the
+         *      Installer service, again throwing on `open()`.
+         *
+         * Fix: invoke `msiexec /i <path>` directly for Windows .msi
+         * files. That hits Windows Installer regardless of file
+         * association quirks. Other OS/extension combos still use
+         * `Desktop.open` — we don't want shell-quoting logic on
+         * paths we didn't pick.
          */
+        /**
+         * Returns the explicit launcher command for [file] on [osName],
+         * or null when no special handling is needed (caller should
+         * fall back to `Desktop.open`). Today the only special case is
+         * Windows + .msi → `msiexec /i <file>`, because `Desktop.open`
+         * fails on .msi inside Windows Sandbox and on some Java/AWT
+         * builds with quirky file-association handling.
+         */
+        internal fun resolveLauncherCommand(file: File, osName: String): List<String>? {
+            val n = osName.lowercase()
+            val isWindows = "windows" in n
+            val isMsi = file.name.endsWith(".msi", ignoreCase = true)
+            return if (isWindows && isMsi) {
+                listOf("msiexec.exe", "/i", file.absolutePath)
+            } else {
+                null
+            }
+        }
+
         internal fun defaultOsLauncher(file: File) {
+            val cmd = resolveLauncherCommand(file, System.getProperty("os.name") ?: "")
+            if (cmd != null) {
+                // Inherit stdio so any error is visible in the launching
+                // shell during dev; the Installer UI itself runs
+                // detached. /i = install (or upgrade if same upgrade
+                // code); we let Windows decide based on the MSI's
+                // ProductCode/UpgradeCode metadata.
+                ProcessBuilder(cmd).inheritIO().start()
+                return
+            }
             java.awt.Desktop.getDesktop().open(file)
         }
 

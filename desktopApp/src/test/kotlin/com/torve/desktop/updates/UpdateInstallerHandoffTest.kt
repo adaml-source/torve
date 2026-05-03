@@ -7,6 +7,7 @@ import java.security.MessageDigest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -152,6 +153,58 @@ class UpdateInstallerHandoffTest {
         assertTrue(UpdateInstallerHandoff.supportsHandoffOn("Darwin"))
         assertEquals(false, UpdateInstallerHandoff.supportsHandoffOn("Linux"))
         assertEquals(false, UpdateInstallerHandoff.supportsHandoffOn(""))
+    }
+
+    // ── Fix #6 regression: Windows .msi must use msiexec, not Desktop.open ──
+    // Original Desktop.open(file) failed inside Windows Sandbox with
+    // "Unsupported URI content" because the Sandbox's .msi file-type
+    // handler isn't registered the same way as on a normal install.
+    // resolveLauncherCommand picks an explicit msiexec /i command for
+    // that case so we don't depend on AWT integration.
+
+    @Test
+    fun resolveLauncher_windowsMsi_returnsMsiexecCommand() {
+        val file = File("C:/foo/torve-update.msi")
+        val cmd = UpdateInstallerHandoff.resolveLauncherCommand(file, "Windows 11")
+        assertEquals(listOf("msiexec.exe", "/i", file.absolutePath), cmd)
+    }
+
+    @Test
+    fun resolveLauncher_windowsMsiUppercase_stillMatches() {
+        val file = File("C:/foo/torve.MSI")
+        val cmd = UpdateInstallerHandoff.resolveLauncherCommand(file, "Windows 11")
+        assertEquals("msiexec.exe", cmd?.firstOrNull())
+    }
+
+    @Test
+    fun resolveLauncher_windowsExe_fallsBackToDesktopOpen() {
+        // .exe installers stay on Desktop.open — Windows handles those
+        // fine without explicit command resolution.
+        val cmd = UpdateInstallerHandoff.resolveLauncherCommand(
+            File("C:/foo/torve.exe"),
+            "Windows 11",
+        )
+        assertNull(cmd)
+    }
+
+    @Test
+    fun resolveLauncher_macOsDmg_fallsBackToDesktopOpen() {
+        val cmd = UpdateInstallerHandoff.resolveLauncherCommand(
+            File("/tmp/torve.dmg"),
+            "Mac OS X",
+        )
+        assertNull(cmd)
+    }
+
+    @Test
+    fun resolveLauncher_linuxDeb_fallsBackToDesktopOpen() {
+        // Linux is filtered out earlier by supportsHandoffOn, but the
+        // resolver shouldn't apply Windows logic if it ever reaches it.
+        val cmd = UpdateInstallerHandoff.resolveLauncherCommand(
+            File("/tmp/torve.deb"),
+            "Linux",
+        )
+        assertNull(cmd)
     }
 
     private fun infoWith(
