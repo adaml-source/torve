@@ -1,10 +1,12 @@
-# `server/` Sync Strategy — Decision Pending
+# `server/` Sync Strategy — Option B picked 2026-05-03
 
-Status: open. Created 2026-05-03 after the prod-snapshot reconciliation
-landed. This doc lays out the three sustainable options for keeping the
-repo `server/` directory in sync with deployed `/opt/torve-backend/`,
-with cost / risk / when-to-pick for each. Pick one and codify it in
-`server/DO_NOT_EDIT.md`.
+Status: **decided 2026-05-03 — Option B (repo-canonical with manual
+deploy)**. See "Decision" section at bottom for what was wired up.
+
+Created 2026-05-03 after the prod-snapshot reconciliation landed. This
+doc lays out the three sustainable options for keeping the repo
+`server/` directory in sync with deployed `/opt/torve-backend/`, with
+cost / risk / when-to-pick for each.
 
 ## Background
 
@@ -120,16 +122,38 @@ gets renamed to `server/README.md` and rewritten.
 
 ## Decision
 
-(fill in when you pick — leave the other two crossed out)
+- [x] **Option B — Repo-canonical with manual deploy.** Wired up
+      2026-05-03 (same day as the strategy doc). The repo `server/`
+      directory is now the source of truth; prod-side edits become
+      hotfix-only and get backported same-day per `server/README.md`.
 
-- [ ] **Option A — Passive snapshot.** Snapshot rule: ____________ .
-- [ ] **Option B — Repo-canonical with manual deploy.** First-cut
-      target date: ____________ .
-- [ ] **Option C — Hybrid, switch to B by:** ____________ .
+What was added to make Option B real:
+
+- `scripts/deploy-backend.sh` — client-side deploy helper. Defaults
+  to `--dry-run`; `apply` triggers rsync + on-VPS deploy.
+- `.github/workflows/backend-ci.yml` — runs on every PR touching
+  `server/`. Imports every `app/` module, applies migrations
+  against a clean Postgres, runs `pytest`.
+- `server/README.md` — replaces the old phase-2/3-era README (and
+  the briefly-living `DO_NOT_EDIT.md`). Documents the new flow,
+  hotfix escape hatch, and CI shape.
+
+What stays the same:
+
+- `.env` lives only on the VPS (`--exclude=.env` in rsync).
+- `venv/` lives only on the VPS (`--exclude=venv`).
+- `server/scripts/deploy.sh` (the on-VPS helper) is unchanged —
+  the new client-side script just SSHs in and runs it.
+
+First real deploy (separate session, not done in this commit): run
+`./scripts/deploy-backend.sh` in dry-run mode first to confirm zero
+diff vs prod (because prod was just snapshotted into repo this
+morning). Then `./scripts/deploy-backend.sh apply` for the live
+switch.
 
 ## Related
 
-- `server/DO_NOT_EDIT.md` — current Option-A documentation.
+- `server/README.md` — current workflow + deploy + CI documentation.
 - Reconciliation commits: `5e6253a` (initial snapshot), `1060658`
   (stale `secret_wrap.py` cleanup).
 - Snapshot anchor: alembic head **0029** as of 2026-05-03.
