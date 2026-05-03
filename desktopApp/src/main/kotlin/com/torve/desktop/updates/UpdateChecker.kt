@@ -158,7 +158,7 @@ class UpdateChecker(
      * the Sparkle conventions use a fixed structure. If the feed is
      * unparseable we return null and the caller treats it as a failure.
      */
-    private fun parseAppcast(body: String): UpdateInfo? {
+    internal fun parseAppcast(body: String): UpdateInfo? {
         val itemBlock = Regex("<item\\b[\\s\\S]*?</item>", RegexOption.IGNORE_CASE).find(body)?.value
             ?: return null
         val title = Regex("<title>([\\s\\S]*?)</title>", RegexOption.IGNORE_CASE).find(itemBlock)
