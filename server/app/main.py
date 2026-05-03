@@ -11,7 +11,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.bootstrap import bootstrap_reviewer_account
 from app.events import event_bus
-from app.routers import acceleration, account, account_settings, addons, admin_billing, admin_promo, admin_users, auth, checkout, content_policy, devices, health, health_integrations, integrations, meta, nzbdav as nzbdav_router, paddle_webhook, pairing_code, pairing_signin, pairings, playlists, purchase_verify, rebate, sse, transfer, watch_state, web_session, web_proxy
+from app.routers import acceleration, account, account_settings, addons, admin_billing, admin_promo, admin_users, auth, checkout, content_policy, devices, health, health_integrations, integrations, meta, nzbdav as nzbdav_router, paddle_webhook, pairing_code, pairing_signin, pairings, playlists, purchase_verify, rebate, releases, sse, transfer, watch_state, web_session, web_proxy
 
 _log = logging.getLogger(__name__)
 
@@ -106,12 +106,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def _json_safe(v):
+    """Recursively convert non-JSON-serializable values (e.g. ValueError from
+    Pydantic v2 field_validator ctx) to their string representation."""
+    if isinstance(v, dict):
+        return {k: _json_safe(val) for k, val in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_json_safe(i) for i in v]
+    if isinstance(v, (str, int, float, bool)) or v is None:
+        return v
+    return str(v)
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     # Redact input values from logs to prevent secret leakage
     safe_errors = []
     for err in exc.errors():
-        safe = {k: v for k, v in err.items() if k != "input"}
+        safe = {k: _json_safe(v) for k, v in err.items() if k != "input"}
         safe["input"] = "[REDACTED]"
         safe_errors.append(safe)
     _log.warning("Validation error on %s %s: %s", request.method, request.url.path, safe_errors)
@@ -153,3 +165,4 @@ app.include_router(nzbdav_router.resolver_router)
 app.include_router(health_integrations.router)
 app.include_router(watch_state.router)
 app.include_router(transfer.router)
+app.include_router(releases.router)

@@ -1131,3 +1131,22 @@ class PairingSigninCode(Base):
         Index("ix_pairing_signin_codes_expires_at", "expires_at"),
         Index("ix_pairing_signin_codes_installation", "device_installation_id"),
     )
+
+
+class DesktopRelease(Base):
+    """One row per published desktop build, consumed by GET /releases/appcast.xml."""
+    __tablename__ = "desktop_releases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    version: Mapped[str] = mapped_column(String(40), nullable=False, unique=True, index=True)
+    msi_url: Mapped[str] = mapped_column(Text, nullable=False)
+    sha256_hex: Mapped[str] = mapped_column(String(64), nullable=False)
+    msi_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    release_notes_html: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    published_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    is_published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
