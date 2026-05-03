@@ -338,6 +338,9 @@ class UsenetWarmCoordinatorTest {
             contentId: String, candidate: UsenetCandidateDto,
         ): UsenetResolveResponseDto = UsenetResolveResponseDto(state = "warming", jobId = "j")
 
+        override suspend fun resolveBarNzb(nzbUrl: String, title: String): UsenetResolveResponseDto =
+            UsenetResolveResponseDto(state = "failed", failureCode = "unmocked")
+
         override suspend fun getUsenetJobStatus(jobId: String): UsenetJobStatusResponseDto =
             UsenetJobStatusResponseDto(jobId = jobId, contentId = "x", state = "warming")
 
@@ -378,6 +381,9 @@ class UsenetWarmCoordinatorTest {
         override suspend fun resolveUsenetCandidate(
             contentId: String, candidate: UsenetCandidateDto,
         ): UsenetResolveResponseDto = UsenetResolveResponseDto(state = "warming")
+
+        override suspend fun resolveBarNzb(nzbUrl: String, title: String): UsenetResolveResponseDto =
+            UsenetResolveResponseDto(state = "failed", failureCode = "unmocked")
 
         override suspend fun getUsenetJobStatus(jobId: String): UsenetJobStatusResponseDto =
             UsenetJobStatusResponseDto(jobId = jobId, contentId = "x", state = "warming")

@@ -392,6 +392,9 @@ class UsenetJobPollerTest {
             return resolveResponse
         }
 
+        override suspend fun resolveBarNzb(nzbUrl: String, title: String): UsenetResolveResponseDto =
+            UsenetResolveResponseDto(state = "failed", failureCode = "unmocked")
+
         override suspend fun getUsenetJobStatus(jobId: String): UsenetJobStatusResponseDto {
             if (jobSequence.isEmpty()) return UsenetJobStatusResponseDto(jobId = jobId, contentId = "x", state = "warming")
             val next = jobSequence.getOrNull(idx) ?: jobSequence.last()

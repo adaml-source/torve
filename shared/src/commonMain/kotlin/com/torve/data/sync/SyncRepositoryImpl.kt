@@ -108,7 +108,7 @@ class SyncRepositoryImpl(
     override suspend fun exportSyncPayload(): SyncPayload {
         val queries = database.torveQueries
 
-        val addons = queries.getAllAddons().executeAsList().map { row ->
+        val addons = queries.getAllAddons(userId = uid()).executeAsList().map { row ->
             SyncAddon(
                 manifestUrl = row.manifest_url,
                 isEnabled = row.is_enabled == 1L,
@@ -208,11 +208,15 @@ class SyncRepositoryImpl(
 
         // Addons: insert if new, update enabled/priority if existing
         for (addon in payload.addons) {
-            val existing = queries.getAddonByUrl(addon.manifestUrl).executeAsOneOrNull()
+            val existing = queries.getAddonByUrl(
+                userId = uid(),
+                manifestUrl = addon.manifestUrl,
+            ).executeAsOneOrNull()
             if (existing == null) {
                 // New addon — we only have the URL, not the full manifest.
                 // Insert a placeholder that the AddonRepository can refresh later.
                 queries.insertAddon(
+                    user_id = uid(),
                     manifest_url = addon.manifestUrl,
                     id = addon.manifestUrl,   // placeholder
                     name = "Synced Addon",    // placeholder
@@ -231,12 +235,14 @@ class SyncRepositoryImpl(
                 addonsImported++
             } else {
                 queries.updateAddonEnabled(
-                    is_enabled = if (addon.isEnabled) 1L else 0L,
-                    manifest_url = addon.manifestUrl,
+                    isEnabled = if (addon.isEnabled) 1L else 0L,
+                    userId = uid(),
+                    manifestUrl = addon.manifestUrl,
                 )
                 queries.updateAddonPriority(
                     priority = addon.priority.toLong(),
-                    manifest_url = addon.manifestUrl,
+                    userId = uid(),
+                    manifestUrl = addon.manifestUrl,
                 )
                 addonsImported++
             }

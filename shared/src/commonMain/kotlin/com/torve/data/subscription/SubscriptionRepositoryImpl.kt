@@ -57,8 +57,17 @@ class SubscriptionRepositoryImpl(
     private val localSettingsRepository: DeviceLocalSettingsRepository,
 ) : SubscriptionRepository {
 
+    /**
+     * Subscription rows are scoped per user — when no one is signed in we
+     * return an empty string and rely on the empty-state guards below to
+     * skip persistence rather than risk leaking another user's cached row.
+     */
+    private fun uid(): String = authClient.authUserFlow.value?.id ?: ""
+    private fun isSignedIn(): Boolean = authClient.authUserFlow.value != null
+
     override suspend fun getActiveSubscription(): Subscription? {
-        val row = database.torveQueries.getActiveSubscription().executeAsOneOrNull()
+        if (!isSignedIn()) return null
+        val row = database.torveQueries.getActiveSubscription(userId = uid()).executeAsOneOrNull()
             ?: return null
         return Subscription(
             id = row.id,
@@ -88,9 +97,12 @@ class SubscriptionRepositoryImpl(
     }
 
     override suspend fun activateSubscription(tier: SubscriptionTier, purchaseToken: String) {
+        if (!isSignedIn()) return
+        val uid = uid()
         val now = Clock.System.now().toEpochMilliseconds()
-        database.torveQueries.deactivateAllSubscriptions()
+        database.torveQueries.deactivateAllSubscriptions(userId = uid)
         database.torveQueries.insertSubscription(
+            user_id = uid,
             id = "sub_$now",
             tier = tier.name,
             purchase_token = purchaseToken,
@@ -235,9 +247,12 @@ class SubscriptionRepositoryImpl(
             persistFreeTier()
             return
         }
+        if (!isSignedIn()) return
+        val uid = uid()
         val now = Clock.System.now().toEpochMilliseconds()
-        database.torveQueries.deactivateAllSubscriptions()
+        database.torveQueries.deactivateAllSubscriptions(userId = uid)
         database.torveQueries.insertSubscription(
+            user_id = uid,
             id = "sub_backend_${resolved.tier.name.lowercase()}",
             tier = resolved.tier.name,
             purchase_token = "backend_entitlement",
@@ -249,9 +264,12 @@ class SubscriptionRepositoryImpl(
     }
 
     private suspend fun persistFreeTier() {
+        if (!isSignedIn()) return
+        val uid = uid()
         val now = Clock.System.now().toEpochMilliseconds()
-        database.torveQueries.deactivateAllSubscriptions()
+        database.torveQueries.deactivateAllSubscriptions(userId = uid)
         database.torveQueries.insertSubscription(
+            user_id = uid,
             id = "sub_free",
             tier = SubscriptionTier.FREE.name,
             purchase_token = null,

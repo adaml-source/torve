@@ -117,6 +117,7 @@ internal actual object GzipSupport {
         tempFilePath: String,
         parser: EpgParser,
         db: TorveDatabase,
+        userId: String,
         playlistId: String,
         generationId: Long,
         windowStartMs: Long,
@@ -157,6 +158,7 @@ internal actual object GzipSupport {
                         stats = parser.parseXmlTvStreamingToDb(
                             input = counted,
                             db = db,
+                            userId = userId,
                             playlistId = playlistId,
                             generationId = generationId,
                             windowStartMs = windowStartMs,
@@ -195,6 +197,7 @@ internal actual object GzipSupport {
         xmlChannel: ByteReadChannel,
         parser: EpgParser,
         db: TorveDatabase,
+        userId: String,
         playlistId: String,
         generationId: Long,
         windowStartMs: Long,
@@ -219,6 +222,7 @@ internal actual object GzipSupport {
                     parser.parseXmlTvStreamingToDb(
                         input = buffered,
                         db = db,
+                        userId = userId,
                         playlistId = playlistId,
                         generationId = generationId,
                         windowStartMs = windowStartMs,
@@ -281,6 +285,7 @@ internal actual object GzipSupport {
         compressedChannel: ByteReadChannel,
         parser: EpgParser,
         db: TorveDatabase,
+        userId: String,
         playlistId: String,
         generationId: Long,
         windowStartMs: Long,
@@ -306,6 +311,7 @@ internal actual object GzipSupport {
                         parser.parseXmlTvStreamingToDb(
                             input = gzipStream,
                             db = db,
+                            userId = userId,
                             playlistId = playlistId,
                             generationId = generationId,
                             windowStartMs = windowStartMs,

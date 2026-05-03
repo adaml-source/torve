@@ -330,6 +330,9 @@ class UsenetTelemetryTest {
             contentId: String, candidate: UsenetCandidateDto,
         ): UsenetResolveResponseDto = resolveResponse
 
+        override suspend fun resolveBarNzb(nzbUrl: String, title: String): UsenetResolveResponseDto =
+            UsenetResolveResponseDto(state = "failed", failureCode = "unmocked")
+
         override suspend fun getUsenetJobStatus(jobId: String): UsenetJobStatusResponseDto =
             UsenetJobStatusResponseDto(jobId = jobId, contentId = "x", state = "warming")
 

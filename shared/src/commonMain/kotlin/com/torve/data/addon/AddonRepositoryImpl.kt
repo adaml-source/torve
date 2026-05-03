@@ -1,5 +1,6 @@
 package com.torve.data.addon
 
+import com.torve.data.auth.UserIdProvider
 import com.torve.db.TorveDatabase
 import com.torve.domain.model.AddonCatalog
 import com.torve.domain.model.AddonExtra
@@ -13,7 +14,11 @@ class AddonRepositoryImpl(
     private val database: TorveDatabase,
     private val addonClient: StremioAddonClient,
     private val json: Json,
+    private val userIdProvider: UserIdProvider,
 ) : AddonRepository {
+
+    private fun userId(): String = userIdProvider.currentUserId()
+    private fun isSignedIn(): Boolean = userIdProvider.isSignedIn()
 
     override suspend fun installAddon(
         url: String,
@@ -33,7 +38,8 @@ class AddonRepositoryImpl(
         val now = Clock.System.now().toEpochMilliseconds()
         val manifestJson = json.encodeToString(AddonManifest.serializer(), manifest)
 
-        val maxPriority = database.torveQueries.getAllAddons().executeAsList()
+        val uid = userId()
+        val maxPriority = database.torveQueries.getAllAddons(userId = uid).executeAsList()
             .maxOfOrNull { it.priority } ?: -1
         val storedPriority = priority ?: (maxPriority + 1).toInt()
         val storedInstalledFrom = normalizeInstallSource(installedFrom)
@@ -42,10 +48,13 @@ class AddonRepositoryImpl(
         // addon catalog "Install" button) don't know the Panda config_id; the
         // Panda onboarding VM persists it via setAddonConfigId immediately
         // after install. Re-installing must not wipe that pointer.
-        val existingConfigId = database.torveQueries.getAddonByUrl(manifestUrl)
-            .executeAsOneOrNull()?.config_id
+        val existingConfigId = database.torveQueries.getAddonByUrl(
+            userId = uid,
+            manifestUrl = manifestUrl,
+        ).executeAsOneOrNull()?.config_id
 
         database.torveQueries.insertAddon(
+            user_id = uid,
             manifest_url = manifestUrl,
             id = manifest.id,
             name = manifest.name,
@@ -76,36 +85,46 @@ class AddonRepositoryImpl(
     }
 
     override suspend fun setAddonConfigId(manifestUrl: String, configId: String?) {
+        if (!isSignedIn()) return
         database.torveQueries.updateAddonConfigId(
-            config_id = configId,
-            manifest_url = manifestUrl,
+            configId = configId,
+            userId = userId(),
+            manifestUrl = manifestUrl,
         )
     }
 
     override suspend fun removeAddon(manifestUrl: String) {
-        database.torveQueries.deleteAddon(manifestUrl)
+        if (!isSignedIn()) return
+        database.torveQueries.deleteAddon(userId = userId(), manifestUrl = manifestUrl)
     }
 
     override suspend fun getInstalledAddons(): List<InstalledAddon> {
-        return database.torveQueries.getAllAddons().executeAsList().map(::mapRow)
+        if (!isSignedIn()) return emptyList()
+        return database.torveQueries.getAllAddons(userId = userId()).executeAsList().map(::mapRow)
     }
 
     override suspend fun getEnabledAddons(): List<InstalledAddon> {
-        return database.torveQueries.getEnabledAddons().executeAsList().map(::mapRow)
+        if (!isSignedIn()) return emptyList()
+        return database.torveQueries.getEnabledAddons(userId = userId()).executeAsList().map(::mapRow)
     }
 
     override suspend fun toggleAddon(manifestUrl: String, enabled: Boolean) {
+        if (!isSignedIn()) return
         database.torveQueries.updateAddonEnabled(
-            is_enabled = if (enabled) 1 else 0,
-            manifest_url = manifestUrl,
+            isEnabled = if (enabled) 1 else 0,
+            userId = userId(),
+            manifestUrl = manifestUrl,
         )
     }
 
     override suspend fun reorderAddons(orderedUrls: List<String>) {
+        if (!isSignedIn()) return
+        val uid = userId()
         orderedUrls.forEachIndexed { index, url ->
             database.torveQueries.updateAddonPriority(
                 priority = index.toLong(),
-                manifest_url = url,
+                userId = uid,
+                manifestUrl = url,
             )
         }
     }
@@ -119,7 +138,11 @@ class AddonRepositoryImpl(
     }
 
     override suspend fun getAddon(manifestUrl: String): InstalledAddon? {
-        return database.torveQueries.getAddonByUrl(manifestUrl).executeAsOneOrNull()?.let(::mapRow)
+        if (!isSignedIn()) return null
+        return database.torveQueries.getAddonByUrl(
+            userId = userId(),
+            manifestUrl = manifestUrl,
+        ).executeAsOneOrNull()?.let(::mapRow)
     }
 
     override suspend fun markAddonSynced(
@@ -128,11 +151,13 @@ class AddonRepositoryImpl(
         syncedAt: Long?,
         installedFrom: String,
     ) {
+        if (!isSignedIn()) return
         database.torveQueries.markAddonSynced(
-            server_id = serverId,
-            synced_at = syncedAt,
-            installed_from = normalizeInstallSource(installedFrom),
-            manifest_url = manifestUrl,
+            serverId = serverId,
+            syncedAt = syncedAt,
+            installedFrom = normalizeInstallSource(installedFrom),
+            userId = userId(),
+            manifestUrl = manifestUrl,
         )
     }
 
@@ -144,18 +169,21 @@ class AddonRepositoryImpl(
         syncedAt: Long,
         installedFrom: String,
     ) {
+        if (!isSignedIn()) return
         database.torveQueries.syncAddonWithServer(
-            server_id = serverId,
-            synced_at = syncedAt,
-            installed_from = normalizeInstallSource(installedFrom),
-            is_enabled = if (enabled) 1 else 0,
+            serverId = serverId,
+            syncedAt = syncedAt,
+            installedFrom = normalizeInstallSource(installedFrom),
+            isEnabled = if (enabled) 1 else 0,
             priority = priority.toLong(),
-            manifest_url = manifestUrl,
+            userId = userId(),
+            manifestUrl = manifestUrl,
         )
     }
 
     override suspend fun clearSyncMetadata() {
-        database.torveQueries.clearAddonSyncMetadata()
+        if (!isSignedIn()) return
+        database.torveQueries.clearAddonSyncMetadata(userId = userId())
     }
 
     private fun StremioManifest.toDomain(

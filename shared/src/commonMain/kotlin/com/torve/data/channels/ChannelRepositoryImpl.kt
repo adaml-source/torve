@@ -301,7 +301,7 @@ class ChannelRepositoryImpl(
     override suspend fun removePlaylist(id: String) {
         removeXtreamPassword(id) // clear from secure storage
         database.torveQueries.deletePlaylist(userId = uid(), playlistId = id)
-        database.torveQueries.deleteChannelsForPlaylist(id)
+        database.torveQueries.deleteChannelsForPlaylist(userId = uid(), playlistId = id)
         playlistCache.remove(id)
         epgCache.remove(id)
         epgErrorCache.remove(id)
@@ -544,21 +544,21 @@ class ChannelRepositoryImpl(
         repairChannelCatalogIfNeeded(playlistId)
         val generationId = getActiveChannelGeneration(playlistId) ?: return emptyList()
         val results = database.torveQueries
-            .getCategoryCountsForPlaylist(playlistId, generationId)
+            .getCategoryCountsForPlaylist(userId = uid(), playlistId = playlistId, generationId = generationId)
             .executeAsList()
         if (results.isNotEmpty()) {
             return results.map { row -> (row.group_title ?: "Ungrouped") to row.channel_count }
         }
         // Active generation has no data — find any generation that does.
         val fallbackGeneration = database.torveQueries
-            .getChannelsForPlaylistGeneration(playlistId, generationId)
+            .getChannelsForPlaylistGeneration(userId = uid(), playlistId = playlistId, generationId = generationId)
             .executeAsList()
         if (fallbackGeneration.isEmpty()) {
             // Try loading via getChannels which handles catalog repair and cache rebuild.
             val channels = getChannels(playlistId)
             val repairedGeneration = getActiveChannelGeneration(playlistId) ?: return emptyList()
             return database.torveQueries
-                .getCategoryCountsForPlaylist(playlistId, repairedGeneration)
+                .getCategoryCountsForPlaylist(userId = uid(), playlistId = playlistId, generationId = repairedGeneration)
                 .executeAsList()
                 .map { row -> (row.group_title ?: "Ungrouped") to row.channel_count }
         }
@@ -572,11 +572,11 @@ class ChannelRepositoryImpl(
         val generationId = getActiveChannelGeneration(playlistId) ?: return emptyList()
         val rows = if (categoryName == "Ungrouped") {
             database.torveQueries
-                .getChannelsForPlaylistCategoryNull(playlistId, generationId)
+                .getChannelsForPlaylistCategoryNull(userId = uid(), playlistId = playlistId, generationId = generationId)
                 .executeAsList()
         } else {
             database.torveQueries
-                .getChannelsForPlaylistCategory(playlistId, generationId, categoryName)
+                .getChannelsForPlaylistCategory(userId = uid(), playlistId = playlistId, generationId = generationId, groupTitle = categoryName)
                 .executeAsList()
         }
         return rows.map { row ->
@@ -610,7 +610,7 @@ class ChannelRepositoryImpl(
     override suspend fun getTotalChannelCount(playlistId: String): Long {
         val generationId = getActiveChannelGeneration(playlistId) ?: return 0L
         return database.torveQueries
-            .getTotalChannelCountForPlaylist(playlistId, generationId)
+            .getTotalChannelCountForPlaylist(userId = uid(), playlistId = playlistId, generationId = generationId)
             .executeAsOne()
     }
 
@@ -621,7 +621,14 @@ class ChannelRepositoryImpl(
         return playlists.flatMap { playlist ->
             val generationId = getActiveChannelGeneration(playlist.id) ?: return@flatMap emptyList()
             database.torveQueries
-                .searchChannelsForPlaylist(playlist.id, generationId, pattern, pattern, pattern)
+                .searchChannelsForPlaylist(
+                    userId = uid(),
+                    playlistId = playlist.id,
+                    generationId = generationId,
+                    nameLike = pattern,
+                    tvgNameLike = pattern,
+                    groupLike = pattern,
+                )
                 .executeAsList()
                 .map { row ->
                     Channel(
@@ -692,7 +699,7 @@ class ChannelRepositoryImpl(
             // Legacy format — try to resolve to stable_id via DB lookup.
             // Case 1: bare tvg_id (e.g. "channel.epg.id")
             val byTvgId = runCatching {
-                database.torveQueries.getChannelByTvgId(id).executeAsOneOrNull()
+                database.torveQueries.getChannelByTvgId(userId = uid(), tvgId = id).executeAsOneOrNull()
             }.getOrNull()
             if (byTvgId != null) {
                 result.add(byTvgId)
@@ -705,7 +712,11 @@ class ChannelRepositoryImpl(
                 val playlistId = id.substring(0, underscoreIdx)
                 val channelName = id.substring(underscoreIdx + 1)
                 val byName = runCatching {
-                    database.torveQueries.getChannelByPlaylistAndName(playlistId, channelName)
+                    database.torveQueries.getChannelByPlaylistAndName(
+                        userId = uid(),
+                        playlistId = playlistId,
+                        name = channelName,
+                    )
                         .executeAsOneOrNull()
                 }.getOrNull()
                 if (byName != null) {
@@ -759,12 +770,13 @@ class ChannelRepositoryImpl(
         val (windowStart, windowEnd) = resolveEpgWindowBounds()
         return database.torveQueries
             .getEpgProgrammesForChannelWindowLimited(
-                playlistId,
-                generationId,
-                channelId,
-                windowStart,
-                windowEnd,
-                EPG_MAX_PROGRAMMES_PER_CHANNEL_IN_MEMORY.toLong(),
+                userId = uid(),
+                playlistId = playlistId,
+                generationId = generationId,
+                epgChannelKey = channelId,
+                startTime = windowStart,
+                endTime = windowEnd,
+                rowLimit = EPG_MAX_PROGRAMMES_PER_CHANNEL_IN_MEMORY.toLong(),
             )
             .executeAsList()
             .map { row ->
@@ -858,7 +870,7 @@ class ChannelRepositoryImpl(
             if (p.type == "xtream") removeXtreamPassword(p.id)
         }
         println("[XtreamCred] Cleared ${playlists.count { it.type == "xtream" }} secure passwords on sign-out")
-        database.torveQueries.deleteAllChannels()
+        database.torveQueries.deleteAllChannels(userId = uid())
         database.torveQueries.deleteAllFavorites(userId = uid())
         database.torveQueries.clearRecentChannels(userId = uid())
         database.torveQueries.deleteAllPlaylists(userId = uid())
@@ -908,6 +920,7 @@ class ChannelRepositoryImpl(
         database.transaction {
             channels.forEachIndexed { index, channel ->
                 database.torveQueries.insertChannel(
+                    user_id = uid(),
                     playlist_id = playlistId,
                     generation_id = nextGeneration,
                     stable_id = stableChannelId(playlistId, channel),
@@ -948,7 +961,7 @@ class ChannelRepositoryImpl(
             )
             setActiveChannelGeneration(playlistId, nextGeneration)
             database.torveQueries.setPreference(user_id = uid(), key = channelLastSyncPrefKey(playlistId), value_ = updatedAt.toString())
-            database.torveQueries.deleteChannelsOlderGenerations(playlistId, nextGeneration)
+            database.torveQueries.deleteChannelsOlderGenerations(userId = uid(), playlistId = playlistId, generationId = nextGeneration)
         }
         clearStagedChannelGeneration(playlistId)
 
@@ -969,7 +982,7 @@ class ChannelRepositoryImpl(
         generationId: Long,
     ): List<Channel> {
         return database.torveQueries
-            .getChannelsForPlaylistGeneration(playlistId, generationId)
+            .getChannelsForPlaylistGeneration(userId = uid(), playlistId = playlistId, generationId = generationId)
             .executeAsList()
             .map { row ->
                 Channel(
@@ -1136,6 +1149,7 @@ class ChannelRepositoryImpl(
                             tempFilePath = downloadResult.tempFilePath,
                             parser = epgParser,
                             db = database,
+                            userId = uid(),
                             playlistId = playlistId,
                             generationId = nextGeneration,
                             windowStartMs = windowStart,
@@ -1182,8 +1196,8 @@ class ChannelRepositoryImpl(
                             "ChannelsEPG: db ingest complete playlistId=$playlistId generation=$nextGeneration totalSeen=${stats.totalProgrammesSeen} kept=${stats.programmesKept} skippedByWindow=${stats.programmesSkippedByWindow} skippedByChannelFilter=${stats.programmesSkippedByChannelFilter} skippedByInvalidTime=${stats.programmesSkippedByInvalidTime} skippedByNoMapping=${stats.programmesSkippedByNoMapping} skippedByCap=${stats.programmesSkippedByCap} durationMs=${stats.parseDurationMs}",
                         )
                         setActiveEpgGeneration(playlistId, nextGeneration)
-                        database.torveQueries.deleteEpgProgrammesOlderGenerations(playlistId, nextGeneration)
-                        database.torveQueries.deleteEpgChannelsOlderGenerations(playlistId, nextGeneration)
+                        database.torveQueries.deleteEpgProgrammesOlderGenerations(userId = uid(), playlistId = playlistId, generationId = nextGeneration)
+                        database.torveQueries.deleteEpgChannelsOlderGenerations(userId = uid(), playlistId = playlistId, generationId = nextGeneration)
                         inFlightGeneration = null
                         loadEpgFromDatabase(playlistId, nextGeneration, windowStart, windowEnd)
                     } finally {
@@ -1358,7 +1372,7 @@ class ChannelRepositoryImpl(
             stagedGeneration = getStagedChannelGeneration(playlistId),
         )
         recovery.staleGenerationToDelete?.let { generationId ->
-            database.torveQueries.clearChannelsForPlaylistGeneration(playlistId, generationId)
+            database.torveQueries.clearChannelsForPlaylistGeneration(userId = uid(), playlistId = playlistId, generationId = generationId)
             playlistCache.remove(playlistId)
             channelDebugLog(
                 "ChannelCatalog: discarded interrupted staged generation playlistId=$playlistId generation=$generationId fallback=${recovery.fallbackActiveGeneration}",
@@ -1430,7 +1444,7 @@ class ChannelRepositoryImpl(
     ): EpgData {
         val startedAtMs = Clock.System.now().toEpochMilliseconds()
         val channelRows = database.torveQueries
-            .getEpgChannelsForPlaylistGeneration(playlistId, generationId)
+            .getEpgChannelsForPlaylistGeneration(userId = uid(), playlistId = playlistId, generationId = generationId)
             .executeAsList()
         val channelsByKey = LinkedHashMap<String, EpgChannel>(channelRows.size)
         channelRows.forEach { row ->
@@ -1445,11 +1459,12 @@ class ChannelRepositoryImpl(
 
         val programmeRows = database.torveQueries
             .getEpgProgrammesForPlaylistWindowLimited(
-                playlistId,
-                generationId,
-                windowStartMs,
-                windowEndMs,
-                EPG_MAX_PROGRAMMES_TOTAL_IN_MEMORY.toLong(),
+                userId = uid(),
+                playlistId = playlistId,
+                generationId = generationId,
+                startTime = windowStartMs,
+                endTime = windowEndMs,
+                rowLimit = EPG_MAX_PROGRAMMES_TOTAL_IN_MEMORY.toLong(),
             )
             .executeAsList()
         val programmes = ArrayList<EpgProgramme>(programmeRows.size)
@@ -1530,8 +1545,8 @@ class ChannelRepositoryImpl(
     }
 
     private fun clearEpgGenerationRows(playlistId: String, generationId: Long) {
-        database.torveQueries.clearEpgProgrammesForPlaylistGeneration(playlistId, generationId)
-        database.torveQueries.clearEpgChannelsForPlaylistGeneration(playlistId, generationId)
+        database.torveQueries.clearEpgProgrammesForPlaylistGeneration(userId = uid(), playlistId = playlistId, generationId = generationId)
+        database.torveQueries.clearEpgChannelsForPlaylistGeneration(userId = uid(), playlistId = playlistId, generationId = generationId)
     }
 
     private fun debugLog(message: String) {

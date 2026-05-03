@@ -170,6 +170,7 @@ private fun consumeProgrammeTagAndReadTitle(
 internal suspend fun EpgParser.parseXmlTvStreamingToDb(
     input: InputStream,
     db: TorveDatabase,
+    userId: String,
     playlistId: String,
     generationId: Long,
     windowStartMs: Long,
@@ -224,6 +225,7 @@ internal suspend fun EpgParser.parseXmlTvStreamingToDb(
         db.torveQueries.transaction {
             channelBatch.forEach { row ->
                 db.torveQueries.insertEpgChannel(
+                    user_id = userId,
                     playlist_id = playlistId,
                     generation_id = generationId,
                     channel_id = row.channelId,
@@ -236,6 +238,7 @@ internal suspend fun EpgParser.parseXmlTvStreamingToDb(
             }
             programmeBatch.forEach { row ->
                 db.torveQueries.insertEpgProgramme(
+                    user_id = userId,
                     playlist_id = playlistId,
                     generation_id = generationId,
                     channel_id = row.channelId,
@@ -283,8 +286,8 @@ internal suspend fun EpgParser.parseXmlTvStreamingToDb(
         "ChannelsEPG: db parser start playlistId=$playlistId generation=$generationId windowStartMs=$windowStartMs windowEndMs=$windowEndMs batchSize=$safeBatchSize maxPerChannel=$maxPerChannel maxTotal=$maxTotal heapUsedMb=${progressSnapshot().heapUsedMb} heapFreeMb=${progressSnapshot().heapFreeMb}",
     )
 
-    db.torveQueries.clearEpgProgrammesForPlaylistGeneration(playlistId, generationId)
-    db.torveQueries.clearEpgChannelsForPlaylistGeneration(playlistId, generationId)
+    db.torveQueries.clearEpgProgrammesForPlaylistGeneration(userId = userId, playlistId = playlistId, generationId = generationId)
+    db.torveQueries.clearEpgChannelsForPlaylistGeneration(userId = userId, playlistId = playlistId, generationId = generationId)
 
     try {
         val xmlParser = XmlPullParserFactory.newInstance().newPullParser().apply {
@@ -420,8 +423,8 @@ internal suspend fun EpgParser.parseXmlTvStreamingToDb(
             flushBatches()
         }
     } catch (t: Throwable) {
-        db.torveQueries.clearEpgProgrammesForPlaylistGeneration(playlistId, generationId)
-        db.torveQueries.clearEpgChannelsForPlaylistGeneration(playlistId, generationId)
+        db.torveQueries.clearEpgProgrammesForPlaylistGeneration(userId = userId, playlistId = playlistId, generationId = generationId)
+        db.torveQueries.clearEpgChannelsForPlaylistGeneration(userId = userId, playlistId = playlistId, generationId = generationId)
         throw t
     }
 

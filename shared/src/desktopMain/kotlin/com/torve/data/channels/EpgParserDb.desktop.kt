@@ -173,6 +173,7 @@ private fun consumeProgrammeElement(
 internal suspend fun EpgParser.parseXmlTvStreamingToDbDesktop(
     input: InputStream,
     db: TorveDatabase,
+    userId: String,
     playlistId: String,
     generationId: Long,
     windowStartMs: Long,
@@ -227,6 +228,7 @@ internal suspend fun EpgParser.parseXmlTvStreamingToDbDesktop(
         db.torveQueries.transaction {
             channelBatch.forEach { row ->
                 db.torveQueries.insertEpgChannel(
+                    user_id = userId,
                     playlist_id = playlistId,
                     generation_id = generationId,
                     channel_id = row.channelId,
@@ -239,6 +241,7 @@ internal suspend fun EpgParser.parseXmlTvStreamingToDbDesktop(
             }
             programmeBatch.forEach { row ->
                 db.torveQueries.insertEpgProgramme(
+                    user_id = userId,
                     playlist_id = playlistId,
                     generation_id = generationId,
                     channel_id = row.channelId,
@@ -273,8 +276,8 @@ internal suspend fun EpgParser.parseXmlTvStreamingToDbDesktop(
         programmeBatch += row
     }
 
-    db.torveQueries.clearEpgProgrammesForPlaylistGeneration(playlistId, generationId)
-    db.torveQueries.clearEpgChannelsForPlaylistGeneration(playlistId, generationId)
+    db.torveQueries.clearEpgProgrammesForPlaylistGeneration(userId = userId, playlistId = playlistId, generationId = generationId)
+    db.torveQueries.clearEpgChannelsForPlaylistGeneration(userId = userId, playlistId = playlistId, generationId = generationId)
 
     val factory = XMLInputFactory.newInstance().apply {
         // Defensive against XML bombs / external entity attacks. Public IPTV
@@ -393,8 +396,8 @@ internal suspend fun EpgParser.parseXmlTvStreamingToDbDesktop(
 
         if (!abortedByGlobalCap) flushBatches()
     } catch (t: Throwable) {
-        db.torveQueries.clearEpgProgrammesForPlaylistGeneration(playlistId, generationId)
-        db.torveQueries.clearEpgChannelsForPlaylistGeneration(playlistId, generationId)
+        db.torveQueries.clearEpgProgrammesForPlaylistGeneration(userId = userId, playlistId = playlistId, generationId = generationId)
+        db.torveQueries.clearEpgChannelsForPlaylistGeneration(userId = userId, playlistId = playlistId, generationId = generationId)
         throw t
     } finally {
         runCatching { reader.close() }

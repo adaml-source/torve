@@ -310,7 +310,7 @@ val sharedModule = module {
     single { ContentPolicyFilter() }
 
     // Addon Repository
-    single<AddonRepository> { AddonRepositoryImpl(get(), get(), get()) }
+    single<AddonRepository> { AddonRepositoryImpl(get(), get(), get(), get()) }
     single {
         AddonSyncService(
             accessTokenProvider = { get<AuthClient>().getValidAccessToken() },
