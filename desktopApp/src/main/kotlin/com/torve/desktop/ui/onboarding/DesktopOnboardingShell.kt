@@ -1166,11 +1166,44 @@ private fun TraktStep(
 
                 setupState.traktDeviceCode != null -> {
                     val deviceCode = setupState.traktDeviceCode
-                    TorveBanner(
-                        title = "Authorize Trakt",
-                        description = "Go to ${deviceCode?.verificationUrl.orEmpty()} and enter ${deviceCode?.userCode.orEmpty()}. Desktop will keep polling in the background.",
-                        tone = TorveBannerTone.Info,
-                    )
+                    val verificationUrl = deviceCode?.verificationUrl.orEmpty()
+                    val userCode = deviceCode?.userCode.orEmpty()
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        TorveBanner(
+                            title = "Authorize Trakt",
+                            description = "Open the URL below, sign in to Trakt, and enter the code. Desktop will keep polling in the background.",
+                            tone = TorveBannerTone.Info,
+                        )
+                        // Verification URL with Copy + Open-in-browser
+                        // buttons. Pulled out of the banner copy so
+                        // users don't have to manually retype the URL
+                        // — the most common friction point in
+                        // device-code flows on desktop.
+                        OnboardingDeviceCodeRow(
+                            label = "URL",
+                            value = verificationUrl,
+                            actions = {
+                                TorveGhostButton(
+                                    text = "Copy link",
+                                    onClick = { copyToClipboard(verificationUrl) },
+                                )
+                                TorveGhostButton(
+                                    text = "Open in browser",
+                                    onClick = { openInBrowser(verificationUrl) },
+                                )
+                            },
+                        )
+                        OnboardingDeviceCodeRow(
+                            label = "Code",
+                            value = userCode,
+                            actions = {
+                                TorveGhostButton(
+                                    text = "Copy code",
+                                    onClick = { copyToClipboard(userCode) },
+                                )
+                            },
+                        )
+                    }
                 }
 
                 else -> {
@@ -1352,4 +1385,78 @@ private fun SetupStep.desktopDescription(): String = when (this) {
     SetupStep.QUALITY -> "Initial playback defaults."
     SetupStep.CHANNELS -> "Optional IPTV admission path."
     SetupStep.DONE -> "Persist and hand off to the main shell."
+}
+
+/**
+ * Renders one row of a device-code OAuth flow: a label, the value
+ * itself shown as a monospaced selectable string, and one or more
+ * action buttons (Copy link / Open in browser / Copy code).
+ *
+ * The value background uses the field surface so it's visually
+ * distinct from prose copy, signalling "this is a thing you can
+ * grab" rather than instructional text. Long URLs wrap rather than
+ * truncate so the user can always read the full string.
+ */
+@Composable
+private fun OnboardingDeviceCodeRow(
+    label: String,
+    value: String,
+    actions: @Composable () -> Unit,
+) {
+    val colors = com.torve.desktop.ui.theme.TorveDesktopThemeTokens.colors
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.textSecondary,
+            modifier = Modifier.width(48.dp),
+        )
+        Surface(
+            modifier = Modifier.weight(1f),
+            color = colors.fieldSurface,
+            shape = RoundedCornerShape(8.dp),
+            border = BorderStroke(1.dp, colors.borderSubtle),
+        ) {
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textPrimary,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            actions()
+        }
+    }
+}
+
+/**
+ * Best-effort clipboard write. AWT's Toolkit clipboard is the
+ * cross-platform path on JVM; same pattern used elsewhere in the
+ * desktop shell (Settings → "Copy DSN env var" button).
+ */
+private fun copyToClipboard(value: String) {
+    if (value.isEmpty()) return
+    runCatching {
+        val sel = java.awt.datatransfer.StringSelection(value)
+        java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(sel, sel)
+    }
+}
+
+/**
+ * Opens [url] in the user's default browser via AWT Desktop. No-op
+ * on platforms / sessions where Desktop.browse isn't supported
+ * (some headless / sandboxed environments). Failure is silent — the
+ * user still has the URL on screen with a Copy button.
+ */
+private fun openInBrowser(url: String) {
+    if (url.isEmpty()) return
+    runCatching {
+        java.awt.Desktop.getDesktop().browse(java.net.URI(url))
+    }
 }

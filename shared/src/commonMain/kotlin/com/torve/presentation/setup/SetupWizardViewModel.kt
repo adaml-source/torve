@@ -84,16 +84,47 @@ class SetupWizardViewModel(
 
     companion object {
         const val KEY_SETUP_COMPLETED = "setup_completed"
+
+        // Legacy boolean key — held the literal "true" string when
+        // terms were accepted. Kept for migration only; new writes go
+        // to KEY_TERMS_ACCEPTED_VERSION.
         const val KEY_TERMS_ACCEPTED = "setup_terms_accepted"
+
+        // Versioned acceptance — stores the integer version of the
+        // terms the user accepted. Compared against
+        // [CURRENT_TERMS_VERSION]; if the persisted value is lower,
+        // the user is treated as not having accepted (and the TERMS
+        // step is shown again). Bump CURRENT_TERMS_VERSION whenever
+        // terms / TMDB / Trakt disclosure copy materially changes —
+        // returning users will then re-consent on next launch.
+        const val KEY_TERMS_ACCEPTED_VERSION = "setup_terms_accepted_version"
+        const val CURRENT_TERMS_VERSION = 1
     }
 
     init {
         // Hydrate persisted terms acceptance so a returning user who
         // already agreed never sees the disclaimer-as-blocker again.
         // Also covers process death / cold start within the same install.
+        // Versioned form first; falls back to the legacy boolean key,
+        // which is treated as version 1 (the version in effect when
+        // that key was written). Migrating the legacy value to the
+        // versioned key on the same launch keeps the prefs
+        // canonical going forward.
         scope.launch {
-            val accepted = prefsRepo.getString(KEY_TERMS_ACCEPTED) == "true"
-            if (accepted) {
+            val versionStr = prefsRepo.getString(KEY_TERMS_ACCEPTED_VERSION)
+            val acceptedVersion = versionStr?.toIntOrNull() ?: run {
+                // No versioned value — check the legacy boolean.
+                val legacy = prefsRepo.getString(KEY_TERMS_ACCEPTED) == "true"
+                if (legacy) {
+                    // Migrate to the versioned key. The legacy "true"
+                    // means the user accepted whatever was version 1.
+                    prefsRepo.setString(KEY_TERMS_ACCEPTED_VERSION, "1")
+                    1
+                } else {
+                    0
+                }
+            }
+            if (acceptedVersion >= CURRENT_TERMS_VERSION) {
                 _state.update { it.copy(termsAccepted = true) }
             }
         }
@@ -298,10 +329,21 @@ class SetupWizardViewModel(
     fun setTermsAccepted(accepted: Boolean) {
         _state.update { it.copy(termsAccepted = accepted) }
         // Persist so a returning user doesn't see the disclaimer again
-        // on every cold start. Untick clears the pref too.
+        // on every cold start. Untick clears both the versioned key
+        // and the legacy boolean. Tick writes the current version to
+        // the versioned key (the legacy key is left alone — init
+        // migration writes "1" there for hydration if the version
+        // key is missing, but on accept we don't need to touch it).
         scope.launch {
-            if (accepted) prefsRepo.setString(KEY_TERMS_ACCEPTED, "true")
-            else prefsRepo.remove(KEY_TERMS_ACCEPTED)
+            if (accepted) {
+                prefsRepo.setString(KEY_TERMS_ACCEPTED_VERSION, CURRENT_TERMS_VERSION.toString())
+                // Also set the legacy key in case some external reader
+                // still queries it. Cheap to keep in sync.
+                prefsRepo.setString(KEY_TERMS_ACCEPTED, "true")
+            } else {
+                prefsRepo.remove(KEY_TERMS_ACCEPTED_VERSION)
+                prefsRepo.remove(KEY_TERMS_ACCEPTED)
+            }
         }
     }
 
