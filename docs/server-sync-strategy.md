@@ -110,15 +110,15 @@ this week.
 
 ## Recommendation
 
-For the current state of Torve (~solo, small-cadence, prod-active),
-**Option A** is the pragmatic choice — but with a hard rule: every
-prod edit triggers a snapshot back to repo within the same session.
-If that rule slips, escalate to Option B.
+Superseded by the decision below. The initial recommendation was to
+choose Option A for lowest operational overhead unless snapshot
+discipline slipped. The repository now implements Option B instead:
+repo-canonical backend source, manual deploy script, backend CI, and a
+new `server/README.md`.
 
-**My ask**: pick A or B (or commit to C with a date), and update
-`server/DO_NOT_EDIT.md` accordingly. The current
-`server/DO_NOT_EDIT.md` describes Option A; if you pick B, that file
-gets renamed to `server/README.md` and rewritten.
+The remaining hard requirement is operational proof: run the deploy
+script in dry-run mode first, confirm the diff is exactly expected,
+then perform the first live deploy in a separate controlled session.
 
 ## Decision
 
