@@ -329,8 +329,14 @@ tasks.register("packageMsiCloseApp") {
     // build via `-PtorveMsiVersion=X.Y.Z`.
     val torveVersion = (project.findProperty("torveMsiVersion") as String?) ?: "1.0.6"
     val wixResourceDir = layout.projectDirectory.dir("wix-resources")
+    val licenseFile = layout.projectDirectory.file("LICENSE")
+    val iconFile = layout.projectDirectory.file("src/main/resources/torve.ico")
     val outDir = layout.buildDirectory.dir("compose/binaries/main-closeapp/msi")
     inputs.dir(wixResourceDir)
+    inputs.file(licenseFile)
+    inputs.file(iconFile)
+    inputs.property("torveVersion", torveVersion)
+    inputs.property("torveUpdateFeed", project.findProperty("torveUpdateFeed") as String? ?: "")
     outputs.dir(outDir)
 
     doLast {
