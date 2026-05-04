@@ -1,0 +1,180 @@
+Torve Desktop — End User License Agreement
+
+Copyright (c) 2026 Torve. All rights reserved.
+
+Last updated: 2026-05-04
+
+This End User License Agreement ("Agreement") is a legal contract
+between you ("You") and Torve ("we", "us") covering your use of the
+Torve Desktop application and any updates we provide ("Software").
+
+By installing, copying, or using the Software you agree to be bound
+by this Agreement. If you do not agree, do not install or use the
+Software.
+
+
+1. LICENSE GRANT
+
+We grant You a personal, non-exclusive, non-transferable, revocable
+license to install and use the Software on devices You own or
+control, for Your own personal use, subject to this Agreement.
+
+Free / beta builds are licensed at no cost. Paid plans, if and when
+offered, will be governed by additional terms presented at purchase.
+
+
+2. RESTRICTIONS
+
+You may not:
+
+  (a) reverse engineer, decompile, or disassemble the Software except
+      to the extent that applicable law expressly prohibits this
+      restriction (e.g. for interoperability under EU Directive
+      2009/24/EC, in which case You must contact us first);
+
+  (b) rent, lease, sublicense, sell, or otherwise commercially
+      redistribute the Software;
+
+  (c) remove, alter, or obscure any copyright, trademark, or other
+      proprietary notices in the Software;
+
+  (d) use the Software to violate the law, infringe third-party
+      rights, distribute malware, or attempt to gain unauthorized
+      access to any system.
+
+
+3. CONTENT AND THIRD-PARTY SERVICES
+
+The Software is a media hub. It does not host, scrape, or distribute
+any video, audio, or other content. All content is supplied by You
+or by third-party services You choose to connect (debrid services,
+Usenet providers, IPTV playlists, Plex/Jellyfin servers, etc.).
+
+You are solely responsible for:
+
+  - the legality of any content You access through the Software;
+  - any credentials, API keys, or subscriptions You use with it;
+  - complying with the terms of every third-party service You
+    connect.
+
+We do not endorse and are not responsible for any third-party
+service or any content accessed through it.
+
+
+4. AUTOMATIC UPDATES
+
+The Software contains an in-app updater that may download and
+install future versions. You can disable automatic update checks in
+Settings. Updates may add, change, or remove features.
+
+
+5. PRIVACY
+
+The Software collects only the data needed to deliver its features.
+A summary of what is collected, how it is used, and how to exercise
+Your rights (access, deletion, export) is in our Privacy Policy at
+https://torve.app/privacy.
+
+Crash and diagnostic reporting is optional and disabled by default
+unless You consent during onboarding.
+
+
+6. OPEN SOURCE COMPONENTS
+
+The Software bundles open-source software, including VideoLAN's VLC
+(libvlc, libvlccore, and the VLC plugin set), FFmpeg, libmpv (when
+present in the runtime), Kotlin, kotlinx-coroutines, Jetpack Compose
+for Desktop, Skiko, JNA, Ktor, SQLDelight, Sentry, and other
+libraries listed in the project's dependency manifest.
+
+Open-source components are licensed under their respective licenses.
+Most are permissively licensed (Apache 2.0, MIT, BSD). VLC and its
+plugin tree are licensed under the GNU Lesser General Public
+License version 2.1 ("LGPL-2.1"); the upstream license text is
+included as `runtime/windows/vlc/COPYING.txt` in the installation
+directory and can be re-read at any time.
+
+Per the LGPL-2.1, You have the right to:
+
+  - obtain the corresponding source code for the bundled VLC libraries
+    (we ship the unmodified upstream binaries; the source is available
+    from https://www.videolan.org/vlc/);
+  - replace the bundled VLC libraries with your own version, by
+    swapping the files in the installation's runtime directory;
+  - re-link the Software against a modified VLC, subject to the
+    LGPL-2.1's requirements.
+
+Nothing in this Agreement restricts the rights granted by an
+open-source license to its respective component.
+
+
+7. NO WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE", WITHOUT
+WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING WITHOUT
+LIMITATION ANY IMPLIED WARRANTY OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE, OR NON-INFRINGEMENT. WE DO NOT WARRANT THAT THE
+SOFTWARE WILL BE UNINTERRUPTED, ERROR-FREE, OR SECURE, OR THAT IT
+WILL BE COMPATIBLE WITH ANY THIRD-PARTY SERVICE.
+
+Your jurisdiction may not allow exclusion of certain implied
+warranties; in that case the exclusions above apply to the maximum
+extent permitted.
+
+
+8. LIMITATION OF LIABILITY
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT WILL
+WE BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL,
+OR PUNITIVE DAMAGES, OR FOR ANY LOSS OF PROFITS, REVENUE, DATA, OR
+USE, ARISING OUT OF OR RELATED TO THIS AGREEMENT OR THE SOFTWARE,
+EVEN IF WE HAVE BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+
+Our total cumulative liability arising out of or related to this
+Agreement and the Software will not exceed the greater of:
+
+  (a) the amount, if any, You paid us for the Software in the twelve
+      months preceding the claim; or
+  (b) ten Euro (EUR 10).
+
+Nothing in this Agreement excludes or limits liability for fraud,
+gross negligence, willful misconduct, death, or personal injury,
+where such limitation is not permitted under applicable law (in
+particular under German Bürgerliches Gesetzbuch §§ 309 No. 7 and
+276 Abs. 3).
+
+
+9. TERMINATION
+
+This Agreement applies until terminated. You may terminate by
+uninstalling the Software. We may terminate if You materially breach
+this Agreement. On termination, You must stop using the Software and
+remove all copies. Sections 6, 7, 8, and 10 survive termination.
+
+
+10. GOVERNING LAW AND VENUE
+
+This Agreement is governed by the laws of the Federal Republic of
+Germany, excluding its conflict-of-laws rules and excluding the
+United Nations Convention on Contracts for the International Sale of
+Goods.
+
+The exclusive place of jurisdiction for any disputes arising from or
+in connection with this Agreement is, to the extent permitted by
+law, our registered place of business. This does not affect Your
+mandatory consumer-protection rights under the law of Your country
+of residence.
+
+
+11. CONTACT
+
+Questions, license enquiries, or DMCA / takedown notices:
+
+  Email:   support@torve.app
+  Website: https://torve.app
+
+
+Note for source-code contributors: the underlying source code in the
+Torve repository is provided to contributors under the project's
+contribution terms; this Agreement governs the compiled, distributed
+desktop application only.
