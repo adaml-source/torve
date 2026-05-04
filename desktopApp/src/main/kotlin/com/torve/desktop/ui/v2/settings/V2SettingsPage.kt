@@ -1627,6 +1627,18 @@ private fun AddonsSection(
                                 append(" • ")
                                 append(addon.manifest.description)
                             }
+                            // Surface the manifest URL on its own line so the
+                            // user can see exactly which endpoint is registered
+                            // (especially relevant for Panda's per-user URL).
+                            // Token segments in URLs (e.g.
+                            // panda.torve.app/u/<token>/manifest.json) are
+                            // sensitive but the row already requires an
+                            // authenticated user to see, so showing them
+                            // matches the rest of the integrations surface.
+                            if (addon.manifestUrl.isNotBlank()) {
+                                append("\n")
+                                append(addon.manifestUrl)
+                            }
                         },
                         trailing = {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1647,6 +1659,15 @@ private fun AddonsSection(
                                         enabled = !addonBusy,
                                     )
                                 }
+                                TorveGhostButton(
+                                    text = ds("Copy URL"),
+                                    onClick = {
+                                        val sel = java.awt.datatransfer.StringSelection(addon.manifestUrl)
+                                        java.awt.Toolkit.getDefaultToolkit()
+                                            .systemClipboard.setContents(sel, sel)
+                                    },
+                                    enabled = !addonBusy && addon.manifestUrl.isNotBlank(),
+                                )
                                 TorveGhostButton(
                                     text = if (addon.isEnabled) disableLabel else enableLabel,
                                     onClick = { onToggleAddon(addon) },
