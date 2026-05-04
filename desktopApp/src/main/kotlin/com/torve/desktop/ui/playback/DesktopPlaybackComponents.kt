@@ -195,10 +195,17 @@ fun DesktopSourcePickerOverlay(
 
                         DesktopSourcePickerHeader(session = session)
 
-                        // Distinct addons + cached count drives the filter
-                        // chip row. Stable order: most-frequent addon
-                        // first so the chips reflect what the user is
-                        // actually getting from this title.
+                        // Two-axis filter: provider TYPE (Debrid /
+                        // Torrent / Usenet / Direct) and specific
+                        // addon. Most users care about type ("only
+                        // show debrid-cached") which is why that's the
+                        // top row.
+                        val typeOf: (DesktopPlaybackSourceCandidate) -> SourceProviderType = { c ->
+                            classifyCandidate(c)
+                        }
+                        val typeCounts = session.streamCandidates
+                            .groupingBy(typeOf)
+                            .eachCount()
                         val addonNames = session.streamCandidates
                             .map { it.addonName }
                             .filter { it.isNotBlank() }
@@ -207,32 +214,46 @@ fun DesktopSourcePickerOverlay(
                             .entries
                             .sortedByDescending { it.value }
                             .map { it.key }
-                        val cachedCount = session.streamCandidates.count { it.isCached }
 
+                        var selectedType: SourceProviderType? by remember(session.streamCandidates) {
+                            mutableStateOf(null)
+                        }
                         var selectedAddon: String? by remember(session.streamCandidates) {
                             mutableStateOf(null)
                         }
-                        var cachedOnly by remember(session.streamCandidates) {
-                            mutableStateOf(false)
-                        }
 
-                        if (addonNames.size > 1 || cachedCount > 0) {
+                        // Top row — provider type
+                        if (typeCounts.size > 1) {
                             FlowRow(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 verticalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
                                 TorveFilterChip(
                                     text = "All (${session.streamCandidates.size})",
-                                    selected = selectedAddon == null,
-                                    onClick = { selectedAddon = null },
+                                    selected = selectedType == null,
+                                    onClick = { selectedType = null },
                                 )
-                                if (cachedCount > 0) {
-                                    TorveFilterChip(
-                                        text = "Cached only ($cachedCount)",
-                                        selected = cachedOnly,
-                                        onClick = { cachedOnly = !cachedOnly },
-                                    )
+                                SourceProviderType.entries.forEach { type ->
+                                    val count = typeCounts[type] ?: 0
+                                    if (count > 0) {
+                                        TorveFilterChip(
+                                            text = "${type.label} ($count)",
+                                            selected = selectedType == type,
+                                            onClick = {
+                                                selectedType = if (selectedType == type) null else type
+                                            },
+                                        )
+                                    }
                                 }
+                            }
+                        }
+
+                        // Bottom row — specific addon (when more than one)
+                        if (addonNames.size > 1) {
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
                                 addonNames.forEach { name ->
                                     val count = session.streamCandidates.count { it.addonName == name }
                                     TorveFilterChip(
@@ -247,8 +268,8 @@ fun DesktopSourcePickerOverlay(
                         }
 
                         val visibleCandidates = session.streamCandidates.filter { c ->
-                            (selectedAddon == null || c.addonName == selectedAddon) &&
-                                (!cachedOnly || c.isCached)
+                            (selectedType == null || typeOf(c) == selectedType) &&
+                                (selectedAddon == null || c.addonName == selectedAddon)
                         }
 
                         if (visibleCandidates.isEmpty()) {
@@ -621,4 +642,50 @@ fun DesktopPlaybackDock(
             }
         }
     }
+}
+
+/**
+ * Provider-type axis for the source-picker filter chips. Mirrors the
+ * way users mentally categorise streams (debrid vs torrent vs Usenet
+ * vs direct) rather than the addon that produced them.
+ */
+enum class SourceProviderType(val label: String) {
+    DEBRID_CACHED("Debrid (cached)"),
+    TORRENT("Torrent"),
+    USENET("Usenet / NZB"),
+    DIRECT("Direct stream"),
+}
+
+private fun classifyCandidate(candidate: DesktopPlaybackSourceCandidate): SourceProviderType {
+    val url = candidate.directUrl.orEmpty()
+    val titleLower = candidate.title.lowercase()
+    val sourceLower = candidate.source?.lowercase().orEmpty()
+
+    // NZB / Usenet detection: explicit `/nzb/` segment in Panda's
+    // per-user URL, `.nzb` extension, or NZB markers in the rendered
+    // title / source label. Catches SceneNZBs, NZBHydra, Easynews,
+    // TorBox NZB, etc.
+    val looksLikeNzb = url.contains("/nzb/", ignoreCase = true) ||
+        url.endsWith(".nzb", ignoreCase = true) ||
+        url.contains("/easynews/", ignoreCase = true) ||
+        url.contains("/torbox/", ignoreCase = true) ||
+        sourceLower.contains("nzb") ||
+        sourceLower.contains("usenet") ||
+        sourceLower.contains("easynews") ||
+        sourceLower.contains("torbox") ||
+        titleLower.contains("[nzb]") ||
+        titleLower.contains("scenenzb") ||
+        titleLower.contains("usenet")
+    if (looksLikeNzb) return SourceProviderType.USENET
+
+    // Torrent / debrid: an infoHash means the underlying source is a
+    // torrent. The cached flag splits "ready to play via debrid" from
+    // "uncached, would need to be added to debrid first".
+    if (candidate.infoHash != null) {
+        return if (candidate.isCached) SourceProviderType.DEBRID_CACHED else SourceProviderType.TORRENT
+    }
+
+    // Everything else with a directUrl is a direct stream (hoster URL,
+    // HLS/DASH, addon-hosted, etc.).
+    return SourceProviderType.DIRECT
 }
