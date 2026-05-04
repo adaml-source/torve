@@ -25,6 +25,10 @@ class TraktClient(
         const val TRAKT_BASE = "https://api.trakt.tv"
         const val DEFAULT_CLIENT_ID = "1e8d7696fb3bae585a4036fd03569e68426aa4b540b2911180ec9f540688ac6a"
         const val DEFAULT_CLIENT_SECRET = "4fd2e66df137b876575ff390a1c8d46f27c9b4a4db08f40d4c9867ce6d65e6a3"
+        // Sent on every Trakt request. Required by Trakt's API guide
+        // and also keeps us out of Cloudflare's "no-UA = bot" filter
+        // (which surfaces as 429 / Cloudflare error 1015).
+        private const val USER_AGENT = "Torve/1.0 (+https://torve.app)"
     }
 
     var clientId: String = DEFAULT_CLIENT_ID
@@ -41,6 +45,14 @@ class TraktClient(
         val headers = mutableMapOf(
             "trakt-api-version" to "2",
             "trakt-api-key" to clientId,
+            // Cloudflare's edge filtering (which Trakt sits behind)
+            // hard-rate-limits requests without a recognisable User-
+            // Agent string -- the symptom is "Trakt API error 429:
+            // error code: 1015" with no real-world traffic against
+            // the user. Trakt's API reference requires a real UA
+            // identifying the app + version. We pin a stable string
+            // here so the same UA renders across environments.
+            "User-Agent" to USER_AGENT,
         )
         if (accessToken != null) {
             headers["Authorization"] = "Bearer $accessToken"
