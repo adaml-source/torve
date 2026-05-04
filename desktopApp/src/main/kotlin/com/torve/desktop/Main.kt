@@ -98,6 +98,7 @@ import org.koin.core.logger.Level
 import org.koin.dsl.koinApplication
 
 private data class DesktopRuntime(
+    val authClient: AuthClient,
     val authController: DesktopAuthController,
     val admissionController: DesktopShellAdmissionController,
     val playerController: DesktopPlayerController,
@@ -486,6 +487,7 @@ private fun bootstrapDesktop(): BootstrapState {
         }
 
         val runtime = DesktopRuntime(
+            authClient = authClient,
             authController = authController,
             admissionController = DesktopShellAdmissionController(
                 authController = authController,
@@ -818,6 +820,13 @@ private fun DesktopRuntimePane(
             onExit = onExit,
             onCompleteOnboarding = { Result.failure(IllegalStateException("Sign in before completing setup.")) },
         )
+
+        is DesktopShellState.VerifyEmail ->
+            com.torve.desktop.ui.onboarding.DesktopVerifyEmailScreen(
+                authState = state.authState,
+                authClient = runtime.authClient,
+                authController = authController,
+            )
 
         is DesktopShellState.Onboarding -> DesktopOnboardingShell(
             authState = state.authState,

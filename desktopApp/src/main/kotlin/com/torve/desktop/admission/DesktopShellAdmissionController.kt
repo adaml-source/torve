@@ -116,6 +116,18 @@ class DesktopShellAdmissionController(
             return DesktopShellState.SignedOut(authState)
         }
 
+        // Email verification gate — mirrors Android's
+        // VerifyEmailGateScreen routing in NavGraph.kt:1646. A signed-
+        // in user with isVerified == false must confirm their email
+        // before reaching Onboarding or Main. AuthClient already
+        // auto-starts the SSE listener for EMAIL_VERIFIED events when
+        // the auth state transitions to "signed in but unverified",
+        // so the screen just renders status + Resend / "I've
+        // confirmed" controls.
+        if (!authState.user.isVerified) {
+            return DesktopShellState.VerifyEmail(authState)
+        }
+
         val admission = buildAdmissionSnapshot(
             userId = authState.user.id,
             settingsState = settingsState,

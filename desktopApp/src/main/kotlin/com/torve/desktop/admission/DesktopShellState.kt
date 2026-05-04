@@ -52,6 +52,18 @@ sealed interface DesktopShellState {
         val authState: DesktopAuthUiState,
     ) : DesktopShellState
 
+    /**
+     * Signed in but `isVerified == false`. Mirrors Android's
+     * VerifyEmailGateScreen behaviour: the user must confirm their
+     * email before reaching Onboarding or Main. The shell shows a
+     * dedicated "confirm your email" surface with Resend / I've
+     * confirmed buttons; the SSE EMAIL_VERIFIED event auto-advances
+     * the user once the inbox link is clicked.
+     */
+    data class VerifyEmail(
+        val authState: DesktopAuthUiState,
+    ) : DesktopShellState
+
     data class Onboarding(
         val authState: DesktopAuthUiState,
         val admission: DesktopAdmissionSnapshot,
