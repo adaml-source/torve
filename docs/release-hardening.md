@@ -198,6 +198,56 @@ module rather than reviving one-off wrapping helpers.
 - Manual playback verification checklist lives in
   `desktopApp/WINDOWS_PACKAGING.md`.
 
+### Android — implicit `<uses-feature>` audit
+
+Whenever a permission is added or removed in
+`androidApp/src/main/AndroidManifest.xml`, audit
+[Android's implicit feature table](https://developer.android.com/guide/topics/manifest/uses-feature-element#permissions)
+and explicitly declare every implied feature as
+`android:required="false"` unless the app actually requires the
+hardware. **Skipping this filters out devices that lack the feature
+even if you never call into it.**
+
+Concretely, the lesson from the 2026-05-03 device-count regression:
+
+- The `CAMERA` permission implicitly hard-requires
+  `android.hardware.camera` (bare name). The previous manifest only
+  declared `android.hardware.camera.any` as not-required, which is
+  treated as a *different* feature by Play Console.
+- Result: Play Console filtered out **2,886 of 2,898 Android TV
+  devices, 61 of 72 Chromebooks, 19 of 20 cars** — every device
+  without a camera. Phones / tablets were largely unaffected because
+  they almost all have cameras.
+- One missed `<uses-feature>` declaration, four form factors lost.
+  Cost would have been hidden until a user complained their TV
+  couldn't find the app.
+
+Required declarations per common permission (declare ALL of these as
+`required="false"` if the permission is in the manifest):
+
+| Permission | Implicitly hard-requires features |
+| --- | --- |
+| `CAMERA` | `android.hardware.camera`, `android.hardware.camera.any`, `android.hardware.camera.front`, `android.hardware.camera.autofocus`, `android.hardware.camera.flash` |
+| `ACCESS_FINE_LOCATION` | `android.hardware.location`, `android.hardware.location.gps` |
+| `ACCESS_COARSE_LOCATION` | `android.hardware.location`, `android.hardware.location.network` |
+| `RECORD_AUDIO` | `android.hardware.microphone` |
+| `BLUETOOTH` / `BLUETOOTH_ADMIN` | `android.hardware.bluetooth` |
+| `READ_PHONE_STATE` / `CALL_PHONE` etc. | `android.hardware.telephony` |
+
+Pre-release sanity check after every manifest edit:
+
+```bash
+JAVA_HOME=... ./gradlew :androidApp:processGoogleMobileReleaseManifest
+grep -B1 -A3 'uses-feature' \
+  androidApp/build/intermediates/merged_manifests/googleMobileRelease/processGoogleMobileReleaseManifest/AndroidManifest.xml
+```
+
+Any feature you didn't intend to require should be flagged
+`required="false"`. Inspect Play Console's "Devices supported by
+this release" pane after every upload — a >5% drop on any form
+factor without a deliberate reason is almost always a missing
+`<uses-feature required="false">` line.
+
 ### macOS ⚠ operator-required
 
 This audit ran on Windows; macOS signing/notarization commands cannot
