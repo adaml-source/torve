@@ -82,13 +82,21 @@ tasks.register("verifyWindowsPackagingPrereqs") {
     group = "distribution"
     description = "Checks Windows desktop packaging prerequisites for Torve."
     doLast {
-        val javaHome = File(System.getProperty("java.home"))
-        val jpackageExe = File(javaHome, "bin/jpackage.exe")
-        if (!jpackageExe.exists()) {
+        // Resolve a JDK with jpackage.exe via the same chain
+        // packageMsiCloseApp uses (TORVE_JPACKAGE_JDK env var first,
+        // then $JAVA_HOME, then auto-discovered JDK 21+ installs).
+        // Compose Desktop's javaHome also points here, so the gate
+        // matches what the actual packaging will use rather than
+        // checking the daemon JVM (which is JBR and doesn't ship
+        // jdk.jpackage).
+        val jpackageExe = runCatching { locateJpackage() }.getOrNull()
+        if (jpackageExe == null) {
             throw GradleException(
                 "Windows desktop packaging requires a JDK with jpackage.exe. " +
-                    "Current java.home: ${javaHome.absolutePath}. " +
-                    "See ${packagingChecklistDoc.asFile.absolutePath}."
+                    "JBR (the Android Studio bundled JDK) does NOT ship " +
+                    "jdk.jpackage. Install JDK 21+ from https://adoptium.net " +
+                    "or set TORVE_JPACKAGE_JDK to a JDK root that has " +
+                    "bin/jpackage.exe. See ${packagingChecklistDoc.asFile.absolutePath}."
             )
         }
 
@@ -444,6 +452,23 @@ fun locateJpackage(): File {
 compose.desktop {
     application {
         mainClass = "com.torve.desktop.MainKt"
+        // Compose Desktop's checkRuntime + packaging pipeline calls
+        // jpackage. JBR (Android Studio's bundled JDK) does NOT ship
+        // jdk.jpackage, so the build fails on a fresh daemon unless we
+        // explicitly point at a JDK 21+ install that does. Honors the
+        // TORVE_JPACKAGE_JDK env var first; falls back to a sensible
+        // default for the local dev box; null lets Compose use the
+        // toolchain (works only when the toolchain happens to have
+        // jpackage, e.g. a non-JBR JDK 17).
+        val jpackageJdk = System.getenv("TORVE_JPACKAGE_JDK")
+            ?: listOf(
+                "C:/Program Files/Java/jdk-21.0.10",
+                "C:/Program Files/Java/jdk-21",
+                "C:/Program Files/Eclipse Adoptium/jdk-21.0.4.7-hotspot",
+            ).firstOrNull { File(it, "bin/jpackage.exe").exists() }
+        if (jpackageJdk != null) {
+            javaHome = jpackageJdk
+        }
         // Release channel is env-driven so a single build script
         // produces stable / beta / internal artifacts. CI sets
         // TORVE_RELEASE_CHANNEL per pipeline; defaults to
