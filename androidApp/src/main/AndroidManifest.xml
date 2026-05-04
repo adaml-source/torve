@@ -18,9 +18,20 @@
 
     <!-- Camera — used only by the credential-transfer QR scanner. Not
          install-time required so TV / camera-less devices can install
-         (the scan UI is hidden at runtime via PackageManager.FEATURE_CAMERA_ANY). -->
+         (the scan UI is hidden at runtime via PackageManager.FEATURE_CAMERA_ANY).
+         The CAMERA permission implicitly hard-requires several camera
+         features unless they're explicitly declared `required="false"`;
+         miss any of them and Play Console filters out camera-less
+         devices (most Android TVs, many Chromebooks). The most
+         critical is bare `android.hardware.camera` — Play counts
+         this separately from `camera.any` and the previous release
+         was hemorrhaging 2,800+ TV devices because of it. -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.front" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
 
     <!-- Android TV: touchscreen is not required -->
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
