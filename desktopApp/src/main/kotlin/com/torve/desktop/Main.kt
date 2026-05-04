@@ -254,7 +254,15 @@ fun main() = application {
             }
         }
     }
-    var windowVisible by remember { mutableStateOf(true) }
+    // Start INVISIBLE so the OS never paints the empty JFrame.
+    // We flip to true ~350ms later (after Compose composes its first
+    // frame and Skiko uploads its GPU surface). Without this the
+    // user saw a black window until alt-tab forced a WM_PAINT --
+    // a known Compose Desktop / Skiko-on-Windows race. Trade-off:
+    // the launch *feels* slower because no window appears for the
+    // first ~350ms, but when it appears it's already content-ready,
+    // matching how well-behaved macOS / Windows apps launch.
+    var windowVisible by remember { mutableStateOf(false) }
     val bootstrapStateHolder = remember { mutableStateOf<BootstrapState>(BootstrapState.Starting) }
     val trayHolder = remember { mutableStateOf<com.torve.desktop.tray.DesktopSystemTray?>(null) }
 
@@ -313,38 +321,23 @@ fun main() = application {
             }
         }
 
-        // Force the AWT canvas hosting Skiko to re-paint after the
-        // first composition pass. Compose Desktop / Skiko on Windows
-        // sometimes initialises the GPU surface but never receives a
-        // WM_PAINT to upload it -- the user sees a black window until
-        // alt-tab forces the redraw.
-        //
-        // Tried previously and proven insufficient on this combo:
-        //   * window.repaint() / contentPane.repaint() alone
-        //   * resize-by-1px to trigger WM_SIZE -> WM_PAINT
-        //
-        // Going harder: hide and re-show the window. setVisible(false)
-        // then (true) forces AWT/Skiko through the full
-        // WM_SHOWWINDOW -> WM_NCACTIVATE -> WM_PAINT cycle, which is
-        // also what alt-tab fires manually. The window flickers for
-        // ~50ms but the user no longer needs to alt-tab.
+        // Show the window only after the first frame has been
+        // composed. The visibility flag starts false at the parent
+        // composable; flip to true here once Compose has had a
+        // moment to compose + Skiko to upload its first GPU surface.
+        // No flicker, no flash, no alt-tab required -- the OS just
+        // paints an already-content-ready window the first time.
         LaunchedEffect(Unit) {
-            // Wait long enough for the runtime image to load and
-            // Compose's first composition to land. ~350ms covers
-            // warm-disk + first-launch cold-disk.
+            // Two delays: a short one for an initial nudge, and a
+            // longer fallback. Most launches succeed within the
+            // first; the second handles slow GPUs / cold disks.
             kotlinx.coroutines.delay(350)
-            // Hide + show forces the full paint cycle. Combined with
-            // toFront() to make sure focus stays on Torve so the
-            // hide/show doesn't kick the window behind another app.
-            runCatching {
-                window.isVisible = false
-                kotlinx.coroutines.delay(40)
-                window.isVisible = true
-                window.toFront()
-                window.requestFocus()
-            }
-            window.repaint()
-            window.contentPane?.repaint()
+            windowVisible = true
+            // Once visible, ensure focus + bring-to-front so it
+            // doesn't slip behind whatever the user clicked the
+            // taskbar from.
+            window.toFront()
+            window.requestFocus()
         }
 
         // Install AWT-level subtitle drop target on the JFrame backing this

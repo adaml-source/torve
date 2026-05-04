@@ -2315,17 +2315,80 @@ private fun DeviceCodeBanner(
     verificationUrl: String,
     waiting: Boolean,
 ) {
-    TorveBanner(
-        title = title,
-        description = buildString {
-            append("Code: ")
-            append(userCode)
-            append(" • Open ")
-            append(verificationUrl)
-            if (waiting) append(" • Waiting for confirmation")
-        },
-        tone = if (waiting) TorveBannerTone.Info else TorveBannerTone.Success,
-    )
+    val colors = TorveDesktopThemeTokens.colors
+    TorveSectionCard(title = title) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // Code, large + bold so the user can read it from across
+            // the room while typing it into the browser.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "Code:",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.textSecondary,
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+                Text(
+                    text = userCode,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+
+            // URL on its own line so it wraps cleanly. Slightly muted
+            // colour because the action buttons below are the primary
+            // affordance, not the URL text itself.
+            Text(
+                text = verificationUrl,
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textSecondary,
+            )
+
+            // Three actions: open the URL in browser, copy the code,
+            // copy the URL itself. Same belt-and-suspenders pattern
+            // Panda's OAuth code uses elsewhere; lets the user
+            // recover when "Open in browser" lands in the wrong
+            // browser profile or when they want to scan a QR.
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                TorvePrimaryButton(
+                    text = "Open in browser",
+                    onClick = {
+                        runCatching {
+                            java.awt.Desktop.getDesktop().browse(java.net.URI(verificationUrl))
+                        }
+                    },
+                )
+                TorveSecondaryButton(
+                    text = "Copy code",
+                    onClick = {
+                        val sel = java.awt.datatransfer.StringSelection(userCode)
+                        java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(sel, sel)
+                    },
+                )
+                TorveSecondaryButton(
+                    text = "Copy link",
+                    onClick = {
+                        val sel = java.awt.datatransfer.StringSelection(verificationUrl)
+                        java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(sel, sel)
+                    },
+                )
+            }
+
+            if (waiting) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LinearProgressIndicator(modifier = Modifier.weight(1f))
+                    Text(
+                        text = "Waiting for confirmation",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.textSecondary,
+                        modifier = Modifier.padding(start = 12.dp),
+                    )
+                }
+            }
+        }
+    }
 }
 
 private fun categoryBadge(
