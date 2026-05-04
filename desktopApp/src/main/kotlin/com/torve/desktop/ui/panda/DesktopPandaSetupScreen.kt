@@ -311,10 +311,32 @@ private fun OAuthSection(state: PandaSetupUiState, viewModel: PandaSetupViewMode
                 fontWeight = FontWeight.Bold,
             )
             Spacer(Modifier.height(12.dp))
-            TorvePrimaryButton(
-                text = "Open in browser",
-                onClick = { openUrl(code.verificationUrl) },
-            )
+            // Three-button row so the user can:
+            //   * "Open in browser" (primary path — works on most desktops)
+            //   * "Copy code" if "Open in browser" landed on the wrong tab /
+            //     a different browser profile / a Sandbox without Default
+            //     browser registration.
+            //   * "Copy link" if the user wants to paste the verification
+            //     URL into a different browser entirely.
+            // Same belt-and-suspenders pattern Trakt's device-code step
+            // already uses elsewhere in onboarding.
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                TorvePrimaryButton(
+                    text = "Open in browser",
+                    onClick = { openUrl(code.verificationUrl) },
+                )
+                TorveSecondaryButton(
+                    text = "Copy code",
+                    onClick = { copyTextToClipboard(code.userCode) },
+                )
+                TorveSecondaryButton(
+                    text = "Copy link",
+                    onClick = { copyTextToClipboard(code.verificationUrl) },
+                )
+            }
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
@@ -931,4 +953,21 @@ private fun InnerPandaSecretField(
             }
         },
     )
+}
+
+/**
+ * Best-effort clipboard write via AWT's cross-platform Toolkit
+ * clipboard. No-op when the AWT bridge isn't available (headless
+ * sessions, sandboxed containers); failure is silent because the
+ * user still has the source value visible on screen.
+ *
+ * Same shape as the helpers in DesktopOnboardingShell.kt and
+ * V2SettingsPage.kt.
+ */
+private fun copyTextToClipboard(value: String) {
+    if (value.isEmpty()) return
+    runCatching {
+        val sel = java.awt.datatransfer.StringSelection(value)
+        java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(sel, sel)
+    }
 }

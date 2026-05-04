@@ -32,8 +32,13 @@ class DebridProviderHealthChecker(
         if (key == null) {
             return base().copy(
                 status = ProviderHealthStatus.UNCONFIGURED,
-                message = "Not connected. Add your $label API key.",
-                nextAction = "Connect $label",
+                // Debrid providers are configured through the Panda
+                // integration on desktop / mobile. Surfacing the path
+                // up-front in the message saves a round-trip to a
+                // dead-end Account screen looking for an API-key field
+                // that isn't there.
+                message = "Not connected. Connect $label via the Panda integration.",
+                nextAction = "Set up $label via Panda",
             )
         }
         val result = runCatching { debridClient.verifyApiKey(provider, key) }.getOrElse { t ->

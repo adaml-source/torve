@@ -3510,8 +3510,15 @@ private fun SourcesSection(
                     },
                     onOpenSetup = {
                         when (summary.intent) {
+                            // Debrid + Usenet both flow through Panda's
+                            // guided setup. Routing DEBRID to the
+                            // Account category was the legacy path
+                            // (account-attached API keys); the modern
+                            // path is the Panda OAuth/API-key wizard
+                            // which also handles AllDebrid / Premiumize
+                            // / TorBox under the same surface.
                             com.torve.presentation.setup.SetupIntent.DEBRID ->
-                                onSwitchToCategory(SettingsCategory.ACCOUNT)
+                                onOpenPandaSetup()
                             com.torve.presentation.setup.SetupIntent.IPTV ->
                                 onSwitchToCategory(SettingsCategory.PLAYLISTS)
                             com.torve.presentation.setup.SetupIntent.PLEX_JELLYFIN ->
