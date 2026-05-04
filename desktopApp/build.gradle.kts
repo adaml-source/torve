@@ -1,4 +1,5 @@
-﻿import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+﻿import org.gradle.api.tasks.PathSensitivity
+import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import java.io.File
 import java.io.FileInputStream
 import java.time.Instant
@@ -331,10 +332,17 @@ tasks.register("packageMsiCloseApp") {
     val wixResourceDir = layout.projectDirectory.dir("wix-resources")
     val licenseFile = layout.projectDirectory.file("LICENSE")
     val iconFile = layout.projectDirectory.file("src/main/resources/torve.ico")
+    val appImageDir = layout.buildDirectory.dir("compose/binaries/main/app/Torve")
     val outDir = layout.buildDirectory.dir("compose/binaries/main-closeapp/msi")
     inputs.dir(wixResourceDir)
     inputs.file(licenseFile)
     inputs.file(iconFile)
+    // The app image is what jpackage actually consumes via --app-image.
+    // Without this declaration, gradle thinks the task is UP-TO-DATE
+    // when only Kotlin sources change (createDistributable rebuilds the
+    // app image, but packageMsiCloseApp wouldn't notice). Result: a
+    // BUILD SUCCESSFUL that quietly serves a stale MSI.
+    inputs.dir(appImageDir).withPropertyName("appImage").withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.property("torveVersion", torveVersion)
     inputs.property("torveUpdateFeed", project.findProperty("torveUpdateFeed") as String? ?: "")
     outputs.dir(outDir)
