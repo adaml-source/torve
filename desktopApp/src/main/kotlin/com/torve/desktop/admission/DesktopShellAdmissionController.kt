@@ -175,13 +175,24 @@ class DesktopShellAdmissionController(
     ): DesktopAdmissionSnapshot {
         val sharedSetupCompleted = prefsRepo.getString(SetupWizardViewModel.KEY_SETUP_COMPLETED) == "true"
         val userScopedOnboardingCompleted = prefsRepo.getString(onboardingCompletedKey(userId)) == "true"
-        val onboardingCompleted = userScopedOnboardingCompleted || sharedSetupCompleted
-        if (onboardingCompleted && !userScopedOnboardingCompleted) {
-            prefsRepo.setString(onboardingCompletedKey(userId), "true")
-        }
 
         val hasVodPlaybackPath = settingsState.debridConnected
         val hasLivePlaybackPath = channelsState.playlists.isNotEmpty()
+
+        // Returning-user fast-path: if AccountSessionCoordinator's
+        // post-sign-in restore has produced any actual setup state
+        // (a debrid connection or a synced playlist), there's no
+        // point dragging this user through onboarding again on a
+        // fresh device. They already finished it on their other
+        // device; the sync brought their credentials over. Auto-mark
+        // onboarding as completed so the admission flow advances
+        // straight into Main without the user clicking "Skip".
+        val restoredFromBackend = hasVodPlaybackPath || hasLivePlaybackPath
+        val onboardingCompleted =
+            userScopedOnboardingCompleted || sharedSetupCompleted || restoredFromBackend
+        if (onboardingCompleted && !userScopedOnboardingCompleted) {
+            prefsRepo.setString(onboardingCompletedKey(userId), "true")
+        }
         val playbackPathStatus = when {
             hasVodPlaybackPath && hasLivePlaybackPath -> DesktopPlaybackPathStatus.COMBINED
             hasVodPlaybackPath -> DesktopPlaybackPathStatus.VOD_ONLY

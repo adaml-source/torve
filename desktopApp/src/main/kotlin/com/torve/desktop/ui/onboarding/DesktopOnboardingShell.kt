@@ -495,19 +495,29 @@ private fun DesktopOnboardingRail(
         // banner below cover the same intent more honestly.
 
         admission?.let { snapshot ->
-            if (snapshot.missingRequirements.isNotEmpty()) {
+            // Post-A+B+E admission policy: onboarding-completion alone
+            // admits the user to Main. Zero-source users land in the
+            // Home empty state with explicit CTAs ("Set up sources",
+            // "Sync your watchlist with Trakt"), so a missing playback
+            // path is *not* a true block on entering Torve. Surface
+            // the two requirements with different tones to match the
+            // actual policy:
+            //   - ONBOARDING_COMPLETED is genuinely required (must
+            //     finish or click "Skip for now")
+            //   - PLAYBACK_PATH is informational only — Torve runs
+            //     without it, but most features depend on it.
+            if (DesktopAdmissionRequirement.ONBOARDING_COMPLETED in snapshot.missingRequirements) {
                 TorveBanner(
-                    title = "Required before entering desktop",
-                    description = snapshot.missingRequirements.joinToString(" ") { requirement ->
-                        when (requirement) {
-                            DesktopAdmissionRequirement.ONBOARDING_COMPLETED ->
-                                "Complete onboarding."
-
-                            DesktopAdmissionRequirement.PLAYBACK_PATH ->
-                                "Connect a VOD source or add one IPTV playlist."
-                        }
-                    },
+                    title = "Finish onboarding",
+                    description = "Set up with Panda or click \"Skip for now\" to enter Torve.",
                     tone = TorveBannerTone.Warning,
+                )
+            }
+            if (DesktopAdmissionRequirement.PLAYBACK_PATH in snapshot.missingRequirements) {
+                TorveBanner(
+                    title = "For streaming, add a source later",
+                    description = "Torve runs without one - addons and Plex/Jellyfin still work. Add a debrid provider, IPTV playlist, or NZB account in Settings whenever you're ready.",
+                    tone = TorveBannerTone.Info,
                 )
             }
         }
