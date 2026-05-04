@@ -524,6 +524,15 @@ compose.desktop {
             "-Dtorve.desktop.channel=$releaseChannel",
             "-Dtorve.update.feed=$updateFeedUrl",
             "-Dtorve.update.repo=$updateRepo",
+            // -splash:<path> is JDK's built-in launch-time splash. The
+            // image is shown by the launcher before any class is loaded,
+            // so it covers the JVM init + Compose first-frame gap that
+            // otherwise leaves the user staring at an empty desktop for
+            // ~350ms. The image lives in runtime/common/torve-splash.png
+            // (appResourcesRootDir is wired to `runtime/`, so the file
+            // lands at \$APPDIR/torve-splash.png after install). The
+            // splash auto-closes when the main Window becomes visible.
+            "-splash:${'$'}APPDIR/torve-splash.png",
         )
 
         nativeDistributions {

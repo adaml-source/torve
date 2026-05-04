@@ -109,6 +109,14 @@
       DllEntry="WixShellExec"
       Impersonate="yes" />
 
+    <!--
+      Default the launch checkbox to ON. Users uncheck it in
+      ShortcutPromptDlg if they want to install without immediately
+      launching. msiexec command-line override also works:
+        msiexec /i Torve-1.0.0.msi JP_LAUNCH_AFTER_INSTALL=0
+    -->
+    <Property Id="JP_LAUNCH_AFTER_INSTALL" Value="1" />
+
     <!-- Standard required root -->
     <Directory Id="TARGETDIR" Name="SourceDir"/>
 
@@ -166,10 +174,10 @@
       <RemoveExistingProducts Before="CostInitialize"/>
       <Custom Action="JpFindRelatedProducts" After="FindRelatedProducts"/>
       <Custom Action="TorveSetLaunchTarget" After="InstallFinalize">
-        NOT Installed AND NOT REMOVE AND UILevel &gt;= 4
+        NOT Installed AND NOT REMOVE AND UILevel &gt;= 4 AND JP_LAUNCH_AFTER_INSTALL=&quot;1&quot;
       </Custom>
       <Custom Action="TorveLaunchAfterInstall" After="TorveSetLaunchTarget">
-        NOT Installed AND NOT REMOVE AND UILevel &gt;= 4
+        NOT Installed AND NOT REMOVE AND UILevel &gt;= 4 AND JP_LAUNCH_AFTER_INSTALL=&quot;1&quot;
       </Custom>
     </InstallExecuteSequence>
 

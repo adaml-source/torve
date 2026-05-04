@@ -31,6 +31,7 @@
 
   <?define JpDesktopShortcutPromptControlY=140 ?>
   <?define JpStartMenuShortcutPromptControlY=180 ?>
+  <?define JpLaunchAfterInstallControlY=210 ?>
 
   <?ifndef JpDesktopShortcutPrompt ?>
     <?define JpStartMenuShortcutPromptControlY=$(var.JpDesktopShortcutPromptControlY) ?>
@@ -63,6 +64,18 @@
                  Property="JP_INSTALL_STARTMENU_SHORTCUT"
                  Text="!(loc.ShortcutPromptDlgStartMenuShortcutControlLabel)"/>
         <?endif?>
+
+        <!--
+          Torve customisation: opt-out of the launch-after-install
+          custom action. Default checked; users who want to install
+          and run the app later can uncheck this. The launch CA in
+          main.wxs reads JP_LAUNCH_AFTER_INSTALL when sequencing.
+        -->
+        <Control Type="CheckBox" X="20" Width="300" Height="17" CheckBoxValue="1"
+                 Id="LaunchAfterInstall"
+                 Y="$(var.JpLaunchAfterInstallControlY)"
+                 Property="JP_LAUNCH_AFTER_INSTALL"
+                 Text="Launch Torve when setup finishes"/>
 
         <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes"
                  Text="!(loc.WixUINext)" />
