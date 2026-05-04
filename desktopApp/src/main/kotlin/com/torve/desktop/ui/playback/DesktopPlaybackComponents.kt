@@ -222,8 +222,14 @@ fun DesktopSourcePickerOverlay(
                             mutableStateOf(null)
                         }
 
-                        // Top row — provider type
-                        if (typeCounts.size > 1) {
+                        // Top row — provider type. Always visible when
+                        // there's at least one stream so the
+                        // categorisation is discoverable; a single-type
+                        // result still gets a one-chip row that makes
+                        // it obvious *what* category this title's
+                        // streams fell into ("you're seeing only Usenet
+                        // -- try installing Torrentio for torrents").
+                        if (session.streamCandidates.isNotEmpty()) {
                             FlowRow(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 verticalArrangement = Arrangement.spacedBy(6.dp),

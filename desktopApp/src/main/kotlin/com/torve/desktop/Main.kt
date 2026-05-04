@@ -317,23 +317,29 @@ fun main() = application {
         // first composition pass. Compose Desktop / Skiko on Windows
         // sometimes initialises the GPU surface but never receives a
         // WM_PAINT to upload it -- the user sees a black window until
-        // alt-tab forces the redraw. invalidate() + validate() +
-        // repaint() schedules a full paint cycle on the EDT and
-        // sidesteps the bug. Cheap to call once: invalidate is a
-        // no-op on a healthy layout, repaint is coalesced.
+        // alt-tab forces the redraw.
+        //
+        // repaint() alone proved insufficient (the EDT schedules the
+        // paint, but Skiko's HardwareLayer doesn't actually upload
+        // its first surface until something more invasive happens).
+        // Resize the window by 1 pixel and back -- forces a real
+        // WM_SIZE -> WM_PAINT cycle and Skiko commits the surface.
+        // Same trick most Compose Desktop apps that hit this bug
+        // settle on.
         LaunchedEffect(Unit) {
-            // Yield once so Compose's initial composition has at
-            // least kicked off before we ask AWT to repaint.
-            kotlinx.coroutines.yield()
-            // Two-pass: immediate repaint catches the common case,
-            // delayed repaint catches the slower-GPU case (Skiko
-            // sometimes takes 100-200ms to be ready on integrated
-            // graphics or when the runtime image is cold from disk).
-            window.invalidate()
-            window.validate()
-            window.repaint()
-            window.contentPane?.repaint()
-            kotlinx.coroutines.delay(150)
+            // Wait long enough for the runtime image to load and
+            // Compose's first composition to land. Empirically
+            // ~250-400ms is enough on a warm SSD; we wait 350ms
+            // to cover slower disks too. The cost is "user sees the
+            // dark JFrame background" for that window -- materially
+            // better than the previous "black until alt-tab".
+            kotlinx.coroutines.delay(350)
+            val original = window.size
+            if (original != null && original.width > 0 && original.height > 0) {
+                window.size = java.awt.Dimension(original.width + 1, original.height)
+                kotlinx.coroutines.delay(30)
+                window.size = original
+            }
             window.repaint()
             window.contentPane?.repaint()
         }
