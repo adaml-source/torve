@@ -109,8 +109,7 @@ class TraktClient(
             )
         }
         if (!response.status.isSuccess()) {
-            val body = try { response.bodyAsText().take(200) } catch (_: Exception) { "" }
-            throw Exception("Trakt API error ${response.status.value}: $body")
+            throw Exception(traktErrorMessage(response))
         }
         val resp: TraktDeviceCodeResponse = response.body()
         if (resp.userCode.isBlank() || resp.verificationUrl.isBlank()) {
@@ -422,6 +421,53 @@ class TraktClient(
             contentType(ContentType.Application.Json)
             traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
             setBody(body)
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Error message formatting
+    // -------------------------------------------------------------------------
+
+    /**
+     * Translate a non-success Trakt response into a message the user
+     * can act on. The previous "Trakt API error 429: error code: 1015"
+     * surface confused operators because:
+     *   - 1015 is Cloudflare's IP-rate-limit code, not a Trakt account
+     *     issue. Telling the user to "fix" Trakt sends them down the
+     *     wrong rabbit hole.
+     *   - The Retry-After header (Cloudflare returns this on 429)
+     *     was being thrown away.
+     *
+     * Now we read Retry-After when present and surface "Trakt is
+     * temporarily rate-limiting this network. Try again in N
+     * seconds." for 429s, and other recognisable shapes for the
+     * common Trakt error codes.
+     */
+    private suspend fun traktErrorMessage(response: HttpResponse): String {
+        val status = response.status.value
+        val retryAfter = response.headers["Retry-After"]?.toIntOrNull()
+        val cfRay = response.headers["cf-ray"]
+        val isCloudflareEdge = response.headers["Server"]?.contains("cloudflare", ignoreCase = true) == true
+        return when {
+            status == 429 -> {
+                val waitText = retryAfter?.let { "Try again in $it seconds." }
+                    ?: "Try again in a minute or two."
+                if (isCloudflareEdge) {
+                    "Trakt is rate-limiting this network at its edge (HTTP 429" +
+                        cfRay?.let { ", CF-Ray $it" }.orEmpty() +
+                        "). $waitText If it keeps happening, try a different network (mobile hotspot / VPN) " +
+                        "to confirm whether your IP got flagged or your account did."
+                } else {
+                    "Trakt is rate-limiting your account (HTTP 429). $waitText"
+                }
+            }
+            status == 401 -> "Trakt rejected our credentials (HTTP 401). Reconnect Trakt in Settings."
+            status == 403 -> "Trakt refused this request (HTTP 403). Your client ID may be invalid."
+            status in 500..599 -> "Trakt is having a server problem (HTTP $status). Try again shortly."
+            else -> {
+                val body = runCatching { response.bodyAsText().take(200) }.getOrDefault("")
+                "Trakt API error $status${if (body.isNotBlank()) ": $body" else ""}"
+            }
         }
     }
 }
