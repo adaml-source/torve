@@ -301,16 +301,41 @@ fun main() = application {
         // Paint the JFrame's native background dark BEFORE Compose's
         // first frame lands. Without this, Windows flashes its
         // default-white window background until Skiko uploads the
-        // first GPU surface, leaving the user staring at a blank
-        // white window until they alt-tab and force a redraw.
-        // The colour matches TorveDesktopTheme dark background
-        // (Color(0xFF090A10)) so the transition is invisible.
+        // first GPU surface; with this set the flash is dark and
+        // matches the loading splash that follows, but the surface
+        // still doesn't render content until something forces a
+        // repaint. (See LaunchedEffect below.)
         SideEffect {
             val darkBg = java.awt.Color(0x09, 0x0A, 0x10)
             if (window.background != darkBg) {
                 window.background = darkBg
                 window.contentPane.background = darkBg
             }
+        }
+
+        // Force the AWT canvas hosting Skiko to re-paint after the
+        // first composition pass. Compose Desktop / Skiko on Windows
+        // sometimes initialises the GPU surface but never receives a
+        // WM_PAINT to upload it -- the user sees a black window until
+        // alt-tab forces the redraw. invalidate() + validate() +
+        // repaint() schedules a full paint cycle on the EDT and
+        // sidesteps the bug. Cheap to call once: invalidate is a
+        // no-op on a healthy layout, repaint is coalesced.
+        LaunchedEffect(Unit) {
+            // Yield once so Compose's initial composition has at
+            // least kicked off before we ask AWT to repaint.
+            kotlinx.coroutines.yield()
+            // Two-pass: immediate repaint catches the common case,
+            // delayed repaint catches the slower-GPU case (Skiko
+            // sometimes takes 100-200ms to be ready on integrated
+            // graphics or when the runtime image is cold from disk).
+            window.invalidate()
+            window.validate()
+            window.repaint()
+            window.contentPane?.repaint()
+            kotlinx.coroutines.delay(150)
+            window.repaint()
+            window.contentPane?.repaint()
         }
 
         // Install AWT-level subtitle drop target on the JFrame backing this
