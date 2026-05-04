@@ -27,6 +27,7 @@ import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -297,6 +298,21 @@ fun main() = application {
         undecorated = loginFullscreenPreview,
         visible = windowVisible,
     ) {
+        // Paint the JFrame's native background dark BEFORE Compose's
+        // first frame lands. Without this, Windows flashes its
+        // default-white window background until Skiko uploads the
+        // first GPU surface, leaving the user staring at a blank
+        // white window until they alt-tab and force a redraw.
+        // The colour matches TorveDesktopTheme dark background
+        // (Color(0xFF090A10)) so the transition is invisible.
+        SideEffect {
+            val darkBg = java.awt.Color(0x09, 0x0A, 0x10)
+            if (window.background != darkBg) {
+                window.background = darkBg
+                window.contentPane.background = darkBg
+            }
+        }
+
         // Install AWT-level subtitle drop target on the JFrame backing this
         // Compose Window. Fires SubtitleDropBus, which the active player
         // surface subscribes to. Must run inside the Window scope so
