@@ -84,6 +84,30 @@
       RebootPrompt="no"
       EndSessionMessage="no" />
 
+    <!--
+      Torve customisation: launch the app after a fresh install so the
+      user doesn't have to go to the Start menu to find Torve.
+      WixShellExec uses ShellExecuteEx, so it runs Torve.exe as the
+      installing user (NOT the elevated installer process), inherits
+      a normal desktop session, and immediately returns control to
+      the installer. Conditions:
+        * NOT Installed -- only on first-time install
+        * NOT REMOVE    -- not on uninstall
+        * UILevel >= 4  -- only when the user is on the full UI
+                           (skips the in-app updater /qb path and
+                            true silent /qn installs; in those cases
+                            the in-app updater's own watchdog will
+                            relaunch Torve, or the operator chose to
+                            install silently and doesn't want a popup)
+    -->
+    <Property Id="WixShellExecTarget" Value="[INSTALLDIR]Torve.exe" />
+    <CustomAction
+      Id="TorveLaunchAfterInstall"
+      BinaryKey="WixCA"
+      DllEntry="WixShellExec"
+      Impersonate="yes"
+      Return="asyncNoWait" />
+
     <!-- Standard required root -->
     <Directory Id="TARGETDIR" Name="SourceDir"/>
 
@@ -140,6 +164,9 @@
       <?endif?>
       <RemoveExistingProducts Before="CostInitialize"/>
       <Custom Action="JpFindRelatedProducts" After="FindRelatedProducts"/>
+      <Custom Action="TorveLaunchAfterInstall" After="InstallFinalize">
+        NOT Installed AND NOT REMOVE AND UILevel &gt;= 4
+      </Custom>
     </InstallExecuteSequence>
 
     <InstallUISequence>

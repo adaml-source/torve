@@ -319,26 +319,29 @@ fun main() = application {
         // WM_PAINT to upload it -- the user sees a black window until
         // alt-tab forces the redraw.
         //
-        // repaint() alone proved insufficient (the EDT schedules the
-        // paint, but Skiko's HardwareLayer doesn't actually upload
-        // its first surface until something more invasive happens).
-        // Resize the window by 1 pixel and back -- forces a real
-        // WM_SIZE -> WM_PAINT cycle and Skiko commits the surface.
-        // Same trick most Compose Desktop apps that hit this bug
-        // settle on.
+        // Tried previously and proven insufficient on this combo:
+        //   * window.repaint() / contentPane.repaint() alone
+        //   * resize-by-1px to trigger WM_SIZE -> WM_PAINT
+        //
+        // Going harder: hide and re-show the window. setVisible(false)
+        // then (true) forces AWT/Skiko through the full
+        // WM_SHOWWINDOW -> WM_NCACTIVATE -> WM_PAINT cycle, which is
+        // also what alt-tab fires manually. The window flickers for
+        // ~50ms but the user no longer needs to alt-tab.
         LaunchedEffect(Unit) {
             // Wait long enough for the runtime image to load and
-            // Compose's first composition to land. Empirically
-            // ~250-400ms is enough on a warm SSD; we wait 350ms
-            // to cover slower disks too. The cost is "user sees the
-            // dark JFrame background" for that window -- materially
-            // better than the previous "black until alt-tab".
+            // Compose's first composition to land. ~350ms covers
+            // warm-disk + first-launch cold-disk.
             kotlinx.coroutines.delay(350)
-            val original = window.size
-            if (original != null && original.width > 0 && original.height > 0) {
-                window.size = java.awt.Dimension(original.width + 1, original.height)
-                kotlinx.coroutines.delay(30)
-                window.size = original
+            // Hide + show forces the full paint cycle. Combined with
+            // toFront() to make sure focus stays on Torve so the
+            // hide/show doesn't kick the window behind another app.
+            runCatching {
+                window.isVisible = false
+                kotlinx.coroutines.delay(40)
+                window.isVisible = true
+                window.toFront()
+                window.requestFocus()
             }
             window.repaint()
             window.contentPane?.repaint()
