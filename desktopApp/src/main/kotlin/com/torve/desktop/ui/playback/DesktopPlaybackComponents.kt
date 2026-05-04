@@ -21,7 +21,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -35,6 +38,7 @@ import com.torve.desktop.ui.components.TorveBadge
 import com.torve.desktop.ui.components.TorveBadgeTone
 import com.torve.desktop.ui.components.TorveBanner
 import com.torve.desktop.ui.components.TorveBannerTone
+import com.torve.desktop.ui.components.TorveFilterChip
 import com.torve.desktop.ui.components.TorveGhostButton
 import com.torve.desktop.ui.components.TorvePill
 import com.torve.desktop.ui.components.TorvePrimaryButton
@@ -191,7 +195,71 @@ fun DesktopSourcePickerOverlay(
 
                         DesktopSourcePickerHeader(session = session)
 
-                        session.streamCandidates.forEach { candidate ->
+                        // Distinct addons + cached count drives the filter
+                        // chip row. Stable order: most-frequent addon
+                        // first so the chips reflect what the user is
+                        // actually getting from this title.
+                        val addonNames = session.streamCandidates
+                            .map { it.addonName }
+                            .filter { it.isNotBlank() }
+                            .groupingBy { it }
+                            .eachCount()
+                            .entries
+                            .sortedByDescending { it.value }
+                            .map { it.key }
+                        val cachedCount = session.streamCandidates.count { it.isCached }
+
+                        var selectedAddon: String? by remember(session.streamCandidates) {
+                            mutableStateOf(null)
+                        }
+                        var cachedOnly by remember(session.streamCandidates) {
+                            mutableStateOf(false)
+                        }
+
+                        if (addonNames.size > 1 || cachedCount > 0) {
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                TorveFilterChip(
+                                    text = "All (${session.streamCandidates.size})",
+                                    selected = selectedAddon == null,
+                                    onClick = { selectedAddon = null },
+                                )
+                                if (cachedCount > 0) {
+                                    TorveFilterChip(
+                                        text = "Cached only ($cachedCount)",
+                                        selected = cachedOnly,
+                                        onClick = { cachedOnly = !cachedOnly },
+                                    )
+                                }
+                                addonNames.forEach { name ->
+                                    val count = session.streamCandidates.count { it.addonName == name }
+                                    TorveFilterChip(
+                                        text = "$name ($count)",
+                                        selected = selectedAddon == name,
+                                        onClick = {
+                                            selectedAddon = if (selectedAddon == name) null else name
+                                        },
+                                    )
+                                }
+                            }
+                        }
+
+                        val visibleCandidates = session.streamCandidates.filter { c ->
+                            (selectedAddon == null || c.addonName == selectedAddon) &&
+                                (!cachedOnly || c.isCached)
+                        }
+
+                        if (visibleCandidates.isEmpty()) {
+                            TorveBanner(
+                                title = "No matches for current filter",
+                                description = "Loosen the filter or pick \"All\" to see every source for this title.",
+                                tone = TorveBannerTone.Info,
+                            )
+                        }
+
+                        visibleCandidates.forEach { candidate ->
                             DesktopSourceCandidateCard(
                                 candidate = candidate,
                                 session = session,
