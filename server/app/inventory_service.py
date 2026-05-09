@@ -34,6 +34,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable, NamedTuple
 
 from sqlalchemy import and_, desc, func, or_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.models import ProviderInventorySnapshot
@@ -315,58 +316,59 @@ def ingest_snapshot(
     """
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(hours=ttl_hours)
-    upserted = 0
     seen_remote_ids = set()
 
+    rows = []
     for item in items:
         seen_remote_ids.add(item.remote_item_id)
+        cls_value = classify_fn(item.file_name or item.normalized_title or "") if classify_fn else None
+        rows.append({
+            "user_id": user_id,
+            "provider_type": provider_type,
+            "remote_item_id": item.remote_item_id,
+            "normalized_title": item.normalized_title,
+            "year": item.year,
+            "season": item.season,
+            "episode": item.episode,
+            "infohash": item.infohash,
+            "file_size": item.file_size,
+            "file_name": item.file_name,
+            "display_path": item.display_path,
+            "inventory_class": item.inventory_class,
+            "quality": item.quality,
+            "content_classification": cls_value,
+            "last_seen_at": now,
+            "expires_at": expires_at,
+        })
 
-        # Classify on ingest if a classifier is provided
-        cls_value = None
-        if classify_fn:
-            cls_value = classify_fn(item.file_name or item.normalized_title or "")
+    if rows:
+        stmt = pg_insert(ProviderInventorySnapshot).values(rows)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["user_id", "provider_type", "remote_item_id"],
+            set_={
+                "normalized_title": stmt.excluded.normalized_title,
+                "year": stmt.excluded.year,
+                "season": stmt.excluded.season,
+                "episode": stmt.excluded.episode,
+                "infohash": stmt.excluded.infohash,
+                "file_size": stmt.excluded.file_size,
+                "file_name": stmt.excluded.file_name,
+                "display_path": stmt.excluded.display_path,
+                "inventory_class": stmt.excluded.inventory_class,
+                "quality": stmt.excluded.quality,
+                # Preserve existing classification when the new ingest has none
+                "content_classification": func.coalesce(
+                    stmt.excluded.content_classification,
+                    ProviderInventorySnapshot.content_classification,
+                ),
+                "last_seen_at": stmt.excluded.last_seen_at,
+                "expires_at": stmt.excluded.expires_at,
+                "updated_at": now,
+            },
+        )
+        db.execute(stmt)
 
-        existing = db.query(ProviderInventorySnapshot).filter(
-            ProviderInventorySnapshot.user_id == user_id,
-            ProviderInventorySnapshot.provider_type == provider_type,
-            ProviderInventorySnapshot.remote_item_id == item.remote_item_id,
-        ).first()
-
-        if existing:
-            existing.normalized_title = item.normalized_title
-            existing.year = item.year
-            existing.season = item.season
-            existing.episode = item.episode
-            existing.infohash = item.infohash
-            existing.file_size = item.file_size
-            existing.file_name = item.file_name
-            existing.display_path = item.display_path
-            existing.inventory_class = item.inventory_class
-            existing.quality = item.quality
-            if cls_value:
-                existing.content_classification = cls_value
-            existing.last_seen_at = now
-            existing.expires_at = expires_at
-        else:
-            db.add(ProviderInventorySnapshot(
-                user_id=user_id,
-                provider_type=provider_type,
-                remote_item_id=item.remote_item_id,
-                normalized_title=item.normalized_title,
-                year=item.year,
-                season=item.season,
-                episode=item.episode,
-                infohash=item.infohash,
-                file_size=item.file_size,
-                file_name=item.file_name,
-                display_path=item.display_path,
-                inventory_class=item.inventory_class,
-                quality=item.quality,
-                content_classification=cls_value,
-                last_seen_at=now,
-                expires_at=expires_at,
-            ))
-        upserted += 1
+    upserted = len(rows)
 
     # Full refresh: expire items not in the new batch
     expired = 0
