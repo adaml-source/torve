@@ -10,6 +10,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, desc
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.models import HashAvailabilityMemory
@@ -35,22 +36,7 @@ def record_observation(
     expires_at = now + timedelta(hours=ttl_hours)
     infohash = infohash.lower().strip()
 
-    existing = db.query(HashAvailabilityMemory).filter(
-        HashAvailabilityMemory.user_id == user_id,
-        HashAvailabilityMemory.provider_type == provider_type,
-        HashAvailabilityMemory.infohash == infohash,
-    ).first()
-
-    if existing:
-        existing.is_cached = is_cached
-        existing.observed_at = now
-        existing.observation_source = source
-        existing.confidence = confidence
-        existing.expires_at = expires_at
-        db.flush()
-        return existing
-
-    row = HashAvailabilityMemory(
+    stmt = pg_insert(HashAvailabilityMemory).values(
         user_id=user_id,
         provider_type=provider_type,
         infohash=infohash,
@@ -59,14 +45,23 @@ def record_observation(
         observation_source=source,
         confidence=confidence,
         expires_at=expires_at,
+    ).on_conflict_do_update(
+        index_elements=["user_id", "provider_type", "infohash"],
+        set_={
+            "is_cached": is_cached,
+            "observed_at": now,
+            "observation_source": source,
+            "confidence": confidence,
+            "expires_at": expires_at,
+        },
     )
-    db.add(row)
+    db.execute(stmt)
     db.flush()
-    _log.debug(
-        "HASH_AVAILABILITY_NEW user=%s provider=%s cached=%s",
-        user_id, provider_type, is_cached,
-    )
-    return row
+    return db.query(HashAvailabilityMemory).filter(
+        HashAvailabilityMemory.user_id == user_id,
+        HashAvailabilityMemory.provider_type == provider_type,
+        HashAvailabilityMemory.infohash == infohash,
+    ).one()
 
 
 MAX_BATCH_SIZE = 200
