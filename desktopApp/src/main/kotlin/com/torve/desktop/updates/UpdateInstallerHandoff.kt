@@ -49,6 +49,9 @@ class UpdateInstallerHandoff(
     private val osLauncher: (File) -> Unit = ::defaultOsLauncher,
     private val urlOpener: (String) -> java.io.InputStream = ::defaultUrlOpener,
     private val osNameSupplier: () -> String = { System.getProperty("os.name") ?: "" },
+    private val windowsPostHandoffDelayMillis: Long = 1_500,
+    private val windowsRelaunchWatchdog: (() -> Unit)? = null,
+    private val processTerminator: ((Int) -> Unit)? = { kotlin.system.exitProcess(it) },
 ) {
 
     sealed class Phase {
@@ -67,11 +70,12 @@ class UpdateInstallerHandoff(
      * invoked or a failure fires. Returns the final phase.
      */
     suspend fun start(info: UpdateChecker.UpdateInfo): Phase = withContext(Dispatchers.IO) {
+        val osName = osNameSupplier()
         val installerUrl = info.installerUrl
         if (installerUrl.isNullOrBlank()) {
             return@withContext fail("Update feed didn't include a direct installer URL.")
         }
-        if (!supportsHandoffOn(osNameSupplier())) {
+        if (!supportsHandoffOn(osName)) {
             return@withContext fail("Installer handoff not supported on this OS yet - use the View release link.")
         }
 
@@ -144,14 +148,16 @@ class UpdateInstallerHandoff(
         // path. Result: user sees Torve close, brief gap while the
         // upgrade lands, then Torve reopens at the new version — no
         // Start-Menu hop required (Fix C).
-        if (System.getProperty("os.name").orEmpty().lowercase().contains("windows")) {
-            runCatching { spawnWindowsRelaunchWatchdog() }
+        if (osName.lowercase().contains("windows")) {
+            runCatching { (windowsRelaunchWatchdog ?: ::spawnWindowsRelaunchWatchdog).invoke() }
             try {
-                Thread.sleep(1_500)
+                if (windowsPostHandoffDelayMillis > 0) {
+                    Thread.sleep(windowsPostHandoffDelayMillis)
+                }
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
             }
-            kotlin.system.exitProcess(0)
+            processTerminator?.invoke(0)
         }
 
         final

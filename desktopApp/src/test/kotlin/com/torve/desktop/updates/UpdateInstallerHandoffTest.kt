@@ -103,6 +103,9 @@ class UpdateInstallerHandoffTest {
             osLauncher = { launchedFile = it },
             urlOpener = { ByteArrayInputStream(payload) },
             osNameSupplier = { "Windows 11" },
+            windowsPostHandoffDelayMillis = 0,
+            windowsRelaunchWatchdog = {},
+            processTerminator = null,
         )
 
         val phase = handoff.start(
