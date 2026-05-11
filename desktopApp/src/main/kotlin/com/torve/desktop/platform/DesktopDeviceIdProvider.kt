@@ -21,12 +21,12 @@ class DesktopDeviceIdProvider : DeviceIdProvider {
             ?.takeIf { it.isNotBlank() }
             ?: System.getenv("HOSTNAME")?.takeIf { it.isNotBlank() }
             ?: System.getProperty("user.name")?.takeIf { it.isNotBlank() }
-            ?: "Windows Desktop"
+            ?: defaultDesktopName()
     }
 
     override fun getDeviceType(): String = "desktop"
 
-    override fun getPlatform(): String = "windows"
+    override fun getPlatform(): String = desktopPlatform()
 
     override fun getAppVersion(): String = "desktop-preview"
 
@@ -56,10 +56,35 @@ class DesktopDeviceIdProvider : DeviceIdProvider {
 }
 
 internal fun desktopDataDir(): File {
-    val localAppData = System.getenv("LOCALAPPDATA")?.takeIf { it.isNotBlank() }
-    return if (localAppData != null) {
-        File(localAppData, "Torve")
-    } else {
-        File(System.getProperty("user.home"), ".torve")
+    return when (desktopPlatform()) {
+        "windows" -> {
+            val localAppData = System.getenv("LOCALAPPDATA")?.takeIf { it.isNotBlank() }
+            if (localAppData != null) File(localAppData, "Torve")
+            else File(System.getProperty("user.home"), ".torve")
+        }
+        "linux" -> {
+            val xdgDataHome = System.getenv("XDG_DATA_HOME")?.takeIf { it.isNotBlank() }
+            if (xdgDataHome != null) File(xdgDataHome, "Torve")
+            else File(File(System.getProperty("user.home"), ".local/share"), "Torve")
+        }
+        else -> File(System.getProperty("user.home"), ".torve")
     }
 }
+
+internal fun desktopPlatform(): String {
+    val os = System.getProperty("os.name", "").lowercase()
+    return when {
+        "win" in os -> "windows"
+        "mac" in os || "darwin" in os -> "macos"
+        "linux" in os || "nux" in os || "nix" in os -> "linux"
+        else -> "desktop"
+    }
+}
+
+private fun defaultDesktopName(): String =
+    when (desktopPlatform()) {
+        "windows" -> "Windows Desktop"
+        "macos" -> "macOS Desktop"
+        "linux" -> "Linux Desktop"
+        else -> "Desktop"
+    }

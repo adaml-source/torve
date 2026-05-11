@@ -7,10 +7,10 @@ import java.net.URI
  * Discovers VLC native libraries for LibVLC/vlcj initialization.
  *
  * Discovery order:
- * 1. Bundled Torve runtime under desktopApp/runtime/windows/vlc
+ * 1. Bundled Torve runtime under runtime/<os>/vlc
  * 2. JVM property: torve.desktop.vlc.path
  * 3. Environment variable: TORVE_VLC_PATH
- * 4. Standard installed VLC paths on Windows
+ * 4. Standard installed VLC paths for the current OS
  */
 object VlcRuntimeLocator {
 
@@ -28,10 +28,10 @@ object VlcRuntimeLocator {
         // 1. Bundled Torve runtime
         for (baseDir in discoverBaseDirectories()) {
             for (relativePath in listOf(
-                "runtime/windows/vlc",
+                "runtime/${osFolder()}/vlc",
                 "runtime/vlc",
                 "vlc",
-                "desktopApp/runtime/windows/vlc",
+                "desktopApp/runtime/${osFolder()}/vlc",
             )) {
                 val dir = File(baseDir, relativePath)
                 val normalized = normalize(dir)
@@ -53,7 +53,7 @@ object VlcRuntimeLocator {
             ?.takeIf { it.isNotBlank() }
             ?.let(::File)
         if (composeResDir != null) {
-            for (rel in listOf("vlc", "windows/vlc")) {
+            for (rel in listOf("vlc", "${osFolder()}/vlc")) {
                 val dir = File(composeResDir, rel)
                 val normalized = normalize(dir)
                 attempted += normalized
@@ -103,12 +103,8 @@ object VlcRuntimeLocator {
             }
         }
 
-        // 4. Standard Windows install locations
-        val standardPaths = listOf(
-            "C:\\Program Files\\VideoLAN\\VLC",
-            "C:\\Program Files (x86)\\VideoLAN\\VLC",
-        )
-        for (path in standardPaths) {
+        // 4. Standard install locations for the current OS
+        for (path in standardInstallLocations()) {
             val dir = File(path)
             val normalized = normalize(dir)
             attempted += normalized
@@ -116,7 +112,7 @@ object VlcRuntimeLocator {
                 return DiscoveryResult(
                     found = true,
                     vlcDirectory = normalized,
-                    discoverySource = "Standard Windows VLC install",
+                    discoverySource = "Standard VLC install",
                     attemptedPaths = attempted,
                     diagnosticMessage = "VLC found at standard install location $normalized",
                 )
@@ -178,11 +174,45 @@ object VlcRuntimeLocator {
 
     private fun isValidVlcDirectory(dir: File): Boolean {
         if (!dir.isDirectory) return false
-        // Check for libvlc.dll (Windows) or libvlc.so (Linux) or libvlc.dylib (macOS)
-        return File(dir, "libvlc.dll").exists() ||
-            File(dir, "libvlccore.dll").exists() ||
-            File(dir, "libvlc.so").exists() ||
-            File(dir, "libvlc.dylib").exists()
+        // Check for libvlc.dll (Windows), libvlc.so* (Linux), or libvlc.dylib (macOS).
+        val files = dir.listFiles().orEmpty()
+        return files.any { file ->
+            val name = file.name
+            name == "libvlc.dll" ||
+                name == "libvlccore.dll" ||
+                name == "libvlc.dylib" ||
+                name.startsWith("libvlc.so")
+        }
+    }
+
+    private fun standardInstallLocations(): List<String> {
+        val os = System.getProperty("os.name", "").lowercase()
+        return when {
+            "win" in os -> listOf(
+                "C:\\Program Files\\VideoLAN\\VLC",
+                "C:\\Program Files (x86)\\VideoLAN\\VLC",
+            )
+            "mac" in os || "darwin" in os -> listOf(
+                "/Applications/VLC.app/Contents/MacOS/lib",
+                "/opt/homebrew/lib",
+                "/usr/local/lib",
+            )
+            else -> listOf(
+                "/usr/lib",
+                "/usr/lib/x86_64-linux-gnu",
+                "/usr/local/lib",
+                "/snap/vlc/current/usr/lib",
+            )
+        }
+    }
+
+    private fun osFolder(): String {
+        val os = System.getProperty("os.name", "").lowercase()
+        return when {
+            "win" in os -> "windows"
+            "mac" in os || "darwin" in os -> "macos"
+            else -> "linux"
+        }
     }
 
     private fun discoverBaseDirectories(): List<File> {

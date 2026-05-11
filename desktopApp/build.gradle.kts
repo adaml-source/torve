@@ -23,6 +23,15 @@ fun readTmdbApiKey(): String {
         ?: ""
 }
 
+fun hostOsName(): String = System.getProperty("os.name", "").lowercase(Locale.US)
+
+fun isWindowsHost(): Boolean = "win" in hostOsName()
+
+fun isLinuxHost(): Boolean {
+    val os = hostOsName()
+    return "linux" in os || "nux" in os || "nix" in os
+}
+
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.serialization)
@@ -77,6 +86,7 @@ val packagingChecklistDoc = layout.projectDirectory.file("WINDOWS_PACKAGING.md")
 val bundledMpvWindowsDir = layout.projectDirectory.dir("runtime/windows/mpv")
 val bundledMpvMacosDir = layout.projectDirectory.dir("runtime/macos/mpv")
 val bundledMpvLinuxDir = layout.projectDirectory.dir("runtime/linux/mpv")
+val bundledVlcLinuxDir = layout.projectDirectory.dir("runtime/linux/vlc")
 
 tasks.register("verifyWindowsPackagingPrereqs") {
     group = "distribution"
@@ -232,6 +242,48 @@ tasks.register("printWindowsPackagingChecklist") {
     }
 }
 
+tasks.register("verifyLinuxPackagingPrereqs") {
+    group = "distribution"
+    description = "Checks Linux desktop packaging prerequisites for Torve."
+    doLast {
+        if (!isLinuxHost()) {
+            throw GradleException(
+                "Linux desktop packaging must run on a Linux host. " +
+                    "Use a Linux VM/CI runner for :desktopApp:packageDeb or :desktopApp:packageAppImage.",
+            )
+        }
+
+        val jpackage = locateJpackageForCurrentHost()
+        if (jpackage == null) {
+            throw GradleException(
+                "Linux desktop packaging requires a full JDK with jpackage. " +
+                    "Install JDK 21+ or set TORVE_JPACKAGE_JDK to a JDK root that has bin/jpackage.",
+            )
+        }
+
+        val missingTools = listOf("dpkg-deb", "fakeroot", "file").filterNot(::isCommandAvailable)
+        if (missingTools.isNotEmpty()) {
+            throw GradleException(
+                "Linux desktop packaging tools missing: ${missingTools.joinToString()}. " +
+                    "On Ubuntu install them with: sudo apt install dpkg fakeroot file.",
+            )
+        }
+
+        val hasBundledMpv = bundledMpvLinuxDir.asFile
+            .let { dir -> dir.isDirectory && listOf("libmpv.so.2", "libmpv.so").any { File(dir, it).exists() } }
+        val hasBundledVlc = bundledVlcLinuxDir.asFile
+            .let { dir -> dir.isDirectory && listOf("libvlc.so", "libvlccore.so").any { File(dir, it).exists() } }
+        if (!hasBundledMpv && !hasBundledVlc) {
+            logger.warn(
+                "No bundled Linux playback runtime found under runtime/linux/{mpv,vlc}. " +
+                    "This is acceptable for beta packaging only; Linux smoke hosts must install mpv/libmpv or VLC.",
+            )
+        }
+
+        println("Linux packaging prerequisites OK. jpackage=${jpackage.absolutePath}")
+    }
+}
+
 tasks.register("verifyMpvRuntime") {
     group = "distribution"
     description = "Reports whether a bundled libmpv runtime is staged for the current host."
@@ -300,13 +352,35 @@ tasks.register("generateSampleAppcast") {
 }
 
 listOf(
-    "createDistributable",
-    "packageDistributionForCurrentOS",
     "packageExe",
     "packageMsi",
+    "packageReleaseExe",
+    "packageReleaseMsi",
 ).forEach { taskName ->
     tasks.matching { it.name == taskName }.configureEach {
         dependsOn("verifyWindowsPackagingPrereqs")
+    }
+}
+
+listOf(
+    "packageDeb",
+    "packageAppImage",
+    "packageReleaseDeb",
+    "packageReleaseAppImage",
+).forEach { taskName ->
+    tasks.matching { it.name == taskName }.configureEach {
+        dependsOn("verifyLinuxPackagingPrereqs")
+    }
+}
+
+if (isLinuxHost()) {
+    listOf(
+        "packageDistributionForCurrentOS",
+        "packageReleaseDistributionForCurrentOS",
+    ).forEach { taskName ->
+        tasks.matching { it.name == taskName }.configureEach {
+            dependsOn("verifyLinuxPackagingPrereqs")
+        }
     }
 }
 
@@ -463,6 +537,29 @@ fun locateJpackage(): File {
         "No JDK with jpackage.exe found. JBR doesn't ship jdk.jpackage. " +
             "Install JDK 21+ from https://adoptium.net or set TORVE_JPACKAGE_JDK.",
     )
+}
+
+fun locateJpackageForCurrentHost(): File? {
+    val executable = if (isWindowsHost()) "jpackage.exe" else "jpackage"
+    val override = System.getenv("TORVE_JPACKAGE_JDK")?.takeIf { it.isNotBlank() }
+    if (override != null) {
+        return File(override).resolve("bin/$executable").takeIf { it.exists() }
+    }
+    val javaHome = File(System.getProperty("java.home"))
+    javaHome.resolve("bin/$executable").takeIf { it.exists() }?.let { return it }
+    return findCommandOnPath(executable)
+}
+
+fun isCommandAvailable(command: String): Boolean = findCommandOnPath(command) != null
+
+fun findCommandOnPath(command: String): File? {
+    val path = System.getenv("PATH").orEmpty()
+    if (path.isBlank()) return null
+    return path.split(File.pathSeparator)
+        .asSequence()
+        .filter { it.isNotBlank() }
+        .map { File(it, command) }
+        .firstOrNull { it.exists() && it.canExecute() }
 }
 
 compose.desktop {
