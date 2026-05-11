@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.res.stringResource
+import com.torve.android.BuildConfig
 import com.torve.android.R
 import com.torve.android.billing.BillingManager
 import com.torve.android.tv.premium.TvEntitledFeature
@@ -65,6 +66,11 @@ fun TvLifetimeUnlockDialog(
     onUnlock: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    if (!BuildConfig.SUPPORTS_TV_BILLING) {
+        TvBuyViaPhoneDialog(feature = feature, onDismiss = onDismiss)
+        return
+    }
+
     val billingManager: BillingManager = koinInject()
     val billingState by billingManager.billingState.collectAsState()
     val unlockRequester = remember(feature) { FocusRequester() }
@@ -279,6 +285,110 @@ fun TvLifetimeUnlockDialog(
                         onClick = onDismiss,
                     )
                 }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun TvBuyViaPhoneDialog(
+    feature: TvEntitledFeature,
+    onDismiss: () -> Unit,
+) {
+    val dismissRequester = remember(feature) { FocusRequester() }
+    BackHandler(onBack = onDismiss)
+    LaunchedEffect(feature) {
+        kotlinx.coroutines.delay(24)
+        runCatching { dismissRequester.requestFocus() }
+    }
+    Popup(
+        alignment = Alignment.Center,
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(
+            focusable = true,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true,
+        ),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Obsidian.copy(alpha = 0.9f))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onDismiss,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                modifier = Modifier
+                    .width(640.dp)
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(Charcoal.copy(alpha = 0.98f))
+                    .border(2.dp, Steel.copy(alpha = 0.5f), RoundedCornerShape(22.dp))
+                    .padding(horizontal = 28.dp, vertical = 28.dp)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {},
+                    ),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(Amber.copy(alpha = 0.2f))
+                        .padding(12.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Lock,
+                        contentDescription = null,
+                        tint = Amber,
+                    )
+                }
+                Text(
+                    text = TvPremiumAccess.titleFor(feature),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = Amber,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = TvPremiumAccess.unlockSummaryFor(feature),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Silver,
+                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Graphite.copy(alpha = 0.6f))
+                        .border(1.dp, Steel.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.tv_unlock_purchase_phone_title),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = Snow,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = stringResource(R.string.tv_unlock_purchase_phone_body),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Silver,
+                    )
+                }
+                TvUnlockDialogButton(
+                    title = stringResource(R.string.tv_action_got_it),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(dismissRequester),
+                    secondary = true,
+                    onClick = onDismiss,
+                )
             }
         }
     }

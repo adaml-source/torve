@@ -47,6 +47,7 @@ import kotlin.test.fail
 class TransferTelemetryRedactionTest {
 
     private val fixedNow = 1_700_000_000_000L
+    private val envelopeJsonFormat = Json { encodeDefaults = true }
 
     @Test
     fun receiverEmitsForRelayUnavailableWithoutLeakingTokensOrSessions() = runTest {
@@ -119,8 +120,7 @@ class TransferTelemetryRedactionTest {
             ),
             expiresAtEpochMs = active.handshake.expiresAtEpochMs,
         )
-        val envelopeJson = Json { encodeDefaults = true }
-            .encodeToString(SealedSecretsEnvelope.serializer(), envelope)
+        val envelopeJson = envelopeJsonFormat.encodeToString(SealedSecretsEnvelope.serializer(), envelope)
         vm.updateEnvelopeText(envelopeJson)
         vm.acceptEnvelopeJson()
 

@@ -23,6 +23,7 @@ enum class IntegrationSecretKey {
     DEEPSEEK_API_KEY,
     MDBLIST_API_KEY,
     OMDB_API_KEY,
+    OPENSUBTITLES_API_KEY,
     PANDA_TOKEN,
     /**
      * Panda per-config management token. Always persisted as DEVICE_ONLY: a
@@ -136,6 +137,15 @@ interface IntegrationSecretStore {
     /** Check if a usable local secret exists for [key] and optional [subKey]. */
     suspend fun hasSecret(key: IntegrationSecretKey, subKey: String? = null): Boolean =
         get(key, subKey)?.isNotBlank() == true
+
+    /**
+     * Returns all subKeys stored under [key]. Useful when the caller needs to
+     * enumerate scoped entries without knowing the subKeys in advance (e.g.
+     * finding indexer entries whose subKey encodes a URL that isn't stored
+     * separately). Implementations that don't support enumeration return an
+     * empty list — callers must treat this as "unknown, not absent".
+     */
+    suspend fun getSubKeys(key: IntegrationSecretKey): List<String> = emptyList()
 
     /** Keys in the preferences DB that may contain legacy secret fallbacks.
      *  Must be cleared on logout alongside the secure store. */

@@ -139,7 +139,7 @@ private fun StatusPill(status: ProviderHealthStatus) {
  * adaptation done at the call site).
  */
 fun providerSettingsRouteFor(category: ProviderHealthCategory): String? = when (category) {
-    ProviderHealthCategory.DEBRID -> "streaming_services_settings"
+    ProviderHealthCategory.DEBRID -> "panda_setup"
     ProviderHealthCategory.PLEX_JELLYFIN -> "integrations"
     ProviderHealthCategory.TRAKT, ProviderHealthCategory.SIMKL -> "integrations"
     ProviderHealthCategory.USENET_INDEXER,

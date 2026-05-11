@@ -40,9 +40,10 @@ class WatchlistRepositoryImpl(
 ) : WatchlistRepository {
 
     private val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private fun signedInUserIdOrNull(): String? = userIdProvider.currentUserIdOrNull()
 
     override suspend fun getAll(): List<WatchlistItem> {
-        val userId = userIdProvider.currentUserId()
+        val userId = signedInUserIdOrNull() ?: return emptyList()
         return database.torveQueries.getAllWatchlist(userId = userId).executeAsList().map { row ->
             WatchlistItem(
                 mediaId = row.media_id,
@@ -62,7 +63,7 @@ class WatchlistRepositoryImpl(
     }
 
     override suspend fun getByType(mediaType: String): List<WatchlistItem> {
-        val userId = userIdProvider.currentUserId()
+        val userId = signedInUserIdOrNull() ?: return emptyList()
         return database.torveQueries.getWatchlistByType(userId = userId, mediaType = mediaType).executeAsList().map { row ->
             WatchlistItem(
                 mediaId = row.media_id,
@@ -82,14 +83,15 @@ class WatchlistRepositoryImpl(
     }
 
     override suspend fun isInWatchlist(mediaId: String): Boolean {
+        val userId = signedInUserIdOrNull() ?: return false
         return database.torveQueries.isInWatchlist(
-            userId = userIdProvider.currentUserId(),
+            userId = userId,
             mediaId = mediaId,
         ).executeAsOne() > 0
     }
 
     override suspend fun add(item: WatchlistItem) {
-        val userId = userIdProvider.currentUserId()
+        val userId = signedInUserIdOrNull() ?: return
         database.torveQueries.insertWatchlistItem(
             user_id = userId,
             media_id = item.mediaId,
@@ -113,7 +115,7 @@ class WatchlistRepositoryImpl(
     }
 
     override suspend fun add(item: WatchlistItem, syncTrakt: Boolean, syncSimkl: Boolean) {
-        val userId = userIdProvider.currentUserId()
+        val userId = signedInUserIdOrNull() ?: return
         database.torveQueries.insertWatchlistItem(
             user_id = userId,
             media_id = item.mediaId,
@@ -137,7 +139,7 @@ class WatchlistRepositoryImpl(
     }
 
     override suspend fun remove(mediaId: String) {
-        val userId = userIdProvider.currentUserId()
+        val userId = signedInUserIdOrNull() ?: return
         // Read item before deleting so we can sync to Trakt/Simkl
         val item = database.torveQueries.getAllWatchlist(userId = userId).executeAsList()
             .firstOrNull { it.media_id == mediaId }
@@ -157,11 +159,12 @@ class WatchlistRepositoryImpl(
     }
 
     override suspend fun clear() {
-        database.torveQueries.clearWatchlist(userId = userIdProvider.currentUserId())
+        val userId = signedInUserIdOrNull() ?: return
+        database.torveQueries.clearWatchlist(userId = userId)
     }
 
     override suspend fun syncFromTrakt() {
-        val userId = userIdProvider.currentUserId()
+        val userId = signedInUserIdOrNull() ?: return
         try {
             val traktItems = traktApi.getWatchlist()
             val traktIds = traktItems.mapNotNull { item ->
@@ -222,7 +225,7 @@ class WatchlistRepositoryImpl(
 
     private suspend fun enrichMissingPosters() {
         try {
-            val userId = userIdProvider.currentUserId()
+            val userId = signedInUserIdOrNull() ?: return
             val itemsNeedingPosters = database.torveQueries.getAllWatchlist(userId = userId)
                 .executeAsList()
                 .filter { it.poster_url == null }
@@ -341,4 +344,3 @@ class WatchlistRepositoryImpl(
         }
     }
 }
-

@@ -107,7 +107,7 @@ fun TvPandaSetupScreen(
                 OutlinedButton(onClick = onBack) {
                     Icon(Icons.Filled.Close, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Close setup")
+                    Text(stringResource(R.string.tv_panda_close_setup))
                 }
             }
 

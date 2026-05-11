@@ -5,6 +5,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -49,6 +50,7 @@ import com.torve.android.tv.components.rememberTvFocusMemory
 import com.torve.android.tv.focus.TvScreenFocusHandle
 import com.torve.android.tv.toMediaItem
 import com.torve.android.ui.theme.*
+import com.torve.domain.model.Channel
 import com.torve.domain.model.DownloadMediaType
 import com.torve.domain.model.DownloadStatus
 import com.torve.domain.model.MediaItem
@@ -65,7 +67,7 @@ private data class TvLibraryUiState(
     val error: String? = null,
 )
 
-private enum class LibraryTab { WATCHLIST, DOWNLOADS, JELLYFIN }
+private enum class LibraryTab { WATCHLIST, VOD, DOWNLOADS, JELLYFIN }
 
 @Composable
 internal fun TvLibraryScreen(
@@ -81,6 +83,8 @@ internal fun TvLibraryScreen(
     contextMenuActionsForItem: ((MediaItem, Float?) -> List<TvMediaContextMenuAction>)? = null,
     onContextMenuAction: ((MediaItem, TvMediaContextMenuAction, Float?) -> Unit)? = null,
     onJellyfinItemPlay: (streamUrl: String, title: String) -> Unit = { _, _ -> },
+    onVodItemPlay: (channel: Channel, item: MediaItem) -> Unit = { _, _ -> },
+    onVodSeriesOpen: (channel: Channel, item: MediaItem) -> Unit = onVodItemPlay,
     registerFocusHandle: ((TvScreenFocusHandle?) -> Unit)? = null,
 ) {
     // Defer Jellyfin ViewModel creation until the tab is actually selected
@@ -88,8 +92,12 @@ internal fun TvLibraryScreen(
     var selectedTabIndex by rememberSaveable { mutableStateOf(0) }
     val availableTabs = listOf(
         LibraryTab.WATCHLIST,
+        LibraryTab.VOD,
         LibraryTab.JELLYFIN,
     )
+    val tabRequesters = remember(availableTabs.size) {
+        List(availableTabs.size) { FocusRequester() }
+    }
     val currentTab = availableTabs.getOrElse(selectedTabIndex) { LibraryTab.WATCHLIST }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -97,19 +105,20 @@ internal fun TvLibraryScreen(
         val tabLabels = availableTabs.map { tab ->
             when (tab) {
                 LibraryTab.WATCHLIST -> stringResource(R.string.tv_library_tab_watchlist)
+                LibraryTab.VOD -> stringResource(R.string.tv_library_tab_vod)
                 LibraryTab.DOWNLOADS -> stringResource(R.string.tv_library_tab_downloads)
                 LibraryTab.JELLYFIN -> stringResource(R.string.watchlist_jellyfin)
             }
         }
         LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding = PaddingValues(start = 40.dp, end = 12.dp, top = 16.dp, bottom = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(start = 40.dp, end = 12.dp, top = 14.dp, bottom = 8.dp),
         ) {
             itemsIndexed(
                 items = tabLabels,
                 key = { index, _ -> "tab_$index" },
             ) { index, label ->
-                val requester = remember("library_tab_$index") { FocusRequester() }
+                val requester = tabRequesters[index]
                 if (index == 0) {
                     onFirstContentRequester(requester)
                 }
@@ -146,6 +155,17 @@ internal fun TvLibraryScreen(
                 registerFocusHandle = registerFocusHandle,
             )
             LibraryTab.DOWNLOADS -> { /* Downloads removed from TV — stream-only */ }
+            LibraryTab.VOD -> TvVodLibraryContent(
+                railFocusRequester = railFocusRequester,
+                headerFocusRequester = tabRequesters.getOrNull(selectedTabIndex) ?: headerFocusRequester,
+                onVodItemPlay = onVodItemPlay,
+                onVodSeriesOpen = onVodSeriesOpen,
+                onFirstContentRequester = onFirstContentRequester,
+                onContentFocused = onContentFocused,
+                onMediaFocused = onMediaFocused,
+                shouldAutoFocus = shouldAutoFocus,
+                registerFocusHandle = registerFocusHandle,
+            )
             LibraryTab.JELLYFIN -> JellyfinContent(
                 railFocusRequester = railFocusRequester,
                 headerFocusRequester = headerFocusRequester,
@@ -402,19 +422,19 @@ private fun TvLibraryTabChip(
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(targetValue = if (focused) 1.05f else 1f, label = "tabScale")
+    val scale by animateFloatAsState(targetValue = if (focused) 1.035f else 1f, label = "tabScale")
     val borderColor by animateColorAsState(
         targetValue = when {
             focused -> AmberLight
-            isSelected -> Amber.copy(alpha = 0.67f)
+            isSelected -> Amber.copy(alpha = 0.48f)
             else -> Color.Transparent
         },
         label = "tabBorder",
     )
     val bgColor = when {
-        focused -> Gunmetal
-        isSelected -> Graphite
-        else -> Charcoal
+        focused -> Graphite.copy(alpha = 0.44f)
+        isSelected -> Amber.copy(alpha = 0.11f)
+        else -> Charcoal.copy(alpha = 0.24f)
     }
 
     Box(
@@ -428,18 +448,19 @@ private fun TvLibraryTabChip(
                 indication = null,
                 onClick = onClick,
             )
+            .focusable()
             .zIndex(if (focused) 1f else 0f)
             .scale(scale)
-            .border(2.dp, borderColor, RoundedCornerShape(14.dp))
+            .border(1.dp, borderColor, RoundedCornerShape(14.dp))
             .clip(RoundedCornerShape(14.dp))
             .background(bgColor)
-            .padding(horizontal = 18.dp, vertical = 10.dp),
+            .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
         Text(
             text = label,
-            style = MaterialTheme.typography.titleMedium,
+            style = MaterialTheme.typography.labelLarge,
             color = if (isSelected || focused) Snow else Silver,
-            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+            fontWeight = if (isSelected || focused) FontWeight.SemiBold else FontWeight.Medium,
         )
     }
 }

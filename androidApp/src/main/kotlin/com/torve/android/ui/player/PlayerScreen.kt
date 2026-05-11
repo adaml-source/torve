@@ -1,6 +1,7 @@
 package com.torve.android.ui.player
 
 import android.app.Activity
+import android.util.Log
 import android.content.pm.ActivityInfo
 import android.os.SystemClock
 import android.view.ViewGroup
@@ -47,7 +48,12 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay10
+import androidx.compose.material.icons.filled.AspectRatio
+import androidx.compose.material.icons.filled.ClosedCaption
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.Equalizer
@@ -92,6 +98,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -133,7 +140,9 @@ import com.torve.data.trakt.TraktClient
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.data.trakt.TraktHistoryBody
+import com.torve.data.trakt.TraktHistoryEpisodeEntry
 import com.torve.data.trakt.TraktHistoryMovie
+import com.torve.data.trakt.TraktHistorySeasonEntry
 import com.torve.data.trakt.TraktHistoryShow
 import com.torve.data.trakt.TraktIds
 import com.torve.domain.model.ContentWarmupTrigger
@@ -149,6 +158,8 @@ import com.torve.domain.model.WatchProgress
 import com.torve.domain.model.extractImdbIdOrNull
 import com.torve.domain.model.extractTmdbIdOrNull
 import com.torve.data.addon.SubtitleAggregator
+import com.torve.data.subtitles.OpenSubtitlesClient
+import com.torve.data.subtitles.languageInfo
 import com.torve.domain.player.ExternalSubtitle
 import com.torve.domain.player.NextEpisodeHelper
 import com.torve.domain.player.NextEpisodeInfo
@@ -189,6 +200,7 @@ fun PlayerScreen(
     backdropUrl: String = "",
     seasonNumber: Int? = null,
     episodeNumber: Int? = null,
+    episodeName: String = "",
     showTmdbId: Int? = null,
     showImdbId: String? = null,
     startPositionMs: Long = 0L,
@@ -209,8 +221,10 @@ fun PlayerScreen(
     integrationSecretStore: IntegrationSecretStore = koinInject(),
     prefsRepo: PreferencesRepository = koinInject(),
     subtitleAggregator: SubtitleAggregator = koinInject(),
+    openSubtitlesClient: OpenSubtitlesClient = koinInject(),
 ) {
     val context = LocalContext.current
+    val voiceInputUnavailableFallback = context.getString(R.string.voice_input_unavailable)
     val configuration = LocalConfiguration.current
     val isTv = remember(context) { DeviceFormFactor.isTv(context) }
     val enablePhoneAutoRotation = !isTv && configuration.smallestScreenWidthDp < 600
@@ -277,7 +291,14 @@ fun PlayerScreen(
     var sliderPosition by remember { mutableFloatStateOf(0f) }
     var isSeeking by remember { mutableStateOf(false) }
     var showTrackDialog by remember { mutableStateOf(false) }
+    var trackDialogSubtitlesOnly by remember { mutableStateOf(true) }
+    var subtitleFetchState by remember { mutableStateOf<SubtitleFetchState>(SubtitleFetchState.Idle) }
+    var showSubtitleSearch by remember { mutableStateOf(false) }
+    var pendingSubtitleAutoSelect by remember { mutableStateOf(false) }
+    var backKeyDownAtMs by remember { mutableLongStateOf(0L) }
+    val backLongPressJob = remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var showAudioDelayDialog by remember { mutableStateOf(false) }
+    var showSubtitleDelayDialog by remember { mutableStateOf(false) }
     var showPictureFormatPicker by remember { mutableStateOf(false) }
     var subtitleTracks by remember { mutableStateOf<List<TrackDescription>>(emptyList()) }
     var audioTracks by remember { mutableStateOf<List<TrackDescription>>(emptyList()) }
@@ -291,6 +312,7 @@ fun PlayerScreen(
     var exitSnapshotPositionMs by remember { mutableLongStateOf(-1L) }
     var exitSnapshotDurationMs by remember { mutableLongStateOf(-1L) }
     var audioDelayMs by remember { mutableIntStateOf(0) }
+    var subtitleDelayMs by remember { mutableIntStateOf(0) }
     var showEqualizerSheet by remember { mutableStateOf(false) }
     var showDevicePicker by remember { mutableStateOf(false) }
     var mobileSheetStack by remember { mutableStateOf<List<MobilePlaybackSheet>>(emptyList()) }
@@ -467,7 +489,8 @@ fun PlayerScreen(
         if (castAvailable) add(TopMenuFocusTarget.CAST)
         if (!isTv) add(TopMenuFocusTarget.HANDOFF)
         if (!isTv) add(TopMenuFocusTarget.VOICE)
-        add(TopMenuFocusTarget.TRACKS) // Always visible — tracks may load after playback starts
+        add(TopMenuFocusTarget.SUBTITLE_TRACKS)
+        add(TopMenuFocusTarget.AUDIO_TRACKS)
         add(TopMenuFocusTarget.AUDIO_DELAY)
         if (audioEqualizer != null) add(TopMenuFocusTarget.EQUALIZER)
         if (isTv) add(TopMenuFocusTarget.PICTURE_FORMAT)
@@ -967,7 +990,7 @@ fun PlayerScreen(
         return direction * stepMs
     }
 
-    fun handleTvTransportSeek(direction: Int) {
+    fun handleTvTransportSeek(direction: Int, hideControls: Boolean = true) {
         if (!settingsState.tvTransportSkipEnabled) {
             resetSeekAcceleration()
             if (settingsState.tvExplicitTimelineScrubEnabled) {
@@ -991,7 +1014,7 @@ fun PlayerScreen(
         val maxPosition = duration.takeIf { it > 0L } ?: Long.MAX_VALUE
         val targetPosition = (basePosition + deltaMs).coerceIn(0L, maxPosition)
         seekRepeatTargetMs = targetPosition
-        showControls = false
+        if (hideControls) showControls = false
         performSeekTo(
             targetMs = targetPosition,
             userInitiated = true,
@@ -1269,6 +1292,15 @@ fun PlayerScreen(
         }
 
         trackPrefsAppliedForUrl = true
+        pendingSubtitleAutoSelect = false
+    }
+
+    // After a downloaded subtitle is added, select it as soon as tracks are available.
+    LaunchedEffect(subtitleTracks, pendingSubtitleAutoSelect) {
+        if (!pendingSubtitleAutoSelect) return@LaunchedEffect
+        if (subtitleTracks.isEmpty()) return@LaunchedEffect
+        subtitleTracks.firstOrNull()?.let { engine.selectSubtitleTrack(it.id) }
+        pendingSubtitleAutoSelect = false
     }
 
     // Load season data for next-episode calculation (TV shows only)
@@ -1415,14 +1447,13 @@ fun PlayerScreen(
         )
     }
 
-    // MediaSession for notification bar / lock screen controls
+    // MediaSession for notification bar / lock screen controls.
+    // ID must be unique per instance — reusing "" crashes when re-entering player
+    // before the previous session's onDispose has released it.
     val mediaSession = remember(engine) {
         val exo = (engine as? ExoPlayerEngine)?.getExoPlayer() ?: return@remember null
-        val metadata = MediaMetadata.Builder()
-            .setTitle(title.ifBlank { "Torve" })
-            .build()
-        exo.mediaMetadata // trigger metadata
         MediaSession.Builder(context, exo)
+            .setId("torve-${System.nanoTime()}")
             .build()
     }
 
@@ -1864,30 +1895,44 @@ fun PlayerScreen(
         if (hasMarkedWatched) return@LaunchedEffect
         if (duration <= 0 || tmdbId <= 0) return@LaunchedEffect
         val progressPercent = currentPosition.toDouble() / duration
-        if (progressPercent > 0.80) {
+        if (progressPercent >= 0.85) {
             hasMarkedWatched = true
             // Trakt
             if (canScrobble) {
                 try {
                     val ids = TraktIds(tmdb = tmdbId)
-                    val body = if (parsedMediaType == MediaType.MOVIE) {
-                        TraktHistoryBody(movies = listOf(TraktHistoryMovie(ids = ids)))
-                    } else {
-                        TraktHistoryBody(shows = listOf(TraktHistoryShow(ids = ids)))
+                    val body = when {
+                        parsedMediaType == MediaType.MOVIE -> {
+                            TraktHistoryBody(movies = listOf(TraktHistoryMovie(ids = ids)))
+                        }
+                        currentSeasonNumber != null && currentEpisodeNumber != null -> {
+                            TraktHistoryBody(
+                                shows = listOf(
+                                    TraktHistoryShow(
+                                        ids = ids,
+                                        seasons = listOf(
+                                            TraktHistorySeasonEntry(
+                                                number = currentSeasonNumber!!,
+                                                episodes = listOf(TraktHistoryEpisodeEntry(number = currentEpisodeNumber!!)),
+                                            ),
+                                        ),
+                                    ),
+                                ),
+                            )
+                        }
+                        else -> null
                     }
-                    traktClient.addToHistory(traktAccessToken, body)
+                    if (body != null) {
+                        traktClient.addToHistory(traktAccessToken, body)
+                    }
                 } catch (_: Exception) { }
             }
             // Simkl
             try {
                 val simklToken = integrationSecretStore.get(IntegrationSecretKey.SIMKL_ACCESS_TOKEN)
-                if (!simklToken.isNullOrBlank()) {
+                if (!simklToken.isNullOrBlank() && parsedMediaType == MediaType.MOVIE) {
                     val simklIds = SimklIds(tmdb = tmdbId)
-                    val simklBody = if (parsedMediaType == MediaType.MOVIE) {
-                        SimklSyncBody(movies = listOf(SimklSyncItem(simklIds)))
-                    } else {
-                        SimklSyncBody(shows = listOf(SimklSyncItem(simklIds)))
-                    }
+                    val simklBody = SimklSyncBody(movies = listOf(SimklSyncItem(simklIds)))
                     simklClient.addToHistory(simklToken, simklBody)
                 }
             } catch (_: Exception) { }
@@ -1920,14 +1965,18 @@ fun PlayerScreen(
         }
     }
 
-    // Auto-hide controls after 5 seconds on non-TV devices.
+    // Auto-hide controls after inactivity: 4s on TV, 5s on mobile.
     var controlsInteractionTick by remember { mutableLongStateOf(0L) }
-    LaunchedEffect(showControls, controlsInteractionTick, isTv, showTrackDialog, showAudioDelayDialog, showPictureFormatPicker, showEqualizerSheet, showDevicePicker, showResumePrompt, mobileActiveSheet) {
+    LaunchedEffect(showControls, controlsInteractionTick, isTv, showTrackDialog, showAudioDelayDialog, showPictureFormatPicker, showEqualizerSheet, showDevicePicker, showResumePrompt, mobileActiveSheet, showSubtitleSearch) {
         if (!showControls) return@LaunchedEffect
-        if (isTv) return@LaunchedEffect
-        if (showTrackDialog || showAudioDelayDialog || showPictureFormatPicker || showEqualizerSheet || showDevicePicker || showResumePrompt || mobileActiveSheet != null) return@LaunchedEffect
-        delay(5000)
+        if (showTrackDialog || showAudioDelayDialog || showPictureFormatPicker || showEqualizerSheet || showDevicePicker || showResumePrompt || mobileActiveSheet != null || showSubtitleSearch) return@LaunchedEffect
+        delay(if (isTv) 4000L else 5000L)
         showControls = false
+    }
+
+    // Hide controls when subtitle search opens.
+    LaunchedEffect(showSubtitleSearch) {
+        if (showSubtitleSearch) showControls = false
     }
 
     LaunchedEffect(currentUrl, pendingStartPositionMs, showResumePrompt) {
@@ -1951,18 +2000,16 @@ fun PlayerScreen(
     LaunchedEffect(
         tvSeekFeedbackVisible,
         tvSeekFeedbackInteractionAtMs,
-        showControls,
         settingsState.tvSkipResetWindowMs,
     ) {
         if (!tvSeekFeedbackVisible) return@LaunchedEffect
-        if (showControls) {
-            tvSeekFeedbackVisible = false
-            return@LaunchedEffect
-        }
+        // Persist for at least 1.2s, then let the burst window clear it
+        val minShowMs = 1_200L
         val timeoutMs = settingsState.tvSkipResetWindowMs.coerceIn(600, 4_000).toLong() + 650L
-        delay(timeoutMs)
+        val waitMs = maxOf(minShowMs, timeoutMs)
+        delay(waitMs)
         val elapsed = SystemClock.elapsedRealtime() - tvSeekFeedbackInteractionAtMs
-        if (elapsed >= timeoutMs - 40L) {
+        if (elapsed >= waitMs - 40L) {
             tvSeekFeedbackVisible = false
             if (elapsed >= settingsState.tvSkipResetWindowMs.coerceIn(600, 4_000).toLong()) {
                 resetSeekAcceleration()
@@ -2232,21 +2279,69 @@ fun PlayerScreen(
             .focusRequester(playerRootFocusRequester)
             .focusable()
             .onPreviewKeyEvent { keyEvent ->
+                // Subtitle search intercepts Back before the player's own handler.
+                if (showSubtitleSearch && keyEvent.key == Key.Back) {
+                    if (keyEvent.type == KeyEventType.KeyUp) {
+                        showSubtitleSearch = false
+                        subtitleFetchState = SubtitleFetchState.Idle
+                        scope.launch {
+                            kotlinx.coroutines.delay(100)
+                            runCatching { playerRootFocusRequester.requestFocus() }
+                        }
+                    }
+                    return@onPreviewKeyEvent true // consume both KeyDown and KeyUp
+                }
+
+                // Back key: on TV, KeyDown starts a long-press coroutine (800ms → exit).
+                // KeyUp cancels the coroutine and does short-press behavior if still active.
+                if (keyEvent.type == KeyEventType.KeyUp) {
+                    if (isTv && keyEvent.key == Key.Back) {
+                        val job = backLongPressJob.value
+                        backLongPressJob.value = null
+                        if (job != null && job.isActive) {
+                            // Released before long-press triggered → short press
+                            job.cancel()
+                            resetSeekAcceleration()
+                            if (!handleBackAction()) {
+                                if (showControls) showControls = false
+                                else requestExitPlayer()
+                            }
+                        }
+                        return@onPreviewKeyEvent true
+                    }
+                    return@onPreviewKeyEvent false
+                }
                 if (keyEvent.type != KeyEventType.KeyDown) {
                     return@onPreviewKeyEvent false
                 }
-                if ((showTrackDialog || showAudioDelayDialog || showPictureFormatPicker || showEqualizerSheet || showDevicePicker || showResumePrompt) && keyEvent.key != Key.Back) {
+                if ((showTrackDialog || showAudioDelayDialog || showPictureFormatPicker || showEqualizerSheet || showDevicePicker || showResumePrompt || showNextEpisodeOverlay || showSubtitleSearch) && keyEvent.key != Key.Back) {
                     return@onPreviewKeyEvent false
                 }
 
                 // When controls are visible, let D-pad navigate between buttons.
                 // Only intercept Back and media keys at root level.
-                if (showControls) {
+                if (showControls && !showNextEpisodeOverlay) {
                     return@onPreviewKeyEvent when (keyEvent.key) {
                         Key.Back -> {
-                            resetSeekAcceleration()
-                            if (!handleBackAction()) {
-                                showControls = false
+                            if (isTv) {
+                                // Long-press detection: Fire TV sends repeated KeyDown events
+                                // while the button is held (~50ms apart). Exit after ~20 repeats (~1s).
+                                if (keyEvent.nativeKeyEvent.repeatCount >= 20) {
+                                    backLongPressJob.value?.cancel()
+                                    backLongPressJob.value = null
+                                    resetSeekAcceleration()
+                                    requestExitPlayer()
+                                } else if (keyEvent.nativeKeyEvent.repeatCount == 0) {
+                                    backLongPressJob.value?.cancel()
+                                    backLongPressJob.value = scope.launch {
+                                        kotlinx.coroutines.delay(2_000)
+                                        resetSeekAcceleration()
+                                        requestExitPlayer()
+                                    }
+                                }
+                            } else {
+                                resetSeekAcceleration()
+                                if (!handleBackAction()) showControls = false
                             }
                             true
                         }
@@ -2259,7 +2354,6 @@ fun PlayerScreen(
                             resetSeekAcceleration()
                             controlsInteractionTick++
                             if (isTv) {
-                                // Coordinator resolves Up to the correct active region
                                 val target = focusCoordinator.resolveDirectionalMove(FocusDirection.Up)
                                 target != null && focusCoordinator.requestFocusToRegion(target)
                             } else {
@@ -2277,7 +2371,8 @@ fun PlayerScreen(
                             }
                         }
                         Key.DirectionLeft, Key.DirectionRight -> {
-                            if (isTv && !settingsState.tvExplicitTimelineScrubEnabled) {
+                            val timelineActive = isTv && focusCoordinator.currentRegion == PlaybackFocusRegion.Timeline
+                            if (isTv && !settingsState.tvExplicitTimelineScrubEnabled && !timelineActive) {
                                 val direction = if (keyEvent.key == Key.DirectionLeft) -1 else 1
                                 handleTvTransportSeek(direction)
                                 true
@@ -2288,7 +2383,6 @@ fun PlayerScreen(
                             }
                         }
                         Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
-                            resetSeekAcceleration()
                             controlsInteractionTick++
                             false
                         }
@@ -2299,21 +2393,46 @@ fun PlayerScreen(
                     }
                 }
 
+                // When next episode popup is showing, block all navigation keys
+                // from opening the playback menu — let the popup handle focus internally.
+                if (showNextEpisodeOverlay) {
+                    return@onPreviewKeyEvent false
+                }
+
                 // Controls hidden — handle all D-pad keys for media shortcuts
                 when (keyEvent.key) {
                     Key.Back -> {
-                        resetSeekAcceleration()
-                        if (!handleBackAction()) {
-                            requestExitPlayer()
+                        if (isTv) {
+                            if (keyEvent.nativeKeyEvent.repeatCount >= 20) {
+                                backLongPressJob.value?.cancel()
+                                backLongPressJob.value = null
+                                resetSeekAcceleration()
+                                requestExitPlayer()
+                            } else if (keyEvent.nativeKeyEvent.repeatCount == 0) {
+                                backLongPressJob.value?.cancel()
+                                backLongPressJob.value = scope.launch {
+                                    kotlinx.coroutines.delay(2_000)
+                                    resetSeekAcceleration()
+                                    requestExitPlayer()
+                                }
+                            }
+                        } else {
+                            resetSeekAcceleration()
+                            if (!handleBackAction()) requestExitPlayer()
                         }
                         true
                     }
-                    Key.DirectionCenter,
-                    Key.Enter,
-                    Key.NumPadEnter,
-                    Key.Spacebar,
-                    Key.MediaPlayPause,
-                    -> {
+                    Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                        resetSeekAcceleration()
+                        if (isTv) {
+                            // First OK press shows controls; user then presses play/pause explicitly
+                            showControls = true
+                        } else {
+                            togglePlayback()
+                        }
+                        true
+                    }
+                    Key.Spacebar, Key.MediaPlayPause -> {
                         resetSeekAcceleration()
                         togglePlayback()
                         true
@@ -2508,6 +2627,51 @@ fun PlayerScreen(
             }
         }
 
+        // Subtitle search overlay (TV only)
+        if (showSubtitleSearch && isTv) {
+            TvSubtitleSearchOverlay(
+                state = subtitleFetchState,
+                onSelect = { candidate ->
+                    showSubtitleSearch = false
+                    subtitleFetchState = SubtitleFetchState.Idle
+                    val savedPos = currentPosition.coerceAtLeast(0L)
+                    scope.launch {
+                        val subtitleUrl: String? = when {
+                            candidate.directUrl != null -> candidate.directUrl
+                            candidate.osFileId != null -> runCatching {
+                                openSubtitlesClient.getDownloadUrl(candidate.osFileId)
+                            }.getOrNull()
+                            else -> null
+                        }
+                        if (subtitleUrl != null) {
+                            val sub = ExternalSubtitle(
+                                url = subtitleUrl,
+                                languageCode = candidate.languageCode.takeIf { it.isNotBlank() },
+                                label = "${candidate.flagEmoji} ${candidate.languageName} · ${candidate.displayLabel}",
+                                mimeType = candidate.mimeType,
+                            )
+                            externalSubtitles = listOf(sub)
+                            trackPrefsAppliedForUrl = false
+                            subtitlesPreferredEnabled = true
+                            pendingSubtitleAutoSelect = true
+                            engine.play(currentUrl, externalSubtitles)
+                            pendingStartPositionMs = savedPos
+                        }
+                        kotlinx.coroutines.delay(100)
+                        runCatching { playerRootFocusRequester.requestFocus() }
+                    }
+                },
+                onDismiss = {
+                    showSubtitleSearch = false
+                    subtitleFetchState = SubtitleFetchState.Idle
+                    scope.launch {
+                        kotlinx.coroutines.delay(100)
+                        runCatching { playerRootFocusRequester.requestFocus() }
+                    }
+                },
+            )
+        }
+
         // Track selection dialog
         if (showTrackDialog) {
             if (isTv) {
@@ -2516,6 +2680,7 @@ fun PlayerScreen(
                 TvTrackSelectionOverlay(
                     subtitleTracks = subtitleTracks,
                     audioTracks = audioTracks,
+                    showSubtitlesOnly = trackDialogSubtitlesOnly,
                     onSelectSubtitle = { track ->
                         if (track == null) {
                             engine.disableSubtitles()
@@ -2538,6 +2703,101 @@ fun PlayerScreen(
                     onDismiss = {
                         showTrackDialog = false
                         topMenuFocusTick++
+                    },
+                    onSubtitleDelay = {
+                        showTrackDialog = false
+                        showSubtitleDelayDialog = true
+                    },
+                    onDownloadSubtitles = {
+                        showTrackDialog = false
+                        showSubtitleSearch = true
+                        subtitleFetchState = SubtitleFetchState.Loading
+                        scope.launch {
+                            // Resolve IMDB ID
+                            var imdb = showImdbId?.trim()?.takeIf { it.isNotBlank() }
+                                ?: mediaId.extractImdbIdOrNull()
+                            if (imdb == null && resolvedTmdbId > 0) {
+                                val typeStr = if (mediaType.equals("tv", ignoreCase = true) ||
+                                    mediaType.equals("series", ignoreCase = true)
+                                ) "tv" else "movie"
+                                imdb = runCatching {
+                                    metadataRepo.getDetail(typeStr, resolvedTmdbId).imdbId
+                                }.getOrNull()
+                            }
+                            if (imdb == null) {
+                                subtitleFetchState = SubtitleFetchState.Empty
+                                return@launch
+                            }
+
+                            if (openSubtitlesClient.isConfigured()) {
+                                // Direct OpenSubtitles.com API — rich results with flags and full names
+                                val results = runCatching {
+                                    openSubtitlesClient.searchSubtitles(
+                                        imdbId = imdb,
+                                        seasonNumber = seasonNumber,
+                                        episodeNumber = episodeNumber,
+                                    )
+                                }.getOrNull()
+                                subtitleFetchState = when {
+                                    results == null -> SubtitleFetchState.Error
+                                    results.isEmpty() -> SubtitleFetchState.Empty
+                                    else -> SubtitleFetchState.Results(
+                                        results.map { r ->
+                                            SubtitleCandidate(
+                                                flagEmoji = r.flagEmoji,
+                                                languageName = r.languageName,
+                                                languageCode = r.language,
+                                                displayLabel = r.fileName.ifBlank { r.release.ifBlank { "Subtitle" } },
+                                                osFileId = r.fileId,
+                                                downloadCount = r.downloadCount,
+                                                fromTrusted = r.fromTrusted,
+                                                hearingImpaired = r.hearingImpaired,
+                                                aiTranslated = r.aiTranslated,
+                                                ratings = r.ratings,
+                                            )
+                                        }
+                                    )
+                                }
+                            } else {
+                                // Fallback: Stremio subtitle addons
+                                val addons = runCatching { addonRepo.getInstalledAddons() }.getOrNull().orEmpty()
+                                val subtitleAddons = addons.filter { a ->
+                                    a.isEnabled && a.manifest.resources.any { it == "subtitles" }
+                                }
+                                if (subtitleAddons.isEmpty()) {
+                                    subtitleFetchState = SubtitleFetchState.NoKey
+                                    return@launch
+                                }
+                                val typeEnum = if (mediaType.equals("tv", ignoreCase = true) ||
+                                    mediaType.equals("series", ignoreCase = true)
+                                ) com.torve.domain.model.MediaType.SERIES else com.torve.domain.model.MediaType.MOVIE
+                                val fetched = runCatching {
+                                    subtitleAggregator.fetchSubtitles(
+                                        addons = addons,
+                                        type = typeEnum,
+                                        imdbId = imdb,
+                                        season = seasonNumber,
+                                        episode = episodeNumber,
+                                    )
+                                }.getOrNull()
+                                subtitleFetchState = when {
+                                    fetched == null -> SubtitleFetchState.Error
+                                    fetched.isEmpty() -> SubtitleFetchState.Empty
+                                    else -> SubtitleFetchState.Results(
+                                        fetched.map { s ->
+                                            val (flag, name) = languageInfo(s.lang.ifBlank { "" })
+                                            SubtitleCandidate(
+                                                flagEmoji = flag,
+                                                languageName = name,
+                                                languageCode = s.lang.ifBlank { "?" },
+                                                displayLabel = s.label?.ifBlank { null } ?: name,
+                                                directUrl = s.url,
+                                            )
+                                        }
+                                    )
+                                }
+                            }
+                        }
                     },
                 )
             } else {
@@ -2602,6 +2862,24 @@ fun PlayerScreen(
             }
         }
 
+        if (showSubtitleDelayDialog && isTv) {
+            TvSubtitleDelayOverlay(
+                currentDelayMs = subtitleDelayMs,
+                onSave = { newDelay ->
+                    subtitleDelayMs = newDelay
+                    engine.setSubtitleDelay(newDelay)
+                },
+                onReset = {
+                    subtitleDelayMs = 0
+                    engine.setSubtitleDelay(0)
+                },
+                onDismiss = {
+                    showSubtitleDelayDialog = false
+                    topMenuFocusTick++
+                },
+            )
+        }
+
         if (showPictureFormatPicker && isTv) {
             RegisterFocusRegion(focusCoordinator, PlaybackFocusRegion.PictureFormatOverlay) { true }
             TvPictureFormatOverlay(
@@ -2653,8 +2931,8 @@ fun PlayerScreen(
             }
         }
 
-        // Skip Intro/Credits button
-        activeSkipSegment?.let { segment ->
+        // Skip Intro/Credits button — mobile only (TV uses D-pad seek)
+        if (!isTv) activeSkipSegment?.let { segment ->
             val skipFocus = remember(segment.type) { androidx.compose.ui.focus.FocusRequester() }
             LaunchedEffect(segment.type) { runCatching { skipFocus.requestFocus() } }
             Button(
@@ -2685,9 +2963,12 @@ fun PlayerScreen(
                     style = MaterialTheme.typography.labelLarge,
                 )
             }
-        }
+        } // end if (!isTv)
 
-        // Next Episode overlay
+        // Next Episode overlay — hide controls so the popup can be reached via D-pad
+        LaunchedEffect(showNextEpisodeOverlay) {
+            if (showNextEpisodeOverlay) showControls = false
+        }
         if (showNextEpisodeOverlay && nextEpisodeInfo != null) {
             RegisterFocusRegion(focusCoordinator, PlaybackFocusRegion.NextEpisodeOverlay) { true }
             NextEpisodeOverlay(
@@ -2812,13 +3093,15 @@ fun PlayerScreen(
         val tvModalOverlayOpen = isTv && (
             showTrackDialog ||
                 showAudioDelayDialog ||
+                showSubtitleDelayDialog ||
                 showPictureFormatPicker ||
                 showEqualizerSheet ||
                 showResumePrompt ||
-                showDevicePicker
+                showDevicePicker ||
+                showSubtitleSearch
             )
 
-        if (isTv && tvSeekFeedbackVisible && !showControls && !tvModalOverlayOpen) {
+        if (isTv && tvSeekFeedbackVisible && !tvModalOverlayOpen) {
             TvSeekFeedbackOverlay(
                 deltaMs = tvSeekFeedbackDeltaMs,
                 currentPositionMs = tvSeekFeedbackCurrentMs,
@@ -2835,6 +3118,8 @@ fun PlayerScreen(
                 visibleTopMenuTargets.associateWith { FocusRequester() }
             }
             val playButtonFocusRequester = remember { FocusRequester() }
+            val rewindButtonFocusRequester = remember { FocusRequester() }
+            val forwardButtonFocusRequester = remember { FocusRequester() }
             val timelineFocusRequester = remember { FocusRequester() }
 
             // Build region-local modifier for top menu items: left/right cycle
@@ -2926,15 +3211,32 @@ fun PlayerScreen(
                             modifier = Modifier.size(28.dp),
                         )
                     }
-                    if (currentTitle.isNotBlank()) {
-                        Text(
-                            text = currentTitle,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = Color.White,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
+                    if (currentTitle.isNotBlank() || (seasonNumber != null && episodeNumber != null)) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            if (currentTitle.isNotBlank()) {
+                                Text(
+                                    text = currentTitle,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            if (seasonNumber != null && episodeNumber != null) {
+                                Text(
+                                    text = buildString {
+                                        append("S${seasonNumber.toString().padStart(2, '0')}")
+                                        append("E${episodeNumber.toString().padStart(2, '0')}")
+                                        if (episodeName.isNotBlank()) append(" · $episodeName")
+                                    },
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = com.torve.android.ui.theme.Amber,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
                     } else {
                         Spacer(Modifier.weight(1f))
                     }
@@ -3035,21 +3337,36 @@ fun PlayerScreen(
                         }
                     }
 
-                    // Always show track selection — tracks may load after playback starts.
-                    // If no tracks available yet, the dialog will show "No tracks available".
+                    // Subtitle track button
                     FocusableIconButton(
-                        onClick = { showTrackDialog = true },
-                        modifier = topMenuItemModifier(TopMenuFocusTarget.TRACKS),
+                        onClick = { trackDialogSubtitlesOnly = true; showTrackDialog = true },
+                        modifier = topMenuItemModifier(TopMenuFocusTarget.SUBTITLE_TRACKS),
                         onFocused = {
-                            lastTopMenuFocusTarget = TopMenuFocusTarget.TRACKS
-                            focusCoordinator.reportFocusedRegion(PlaybackFocusRegion.TopActions, TopMenuFocusTarget.TRACKS.name)
+                            lastTopMenuFocusTarget = TopMenuFocusTarget.SUBTITLE_TRACKS
+                            focusCoordinator.reportFocusedRegion(PlaybackFocusRegion.TopActions, TopMenuFocusTarget.SUBTITLE_TRACKS.name)
                         },
                     ) {
                         Icon(
-                            Icons.Default.Settings,
+                            Icons.Default.ClosedCaption,
                             contentDescription = stringResource(R.string.player_track_selection),
-                            tint = if (subtitleTracks.isNotEmpty() || audioTracks.isNotEmpty()) Color.White
-                                else Color.White.copy(alpha = 0.5f),
+                            tint = if (subtitleTracks.isNotEmpty()) Color.White else Color.White.copy(alpha = 0.5f),
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+
+                    // Audio track button
+                    FocusableIconButton(
+                        onClick = { trackDialogSubtitlesOnly = false; showTrackDialog = true },
+                        modifier = topMenuItemModifier(TopMenuFocusTarget.AUDIO_TRACKS),
+                        onFocused = {
+                            lastTopMenuFocusTarget = TopMenuFocusTarget.AUDIO_TRACKS
+                            focusCoordinator.reportFocusedRegion(PlaybackFocusRegion.TopActions, TopMenuFocusTarget.AUDIO_TRACKS.name)
+                        },
+                    ) {
+                        Icon(
+                            Icons.Default.Headphones,
+                            contentDescription = stringResource(R.string.player_track_selection),
+                            tint = if (audioTracks.isNotEmpty()) Color.White else Color.White.copy(alpha = 0.5f),
                             modifier = Modifier.size(24.dp),
                         )
                     }
@@ -3063,7 +3380,7 @@ fun PlayerScreen(
                         },
                     ) {
                         Icon(
-                            Icons.Default.Tune,
+                            Icons.Default.Timer,
                             contentDescription = stringResource(R.string.player_audio_delay_cd),
                             tint = if (audioDelayMs != 0) com.torve.android.ui.theme.Amber else Color.White,
                             modifier = Modifier.size(24.dp),
@@ -3083,7 +3400,7 @@ fun PlayerScreen(
                             },
                         ) {
                             Icon(
-                                Icons.Default.Equalizer,
+                                Icons.Default.GraphicEq,
                                 contentDescription = stringResource(R.string.player_equalizer_cd),
                                 tint = if (audioEqualizer?.enabled == true) com.torve.android.ui.theme.Amber else Color.White,
                                 modifier = Modifier.size(24.dp),
@@ -3103,11 +3420,11 @@ fun PlayerScreen(
                                 focusCoordinator.reportFocusedRegion(PlaybackFocusRegion.TopActions, TopMenuFocusTarget.PICTURE_FORMAT.name)
                             },
                         ) {
-                            Text(
-                                text = pictureFormat.shortLabel,
-                                color = if (pictureFormat == PlayerPictureFormat.SOURCE) Color.White else com.torve.android.ui.theme.Amber,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                            Icon(
+                                Icons.Default.AspectRatio,
+                                contentDescription = "Picture format",
+                                tint = if (pictureFormat == PlayerPictureFormat.SOURCE) Color.White else com.torve.android.ui.theme.Amber,
+                                modifier = Modifier.size(24.dp),
                             )
                         }
                     }
@@ -3142,7 +3459,7 @@ fun PlayerScreen(
                     VoiceInputPhase.Processing -> "Processing voice input"
                     VoiceInputPhase.Error,
                     VoiceInputPhase.Unsupported,
-                    -> voiceController.uiState.value.message ?: "Voice input is not available on this device"
+                    -> voiceController.uiState.value.message ?: voiceInputUnavailableFallback
 
                     VoiceInputPhase.Idle -> voiceFeedbackMessage
                 }
@@ -3169,7 +3486,23 @@ fun PlayerScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     FocusableIconButton(
-                        onClick = { seekBy(-10_000) },
+                        onClick = {
+                            if (isTv) {
+                                handleTvTransportSeek(-1, hideControls = false)
+                                runCatching { rewindButtonFocusRequester.requestFocus() }
+                            } else {
+                                seekBy(-10_000)
+                            }
+                        },
+                        modifier = Modifier
+                            .focusRequester(rewindButtonFocusRequester)
+                            .focusProperties { down = timelineFocusRequester }
+                            .onFocusChanged {
+                                if (it.isFocused) {
+                                    controlsInteractionTick++
+                                    focusCoordinator.reportFocusedRegion(PlaybackFocusRegion.TransportControls)
+                                }
+                            },
                     ) {
                         Icon(
                             Icons.Default.Replay10,
@@ -3186,10 +3519,10 @@ fun PlayerScreen(
                         modifier = Modifier
                             .focusRequester(playButtonFocusRequester)
                             .focusProperties {
-                                // UP from transport controls → top menu (last focused or BACK)
                                 up = topMenuRequesters[lastTopMenuFocusTarget]
                                     ?: topMenuRequesters[TopMenuFocusTarget.BACK]
                                     ?: FocusRequester.Default
+                                down = timelineFocusRequester
                             }
                             .onFocusChanged {
                                 if (it.isFocused) focusCoordinator.reportFocusedRegion(PlaybackFocusRegion.TransportControls)
@@ -3206,7 +3539,23 @@ fun PlayerScreen(
                     Spacer(Modifier.width(24.dp))
 
                     FocusableIconButton(
-                        onClick = { seekBy(10_000) },
+                        onClick = {
+                            if (isTv) {
+                                handleTvTransportSeek(1, hideControls = false)
+                                runCatching { forwardButtonFocusRequester.requestFocus() }
+                            } else {
+                                seekBy(10_000)
+                            }
+                        },
+                        modifier = Modifier
+                            .focusRequester(forwardButtonFocusRequester)
+                            .focusProperties { down = timelineFocusRequester }
+                            .onFocusChanged {
+                                if (it.isFocused) {
+                                    controlsInteractionTick++
+                                    focusCoordinator.reportFocusedRegion(PlaybackFocusRegion.TransportControls)
+                                }
+                            },
                     ) {
                         Icon(
                             Icons.Default.Forward10,
@@ -3230,6 +3579,7 @@ fun PlayerScreen(
                     } else {
                         currentPosition
                     }
+                    var isSliderFocused by remember { mutableStateOf(false) }
                     Slider(
                         value = sliderPosition,
                         onValueChange = {
@@ -3251,8 +3601,47 @@ fun PlayerScreen(
                             .fillMaxWidth()
                             .focusRequester(timelineFocusRequester)
                             .focusProperties { up = playButtonFocusRequester }
-                            .onFocusChanged {
-                                if (it.isFocused) focusCoordinator.reportFocusedRegion(PlaybackFocusRegion.Timeline)
+                            .onFocusChanged { fs ->
+                                isSliderFocused = fs.isFocused
+                                if (fs.isFocused) {
+                                    focusCoordinator.reportFocusedRegion(PlaybackFocusRegion.Timeline)
+                                    controlsInteractionTick++
+                                } else if (isSeeking) {
+                                    // Commit seek when focus leaves the slider
+                                    val target = (sliderPosition * duration).toLong()
+                                    val delta = target - currentPosition
+                                    performSeekTo(target, userInitiated = true, sourceDeltaMs = delta, showTvFeedback = false)
+                                    isSeeking = false
+                                }
+                            }
+                            .onPreviewKeyEvent { e ->
+                                if (!isTv || e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                if (focusCoordinator.currentRegion != PlaybackFocusRegion.Timeline) return@onPreviewKeyEvent false
+                                val stepFraction = if (duration > 0L) 10_000f / duration.toFloat() else 0.01f
+                                when (e.key) {
+                                    Key.DirectionLeft -> {
+                                        sliderPosition = (sliderPosition - stepFraction).coerceAtLeast(0f)
+                                        isSeeking = true
+                                        controlsInteractionTick++
+                                        true
+                                    }
+                                    Key.DirectionRight -> {
+                                        sliderPosition = (sliderPosition + stepFraction).coerceAtMost(1f)
+                                        isSeeking = true
+                                        controlsInteractionTick++
+                                        true
+                                    }
+                                    Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                                        if (isSeeking) {
+                                            val target = (sliderPosition * duration).toLong()
+                                            val delta = target - currentPosition
+                                            performSeekTo(target, userInitiated = true, sourceDeltaMs = delta, showTvFeedback = false)
+                                            isSeeking = false
+                                        }
+                                        true
+                                    }
+                                    else -> false
+                                }
                             },
                     )
                     if (duration > 0L && skipSegments.isNotEmpty()) {
@@ -3276,12 +3665,23 @@ fun PlayerScreen(
                             }
                         }
                     }
+                    // Slider focus indicator
+                    if (isTv && isSliderFocused) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(3.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(com.torve.android.ui.theme.Amber),
+                        )
+                    }
                     if (isSeeking) {
                         Text(
-                            text = "Preview ${formatTime(seekPreviewPositionMs)}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color.White.copy(alpha = 0.86f),
-                            modifier = Modifier.align(Alignment.End),
+                            text = formatTime(seekPreviewPositionMs),
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                            color = com.torve.android.ui.theme.Amber,
+                            modifier = Modifier.align(Alignment.CenterHorizontally),
                         )
                     }
                     Row(modifier = Modifier.fillMaxWidth()) {
@@ -3320,7 +3720,7 @@ fun PlayerScreen(
                 VoiceInputPhase.Processing -> "Processing voice input"
                 VoiceInputPhase.Error,
                 VoiceInputPhase.Unsupported,
-                -> voiceController.uiState.value.message ?: "Voice input is not available on this device"
+                -> voiceController.uiState.value.message ?: voiceInputUnavailableFallback
 
                 VoiceInputPhase.Idle -> voiceFeedbackMessage
             }
@@ -3973,7 +4373,8 @@ private enum class TopMenuFocusTarget {
     CAST,
     HANDOFF,
     VOICE,
-    TRACKS,
+    SUBTITLE_TRACKS,
+    AUDIO_TRACKS,
     AUDIO_DELAY,
     EQUALIZER,
     PICTURE_FORMAT,

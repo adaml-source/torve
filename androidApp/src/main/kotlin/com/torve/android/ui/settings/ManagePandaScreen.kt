@@ -1,4 +1,4 @@
-package com.torve.android.ui.settings
+﻿package com.torve.android.ui.settings
 
 import android.content.Intent
 import android.net.Uri
@@ -22,6 +22,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -57,6 +59,7 @@ import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Steel
 import com.torve.presentation.addon.AddonViewModel
 import com.torve.presentation.panda.PandaSetupViewModel
+import com.torve.presentation.settings.SettingsViewModel
 import org.koin.compose.koinInject
 
 private const val HELP_URL_MANAGEMENT_TOKEN =
@@ -68,9 +71,11 @@ fun ManagePandaScreen(
     onSetupClick: () -> Unit = {},
     viewModel: AddonViewModel = koinInject(),
     pandaViewModel: PandaSetupViewModel = koinInject(),
+    settingsViewModel: SettingsViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
     val pandaState by pandaViewModel.state.collectAsState()
+    val settingsState by settingsViewModel.state.collectAsState()
     val context = LocalContext.current
 
     val pandaManifestUrl = remember {
@@ -213,6 +218,30 @@ fun ManagePandaScreen(
                 Spacer(Modifier.height(16.dp))
             }
 
+            if (isInstalled && (!settingsState.debridConnected || settingsState.connectedDebridProviders.isEmpty())) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Ruby.copy(alpha = 0.12f)),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        Text(
+                            "Real-Debrid not connected",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Ruby,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "Your debrid token may have expired. Go to Settings â†’ Integrations â†’ Debrid to reconnect, then tap Reconfigure below to sync.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Silver,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+            }
+
             // One-time display following a successful rotate-management. Shown
             // exactly once per rotate; "I've saved it" clears it.
             if (!pandaState.pendingManagementTokenDisplay.isNullOrBlank()) {
@@ -265,7 +294,7 @@ fun ManagePandaScreen(
                     // actually address.
                     HorizontalDivider(color = Steel.copy(alpha = 0.15f))
                     Text(
-                        "Management token",
+                        stringResource(R.string.manage_panda_management_token_heading),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = Snow,
@@ -275,9 +304,9 @@ fun ManagePandaScreen(
                     )
                     Text(
                         if (pandaState.hasManagementToken) {
-                            "Required for editing, deleting, or rotating this Panda config."
+                            stringResource(R.string.manage_panda_token_required_desc)
                         } else {
-                            "This device has no management token for this config. Paste an admin-issued token below to unlock config edits."
+                            stringResource(R.string.manage_panda_token_missing_desc)
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = Silver,
@@ -289,7 +318,7 @@ fun ManagePandaScreen(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
                         ) {
-                            Text("I need a management token", color = Silver)
+                            Text(stringResource(R.string.manage_panda_need_token), color = Silver)
                         }
                     } else {
                         OutlinedButton(
@@ -298,7 +327,7 @@ fun ManagePandaScreen(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
                         ) {
-                            Text("Rotate management token", color = Silver)
+                            Text(stringResource(R.string.manage_panda_rotate_token), color = Silver)
                         }
                         OutlinedButton(
                             onClick = { pandaViewModel.rotateManifestUrl() },
@@ -306,7 +335,7 @@ fun ManagePandaScreen(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
                         ) {
-                            Text("Reset leaked manifest URL", color = Silver)
+                            Text(stringResource(R.string.manage_panda_reset_manifest_url), color = Silver)
                         }
                     }
 
@@ -318,7 +347,7 @@ fun ManagePandaScreen(
                         },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text("Learn more", color = Amber)
+                        Text(stringResource(R.string.common_learn_more), color = Amber)
                     }
 
                     pandaState.rotateError?.let { err ->
@@ -399,12 +428,11 @@ private fun RecoveryDialog(
     var input by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Paste management token") },
+        title = { Text(stringResource(R.string.manage_panda_token_title)) },
         text = {
             Column {
                 Text(
-                    "Paste the admin-issued management token for this Panda config. " +
-                        "It validates immediately; invalid tokens aren't stored.",
+                    stringResource(R.string.manage_panda_token_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = Silver,
                 )
@@ -412,7 +440,7 @@ private fun RecoveryDialog(
                 OutlinedTextField(
                     value = input,
                     onValueChange = { input = it },
-                    label = { Text("Management token") },
+                    label = { Text(stringResource(R.string.manage_panda_token_label)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -427,11 +455,14 @@ private fun RecoveryDialog(
                 enabled = !inProgress && input.isNotBlank(),
                 onClick = { onSubmit(input) },
             ) {
-                Text(if (inProgress) "Checking…" else "Validate and save", color = Amber)
+                Text(
+                    if (inProgress) stringResource(R.string.manage_panda_checking) else stringResource(R.string.manage_panda_validate_save),
+                    color = Amber,
+                )
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel", color = Silver) }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel), color = Silver) }
         },
     )
 }

@@ -29,8 +29,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.torve.android.R
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Charcoal
 import com.torve.android.ui.theme.Obsidian
@@ -101,14 +103,14 @@ fun PandaSetupNudgeCard(
             Spacer(Modifier.size(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Set up Panda",
+                    text = stringResource(R.string.panda_setup_nudge_title),
                     style = MaterialTheme.typography.titleSmall,
                     color = Snow,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    text = "Easiest way to enable Torve's core source discovery — a guided wizard wires debrid + Usenet for you.",
+                    text = stringResource(R.string.panda_setup_nudge_body),
                     style = MaterialTheme.typography.bodySmall,
                     color = Torve.colors.textSecondary,
                 )
@@ -117,7 +119,7 @@ fun PandaSetupNudgeCard(
                     onClick = onSetupClick,
                     colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
                 ) {
-                    Text("Set up Panda", fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.panda_setup_nudge_title), fontWeight = FontWeight.SemiBold)
                 }
             }
             IconButton(
@@ -130,7 +132,7 @@ fun PandaSetupNudgeCard(
             ) {
                 Icon(
                     imageVector = Icons.Filled.Close,
-                    contentDescription = "Dismiss",
+                    contentDescription = stringResource(R.string.common_dismiss),
                     tint = Torve.colors.textSecondary,
                 )
             }

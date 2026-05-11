@@ -15,6 +15,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import com.torve.android.R
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -56,6 +58,9 @@ fun rememberVoiceInputController(
     val scope = rememberCoroutineScope()
     val onTranscriptUpdated by rememberUpdatedState(onTranscript)
     val state = remember { mutableStateOf(VoiceInputUiState()) }
+    val noVoiceInputMessage = stringResource(R.string.voice_input_no_input)
+    val voiceUnavailableMessage = stringResource(R.string.voice_input_unavailable)
+    val voiceFailedMessage = stringResource(R.string.voice_input_failed_start)
 
     val speechLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult(),
@@ -72,7 +77,7 @@ fun rememberVoiceInputController(
         if (transcript.isBlank()) {
             state.value = VoiceInputUiState(
                 phase = VoiceInputPhase.Error,
-                message = "No voice input detected",
+                message = noVoiceInputMessage,
             )
             return@rememberLauncherForActivityResult
         }
@@ -99,7 +104,7 @@ fun rememberVoiceInputController(
                 if (!supported) {
                     state.value = VoiceInputUiState(
                         phase = VoiceInputPhase.Unsupported,
-                        message = "Voice input is not available on this device",
+                        message = voiceUnavailableMessage,
                     )
                 } else {
                     state.value = VoiceInputUiState(phase = VoiceInputPhase.Listening)
@@ -108,12 +113,12 @@ fun rememberVoiceInputController(
                     } catch (_: ActivityNotFoundException) {
                         state.value = VoiceInputUiState(
                             phase = VoiceInputPhase.Unsupported,
-                            message = "Voice input is not available on this device",
+                            message = voiceUnavailableMessage,
                         )
                     } catch (_: Throwable) {
                         state.value = VoiceInputUiState(
                             phase = VoiceInputPhase.Error,
-                            message = "Voice input failed to start",
+                            message = voiceFailedMessage,
                         )
                     }
                 }

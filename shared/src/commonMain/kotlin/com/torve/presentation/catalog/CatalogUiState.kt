@@ -3,6 +3,8 @@ package com.torve.presentation.catalog
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.WatchProgress
 
+enum class CatalogViewMode { LIST, GRID_SMALL, GRID_MEDIUM, GRID_LARGE }
+
 data class CatalogUiState(
     val items: List<MediaItem> = emptyList(),
     val isLoading: Boolean = false,
@@ -33,6 +35,8 @@ data class CatalogUiState(
     val shelvesLoaded: Boolean = false,
     // Provider filter (TMDB watch provider ID)
     val providerId: Int? = null,
+    // View mode selector
+    val viewMode: CatalogViewMode = CatalogViewMode.GRID_MEDIUM,
     // AI search
     val isAiSearching: Boolean = false,
     val aiSearchLabel: String? = null,

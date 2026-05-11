@@ -59,8 +59,8 @@ class ChannelsViewModelStartupTest {
         advanceUntilIdle()
 
         assertEquals("playlist-1", viewModel.state.value.selectedPlaylistId)
-        assertEquals(1, viewModel.state.value.channels.size)
-        assertEquals("News One HD", viewModel.state.value.channels.first().channel.name)
+        assertEquals(1, viewModel.state.value.categoryChannels.size)
+        assertEquals("News One HD", viewModel.state.value.categoryChannels.first().channel.name)
         assertEquals("News", viewModel.state.value.selectedGroup)
         assertEquals(stableChannelId(channel), stableChannelId(viewModel.state.value.selectedChannel!!))
         assertEquals(1, repo.refreshCalls)
@@ -82,8 +82,8 @@ class ChannelsViewModelStartupTest {
         val viewModel = ChannelsViewModel(repo, prefs, backgroundDispatcher = dispatcher)
         advanceUntilIdle()
 
-        assertEquals(1, viewModel.state.value.channels.size)
-        assertEquals("Sports One", viewModel.state.value.channels.first().channel.name)
+        assertEquals(1, viewModel.state.value.categoryChannels.size)
+        assertEquals("Sports One", viewModel.state.value.categoryChannels.first().channel.name)
         assertFalse(viewModel.state.value.isLoadingChannels)
         assertEquals(1, repo.refreshCalls)
     }
@@ -103,8 +103,8 @@ class ChannelsViewModelStartupTest {
         val viewModel = ChannelsViewModel(repo, prefs, backgroundDispatcher = dispatcher)
         advanceUntilIdle()
 
-        assertEquals(1, viewModel.state.value.channels.size)
-        assertEquals("Movie Max", viewModel.state.value.channels.first().channel.name)
+        assertEquals(1, viewModel.state.value.categoryChannels.size)
+        assertEquals("Movie Max", viewModel.state.value.categoryChannels.first().channel.name)
         assertFalse(viewModel.state.value.isLoadingChannels)
         assertEquals(1, repo.refreshCalls)
     }
@@ -155,7 +155,7 @@ class ChannelsViewModelStartupTest {
         advanceUntilIdle()
 
         assertTrue(secondViewModel.state.value.favorites.any { stableChannelId(it) == stableChannelId(channel) })
-        assertTrue(secondViewModel.state.value.channels.first().channel.isFavorite)
+        assertTrue(secondViewModel.state.value.categoryChannels.first().channel.isFavorite)
     }
 
     @Test
@@ -321,6 +321,33 @@ private class FakeChannelRepository(
 
     override suspend fun getCategoryCounts(playlistId: String): List<Pair<String, Long>> {
         return getChannelsByGroup(playlistId).map { (group, channels) -> group to channels.size.toLong() }
+    }
+
+    override suspend fun getLiveCategoryCounts(playlistId: String): List<Pair<String, Long>> {
+        return getChannelsByGroup(playlistId)
+            .mapValues { (_, channels) ->
+                channels.filter { it.contentType == ChannelContentType.LIVE || it.contentType == ChannelContentType.UNKNOWN }
+            }
+            .filter { (group, channels) ->
+                channels.isNotEmpty() &&
+                    !group.startsWith("VOD:", ignoreCase = true) &&
+                    !group.equals("VOD", ignoreCase = true)
+            }
+            .map { (group, channels) -> group to channels.size.toLong() }
+    }
+
+    override suspend fun getVodCategoryCounts(playlistId: String): List<Pair<String, Long>> {
+        return getChannelsByGroup(playlistId).mapNotNull { (group, channels) ->
+            val isVodGroup = group.startsWith("VOD:", ignoreCase = true) || group.equals("VOD", ignoreCase = true)
+            val vodChannels = if (isVodGroup) {
+                channels
+            } else {
+                channels.filter {
+                    it.contentType == ChannelContentType.VOD_MOVIE || it.contentType == ChannelContentType.VOD_SERIES
+                }
+            }
+            if (vodChannels.isEmpty()) null else group to vodChannels.size.toLong()
+        }
     }
 
     override suspend fun getChannelsForCategory(playlistId: String, categoryName: String): List<Channel> {

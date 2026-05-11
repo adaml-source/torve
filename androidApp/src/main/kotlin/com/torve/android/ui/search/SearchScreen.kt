@@ -267,7 +267,7 @@ fun SearchScreen(
             VoiceInputPhase.Unsupported,
             -> {
                 Text(
-                    text = voiceInputState.message ?: "Voice input is not available on this device",
+                    text = voiceInputState.message ?: stringResource(R.string.voice_input_unavailable),
                     style = MaterialTheme.typography.labelMedium,
                     color = Amber,
                     modifier = Modifier.padding(start = 16.dp, top = 6.dp),

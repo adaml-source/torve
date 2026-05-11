@@ -29,9 +29,15 @@
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
      xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
 
-  <?define JpDesktopShortcutPromptControlY=140 ?>
-  <?define JpStartMenuShortcutPromptControlY=180 ?>
-  <?define JpLaunchAfterInstallControlY=210 ?>
+  <!--
+    Three checkbox rows evenly spaced (40px) starting at Y=110 so the
+    bottom one (Y=190 + 17 height = 207) clears the dialog's bottom
+    separator at Y=234. Visually centers the stack between the banner
+    line (Y=44) and the button row (Y=243).
+  -->
+  <?define JpDesktopShortcutPromptControlY=110 ?>
+  <?define JpStartMenuShortcutPromptControlY=150 ?>
+  <?define JpLaunchAfterInstallControlY=190 ?>
 
   <?ifndef JpDesktopShortcutPrompt ?>
     <?define JpStartMenuShortcutPromptControlY=$(var.JpDesktopShortcutPromptControlY) ?>
@@ -65,17 +71,11 @@
                  Text="!(loc.ShortcutPromptDlgStartMenuShortcutControlLabel)"/>
         <?endif?>
 
-        <!--
-          Torve customisation: opt-out of the launch-after-install
-          custom action. Default checked; users who want to install
-          and run the app later can uncheck this. The launch CA in
-          main.wxs reads JP_LAUNCH_AFTER_INSTALL when sequencing.
-        -->
         <Control Type="CheckBox" X="20" Width="300" Height="17" CheckBoxValue="1"
                  Id="LaunchAfterInstall"
                  Y="$(var.JpLaunchAfterInstallControlY)"
                  Property="JP_LAUNCH_AFTER_INSTALL"
-                 Text="Launch Torve when setup finishes"/>
+                 Text="Launch Torve after setup completes"/>
 
         <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes"
                  Text="!(loc.WixUINext)" />

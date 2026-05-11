@@ -85,37 +85,25 @@
       EndSessionMessage="no" />
 
     <!--
-      Torve customisation: launch the app after a fresh install so the
-      user doesn't have to go to the Start menu to find Torve.
-      WixShellExec uses ShellExecuteEx, so it runs Torve.exe as the
-      installing user (NOT the elevated installer process), inherits
-      a normal desktop session, and immediately returns control to
-      the installer. Conditions:
-        (a) NOT Installed: only on first-time install
-        (b) NOT REMOVE   : not on uninstall
-        (c) UILevel >= 4 : only when the user is on the full UI
-            (skips the in-app updater /qb path and true silent /qn
-            installs; in those cases the in-app updater's own
-            watchdog will relaunch Torve, or the operator chose to
-            install silently and doesn't want a popup).
+      Launch Torve after installation completes.
+      The checkbox "Launch Torve after setup completes" in ShortcutPromptDlg
+      sets JP_LAUNCH_AFTER_INSTALL=1 (default on). After ExecuteAction in the
+      UI sequence, if the checkbox was checked, Torve.exe is launched via
+      ShellExecuteEx as the installing user before the Finish page appears.
+      Silent installs (UILevel < 4) are unaffected.
+      Command-line override: msiexec /i Torve.msi JP_LAUNCH_AFTER_INSTALL=0
     -->
+    <Property Id="JP_LAUNCH_AFTER_INSTALL" Value="1" />
     <CustomAction
       Id="TorveSetLaunchTarget"
       Property="WixShellExecTarget"
       Value="[INSTALLDIR]Torve.exe" />
     <CustomAction
-      Id="TorveLaunchAfterInstall"
+      Id="WixUILaunchAction"
       BinaryKey="WixCA"
       DllEntry="WixShellExec"
       Impersonate="yes" />
 
-    <!--
-      Default the launch checkbox to ON. Users uncheck it in
-      ShortcutPromptDlg if they want to install without immediately
-      launching. msiexec command-line override also works:
-        msiexec /i Torve-1.0.0.msi JP_LAUNCH_AFTER_INSTALL=0
-    -->
-    <Property Id="JP_LAUNCH_AFTER_INSTALL" Value="1" />
 
     <!-- Standard required root -->
     <Directory Id="TARGETDIR" Name="SourceDir"/>
@@ -173,16 +161,13 @@
       <?endif?>
       <RemoveExistingProducts Before="CostInitialize"/>
       <Custom Action="JpFindRelatedProducts" After="FindRelatedProducts"/>
-      <Custom Action="TorveSetLaunchTarget" After="InstallFinalize">
-        NOT Installed AND NOT REMOVE AND UILevel &gt;= 4 AND JP_LAUNCH_AFTER_INSTALL=&quot;1&quot;
-      </Custom>
-      <Custom Action="TorveLaunchAfterInstall" After="TorveSetLaunchTarget">
-        NOT Installed AND NOT REMOVE AND UILevel &gt;= 4 AND JP_LAUNCH_AFTER_INSTALL=&quot;1&quot;
-      </Custom>
     </InstallExecuteSequence>
 
     <InstallUISequence>
       <Custom Action="JpFindRelatedProducts" After="FindRelatedProducts"/>
+      <!-- Launch Torve right after installation if the user left the checkbox checked. -->
+      <Custom Action="TorveSetLaunchTarget" After="ExecuteAction">NOT REMOVE AND UILevel &gt;= 4 AND JP_LAUNCH_AFTER_INSTALL="1"</Custom>
+      <Custom Action="WixUILaunchAction"    After="TorveSetLaunchTarget">NOT REMOVE AND UILevel &gt;= 4 AND JP_LAUNCH_AFTER_INSTALL="1"</Custom>
     </InstallUISequence>
 
   </Product>

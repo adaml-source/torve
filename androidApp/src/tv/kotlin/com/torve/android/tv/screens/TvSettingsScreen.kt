@@ -262,6 +262,15 @@ internal fun TvSettingsScreen(
     val subscriptionAccess = subscriptionState.accessPresentation(purchaseStrings)
     val channelsState by channelsViewModel.state.collectAsState()
     val addonState by addonViewModel.state.collectAsState()
+    val pandaAddon = remember(addonState.addons) {
+        addonState.addons.firstOrNull { addon ->
+            addon.manifest.id.equals("com.torve.panda", ignoreCase = true) ||
+                addon.manifest.name.contains("panda", ignoreCase = true) ||
+                addon.manifestUrl.contains("panda.torve.app", ignoreCase = true)
+        }
+    }
+    val pandaConfigured = pandaAddon != null
+    val pandaEnabled = pandaAddon?.isEnabled == true
     val mdbListState by mdbListViewModel.state.collectAsState()
     val hasPairedPhone = syncState.devices.any { it.deviceType != "tv" && it.revokedAt == null }
     var aboutTapCount by remember { mutableIntStateOf(0) }
@@ -431,8 +440,14 @@ internal fun TvSettingsScreen(
     }
     val selectedCategory = settingsFocusController.selectedCategory
     val settingsListState = rememberLazyListState()
+    LaunchedEffect(authUser, selectedCategory) {
+        if (authUser == null && selectedCategory != TvSettingsCategory.ACCOUNT) {
+            settingsFocusController.selectedCategory = TvSettingsCategory.ACCOUNT
+        }
+    }
     val pendingSettingsOrigin = settingsFocusController.pendingRestore
     val hasPendingExactSettingsRestore = pendingSettingsOrigin != null
+    val allowPendingRestoreFromRail = pendingSettingsOrigin?.reason == "app_link"
     val subscriptionSectionHeaderScrollIndex = remember(authUser, authShowRegister, authError) {
         var index = 0
         index += 1 // section_account
@@ -446,6 +461,7 @@ internal fun TvSettingsScreen(
         } else {
             index += 1 // auth_account
             if (authUser?.isVerified == false) index += 1 // auth_verify
+            index += 1 // account_import_setup
             index += 1 // auth_logout
             index += 1 // auth_delete_account
         }
@@ -492,7 +508,11 @@ internal fun TvSettingsScreen(
         }
     }
     fun buildVisibleSuggestedAddons(installedUrls: Set<String>): List<com.torve.android.ui.settings.PopularAddon> {
-        return POPULAR_ADDONS.filter { addon -> addon.url !in installedUrls }
+        return POPULAR_ADDONS.filter { addon ->
+            val isPanda = addon.url.contains("panda", ignoreCase = true) ||
+                addon.actionUrl?.contains("panda", ignoreCase = true) == true
+            !isPanda && addon.url !in installedUrls
+        }
     }
     fun resolveSuggestedInstallRestoreTarget(
         pendingRestore: PendingSuggestedAddonInstallRestore,
@@ -643,9 +663,15 @@ internal fun TvSettingsScreen(
     val minQualityCardRequester = remember { FocusRequester() }
     val reduceMotionCardRequester = remember { FocusRequester() }
     val languageCardRequester = remember { FocusRequester() }
+    val homeLayoutCardRequester = homeLayoutFocusRequester ?: remember("home_layout_card") { FocusRequester() }
+    val ratingsCardRequester = ratingsFocusRequester ?: remember("ratings_card") { FocusRequester() }
+    val posterTitlesCardRequester = remember { FocusRequester() }
     val aboutVersionCardRequester = remember { FocusRequester() }
     val advancedPhoneEntryRequester = remember { FocusRequester() }
     val advancedTvEntryRequester = remember { FocusRequester() }
+    val advancedPandaCardRequester = remember { FocusRequester() }
+    val advancedRealDebridCardRequester = remember { FocusRequester() }
+    val advancedPandaHealthCardRequester = remember { FocusRequester() }
     var categoryPaneHasFocus by remember { mutableStateOf(false) }
     val addPlaylistCardRequester = remember { FocusRequester() }
     val editPlaylistEpgCardRequester = remember { FocusRequester() }
@@ -801,7 +827,8 @@ internal fun TvSettingsScreen(
     }
     LaunchedEffect(showChannelManager) {
         if (showChannelManager) {
-            channelManagerShowAllRequester.requestFocus()
+            withFrameNanos { }
+            runCatching { channelManagerShowAllRequester.requestFocus() }
         } else {
             confirmHideAllChannelGroups = false
         }
@@ -958,6 +985,14 @@ internal fun TvSettingsScreen(
             focusTargetType = "action",
         )
     }
+    val accountImportSetupTarget = remember {
+        TvSettingsFocusTarget(
+            itemId = TvSettingsItemIds.ACCOUNT_IMPORT_SETUP,
+            category = TvSettingsCategory.ACCOUNT,
+            listIndex = 12,
+            focusTargetType = "navigation",
+        )
+    }
     val authEmailTarget = remember {
         TvSettingsFocusTarget(
             itemId = TvSettingsItemIds.ACCOUNT_AUTH_EMAIL,
@@ -986,7 +1021,7 @@ internal fun TvSettingsScreen(
         TvSettingsFocusTarget(
             itemId = TvSettingsItemIds.ACCOUNT_AUTH_PRIMARY_ACTION,
             category = TvSettingsCategory.ACCOUNT,
-            listIndex = 12,
+            listIndex = 13,
             focusTargetType = "action",
         )
     }
@@ -994,7 +1029,7 @@ internal fun TvSettingsScreen(
         TvSettingsFocusTarget(
             itemId = TvSettingsItemIds.ACCOUNT_AUTH_DELETE,
             category = TvSettingsCategory.ACCOUNT,
-            listIndex = 13,
+            listIndex = 14,
             focusTargetType = "action",
         )
     }
@@ -1153,6 +1188,22 @@ internal fun TvSettingsScreen(
             focusTargetType = "entry",
         )
     }
+    val advancedPandaTarget = remember {
+        TvSettingsFocusTarget(
+            itemId = TvSettingsItemIds.ADVANCED_PANDA,
+            category = TvSettingsCategory.ADVANCED,
+            listIndex = 1,
+            focusTargetType = "action",
+        )
+    }
+    val advancedRealDebridTarget = remember {
+        TvSettingsFocusTarget(
+            itemId = TvSettingsItemIds.ADVANCED_REAL_DEBRID,
+            category = TvSettingsCategory.ADVANCED,
+            listIndex = 2,
+            focusTargetType = "action",
+        )
+    }
     val advancedPhoneMdblistTarget = remember {
         TvSettingsFocusTarget(
             itemId = TvSettingsItemIds.ADVANCED_PHONE_MDBLIST,
@@ -1177,19 +1228,35 @@ internal fun TvSettingsScreen(
             focusTargetType = "action",
         )
     }
+    val advancedOmdbKeyTarget = remember {
+        TvSettingsFocusTarget(
+            itemId = TvSettingsItemIds.ADVANCED_OMDB_KEY,
+            category = TvSettingsCategory.ADVANCED,
+            listIndex = 10,
+            focusTargetType = "input",
+        )
+    }
     val advancedOmdbTestTarget = remember {
         TvSettingsFocusTarget(
             itemId = TvSettingsItemIds.ADVANCED_OMDB_TEST,
             category = TvSettingsCategory.ADVANCED,
-            listIndex = 2,
+            listIndex = 11,
             focusTargetType = "action",
+        )
+    }
+    val advancedOpenSubtitlesKeyTarget = remember {
+        TvSettingsFocusTarget(
+            itemId = TvSettingsItemIds.ADVANCED_OPENSUBTITLES_KEY,
+            category = TvSettingsCategory.ADVANCED,
+            listIndex = 12,
+            focusTargetType = "input",
         )
     }
     val advancedMdblistKeyTarget = remember {
         TvSettingsFocusTarget(
             itemId = TvSettingsItemIds.ADVANCED_MDBLIST_KEY,
             category = TvSettingsCategory.ADVANCED,
-            listIndex = 3,
+            listIndex = 13,
             focusTargetType = "input",
         )
     }
@@ -1341,8 +1408,14 @@ internal fun TvSettingsScreen(
         isDefaultEntry = isDefaultEntry,
     )
 
+    var isFirstItemFocused by remember { mutableStateOf(false) }
+    var isLastItemFocused by remember { mutableStateOf(false) }
+
     fun onSettingsRowFocused(target: TvSettingsFocusTarget, requester: FocusRequester) {
         settingsFocusController.markFocused(target.itemId, requester)
+        val visibleInCategory = settingsFocusController.visibleItemIdsInCategory(target.category)
+        isFirstItemFocused = visibleInCategory.firstOrNull() == target.itemId
+        isLastItemFocused = visibleInCategory.lastOrNull() == target.itemId
         onContentFocused(requester)
     }
     var previousPlaylistCount by remember { mutableIntStateOf(channelsState.playlists.size) }
@@ -1372,7 +1445,7 @@ internal fun TvSettingsScreen(
         isRailFocused,
     ) {
         if (!isActive) return@LaunchedEffect
-        if (isRailFocused) return@LaunchedEffect
+        if (isRailFocused && !allowPendingRestoreFromRail) return@LaunchedEffect
         if (aboutOverlayState != null || showLanguagePicker || showMaxQualityPicker || showMinQualityPicker) {
             return@LaunchedEffect
         }
@@ -1504,15 +1577,19 @@ internal fun TvSettingsScreen(
 
     // ── Setup mode picker ──
     val needsSetupLabel = stringResource(R.string.tv_settings_needs_setup)
-    val categoryEntries = listOf(
-        TvSettingsCategory.ACCOUNT to stringResource(R.string.tv_settings_category_account),
-        TvSettingsCategory.PLAYBACK to stringResource(R.string.tv_settings_category_playback),
-        TvSettingsCategory.APPEARANCE to stringResource(R.string.tv_settings_category_appearance),
-        TvSettingsCategory.LIBRARY to stringResource(R.string.tv_settings_category_channels),
-        TvSettingsCategory.CONNECTIONS to stringResource(R.string.tv_settings_category_connections),
-        TvSettingsCategory.ADVANCED to stringResource(R.string.tv_settings_category_advanced),
-        TvSettingsCategory.ABOUT to stringResource(R.string.tv_settings_category_about),
-    )
+    val categoryEntries = if (authUser == null) {
+        listOf(TvSettingsCategory.ACCOUNT to stringResource(R.string.tv_settings_category_account))
+    } else {
+        listOf(
+            TvSettingsCategory.ACCOUNT to stringResource(R.string.tv_settings_category_account),
+            TvSettingsCategory.PLAYBACK to stringResource(R.string.tv_settings_category_playback),
+            TvSettingsCategory.APPEARANCE to stringResource(R.string.tv_settings_category_appearance),
+            TvSettingsCategory.LIBRARY to stringResource(R.string.tv_settings_category_channels),
+            TvSettingsCategory.CONNECTIONS to stringResource(R.string.tv_settings_category_connections),
+            TvSettingsCategory.ADVANCED to stringResource(R.string.tv_settings_category_advanced),
+            TvSettingsCategory.ABOUT to stringResource(R.string.tv_settings_category_about),
+        )
+    }
     val categoryOrder = remember(categoryEntries) { categoryEntries.map { it.first } }
     val categoryLockFeature = remember {
         mapOf(
@@ -1547,7 +1624,7 @@ internal fun TvSettingsScreen(
                 if (advancedLocked) {
                     advancedPhoneEntryRequester
                 } else if (setupMode == TvSetupMode.TV_ONLY) {
-                    advancedTvEntryRequester
+                    advancedPandaCardRequester
                 } else {
                     advancedPhoneEntryRequester
                 }
@@ -1809,8 +1886,6 @@ internal fun TvSettingsScreen(
     }
 
     // ── Main settings (mode selected) ──
-    var isFirstItemFocused by remember { mutableStateOf(false) }
-    var isLastItemFocused by remember { mutableStateOf(false) }
     val lastItemRequester = remember { FocusRequester() }
     var focusMoveNonce by remember { mutableIntStateOf(0) }
     var pendingFocusMove by remember { mutableStateOf<TvSettingsFocusMoveRequest?>(null) }
@@ -1874,9 +1949,15 @@ internal fun TvSettingsScreen(
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 val totalItems = settingsListState.layoutInfo.totalItemsCount
                 if (totalItems == 0) return@onPreviewKeyEvent false
+                val focusedSettingsItemId = settingsFocusController.focusedItemId
+                val visibleSettingsItemIds = settingsFocusController.visibleItemIdsInCategory(selectedCategory)
+                val focusedFirstSettingsItem = focusedSettingsItemId != null &&
+                    visibleSettingsItemIds.firstOrNull() == focusedSettingsItemId
+                val focusedLastSettingsItem = focusedSettingsItemId != null &&
+                    visibleSettingsItemIds.lastOrNull() == focusedSettingsItemId
                 when (event.key) {
                     Key.DirectionUp -> {
-                        if (isFirstItemFocused) {
+                        if (focusedFirstSettingsItem || (focusedSettingsItemId == null && isFirstItemFocused)) {
                             focusMoveNonce += 1
                             pendingFocusMove = TvSettingsFocusMoveRequest(
                                 nonce = focusMoveNonce,
@@ -1887,7 +1968,7 @@ internal fun TvSettingsScreen(
                         } else false
                     }
                     Key.DirectionDown -> {
-                        if (isLastItemFocused) {
+                        if (focusedLastSettingsItem || (focusedSettingsItemId == null && isLastItemFocused)) {
                             focusMoveNonce += 1
                             pendingFocusMove = TvSettingsFocusMoveRequest(
                                 nonce = focusMoveNonce,
@@ -2111,10 +2192,7 @@ internal fun TvSettingsScreen(
                             up = categoryRequesters.getValue(TvSettingsCategory.CONNECTIONS)
                         },
                         focusRequester = requester,
-                        onFocused = {
-                            settingsFocusController.markFocused(connectionsPairingTarget.itemId, requester)
-                            onContentFocused(requester)
-                        },
+                        onFocused = { onSettingsRowFocused(connectionsPairingTarget, requester) },
                         onClick = {
                             syncCoordinator.startTvPairingFlow()
                         },
@@ -2140,10 +2218,7 @@ internal fun TvSettingsScreen(
                     subtitle = subtitle,
                     modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                     focusRequester = requester,
-                    onFocused = {
-                        settingsFocusController.markFocused(pairedDevicesTarget.itemId, requester)
-                        onContentFocused(requester)
-                    },
+                    onFocused = { onSettingsRowFocused(pairedDevicesTarget, requester) },
                     onClick = {
                         logSettingsFocus("launch_subpage category=CONNECTIONS row=PAIRING item=account_paired_devices reason=route_open")
                         settingsFocusController.captureOrigin(
@@ -2168,10 +2243,7 @@ internal fun TvSettingsScreen(
                     subtitle = stringResource(R.string.tv_settings_activated_devices_subtitle),
                     modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                     focusRequester = requester,
-                    onFocused = {
-                        settingsFocusController.markFocused(activatedDevicesTarget.itemId, requester)
-                        onContentFocused(requester)
-                    },
+                    onFocused = { onSettingsRowFocused(activatedDevicesTarget, requester) },
                     onClick = {
                         logSettingsFocus("launch_subpage category=CONNECTIONS row=PAIRING item=account_activated_devices reason=route_open")
                         settingsFocusController.captureOrigin(
@@ -2191,25 +2263,24 @@ internal fun TvSettingsScreen(
                     externalRequester = accountSyncStatusCardRequester,
                 )
                 val accountSyncSubtitle = when {
-                    accountSettingsState.isRefreshing -> "Syncing account settings..."
-                    accountSettingsState.lastError != null -> "Last sync failed. Tap to retry."
-                    accountSettingsState.lastFetchedAt != null -> "Settings synced via account sign-in."
-                    else -> "Tap to sync shared settings from your account."
+                    accountSettingsState.isRefreshing -> stringResource(R.string.tv_settings_account_syncing)
+                    accountSettingsState.lastError != null -> stringResource(R.string.tv_settings_account_sync_failed_retry)
+                    accountSettingsState.lastFetchedAt != null -> stringResource(R.string.tv_settings_account_sync_synced)
+                    else -> stringResource(R.string.tv_settings_account_sync_tap_sync)
                 }
                 TvSettingCard(
                     title = stringResource(R.string.tv_settings_account_sync_status),
                     subtitle = accountSyncSubtitle,
                     modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                     focusRequester = requester,
-                    onFocused = {
-                        settingsFocusController.markFocused(accountSyncStatusTarget.itemId, requester)
-                        onContentFocused(requester)
-                    },
+                    onFocused = { onSettingsRowFocused(accountSyncStatusTarget, requester) },
                     onClick = {
                         authScope.launch {
                             accountSettingsRepository.refreshIfStale(force = true)
                             settingsViewModel.refreshSettings()
-                            TvNotificationQueue.post("Account settings refreshed.")
+                            TvNotificationQueue.post(
+                                context.getString(R.string.tv_settings_account_refreshed),
+                            )
                         }
                     },
                     rowType = TvSettingRowType.ACTION,
@@ -2231,10 +2302,7 @@ internal fun TvSettingsScreen(
                         subtitle = resolvedSyncError,
                         modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                         focusRequester = requester,
-                        onFocused = {
-                            settingsFocusController.markFocused(accountSyncErrorTarget.itemId, requester)
-                            onContentFocused(requester)
-                        },
+                        onFocused = { onSettingsRowFocused(accountSyncErrorTarget, requester) },
                         onClick = {
                             authScope.launch {
                                 accountSettingsRepository.refreshIfStale(force = true)
@@ -2298,17 +2366,14 @@ internal fun TvSettingsScreen(
                 TvSettingCard(
                     title = stringResource(R.string.tv_settings_torve_account),
                     subtitle = if (authUser?.isVerified == false)
-                        "${authUser!!.email} (unverified)"
+                        stringResource(R.string.tv_auth_email_unverified, authUser!!.email)
                     else authUser!!.email,
                     modifier = Modifier.fillMaxWidth().focusProperties {
                         left = railFocusRequester
                         up = categoryRequesters.getValue(TvSettingsCategory.ACCOUNT)
                     },
                     focusRequester = requester,
-                    onFocused = {
-                        settingsFocusController.markFocused(authAccountTarget.itemId, requester)
-                        onContentFocused(requester)
-                    },
+                    onFocused = { onSettingsRowFocused(authAccountTarget, requester) },
                     onClick = {},
                     emphasis = TvSettingEmphasis.SECONDARY,
                 )
@@ -2325,24 +2390,43 @@ internal fun TvSettingsScreen(
                         subtitle = stringResource(R.string.tv_settings_resend_verification),
                         modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                         focusRequester = requester,
-                        onFocused = {
-                            settingsFocusController.markFocused(authVerifyTarget.itemId, requester)
-                            onContentFocused(requester)
-                        },
+                        onFocused = { onSettingsRowFocused(authVerifyTarget, requester) },
                         onClick = {
                             val email = authUser?.email ?: return@TvSettingCard
                             authScope.launch {
                                 val result = authClient.resendVerification(email)
                                 if (result.success) {
-                                    TvNotificationQueue.post("Verification email sent!", NotificationType.SUCCESS)
+                                    TvNotificationQueue.post(
+                                        context.getString(R.string.verify_email_sent),
+                                        NotificationType.SUCCESS,
+                                    )
                                 } else {
-                                    TvNotificationQueue.post(result.error ?: "Failed to send", NotificationType.ERROR)
+                                    TvNotificationQueue.post(
+                                        result.error ?: context.getString(R.string.tv_auth_failed_to_send),
+                                        NotificationType.ERROR,
+                                    )
                                 }
                             }
                         },
                         rowType = TvSettingRowType.ACTION,
                     )
                 }
+            }
+            item(key = "account_import_setup") {
+                val requester = rememberRegisteredTvSettingsFocusRequester(
+                    controller = settingsFocusController,
+                    target = accountImportSetupTarget,
+                    externalRequester = remember("account_import_setup") { FocusRequester() },
+                )
+                TvSettingCard(
+                    title = stringResource(R.string.tv_settings_import_setup_title),
+                    subtitle = stringResource(R.string.tv_settings_import_setup_subtitle),
+                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                    focusRequester = requester,
+                    onFocused = { onSettingsRowFocused(accountImportSetupTarget, requester) },
+                    onClick = { onNavigateToReceiveCredentials() },
+                    rowType = TvSettingRowType.NAVIGATION,
+                )
             }
             item(key = "auth_logout") {
                 val requester = rememberRegisteredTvSettingsFocusRequester(
@@ -2352,14 +2436,14 @@ internal fun TvSettingsScreen(
                 )
                 TvSettingCard(
                     title = stringResource(R.string.tv_settings_log_out),
-                    subtitle = if (confirmSignOut) "Press again to sign out on this TV"
-                        else "Sign out of your Torve account",
+                    subtitle = if (confirmSignOut) {
+                        stringResource(R.string.tv_auth_sign_out_confirm)
+                    } else {
+                        stringResource(R.string.tv_auth_sign_out_desc)
+                    },
                     modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                     focusRequester = requester,
-                    onFocused = {
-                        settingsFocusController.markFocused(authLogoutTarget.itemId, requester)
-                        onContentFocused(requester)
-                    },
+                    onFocused = { onSettingsRowFocused(authLogoutTarget, requester) },
                     onClick = {
                         if (confirmSignOut) {
                             authScope.launch {
@@ -2369,21 +2453,24 @@ internal fun TvSettingsScreen(
                                     reason = "confirm",
                                 )
                                 pendingAuthTransitionFocusTarget = null
-                                authClient.logout()
                                 accountSessionCoordinator.signOut()
+                                authClient.logout()
                                 authUser = null
                                 authEmail = ""
                                 authPassword = ""
                                 confirmSignOut = false
                                 subscriptionViewModel.loadSubscription()
-                                TvNotificationQueue.post("Logged out", NotificationType.INFO)
+                                TvNotificationQueue.post(
+                                    context.getString(R.string.tv_auth_logged_out),
+                                    NotificationType.INFO,
+                                )
                             }
                         } else {
                             confirmSignOut = true
                         }
                     },
                     rowType = TvSettingRowType.DANGEROUS,
-                    focusedHint = "Requires a second press to avoid accidental sign-out.",
+                    focusedHint = stringResource(R.string.tv_auth_sign_out_second_press_hint),
                 )
             }
             item(key = "auth_delete_account") {
@@ -2399,10 +2486,7 @@ internal fun TvSettingsScreen(
                     subtitle = stringResource(R.string.tv_settings_delete_account_subtitle),
                     modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                     focusRequester = deleteRequester,
-                    onFocused = {
-                        settingsFocusController.markFocused(authDeleteTarget.itemId, deleteRequester)
-                        onContentFocused(deleteRequester)
-                    },
+                    onFocused = { onSettingsRowFocused(authDeleteTarget, deleteRequester) },
                     onClick = { if (!isDeletingAccount) showDeleteDialog = true },
                     rowType = TvSettingRowType.DANGEROUS,
                 )
@@ -2425,7 +2509,10 @@ internal fun TvSettingsScreen(
                         confirmButton = {
                             val cancelRequester = remember { FocusRequester() }
                             val confirmRequester = remember { FocusRequester() }
-                            LaunchedEffect(Unit) { cancelRequester.requestFocus() }
+                            LaunchedEffect(Unit) {
+                                withFrameNanos { }
+                                runCatching { cancelRequester.requestFocus() }
+                            }
                             Row {
                                 androidx.compose.material3.TextButton(
                                     onClick = { showDeleteDialog = false },
@@ -2486,8 +2573,7 @@ internal fun TvSettingsScreen(
                     railFocusRequester = railFocusRequester,
                     upFocusRequester = categoryRequesters.getValue(TvSettingsCategory.ACCOUNT),
                     onContentFocused = {
-                        settingsFocusController.markFocused(authEmailTarget.itemId, requester)
-                        onContentFocused(it)
+                        onSettingsRowFocused(authEmailTarget, requester)
                     },
                     onExpandToggle = { expandedInput = if (expandedInput == it) null else it },
                     onValueChange = { authEmail = it },
@@ -2507,8 +2593,7 @@ internal fun TvSettingsScreen(
                     expandedInput = expandedInput,
                     railFocusRequester = railFocusRequester,
                     onContentFocused = {
-                        settingsFocusController.markFocused(authPasswordTarget.itemId, requester)
-                        onContentFocused(it)
+                        onSettingsRowFocused(authPasswordTarget, requester)
                     },
                     onExpandToggle = { expandedInput = if (expandedInput == it) null else it },
                     onValueChange = { authPassword = it },
@@ -2530,8 +2615,7 @@ internal fun TvSettingsScreen(
                         expandedInput = expandedInput,
                         railFocusRequester = railFocusRequester,
                         onContentFocused = {
-                            settingsFocusController.markFocused(authConfirmPasswordTarget.itemId, requester)
-                            onContentFocused(it)
+                            onSettingsRowFocused(authConfirmPasswordTarget, requester)
                         },
                         onExpandToggle = { expandedInput = if (expandedInput == it) null else it },
                         onValueChange = { authConfirmPassword = it },
@@ -2552,10 +2636,7 @@ internal fun TvSettingsScreen(
                               else stringResource(R.string.tv_auth_sign_in_desc),
                     modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                     focusRequester = requester,
-                    onFocused = {
-                        settingsFocusController.markFocused(authSubmitTarget.itemId, requester)
-                        onContentFocused(requester)
-                    },
+                    onFocused = { onSettingsRowFocused(authSubmitTarget, requester) },
                     onClick = {
                         if (!authIsLoading) {
                             if (authShowRegister && authPassword != authConfirmPassword) {
@@ -2590,13 +2671,18 @@ internal fun TvSettingsScreen(
                                     runCatching { accountSessionCoordinator.bootstrapAfterSignIn() }
                                     settingsViewModel.refreshSettings()
                                     onAuthSuccess()
-                                    val msg = if (authShowRegister)
-                                        "Account created! Check your email to verify your address."
-                                    else "Logged in!"
+                                    val msg = if (authShowRegister) {
+                                        context.getString(R.string.tv_auth_account_created_verify)
+                                    } else {
+                                        context.getString(R.string.tv_auth_logged_in)
+                                    }
                                     TvNotificationQueue.post(msg, NotificationType.SUCCESS)
                                 } else {
                                     authError = result.error
-                                    TvNotificationQueue.post(result.error ?: "Failed", NotificationType.ERROR)
+                                    TvNotificationQueue.post(
+                                        result.error ?: context.getString(R.string.tv_auth_failed),
+                                        NotificationType.ERROR,
+                                    )
                                 }
                             }
                         }
@@ -2615,10 +2701,7 @@ internal fun TvSettingsScreen(
                     subtitle = if (authShowRegister) stringResource(R.string.tv_auth_switch_login) else stringResource(R.string.tv_auth_switch_signup),
                     modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                     focusRequester = requester,
-                    onFocused = {
-                        settingsFocusController.markFocused(authToggleTarget.itemId, requester)
-                        onContentFocused(requester)
-                    },
+                    onFocused = { onSettingsRowFocused(authToggleTarget, requester) },
                     onClick = {
                         authShowRegister = !authShowRegister
                         authConfirmPassword = ""
@@ -2639,14 +2722,11 @@ internal fun TvSettingsScreen(
                     externalRequester = remember("auth_pair_with_phone") { FocusRequester() },
                 )
                 TvSettingCard(
-                    title = "Sign in with your phone",
-                    subtitle = "Scan a QR with the Torve app on your phone — no typing required.",
+                    title = stringResource(R.string.tv_settings_pair_phone_title),
+                    subtitle = stringResource(R.string.tv_settings_pair_phone_subtitle),
                     modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                     focusRequester = requester,
-                    onFocused = {
-                        settingsFocusController.markFocused(authPairWithPhoneTarget.itemId, requester)
-                        onContentFocused(requester)
-                    },
+                    onFocused = { onSettingsRowFocused(authPairWithPhoneTarget, requester) },
                     onClick = onNavigateToPairingSignIn,
                     rowType = TvSettingRowType.NAVIGATION,
                 )
@@ -2663,10 +2743,7 @@ internal fun TvSettingsScreen(
                         subtitle = stringResource(R.string.tv_settings_forgot_password_desc),
                         modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                         focusRequester = requester,
-                        onFocused = {
-                            settingsFocusController.markFocused(authForgotPasswordTarget.itemId, requester)
-                            onContentFocused(requester)
-                        },
+                        onFocused = { onSettingsRowFocused(authForgotPasswordTarget, requester) },
                         onClick = {
                             if (!authIsLoading && authEmail.isNotBlank()) {
                                 authError = null
@@ -2676,16 +2753,19 @@ internal fun TvSettingsScreen(
                                     authIsLoading = false
                                     if (result.success) {
                                         TvNotificationQueue.post(
-                                            "If that email exists, a reset link will be sent.",
+                                            context.getString(R.string.login_reset_sent),
                                             NotificationType.INFO,
                                         )
                                     } else {
                                         authError = result.error
-                                        TvNotificationQueue.post(result.error ?: "Failed", NotificationType.ERROR)
+                                        TvNotificationQueue.post(
+                                            result.error ?: context.getString(R.string.tv_auth_failed),
+                                            NotificationType.ERROR,
+                                        )
                                     }
                                 }
                             } else if (authEmail.isBlank()) {
-                                authError = "Please enter your email first"
+                                authError = context.getString(R.string.tv_auth_email_required)
                             }
                         },
                         rowType = TvSettingRowType.ACTION,
@@ -2750,7 +2830,10 @@ internal fun TvSettingsScreen(
                             }
                         }
                         billingManager.clearPurchaseResult()
-                        TvNotificationQueue.post("Purchase received. Verifying Premium...", NotificationType.INFO)
+                        TvNotificationQueue.post(
+                            context.getString(R.string.tv_purchase_verifying_premium),
+                            NotificationType.INFO,
+                        )
                     }
                     is com.torve.android.billing.BillingManager.PurchaseResult.AlreadyOwned -> {
                         if (isAmazonBuild) {
@@ -2763,14 +2846,20 @@ internal fun TvSettingsScreen(
                             )
                         }
                         billingManager.clearPurchaseResult()
-                        TvNotificationQueue.post("Restore started. Checking Premium access...", NotificationType.INFO)
+                        TvNotificationQueue.post(
+                            context.getString(R.string.tv_purchase_restore_started),
+                            NotificationType.INFO,
+                        )
                     }
                     is com.torve.android.billing.BillingManager.PurchaseResult.Pending -> {
                         subscriptionViewModel.markPurchasePending(result.message)
                         billingManager.clearPurchaseResult()
                     }
                     is com.torve.android.billing.BillingManager.PurchaseResult.Cancelled -> {
-                        TvNotificationQueue.post("Purchase cancelled.", NotificationType.INFO)
+                        TvNotificationQueue.post(
+                            context.getString(R.string.tv_purchase_cancelled),
+                            NotificationType.INFO,
+                        )
                         billingManager.clearPurchaseResult()
                     }
                     is com.torve.android.billing.BillingManager.PurchaseResult.Error -> {
@@ -2807,10 +2896,7 @@ internal fun TvSettingsScreen(
                         subtitle = stringResource(R.string.tv_premium_needs_activation),
                         modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                         focusRequester = manageDevicesRequester,
-                        onFocused = {
-                            settingsFocusController.markFocused(subscriptionManageDevicesTarget.itemId, manageDevicesRequester)
-                            onContentFocused(manageDevicesRequester)
-                        },
+                        onFocused = { onSettingsRowFocused(subscriptionManageDevicesTarget, manageDevicesRequester) },
                         onClick = {
                             settingsFocusController.captureOrigin(
                                 itemId = subscriptionManageDevicesTarget.itemId,
@@ -2835,10 +2921,7 @@ internal fun TvSettingsScreen(
                     },
                     modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                     focusRequester = requester,
-                    onFocused = {
-                        settingsFocusController.markFocused(subscriptionMonthlyTarget.itemId, requester)
-                        onContentFocused(requester)
-                    },
+                    onFocused = { onSettingsRowFocused(subscriptionMonthlyTarget, requester) },
                     onClick = {
                         if (!subscriptionState.hasEntitlement) {
                             if (monthlyOffer == null) {
@@ -2849,7 +2932,7 @@ internal fun TvSettingsScreen(
                             } else if (purchaseBlocked) {
                                 TvNotificationQueue.post(
                                     subscriptionState.purchaseStatus?.message
-                                        ?: "Verification is already pending. Choose Retry Verification or Restore Purchase.",
+                                        ?: context.getString(R.string.tv_purchase_verification_pending),
                                     NotificationType.INFO,
                                 )
                             } else if (authUser != null) {
@@ -2891,10 +2974,7 @@ internal fun TvSettingsScreen(
                     },
                     modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                     focusRequester = lifetimeRequester,
-                    onFocused = {
-                        settingsFocusController.markFocused(subscriptionLifetimeTarget.itemId, lifetimeRequester)
-                        onContentFocused(lifetimeRequester)
-                    },
+                    onFocused = { onSettingsRowFocused(subscriptionLifetimeTarget, lifetimeRequester) },
                     onClick = {
                         if (!subscriptionState.hasEntitlement) {
                             if (lifetimeOffer == null) {
@@ -2905,7 +2985,7 @@ internal fun TvSettingsScreen(
                             } else if (purchaseBlocked) {
                                 TvNotificationQueue.post(
                                     subscriptionState.purchaseStatus?.message
-                                        ?: "Verification is already pending. Choose Retry Verification or Restore Purchase.",
+                                        ?: context.getString(R.string.tv_purchase_verification_pending),
                                     NotificationType.INFO,
                                 )
                             } else if (authUser != null) {
@@ -2936,9 +3016,13 @@ internal fun TvSettingsScreen(
                         subscriptionAccess.isPremiumButBlockedOnThisDevice ->
                             stringResource(R.string.tv_premium_needs_activation)
                         subscriptionAccess.hasPremiumEntitlement ->
-                            "Billing is managed by ${subscriptionMarketplaceLabel(subscriptionState.subscription?.platform) ?: purchaseStoreLabel}."
+                            stringResource(
+                                R.string.tv_purchase_billing_managed_by,
+                                subscriptionMarketplaceLabel(subscriptionState.subscription?.platform)
+                                    ?: purchaseStoreLabel,
+                            )
                         else ->
-                            "Choose monthly or lifetime access. Billing is handled by $purchaseStoreLabel."
+                            stringResource(R.string.tv_purchase_choose_billing_store, purchaseStoreLabel)
                     },
                     tone = if (subscriptionAccess.isPremiumButBlockedOnThisDevice) PurchaseStatusTone.ERROR else PurchaseStatusTone.INFO,
                 )
@@ -2961,10 +3045,7 @@ internal fun TvSettingsScreen(
                     subtitle = stringResource(R.string.tv_premium_check_access),
                     modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                     focusRequester = refreshRequester,
-                    onFocused = {
-                        settingsFocusController.markFocused(subscriptionRefreshTarget.itemId, refreshRequester)
-                        onContentFocused(refreshRequester)
-                    },
+                    onFocused = { onSettingsRowFocused(subscriptionRefreshTarget, refreshRequester) },
                     onClick = { subscriptionViewModel.refreshAccess() },
                     rowType = TvSettingRowType.ACTION,
                     emphasis = TvSettingEmphasis.SECONDARY,
@@ -2981,10 +3062,7 @@ internal fun TvSettingsScreen(
                         subtitle = stringResource(R.string.tv_settings_retry_verification_desc),
                         modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                         focusRequester = retryRequester,
-                        onFocused = {
-                            settingsFocusController.markFocused(subscriptionRetryTarget.itemId, retryRequester)
-                            onContentFocused(retryRequester)
-                        },
+                        onFocused = { onSettingsRowFocused(subscriptionRetryTarget, retryRequester) },
                         onClick = { subscriptionViewModel.retryPendingAmazonVerification() },
                         rowType = TvSettingRowType.ACTION,
                         emphasis = TvSettingEmphasis.SECONDARY,
@@ -3001,10 +3079,7 @@ internal fun TvSettingsScreen(
                     subtitle = stringResource(R.string.tv_settings_restore_purchase_desc),
                     modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                     focusRequester = restoreRequester,
-                    onFocused = {
-                        settingsFocusController.markFocused(subscriptionRestoreTarget.itemId, restoreRequester)
-                        onContentFocused(restoreRequester)
-                    },
+                    onFocused = { onSettingsRowFocused(subscriptionRestoreTarget, restoreRequester) },
                     onClick = {
                         subscriptionViewModel.requireAccountForRestore(purchaseStoreLabel) {
                             if (isAmazonBuild) {
@@ -3035,18 +3110,6 @@ internal fun TvSettingsScreen(
                         description = stringResource(R.string.tv_settings_linked_services_desc),
                     )
                 }
-                item(key = "panda_setup") {
-                    val requester = remember("panda_setup") { FocusRequester() }
-                    TvSettingCard(
-                        title = stringResource(R.string.panda_setup_title),
-                        subtitle = stringResource(R.string.setup_panda_desc),
-                        modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
-                        focusRequester = requester,
-                        onFocused = { },
-                        onClick = { onNavigateToPandaSetup() },
-                        rowType = TvSettingRowType.ACTION,
-                    )
-                }
                 if (showRecoveryRow) {
                     item(key = "restore_setup") {
                         val requester = remember("restore_setup") { FocusRequester() }
@@ -3073,8 +3136,8 @@ internal fun TvSettingsScreen(
                 item(key = "transfer_receive_unconditional") {
                     val requester = remember("transfer_receive_unconditional") { FocusRequester() }
                     TvSettingCard(
-                        title = "Receive credentials from another device",
-                        subtitle = "Show a one-time pairing code to import debrid / Plex / Panda secrets without typing.",
+                        title = stringResource(R.string.settings_receive_credentials),
+                        subtitle = stringResource(R.string.tv_settings_receive_credentials_import_desc),
                         modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                         focusRequester = requester,
                         onFocused = { },
@@ -3096,9 +3159,9 @@ internal fun TvSettingsScreen(
                         }
                         val (subtitleSuffix, onTap) = when (primary) {
                             com.torve.presentation.providerhealth.ProviderRepairAction.TransferFromAnotherDevice ->
-                                "Open Transfer →" to { onNavigateToReceiveCredentials() }
+                                stringResource(R.string.tv_settings_open_transfer_arrow) to { onNavigateToReceiveCredentials() }
                             com.torve.presentation.providerhealth.ProviderRepairAction.OpenDiagnostics ->
-                                "Open Diagnostics →" to { onNavigateToTransferDiagnostics() }
+                                stringResource(R.string.tv_settings_open_diagnostics_arrow) to { onNavigateToTransferDiagnostics() }
                             else -> "" to { /* unreachable */ }
                         }
                         val message = entry.message?.takeIf { it.isNotBlank() }
@@ -3295,9 +3358,8 @@ internal fun TvSettingsScreen(
                     item(key = "transfer_receive_tv_only") {
                         val requester = remember("transfer_receive_tv_only") { FocusRequester() }
                         TvSettingCard(
-                            title = "Receive credentials from another device",
-                            subtitle = "Show a one-time pairing code so a desktop or phone can " +
-                                "send debrid / Plex / Panda credentials without typing on the remote.",
+                            title = stringResource(R.string.settings_receive_credentials),
+                            subtitle = stringResource(R.string.tv_settings_receive_credentials_tv_desc),
                             modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                             focusRequester = requester,
                             onFocused = { },
@@ -3305,18 +3367,128 @@ internal fun TvSettingsScreen(
                             rowType = TvSettingRowType.ACTION,
                         )
                     }
-                    item(key = "panda_setup") {
-                        val requester = remember("panda_setup_tvonly") { FocusRequester() }
-                        TvSettingCard(
-                            title = stringResource(R.string.panda_setup_title),
-                            subtitle = stringResource(R.string.setup_panda_desc),
-                            modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
-                            focusRequester = requester,
-                            onFocused = { },
-                            onClick = { onNavigateToPandaSetup() },
-                            rowType = TvSettingRowType.ACTION,
-                        )
+                    // ── Debrid management ──
+                    if (false) {
+                    item(key = "section_debrid") {
+                        TvSectionHeader(text = "Cloud Services (Debrid)")
                     }
+                    when {
+                        settingsState.debridDeviceCode != null -> {
+                            val code = settingsState.debridDeviceCode!!
+                            item(key = "debrid_code_info") {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(Graphite, RoundedCornerShape(10.dp))
+                                        .border(1.dp, Steel, RoundedCornerShape(10.dp))
+                                        .padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    Text(
+                                        stringResource(
+                                            R.string.tv_settings_debrid_connecting_to,
+                                            settingsState.debridProvider.name.replace('_', ' ').lowercase()
+                                                .replaceFirstChar { it.uppercase() },
+                                        ),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Amber,
+                                    )
+                                    Text(
+                                        stringResource(R.string.tv_settings_debrid_visit_url, code.verificationUrl),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Snow,
+                                    )
+                                    Text(
+                                        stringResource(R.string.tv_settings_debrid_enter_code, code.userCode),
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Amber,
+                                    )
+                                }
+                            }
+                            item(key = "debrid_cancel") {
+                                val requester = remember("debrid_cancel") { FocusRequester() }
+                                TvSettingCard(
+                                    title = stringResource(R.string.common_cancel),
+                                    subtitle = stringResource(R.string.tv_settings_debrid_cancel_auth_desc),
+                                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                                    focusRequester = requester,
+                                    onFocused = { },
+                                    onClick = { settingsViewModel.disconnectDebrid() },
+                                    rowType = TvSettingRowType.DANGEROUS,
+                                )
+                            }
+                        }
+                        settingsState.debridConnected -> {
+                            item(key = "debrid_status") {
+                                val providerLabel = when (settingsState.debridProvider) {
+                                    com.torve.domain.model.DebridServiceType.REAL_DEBRID -> "Real-Debrid"
+                                    com.torve.domain.model.DebridServiceType.ALL_DEBRID -> "AllDebrid"
+                                    com.torve.domain.model.DebridServiceType.PREMIUMIZE -> "Premiumize"
+                                    com.torve.domain.model.DebridServiceType.TORBOX -> "TorBox"
+                                }
+                                val username = settingsState.debridUser?.username
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(Graphite, RoundedCornerShape(10.dp))
+                                        .border(1.dp, Steel, RoundedCornerShape(10.dp))
+                                        .padding(16.dp),
+                                ) {
+                                    Text(providerLabel, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = Snow)
+                                    if (!username.isNullOrBlank()) {
+                                        Text(username, style = MaterialTheme.typography.bodySmall, color = Silver)
+                                    }
+                                    Text(stringResource(R.string.tv_settings_connected), style = MaterialTheme.typography.labelSmall, color = Emerald)
+                                }
+                            }
+                            item(key = "debrid_disconnect") {
+                                val requester = remember("debrid_disconnect") { FocusRequester() }
+                                TvSettingCard(
+                                    title = stringResource(R.string.common_disconnect),
+                                    subtitle = stringResource(R.string.tv_settings_debrid_disconnect_desc),
+                                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                                    focusRequester = requester,
+                                    onFocused = { },
+                                    onClick = { settingsViewModel.disconnectDebrid() },
+                                    rowType = TvSettingRowType.DANGEROUS,
+                                )
+                            }
+                            item(key = "debrid_reauth") {
+                                val requester = remember("debrid_reauth") { FocusRequester() }
+                                TvSettingCard(
+                                    title = stringResource(R.string.tv_settings_debrid_reauth),
+                                    subtitle = stringResource(R.string.tv_settings_debrid_reauth_desc),
+                                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                                    focusRequester = requester,
+                                    onFocused = { },
+                                    onClick = { settingsViewModel.startDebridDeviceAuth() },
+                                    rowType = TvSettingRowType.ACTION,
+                                )
+                            }
+                        }
+                        else -> {
+                            item(key = "debrid_connect") {
+                                val requester = remember("debrid_connect") { FocusRequester() }
+                                TvSettingCard(
+                                    title = stringResource(R.string.tv_settings_realdebrid_connect),
+                                    subtitle = stringResource(R.string.tv_settings_realdebrid_authorize_desc),
+                                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                                    focusRequester = requester,
+                                    onFocused = { },
+                                    onClick = {
+                                        settingsViewModel.setDebridProvider(com.torve.domain.model.DebridServiceType.REAL_DEBRID)
+                                        settingsViewModel.startDebridDeviceAuth()
+                                    },
+                                    rowType = TvSettingRowType.ACTION,
+                                )
+                            }
+                        }
+                    }
+
+                    }
+
                     // Trakt (device code auth)
                 item(key = "trakt") {
                     val requester = rememberSettingsRowRequester(
@@ -3336,6 +3508,49 @@ internal fun TvSettingsScreen(
                         },
                         rowType = TvSettingRowType.ACTION,
                     )
+                }
+
+                settingsState.traktDeviceCode?.let { code ->
+                    item(key = "trakt_device_code_panel") {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Charcoal.copy(alpha = 0.62f), RoundedCornerShape(16.dp))
+                                .border(1.dp, Amber.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
+                                .padding(horizontal = 22.dp, vertical = 18.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                text = "Connect Trakt",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = Snow,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                text = code.userCode,
+                                style = MaterialTheme.typography.headlineMedium,
+                                color = Amber,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                text = code.verificationUrl,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = Snow,
+                                maxLines = 2,
+                                overflow = TextOverflow.Visible,
+                            )
+                            val status = when {
+                                settingsState.traktError != null -> settingsState.traktError!!
+                                settingsState.isPollingTrakt -> stringResource(R.string.tv_settings_auth_waiting_authorization)
+                                else -> stringResource(R.string.tv_settings_auth_open_url_code)
+                            }
+                            Text(
+                                text = status,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (settingsState.traktError != null) Ruby else Silver,
+                            )
+                        }
+                    }
                 }
 
                 // SIMKL (device code auth)
@@ -3363,6 +3578,196 @@ internal fun TvSettingsScreen(
                 }
 
                 if (selectedCategory == TvSettingsCategory.ADVANCED && !advancedLocked) {
+                    item(key = "section_panda_streaming_hub") {
+                        TvSectionHeader(
+                            text = stringResource(R.string.tv_settings_panda_streaming_setup),
+                            description = stringResource(R.string.tv_settings_panda_streaming_setup_desc),
+                        )
+                    }
+                    item(key = "advanced_panda_hub") {
+                        val requester = rememberSettingsRowRequester(
+                            target = advancedPandaTarget,
+                            externalRequester = advancedPandaCardRequester,
+                            isDefaultEntry = true,
+                        )
+                        val subtitle = when {
+                            pandaConfigured && pandaEnabled -> stringResource(R.string.tv_settings_panda_configured_enabled)
+                            pandaConfigured -> stringResource(R.string.tv_settings_panda_configured_disabled)
+                            else -> stringResource(R.string.tv_settings_panda_setup_desc)
+                        }
+                        TvSettingCard(
+                            title = "Panda",
+                            subtitle = subtitle,
+                            modifier = Modifier.fillMaxWidth().focusProperties {
+                                left = railFocusRequester
+                                up = categoryRequesters.getValue(TvSettingsCategory.ADVANCED)
+                                down = advancedRealDebridCardRequester
+                            },
+                            focusRequester = requester,
+                            onFocused = { onSettingsRowFocused(advancedPandaTarget, requester) },
+                            onClick = { onNavigateToPandaSetup() },
+                            rowType = TvSettingRowType.ACTION,
+                        )
+                    }
+                    item(key = "advanced_panda_real_debrid") {
+                        val requester = rememberSettingsRowRequester(
+                            target = advancedRealDebridTarget,
+                            externalRequester = advancedRealDebridCardRequester,
+                        )
+                        val debridError = settingsState.debridError
+                        val rdSubtitle = when {
+                            settingsState.debridDeviceCode != null -> stringResource(R.string.tv_settings_realdebrid_managed_authorize)
+                            settingsState.debridConnected -> settingsState.debridUser?.username?.let {
+                                stringResource(R.string.tv_settings_realdebrid_managed_connected_as, it)
+                            } ?: stringResource(R.string.tv_settings_realdebrid_managed_connected)
+                            debridError != null -> stringResource(
+                                R.string.tv_settings_realdebrid_managed_reconnect,
+                                debridError,
+                            )
+                            else -> stringResource(R.string.tv_settings_realdebrid_managed_not_connected)
+                        }
+                        TvSettingCard(
+                            title = "Real-Debrid",
+                            subtitle = rdSubtitle,
+                            modifier = Modifier.fillMaxWidth().focusProperties {
+                                left = railFocusRequester
+                                up = advancedPandaCardRequester
+                                down = advancedPandaHealthCardRequester
+                            },
+                            focusRequester = requester,
+                            onFocused = { onSettingsRowFocused(advancedRealDebridTarget, requester) },
+                            onClick = { onNavigateToPandaSetup() },
+                            rowType = TvSettingRowType.ACTION,
+                        )
+                    }
+                    settingsState.debridDeviceCode?.let { code ->
+                        item(key = "advanced_real_debrid_code_panel") {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Charcoal.copy(alpha = 0.62f), RoundedCornerShape(16.dp))
+                                    .border(1.dp, Amber.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
+                                    .padding(horizontal = 22.dp, vertical = 18.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.tv_settings_realdebrid_connect_panda),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = Snow,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    text = code.userCode,
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    color = Amber,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Text(
+                                    text = code.verificationUrl,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = Snow,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Visible,
+                                )
+                                Text(
+                                    text = if (settingsState.isPollingDebrid) {
+                                        stringResource(R.string.tv_settings_auth_waiting_authorization)
+                                    } else {
+                                        stringResource(R.string.tv_settings_auth_open_url_code)
+                                    },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Silver,
+                                )
+                            }
+                        }
+                    }
+                    item(key = "section_panda_health") {
+                        TvSectionHeader(
+                            text = stringResource(R.string.tv_settings_panda_health_monitor),
+                            description = stringResource(R.string.tv_settings_panda_health_monitor_desc),
+                        )
+                    }
+                    if (tvHealthRows.isEmpty()) {
+                        item(key = "panda_health_clear") {
+                            val target = remember {
+                                TvSettingsFocusTarget(
+                                    itemId = "settings/advanced/panda_health/clear",
+                                    category = TvSettingsCategory.ADVANCED,
+                                    listIndex = 3,
+                                    focusTargetType = "status",
+                                )
+                            }
+                            val requester = rememberSettingsRowRequester(
+                                target = target,
+                                externalRequester = advancedPandaHealthCardRequester,
+                            )
+                            TvSettingCard(
+                                title = stringResource(R.string.tv_settings_streaming_health),
+                                subtitle = stringResource(R.string.tv_settings_streaming_health_clear),
+                                modifier = Modifier.fillMaxWidth().focusProperties {
+                                    left = railFocusRequester
+                                    up = advancedRealDebridCardRequester
+                                    down = advancedTvEntryRequester
+                                },
+                                focusRequester = requester,
+                                onFocused = { onSettingsRowFocused(target, requester) },
+                                onClick = { },
+                                rowType = TvSettingRowType.ACTION,
+                                emphasis = TvSettingEmphasis.SECONDARY,
+                            )
+                        }
+                    } else {
+                        tvHealthRows.forEachIndexed { index, (entry, actions) ->
+                            item(key = "advanced_health:${entry.providerKey}") {
+                                val target = remember(entry.providerKey, index) {
+                                    TvSettingsFocusTarget(
+                                        itemId = "settings/advanced/panda_health/${entry.providerKey}",
+                                        category = TvSettingsCategory.ADVANCED,
+                                        listIndex = 3 + index,
+                                        focusTargetType = "action",
+                                    )
+                                }
+                                val requester = rememberSettingsRowRequester(
+                                    target = target,
+                                    externalRequester = if (index == 0) {
+                                        advancedPandaHealthCardRequester
+                                    } else {
+                                        remember("advanced_health:${entry.providerKey}") { FocusRequester() }
+                                    },
+                                )
+                                val primary = actions.firstOrNull {
+                                    it == com.torve.presentation.providerhealth.ProviderRepairAction.TransferFromAnotherDevice ||
+                                        it == com.torve.presentation.providerhealth.ProviderRepairAction.OpenDiagnostics
+                                }
+                                val (subtitleSuffix, onTap) = when (primary) {
+                                    com.torve.presentation.providerhealth.ProviderRepairAction.TransferFromAnotherDevice ->
+                                        stringResource(R.string.tv_settings_open_credential_transfer) to { onNavigateToReceiveCredentials() }
+                                    com.torve.presentation.providerhealth.ProviderRepairAction.OpenDiagnostics ->
+                                        stringResource(R.string.tv_settings_open_diagnostics) to { onNavigateToTransferDiagnostics() }
+                                    else -> "" to { }
+                                }
+                                val message = entry.message?.takeIf { it.isNotBlank() }
+                                val combined = if (message != null) "$message - $subtitleSuffix" else subtitleSuffix
+                                TvSettingCard(
+                                    title = entry.label,
+                                    subtitle = combined,
+                                    modifier = Modifier.fillMaxWidth().focusProperties {
+                                        left = railFocusRequester
+                                        if (index == 0) {
+                                            up = advancedRealDebridCardRequester
+                                        }
+                                        if (index == tvHealthRows.lastIndex) {
+                                            down = advancedTvEntryRequester
+                                        }
+                                    },
+                                    focusRequester = requester,
+                                    onFocused = { onSettingsRowFocused(target, requester) },
+                                    onClick = onTap,
+                                    rowType = TvSettingRowType.ACTION,
+                                )
+                            }
+                        }
+                    }
                     item(key = "section_integrations") {
                     TvSectionHeader(
                         text = stringResource(R.string.tv_settings_metadata_providers),
@@ -3383,9 +3788,8 @@ internal fun TvSettingsScreen(
                         onValueChange = { settingsViewModel.setOmdbApiKey(it) },
                         focusRequester = advancedTvEntryRequester,
                         settingsFocusController = settingsFocusController,
-                        focusTarget = advancedEntryTarget,
-                        isDefaultEntry = true,
-                        upFocusRequester = categoryRequesters.getValue(TvSettingsCategory.ADVANCED),
+                        focusTarget = advancedOmdbKeyTarget,
+                        upFocusRequester = advancedPandaHealthCardRequester,
                         premiumFeature = TvEntitledFeature.OMDB_SETUP,
                         premiumLocked = isLockedFeature(TvEntitledFeature.OMDB_SETUP),
                         onLockedClick = { onRequestLifetimeUnlock(TvEntitledFeature.OMDB_SETUP) },
@@ -3412,6 +3816,22 @@ internal fun TvSettingsScreen(
                         onFocused = { onSettingsRowFocused(advancedOmdbTestTarget, requester) },
                         onClick = { settingsViewModel.validateOmdbApiKey() },
                         rowType = TvSettingRowType.ACTION,
+                    )
+                }
+
+                // OpenSubtitles
+                item(key = "opensubtitles_key") {
+                    TvTextInputCard(
+                        key = "opensubtitles_key",
+                        title = stringResource(R.string.tv_settings_opensubtitles_api_key),
+                        value = settingsState.opensubtitlesApiKey,
+                        expandedInput = expandedInput,
+                        railFocusRequester = railFocusRequester,
+                        onContentFocused = onContentFocused,
+                        onExpandToggle = { expandedInput = if (expandedInput == it) null else it },
+                        onValueChange = { settingsViewModel.setOpenSubtitlesApiKey(it) },
+                        settingsFocusController = settingsFocusController,
+                        focusTarget = advancedOpenSubtitlesKeyTarget,
                     )
                 }
 
@@ -3644,21 +4064,37 @@ internal fun TvSettingsScreen(
                                 modifier = Modifier.fillMaxWidth(),
                             )
                             val saveRequester = remember { FocusRequester() }
+                            val saveTarget = remember {
+                                TvSettingsFocusTarget(
+                                    itemId = "settings/advanced/kodi_form/save",
+                                    category = TvSettingsCategory.ADVANCED,
+                                    listIndex = 36,
+                                    focusTargetType = "action",
+                                )
+                            }
+                            val registeredSaveRequester = rememberSettingsRowRequester(
+                                target = saveTarget,
+                                externalRequester = saveRequester,
+                            )
                             TvSettingCard(
                                 title = stringResource(R.string.tv_settings_kodi_add),
                                 subtitle = "",
                                 modifier = Modifier.fillMaxWidth(),
-                                focusRequester = saveRequester,
-                                onFocused = { onContentFocused(saveRequester) },
+                                focusRequester = registeredSaveRequester,
+                                onFocused = { onSettingsRowFocused(saveTarget, registeredSaveRequester) },
                                 onClick = {
                                     val port = kodiPort.toIntOrNull() ?: 8080
                                     if (kodiName.isNotBlank() && kodiIp.isNotBlank()) {
+                                        settingsFocusController.requestRestore(
+                                            itemId = advancedKodiAddTarget.itemId,
+                                            reason = "kodi_saved",
+                                            outerListState = settingsListState,
+                                        )
                                         settingsViewModel.addKodiHost(kodiName, kodiIp, port)
                                         kodiName = ""
                                         kodiIp = ""
                                         kodiPort = "8080"
                                         showAddKodi = false
-                                        onContentFocused(addKodiCardRequester)
                                     }
                                 },
                             )
@@ -3932,12 +4368,24 @@ internal fun TvSettingsScreen(
                                 Text(text = err, style = MaterialTheme.typography.bodySmall, color = Ruby)
                             }
                             val installRequester = remember { FocusRequester() }
+                            val installTarget = remember {
+                                TvSettingsFocusTarget(
+                                    itemId = "settings/advanced/addon_form/install",
+                                    category = TvSettingsCategory.ADVANCED,
+                                    listIndex = 201,
+                                    focusTargetType = "action",
+                                )
+                            }
+                            val registeredInstallRequester = rememberSettingsRowRequester(
+                                target = installTarget,
+                                externalRequester = installRequester,
+                            )
                             TvSettingCard(
                                 title = stringResource(R.string.tv_settings_addon_install),
                                 subtitle = "",
                                 modifier = Modifier.fillMaxWidth(),
-                                focusRequester = installRequester,
-                                onFocused = { onContentFocused(installRequester) },
+                                focusRequester = registeredInstallRequester,
+                                onFocused = { onSettingsRowFocused(installTarget, registeredInstallRequester) },
                                 onClick = {
                                     addonViewModel.installAddon()
                                 },
@@ -4022,8 +4470,8 @@ internal fun TvSettingsScreen(
 
                     // Tab toggle: Popular / Search
                     item(key = "mdblist_tabs") {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
                             modifier = Modifier.padding(vertical = 4.dp),
                         ) {
                             val popularTarget = remember {
@@ -4053,9 +4501,8 @@ internal fun TvSettingsScreen(
                             TvSettingCard(
                                 title = stringResource(R.string.tv_settings_mdblist_popular),
                                 subtitle = if (mdbListState.activeTab == MdbListTab.POPULAR) "●" else "",
-                                modifier = Modifier.weight(1f).focusProperties {
+                                modifier = Modifier.fillMaxWidth().focusProperties {
                                     left = railFocusRequester
-                                    right = searchRequester
                                 },
                                 focusRequester = popRequester,
                                 onFocused = { onSettingsRowFocused(popularTarget, popRequester) },
@@ -4068,7 +4515,7 @@ internal fun TvSettingsScreen(
                             TvSettingCard(
                                 title = stringResource(R.string.tv_settings_mdblist_search),
                                 subtitle = if (mdbListState.activeTab == MdbListTab.SEARCH) "●" else "",
-                                modifier = Modifier.weight(1f).focusProperties { left = popRequester },
+                                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                                 focusRequester = searchRequester,
                                 onFocused = { onSettingsRowFocused(searchTarget, searchRequester) },
                                 onClick = { mdbListViewModel.setActiveTab(MdbListTab.SEARCH) },
@@ -4096,12 +4543,24 @@ internal fun TvSettingsScreen(
                                     modifier = Modifier.fillMaxWidth(),
                                 )
                                 val searchBtnRequester = remember { FocusRequester() }
+                                val searchBtnTarget = remember {
+                                    TvSettingsFocusTarget(
+                                        itemId = "settings/advanced/mdblist/search_submit",
+                                        category = TvSettingsCategory.ADVANCED,
+                                        listIndex = 84,
+                                        focusTargetType = "action",
+                                    )
+                                }
+                                val registeredSearchBtnRequester = rememberSettingsRowRequester(
+                                    target = searchBtnTarget,
+                                    externalRequester = searchBtnRequester,
+                                )
                                 TvSettingCard(
                                     title = stringResource(R.string.tv_settings_mdblist_search),
                                     subtitle = if (mdbListState.isSearching) stringResource(R.string.tv_settings_validating) else "",
                                     modifier = Modifier.fillMaxWidth(),
-                                    focusRequester = searchBtnRequester,
-                                    onFocused = { onContentFocused(searchBtnRequester) },
+                                    focusRequester = registeredSearchBtnRequester,
+                                    onFocused = { onSettingsRowFocused(searchBtnTarget, registeredSearchBtnRequester) },
                                     onClick = { mdbListViewModel.search() },
                                     rowType = TvSettingRowType.ACTION,
                                 )
@@ -4330,19 +4789,35 @@ internal fun TvSettingsScreen(
                         modifier = Modifier.fillMaxWidth(),
                     )
                     val saveRequester = remember("selected_playlist_epg_save") { FocusRequester() }
+                    val saveTarget = remember(selectedPlaylistForEpg.id) {
+                        TvSettingsFocusTarget(
+                            itemId = "settings/library/playlist_epg/${selectedPlaylistForEpg.id}/save",
+                            category = TvSettingsCategory.LIBRARY,
+                            listIndex = 21,
+                            focusTargetType = "action",
+                        )
+                    }
+                    val registeredSaveRequester = rememberSettingsRowRequester(
+                        target = saveTarget,
+                        externalRequester = saveRequester,
+                    )
                     TvSettingCard(
                         title = stringResource(R.string.tv_settings_playlist_save),
                         subtitle = "",
                         modifier = Modifier.fillMaxWidth(),
-                        focusRequester = saveRequester,
-                        onFocused = { onContentFocused(saveRequester) },
+                        focusRequester = registeredSaveRequester,
+                        onFocused = { onSettingsRowFocused(saveTarget, registeredSaveRequester) },
                         onClick = {
+                            settingsFocusController.requestRestore(
+                                itemId = libraryManageChannelsTarget.itemId,
+                                reason = "playlist_epg_saved",
+                                outerListState = settingsListState,
+                            )
                             channelsViewModel.updatePlaylistEpgUrl(
                                 playlistId = selectedPlaylistForEpg.id,
                                 epgUrl = selectedPlaylistEpgDraft,
                             )
                             showEditSelectedPlaylistEpg = false
-                            onContentFocused(editPlaylistEpgCardRequester)
                         },
                     )
                 }
@@ -4412,7 +4887,7 @@ internal fun TvSettingsScreen(
                             .onPreviewKeyEvent { event ->
                                 when {
                                     event.type == KeyEventType.KeyDown && event.key == Key.DirectionRight -> {
-                                        channelManagerHideAllRequester.requestFocus()
+                                        runCatching { channelManagerHideAllRequester.requestFocus() }
                                         true
                                     }
                                     event.type == KeyEventType.KeyUp && event.key == Key.DirectionRight -> true
@@ -4437,7 +4912,7 @@ internal fun TvSettingsScreen(
                             .onPreviewKeyEvent { event ->
                                 when {
                                     event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft -> {
-                                        channelManagerShowAllRequester.requestFocus()
+                                        runCatching { channelManagerShowAllRequester.requestFocus() }
                                         true
                                     }
                                     event.type == KeyEventType.KeyUp && event.key == Key.DirectionLeft -> true
@@ -4694,6 +5169,18 @@ internal fun TvSettingsScreen(
                     }
 
                     val saveRequester = remember { FocusRequester() }
+                    val saveTarget = remember {
+                        TvSettingsFocusTarget(
+                            itemId = "settings/library/playlist_form/save",
+                            category = TvSettingsCategory.LIBRARY,
+                            listIndex = 3000,
+                            focusTargetType = "action",
+                        )
+                    }
+                    val registeredSaveRequester = rememberSettingsRowRequester(
+                        target = saveTarget,
+                        externalRequester = saveRequester,
+                    )
                     TvSettingCard(
                         title = if (channelsState.isAddingPlaylist) {
                             stringResource(R.string.tv_settings_validating)
@@ -4702,8 +5189,8 @@ internal fun TvSettingsScreen(
                         },
                         subtitle = "",
                         modifier = Modifier.fillMaxWidth(),
-                        focusRequester = saveRequester,
-                        onFocused = { onContentFocused(saveRequester) },
+                        focusRequester = registeredSaveRequester,
+                        onFocused = { onSettingsRowFocused(saveTarget, registeredSaveRequester) },
                         onClick = {
                             if (channelsState.isAddingPlaylist) return@TvSettingCard
                             channelsViewModel.setNewPlaylistType(addPlaylistType)
@@ -4748,10 +5235,7 @@ internal fun TvSettingsScreen(
                     up = categoryRequesters.getValue(TvSettingsCategory.PLAYBACK)
                 },
                 focusRequester = requester,
-                onFocused = {
-                    settingsFocusController.markFocused(maxQualityTarget.itemId, requester)
-                    onContentFocused(requester)
-                },
+                onFocused = { onSettingsRowFocused(maxQualityTarget, requester) },
                 onClick = {
                     logSettingsFocus("launch_selector category=PLAYBACK row=PLAYBACK item=max_quality reason=selector_open")
                     settingsFocusController.captureOrigin(
@@ -4776,10 +5260,7 @@ internal fun TvSettingsScreen(
                 subtitle = settingsState.minQuality.label,
                 modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                 focusRequester = requester,
-                onFocused = {
-                    settingsFocusController.markFocused(minQualityTarget.itemId, requester)
-                    onContentFocused(requester)
-                },
+                onFocused = { onSettingsRowFocused(minQualityTarget, requester) },
                 onClick = {
                     logSettingsFocus("launch_selector category=PLAYBACK row=PLAYBACK item=min_quality reason=selector_open")
                     settingsFocusController.captureOrigin(
@@ -4809,10 +5290,7 @@ internal fun TvSettingsScreen(
                            else stringResource(R.string.tv_settings_autoplay_off),
                 modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                 focusRequester = requester,
-                onFocused = {
-                    settingsFocusController.markFocused(autoplayTarget.itemId, requester)
-                    onContentFocused(requester)
-                },
+                onFocused = { onSettingsRowFocused(autoplayTarget, requester) },
                 onClick = { settingsViewModel.setAutoPlayEnabled(!settingsState.autoPlayEnabled) },
                 rowType = TvSettingRowType.TOGGLE,
             )
@@ -4830,10 +5308,7 @@ internal fun TvSettingsScreen(
                            else stringResource(R.string.tv_settings_autoplay_next_off),
                 modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                 focusRequester = requester,
-                onFocused = {
-                    settingsFocusController.markFocused(autoplayNextTarget.itemId, requester)
-                    onContentFocused(requester)
-                },
+                onFocused = { onSettingsRowFocused(autoplayNextTarget, requester) },
                 onClick = { settingsViewModel.setAutoPlayNextEpisodeEnabled(!settingsState.autoPlayNextEpisodeEnabled) },
                 rowType = TvSettingRowType.TOGGLE,
             )
@@ -4855,10 +5330,7 @@ internal fun TvSettingsScreen(
                            else stringResource(R.string.tv_settings_dedupe_off),
                 modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                 focusRequester = requester,
-                onFocused = {
-                    settingsFocusController.markFocused(dedupeTarget.itemId, requester)
-                    onContentFocused(requester)
-                },
+                onFocused = { onSettingsRowFocused(dedupeTarget, requester) },
                 onClick = { settingsViewModel.setDedupeResultsEnabled(!settingsState.dedupeResults) },
                 rowType = TvSettingRowType.TOGGLE,
             )
@@ -4888,10 +5360,7 @@ internal fun TvSettingsScreen(
                 subtitle = modeLabel,
                 modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                 focusRequester = requester,
-                onFocused = {
-                    settingsFocusController.markFocused(playbackAudioModeTarget.itemId, requester)
-                    onContentFocused(requester)
-                },
+                onFocused = { onSettingsRowFocused(playbackAudioModeTarget, requester) },
                 onClick = {
                     val nextMode = when (channelsState.liveAudioOutputMode) {
                         LiveAudioOutputMode.AUTO -> LiveAudioOutputMode.PREFER_COMPATIBLE
@@ -4919,10 +5388,7 @@ internal fun TvSettingsScreen(
                 },
                 modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                 focusRequester = requester,
-                onFocused = {
-                    settingsFocusController.markFocused(playbackAudioPassthroughTarget.itemId, requester)
-                    onContentFocused(requester)
-                },
+                onFocused = { onSettingsRowFocused(playbackAudioPassthroughTarget, requester) },
                 onClick = {
                     channelsViewModel.setAudioPassthroughEnabled(!channelsState.audioPassthroughEnabled)
                 },
@@ -4945,10 +5411,7 @@ internal fun TvSettingsScreen(
                 },
                 modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                 focusRequester = requester,
-                onFocused = {
-                    settingsFocusController.markFocused(playbackAudioSurroundTarget.itemId, requester)
-                    onContentFocused(requester)
-                },
+                onFocused = { onSettingsRowFocused(playbackAudioSurroundTarget, requester) },
                 onClick = {
                     channelsViewModel.setPreferSurroundCodecs(!channelsState.preferSurroundCodecs)
                 },
@@ -4974,12 +5437,10 @@ internal fun TvSettingsScreen(
                 modifier = Modifier.fillMaxWidth().focusProperties {
                     left = railFocusRequester
                     up = categoryRequesters.getValue(TvSettingsCategory.APPEARANCE)
+                    down = languageCardRequester
                 },
                 focusRequester = requester,
-                onFocused = {
-                    settingsFocusController.markFocused(reduceMotionTarget.itemId, requester)
-                    onContentFocused(requester)
-                },
+                onFocused = { onSettingsRowFocused(reduceMotionTarget, requester) },
                 onClick = {
                     reduceMotionEnabled = !reduceMotionEnabled
                     setTvReduceMotionEnabled(context, reduceMotionEnabled)
@@ -5001,12 +5462,13 @@ internal fun TvSettingsScreen(
             TvSettingCard(
                 title = languageLabel,
                 subtitle = settingsState.appLanguage.tvDisplayName(),
-                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
-                focusRequester = requester,
-                onFocused = {
-                    settingsFocusController.markFocused(languageTarget.itemId, requester)
-                    onContentFocused(requester)
+                modifier = Modifier.fillMaxWidth().focusProperties {
+                    left = railFocusRequester
+                    up = reduceMotionCardRequester
+                    down = homeLayoutCardRequester
                 },
+                focusRequester = requester,
+                onFocused = { onSettingsRowFocused(languageTarget, requester) },
                 onClick = {
                     logSettingsFocus("launch_selector category=APPEARANCE row=APPEARANCE item=language reason=selector_open")
                     settingsFocusController.captureOrigin(
@@ -5032,21 +5494,21 @@ internal fun TvSettingsScreen(
 
         // Home Layout navigation card
         item(key = "home_layout") {
-            val baseRequester = homeLayoutFocusRequester ?: remember("home_layout") { FocusRequester() }
             val requester = rememberRegisteredTvSettingsFocusRequester(
                 controller = settingsFocusController,
                 target = homeLayoutTarget,
-                externalRequester = baseRequester,
+                externalRequester = homeLayoutCardRequester,
             )
             TvSettingCard(
                 title = stringResource(R.string.tv_settings_home_layout),
                 subtitle = stringResource(R.string.tv_settings_home_layout_subtitle),
-                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
-                focusRequester = requester,
-                onFocused = {
-                    settingsFocusController.markFocused(homeLayoutTarget.itemId, requester)
-                    onContentFocused(requester)
+                modifier = Modifier.fillMaxWidth().focusProperties {
+                    left = railFocusRequester
+                    up = languageCardRequester
+                    down = ratingsCardRequester
                 },
+                focusRequester = requester,
+                onFocused = { onSettingsRowFocused(homeLayoutTarget, requester) },
                 onClick = {
                     logSettingsFocus("launch_subpage category=APPEARANCE row=APPEARANCE item=home_layout reason=route_open")
                     settingsFocusController.captureOrigin(
@@ -5070,21 +5532,21 @@ internal fun TvSettingsScreen(
                 TvSectionHeader(text = stringResource(R.string.tv_settings_section_metadata_ratings))
             }
             item(key = "ratings") {
-                val baseRequester = ratingsFocusRequester ?: remember("ratings") { FocusRequester() }
                 val requester = rememberRegisteredTvSettingsFocusRequester(
                     controller = settingsFocusController,
                     target = ratingsTarget,
-                    externalRequester = baseRequester,
+                    externalRequester = ratingsCardRequester,
                 )
                 TvSettingCard(
                     title = stringResource(R.string.tv_settings_ratings),
                     subtitle = stringResource(R.string.tv_settings_ratings_subtitle),
-                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
-                    focusRequester = requester,
-                    onFocused = {
-                        settingsFocusController.markFocused(ratingsTarget.itemId, requester)
-                        onContentFocused(requester)
+                    modifier = Modifier.fillMaxWidth().focusProperties {
+                        left = railFocusRequester
+                        up = homeLayoutCardRequester
+                        down = posterTitlesCardRequester
                     },
+                    focusRequester = requester,
+                    onFocused = { onSettingsRowFocused(ratingsTarget, requester) },
                     onClick = {
                         logSettingsFocus("launch_subpage category=APPEARANCE row=APPEARANCE item=ratings reason=route_open")
                         settingsFocusController.captureOrigin(
@@ -5102,7 +5564,7 @@ internal fun TvSettingsScreen(
             item(key = "poster_titles") {
             val requester = rememberSettingsRowRequester(
                 target = posterTitlesTarget,
-                externalRequester = remember("poster_titles") { FocusRequester() },
+                externalRequester = posterTitlesCardRequester,
             )
             var showPosterTitles by remember {
                 mutableStateOf(prefs.getBoolean("tv_show_poster_titles", true))
@@ -5111,7 +5573,10 @@ internal fun TvSettingsScreen(
                 title = stringResource(R.string.tv_settings_poster_titles),
                 subtitle = if (showPosterTitles) stringResource(R.string.tv_settings_poster_titles_on)
                            else stringResource(R.string.tv_settings_poster_titles_off),
-                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                modifier = Modifier.fillMaxWidth().focusProperties {
+                    left = railFocusRequester
+                    up = ratingsCardRequester
+                },
                 focusRequester = requester,
                 onFocused = { onSettingsRowFocused(posterTitlesTarget, requester) },
                 onClick = {
@@ -5303,7 +5768,12 @@ internal fun TvSettingsScreen(
             Box(Modifier.onFocusChanged { if (!showDebugPanel) isLastItemFocused = it.hasFocus }) {
                 TvSettingCard(
                     title = stringResource(R.string.tv_settings_stats),
-                    subtitle = "${statsState.totalMovies} movies · ${statsState.totalEpisodes} episodes · ${hours}h watched",
+                    subtitle = stringResource(
+                        R.string.tv_settings_stats_summary,
+                        statsState.totalMovies,
+                        statsState.totalEpisodes,
+                        hours,
+                    ),
                     modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                     focusRequester = requester,
                     onFocused = { onSettingsRowFocused(aboutStatsTarget, requester) },
@@ -5333,7 +5803,7 @@ internal fun TvSettingsScreen(
                 Box(Modifier.onFocusChanged { isLastItemFocused = it.hasFocus }) {
                     TvSettingCard(
                         title = stringResource(R.string.tv_settings_sync_status),
-                        subtitle = "Transport: ${syncState.wsStatus}",
+                        subtitle = stringResource(R.string.tv_settings_transport_status, syncState.wsStatus),
                         modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                         focusRequester = lastItemRequester,
                         onFocused = { onSettingsRowFocused(debugSyncTarget, lastItemRequester) },

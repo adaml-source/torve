@@ -469,7 +469,13 @@ class TmdbApiClient(
                 withWatchProviders?.let { add("with_watch_providers" to it) }
                 watchRegion?.let { add("watch_region" to it) }
                 withKeywords?.let { add("with_keywords" to it) }
-                if (minRating != null) add("vote_count.gte" to 50)
+                // Floor vote_count at 100 globally to exclude indie shorts
+                // with 1-2 votes that pollute the top of any sort
+                // (especially IMDB-rating sort, which previously showed a
+                // wall of "10.0" titles by 1-vote items). 100 is permissive
+                // enough to keep most legitimate small-release content
+                // while filtering the long tail of fringe entries.
+                add("vote_count.gte" to 100)
             },
         )
     }
@@ -512,7 +518,8 @@ class TmdbApiClient(
                 withWatchProviders?.let { add("with_watch_providers" to it) }
                 watchRegion?.let { add("watch_region" to it) }
                 withKeywords?.let { add("with_keywords" to it) }
-                if (minRating != null) add("vote_count.gte" to 50)
+                // Floor vote_count at 100 globally (see discoverMovie comment).
+                add("vote_count.gte" to 100)
             },
         )
     }
@@ -648,6 +655,30 @@ class TmdbApiClient(
                     )
                     body
                 } catch (throwable: Throwable) {
+                    if (throwable is CancellationException) {
+                        diagnostics(
+                            TmdbRequestDiagnostic(
+                                requestId = requestId,
+                                category = requestCategory,
+                                host = BASE_HOST,
+                                resolvedHost = resolvedHost,
+                                endpoint = endpoint,
+                                params = sanitizeParameters(parameters),
+                                requestTimeoutMs = HttpClientFactory.DEFAULT_REQUEST_TIMEOUT_MS,
+                                connectTimeoutMs = HttpClientFactory.DEFAULT_CONNECT_TIMEOUT_MS,
+                                socketTimeoutMs = HttpClientFactory.DEFAULT_SOCKET_TIMEOUT_MS,
+                                queuedAtMs = queuedAtMs,
+                                completedAtMs = Clock.System.now().toEpochMilliseconds(),
+                                queueDelayMs = queueMark.elapsedNow().inWholeMilliseconds,
+                                outcome = "failure",
+                                executed = false,
+                                failureKind = classifyFailure(throwable),
+                                exceptionType = throwable::class.simpleName ?: throwable::class.toString(),
+                                exceptionMessage = sanitizeNetworkDiagnosticText(throwable.message),
+                            ),
+                        )
+                        throw throwable
+                    }
                     diagnostics(
                         TmdbRequestDiagnostic(
                             requestId = requestId,

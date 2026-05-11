@@ -125,15 +125,48 @@ fun V2LivePage(
             .get<com.torve.presentation.recording.RecordingsViewModel>()
     }
     val recordingsState by recordingsVm.state.collectAsState()
+    // Load recording prefs once on entry; refresh when settings change.
+    val prefsRepo = remember {
+        org.koin.mp.KoinPlatform.getKoin()
+            .get<com.torve.domain.repository.PreferencesRepository>()
+    }
+    var recordingPrefs by remember {
+        mutableStateOf(com.torve.domain.recording.RecordingPreferences())
+    }
+    LaunchedEffect(Unit) {
+        recordingPrefs = com.torve.domain.recording.RecordingPreferences.load(prefsRepo)
+    }
     val recordingStatusFor: (com.torve.domain.model.Channel, com.torve.domain.model.EpgProgramme) -> com.torve.presentation.recording.RecordingSlotStatus =
         { ch, p -> recordingsVm.statusFor(ch.url, p.startTime, p.endTime) }
+    // Helper: surface a toast/tray notification when the user has no
+    // recordings folder set. The recording stack would otherwise just
+    // mark the row as Failed, which is a poor UX.
+    val settingsVmForRecording = remember {
+        org.koin.mp.KoinPlatform.getKoin()
+            .get<com.torve.presentation.settings.SettingsViewModel>()
+    }
+    fun ensureRecordingFolderConfigured(): Boolean {
+        val configured = settingsVmForRecording.state.value.recordingDownloadPath.isNotBlank()
+        if (!configured) {
+            com.torve.desktop.desktopNotify(
+                "Recording disabled",
+                "Set a Recordings Folder under Settings → Preferences → Downloads first.",
+            )
+        }
+        return configured
+    }
     val onToggleRecord: (com.torve.domain.model.Channel, com.torve.domain.model.EpgProgramme) -> Unit = { ch, p ->
         val existing = recordingsVm.rowFor(ch.url, p.startTime, p.endTime)
         if (existing != null && (existing.status == com.torve.domain.recording.RecordingStatus.SCHEDULED ||
                     existing.status == com.torve.domain.recording.RecordingStatus.RECORDING)
         ) {
             recordingsVm.cancel(existing.id)
+        } else if (!ensureRecordingFolderConfigured()) {
+            // No-op: the helper notified the user.
         } else {
+            // Apply pre-roll / post-roll buffers from settings so stations
+            // that start a minute early or sports events that overrun get
+            // captured. Defaults: pre=1min, post=5min.
             recordingsVm.schedule(
                 playlistId = channelsState.selectedPlaylistId.orEmpty(),
                 channelId = ch.url,
@@ -141,8 +174,57 @@ fun V2LivePage(
                 streamUrl = ch.url,
                 programmeTitle = p.title,
                 programmeDescription = p.description,
-                startMs = p.startTime,
-                endMs = p.endTime,
+                startMs = p.startTime - recordingPrefs.preRollMs,
+                endMs = p.endTime + recordingPrefs.postRollMs,
+            )
+        }
+    }
+    // Variant of onToggleRecord that adds an explicit extra "overrun"
+    // window on top of the post-roll. Useful for sports events that
+    // routinely run 30-60+ minutes long. Caller picks the bonus from
+    // a submenu (15 / 30 / 60 / 120 min).
+    val onScheduleWithOverrun: (com.torve.domain.model.Channel, com.torve.domain.model.EpgProgramme, Int) -> Unit =
+        { ch, p, overrunMin ->
+            recordingsVm.schedule(
+                playlistId = channelsState.selectedPlaylistId.orEmpty(),
+                channelId = ch.url,
+                channelName = ch.name,
+                streamUrl = ch.url,
+                programmeTitle = p.title,
+                programmeDescription = p.description,
+                startMs = p.startTime - recordingPrefs.preRollMs,
+                endMs = p.endTime + recordingPrefs.postRollMs + overrunMin * 60_000L,
+            )
+        }
+
+    // ── Live "record what I'm watching" (Prompt 10D) ─────────────
+    // Toggle that records the currently selected channel for a default
+    // 2-hour window starting NOW. Reuses the existing recording stack:
+    // schedule(start=now, end=now+2h) is picked up by the scheduler's
+    // 30 s tick (or sooner via the immediate isActive check) and the
+    // recording starts. Stop = cancel the active row by streamUrl.
+    val isRecordingChannel: (com.torve.domain.model.Channel) -> Boolean = { ch ->
+        recordingsState.active.any { it.streamUrl == ch.url }
+    }
+    val onToggleRecordNow: (com.torve.domain.model.Channel) -> Unit = { ch ->
+        val active = recordingsState.active.firstOrNull { it.streamUrl == ch.url }
+        if (active != null) {
+            recordingsVm.cancel(active.id)
+        } else if (!ensureRecordingFolderConfigured()) {
+            // No-op: helper already showed the notification.
+        } else {
+            // Use the user's configured default duration (Settings →
+            // Recording). 0 sentinel = "Until I stop" → 24 hour cap.
+            val now = System.currentTimeMillis()
+            recordingsVm.schedule(
+                playlistId = channelsState.selectedPlaylistId.orEmpty(),
+                channelId = ch.url,
+                channelName = ch.name,
+                streamUrl = ch.url,
+                programmeTitle = "Live recording — ${ch.name}",
+                programmeDescription = null,
+                startMs = now,
+                endMs = now + recordingPrefs.defaultDurationMs,
             )
         }
     }
@@ -331,6 +413,10 @@ fun V2LivePage(
                 onToggleReminder = toggleReminder,
                 recordingStatusFor = recordingStatusFor,
                 onToggleRecord = onToggleRecord,
+                searchQuery = channelsState.guideSearchQuery,
+                onSearchQueryChange = channelsViewModel::setGuideSearchQuery,
+                sortMode = channelsState.guideSortMode,
+                onSortModeChange = channelsViewModel::setGuideSortMode,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             )
 
@@ -358,6 +444,8 @@ fun V2LivePage(
                     selectedChannel = channelsState.selectedChannel,
                     programmes = channelsState.programmes,
                     onPlay = playLive,
+                    isRecording = isRecordingChannel,
+                    onToggleRecord = onToggleRecordNow,
                     modifier = Modifier.width(300.dp).fillMaxHeight(),
                 )
             }
@@ -486,17 +574,20 @@ private fun channelRowKey(enriched: EnrichedChannel): String {
 private fun sectionTitleFor(tab: ChannelsSubTab): String = when (tab) {
     ChannelsSubTab.LIVE, ChannelsSubTab.GUIDE -> "Channels"
     ChannelsSubTab.FAVOURITES -> "Favorite Channels"
+    ChannelsSubTab.MOVIES -> "Movies"
 }
 
 private fun emptyTitleFor(tab: ChannelsSubTab): String = when (tab) {
     ChannelsSubTab.LIVE, ChannelsSubTab.GUIDE -> "No channels loaded"
     ChannelsSubTab.FAVOURITES -> "No favorites yet"
+    ChannelsSubTab.MOVIES -> "No movies loaded"
 }
 
 private fun emptyDescriptionFor(tab: ChannelsSubTab): String = when (tab) {
     ChannelsSubTab.LIVE, ChannelsSubTab.GUIDE ->
         "Choose a category or enter at least two characters in search."
     ChannelsSubTab.FAVOURITES -> "Save channels from the Live tab to see them here."
+    ChannelsSubTab.MOVIES -> "Choose a category or enter at least two characters in search."
 }
 
 private fun keyToKeypadEvent(key: Key): ChannelKeypadStateMachine.Event? = when (key) {
@@ -766,6 +857,8 @@ private fun SelectedChannelPane(
     selectedChannel: Channel?,
     programmes: List<com.torve.domain.model.EpgProgramme>,
     onPlay: (Channel) -> Unit,
+    isRecording: (Channel) -> Boolean = { false },
+    onToggleRecord: (Channel) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val colors = TorveDesktopThemeTokens.colors
@@ -801,6 +894,19 @@ private fun SelectedChannelPane(
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TorvePrimaryButton(text = "Play Channel", onClick = { onPlay(selectedChannel) })
+                    val recording = isRecording(selectedChannel)
+                    TorveGhostButton(
+                        text = if (recording) "● Stop Recording" else "● Record Now (2h)",
+                        onClick = { onToggleRecord(selectedChannel) },
+                    )
+                }
+                if (isRecording(selectedChannel)) {
+                    Text(
+                        text = "Recording in progress. Files appear in your recordings folder " +
+                            "as they're written. Default duration is 2 hours; tap Stop to end early.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.textSecondary,
+                    )
                 }
                 if (programmes.isEmpty()) {
                     TorvePlaceholderState(

@@ -95,7 +95,8 @@ fun rememberCachedBitmap(url: String?): ImageBitmap? {
         value = withContext(Dispatchers.IO) {
             runCatching {
                 val bytes = ImageBitmapCache.readDiskBytes(imageUrl)
-                    ?: URL(imageUrl).readBytes().also { ImageBitmapCache.writeDiskBytes(imageUrl, it) }
+                    ?: downloadImageBytes(imageUrl)?.also { ImageBitmapCache.writeDiskBytes(imageUrl, it) }
+                if (bytes == null) return@runCatching null
                 val bmp = SkiaImage.makeFromEncoded(bytes).toComposeImageBitmap()
                 ImageBitmapCache.put(imageUrl, bmp)
                 bmp
@@ -104,6 +105,74 @@ fun rememberCachedBitmap(url: String?): ImageBitmap? {
     }
     return state.value
 }
+
+/**
+ * Shared HTTP/2 client for poster/backdrop/cast image fetches. Replaces
+ * the older HttpURLConnection path: that opened a fresh TCP+TLS
+ * connection per request and serialised handshakes, so loading the 32
+ * images on a typical detail page (cast circles + Related rail +
+ * backdrop + logo + episode posters) took 1-2 minutes on slow CDN
+ * edges even with http.maxConnections=64.
+ *
+ * Java 11's HttpClient negotiates HTTP/2 on first contact and
+ * multiplexes ALL subsequent image fetches on the same TCP+TLS
+ * connection -- no per-request handshake. image.tmdb.org supports
+ * HTTP/2, so a 32-image burst becomes one connection, one TLS
+ * handshake, and 32 concurrent streams.
+ */
+private val imageHttpClient: java.net.http.HttpClient by lazy {
+    java.net.http.HttpClient.newBuilder()
+        .version(java.net.http.HttpClient.Version.HTTP_2)
+        .connectTimeout(java.time.Duration.ofSeconds(8))
+        .followRedirects(java.net.http.HttpClient.Redirect.NORMAL)
+        .build()
+}
+
+/**
+ * Pre-fetches a list of image URLs into the disk cache. Called by the
+ * catalog top-cache worker after each genre's metadata refresh so the
+ * disk image cache is warm before the user clicks any genre chip.
+ *
+ * Skips URLs that already have a disk entry (idempotent across runs).
+ * No decode / no in-memory cache write — that happens lazily when the
+ * grid actually renders the poster. Failures per URL are swallowed:
+ * one stalled image must not block sibling downloads.
+ */
+suspend fun prefetchImagesToDisk(urls: List<String>) {
+    if (urls.isEmpty()) return
+    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        urls.forEach { url ->
+            if (!url.startsWith("http://") && !url.startsWith("https://")) return@forEach
+            // Already on disk? skip.
+            if (ImageBitmapCache.readDiskBytes(url) != null) return@forEach
+            runCatching {
+                downloadImageBytes(url)?.also {
+                    ImageBitmapCache.writeDiskBytes(url, it)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Bounded HTTP/2 fetch for poster / backdrop / cast images. Returns
+ * null on any failure / timeout so the caller's runCatching block
+ * completes cleanly and the placeholder gradient remains visible
+ * instead of blocking on a dead connection forever.
+ */
+private fun downloadImageBytes(imageUrl: String): ByteArray? = runCatching {
+    val request = java.net.http.HttpRequest.newBuilder()
+        .uri(java.net.URI.create(imageUrl))
+        .timeout(java.time.Duration.ofSeconds(15))
+        .header("User-Agent", "Torve-Desktop/1.0")
+        .GET()
+        .build()
+    val response = imageHttpClient.send(
+        request,
+        java.net.http.HttpResponse.BodyHandlers.ofByteArray(),
+    )
+    if (response.statusCode() in 200..299) response.body() else null
+}.getOrNull()
 
 // ── Color palette for artwork placeholders ────────────────────────
 

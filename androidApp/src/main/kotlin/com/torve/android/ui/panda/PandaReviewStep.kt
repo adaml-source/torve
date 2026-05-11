@@ -1,4 +1,4 @@
-package com.torve.android.ui.panda
+﻿package com.torve.android.ui.panda
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -69,12 +69,12 @@ fun PandaReviewStep(
         ) {
             ReviewRow(
                 label = stringResource(R.string.panda_setup_review_provider),
-                value = state.selectedProvider?.name ?: "—",
+                value = state.selectedProvider?.name ?: "â€”",
             )
             HorizontalDivider(color = Steel.copy(alpha = 0.15f), modifier = Modifier.padding(vertical = 10.dp))
             ReviewRow(
                 label = stringResource(R.string.panda_setup_review_auth),
-                value = if (state.authConnected) stringResource(R.string.panda_setup_auth_connected) else "—",
+                value = if (state.authConnected) stringResource(R.string.panda_setup_auth_connected) else "â€”",
             )
             HorizontalDivider(color = Steel.copy(alpha = 0.15f), modifier = Modifier.padding(vertical = 10.dp))
             ReviewRow(
@@ -175,7 +175,7 @@ fun PandaReviewStep(
                 )
             }
         } else {
-            // Edit mode without a local management token — saving would fail.
+            // Edit mode without a local management token â€” saving would fail.
             // Route the user to the recovery flow in Manage Panda.
             if (state.isEditMode && state.editRequiresRecovery) {
                 Row(
@@ -187,9 +187,7 @@ fun PandaReviewStep(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        "This device doesn't have a Panda management token yet. " +
-                            "Open Manage Panda → 'I need a management token' to paste the " +
-                            "admin-issued token before editing this config.",
+                        stringResource(R.string.panda_setup_review_token_required),
                         style = MaterialTheme.typography.bodyMedium,
                         color = Ruby,
                     )

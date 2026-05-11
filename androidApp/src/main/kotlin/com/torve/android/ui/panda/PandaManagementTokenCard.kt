@@ -26,8 +26,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.torve.android.R
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Gunmetal
 import com.torve.android.ui.theme.Silver
@@ -66,7 +68,7 @@ fun PandaManagementTokenCard(
             .padding(16.dp),
     ) {
         Text(
-            "Management token (advanced)",
+            stringResource(R.string.panda_management_token_title),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
             color = Snow,
@@ -74,7 +76,7 @@ fun PandaManagementTokenCard(
         Spacer(Modifier.height(8.dp))
         Text(
             notice
-                ?: "This token lets you edit your Panda config from other devices or restore access if you uninstall. Most users don't need it.",
+                ?: stringResource(R.string.panda_management_token_desc),
             style = MaterialTheme.typography.bodyMedium,
             color = Silver,
         )
@@ -100,14 +102,14 @@ fun PandaManagementTokenCard(
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.weight(1f),
             ) {
-                Text(if (revealed) "Hide" else "Show token", color = Silver)
+                Text(if (revealed) stringResource(R.string.common_hide) else stringResource(R.string.panda_show_token), color = Silver)
             }
             OutlinedButton(
                 onClick = { copyToClipboard(context, token) },
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.weight(1f),
             ) {
-                Text("Copy", color = Silver)
+                Text(stringResource(R.string.common_copy), color = Silver)
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -117,7 +119,7 @@ fun PandaManagementTokenCard(
             colors = ButtonDefaults.buttonColors(containerColor = Amber),
             shape = RoundedCornerShape(10.dp),
         ) {
-            Text("I've saved it", color = Gunmetal, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.panda_management_token_saved), color = Gunmetal, fontWeight = FontWeight.SemiBold)
         }
     }
 }

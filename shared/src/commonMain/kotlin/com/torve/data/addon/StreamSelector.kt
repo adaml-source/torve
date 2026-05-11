@@ -128,7 +128,15 @@ class StreamSelector(
     private fun streamKey(stream: ParsedStream): String {
         return stream.infoHash
             ?: stream.directUrl
-            ?: "${stream.addonName}:${stream.title}"
+            ?: listOf(
+                stream.addonName,
+                stream.title,
+                stream.quality,
+                stream.codec.orEmpty(),
+                stream.source.orEmpty(),
+                stream.size.orEmpty(),
+                stream.fileIdx?.toString().orEmpty(),
+            ).joinToString(":")
     }
 
     private fun effectiveMaxHeight(preferences: StreamPreferences): Int? {

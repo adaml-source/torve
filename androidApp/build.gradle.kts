@@ -37,14 +37,14 @@ android {
         }
     }
 
-    val baseVersionCode = 68
+    val baseVersionCode = 70
 
     defaultConfig {
         applicationId = "com.torve.app"
         minSdk = 24
         targetSdk = 36
         versionCode = baseVersionCode
-        versionName = "1.0.58"
+        versionName = "1.0.60"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         multiDexEnabled = true
         multiDexKeepProguard = file("multidex-config.pro")
@@ -71,12 +71,16 @@ android {
         create("google") {
             dimension = "store"
             buildConfigField("Boolean", "HAS_BILLING", "true")
+            buildConfigField("Boolean", "SUPPORTS_TV_BILLING", "true")
         }
         create("amazon") {
             dimension = "store"
             // Different applicationId so it can coexist with Google Play version
             applicationIdSuffix = ".amazon"
             buildConfigField("Boolean", "HAS_BILLING", "true")
+            // Amazon TV is distributed as a sideloaded APK — no in-app purchase flow.
+            // TV paywall shows "buy via phone" instead of a purchase dialog.
+            buildConfigField("Boolean", "SUPPORTS_TV_BILLING", "false")
         }
         create("mobile") {
             dimension = "formFactor"

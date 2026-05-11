@@ -267,6 +267,16 @@ class MPVPlayerEngine(
         MPVLib.disableSubtitles()
     }
 
+    override fun setSubtitleDelay(delayMs: Int) {
+        if (!initialized) return
+        MPVLib.setPropertyDouble("sub-delay", delayMs / 1000.0)
+    }
+
+    override fun getSubtitleDelay(): Int {
+        if (!initialized) return 0
+        return try { (MPVLib.getPropertyDouble("sub-delay") * 1000).toInt() } catch (_: Exception) { 0 }
+    }
+
     override fun setAudioDelay(delayMs: Int) {
         if (!initialized) return
         val seconds = delayMs / 1000.0

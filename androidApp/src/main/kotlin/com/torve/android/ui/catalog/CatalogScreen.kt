@@ -27,12 +27,14 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.ui.zIndex
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -41,10 +43,14 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.ViewList
+import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.FilterList
+import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.ViewModule
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.CircularProgressIndicator
@@ -106,6 +112,7 @@ import com.torve.domain.model.allowsTmdbRatingProvider
 import com.torve.domain.model.resolveCardStyle
 import com.torve.presentation.catalog.CatalogCategory
 import com.torve.presentation.catalog.CatalogFilter
+import com.torve.presentation.catalog.CatalogViewMode
 import com.torve.presentation.catalog.CatalogViewModel
 import com.torve.presentation.settings.SettingsViewModel
 import org.koin.compose.koinInject
@@ -269,197 +276,408 @@ fun CatalogScreen(
             }
 
             else -> {
-                LazyVerticalGrid(
-                    state = gridState,
-                    columns = GridCells.Adaptive(minSize = 130.dp),
-                    contentPadding = PaddingValues(
-                        top = gridTopPadding,
-                        start = 16.dp,
-                        end = 16.dp,
-                        bottom = 24.dp,
-                    ),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
+                if (state.viewMode == CatalogViewMode.LIST) {
+                    val listState = rememberLazyListState()
 
-                    // ── Featured Hero Pager ──
-                    if (!isSearchMode && displayItems.size >= 3) {
-                        item(
-                            key = "hero",
-                            span = { GridItemSpan(maxLineSpan) },
-                        ) {
-                            CatalogHeroPager(
-                                items = displayItems.take(5),
-                                onItemClick = onMediaClick,
-                            )
+                    // Infinite scroll for list mode
+                    LaunchedEffect(listState, viewModel) {
+                        snapshotFlow {
+                            val layoutInfo = listState.layoutInfo
+                            val totalItems = layoutInfo.totalItemsCount
+                            val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                            lastVisible to totalItems
                         }
+                            .distinctUntilChanged()
+                            .collect { (lastVisible, totalItems) ->
+                                if (totalItems > 0 && lastVisible >= totalItems - 6) {
+                                    viewModel.loadMore()
+                                }
+                            }
                     }
 
-                    // ── Category Chips ──
-                    item(
-                        key = "categories",
-                        span = { GridItemSpan(maxLineSpan) },
+                    LazyColumn(
+                        state = listState,
+                        contentPadding = PaddingValues(
+                            top = gridTopPadding,
+                            bottom = 24.dp,
+                        ),
                     ) {
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            items(CatalogCategory.entries.filter { it != CatalogCategory.IN_PROGRESS }) { category ->
-                                val selected = state.selectedCategory == category
-                                FilterChip(
-                                    selected = selected,
-                                    onClick = { viewModel.selectCategory(category) },
-                                    label = {
-                                        Text(
-                                            category.label,
-                                            style = MaterialTheme.typography.labelLarge,
-                                        )
-                                    },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = Amber,
-                                        selectedLabelColor = MaterialTheme.colorScheme.background,
-                                        containerColor = Gunmetal,
-                                        labelColor = Torve.colors.textSecondary,
-                                    ),
-                                    border = FilterChipDefaults.filterChipBorder(
-                                        borderColor = MaterialTheme.colorScheme.background,
-                                        selectedBorderColor = Amber,
-                                        enabled = true,
+                        // ── Featured Hero Pager ──
+                        if (!isSearchMode && displayItems.size >= 3) {
+                            item(key = "hero") {
+                                Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                                    CatalogHeroPager(
+                                        items = displayItems.take(5),
+                                        onItemClick = onMediaClick,
+                                    )
+                                }
+                            }
+                        }
+
+                        // ── Category Chips ──
+                        item(key = "categories") {
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                contentPadding = PaddingValues(horizontal = 16.dp),
+                            ) {
+                                items(CatalogCategory.entries.filter { it != CatalogCategory.IN_PROGRESS }) { category ->
+                                    val selected = state.selectedCategory == category
+                                    FilterChip(
                                         selected = selected,
-                                    ),
-                                    shape = RoundedCornerShape(20.dp),
+                                        onClick = { viewModel.selectCategory(category) },
+                                        label = {
+                                            Text(
+                                                category.label,
+                                                style = MaterialTheme.typography.labelLarge,
+                                            )
+                                        },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = Amber,
+                                            selectedLabelColor = MaterialTheme.colorScheme.background,
+                                            containerColor = Gunmetal,
+                                            labelColor = Torve.colors.textSecondary,
+                                        ),
+                                        border = FilterChipDefaults.filterChipBorder(
+                                            borderColor = MaterialTheme.colorScheme.background,
+                                            selectedBorderColor = Amber,
+                                            enabled = true,
+                                            selected = selected,
+                                        ),
+                                        shape = RoundedCornerShape(20.dp),
+                                    )
+                                }
+                            }
+                        }
+
+                        // ── Genre Chips ──
+                        item(key = "genres") {
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                contentPadding = PaddingValues(horizontal = 16.dp),
+                            ) {
+                                item {
+                                    val selected = state.selectedGenreId == null
+                                    FilterChip(
+                                        selected = selected,
+                                        onClick = { viewModel.selectGenre(null) },
+                                        label = {
+                                            Text(stringResource(R.string.catalog_all), style = MaterialTheme.typography.labelMedium)
+                                        },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = AmberSubtle,
+                                            selectedLabelColor = Amber,
+                                            containerColor = MaterialTheme.colorScheme.background,
+                                            labelColor = Torve.colors.textTertiary,
+                                        ),
+                                        border = FilterChipDefaults.filterChipBorder(
+                                            borderColor = Torve.colors.border,
+                                            selectedBorderColor = Amber.copy(alpha = 0.3f),
+                                            enabled = true,
+                                            selected = selected,
+                                        ),
+                                        shape = RoundedCornerShape(16.dp),
+                                    )
+                                }
+                                items(genres) { (id, name) ->
+                                    val selected = state.selectedGenreId == id
+                                    FilterChip(
+                                        selected = selected,
+                                        onClick = { viewModel.selectGenre(id) },
+                                        label = {
+                                            Text(name, style = MaterialTheme.typography.labelMedium)
+                                        },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = AmberSubtle,
+                                            selectedLabelColor = Amber,
+                                            containerColor = MaterialTheme.colorScheme.background,
+                                            labelColor = Torve.colors.textTertiary,
+                                        ),
+                                        border = FilterChipDefaults.filterChipBorder(
+                                            borderColor = Torve.colors.border,
+                                            selectedBorderColor = Amber.copy(alpha = 0.3f),
+                                            enabled = true,
+                                            selected = selected,
+                                        ),
+                                        shape = RoundedCornerShape(16.dp),
+                                    )
+                                }
+                            }
+                        }
+
+                        // ── Section Label ──
+                        if (displayItems.isNotEmpty()) {
+                            item(key = "section_label") {
+                                Text(
+                                    text = if (isSearchMode) {
+                                        state.aiSearchLabel ?: stringResource(R.string.catalog_search_results)
+                                    } else {
+                                        state.selectedCategory.label
+                                    },
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    color = Torve.colors.textPrimary,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                                 )
                             }
                         }
-                    }
 
-                    // ── Genre Chips ──
-                    item(
-                        key = "genres",
-                        span = { GridItemSpan(maxLineSpan) },
-                    ) {
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
+                        // ── List Items ──
+                        items(displayItems, key = { item -> "${item.type}_${item.id}" }) { item ->
+                            MediaListItem(
+                                item = item,
+                                onClick = { onMediaClick(item) },
+                            )
+                        }
+
+                        // ── Loading More ──
+                        if (isLoadingMore) {
                             item {
-                                val selected = state.selectedGenreId == null
-                                FilterChip(
-                                    selected = selected,
-                                    onClick = { viewModel.selectGenre(null) },
-                                    label = {
-                                        Text(stringResource(R.string.catalog_all), style = MaterialTheme.typography.labelMedium)
-                                    },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = AmberSubtle,
-                                        selectedLabelColor = Amber,
-                                        containerColor = MaterialTheme.colorScheme.background,
-                                        labelColor = Torve.colors.textTertiary,
-                                    ),
-                                    border = FilterChipDefaults.filterChipBorder(
-                                        borderColor = Torve.colors.border,
-                                        selectedBorderColor = Amber.copy(alpha = 0.3f),
-                                        enabled = true,
-                                        selected = selected,
-                                    ),
-                                    shape = RoundedCornerShape(16.dp),
-                                )
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 16.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    CircularProgressIndicator(
+                                        color = Amber,
+                                        modifier = Modifier.size(28.dp),
+                                        strokeWidth = 2.dp,
+                                    )
+                                }
                             }
-                            items(genres) { (id, name) ->
-                                val selected = state.selectedGenreId == id
-                                FilterChip(
-                                    selected = selected,
-                                    onClick = { viewModel.selectGenre(id) },
-                                    label = {
-                                        Text(name, style = MaterialTheme.typography.labelMedium)
-                                    },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = AmberSubtle,
-                                        selectedLabelColor = Amber,
-                                        containerColor = MaterialTheme.colorScheme.background,
-                                        labelColor = Torve.colors.textTertiary,
-                                    ),
-                                    border = FilterChipDefaults.filterChipBorder(
-                                        borderColor = Torve.colors.border,
-                                        selectedBorderColor = Amber.copy(alpha = 0.3f),
-                                        enabled = true,
-                                        selected = selected,
-                                    ),
-                                    shape = RoundedCornerShape(16.dp),
-                                )
+                        }
+
+                        // ── Empty State ──
+                        if (displayItems.isEmpty() && !state.isSearching && !state.isLoading) {
+                            item {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(200.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(
+                                            Icons.Rounded.Search,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(48.dp),
+                                            tint = Torve.colors.textHint,
+                                        )
+                                        Spacer(Modifier.height(8.dp))
+                                        Text(
+                                            text = stringResource(R.string.catalog_no_results),
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = Torve.colors.textTertiary,
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
+                } else {
+                    val gridColumns = when (state.viewMode) {
+                        CatalogViewMode.GRID_SMALL -> GridCells.Fixed(4)
+                        CatalogViewMode.GRID_MEDIUM -> GridCells.Fixed(3)
+                        CatalogViewMode.GRID_LARGE -> GridCells.Fixed(2)
+                        else -> GridCells.Fixed(3)
+                    }
+                    val gridCardSize = when (state.viewMode) {
+                        CatalogViewMode.GRID_SMALL -> CardSize.SMALL
+                        CatalogViewMode.GRID_LARGE -> CardSize.LARGE
+                        else -> CardSize.MEDIUM
+                    }
 
-                    // ── Section Label ──
-                    if (displayItems.isNotEmpty()) {
+                    LazyVerticalGrid(
+                        state = gridState,
+                        columns = gridColumns,
+                        contentPadding = PaddingValues(
+                            top = gridTopPadding,
+                            start = 16.dp,
+                            end = 16.dp,
+                            bottom = 24.dp,
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+
+                        // ── Featured Hero Pager ──
+                        if (!isSearchMode && displayItems.size >= 3) {
+                            item(
+                                key = "hero",
+                                span = { GridItemSpan(maxLineSpan) },
+                            ) {
+                                CatalogHeroPager(
+                                    items = displayItems.take(5),
+                                    onItemClick = onMediaClick,
+                                )
+                            }
+                        }
+
+                        // ── Category Chips ──
                         item(
-                            key = "section_label",
+                            key = "categories",
                             span = { GridItemSpan(maxLineSpan) },
                         ) {
-                            Text(
-                                text = if (isSearchMode) {
-                                    state.aiSearchLabel ?: stringResource(R.string.catalog_search_results)
-                                } else {
-                                    state.selectedCategory.label
-                                },
-                                style = MaterialTheme.typography.headlineSmall,
-                                color = Torve.colors.textPrimary,
-                            )
-                        }
-                    }
-
-                    // ── Poster Grid ──
-                    items(
-                        displayItems.size,
-                        key = { index -> "${displayItems[index].type}_${displayItems[index].id}_$index" },
-                    ) { index ->
-                        val item = displayItems[index]
-                        PosterCard(
-                            item = item,
-                            sizeOverride = CardSize.MEDIUM,
-                            onClick = { onMediaClick(item) },
-                        )
-                    }
-
-                    // ── Loading More ──
-                    if (isLoadingMore) {
-                        item(span = { GridItemSpan(maxLineSpan) }) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 16.dp),
-                                contentAlignment = Alignment.Center,
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
-                                CircularProgressIndicator(
-                                    color = Amber,
-                                    modifier = Modifier.size(28.dp),
-                                    strokeWidth = 2.dp,
+                                items(CatalogCategory.entries.filter { it != CatalogCategory.IN_PROGRESS }) { category ->
+                                    val selected = state.selectedCategory == category
+                                    FilterChip(
+                                        selected = selected,
+                                        onClick = { viewModel.selectCategory(category) },
+                                        label = {
+                                            Text(
+                                                category.label,
+                                                style = MaterialTheme.typography.labelLarge,
+                                            )
+                                        },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = Amber,
+                                            selectedLabelColor = MaterialTheme.colorScheme.background,
+                                            containerColor = Gunmetal,
+                                            labelColor = Torve.colors.textSecondary,
+                                        ),
+                                        border = FilterChipDefaults.filterChipBorder(
+                                            borderColor = MaterialTheme.colorScheme.background,
+                                            selectedBorderColor = Amber,
+                                            enabled = true,
+                                            selected = selected,
+                                        ),
+                                        shape = RoundedCornerShape(20.dp),
+                                    )
+                                }
+                            }
+                        }
+
+                        // ── Genre Chips ──
+                        item(
+                            key = "genres",
+                            span = { GridItemSpan(maxLineSpan) },
+                        ) {
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                item {
+                                    val selected = state.selectedGenreId == null
+                                    FilterChip(
+                                        selected = selected,
+                                        onClick = { viewModel.selectGenre(null) },
+                                        label = {
+                                            Text(stringResource(R.string.catalog_all), style = MaterialTheme.typography.labelMedium)
+                                        },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = AmberSubtle,
+                                            selectedLabelColor = Amber,
+                                            containerColor = MaterialTheme.colorScheme.background,
+                                            labelColor = Torve.colors.textTertiary,
+                                        ),
+                                        border = FilterChipDefaults.filterChipBorder(
+                                            borderColor = Torve.colors.border,
+                                            selectedBorderColor = Amber.copy(alpha = 0.3f),
+                                            enabled = true,
+                                            selected = selected,
+                                        ),
+                                        shape = RoundedCornerShape(16.dp),
+                                    )
+                                }
+                                items(genres) { (id, name) ->
+                                    val selected = state.selectedGenreId == id
+                                    FilterChip(
+                                        selected = selected,
+                                        onClick = { viewModel.selectGenre(id) },
+                                        label = {
+                                            Text(name, style = MaterialTheme.typography.labelMedium)
+                                        },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = AmberSubtle,
+                                            selectedLabelColor = Amber,
+                                            containerColor = MaterialTheme.colorScheme.background,
+                                            labelColor = Torve.colors.textTertiary,
+                                        ),
+                                        border = FilterChipDefaults.filterChipBorder(
+                                            borderColor = Torve.colors.border,
+                                            selectedBorderColor = Amber.copy(alpha = 0.3f),
+                                            enabled = true,
+                                            selected = selected,
+                                        ),
+                                        shape = RoundedCornerShape(16.dp),
+                                    )
+                                }
+                            }
+                        }
+
+                        // ── Section Label ──
+                        if (displayItems.isNotEmpty()) {
+                            item(
+                                key = "section_label",
+                                span = { GridItemSpan(maxLineSpan) },
+                            ) {
+                                Text(
+                                    text = if (isSearchMode) {
+                                        state.aiSearchLabel ?: stringResource(R.string.catalog_search_results)
+                                    } else {
+                                        state.selectedCategory.label
+                                    },
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    color = Torve.colors.textPrimary,
                                 )
                             }
                         }
-                    }
 
-                    // ── Empty State ──
-                    if (displayItems.isEmpty() && !state.isSearching && !state.isLoading) {
-                        item(span = { GridItemSpan(maxLineSpan) }) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(200.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Icon(
-                                        Icons.Rounded.Search,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(48.dp),
-                                        tint = Torve.colors.textHint,
+                        // ── Poster Grid ──
+                        items(
+                            displayItems.size,
+                            key = { index -> "${displayItems[index].type}_${displayItems[index].id}_$index" },
+                        ) { index ->
+                            val item = displayItems[index]
+                            PosterCard(
+                                item = item,
+                                sizeOverride = gridCardSize,
+                                onClick = { onMediaClick(item) },
+                            )
+                        }
+
+                        // ── Loading More ──
+                        if (isLoadingMore) {
+                            item(span = { GridItemSpan(maxLineSpan) }) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 16.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    CircularProgressIndicator(
+                                        color = Amber,
+                                        modifier = Modifier.size(28.dp),
+                                        strokeWidth = 2.dp,
                                     )
-                                    Spacer(Modifier.height(8.dp))
-                                    Text(
-                                        text = stringResource(R.string.catalog_no_results),
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = Torve.colors.textTertiary,
-                                    )
+                                }
+                            }
+                        }
+
+                        // ── Empty State ──
+                        if (displayItems.isEmpty() && !state.isSearching && !state.isLoading) {
+                            item(span = { GridItemSpan(maxLineSpan) }) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(200.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(
+                                            Icons.Rounded.Search,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(48.dp),
+                                            tint = Torve.colors.textHint,
+                                        )
+                                        Spacer(Modifier.height(8.dp))
+                                        Text(
+                                            text = stringResource(R.string.catalog_no_results),
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = Torve.colors.textTertiary,
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -566,6 +784,8 @@ fun CatalogScreen(
                         isAiSearching = state.isAiSearching,
                         onAiSearchClick = { viewModel.searchWithAi(settingsState.aiProvider, settingsState.activeAiApiKey) },
                         hasActiveSearch = state.hasActiveSearch,
+                        viewMode = state.viewMode,
+                        onViewModeChange = { viewModel.setViewMode(it) },
                     )
                     // AI search hint / error
                     state.aiSearchError?.let { hint ->
@@ -763,6 +983,8 @@ private fun CatalogSearchRow(
     isAiSearching: Boolean = false,
     onAiSearchClick: () -> Unit = {},
     hasActiveSearch: Boolean = false,
+    viewMode: CatalogViewMode = CatalogViewMode.GRID_MEDIUM,
+    onViewModeChange: (CatalogViewMode) -> Unit = {},
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -867,6 +1089,52 @@ private fun CatalogSearchRow(
                     tint = Torve.colors.textSecondary,
                 )
             }
+        }
+
+        // View mode buttons
+        IconButton(
+            onClick = { onViewModeChange(CatalogViewMode.GRID_SMALL) },
+            modifier = Modifier.size(36.dp),
+        ) {
+            Icon(
+                Icons.Rounded.Apps,
+                contentDescription = "Small grid",
+                tint = if (viewMode == CatalogViewMode.GRID_SMALL) Amber else Torve.colors.textTertiary,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        IconButton(
+            onClick = { onViewModeChange(CatalogViewMode.GRID_MEDIUM) },
+            modifier = Modifier.size(36.dp),
+        ) {
+            Icon(
+                Icons.Rounded.ViewModule,
+                contentDescription = "Medium grid",
+                tint = if (viewMode == CatalogViewMode.GRID_MEDIUM) Amber else Torve.colors.textTertiary,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        IconButton(
+            onClick = { onViewModeChange(CatalogViewMode.GRID_LARGE) },
+            modifier = Modifier.size(36.dp),
+        ) {
+            Icon(
+                Icons.Rounded.GridView,
+                contentDescription = "Large grid",
+                tint = if (viewMode == CatalogViewMode.GRID_LARGE) Amber else Torve.colors.textTertiary,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        IconButton(
+            onClick = { onViewModeChange(CatalogViewMode.LIST) },
+            modifier = Modifier.size(36.dp),
+        ) {
+            Icon(
+                Icons.AutoMirrored.Rounded.ViewList,
+                contentDescription = "List view",
+                tint = if (viewMode == CatalogViewMode.LIST) Amber else Torve.colors.textTertiary,
+                modifier = Modifier.size(18.dp),
+            )
         }
     }
 }
@@ -1238,6 +1506,59 @@ private fun FilterBottomSheet(
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
+            }
+        }
+    }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Media List Item — Row layout for LIST view mode
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@Composable
+private fun MediaListItem(
+    item: MediaItem,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        AsyncImage(
+            model = item.posterUrl,
+            contentDescription = item.title,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .width(52.dp)
+                .height(78.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(Gunmetal),
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = Snow,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            item.year?.let { year ->
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = year.toString(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Torve.colors.textTertiary,
+                )
+            }
+            item.ratings?.let { ratings ->
+                Spacer(Modifier.height(4.dp))
+                com.torve.android.ui.components.MultiRatingPills(ratings = ratings)
             }
         }
     }

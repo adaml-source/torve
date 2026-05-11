@@ -110,6 +110,8 @@ class MainActivity : AppCompatActivity() {
             authClient.authEvents.collectLatest { event ->
                 when (event) {
                     is AuthEvent.SessionExpired -> {
+                        getKoin().get<AccountSessionCoordinator>()
+                            .clearLocalAccountData(reason = "session_expired")
                         Toast.makeText(this@MainActivity, event.message, Toast.LENGTH_LONG).show()
                     }
                     // Handled by NavGraph's AuthEvent observer (sets the

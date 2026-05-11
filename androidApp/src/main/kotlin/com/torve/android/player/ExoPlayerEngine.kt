@@ -1300,7 +1300,7 @@ class ExoPlayerEngine(
         if (subs.isEmpty()) return emptyList()
         return subs.mapNotNull { sub ->
             val parsedUri = runCatching { Uri.parse(sub.url) }.getOrNull() ?: return@mapNotNull null
-            val mime = sub.mimeType ?: inferSubtitleMimeType(sub.url) ?: return@mapNotNull null
+            val mime = sub.mimeType ?: inferSubtitleMimeType(sub.url)
             MediaItem.SubtitleConfiguration.Builder(parsedUri)
                 .setMimeType(mime)
                 .apply {
@@ -1312,13 +1312,13 @@ class ExoPlayerEngine(
         }
     }
 
-    private fun inferSubtitleMimeType(url: String): String? {
+    private fun inferSubtitleMimeType(url: String): String {
         val lower = url.lowercase()
         return when {
-            lower.endsWith(".vtt") -> MimeTypes.TEXT_VTT
-            lower.endsWith(".srt") -> MimeTypes.APPLICATION_SUBRIP
-            lower.endsWith(".ttml") || lower.endsWith(".xml") -> MimeTypes.APPLICATION_TTML
-            else -> null
+            lower.contains(".vtt") -> MimeTypes.TEXT_VTT
+            lower.contains(".srt") -> MimeTypes.APPLICATION_SUBRIP
+            lower.contains(".ttml") || lower.contains(".xml") -> MimeTypes.APPLICATION_TTML
+            else -> MimeTypes.APPLICATION_SUBRIP  // default for extensionless Stremio/OS URLs
         }
     }
 

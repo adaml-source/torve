@@ -56,6 +56,14 @@ class CatalogViewModel(
     private val contentPolicyFilter: ContentPolicyFilter = ContentPolicyFilter(),
     invalidationCoordinator: ContentPolicyCacheInvalidationCoordinator? = null,
     initialProviderId: Int? = null,
+    /**
+     * Optional pre-paginated top-1000 cache. When present and populated for
+     * the active genre + media type, the catalog grid is rendered straight
+     * from this local SQL store on click, no network round-trip. Falls back
+     * to live discover() when the cache is empty (first launch before the
+     * background worker has populated, or for niche/no-genre filters).
+     */
+    private val catalogTopCache: com.torve.data.catalog.CatalogTopCacheRepository? = null,
 ) {
     private data class CatalogShelvesLoad(
         val continueWatching: List<com.torve.domain.model.WatchProgress>,
@@ -67,6 +75,17 @@ class CatalogViewModel(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(CatalogUiState(providerId = initialProviderId))
     val state: StateFlow<CatalogUiState> = _state.asStateFlow()
+
+    // Cancellation handles for loadCatalog + its enrichment pass.
+    // Without these, rapid genre-pill clicks (Comedy → Drama → Action)
+    // produced several races: the slowest fetch finished last and
+    // overwrote whatever the user actually wanted to see, and stale
+    // enrichment reorders kept rewriting state for a previous genre.
+    // We keep separate refs because enrichment runs after loadCatalog
+    // returns; cancelling loadCatalog alone wouldn't stop in-flight
+    // enrichment from a previous genre.
+    private var catalogLoadJob: kotlinx.coroutines.Job? = null
+    private var catalogEnrichJob: kotlinx.coroutines.Job? = null
 
     private val searchQueryFlow = MutableStateFlow("")
 
@@ -141,23 +160,80 @@ class CatalogViewModel(
     }
 
     fun setProvider(providerId: Int) {
+        catalogDiagLog("ACTION setProvider($providerId)")
         _state.update { it.copy(providerId = providerId) }
         loadCatalog()
     }
 
+    /** Reset the watch-provider filter back to "All providers". */
+    fun clearProvider() {
+        catalogDiagLog("ACTION clearProvider()")
+        _state.update { it.copy(providerId = null) }
+        loadCatalog()
+    }
+
+    fun setViewMode(mode: CatalogViewMode) {
+        _state.update { it.copy(viewMode = mode) }
+    }
+
     fun loadCatalog() {
-        scope.launch {
+        // Cancel any prior in-flight load + enrichment so a slow
+        // previous-genre fetch can't land after a faster newer-genre
+        // fetch has already updated the grid.
+        catalogLoadJob?.cancel()
+        catalogEnrichJob?.cancel()
+        catalogLoadJob = scope.launch {
             torveVerboseLog {
                 "CATALOG_TAB bootstrap_start mediaType=$mediaType category=${_state.value.selectedCategory}"
             }
-            _state.update { it.copy(isLoading = true, error = null, currentPage = 1) }
+            // Clear items immediately so the grid shows a clean loading
+            // state instead of the previous filter's posters lingering
+            // until the network fetch returns. Without this, clicking
+            // genre pills produced a chaotic "old posters → new posters
+            // pop in → re-sort → re-paint" sequence that felt broken.
+            _state.update {
+                it.copy(
+                    isLoading = true,
+                    error = null,
+                    currentPage = 1,
+                    items = emptyList(),
+                    hasMore = false,
+                )
+            }
             try {
                 val filter = _state.value.filter
                 val genreId = _state.value.selectedGenreId
                 val providerId = _state.value.providerId
                 val category = _state.value.selectedCategory
 
+                // Pre-cache fast path DISABLED 2026-05-08. SQLite's
+                // process-wide write lock blocks the cache reads while
+                // the worker is mid-pass, and user-visible behavior
+                // was that genre clicks (which would have used the
+                // cache) fired but loadCatalog never reached its
+                // diagnostic log line -- rapid clicks then cancelled
+                // each other in a chain. The metadata cache keeps
+                // populating in the background; we just don't read
+                // from it from the catalog VM until SQLite is reworked
+                // to WAL mode (concurrent reads during writes) or the
+                // worker breaks its writes into smaller transactions.
+                // Reads always go through discover() which is fast and
+                // works -- the user-visible behavior matches what they
+                // had before the pre-cache work landed.
+                val cachedTop: List<MediaItem>? = null
+                catalogDiagLog(
+                    "load mediaType=$mediaType category=$category genreId=$genreId " +
+                        "providerId=$providerId filterActive=${filter.isActive} " +
+                        "sortBy=${filter.sortBy} cache=disabled",
+                )
+
                 val result = when {
+                    cachedTop != null -> com.torve.domain.model.PagedResult(
+                        items = cachedTop,
+                        page = 1,
+                        totalPages = 1,
+                        totalResults = cachedTop.size,
+                    )
                     // In Progress: always local data, never discovery endpoints
                     category == CatalogCategory.IN_PROGRESS -> {
                         loadInProgressItems(genreId)
@@ -197,23 +273,47 @@ class CatalogViewModel(
 
                 val finalItems = if (shouldDedupe()) result.items.dedupeByStableKey() else result.items
                 val cachedItems = hydrateCachedRatings(finalItems)
+                catalogDiagLog(
+                    "load result.items=${result.items.size} finalItems=${finalItems.size} " +
+                        "cachedItems=${cachedItems.size}",
+                )
                 _state.update {
-                    applyContentPolicy(
-                        it.copy(
-                            items = cachedItems,
-                            isLoading = false,
-                            currentPage = result.page,
-                            totalPages = result.totalPages,
-                            hasMore = result.page < result.totalPages,
-                            activeFilterCount = filter.activeCount + (if (genreId != null) 1 else 0),
-                        ),
+                    val withItems = it.copy(
+                        items = cachedItems,
+                        isLoading = false,
+                        currentPage = result.page,
+                        totalPages = result.totalPages,
+                        hasMore = result.page < result.totalPages,
+                        activeFilterCount = filter.activeCount + (if (genreId != null) 1 else 0),
                     )
+                    val filtered = applyContentPolicy(withItems)
+                    catalogDiagLog("load post-policy items=${filtered.items.size}")
+                    filtered
                 }
                 torveVerboseLog {
                     "CATALOG_TAB state_transition state=success mediaType=$mediaType category=$category items=${cachedItems.size} page=${result.page}/${result.totalPages}"
                 }
-                enrichAndUpdateItems(cachedItems) { items ->
-                    _state.update { current -> applyContentPolicy(current.copy(items = items)) }
+                enrichAndUpdateItems(cachedItems) { enriched ->
+                    // Merge ENRICHED RATINGS into the already-visible items by id.
+                    // Critically: do NOT replace the items list and do NOT re-run
+                    // applyContentPolicy. Re-applying content policy after
+                    // enrichment was the source of "posters disappear / rearrange"
+                    // -- enrichment adds metadata that can re-classify an item as
+                    // adult/restricted, the policy then drops it, and everything
+                    // below shifts up. Patching ratings in place keeps stable
+                    // item identity and zero list-size changes.
+                    _state.update { current ->
+                        val byId = enriched.associateBy { it.id }
+                        val merged = current.items.map { existing ->
+                            byId[existing.id]?.let { e ->
+                                existing.copy(
+                                    ratings = e.ratings,
+                                    imdbId = e.imdbId ?: existing.imdbId,
+                                )
+                            } ?: existing
+                        }
+                        current.copy(items = merged)
+                    }
                 }
             } catch (e: Exception) {
                 torveVerboseLog {
@@ -333,8 +433,20 @@ class CatalogViewModel(
                         ),
                     )
                 }
-                enrichAndUpdateItems(cachedItems) { items ->
-                    _state.update { current -> applyContentPolicy(current.copy(items = items)) }
+                enrichAndUpdateItems(cachedItems) { enriched ->
+                    // Same in-place merge as loadCatalog -- patch ratings only.
+                    _state.update { current ->
+                        val byId = enriched.associateBy { it.id }
+                        val merged = current.items.map { existing ->
+                            byId[existing.id]?.let { e ->
+                                existing.copy(
+                                    ratings = e.ratings,
+                                    imdbId = e.imdbId ?: existing.imdbId,
+                                )
+                            } ?: existing
+                        }
+                        current.copy(items = merged)
+                    }
                 }
             } catch (_: Exception) {
                 torveVerboseLog {
@@ -385,6 +497,7 @@ class CatalogViewModel(
     }
 
     fun selectGenre(genreId: Int?) {
+        catalogDiagLog("ACTION selectGenre($genreId)")
         _state.update { it.copy(selectedGenreId = genreId) }
         loadCatalog()
     }
@@ -622,6 +735,33 @@ class CatalogViewModel(
         return prefsRepo?.getString(SettingsViewModel.KEY_DEDUPE_RESULTS)?.toBooleanStrictOrNull() ?: true
     }
 
+    /**
+     * File-based diagnostic logger that writes to the same launch-guard.log
+     * the desktop launch-guard uses. Compose Desktop's jpackage launcher
+     * swallows stdout, so println-based debugging is invisible; this gives
+     * the user a place to read VM-side logs from PowerShell.
+     * Kotlin Multiplatform: silently no-ops on platforms without a writable
+     * %LOCALAPPDATA% / user.home directory (mobile etc).
+     */
+    private fun catalogDiagLog(message: String) {
+        runCatching {
+            // Resolve a desktop-friendly path. On Android we'd just rely on
+            // Logcat instead, so this branch silently no-ops.
+            val osName = System.getProperty("os.name")?.lowercase().orEmpty()
+            if (!osName.contains("win") && !osName.contains("mac") && !osName.contains("nux")) return@runCatching
+            val home = System.getProperty("user.home") ?: return@runCatching
+            val base = System.getenv("LOCALAPPDATA")?.let { java.io.File(it) }
+                ?: java.io.File(home, ".torve")
+            val dir = java.io.File(base, "Torve")
+            dir.mkdirs()
+            val file = java.io.File(dir, "launch-guard.log")
+            file.appendText(
+                "${java.time.Instant.now()} CATALOG mediaType=$mediaType $message" +
+                    System.lineSeparator(),
+            )
+        }
+    }
+
     private fun hydrateCachedRatings(items: List<MediaItem>): List<MediaItem> {
         val enricher = ratingsEnricher ?: return items
         val hydrated = enricher.hydrateListFromCache(items)
@@ -638,7 +778,13 @@ class CatalogViewModel(
         update: (List<MediaItem>) -> Unit,
     ) {
         val enricher = ratingsEnricher ?: return
-        scope.launch {
+        // Cancel any prior enrichment (e.g. from a previous genre) so
+        // its `update` callback can't land after the user already
+        // moved on. Each loadCatalog cancels this same handle at the
+        // start; here we cancel for safety in case enrichment is
+        // triggered without a fresh loadCatalog.
+        catalogEnrichJob?.cancel()
+        catalogEnrichJob = scope.launch {
             val apiKey = try {
                 integrationSecretStore?.get(IntegrationSecretKey.MDBLIST_API_KEY)
                     ?: prefsRepo?.getString(SettingsViewModel.KEY_MDBLIST_API_KEY)
@@ -647,10 +793,18 @@ class CatalogViewModel(
             // Enrich even without an MDBList key — OMDB/Trakt fallbacks still provide
             // IMDB ratings so pills render on every card.
             val enriched = enricher.enrichList(items, apiKey)
-            val sorted = if (_state.value.filter.sortBy == SortOption.IMDB_SCORE_DESC) {
-                enriched.sortedByDescending { it.ratings?.imdbScore ?: -1f }
-            } else enriched
-            update(sorted)
+            // PRESERVE ORDER. The cache-hydrate phase (hydrateCachedRatings)
+            // already sorted by cached imdbScore for IMDB_SCORE_DESC mode;
+            // re-sorting here would shuffle items into new positions as
+            // freshly-enriched scores arrive, making the grid feel chaotic
+            // -- posters animate from one cell to another for several seconds
+            // after the user clicked a genre pill. Now the order is fixed
+            // at first paint; enrichment only updates the pills in place.
+            //
+            // Tradeoff: items aren't perfectly sorted by globally-best
+            // imdbScore, only by what was cached at first paint. Still much
+            // better UX than the dancing grid.
+            update(enriched)
         }
     }
 

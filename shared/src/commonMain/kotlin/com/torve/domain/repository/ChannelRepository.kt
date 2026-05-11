@@ -54,8 +54,12 @@ interface ChannelRepository {
     suspend fun clearAll()
     suspend fun getChannelsByContentType(playlistId: String, type: ChannelContentType): List<EnrichedChannel>
     suspend fun getCategoryCounts(playlistId: String): List<Pair<String, Long>>
+    suspend fun getLiveCategoryCounts(playlistId: String): List<Pair<String, Long>>
+    suspend fun getVodCategoryCounts(playlistId: String): List<Pair<String, Long>>
     suspend fun getChannelsForCategory(playlistId: String, categoryName: String): List<Channel>
     suspend fun getTotalChannelCount(playlistId: String): Long
+    suspend fun getVodSeriesEpisodes(channel: Channel): List<Channel> = emptyList()
+    suspend fun resolveFirstVodSeriesEpisode(channel: Channel): Channel? = null
     fun syncHiddenChannelsToDb(hiddenIds: Set<String>)
     fun getHiddenChannelIds(): Set<String>
 }

@@ -34,10 +34,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -126,66 +129,71 @@ fun TvSportsScreen(
     val configured = indexerUrl.isNotBlank() && indexerKey.isNotBlank()
 
     val pageKey = "tv_sports"
-    val saved = remember { NzbBrowseStateHolder.get(pageKey) }
-    var query by remember { mutableStateOf(saved.query) }
-    var allItems by remember { mutableStateOf<List<NewznabItem>>(saved.items) }
-    var loading by remember { mutableStateOf(false) }
-    var errorText by remember { mutableStateOf<String?>(saved.errorText) }
+    val pageState by NzbBrowseStateHolder.flow(pageKey).collectAsState()
+    val savedOnce = remember { NzbBrowseStateHolder.get(pageKey) }
+    var query by remember { mutableStateOf(savedOnce.query) }
     var selectedBucket by remember {
         mutableStateOf(
-            saved.selectedSportBucket?.let { name ->
+            savedOnce.selectedSportBucket?.let { name ->
                 SportBucket.entries.firstOrNull { it.name == name }
             },
         )
     }
     var resolveStatus by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     val listState = rememberLazyListState(
-        initialFirstVisibleItemIndex = saved.scrollIndex,
-        initialFirstVisibleItemScrollOffset = saved.scrollOffset,
+        initialFirstVisibleItemIndex = savedOnce.scrollIndex,
+        initialFirstVisibleItemScrollOffset = savedOnce.scrollOffset,
     )
 
-    suspend fun reload() {
-        loading = true
-        errorText = null
-        try {
-            val sportsCat = UsenetIndexerCategoryMap.sportsCategoriesFor(indexerType)
-            allItems = withContext(Dispatchers.IO) {
-                if (query.isBlank()) {
-                    newznab.browseAllPages(indexerUrl, indexerKey, sportsCat, maxItems = 1000)
+    fun startFetch() {
+        val q = query
+        val bucket = selectedBucket
+        NzbBrowseStateHolder.startFetch(pageKey) {
+            NzbBrowseStateHolder.update(pageKey) { it.copy(loading = true, errorText = null, progress = null) }
+            try {
+                val sportsCat = UsenetIndexerCategoryMap.sportsCategoriesFor(indexerType)
+                val items = if (q.isBlank()) {
+                    newznab.browseAllPages(
+                        indexerUrl, indexerKey, sportsCat, maxItems = 200,
+                        onProgress = { fetched, max ->
+                            NzbBrowseStateHolder.update(pageKey) { it.copy(progress = "Loading… $fetched / $max") }
+                        },
+                    )
                 } else {
-                    newznab.searchAllPages(indexerUrl, indexerKey, sportsCat, query.trim(), maxItems = 1000)
+                    newznab.searchAllPages(
+                        indexerUrl, indexerKey, sportsCat, q.trim(), maxItems = 200,
+                        onProgress = { fetched, max ->
+                            NzbBrowseStateHolder.update(pageKey) { it.copy(progress = "Loading… $fetched / $max") }
+                        },
+                    )
+                }
+                val error = if (items.isEmpty() && configured) {
+                    if (q.isBlank()) "Indexer returned 0 results." else "No matches for \"$q\"."
+                } else null
+                NzbBrowseStateHolder.update(pageKey) {
+                    it.copy(
+                        loading = false, progress = null, items = items, errorText = error,
+                        query = q, selectedSportBucket = bucket?.name,
+                        scrollIndex = listState.firstVisibleItemIndex,
+                        scrollOffset = listState.firstVisibleItemScrollOffset,
+                    )
+                }
+            } catch (t: Throwable) {
+                NzbBrowseStateHolder.update(pageKey) {
+                    it.copy(loading = false, progress = null, items = emptyList(), errorText = t.message ?: "Indexer call failed.")
                 }
             }
-            if (allItems.isEmpty() && configured) {
-                errorText = if (query.isBlank()) "Indexer returned 0 results."
-                    else "No matches for \"$query\"."
-            }
-        } catch (t: Throwable) {
-            errorText = t.message ?: "Indexer call failed."
-            allItems = emptyList()
         }
-        loading = false
-        NzbBrowseStateHolder.put(
-            pageKey,
-            NzbBrowseStateHolder.State(
-                query = query,
-                items = allItems,
-                errorText = errorText,
-                scrollIndex = listState.firstVisibleItemIndex,
-                scrollOffset = listState.firstVisibleItemScrollOffset,
-                selectedSportBucket = selectedBucket?.name,
-            ),
-        )
     }
 
     LaunchedEffect(indexerUrl, indexerKey) {
-        if (configured && allItems.isEmpty()) reload()
+        if (configured && pageState.items.isEmpty() && !NzbBrowseStateHolder.isFetching(pageKey)) startFetch()
     }
 
     // Classify each item once per load. Recomputed on filter change.
     data class ClassifiedItem(val item: NewznabItem, val bucket: SportBucket)
-    val classified: List<ClassifiedItem> = remember(allItems) {
-        allItems.map { ClassifiedItem(it, SportBucket.classify(it.title)) }
+    val classified: List<ClassifiedItem> = remember(pageState.items) {
+        pageState.items.map { ClassifiedItem(it, SportBucket.classify(it.title)) }
     }
     val countsByBucket: Map<SportBucket, Int> = remember(classified) {
         classified.groupingBy { it.bucket }.eachCount()
@@ -211,9 +219,9 @@ fun TvSportsScreen(
             color = Snow,
         )
         Text(
-            text = "Newznab sport releases · classified by release name",
+            text = pageState.progress ?: "Newznab sport releases · classified by release name",
             style = MaterialTheme.typography.bodyMedium,
-            color = Torve.colors.textSecondary,
+            color = if (pageState.progress != null) Amber else Torve.colors.textSecondary,
         )
 
         // Search row — submit (IME action / OK on the field) triggers
@@ -221,19 +229,30 @@ fun TvSportsScreen(
         // categories. Empty query falls back to browse on next reload.
         // Clearing the field via the trailing X re-runs the browse so
         // the user sees a fresh list without re-tapping Search.
+        val focusManager = LocalFocusManager.current
+        val keyboardController = LocalSoftwareKeyboardController.current
+        var searchFieldFocused by remember { mutableStateOf(false) }
+        // On TV, pressing Back while the search field is focused clears focus back to the rail.
+        BackHandler(enabled = searchFieldFocused) {
+            keyboardController?.hide()
+            focusManager.clearFocus()
+        }
         com.torve.android.ui.components.TorveSearchField(
             value = query,
             onValueChange = { newValue ->
                 val clearing = query.isNotBlank() && newValue.isBlank()
                 query = newValue
-                if (clearing) scope.launch { reload() }
+                if (clearing) startFetch()
             },
-            placeholder = if (loading) "Searching…" else "Search sport releases",
-            onSubmit = { scope.launch { reload() } },
+            placeholder = if (pageState.loading) "Searching…" else "Search sport releases",
+            onSubmit = { startFetch() },
             showFocusRing = true,
+            editOnClick = true,
             modifier = Modifier
                 .fillMaxWidth()
-                .focusProperties { left = railFocusRequester },
+                .height(42.dp)
+                .focusProperties { left = railFocusRequester }
+                .onFocusChanged { searchFieldFocused = it.isFocused },
         )
 
         // Bucket filter pills — first focusable row; LEFT off the
@@ -269,11 +288,11 @@ fun TvSportsScreen(
                     pandaState.nzbIndexers.any { it.type != "none" },
                 onOpenPandaSetup = onOpenPandaSetup,
             )
-            loading -> Box(
+            pageState.loading -> Box(
                 modifier = Modifier.fillMaxWidth().height(120.dp),
                 contentAlignment = Alignment.Center,
             ) { CircularProgressIndicator(color = Amber) }
-            errorText != null -> Surface(
+            pageState.errorText != null -> Surface(
                 color = Charcoal,
                 shape = RoundedCornerShape(8.dp),
             ) {
@@ -285,7 +304,7 @@ fun TvSportsScreen(
                         color = Snow,
                     )
                     Text(
-                        text = errorText.orEmpty(),
+                        text = pageState.errorText.orEmpty(),
                         style = MaterialTheme.typography.bodySmall,
                         color = Torve.colors.textSecondary,
                     )

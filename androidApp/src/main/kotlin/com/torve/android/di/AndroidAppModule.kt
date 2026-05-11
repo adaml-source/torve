@@ -60,6 +60,7 @@ val androidAppModule = module {
             channelsViewModel = get(),
             pandaConfigStateStore = get(),
             refreshOnSettings = get(),
+            context = androidContext(),
         )
     }
 }

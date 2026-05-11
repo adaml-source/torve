@@ -35,6 +35,7 @@ import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.TorveTheme
 import com.torve.data.auth.AuthEvent
 import com.torve.data.auth.AuthClient
+import com.torve.presentation.session.AccountSessionCoordinator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -138,6 +139,8 @@ class TvMainActivity : AppCompatActivity() {
             authClient.authEvents.collectLatest { event ->
                 when (event) {
                     is AuthEvent.SessionExpired -> {
+                        getKoin().get<AccountSessionCoordinator>()
+                            .clearLocalAccountData(reason = "session_expired")
                         Toast.makeText(this@TvMainActivity, event.message, Toast.LENGTH_LONG).show()
                     }
                     // No TV-side onboarding equivalent today; the

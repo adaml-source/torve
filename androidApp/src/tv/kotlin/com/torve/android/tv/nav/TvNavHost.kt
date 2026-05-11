@@ -2,12 +2,14 @@ package com.torve.android.tv.nav
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.focus.FocusRequester
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import com.torve.android.tv.TvScreenCache
 import com.torve.android.tv.focus.TvScreenFocusHandle
 import com.torve.android.tv.screens.TvDetailsScreen
 import com.torve.android.tv.screens.TvDeviceLimitReachedScreen
@@ -16,10 +18,15 @@ import com.torve.android.tv.screens.TvLivePlayerScreen
 import com.torve.android.tv.screens.TvPandaSetupScreen
 import com.torve.android.tv.screens.TvRatingsSettingsScreen
 import com.torve.android.tv.screens.TvSeeAllScreen
+import com.torve.android.tv.screens.TvVodSeriesDetailsArgs
+import com.torve.android.tv.screens.TvVodSeriesDetailsScreen
 import com.torve.android.tv.premium.TvEntitledFeature
 import com.torve.android.ui.player.PlayerScreen
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
+import com.torve.domain.repository.WatchProgressRepository
+import kotlinx.coroutines.launch
+import org.koin.compose.koinInject
 
 private fun NavHostController.navigateToTvDetails(item: MediaItem, autoPlay: Boolean = false) {
     val id = item.tmdbId ?: item.id.toIntOrNull() ?: return
@@ -58,6 +65,8 @@ internal fun TvNavHost(
     onRatingsEntryReadyChanged: (Boolean) -> Unit = {},
     onRatingsEntryFocused: () -> Unit = {},
 ) {
+    val watchProgressRepo: WatchProgressRepository = koinInject()
+    val navScope = rememberCoroutineScope()
     NavHost(
         navController = navController,
         startDestination = TvRoutes.SUB_NAV_START,
@@ -170,6 +179,64 @@ internal fun TvNavHost(
         }
 
         composable(
+            route = TvRoutes.VOD_SERIES_DETAILS,
+            arguments = listOf(
+                navArgument("cacheKey") { type = NavType.StringType },
+            ),
+        ) { backStackEntry ->
+            val cacheKey = backStackEntry.arguments?.getString("cacheKey").orEmpty()
+            val args = TvScreenCache.get<TvVodSeriesDetailsArgs>(cacheKey)
+            if (args == null) {
+                LaunchedEffect(cacheKey) {
+                    navController.popBackStack()
+                }
+            } else {
+                TvVodSeriesDetailsScreen(
+                    args = args,
+                    railFocusRequester = railFocusRequester,
+                    onBack = { navController.popBackStack() },
+                    onEpisodePlay = { episode, episodeItem ->
+                        if (isStreamPlaybackLocked) {
+                            onRequestLifetimeUnlock(TvEntitledFeature.STREAM_PLAYBACK)
+                        } else {
+                            navScope.launch {
+                                val savedMs = runCatching {
+                                    watchProgressRepo.getProgress(episodeItem.id)
+                                        ?.positionMs
+                                        ?.takeIf { it >= 20_000L }
+                                        ?: 0L
+                                }.getOrDefault(0L)
+                                val season = episode.kodiProps["vod_season_number"]?.toIntOrNull()
+                                val episodeNumber = episode.kodiProps["vod_episode_number"]?.toIntOrNull()
+                                val episodeName = episode.tvgName?.takeIf { it.isNotBlank() }
+                                    ?: episode.name
+                                navController.navigate(
+                                    TvRoutes.player(
+                                        url = episode.url,
+                                        fallbackUrl = "",
+                                        title = args.item.title,
+                                        mediaId = episodeItem.id,
+                                        mediaType = "tv",
+                                        posterUrl = episodeItem.posterUrl.orEmpty(),
+                                        backdropUrl = episodeItem.backdropUrl.orEmpty(),
+                                        seasonNumber = season,
+                                        episodeNumber = episodeNumber,
+                                        episodeName = episodeName,
+                                        showTmdbId = args.item.tmdbId,
+                                        showImdbId = args.item.imdbId,
+                                        startPositionMs = savedMs,
+                                    ),
+                                ) { launchSingleTop = true }
+                            }
+                        }
+                    },
+                    onFirstContentRequester = onFirstContentRequester,
+                    onContentFocused = onContentFocused,
+                )
+            }
+        }
+
+        composable(
             route = TvRoutes.DETAILS,
             arguments = listOf(
                 navArgument("type") { type = NavType.StringType },
@@ -206,25 +273,38 @@ internal fun TvNavHost(
                         ),
                     )
                 },
-                onPlayResolved = { url, fallbackUrl, mediaItem, season, episode, autoSourceSelection ->
+                onPlayResolved = { url, fallbackUrl, mediaItem, season, episode, autoSourceSelection, episodeName ->
                     val mediaType = if (mediaItem.type == MediaType.SERIES) "tv" else "movie"
-                    navController.navigate(
-                        TvRoutes.player(
-                            url = url,
-                            fallbackUrl = fallbackUrl,
-                            title = mediaItem.title,
-                            mediaId = mediaItem.id,
-                            mediaType = mediaType,
-                            posterUrl = mediaItem.posterUrl.orEmpty(),
-                            backdropUrl = mediaItem.backdropUrl.orEmpty(),
-                            seasonNumber = season,
-                            episodeNumber = episode,
-                            showTmdbId = if (mediaType == "tv") mediaItem.tmdbId else null,
-                            showImdbId = mediaItem.imdbId,
-                            startPositionMs = handoffPositionMs.coerceAtLeast(0L),
-                            autoSourceSelection = autoSourceSelection,
-                        ),
-                    )
+                    navScope.launch {
+                        val savedMs = if (handoffPositionMs > 0L) {
+                            handoffPositionMs
+                        } else {
+                            runCatching {
+                                watchProgressRepo.getProgress(mediaItem.id)
+                                    ?.positionMs
+                                    ?.takeIf { it >= 20_000L }
+                                    ?: 0L
+                            }.getOrDefault(0L)
+                        }
+                        navController.navigate(
+                            TvRoutes.player(
+                                url = url,
+                                fallbackUrl = fallbackUrl,
+                                title = mediaItem.title,
+                                mediaId = mediaItem.id,
+                                mediaType = mediaType,
+                                posterUrl = mediaItem.posterUrl.orEmpty(),
+                                backdropUrl = mediaItem.backdropUrl.orEmpty(),
+                                seasonNumber = season,
+                                episodeNumber = episode,
+                                episodeName = episodeName,
+                                showTmdbId = if (mediaType == "tv") mediaItem.tmdbId else null,
+                                showImdbId = mediaItem.imdbId,
+                                startPositionMs = savedMs,
+                                autoSourceSelection = autoSourceSelection,
+                            ),
+                        )
+                    }
                 },
             )
         }
@@ -270,6 +350,7 @@ internal fun TvNavHost(
                 navArgument("fallbackUrl") { type = NavType.StringType; defaultValue = "" },
                 navArgument("startPositionMs") { type = NavType.LongType; defaultValue = 0L },
                 navArgument("autoSourceSelection") { type = NavType.BoolType; defaultValue = false },
+                navArgument("episodeName") { type = NavType.StringType; defaultValue = "" },
             ),
         ) { backStackEntry ->
             if (isStreamPlaybackLocked) {
@@ -290,6 +371,7 @@ internal fun TvNavHost(
                     backdropUrl = backStackEntry.arguments?.getString("backdropUrl") ?: "",
                     seasonNumber = backStackEntry.arguments?.getInt("seasonNumber")?.takeIf { it > 0 },
                     episodeNumber = backStackEntry.arguments?.getInt("episodeNumber")?.takeIf { it > 0 },
+                    episodeName = backStackEntry.arguments?.getString("episodeName").orEmpty(),
                     showTmdbId = backStackEntry.arguments?.getInt("showTmdbId")?.takeIf { it > 0 },
                     showImdbId = backStackEntry.arguments?.getString("showImdbId")?.takeIf { it.isNotBlank() },
                     startPositionMs = backStackEntry.arguments?.getLong("startPositionMs") ?: 0L,

@@ -51,6 +51,13 @@ class AndroidKeystoreSecretStore(
         return runCatching { IntegrationStorageMode.valueOf(stored) }.getOrDefault(IntegrationStorageMode.DEVICE_ONLY)
     }
 
+    override suspend fun getSubKeys(key: IntegrationSecretKey): List<String> {
+        val prefix = "${key.name}:"
+        return prefs.all.keys
+            .filter { it.startsWith(prefix) }
+            .map { it.removePrefix(prefix) }
+    }
+
     override suspend fun clearAllSecrets() {
         val editor = prefs.edit()
         val knownPrefixes = IntegrationSecretKey.entries.map { it.name }.toSet()
@@ -76,6 +83,14 @@ class AndroidKeystoreSecretStore(
 
     override suspend fun remove(key: String) {
         prefs.edit().remove(key).apply()
+    }
+
+    override suspend fun removeByPrefix(prefix: String) {
+        val editor = prefs.edit()
+        prefs.all.keys
+            .filter { it.startsWith(prefix) }
+            .forEach(editor::remove)
+        editor.apply()
     }
 
     override suspend fun updateStrings(updates: Map<String, String?>) {

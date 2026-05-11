@@ -304,6 +304,33 @@ private class EpgFakeChannelRepository(
         return getChannelsByGroup(playlistId).map { (group, channels) -> group to channels.size.toLong() }
     }
 
+    override suspend fun getLiveCategoryCounts(playlistId: String): List<Pair<String, Long>> {
+        return getChannelsByGroup(playlistId)
+            .mapValues { (_, channels) ->
+                channels.filter { it.contentType == ChannelContentType.LIVE || it.contentType == ChannelContentType.UNKNOWN }
+            }
+            .filter { (group, channels) ->
+                channels.isNotEmpty() &&
+                    !group.startsWith("VOD:", ignoreCase = true) &&
+                    !group.equals("VOD", ignoreCase = true)
+            }
+            .map { (group, channels) -> group to channels.size.toLong() }
+    }
+
+    override suspend fun getVodCategoryCounts(playlistId: String): List<Pair<String, Long>> {
+        return getChannelsByGroup(playlistId).mapNotNull { (group, channels) ->
+            val isVodGroup = group.startsWith("VOD:", ignoreCase = true) || group.equals("VOD", ignoreCase = true)
+            val vodChannels = if (isVodGroup) {
+                channels
+            } else {
+                channels.filter {
+                    it.contentType == ChannelContentType.VOD_MOVIE || it.contentType == ChannelContentType.VOD_SERIES
+                }
+            }
+            if (vodChannels.isEmpty()) null else group to vodChannels.size.toLong()
+        }
+    }
+
     override suspend fun getChannelsForCategory(playlistId: String, categoryName: String): List<Channel> {
         return getChannelsByGroup(playlistId)[categoryName].orEmpty()
     }

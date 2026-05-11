@@ -691,8 +691,6 @@ private object DetailSerializer : KSerializer<String?> {
                     ?: element["code"]?.jsonPrimitive?.contentOrNull
                     ?: "Request failed"
             }
-
-            else -> "Request failed"
         }
     }
 

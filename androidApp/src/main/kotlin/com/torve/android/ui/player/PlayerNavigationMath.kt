@@ -2,11 +2,10 @@ package com.torve.android.ui.player
 
 internal object PlayerNavigationMath {
     private val tvProgressiveSkipStepsMs = longArrayOf(
-        15_000L,
+        10_000L,
         30_000L,
         60_000L,
         5 * 60_000L,
-        10 * 60_000L,
     )
 
     fun cyclicIndex(currentIndex: Int, size: Int, delta: Int): Int {

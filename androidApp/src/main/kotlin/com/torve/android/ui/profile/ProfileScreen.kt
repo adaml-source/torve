@@ -735,7 +735,7 @@ private fun EditProfileSheet(
                 shape = RoundedCornerShape(12.dp),
             ) {
                 Text(
-                    "Save Changes",
+                    stringResource(R.string.common_save_changes),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )

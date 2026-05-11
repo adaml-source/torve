@@ -59,6 +59,7 @@ import com.torve.desktop.ui.components.TorvePrimaryButton
 import com.torve.desktop.ui.components.TorveSecondaryButton
 import com.torve.desktop.ui.components.TorveSectionCard
 import com.torve.desktop.ui.components.TorveTextField
+import com.torve.desktop.ui.l10n.ds
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
 import com.torve.presentation.panda.PandaSetupStep
 import com.torve.presentation.panda.PandaSetupUiState
@@ -103,15 +104,15 @@ fun DesktopPandaSetupScreen(
         ) {
             Box(modifier = Modifier.weight(1f)) {
                 TorvePageHeader(
-                    title = "Panda guided setup",
+                    title = ds("Panda guided setup"),
                     subtitle = if (state.isEditMode) {
-                        "Reconfiguring existing Panda setup"
+                        ds("Reconfiguring existing Panda setup")
                     } else {
-                        "Pick a cloud provider, connect it, and Panda installs itself as a Torve add-on."
+                        ds("Pick a cloud provider, connect it, and Panda installs itself as a Torve add-on.")
                     },
                 )
             }
-            TorveGhostButton(text = "Close", onClick = onBack)
+            TorveGhostButton(text = ds("Close"), onClick = onBack)
         }
 
         LinearProgressIndicator(
@@ -135,7 +136,7 @@ fun DesktopPandaSetupScreen(
         }
 
         state.error?.let { message ->
-            TorveBanner(title = "Error", description = message, tone = TorveBannerTone.Error)
+            TorveBanner(title = ds("Error"), description = message, tone = TorveBannerTone.Error)
         }
 
         Row(
@@ -144,9 +145,9 @@ fun DesktopPandaSetupScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (state.currentStep == PandaSetupStep.PROVIDER) {
-                TorveGhostButton(text = "Close", onClick = onBack)
+                TorveGhostButton(text = ds("Close"), onClick = onBack)
             } else {
-                TorveGhostButton(text = "Back", onClick = { viewModel.previousStep() })
+                TorveGhostButton(text = ds("Back"), onClick = { viewModel.previousStep() })
             }
 
             val canAdvance = when (state.currentStep) {
@@ -156,7 +157,7 @@ fun DesktopPandaSetupScreen(
                 PandaSetupStep.REVIEW -> false
             }
             if (canAdvance) {
-                TorvePrimaryButton(text = "Next", onClick = { viewModel.nextStep() })
+                TorvePrimaryButton(text = ds("Next"), onClick = { viewModel.nextStep() })
             }
         }
     }
@@ -165,8 +166,8 @@ fun DesktopPandaSetupScreen(
 @Composable
 private fun ProviderStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel) {
     TorveSectionCard(
-        title = "Choose a cloud provider",
-        supportingText = "Panda will route streams through your debrid service.",
+        title = ds("Choose a cloud provider"),
+        supportingText = ds("Panda will route streams through your debrid service."),
     ) {
         if (state.providersLoading) {
             Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
@@ -174,9 +175,9 @@ private fun ProviderStep(state: PandaSetupUiState, viewModel: PandaSetupViewMode
             }
         } else if (state.providers.isEmpty()) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Could not load providers.", style = MaterialTheme.typography.bodyMedium)
+                Text(ds("Could not load providers."), style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(8.dp))
-                TorveSecondaryButton(text = "Retry", onClick = { viewModel.retryLoadProviders() })
+                TorveSecondaryButton(text = ds("Retry"), onClick = { viewModel.retryLoadProviders() })
             }
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -212,13 +213,15 @@ private fun ProviderStep(state: PandaSetupUiState, viewModel: PandaSetupViewMode
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                             )
+                            val browserSignInLabel = ds("Browser sign-in")
+                            val apiKeyLabel = ds("API key")
                             val subtitle = if (provider.id == "none") {
-                                "No debrid - configure Usenet on the next steps"
+                                ds("No debrid - configure Usenet on the next steps")
                             } else {
                                 provider.authMethods.joinToString(" / ") { method ->
                                     when (method) {
-                                        "oauth" -> "Browser sign-in"
-                                        "apikey" -> "API key"
+                                        "oauth" -> browserSignInLabel
+                                        "apikey" -> apiKeyLabel
                                         else -> method
                                     }
                                 }
@@ -232,7 +235,7 @@ private fun ProviderStep(state: PandaSetupUiState, viewModel: PandaSetupViewMode
                             }
                         }
                         if (selected) {
-                            TorveBadge("Selected", tone = TorveBadgeTone.Success)
+                            TorveBadge(ds("Selected"), tone = TorveBadgeTone.Success)
                         }
                     }
                 }
@@ -247,15 +250,19 @@ private fun AuthStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel) {
     val supportsOAuth = "oauth" in provider.authMethods
 
     TorveSectionCard(
-        title = "Connect ${provider.name}",
+        title = ds("Connect %1\$s").format(provider.name),
         supportingText = if (state.authConnected) {
-            if (state.existingCredentialDetected) "Using existing ${provider.name} credentials." else "Connected."
+            if (state.existingCredentialDetected) {
+                ds("Using existing %1\$s credentials.").format(provider.name)
+            } else {
+                ds("Connected.")
+            }
         } else {
-            "Authorize Panda to use your ${provider.name} account."
+            ds("Authorize Panda to use your %1\$s account.").format(provider.name)
         },
         trailing = {
             if (state.authConnected) {
-                TorveBadge("Connected", tone = TorveBadgeTone.Success)
+                TorveBadge(ds("Connected"), tone = TorveBadgeTone.Success)
             }
         },
     ) {
@@ -264,12 +271,12 @@ private fun AuthStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel) {
         if (supportsOAuth) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TorveFilterChip(
-                    text ="Browser sign-in",
+                    text = ds("Browser sign-in"),
                     selected = state.authMethod == "oauth",
                     onClick = { viewModel.setAuthMethod("oauth") },
                 )
                 TorveFilterChip(
-                    text ="API key",
+                    text = ds("API key"),
                     selected = state.authMethod == "apikey",
                     onClick = { viewModel.setAuthMethod("apikey") },
                 )
@@ -303,7 +310,7 @@ private fun OAuthSection(state: PandaSetupUiState, viewModel: PandaSetupViewMode
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text("Enter this code in your browser:", style = MaterialTheme.typography.bodyMedium)
+            Text(ds("Enter this code in your browser:"), style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.height(6.dp))
             Text(
                 code.userCode,
@@ -325,15 +332,15 @@ private fun OAuthSection(state: PandaSetupUiState, viewModel: PandaSetupViewMode
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 TorvePrimaryButton(
-                    text = "Open in browser",
+                    text = ds("Open in browser"),
                     onClick = { openUrl(code.verificationUrl) },
                 )
                 TorveSecondaryButton(
-                    text = "Copy code",
+                    text = ds("Copy code"),
                     onClick = { copyTextToClipboard(code.userCode) },
                 )
                 TorveSecondaryButton(
-                    text = "Copy link",
+                    text = ds("Copy link"),
                     onClick = { copyTextToClipboard(code.verificationUrl) },
                 )
             }
@@ -341,11 +348,11 @@ private fun OAuthSection(state: PandaSetupUiState, viewModel: PandaSetupViewMode
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
                 Spacer(Modifier.width(8.dp))
-                Text("Waiting for authorization...", style = MaterialTheme.typography.bodySmall)
+                Text(ds("Waiting for authorization..."), style = MaterialTheme.typography.bodySmall)
             }
         }
     } else {
-        TorveSecondaryButton(text = "Retry", onClick = { viewModel.startOAuth() })
+        TorveSecondaryButton(text = ds("Retry"), onClick = { viewModel.startOAuth() })
     }
 }
 
@@ -355,11 +362,11 @@ private fun ApiKeySection(state: PandaSetupUiState, viewModel: PandaSetupViewMod
         PandaSecretField(
             value = state.apiKeyInput,
             onValueChange = { viewModel.setApiKeyInput(it) },
-            label = "API key",
+            label = ds("API key"),
             modifier = Modifier.fillMaxWidth(),
         )
         TorvePrimaryButton(
-            text = if (state.authLoading) "Validating..." else "Validate & connect",
+            text = if (state.authLoading) ds("Validating...") else ds("Validate & connect"),
             onClick = { viewModel.validateApiKey() },
             enabled = state.apiKeyInput.isNotBlank() && !state.authLoading,
         )
@@ -371,8 +378,8 @@ private fun ApiKeySection(state: PandaSetupUiState, viewModel: PandaSetupViewMod
 private fun SourcesStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel) {
     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
         TorveSectionCard(
-            title = "Torrent sources",
-            supportingText = "Panda will search these indexers. Toggle any you want disabled.",
+            title = ds("Torrent sources"),
+            supportingText = ds("Panda will search these indexers. Toggle any you want disabled."),
         ) {
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -393,8 +400,8 @@ private fun SourcesStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel
         // users a chance to pick languages without having to walk all
         // the way to the Quality step.
         TorveSectionCard(
-            title = "Preferred release languages",
-            supportingText = "Pick all languages you want in results. \"any\" disables the filter.",
+            title = ds("Preferred release languages"),
+            supportingText = ds("Pick all languages you want in results. \"any\" disables the filter."),
         ) {
             ReleaseLanguageChips(state = state, viewModel = viewModel)
         }
@@ -420,17 +427,17 @@ private fun ReleaseLanguageChips(state: PandaSetupUiState, viewModel: PandaSetup
 @Composable
 private fun UsenetStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel) {
     TorveSectionCard(
-        title = "Usenet (optional)",
-        supportingText = "Connect a Usenet provider, indexer, and download client if you want NZB support.",
+        title = ds("Usenet (optional)"),
+        supportingText = ds("Connect a Usenet provider, indexer, and download client if you want NZB support."),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Enable Usenet", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            Text(ds("Enable Usenet"), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
             Switch(checked = state.enableUsenet, onCheckedChange = { viewModel.setEnableUsenet(it) })
         }
 
         if (state.enableUsenet) {
             Spacer(Modifier.height(12.dp))
-            Text("Provider", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(ds("Provider"), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -450,13 +457,13 @@ private fun UsenetStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel)
                     TorveTextField(
                         value = state.usenetHost,
                         onValueChange = { viewModel.setUsenetHost(it) },
-                        label = "Host",
+                        label = ds("Host"),
                         modifier = Modifier.weight(2f),
                     )
                     TorveTextField(
                         value = state.usenetPort.toString(),
                         onValueChange = { it.toIntOrNull()?.let(viewModel::setUsenetPort) },
-                        label = "Port",
+                        label = ds("Port"),
                         modifier = Modifier.weight(1f),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     )
@@ -466,29 +473,29 @@ private fun UsenetStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel)
             TorveTextField(
                 value = state.usenetUsername,
                 onValueChange = { viewModel.setUsenetUsername(it) },
-                label = "Username",
+                label = ds("Username"),
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(8.dp))
             PandaSecretField(
                 value = state.usenetPassword,
                 onValueChange = { viewModel.setUsenetPassword(it) },
-                label = "Password",
+                label = ds("Password"),
                 modifier = Modifier.fillMaxWidth(),
                 placeholder = if ("usenet_password" in state.serverHasSecrets) {
-                    "Saved on server - type to replace"
+                    ds("Saved on server - type to replace")
                 } else null,
             )
             if (state.usenetProvider == "generic") {
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("SSL", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    Text(ds("SSL"), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                     Switch(checked = state.usenetSSL, onCheckedChange = { viewModel.setUsenetSSL(it) })
                 }
             }
 
             Spacer(Modifier.height(16.dp))
-            Text("NZB indexers", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(ds("NZB indexers"), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             state.nzbIndexers.forEachIndexed { index, row ->
                 if (index > 0) Spacer(Modifier.height(12.dp))
                 val keyOnServer = "indexer_api_key_$index" in state.serverHasSecrets ||
@@ -507,17 +514,17 @@ private fun UsenetStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel)
                     },
                     onRemove = { viewModel.removeIndexer(index) },
                     canRemove = state.nzbIndexers.size > 1,
-                    indexerKeyPlaceholder = if (keyOnServer) "Saved on server - type to replace" else null,
+                    indexerKeyPlaceholder = if (keyOnServer) ds("Saved on server - type to replace") else null,
                 )
             }
             Spacer(Modifier.height(8.dp))
             TorveSecondaryButton(
-                text = "+ Add another indexer",
+                text = ds("+ Add another indexer"),
                 onClick = { viewModel.addIndexer() },
             )
 
             Spacer(Modifier.height(16.dp))
-            Text("Download client", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(ds("Download client"), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -575,7 +582,7 @@ private fun NzbIndexerRowEditor(
             }
             if (canRemove) {
                 Spacer(Modifier.width(8.dp))
-                TorveGhostButton(text = "Remove", onClick = onRemove)
+                TorveGhostButton(text = ds("Remove"), onClick = onRemove)
             }
         }
         if (row.type != "none") {
@@ -584,7 +591,7 @@ private fun NzbIndexerRowEditor(
                 TorveTextField(
                     value = row.url,
                     onValueChange = onUrlChange,
-                    label = "Indexer URL",
+                    label = ds("Indexer URL"),
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -592,7 +599,7 @@ private fun NzbIndexerRowEditor(
             PandaSecretField(
                 value = row.apiKey,
                 onValueChange = onKeyChange,
-                label = "Indexer API key",
+                label = ds("Indexer API key"),
                 modifier = Modifier.fillMaxWidth(),
                 placeholder = indexerKeyPlaceholder,
             )
@@ -618,13 +625,13 @@ private fun BandwidthSaverSection(state: PandaSetupUiState, viewModel: PandaSetu
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    "Bandwidth saver - use NZB path when available",
+                    ds("Bandwidth saver - use NZB path when available"),
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "When the same release is on both Easynews and one of your NZB indexers, route playback through your cloud download service. Saves Easynews data.",
+                    ds("When the same release is on both Easynews and one of your NZB indexers, route playback through your cloud download service. Saves Easynews data."),
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.textMuted,
                 )
@@ -639,7 +646,7 @@ private fun BandwidthSaverSection(state: PandaSetupUiState, viewModel: PandaSetu
         if (!canEnable) {
             Spacer(Modifier.height(8.dp))
             Text(
-                "Configure at least one NZB indexer with an API key and a cloud download client (Premiumize / TorBox / AllDebrid) to enable.",
+                ds("Configure at least one NZB indexer with an API key and a cloud download client (Premiumize / TorBox / AllDebrid) to enable."),
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.textMuted,
             )
@@ -659,31 +666,31 @@ private fun DownloadClientFields(state: PandaSetupUiState, viewModel: PandaSetup
             "url" -> TorveTextField(
                 value = state.downloadClientUrl,
                 onValueChange = { viewModel.setDownloadClientUrl(it) },
-                label = "Client URL",
+                label = ds("Client URL"),
                 modifier = Modifier.fillMaxWidth(),
             )
             "username" -> TorveTextField(
                 value = state.downloadClientUsername,
                 onValueChange = { viewModel.setDownloadClientUsername(it) },
-                label = "User",
+                label = ds("User"),
                 modifier = Modifier.fillMaxWidth(),
             )
             "password" -> PandaSecretField(
                 value = state.downloadClientPassword,
                 onValueChange = { viewModel.setDownloadClientPassword(it) },
-                label = "Password",
+                label = ds("Password"),
                 modifier = Modifier.fillMaxWidth(),
                 placeholder = if ("download_client_password" in state.serverHasSecrets) {
-                    "Saved on server - type to replace"
+                    ds("Saved on server - type to replace")
                 } else null,
             )
             "apiKey" -> PandaSecretField(
                 value = state.downloadClientApiKey,
                 onValueChange = { viewModel.setDownloadClientApiKey(it) },
-                label = "API key",
+                label = ds("API key"),
                 modifier = Modifier.fillMaxWidth(),
                 placeholder = if ("download_client_api_key" in state.serverHasSecrets) {
-                    "Saved on server - type to replace"
+                    ds("Saved on server - type to replace")
                 } else null,
             )
         }
@@ -696,18 +703,20 @@ private fun desktopLabelForUsenetProvider(id: String): String = when (id) {
     else -> id.replaceFirstChar { it.uppercase() }
 }
 
+@Composable
 private fun desktopLabelForNzbIndexer(id: String): String = when (id) {
-    "none" -> "None"
+    "none" -> ds("None")
     "nzbgeek" -> "NZBgeek"
     "scenenzbs" -> "SceneNZBs"
     "dognzb" -> "DogNZB"
     "nzbplanet" -> "NZBPlanet"
-    "custom" -> "Custom URL"
+    "custom" -> ds("Custom URL")
     else -> id.replaceFirstChar { it.uppercase() }
 }
 
+@Composable
 private fun desktopLabelForDownloadClient(id: String): String = when (id) {
-    "none" -> "None"
+    "none" -> ds("None")
     "nzbget" -> "NZBget"
     "sabnzbd" -> "SABnzbd"
     "premiumize" -> "Premiumize"
@@ -719,8 +728,8 @@ private fun desktopLabelForDownloadClient(id: String): String = when (id) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun QualityStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel) {
-    TorveSectionCard(title = "Quality defaults") {
-        Text("Maximum quality", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+    TorveSectionCard(title = ds("Quality defaults")) {
+        Text(ds("Maximum quality"), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             state.schema.qualityOptions.forEach { id ->
                 TorveFilterChip(
@@ -732,7 +741,7 @@ private fun QualityStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel
         }
 
         Spacer(Modifier.height(16.dp))
-        Text("Quality profile", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Text(ds("Quality profile"), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             state.schema.qualityProfiles.forEach { id ->
                 TorveFilterChip(
@@ -744,7 +753,7 @@ private fun QualityStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel
         }
 
         Spacer(Modifier.height(16.dp))
-        Text("Release language", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Text(ds("Release language"), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
         ReleaseLanguageChips(state = state, viewModel = viewModel)
     }
 }
@@ -754,17 +763,19 @@ private fun desktopLabelForQuality(id: String): String = when (id) {
     else -> id
 }
 
+@Composable
 private fun desktopLabelForQualityProfile(id: String): String = when (id) {
-    "balanced" -> "Balanced"
-    "best_quality" -> "Best quality"
-    "fast_start" -> "Fast start"
-    "data_saver" -> "Data saver"
+    "balanced" -> ds("Balanced")
+    "best_quality" -> ds("Best quality")
+    "fast_start" -> ds("Fast start")
+    "data_saver" -> ds("Data saver")
     else -> id.replace("_", " ").replaceFirstChar { it.uppercase() }
 }
 
+@Composable
 private fun desktopLabelForLanguage(id: String): String = when (id) {
-    "any" -> "Any"
-    "english" -> "English"
+    "any" -> ds("Any")
+    "english" -> ds("English")
     "german" -> "Deutsch"
     "spanish" -> "Español"
     "french" -> "Français"
@@ -804,30 +815,30 @@ private fun ReviewStep(
         }
     }
 
-    TorveSectionCard(title = "Review & save") {
+    TorveSectionCard(title = ds("Review & save")) {
         TorveListRow(
-            title = "Provider",
+            title = ds("Provider"),
             subtitle = state.selectedProvider?.name ?: "-",
         )
         TorveListRow(
-            title = "Auth",
-            subtitle = if (state.authConnected) "Connected" else "Not connected",
+            title = ds("Auth"),
+            subtitle = if (state.authConnected) ds("Connected") else ds("Not connected"),
         )
         TorveListRow(
-            title = "Sources",
-            subtitle = "${state.enabledSources.size} enabled",
+            title = ds("Sources"),
+            subtitle = ds("%1\$d enabled").format(state.enabledSources.size),
         )
         TorveListRow(
-            title = "Max quality",
+            title = ds("Max quality"),
             subtitle = state.maxQuality,
         )
         TorveListRow(
-            title = "Profile",
+            title = ds("Profile"),
             subtitle = state.qualityProfile,
         )
         if (state.enableUsenet) {
             TorveListRow(
-                title = "Usenet",
+                title = ds("Usenet"),
                 subtitle = state.usenetProvider,
             )
         }
@@ -840,29 +851,29 @@ private fun ReviewStep(
         // will close the screen ~1.2s later.
         if (saveJustCompleted) {
             TorveBanner(
-                title = if (state.isEditMode) "Panda updated" else "Panda installed",
-                description = "Saved. Closing setup...",
+                title = if (state.isEditMode) ds("Panda updated") else ds("Panda installed"),
+                description = ds("Saved. Closing setup..."),
                 tone = TorveBannerTone.Success,
             )
             Spacer(Modifier.height(12.dp))
-            TorvePrimaryButton(text = "Close now", onClick = onComplete)
+            TorvePrimaryButton(text = ds("Close now"), onClick = onComplete)
         } else {
             state.saveError?.let {
-                TorveBanner(title = "Save failed", description = it, tone = TorveBannerTone.Error)
+                TorveBanner(title = ds("Save failed"), description = it, tone = TorveBannerTone.Error)
                 Spacer(Modifier.height(12.dp))
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 TorvePrimaryButton(
                     text = when {
-                        state.isSaving -> "Saving..."
-                        state.isEditMode -> "Update Panda"
-                        else -> "Install Panda"
+                        state.isSaving -> ds("Saving...")
+                        state.isEditMode -> ds("Update Panda")
+                        else -> ds("Install Panda")
                     },
                     onClick = { viewModel.saveConfigAndInstall() },
                     enabled = !state.isSaving && state.selectedProvider != null && state.authConnected,
                 )
                 if (state.addonInstalled) {
-                    TorveGhostButton(text = "Exit without saving", onClick = onComplete)
+                    TorveGhostButton(text = ds("Exit without saving"), onClick = onComplete)
                 }
             }
         }
@@ -910,11 +921,11 @@ private fun PandaSecretField(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 TorveBadge(
-                    text = "✓ Saved on server",
+                    text = ds("Saved on server"),
                     tone = TorveBadgeTone.Success,
                 )
                 Text(
-                    text = "Type to replace; leave blank to keep the stored value.",
+                    text = ds("Type to replace; leave blank to keep the stored value."),
                     style = MaterialTheme.typography.labelSmall,
                     color = colors.textSecondary,
                 )
@@ -948,7 +959,7 @@ private fun InnerPandaSecretField(
             IconButton(onClick = { visible = !visible }) {
                 Icon(
                     imageVector = if (visible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                    contentDescription = if (visible) "Hide" else "Show",
+                    contentDescription = if (visible) ds("Hide") else ds("Show"),
                 )
             }
         },

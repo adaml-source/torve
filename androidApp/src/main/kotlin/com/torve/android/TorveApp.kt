@@ -70,12 +70,12 @@ class TorveApp : Application() {
             kotlinx.coroutines.delay(NON_CRITICAL_STARTUP_DELAY_MS)
             launch { runCatching { getKoin().get<BillingManager>().initialize() } }
             launch {
-                EpisodeNotificationWorker.schedule(this@TorveApp)
                 TraktSyncWorker.schedule(this@TorveApp)
                 DownloadWorker.ensureChannel(this@TorveApp)
             }
             launch {
                 runCatching { getKoin().get<AccountSessionCoordinator>().restoreSession() }
+                runCatching { EpisodeNotificationWorker.scheduleIfEnabled(this@TorveApp) }
                 runCatching { getKoin().get<AccelerationInventorySyncService>().syncConnectedProviders() }
             }
             launch { runCatching { androidx.media3.decoder.ffmpeg.FfmpegLibrary.isAvailable() } }

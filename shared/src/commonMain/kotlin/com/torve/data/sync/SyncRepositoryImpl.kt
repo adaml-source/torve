@@ -405,8 +405,8 @@ class SyncRepositoryImpl(
         )
     }
 
-    override suspend fun importFromJson(jsonStr: String): SyncResult {
-        val payload = json.decodeFromString<SyncPayload>(jsonStr)
+    override suspend fun importFromJson(json: String): SyncResult {
+        val payload = this.json.decodeFromString<SyncPayload>(json)
         val schema = if (payload.schemaVersion > 0) payload.schemaVersion else payload.version
         require(schema == 1) { "Unsupported backup schema version: $schema" }
         return importSyncPayload(payload)

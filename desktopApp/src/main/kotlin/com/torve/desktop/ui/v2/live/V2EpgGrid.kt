@@ -52,11 +52,13 @@ import com.torve.desktop.ui.components.TorveBadge
 import com.torve.desktop.ui.components.TorveBadgeTone
 import com.torve.desktop.ui.components.TorveGhostButton
 import com.torve.desktop.ui.components.TorvePlaceholderState
+import com.torve.desktop.ui.components.TorveSearchField
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
 import com.torve.domain.model.Channel
 import com.torve.domain.model.EnrichedChannel
 import com.torve.domain.model.EpgProgramme
 import com.torve.domain.model.canonicalEpgChannelKey
+import com.torve.presentation.channels.GuideSortMode
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.ZoneId
@@ -97,10 +99,45 @@ fun V2EpgGrid(
     recordingStatusFor: (Channel, EpgProgramme) -> com.torve.presentation.recording.RecordingSlotStatus =
         { _, _ -> com.torve.presentation.recording.RecordingSlotStatus.NONE },
     onToggleRecord: (Channel, EpgProgramme) -> Unit = { _, _ -> },
+    searchQuery: String = "",
+    onSearchQueryChange: (String) -> Unit = {},
+    sortMode: GuideSortMode = GuideSortMode.NUMBER,
+    onSortModeChange: (GuideSortMode) -> Unit = {},
 ) {
     val colors = TorveDesktopThemeTokens.colors
 
-    if (error != null && guideChannels.isEmpty()) {
+    // Apply search + sort to the channel list. Search matches channel
+    // name (case-insensitive, substring). Sort modes:
+    //   NUMBER    - playlist order (default; preserves Xtream catalogue
+    //               ordering or m3u file order)
+    //   NAME      - alphabetical
+    //   EPG_FIRST - channels with EPG-matched programmes ahead of the
+    //               empty rows, then alphabetical within each group
+    val displayChannels: List<EnrichedChannel> = remember(
+        guideChannels, guideProgrammes, searchQuery, sortMode,
+    ) {
+        val needle = searchQuery.trim().lowercase()
+        val filtered = if (needle.isEmpty()) {
+            guideChannels
+        } else {
+            guideChannels.filter { it.channel.name.lowercase().contains(needle) }
+        }
+        when (sortMode) {
+            GuideSortMode.NUMBER -> filtered
+            GuideSortMode.NAME -> filtered.sortedBy { it.channel.name.lowercase() }
+            GuideSortMode.EPG_FIRST -> filtered.sortedWith(
+                compareByDescending<EnrichedChannel> { enriched ->
+                    val key = canonicalEpgChannelKey(
+                        playlistId = playlistId.orEmpty(),
+                        channel = enriched.channel,
+                    )
+                    !key.isNullOrBlank() && !guideProgrammes[key].isNullOrEmpty()
+                }.thenBy { it.channel.name.lowercase() },
+            )
+        }
+    }
+
+    if (error != null && displayChannels.isEmpty()) {
         Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             TorvePlaceholderState(
                 title = ds("Guide failed to load"),
@@ -116,7 +153,7 @@ fun V2EpgGrid(
         return
     }
 
-    if (isLoading && guideChannels.isEmpty()) {
+    if (isLoading && displayChannels.isEmpty()) {
         Column(
             modifier = modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -188,16 +225,21 @@ fun V2EpgGrid(
         coroutineScope.launch { timeScroll.animateScrollTo(targetPx) }
     }
 
-    LaunchedEffect(playlistId, guideChannels.size) {
+    LaunchedEffect(playlistId, displayChannels.size) {
         // Initial jump so "now" is visible without manual scrolling.
-        if (guideChannels.isNotEmpty()) jumpToNow()
+        if (displayChannels.isNotEmpty()) jumpToNow()
     }
 
     Column(modifier = modifier.fillMaxSize()) {
         GuideControlsRow(
             nowMs = nowMs,
-            channelCount = guideChannels.size,
+            channelCount = displayChannels.size,
+            totalChannelCount = guideChannels.size,
             isLoading = isLoading,
+            searchQuery = searchQuery,
+            onSearchQueryChange = onSearchQueryChange,
+            sortMode = sortMode,
+            onSortModeChange = onSortModeChange,
             onJumpToNow = ::jumpToNow,
             onRefresh = onRetry,
         )
@@ -233,7 +275,7 @@ fun V2EpgGrid(
                 verticalArrangement = Arrangement.spacedBy(RowSpacing),
             ) {
                 itemsIndexed(
-                    items = guideChannels,
+                    items = displayChannels,
                     key = { index, ch -> "${epgRowKey(ch)}#$index" },
                 ) { _, enriched ->
                     val programmes = programmesFor(playlistId, enriched, guideProgrammes)
@@ -289,7 +331,7 @@ fun V2EpgGrid(
                 OtherAiringsSheet(
                     title = title,
                     nowMs = nowMs,
-                    guideChannels = guideChannels,
+                    guideChannels = displayChannels,
                     guideProgrammes = guideProgrammes,
                     playlistId = playlistId,
                     onPlayChannel = onPlayChannel,
@@ -304,11 +346,18 @@ fun V2EpgGrid(
 private fun GuideControlsRow(
     nowMs: Long,
     channelCount: Int,
+    totalChannelCount: Int,
     isLoading: Boolean,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    sortMode: GuideSortMode,
+    onSortModeChange: (GuideSortMode) -> Unit,
     onJumpToNow: () -> Unit,
     onRefresh: () -> Unit,
 ) {
     val colors = TorveDesktopThemeTokens.colors
+    var sortMenuExpanded by remember { mutableStateOf(false) }
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -319,11 +368,63 @@ private fun GuideControlsRow(
             tone = TorveBadgeTone.Accent,
         )
         Text(
-            text = "$channelCount channels",
+            text = if (channelCount == totalChannelCount) {
+                "$channelCount channels"
+            } else {
+                "$channelCount of $totalChannelCount channels"
+            },
             style = MaterialTheme.typography.bodySmall,
             color = colors.textSecondary,
         )
+
+        Spacer(Modifier.width(4.dp))
+
+        TorveSearchField(
+            value = searchQuery,
+            onValueChange = onSearchQueryChange,
+            placeholder = ds("Search channels"),
+            modifier = Modifier.width(240.dp),
+        )
+
+        Box {
+            TorveGhostButton(
+                text = when (sortMode) {
+                    GuideSortMode.NUMBER -> ds("Sort: Number")
+                    GuideSortMode.NAME -> ds("Sort: Name")
+                    GuideSortMode.EPG_FIRST -> ds("Sort: EPG first")
+                },
+                onClick = { sortMenuExpanded = true },
+            )
+            DropdownMenu(
+                expanded = sortMenuExpanded,
+                onDismissRequest = { sortMenuExpanded = false },
+            ) {
+                DropdownMenuItem(
+                    text = { Text(ds("Number (playlist order)")) },
+                    onClick = {
+                        onSortModeChange(GuideSortMode.NUMBER)
+                        sortMenuExpanded = false
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(ds("Name (A→Z)")) },
+                    onClick = {
+                        onSortModeChange(GuideSortMode.NAME)
+                        sortMenuExpanded = false
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(ds("EPG-matched first")) },
+                    onClick = {
+                        onSortModeChange(GuideSortMode.EPG_FIRST)
+                        sortMenuExpanded = false
+                    },
+                )
+            }
+        }
+
         Spacer(Modifier.weight(1f))
+
         if (isLoading) {
             CircularProgressIndicator(
                 modifier = Modifier.width(16.dp).height(16.dp),

@@ -47,7 +47,14 @@ class DesktopRecordingService(
     private val pollIntervalMs: Long = DEFAULT_POLL_MS,
     private val openConnection: (String) -> RecordingHttpStream = ::defaultConnection,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
-) {
+) : com.torve.presentation.recording.RecordingStarter {
+
+    /** RecordingStarter: also delete the .ts file from disk if present. */
+    override suspend fun deleteRow(id: String) {
+        val row = runCatching { repository.get(id) }.getOrNull() ?: return
+        val path = row.filePath ?: return
+        runCatching { File(path).takeIf { it.exists() }?.delete() }
+    }
 
     private val activeJobs = mutableMapOf<String, Job>()
     private val mutex = Mutex()
@@ -87,7 +94,7 @@ class DesktopRecordingService(
      * scheduler call is the canonical lifecycle entry point so the
      * status flips through the same code path as the timer-driven case.
      */
-    suspend fun runNow(rec: Recording) = kickOff(rec)
+    override suspend fun runNow(rec: Recording) = kickOff(rec)
 
     /**
      * Cancel an in-flight recording. Returns true if the job was
@@ -96,10 +103,18 @@ class DesktopRecordingService(
     suspend fun cancelRunning(id: String): Boolean = mutex.withLock {
         val job = activeJobs.remove(id)
         if (job != null) {
+            // Cancel the coroutine and let runRecording's catch block decide
+            // whether to mark COMPLETED (partial file with bytes) or CANCELLED
+            // (nothing was written yet). Calling scheduler.cancel() here would
+            // pre-set the status to CANCELLED, which markCompleted then refuses
+            // to overwrite -- losing the partial recording from the library.
             job.cancel()
+            true
+        } else {
+            // No active job: must be SCHEDULED. Pre-running cancel is safe.
             scheduler.cancel(id)
             true
-        } else false
+        }
     }
 
     private suspend fun kickOff(rec: Recording) {
@@ -155,8 +170,23 @@ class DesktopRecordingService(
             withContext(Dispatchers.IO) { writeStreamToFile(started, target) }
         }
         val byteCount = streamResult.getOrNull()
+        val cancelException = streamResult.exceptionOrNull() as? kotlinx.coroutines.CancellationException
         mutex.withLock { activeJobs.remove(rec.id) }
         when {
+            // User-initiated cancel (Stop button). Preserve whatever the
+            // file already has on disk as a COMPLETED partial recording so
+            // it stays in the library and is playable. Only mark CANCELLED
+            // if literally zero bytes ever made it to disk.
+            cancelException != null -> {
+                val partialBytes = runCatching {
+                    if (target.exists()) target.length() else 0L
+                }.getOrDefault(0L)
+                if (partialBytes > 0L) {
+                    scheduler.markCompleted(rec.id, partialBytes)
+                } else {
+                    scheduler.cancel(rec.id)
+                }
+            }
             byteCount == null -> {
                 val t = streamResult.exceptionOrNull()
                 val (reason, msg) = mapFailure(t)

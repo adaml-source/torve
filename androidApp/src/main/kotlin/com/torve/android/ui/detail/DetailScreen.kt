@@ -279,16 +279,18 @@ fun DetailScreen(
 
     LaunchedEffect(state.resolvedStream) {
         state.resolvedStream?.let { resolved ->
-            val url = listOf(
-                resolved.transcodeUrls?.mp4,
-                resolved.transcodeUrls?.hls,
-                resolved.url,
-            ).firstOrNull { !it.isNullOrBlank() }.orEmpty()
-            val fallback = listOf(
-                resolved.transcodeUrls?.hls,
-                resolved.transcodeUrls?.mp4,
-                resolved.url,
-            ).firstOrNull { !it.isNullOrBlank() && it != url }.orEmpty()
+            // For debrid streams (service != null) the direct CDN link in
+            // resolved.url needs no auth — RD's transcode endpoints require a
+            // web session cookie that the in-app player doesn't have, causing
+            // silent 401s. For addon-hosted streams there is no direct URL so
+            // the transcode candidates are used as before.
+            val urlCandidates = if (resolved.service != null) {
+                listOf(resolved.url, resolved.transcodeUrls?.hls, resolved.transcodeUrls?.mp4)
+            } else {
+                listOf(resolved.transcodeUrls?.mp4, resolved.transcodeUrls?.hls, resolved.url)
+            }
+            val url = urlCandidates.firstOrNull { !it.isNullOrBlank() }.orEmpty()
+            val fallback = urlCandidates.firstOrNull { !it.isNullOrBlank() && it != url }.orEmpty()
             if (url.isBlank()) {
                 resolvedUrl = ""
                 resolvedFallbackUrl = ""

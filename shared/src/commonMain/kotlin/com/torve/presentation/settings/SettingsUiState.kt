@@ -127,6 +127,9 @@ data class SettingsUiState(
      */
     val adultDownloadPath: String = "",
     val sportsDownloadPath: String = "",
+    /** Live TV recordings folder. Required to be non-empty before the
+     *  record button does anything; UI shows a notice when blank. */
+    val recordingDownloadPath: String = "",
     val downloadScanFolders: List<String> = emptyList(),
     // Kodi
     val kodiHosts: List<KodiHost> = emptyList(),
@@ -161,6 +164,8 @@ data class SettingsUiState(
     val streamGroups: List<StreamGroup> = emptyList(),
     // Browse
     val dedupeResults: Boolean = true,
+    // OpenSubtitles
+    val opensubtitlesApiKey: String = "",
     // OMDB
     val omdbApiKey: String = "",
     val omdbValidating: Boolean = false,

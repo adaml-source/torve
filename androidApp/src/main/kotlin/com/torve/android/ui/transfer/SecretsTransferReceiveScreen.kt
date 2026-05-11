@@ -1,5 +1,6 @@
 package com.torve.android.ui.transfer
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -47,19 +48,30 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.torve.android.R
+import com.torve.domain.transfer.SecretCategory
 import com.torve.domain.transfer.TransferApplyResult
 import com.torve.domain.transfer.TransferDecryptResult
 import com.torve.presentation.transfer.ReceiverState
 import com.torve.presentation.transfer.RelayStatus
 import com.torve.presentation.transfer.SecretsTransferReceiverViewModel
 import com.torve.presentation.transfer.TransferImportResult
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -81,20 +93,38 @@ fun SecretsTransferReceiveScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val scope = rememberCoroutineScope()
+    val closeRequester = remember { FocusRequester() }
+
+    fun closeReceiveScreen() {
+        viewModel.cancel()
+        onBack()
+    }
 
     LaunchedEffect(viewModel) { viewModel.start() }
+    LaunchedEffect(largeQr) {
+        if (largeQr) {
+            delay(80)
+            runCatching { closeRequester.requestFocus() }
+        }
+    }
     DisposableEffect(viewModel) { onDispose { viewModel.cancel() } }
+    BackHandler { closeReceiveScreen() }
 
     Scaffold(
+        modifier = Modifier.onPreviewKeyEvent { event ->
+            if (event.type == KeyEventType.KeyDown && event.key == Key.Back) {
+                closeReceiveScreen()
+                true
+            } else {
+                false
+            }
+        },
         topBar = {
             TopAppBar(
-                title = { Text("Receive credentials") },
+                title = { Text(stringResource(R.string.transfer_receive_title)) },
                 navigationIcon = {
-                    IconButton(onClick = {
-                        viewModel.cancel()
-                        onBack()
-                    }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    IconButton(onClick = ::closeReceiveScreen) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back))
                     }
                 },
             )
@@ -110,9 +140,23 @@ fun SecretsTransferReceiveScreen(
         ) {
             Spacer(Modifier.height(0.dp))
 
+            if (largeQr) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    OutlinedButton(
+                        modifier = Modifier.focusRequester(closeRequester),
+                        onClick = ::closeReceiveScreen,
+                    ) {
+                        Text(stringResource(R.string.common_close))
+                    }
+                }
+            }
+
             when (val s = state) {
                 ReceiverState.Idle -> Text(
-                    text = "Preparing a one-time handshake…",
+                    text = stringResource(R.string.transfer_preparing_handshake),
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 is ReceiverState.Active -> ActiveBlock(
@@ -143,11 +187,10 @@ private fun ActiveBlock(
         runCatching { AndroidTransferQrRenderer.render(state.sessionString) }.getOrNull()
     }
 
-    // largeQr is the TV form-factor signal; pick the right explainer.
     val explainer = if (largeQr) {
-        com.torve.presentation.transfer.TransferCopy.RECEIVE_PRIMARY_EXPLAINER_TV
+        stringResource(R.string.transfer_receive_explainer_tv)
     } else {
-        com.torve.presentation.transfer.TransferCopy.RECEIVE_PRIMARY_EXPLAINER_DESKTOP
+        stringResource(R.string.transfer_receive_explainer_desktop)
     }
     Text(
         text = explainer,
@@ -212,13 +255,13 @@ private fun QrSurface(
             if (qrBitmap != null) {
                 Image(
                     bitmap = qrBitmap,
-                    contentDescription = "Credential transfer QR code",
+                    contentDescription = stringResource(R.string.transfer_qr_code_cd),
                     modifier = Modifier.aspectRatio(1f),
                     contentScale = ContentScale.Fit,
                     filterQuality = FilterQuality.None,
                 )
             } else {
-                Text("QR rendering unavailable.", color = Color.Black)
+                Text(stringResource(R.string.transfer_qr_unavailable), color = Color.Black)
             }
         }
     }
@@ -243,7 +286,7 @@ private fun CountdownChip(remainingSeconds: Long) {
                 .padding(horizontal = 12.dp, vertical = 6.dp),
         ) {
             Text(
-                text = "Expires in %d:%02d".format(mm, ss),
+                text = stringResource(R.string.transfer_expires_in, mm, ss),
                 style = MaterialTheme.typography.labelMedium,
                 color = tone,
                 fontWeight = FontWeight.SemiBold,
@@ -259,19 +302,18 @@ private fun RelayStatusBanner(status: RelayStatus) {
             // No relay was injected; surface only the manual paste flow.
         }
         RelayStatus.Registering -> StatusBanner(
-            title = "Setting up auto-import…",
-            body = "Asking the Torve backend to forward a encrypted bundle to this device.",
+            title = stringResource(R.string.transfer_auto_import_setting_up),
+            body = stringResource(R.string.transfer_auto_import_setting_up_body),
             tone = TransferBannerTone.Info,
         )
         is RelayStatus.Registered -> StatusBanner(
-            title = "Auto-import is on",
-            body = "When the sender posts the encrypted bundle, this device imports it " +
-                "automatically. Manual paste stays available below.",
+            title = stringResource(R.string.transfer_auto_import_on),
+            body = stringResource(R.string.transfer_auto_import_on_body),
             tone = TransferBannerTone.Success,
         )
         is RelayStatus.Unavailable -> StatusBanner(
-            title = "Auto-import unavailable",
-            body = status.reason + " Use the paste field below.",
+            title = stringResource(R.string.transfer_auto_import_unavailable),
+            body = stringResource(R.string.transfer_auto_import_unavailable_body, status.reason),
             tone = TransferBannerTone.Warning,
         )
     }
@@ -285,7 +327,7 @@ private fun SessionStringBlock(
     val context = LocalContext.current
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
-            text = com.torve.presentation.transfer.TransferCopy.RECEIVE_SHORT_CODE_LABEL,
+            text = stringResource(R.string.transfer_receive_short_code_label),
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold,
         )
@@ -305,9 +347,9 @@ private fun SessionStringBlock(
         TextButton(onClick = {
             val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                 as? android.content.ClipboardManager
-            cm?.setPrimaryClip(android.content.ClipData.newPlainText("Torve receive code", sessionString))
+            cm?.setPrimaryClip(android.content.ClipData.newPlainText(context.getString(R.string.transfer_clipboard_receive_code), sessionString))
             onCopy()
-        }) { Text("Copy receiver code") }
+        }) { Text(stringResource(R.string.transfer_copy_receiver_code)) }
     }
 }
 
@@ -326,15 +368,21 @@ private fun AdvancedPasteSection(
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (relayRegistered) {
             TextButton(onClick = { advancedOpen = !advancedOpen }) {
-                Text(if (advancedOpen) "Hide manual paste" else "Advanced: paste sealed code manually")
+                Text(
+                    if (advancedOpen) {
+                        stringResource(R.string.transfer_hide_manual_paste)
+                    } else {
+                        stringResource(R.string.transfer_advanced_paste_sealed_code)
+                    },
+                )
             }
         }
         if (advancedOpen) {
             OutlinedTextField(
                 value = envelopeText,
                 onValueChange = onChange,
-                label = { Text("Sealed credential code from sender") },
-                placeholder = { Text("{\"version\":1,...}") },
+                label = { Text(stringResource(R.string.transfer_sealed_code_from_sender)) },
+                placeholder = { Text(stringResource(R.string.transfer_sealed_code_placeholder)) },
                 singleLine = false,
                 enabled = !importing,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 110.dp),
@@ -350,9 +398,9 @@ private fun AdvancedPasteSection(
                         strokeWidth = 2.dp,
                     )
                     Spacer(Modifier.width(8.dp))
-                    Text("Importing…")
+                    Text(stringResource(R.string.transfer_importing))
                 } else {
-                    Text("Import sealed code")
+                    Text(stringResource(R.string.transfer_import_sealed_code))
                 }
             }
             importResult?.let { ImportResultBanner(it) }
@@ -363,7 +411,7 @@ private fun AdvancedPasteSection(
 @Composable
 private fun ImportedBlock(result: TransferImportResult.Success) {
     StatusBanner(
-        title = "Credentials imported",
+        title = stringResource(R.string.transfer_credentials_imported),
         body = importDescription(result),
         tone = TransferBannerTone.Success,
     )
@@ -373,15 +421,15 @@ private fun ImportedBlock(result: TransferImportResult.Success) {
 private fun ExpiredBlock(onRestart: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         StatusBanner(
-            title = "Receive code expired",
-            body = "Receive codes expire so a forgotten one can't be used later. Generate a new code to keep transferring.",
+            title = stringResource(R.string.transfer_receive_code_expired),
+            body = stringResource(R.string.transfer_receive_code_expired_body),
             tone = TransferBannerTone.Warning,
         )
         // Primary action — receive codes are a low-friction operation,
         // so we lead with regenerate instead of forcing the user to
         // back out and re-enter.
         Button(onClick = onRestart, modifier = Modifier.fillMaxWidth()) {
-            Text("Generate new code")
+            Text(stringResource(R.string.transfer_generate_new_code))
         }
     }
 }
@@ -390,12 +438,12 @@ private fun ExpiredBlock(onRestart: () -> Unit) {
 private fun ImportResultBanner(result: TransferImportResult) {
     when (result) {
         is TransferImportResult.Success -> StatusBanner(
-            title = "Credentials imported",
+            title = stringResource(R.string.transfer_credentials_imported),
             body = importDescription(result),
             tone = TransferBannerTone.Success,
         )
         is TransferImportResult.MalformedEnvelope -> StatusBanner(
-            title = "Invalid sealed code",
+            title = stringResource(R.string.transfer_invalid_sealed_code),
             body = result.reason,
             tone = TransferBannerTone.Error,
         )
@@ -405,98 +453,112 @@ private fun ImportResultBanner(result: TransferImportResult) {
             tone = TransferBannerTone.Error,
         )
         is TransferImportResult.ApplyFailure -> StatusBanner(
-            title = "Could not apply credentials",
+            title = stringResource(R.string.transfer_could_not_apply_credentials),
             body = applyDescription(result.result),
             tone = TransferBannerTone.Error,
         )
         TransferImportResult.NoActiveSession -> StatusBanner(
-            title = "No active receive session",
-            body = "Generate a new receive code first.",
+            title = stringResource(R.string.transfer_no_active_receive_session),
+            body = stringResource(R.string.transfer_generate_receive_code_first),
             tone = TransferBannerTone.Error,
         )
         TransferImportResult.MissingPrivateKey -> StatusBanner(
-            title = "Receive session is no longer usable",
-            body = "Generate a new receive code and try again.",
+            title = stringResource(R.string.transfer_receive_session_unusable),
+            body = stringResource(R.string.transfer_generate_receive_code_try_again),
             tone = TransferBannerTone.Error,
         )
     }
 }
 
+@Composable
 private fun decryptTitle(result: TransferDecryptResult): String = when (result) {
-    TransferDecryptResult.Expired -> "Sealed code expired"
-    TransferDecryptResult.AuthenticationFailure -> "Could not decrypt code"
-    is TransferDecryptResult.UnsupportedVersion -> "Unsupported transfer version"
-    TransferDecryptResult.Replayed -> "Code already used"
-    TransferDecryptResult.EnvelopePayloadMismatch -> "Code failed integrity check"
-    is TransferDecryptResult.Malformed -> "Malformed sealed code"
-    is TransferDecryptResult.Success -> "Credentials imported"
+    TransferDecryptResult.Expired -> stringResource(R.string.transfer_sealed_code_expired)
+    TransferDecryptResult.AuthenticationFailure -> stringResource(R.string.transfer_could_not_decrypt_code)
+    is TransferDecryptResult.UnsupportedVersion -> stringResource(R.string.transfer_unsupported_transfer_version)
+    TransferDecryptResult.Replayed -> stringResource(R.string.transfer_code_already_used)
+    TransferDecryptResult.EnvelopePayloadMismatch -> stringResource(R.string.transfer_code_integrity_failed)
+    is TransferDecryptResult.Malformed -> stringResource(R.string.transfer_malformed_sealed_code)
+    is TransferDecryptResult.Success -> stringResource(R.string.transfer_credentials_imported)
 }
 
+@Composable
 private fun decryptDescription(result: TransferDecryptResult): String = when (result) {
-    TransferDecryptResult.Expired -> "Ask the sender to generate a fresh sealed code."
-    TransferDecryptResult.AuthenticationFailure -> "This code was not sealed for this receive session, or it was changed."
-    is TransferDecryptResult.UnsupportedVersion -> "This app cannot read transfer version ${result.seenVersion}."
-    TransferDecryptResult.Replayed -> "This transfer nonce has already been consumed on this device."
-    TransferDecryptResult.EnvelopePayloadMismatch -> "The envelope and payload expiry values do not match."
+    TransferDecryptResult.Expired -> stringResource(R.string.transfer_ask_sender_fresh_code)
+    TransferDecryptResult.AuthenticationFailure -> stringResource(R.string.transfer_code_not_for_session)
+    is TransferDecryptResult.UnsupportedVersion -> stringResource(R.string.transfer_cannot_read_version, result.seenVersion)
+    TransferDecryptResult.Replayed -> stringResource(R.string.transfer_nonce_already_consumed)
+    TransferDecryptResult.EnvelopePayloadMismatch -> stringResource(R.string.transfer_envelope_payload_mismatch)
     is TransferDecryptResult.Malformed -> result.reason
-    is TransferDecryptResult.Success -> "Imported ${result.payload.secrets.size} credential record(s)."
+    is TransferDecryptResult.Success -> stringResource(R.string.transfer_imported_records, result.payload.secrets.size)
 }
 
+@Composable
 private fun applyDescription(result: TransferApplyResult): String = when (result) {
-    TransferApplyResult.DuplicateNonce -> "This transfer nonce has already been consumed on this device."
-    is TransferApplyResult.NothingApplied -> "No known credential keys were found in the payload."
-    is TransferApplyResult.StoreFailure -> buildString {
-        append(result.message)
-        if (result.rollbackAttempted) {
-            append(
-                if (result.rollbackSucceeded) {
-                    " Rollback succeeded; existing credentials were restored."
-                } else {
-                    " Rollback failed; verify credentials manually."
-                },
-            )
+    TransferApplyResult.DuplicateNonce -> stringResource(R.string.transfer_nonce_already_consumed)
+    is TransferApplyResult.NothingApplied -> stringResource(R.string.transfer_no_known_keys)
+    is TransferApplyResult.StoreFailure -> {
+        val rollbackMessage = if (result.rollbackAttempted) {
+            if (result.rollbackSucceeded) {
+                stringResource(R.string.transfer_rollback_succeeded)
+            } else {
+                stringResource(R.string.transfer_rollback_failed)
+            }
+        } else {
+            null
         }
+        listOfNotNull(result.message, rollbackMessage).joinToString(" ")
     }
-    is TransferApplyResult.Success -> "Imported ${result.applied} credential record(s)."
+    is TransferApplyResult.Success -> stringResource(R.string.transfer_imported_records, result.applied)
 }
 
-private fun importDescription(result: TransferImportResult.Success): String = buildString {
+@Composable
+private fun importDescription(result: TransferImportResult.Success): String {
     val configCount = result.applyResult.configApplied
     val applied = result.applyResult.applied
-    // Lead line tightened so the user understands two things at once:
-    // (a) credentials are in, (b) some providers may take a second.
-    if (configCount > 0) {
-        append("Credentials and setup details imported. Some providers may take a moment to reconnect.")
+    val parts = mutableListOf<String>()
+    parts += if (configCount > 0) {
+        stringResource(R.string.transfer_imported_with_setup)
     } else {
-        append("Credentials imported. Some providers may take a moment to reconnect.")
+        stringResource(R.string.transfer_imported_credentials_only)
     }
-    append(" Imported ")
-    append(applied)
-    append(" credential record")
-    if (applied != 1) append("s")
-    if (configCount > 0) {
-        append(" + ")
-        append(configCount)
-        append(" companion config record")
-        if (configCount != 1) append("s")
+    parts += if (configCount > 0) {
+        stringResource(R.string.transfer_imported_records_with_config, applied, configCount)
+    } else {
+        stringResource(R.string.transfer_imported_records, applied)
     }
-    append(".")
     if (result.applyResult.skippedKeyNames.isNotEmpty()) {
-        append(" Skipped unknown keys: ")
-        append(result.applyResult.skippedKeyNames.joinToString())
-        append(".")
+        parts += stringResource(R.string.transfer_skipped_unknown_keys, result.applyResult.skippedKeyNames.joinToString())
     }
     if (result.applyResult.skippedConfigKeys.isNotEmpty()) {
-        append(" Skipped config keys not on the receiver allowlist: ")
-        append(result.applyResult.skippedConfigKeys.joinToString())
-        append(".")
+        parts += stringResource(R.string.transfer_skipped_config_keys, result.applyResult.skippedConfigKeys.joinToString())
     }
     if (result.applyResult.categoriesMissingCompanionConfig.isNotEmpty()) {
-        append(" Imported credentials but missing companion config for: ")
-        append(result.applyResult.categoriesMissingCompanionConfig.joinToString { it.name })
-        append(". Fill in the matching server URL in Settings to finish setup.")
+        val categoryTitles = transferCategoryTitles()
+        val names = result.applyResult.categoriesMissingCompanionConfig.joinToString { categoryTitles.getValue(it) }
+        parts += stringResource(R.string.transfer_import_missing_companion_config, names)
     }
+    return parts.joinToString(" ")
 }
+
+@Composable
+private fun transferCategoryTitle(category: SecretCategory): String = when (category) {
+    SecretCategory.DEBRID -> stringResource(R.string.transfer_category_debrid)
+    SecretCategory.IPTV -> stringResource(R.string.transfer_category_iptv)
+    SecretCategory.PLEX_JELLYFIN -> stringResource(R.string.transfer_category_plex_jellyfin)
+    SecretCategory.TRAKT_SIMKL -> stringResource(R.string.transfer_category_trakt_simkl)
+    SecretCategory.AI_KEYS -> stringResource(R.string.transfer_category_ai_keys)
+    SecretCategory.PANDA -> stringResource(R.string.transfer_category_panda)
+}
+
+@Composable
+private fun transferCategoryTitles(): Map<SecretCategory, String> = mapOf(
+    SecretCategory.DEBRID to stringResource(R.string.transfer_category_debrid),
+    SecretCategory.IPTV to stringResource(R.string.transfer_category_iptv),
+    SecretCategory.PLEX_JELLYFIN to stringResource(R.string.transfer_category_plex_jellyfin),
+    SecretCategory.TRAKT_SIMKL to stringResource(R.string.transfer_category_trakt_simkl),
+    SecretCategory.AI_KEYS to stringResource(R.string.transfer_category_ai_keys),
+    SecretCategory.PANDA to stringResource(R.string.transfer_category_panda),
+)
 
 @Composable
 private fun StatusBanner(title: String, body: String, tone: TransferBannerTone) {

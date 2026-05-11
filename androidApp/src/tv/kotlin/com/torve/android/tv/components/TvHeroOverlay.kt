@@ -116,15 +116,17 @@ fun TvHeroOverlay(
                     Spacer(Modifier.height(4.dp))
                 }
 
-                // Title
-                Text(
-                    text = item?.title ?: subtitle,
-                    style = MaterialTheme.typography.displayMedium,
-                    color = Snow,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                val titleText = item?.title ?: subtitle
+                if (titleText.isNotBlank()) {
+                    Text(
+                        text = titleText,
+                        style = MaterialTheme.typography.displayMedium,
+                        color = Snow,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
 
                 // Metadata: year • rating • runtime (matching mobile HeroSlide)
                 if (item != null) {

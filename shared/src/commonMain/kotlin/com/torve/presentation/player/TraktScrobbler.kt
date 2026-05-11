@@ -29,6 +29,7 @@ class TraktScrobbler(
         episode: Int? = null,
     ) {
         if (traktClient.clientId.isBlank()) return
+        if (type == MediaType.SERIES && (season == null || episode == null)) return
         try {
             val body = buildScrobbleBody(tmdbId, imdbId, type, progress, season, episode)
             executeWithTokenRefresh(accessToken) { token ->
@@ -50,6 +51,7 @@ class TraktScrobbler(
         episode: Int? = null,
     ) {
         if (!isScrobbling) return
+        if (type == MediaType.SERIES && (season == null || episode == null)) return
         try {
             val body = buildScrobbleBody(tmdbId, imdbId, type, progress, season, episode)
             executeWithTokenRefresh(accessToken) { token ->
@@ -68,6 +70,10 @@ class TraktScrobbler(
         episode: Int? = null,
     ) {
         if (!isScrobbling) return
+        if (type == MediaType.SERIES && (season == null || episode == null)) {
+            isScrobbling = false
+            return
+        }
         try {
             val body = buildScrobbleBody(tmdbId, imdbId, type, progress, season, episode)
             executeWithTokenRefresh(accessToken) { token ->
@@ -120,9 +126,7 @@ class TraktScrobbler(
             )
             MediaType.SERIES -> TraktScrobbleBody(
                 show = TraktScrobbleShow(ids = ids),
-                episode = if (season != null && episode != null) {
-                    TraktScrobbleEpisode(season = season, number = episode)
-                } else null,
+                episode = TraktScrobbleEpisode(season = season!!, number = episode!!),
                 progress = progress,
             )
         }

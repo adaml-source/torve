@@ -29,6 +29,7 @@ import com.torve.desktop.ui.components.TorveBannerTone
 import com.torve.desktop.ui.components.TorveGhostButton
 import com.torve.desktop.ui.components.TorvePrimaryButton
 import com.torve.desktop.ui.components.TorveSectionCard
+import com.torve.desktop.ui.l10n.ds
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
 import com.torve.presentation.transfer.AttemptOutcome
 import com.torve.presentation.transfer.AttemptRole
@@ -66,31 +67,36 @@ fun TransferDiagnosticsCard(
     }
 
     TorveSectionCard(
-        title = "Transfer diagnostics",
-        supportingText = "Read-only health check for credential transfer. Crypto engine, sign-in, " +
-            "relay reachability, and the latest attempt this device made.",
+        title = ds("Transfer diagnostics"),
+        supportingText = ds(
+            "Read-only health check for credential transfer. Crypto engine, sign-in, relay reachability, and the latest attempt this device made.",
+        ),
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             TorveBanner(
-                title = "No secrets in this view",
-                description = "Diagnostics never include credentials, envelope JSON, QR payloads, " +
-                    "access tokens, or private keys. Every value below is a closed enum or a " +
-                    "bucketed count.",
+                title = ds("No secrets in this view"),
+                description = ds(
+                    "Diagnostics never include credentials, envelope JSON, QR payloads, access tokens, or private keys. Every value below is a closed enum or a bucketed count.",
+                ),
                 tone = TorveBannerTone.Info,
             )
 
             val current = snapshot
             if (current == null) {
-                Text("Loading...", color = TorveDesktopThemeTokens.colors.textSecondary)
+                Text(ds("Loading..."), color = TorveDesktopThemeTokens.colors.textSecondary)
             } else {
-                StatusRow("Crypto engine", if (current.cryptoEngineAvailable) "available" else "unavailable", current.cryptoEngineAvailable)
-                StatusRow("Signed in", if (current.signedIn) "yes" else "no", current.signedIn)
                 StatusRow(
-                    "Backend relay",
-                    relayLabel(current.relayReachable),
+                    ds("Crypto engine"),
+                    ds(if (current.cryptoEngineAvailable) "available" else "unavailable"),
+                    current.cryptoEngineAvailable,
+                )
+                StatusRow(ds("Signed in"), ds(if (current.signedIn) "yes" else "no"), current.signedIn)
+                StatusRow(
+                    ds("Backend relay"),
+                    ds(relayLabel(current.relayReachable)),
                     current.relayReachable == RelayReachability.REACHABLE,
                 )
                 LastAttemptBlock(current.lastAttempt)
@@ -102,7 +108,7 @@ fun TransferDiagnosticsCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 TorveGhostButton(
-                    text = "Refresh",
+                    text = ds("Refresh"),
                     onClick = {
                         scope.launch {
                             snapshot = collector.collect(probeRelay = false)
@@ -111,7 +117,7 @@ fun TransferDiagnosticsCard(
                 )
                 Spacer(Modifier.width(8.dp))
                 TorvePrimaryButton(
-                    text = if (probing) "Probing relay..." else "Probe relay now",
+                    text = if (probing) ds("Probing relay...") else ds("Probe relay now"),
                     enabled = !probing,
                     onClick = {
                         scope.launch {
@@ -179,37 +185,37 @@ private fun LastAttemptBlock(record: TransferAttemptRecord?) {
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(
-                text = "Last transfer attempt",
+                text = ds("Last transfer attempt"),
                 color = colors.textPrimary,
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
             )
             if (record == null) {
                 Text(
-                    text = "No attempt recorded yet on this device.",
+                    text = ds("No attempt recorded yet on this device."),
                     color = colors.textSecondary,
                     style = MaterialTheme.typography.bodySmall,
                 )
             } else {
                 Text(
-                    "Role: ${roleLabel(record.role)}",
+                    ds("Role: %1\$s").format(ds(roleLabel(record.role))),
                     color = colors.textSecondary,
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Text(
-                    "Outcome: ${outcomeLabel(record.outcome)}",
+                    ds("Outcome: %1\$s").format(ds(outcomeLabel(record.outcome))),
                     color = colors.textSecondary,
                     style = MaterialTheme.typography.bodySmall,
                 )
                 record.errorCategory?.let {
                     Text(
-                        "Reason: ${it.value}",
+                        ds("Reason: %1\$s").format(it.value),
                         color = colors.textSecondary,
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
                 Text(
-                    "Timestamp: epoch_ms=${record.recordedAtEpochMs}",
+                    ds("Timestamp: epoch_ms=%1\$d").format(record.recordedAtEpochMs),
                     color = colors.textSecondary,
                     style = MaterialTheme.typography.bodySmall,
                 )

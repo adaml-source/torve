@@ -60,6 +60,7 @@ import com.torve.desktop.ui.shell.DesktopSourcePickerRoute
 import com.torve.desktop.ui.shell.matches
 import com.torve.desktop.ui.shell.playbackSourceSurfaceLabel
 import com.torve.desktop.ui.shell.restorePlaybackOrigin
+import com.torve.desktop.ui.l10n.ds
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
 import com.torve.desktop.ui.v2.components.rememberBackdropLuminance
 import com.torve.desktop.ui.v2.detail.V2DetailPage
@@ -79,6 +80,7 @@ import com.torve.presentation.seeall.SeeAllViewModel
 import com.torve.domain.model.Episode
 import com.torve.domain.model.MediaItem
 import com.torve.domain.repository.AddonRepository
+import com.torve.domain.repository.ChannelRepository
 import com.torve.domain.repository.MetadataRepository
 import com.torve.presentation.catalog.CatalogViewModel
 import com.torve.presentation.channels.ChannelsViewModel
@@ -105,6 +107,7 @@ fun V2App(
     settingsViewModel: SettingsViewModel,
     pandaSetupViewModel: PandaSetupViewModel,
     channelsViewModel: ChannelsViewModel,
+    channelRepository: ChannelRepository,
     addonRepository: AddonRepository,
     watchlistViewModel: WatchlistViewModel,
     downloadViewModel: DownloadViewModel,
@@ -130,6 +133,24 @@ fun V2App(
     androidx.compose.runtime.LaunchedEffect(providerHealthInit, playerController) {
         providerHealthInit?.start()
         providerHealthInit?.startPlaybackBridge(playerController)
+    }
+
+    // In-app alert popup. Tray balloons are unreliable when the main
+    // window is fullscreen on Windows, so desktopNotify() also pushes
+    // the message to desktopAlertFlow which we render here as a
+    // guaranteed-visible AlertDialog.
+    val pendingAlert by com.torve.desktop.desktopAlertFlow.collectAsState()
+    pendingAlert?.let { alert ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { com.torve.desktop.desktopAlertDismiss() },
+            title = { androidx.compose.material3.Text(alert.title) },
+            text = { androidx.compose.material3.Text(alert.body) },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = { com.torve.desktop.desktopAlertDismiss() },
+                ) { androidx.compose.material3.Text(ds("OK")) }
+            },
+        )
     }
 
     // Scroll states per destination
@@ -839,6 +860,60 @@ fun V2App(
                 } else if (isEmbeddedActive && !pipMode && vlcEngine != null) {
                     var showSubtitleSearch by remember { mutableStateOf(false) }
                     Box(Modifier.fillMaxSize()) {
+                        // Record button visibility: only on live TV. The
+                        // recordingsVm is bound via Koin; we look up by
+                        // streamUrl since live recordings use the channel
+                        // url as the recording key.
+                        val recordingsVm = remember {
+                            org.koin.mp.KoinPlatform.getKoin()
+                                .get<com.torve.presentation.recording.RecordingsViewModel>()
+                        }
+                        val recordingsState by recordingsVm.state.collectAsState()
+                        val playerPrefsRepo = remember {
+                            org.koin.mp.KoinPlatform.getKoin()
+                                .get<com.torve.domain.repository.PreferencesRepository>()
+                        }
+                        var playerRecordingPrefs by remember {
+                            mutableStateOf(com.torve.domain.recording.RecordingPreferences())
+                        }
+                        LaunchedEffect(Unit) {
+                            playerRecordingPrefs = com.torve.domain.recording.RecordingPreferences
+                                .load(playerPrefsRepo)
+                        }
+                        // For live TV, the resolvedUrl on the prepared session
+                        // IS the channel stream URL (which is what the
+                        // recordings VM keys live recordings by).
+                        val currentLiveStreamUrl: String? = playerState.preparedSession?.resolvedUrl
+                        val isCurrentlyRecording = isLiveTvPlayback &&
+                            currentLiveStreamUrl != null &&
+                            recordingsState.active.any { it.streamUrl == currentLiveStreamUrl }
+                        val onToggleRecord: (() -> Unit)? = if (isLiveTvPlayback && currentLiveStreamUrl != null) {
+                            {
+                                val active = recordingsState.active
+                                    .firstOrNull { it.streamUrl == currentLiveStreamUrl }
+                                if (active != null) {
+                                    recordingsVm.cancel(active.id)
+                                } else if (settingsState.recordingDownloadPath.isBlank()) {
+                                    com.torve.desktop.desktopNotify(
+                                        "Recording disabled",
+                                        "Set a Recordings Folder under Settings → Preferences → Downloads first.",
+                                    )
+                                } else {
+                                    val now = System.currentTimeMillis()
+                                    recordingsVm.schedule(
+                                        playlistId = channelsState.selectedPlaylistId.orEmpty(),
+                                        channelId = currentLiveStreamUrl,
+                                        channelName = playerTitle,
+                                        streamUrl = currentLiveStreamUrl,
+                                        programmeTitle = "Live recording — $playerTitle",
+                                        programmeDescription = null,
+                                        startMs = now,
+                                        endMs = now + playerRecordingPrefs.defaultDurationMs,
+                                    )
+                                }
+                            }
+                        } else null
+
                         VlcComposePlayerSurface(
                             engine = vlcEngine,
                             title = playerTitle,
@@ -851,6 +926,8 @@ fun V2App(
                             channelNavigationEnabled = isLiveTvPlayback,
                             onPreviousChannel = { switchLiveChannel(-1) },
                             onNextChannel = { switchLiveChannel(1) },
+                            isCurrentlyRecording = isCurrentlyRecording,
+                            onToggleRecord = onToggleRecord,
                             windowState = windowState,
                             seekStepMs = playerController.getSeekStepMs(),
                             initialVolume = if (settingsState.rememberVolume) settingsState.lastVolume else null,
@@ -1194,6 +1271,19 @@ fun V2App(
                                     }
                                 },
                                 localLibrary = com.torve.desktop.globalLocalLibrary,
+                                channelRepository = channelRepository,
+                                onPlayVodChannel = { channel ->
+                                    if (!hasPremium) {
+                                        premiumGateReason = "IPTV VOD playback is a Premium feature."
+                                    } else {
+                                        playerController.playDirectStream(
+                                            title = channel.name,
+                                            url = channel.url,
+                                            artworkUrl = channel.tvgLogo,
+                                            sourceSurface = "iptv_vod",
+                                        )
+                                    }
+                                },
                             )
                             V2Destination.LIVE_TV -> V2LivePage(
                                 channelsState = channelsState,
@@ -1551,16 +1641,16 @@ fun V2App(
                                     )
                                     androidx.compose.material3.HorizontalDivider()
                                     androidx.compose.material3.DropdownMenuItem(
-                                        text = { Text("Settings") },
+                                        text = { Text(ds("Settings")) },
                                         onClick = { accessMenuExpanded = false; settingsOpen = true },
                                     )
                                     androidx.compose.material3.DropdownMenuItem(
-                                        text = { Text("Sign Out") },
+                                        text = { Text(ds("Sign Out")) },
                                         onClick = { accessMenuExpanded = false; authController.signOut() },
                                     )
                                     androidx.compose.material3.HorizontalDivider()
                                     androidx.compose.material3.DropdownMenuItem(
-                                        text = { Text("Quit Torve") },
+                                        text = { Text(ds("Quit Torve")) },
                                         onClick = {
                                             accessMenuExpanded = false
                                             kotlin.system.exitProcess(0)

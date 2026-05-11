@@ -10,25 +10,57 @@ class PreferencesRepositoryImpl(
     private val userIdProvider: UserIdProvider,
 ) : PreferencesRepository, DeviceLocalSettingsRepository {
 
+    private companion object {
+        const val DEVICE_LOCAL_USER_ID = "__torve_device_local__"
+
+        fun isDeviceLocalKey(key: String): Boolean =
+            key.startsWith("auth_") ||
+                key.startsWith("subscription_backend_verified_")
+    }
+
+    private fun userIdForKeyOrNull(key: String): String? {
+        if (isDeviceLocalKey(key)) return DEVICE_LOCAL_USER_ID
+        return userIdProvider.currentUserIdOrNull()
+    }
+
     override suspend fun getString(key: String): String? {
+        if (isDeviceLocalKey(key)) {
+            return database.torveQueries.getPreference(
+                userId = DEVICE_LOCAL_USER_ID,
+                key = key,
+            ).executeAsOneOrNull()
+                ?: database.torveQueries.getPreference(
+                    userId = "",
+                    key = key,
+                ).executeAsOneOrNull()
+        }
+        val userId = userIdForKeyOrNull(key) ?: return null
         return database.torveQueries.getPreference(
-            userId = userIdProvider.currentUserId(),
+            userId = userId,
             key = key,
         ).executeAsOneOrNull()
     }
 
     override suspend fun setString(key: String, value: String) {
+        val userId = userIdForKeyOrNull(key) ?: return
         database.torveQueries.setPreference(
-            user_id = userIdProvider.currentUserId(),
+            user_id = userId,
             key = key,
             value_ = value,
         )
     }
 
     override suspend fun remove(key: String) {
+        val userId = userIdForKeyOrNull(key) ?: return
         database.torveQueries.deletePreference(
-            userId = userIdProvider.currentUserId(),
+            userId = userId,
             key = key,
         )
+        if (isDeviceLocalKey(key)) {
+            database.torveQueries.deletePreference(
+                userId = "",
+                key = key,
+            )
+        }
     }
 }

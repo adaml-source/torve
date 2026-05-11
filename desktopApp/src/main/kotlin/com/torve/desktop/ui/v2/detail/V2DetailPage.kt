@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -116,6 +117,16 @@ fun V2DetailPage(
             }
             return@Box
         }
+        val movieLabel = ds("Movie")
+        val tvShowLabel = ds("TV Show")
+        val willPlayLabel = ds("Will play")
+        val episodeMenuTemplate = ds("Episode S%1\$02dE%2\$02d")
+        val seasonMenuTemplate = ds("Season %1\$d")
+        val allEpisodesLabel = ds("All Episodes")
+        val watchlistLabel = ds("Watchlist")
+        val inWatchlistLabel = ds("In Watchlist")
+        val votesTemplate = ds("%1\$d votes")
+        val trailerFallbackTitle = ds("Trailer")
 
         // ── Backdrop extends behind ENTIRE page ──
         val backdrop = rememberCachedBitmap(item.backdropUrl ?: item.posterUrl)
@@ -160,7 +171,7 @@ fun V2DetailPage(
                             // Type badge
                             Surface(color = colors.accent.copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
                                 Text(
-                                    when (item.type) { MediaType.MOVIE -> "Movie"; MediaType.SERIES -> "TV Show" },
+                                    when (item.type) { MediaType.MOVIE -> movieLabel; MediaType.SERIES -> tvShowLabel },
                                     Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.SemiBold, color = colors.accent,
@@ -204,7 +215,7 @@ fun V2DetailPage(
                                         shape = RoundedCornerShape(6.dp),
                                     ) {
                                         Text(
-                                            text = "Will play: S${selectedSeasonNum}E${selectedEpNum}" +
+                                            text = "$willPlayLabel: S${selectedSeasonNum}E${selectedEpNum}" +
                                                 if (!episodeLabel.isNullOrBlank()) " · $episodeLabel" else "",
                                             style = MaterialTheme.typography.labelMedium,
                                             fontWeight = FontWeight.SemiBold,
@@ -243,7 +254,7 @@ fun V2DetailPage(
                                             items = buildList {
                                                 if (selectedSeason != null && selectedEpisode != null) {
                                                     add(
-                                                        "Episode S${selectedSeason.seasonNumber.toString().padStart(2, '0')}E${selectedEpisode.episodeNumber.toString().padStart(2, '0')}" to {
+                                                        episodeMenuTemplate.format(selectedSeason.seasonNumber, selectedEpisode.episodeNumber) to {
                                                             showDownloadMenu = false
                                                             onDownloadEpisode(item, selectedSeason.seasonNumber, selectedEpisode.episodeNumber)
                                                         },
@@ -251,14 +262,14 @@ fun V2DetailPage(
                                                 }
                                                 if (selectedSeason != null && selectedSeason.episodeCount > 0) {
                                                     add(
-                                                        "Season ${selectedSeason.seasonNumber}" to {
+                                                        seasonMenuTemplate.format(selectedSeason.seasonNumber) to {
                                                             showDownloadMenu = false
                                                             onDownloadSeason(item, selectedSeason.seasonNumber, selectedSeason.episodeCount)
                                                         },
                                                     )
                                                 }
                                                 add(
-                                                    "All Episodes" to {
+                                                    allEpisodesLabel to {
                                                         showDownloadMenu = false
                                                         onDownloadAll(item)
                                                     },
@@ -267,7 +278,7 @@ fun V2DetailPage(
                                         )
                                     }
                                 }
-                                TorveGhostButton(text = if (isInWatchlist) "In Watchlist" else "Watchlist", onClick = { onToggleWatchlist(item) })
+                                TorveGhostButton(text = if (isInWatchlist) inWatchlistLabel else watchlistLabel, onClick = { onToggleWatchlist(item) })
                             }
                         }
                     }
@@ -286,7 +297,7 @@ fun V2DetailPage(
                         Row(Modifier.padding(start = 72.dp, end = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             item.status?.let { TorveBadge(it, tone = TorveBadgeTone.Neutral) }
                             item.releaseDate?.let { TorveBadge(it, tone = TorveBadgeTone.Neutral) }
-                            item.voteCount?.let { TorveBadge("$it votes", tone = TorveBadgeTone.Neutral) }
+                            item.voteCount?.let { TorveBadge(votesTemplate.format(it), tone = TorveBadgeTone.Neutral) }
                         }
 
                         // Director with photo
@@ -401,7 +412,7 @@ fun V2DetailPage(
                             Text(ds("Seasons"), Modifier.padding(start = 72.dp, end = 16.dp), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
                             Row(Modifier.padding(horizontal = 36.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 item.seasons.forEach { season ->
-                                    TorveFilterChip(text = season.name ?: "Season ${season.seasonNumber}", selected = detailState.selectedSeasonNumber == season.seasonNumber, onClick = { onSelectSeason(season.seasonNumber) })
+                                    TorveFilterChip(text = season.name ?: seasonMenuTemplate.format(season.seasonNumber), selected = detailState.selectedSeasonNumber == season.seasonNumber, onClick = { onSelectSeason(season.seasonNumber) })
                                 }
                             }
                             if (detailState.isLoadingSeason) {
@@ -455,7 +466,7 @@ fun V2DetailPage(
         trailerKey?.let { key ->
             com.torve.desktop.ui.trailer.TrailerOverlay(
                 youtubeKey = key,
-                title = item.title.takeIf { it.isNotBlank() } ?: "Trailer",
+                title = item.title.takeIf { it.isNotBlank() } ?: trailerFallbackTitle,
                 onDismiss = { trailerKey = null },
                 windowState = windowState,
             )
@@ -484,7 +495,7 @@ private fun DetailSummary(
         )
         if (overview.length > 180) {
             Text(
-                text = if (expanded) "Less" else "More",
+                text = if (expanded) ds("Less") else ds("More"),
                 modifier = Modifier.clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
@@ -503,10 +514,24 @@ private fun DetailSummary(
 private fun DetailRatingPills(item: MediaItem) {
     val ratings = item.ratings
         ?: item.rating?.let { com.torve.domain.model.MediaRatings(tmdbScore = it.toFloat()) }
-        ?: return
-    com.torve.desktop.ui.v2.components.DesktopRatingPills(
-        ratings = ratings,
-        showBackground = false,
-        prefs = com.torve.desktop.ui.v2.components.LocalRatingDisplayPrefs.current.copy(maxRatingsOnCard = 8),
-    )
+    // Reserved height so the row below (logo / title) doesn't shift
+    // downward when ratings finish hydrating. Without this, the user
+    // saw pills appear → title text "overwriting" them → final TMDB
+    // pill appearing as ratings enriched async. Now: empty space
+    // initially, then pills fade in without disturbing the layout
+    // around them.
+    androidx.compose.foundation.layout.Box(
+        modifier = androidx.compose.ui.Modifier
+            .fillMaxWidth()
+            .heightIn(min = 28.dp),
+        contentAlignment = androidx.compose.ui.Alignment.CenterStart,
+    ) {
+        if (ratings != null) {
+            com.torve.desktop.ui.v2.components.DesktopRatingPills(
+                ratings = ratings,
+                showBackground = false,
+                prefs = com.torve.desktop.ui.v2.components.LocalRatingDisplayPrefs.current.copy(maxRatingsOnCard = 8),
+            )
+        }
+    }
 }

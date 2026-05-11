@@ -92,13 +92,13 @@ fun ChannelsGuideContent(
                 )
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "No EPG Data",
+                    stringResource(R.string.channels_no_epg_data),
                     style = MaterialTheme.typography.titleMedium,
                     color = Torve.colors.textPrimary,
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "Programme guide requires an EPG URL in your playlist",
+                    stringResource(R.string.channels_no_epg_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = Torve.colors.textTertiary,
                 )
@@ -141,7 +141,7 @@ fun ChannelsGuideContent(
         TorveSearchField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
-            placeholder = "Search channels in guide",
+            placeholder = stringResource(R.string.channels_guide_search_placeholder),
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 6.dp),
@@ -158,7 +158,7 @@ fun ChannelsGuideContent(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    "Channel",
+                    stringResource(R.string.channels_channel_header),
                     style = MaterialTheme.typography.labelSmall,
                     color = Torve.colors.textTertiary,
                     fontWeight = FontWeight.Bold,
@@ -184,7 +184,7 @@ fun ChannelsGuideContent(
         if (filteredChannels.isEmpty() && searchQuery.isNotBlank()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
-                    "No channels matching \"$searchQuery\".",
+                    stringResource(R.string.channels_no_channels_matching, searchQuery),
                     color = Torve.colors.textSecondary,
                 )
             }

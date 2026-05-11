@@ -37,6 +37,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.CastConnected
+import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.StopCircle
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FastForward
@@ -105,7 +107,9 @@ import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowState
 import com.torve.desktop.playback.DesktopPlaybackHotkeyAction
 import com.torve.desktop.playback.bindingFor
+import com.torve.desktop.playback.toAwtPlaybackKeyCode
 import com.torve.desktop.playback.toComposePlaybackKey
+import com.torve.desktop.ui.l10n.ds
 import com.torve.domain.player.DesktopPlaybackHotkeys
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -124,6 +128,78 @@ private val PanelBg = Color(0xF0101420)
 private val PanelBorder = Color(0xFF2B3448)
 private val ChipBg = Color(0x30FFFFFF)
 private val ChipBgActive = Color(0xFFE8A838)
+
+private data class PlayerText(
+    val play: String,
+    val pause: String,
+    val resume: String,
+    val stop: String,
+    val seekBack: String,
+    val seekForward: String,
+    val jumpToTime: String,
+    val playbackSpeed: String,
+    val audio: String,
+    val audioTrack: String,
+    val audioDevice: String,
+    val audioDelay: String,
+    val audioSyncPanel: String,
+    val equalizerPanel: String,
+    val subtitles: String,
+    val subtitleTrack: String,
+    val subtitleDelay: String,
+    val subtitleSyncPanel: String,
+    val off: String,
+    val video: String,
+    val fullscreen: String,
+    val exitFullscreen: String,
+    val alwaysFitWindow: String,
+    val aspectRatio: String,
+    val videoTrack: String,
+    val takeSnapshot: String,
+    val tools: String,
+    val mediaInformation: String,
+    val codecInformation: String,
+    val playbackDiagnostics: String,
+    val synchronizationAndEffects: String,
+    val window: String,
+    val alwaysOnTop: String,
+    val showPlaybackControls: String,
+    val resetPlayerWindowLayout: String,
+    val closePlayer: String,
+    val volumeUp: String,
+    val volumeDown: String,
+    val mute: String,
+    val loadExternalSubtitleFile: String,
+    val loadSubtitle: String,
+    val previousChannel: String,
+    val nextChannel: String,
+    val noSubtitleTracksAvailable: String,
+    val noTracks: String,
+    val noAudioTracks: String,
+    val searchOnline: String,
+    val speed: String,
+    val panels: String,
+    val audioSync: String,
+    val subtitleSync: String,
+    val equalizer: String,
+    val mediaInfo: String,
+    val audioSyncEllipsis: String,
+    val subtitleSyncEllipsis: String,
+    val equalizerEllipsis: String,
+    val mediaInfoEllipsis: String,
+    val castTo: String,
+    val castUnavailable: String,
+    val searchingForDevices: String,
+    val stopCasting: String,
+    val videoModeTemplate: String,
+    val subtitlesTemplate: String,
+    val bufferingTemplate: String,
+    val loadedSubtitleTemplate: String,
+    val snapshotSavedTemplate: String,
+    val snapshotFailed: String,
+    val audioOutputSwitchedTemplate: String,
+    val audioOutputSwitchFailed: String,
+)
 
 private enum class AdvancedPanel {
     EQUALIZER,
@@ -157,6 +233,14 @@ fun VlcComposePlayerSurface(
     channelNavigationEnabled: Boolean = false,
     onPreviousChannel: (() -> Unit)? = null,
     onNextChannel: (() -> Unit)? = null,
+    /**
+     * Live recording controls for the in-player record button. When
+     * onToggleRecord is provided, the chrome shows a record / stop
+     * button that toggles based on isCurrentlyRecording. Both null = no
+     * record button (e.g. VOD playback where recording doesn't apply).
+     */
+    isCurrentlyRecording: Boolean = false,
+    onToggleRecord: (() -> Unit)? = null,
     windowState: WindowState? = null,
     seekStepMs: Long = 10_000L,
     initialVolume: Int? = null,
@@ -192,6 +276,77 @@ fun VlcComposePlayerSurface(
     var toastMessage by remember { mutableStateOf<String?>(null) }
     var chromePinnedVisible by remember { mutableStateOf(false) }
     var alwaysOnTop by remember { mutableStateOf(false) }
+    val playerText = PlayerText(
+        play = ds("Play"),
+        pause = ds("Pause"),
+        resume = ds("Resume"),
+        stop = ds("Stop"),
+        seekBack = ds("Seek Back %1\$d s").format(seekStepMs / 1000),
+        seekForward = ds("Seek Forward %1\$d s").format(seekStepMs / 1000),
+        jumpToTime = ds("Jump to Time"),
+        playbackSpeed = ds("Playback Speed"),
+        audio = ds("Audio"),
+        audioTrack = ds("Audio Track"),
+        audioDevice = ds("Audio Device"),
+        audioDelay = ds("Audio Delay"),
+        audioSyncPanel = ds("Audio Sync Panel"),
+        equalizerPanel = ds("Equalizer Panel"),
+        subtitles = ds("Subtitles"),
+        subtitleTrack = ds("Subtitle Track"),
+        subtitleDelay = ds("Subtitle Delay"),
+        subtitleSyncPanel = ds("Subtitle Sync Panel"),
+        off = ds("Off"),
+        video = ds("Video"),
+        fullscreen = ds("Fullscreen"),
+        exitFullscreen = ds("Exit Fullscreen"),
+        alwaysFitWindow = ds("Always Fit Window"),
+        aspectRatio = ds("Aspect Ratio"),
+        videoTrack = ds("Video Track"),
+        takeSnapshot = ds("Take Snapshot"),
+        tools = ds("Tools"),
+        mediaInformation = ds("Media Information"),
+        codecInformation = ds("Codec Information"),
+        playbackDiagnostics = ds("Playback Diagnostics"),
+        synchronizationAndEffects = ds("Synchronization and Effects"),
+        window = ds("Window"),
+        alwaysOnTop = ds("Always on Top"),
+        showPlaybackControls = ds("Show Playback Controls"),
+        resetPlayerWindowLayout = ds("Reset Player Window Layout"),
+        closePlayer = ds("Close Player"),
+        volumeUp = ds("Volume Up"),
+        volumeDown = ds("Volume Down"),
+        mute = ds("Mute"),
+        loadExternalSubtitleFile = ds("Load External Subtitle File"),
+        loadSubtitle = ds("Load Subtitle"),
+        previousChannel = ds("Previous channel"),
+        nextChannel = ds("Next channel"),
+        noSubtitleTracksAvailable = ds("No subtitle tracks available"),
+        noTracks = ds("No tracks"),
+        noAudioTracks = ds("No audio tracks"),
+        searchOnline = ds("Search online..."),
+        speed = ds("Speed"),
+        panels = ds("Panels"),
+        audioSync = ds("Audio Sync"),
+        subtitleSync = ds("Subtitle Sync"),
+        equalizer = ds("Equalizer"),
+        mediaInfo = ds("Media Info"),
+        audioSyncEllipsis = ds("Audio Sync..."),
+        subtitleSyncEllipsis = ds("Subtitle Sync..."),
+        equalizerEllipsis = ds("Equalizer..."),
+        mediaInfoEllipsis = ds("Media Info..."),
+        castTo = ds("Cast to"),
+        castUnavailable = ds("Cast not available in this VLC build"),
+        searchingForDevices = ds("Searching for devices..."),
+        stopCasting = ds("Stop casting"),
+        videoModeTemplate = ds("Video mode: %1\$s"),
+        subtitlesTemplate = ds("Subtitles: %1\$s"),
+        bufferingTemplate = ds("Buffering %1\$d%%"),
+        loadedSubtitleTemplate = ds("Loaded subtitle %1\$s"),
+        snapshotSavedTemplate = ds("Snapshot saved to %1\$s"),
+        snapshotFailed = ds("Snapshot failed"),
+        audioOutputSwitchedTemplate = ds("Audio output switched to %1\$s"),
+        audioOutputSwitchFailed = ds("Audio output switch failed"),
+    )
 
     // Fix 1: Frame polling reads engine.frameRenderer fresh each tick
     LaunchedEffect(engine) {
@@ -244,7 +399,7 @@ fun VlcComposePlayerSurface(
                     session.refreshTracks()
                 }
             }
-            toastMessage = "Loaded subtitle ${java.io.File(droppedPath).name}"
+            toastMessage = playerText.loadedSubtitleTemplate.format(java.io.File(droppedPath).name)
         }
         onDispose { handle.unsubscribe() }
     }
@@ -325,13 +480,13 @@ fun VlcComposePlayerSurface(
         val currentIndex = aspectOptions.indexOfFirst { it.label == selectedAspect }.coerceAtLeast(0)
         val next = aspectOptions[(currentIndex + 1) % aspectOptions.size]
         applyAspect(next)
-        showToast("Video mode: ${next.label}")
+        showToast(playerText.videoModeTemplate.format(next.label))
     }
     fun cycleSubtitleTrack() {
         val tracks = sessionState.availableSubtitleTracks
         val session = engine.session
         if (session == null || tracks.isEmpty()) {
-            showToast("No subtitle tracks available")
+            showToast(playerText.noSubtitleTracksAvailable)
             return
         }
         val selectedIndex = tracks.indexOfFirst { it.id == sessionState.selectedSubtitleTrack?.id }
@@ -347,19 +502,29 @@ fun VlcComposePlayerSurface(
         }
         val nextLabel = when {
             selectedIndex < 0 -> tracks.first().name
-            selectedIndex >= tracks.lastIndex -> "Off"
+            selectedIndex >= tracks.lastIndex -> playerText.off
             else -> tracks[selectedIndex + 1].name
         }
-        showToast("Subtitles: $nextLabel")
+        showToast(playerText.subtitlesTemplate.format(nextLabel))
     }
     fun matchesHotkey(
         event: androidx.compose.ui.input.key.KeyEvent,
         action: DesktopPlaybackHotkeyAction,
     ): Boolean = hotkeys.bindingFor(action).toComposePlaybackKey()?.let { event.key == it } == true
     fun toggleFullscreen() {
-        val ws = windowState ?: return
-        ws.placement = if (ws.placement == WindowPlacement.Fullscreen) WindowPlacement.Floating else WindowPlacement.Fullscreen
-        engine.session?.eventBridge?.setFullscreen(ws.placement == WindowPlacement.Fullscreen)
+        // DISABLED 2026-05-05: was toggling the MAIN Compose Window's
+        // WindowState.placement between Fullscreen and Floating. But the
+        // main Window is created with undecorated=true (the
+        // loginFullscreenPreview path, default true), so going
+        // Fullscreen→Floating produced a small, undraggable,
+        // unmaximizable, undecorated window that the user could only
+        // recover from by force-closing the app.
+        //
+        // The player surface is already covering the entire main
+        // window, so a per-player fullscreen toggle isn't needed --
+        // the app is effectively always-fullscreen anyway. F key
+        // pressed inside the player is now a no-op; ESC closes the
+        // player surface (handled in the key dispatcher).
         onInteraction()
     }
 
@@ -379,7 +544,7 @@ fun VlcComposePlayerSurface(
 
     fun loadExternalSubtitle() {
         val owner = activeWindow() as? Frame
-        val chooser = FileDialog(owner, "Load Subtitle", FileDialog.LOAD).apply {
+        val chooser = FileDialog(owner, playerText.loadSubtitle, FileDialog.LOAD).apply {
             isMultipleMode = false
             file = "*.srt;*.ass;*.ssa;*.vtt;*.sub"
         }
@@ -392,7 +557,7 @@ fun VlcComposePlayerSurface(
                 session.addSubtitleFile(subtitlePath.toUri().toString())
                 session.refreshTracks()
             }
-            showToast("Loaded subtitle ${subtitlePath.fileName}")
+            showToast(playerText.loadedSubtitleTemplate.format(subtitlePath.fileName))
         }
     }
 
@@ -406,7 +571,7 @@ fun VlcComposePlayerSurface(
             kotlinx.coroutines.runBlocking { session.takeSnapshot(snapshotPath.toString()) }
         } ?: false
         showToast(
-            if (saved) "Snapshot saved to $snapshotPath" else "Snapshot failed"
+            if (saved) playerText.snapshotSavedTemplate.format(snapshotPath) else playerText.snapshotFailed
         )
     }
 
@@ -423,7 +588,7 @@ fun VlcComposePlayerSurface(
             kotlinx.coroutines.runBlocking { session.switchAudioDevice(device.outputName, device.deviceId) }
         } ?: false
         showToast(
-            if (switched) "Audio output switched to ${device.deviceLabel}" else "Audio output switch failed"
+            if (switched) playerText.audioOutputSwitchedTemplate.format(device.deviceLabel) else playerText.audioOutputSwitchFailed
         )
     }
 
@@ -438,7 +603,7 @@ fun VlcComposePlayerSurface(
         add(
             ActionItem(
                 id = "pause_resume",
-                label = if (sessionState.isPlaying) "Pause" else if (sessionState.isPaused) "Resume" else "Play",
+                label = if (sessionState.isPlaying) playerText.pause else if (sessionState.isPaused) playerText.resume else playerText.play,
                 enabled = sessionState.canPause || sessionState.isPaused || sessionState.isPlaying,
             ) {
                 kotlinx.coroutines.runBlocking {
@@ -449,27 +614,27 @@ fun VlcComposePlayerSurface(
         add(
             ActionItem(
                 id = "stop",
-                label = "Stop",
+                label = playerText.stop,
                 enabled = sessionState.isPlaying || sessionState.isPaused || sessionState.positionMs > 0,
             ) {
                 onStop()
             }
         )
         add(SeparatorItem("transport_sep"))
-        add(ActionItem("seek_back", "Seek Back ${seekStepMs / 1000}s", enabled = sessionState.canSeek) {
+        add(ActionItem("seek_back", playerText.seekBack, enabled = sessionState.canSeek) {
             engine.session?.let { session -> kotlinx.coroutines.runBlocking { session.seekRelative(-seekStepMs) } }
         })
-        add(ActionItem("seek_forward", "Seek Forward ${seekStepMs / 1000}s", enabled = sessionState.canSeek) {
+        add(ActionItem("seek_forward", playerText.seekForward, enabled = sessionState.canSeek) {
             engine.session?.let { session -> kotlinx.coroutines.runBlocking { session.seekRelative(seekStepMs) } }
         })
-        add(ActionItem("jump_to_time", "Jump to Time", hint = fmt(sessionState.positionMs), enabled = sessionState.canSeek && sessionState.durationMs > 0) {
+        add(ActionItem("jump_to_time", playerText.jumpToTime, hint = fmt(sessionState.positionMs), enabled = sessionState.canSeek && sessionState.durationMs > 0) {
             activePanel = AdvancedPanel.JUMP_TO_TIME
         })
         add(SeparatorItem("navigation_sep"))
         add(
             SubmenuItem(
                 id = "playback_speed",
-                label = "Playback Speed",
+                label = playerText.playbackSpeed,
                 hint = speedLabel(sessionState.playbackRate),
                 enabled = true,
             ) {
@@ -485,18 +650,18 @@ fun VlcComposePlayerSurface(
             }
         )
         add(
-            SubmenuItem(id = "audio", label = "Audio", hint = sessionState.selectedAudioTrack?.name, enabled = sessionState.hasAudio) {
+            SubmenuItem(id = "audio", label = playerText.audio, hint = sessionState.selectedAudioTrack?.name, enabled = sessionState.hasAudio) {
                 buildList {
                     add(
                         SubmenuItem(
                             id = "audio_track",
-                            label = "Audio Track",
+                            label = playerText.audioTrack,
                             hint = sessionState.selectedAudioTrack?.name,
                             enabled = sessionState.availableAudioTracks.isNotEmpty() || sessionState.canDisableAudioTrack,
                         ) {
                             buildList {
                                 if (sessionState.canDisableAudioTrack) {
-                                    add(ChoiceGroupItem("audio_track_off", "Off", selected = sessionState.selectedAudioTrack == null) {
+                                    add(ChoiceGroupItem("audio_track_off", playerText.off, selected = sessionState.selectedAudioTrack == null) {
                                         engine.session?.let { session ->
                                             kotlinx.coroutines.runBlocking {
                                                 session.disableAudioTrack()
@@ -525,7 +690,7 @@ fun VlcComposePlayerSurface(
                     add(
                         SubmenuItem(
                             id = "audio_device",
-                            label = "Audio Device",
+                            label = playerText.audioDevice,
                             enabled = engine.session?.availableAudioDevices()?.isNotEmpty() == true,
                         ) {
                             engine.session?.availableAudioDevices()?.map { device ->
@@ -540,48 +705,48 @@ fun VlcComposePlayerSurface(
                         }
                     )
                     add(SeparatorItem("audio_sep_1"))
-                    add(ActionItem("volume_up", "Volume Up", hint = "+5", enabled = true) {
+                    add(ActionItem("volume_up", playerText.volumeUp, hint = "+5", enabled = true) {
                         engine.session?.let { session -> kotlinx.coroutines.runBlocking { session.setVolume(engine.getVolume() + 5) } }
                     })
-                    add(ActionItem("volume_down", "Volume Down", hint = "-5", enabled = true) {
+                    add(ActionItem("volume_down", playerText.volumeDown, hint = "-5", enabled = true) {
                         engine.session?.let { session -> kotlinx.coroutines.runBlocking { session.setVolume(engine.getVolume() - 5) } }
                     })
-                    add(ToggleItem("mute", "Mute", checked = sessionState.isMuted, enabled = true) {
+                    add(ToggleItem("mute", playerText.mute, checked = sessionState.isMuted, enabled = true) {
                         engine.session?.let { session -> kotlinx.coroutines.runBlocking { session.setMute(!engine.isMuted()) } }
                     })
                     add(SeparatorItem("audio_sep_2"))
                     add(
                         SubmenuItem(
                             id = "audio_delay",
-                            label = "Audio Delay",
+                            label = playerText.audioDelay,
                             hint = delayHint(sessionState.audioDelayUs),
                             enabled = true,
                         ) {
                             delayAdjustmentItems("audio_delay") { deltaMs -> updateAudioDelay(deltaMs) }
                         }
                     )
-                    add(ActionItem("audio_sync_panel", "Audio Sync Panel") { activePanel = AdvancedPanel.AUDIO_SYNC })
-                    add(ActionItem("equalizer_panel", "Equalizer Panel") { activePanel = AdvancedPanel.EQUALIZER })
+                    add(ActionItem("audio_sync_panel", playerText.audioSyncPanel) { activePanel = AdvancedPanel.AUDIO_SYNC })
+                    add(ActionItem("equalizer_panel", playerText.equalizerPanel) { activePanel = AdvancedPanel.EQUALIZER })
                 }
             }
         )
         add(
             SubmenuItem(
                 id = "subtitles",
-                label = "Subtitles",
-                hint = sessionState.selectedSubtitleTrack?.name ?: "Off",
+                label = playerText.subtitles,
+                hint = sessionState.selectedSubtitleTrack?.name ?: playerText.off,
                 enabled = true,
             ) {
                 buildList {
                     add(
                         SubmenuItem(
                             id = "subtitle_track",
-                            label = "Subtitle Track",
-                            hint = sessionState.selectedSubtitleTrack?.name ?: "Off",
+                            label = playerText.subtitleTrack,
+                            hint = sessionState.selectedSubtitleTrack?.name ?: playerText.off,
                             enabled = true,
                         ) {
                             buildList {
-                                add(ChoiceGroupItem("subtitle_off", "Off", selected = sessionState.selectedSubtitleTrack == null) {
+                                add(ChoiceGroupItem("subtitle_off", playerText.off, selected = sessionState.selectedSubtitleTrack == null) {
                                     engine.session?.let { session ->
                                         kotlinx.coroutines.runBlocking {
                                             session.disableSubtitles()
@@ -606,32 +771,32 @@ fun VlcComposePlayerSurface(
                             }
                         }
                     )
-                    add(ActionItem("load_external_subtitle", "Load External Subtitle File", enabled = engine.session != null) {
+                    add(ActionItem("load_external_subtitle", playerText.loadExternalSubtitleFile, enabled = engine.session != null) {
                         loadExternalSubtitle()
                     })
                     add(SeparatorItem("subtitle_sep"))
                     add(
                         SubmenuItem(
                             id = "subtitle_delay",
-                            label = "Subtitle Delay",
+                            label = playerText.subtitleDelay,
                             hint = delayHint(sessionState.subtitleDelayUs),
                         ) {
                             delayAdjustmentItems("subtitle_delay") { deltaMs -> updateSubtitleDelay(deltaMs) }
                         }
                     )
-                    add(ActionItem("subtitle_sync_panel", "Subtitle Sync Panel") { activePanel = AdvancedPanel.SUBTITLE_SYNC })
+                    add(ActionItem("subtitle_sync_panel", playerText.subtitleSyncPanel) { activePanel = AdvancedPanel.SUBTITLE_SYNC })
                 }
             }
         )
         add(
-            SubmenuItem(id = "video", label = "Video", hint = if (isFullscreen) "Fullscreen" else selectedAspect, enabled = sessionState.hasVideo) {
+            SubmenuItem(id = "video", label = playerText.video, hint = if (isFullscreen) playerText.fullscreen else selectedAspect, enabled = sessionState.hasVideo) {
                 buildList {
-                    add(ActionItem("fullscreen", if (isFullscreen) "Exit Fullscreen" else "Fullscreen") { toggleFullscreen() })
-                    add(ToggleItem("fit_window", "Always Fit Window", checked = selectedAspect == "Default") {
+                    add(ActionItem("fullscreen", if (isFullscreen) playerText.exitFullscreen else playerText.fullscreen) { toggleFullscreen() })
+                    add(ToggleItem("fit_window", playerText.alwaysFitWindow, checked = selectedAspect == "Default") {
                         applyAspect(aspectOptions.first { it.label == "Default" })
                     })
                     add(
-                        SubmenuItem(id = "aspect_ratio", label = "Aspect Ratio", hint = selectedAspect) {
+                        SubmenuItem(id = "aspect_ratio", label = playerText.aspectRatio, hint = selectedAspect) {
                             aspectOptions.map { option ->
                                 ChoiceGroupItem(
                                     id = "aspect_${option.label}",
@@ -648,13 +813,13 @@ fun VlcComposePlayerSurface(
                         add(
                             SubmenuItem(
                                 id = "video_track",
-                                label = "Video Track",
+                            label = playerText.videoTrack,
                                 hint = sessionState.selectedVideoTrack?.name,
                                 enabled = sessionState.availableVideoTracks.isNotEmpty() || sessionState.canDisableVideoTrack,
                             ) {
                                 buildList {
                                     if (sessionState.canDisableVideoTrack) {
-                                        add(ChoiceGroupItem("video_track_off", "Off", selected = sessionState.selectedVideoTrack == null) {
+                                        add(ChoiceGroupItem("video_track_off", playerText.off, selected = sessionState.selectedVideoTrack == null) {
                                             engine.session?.let { session ->
                                                 kotlinx.coroutines.runBlocking {
                                                     session.selectVideoTrack(-1)
@@ -681,36 +846,134 @@ fun VlcComposePlayerSurface(
                             }
                         )
                     }
-                    add(ActionItem("snapshot", "Take Snapshot", enabled = sessionState.hasVideo) { takeSnapshot() })
+                    add(ActionItem("snapshot", playerText.takeSnapshot, enabled = sessionState.hasVideo) { takeSnapshot() })
                 }
             }
         )
         add(
-            SubmenuItem(id = "tools", label = "Tools") {
+            SubmenuItem(id = "tools", label = playerText.tools) {
                 listOf(
-                    ActionItem("media_information", "Media Information") { activePanel = AdvancedPanel.MEDIA_INFO },
-                    ActionItem("codec_information", "Codec Information") { activePanel = AdvancedPanel.CODEC_INFO },
-                    ActionItem("playback_diagnostics", "Playback Diagnostics") { activePanel = AdvancedPanel.PLAYBACK_DIAGNOSTICS },
+                    ActionItem("media_information", playerText.mediaInformation) { activePanel = AdvancedPanel.MEDIA_INFO },
+                    ActionItem("codec_information", playerText.codecInformation) { activePanel = AdvancedPanel.CODEC_INFO },
+                    ActionItem("playback_diagnostics", playerText.playbackDiagnostics) { activePanel = AdvancedPanel.PLAYBACK_DIAGNOSTICS },
                     SeparatorItem("tools_sep"),
-                    ActionItem("sync_effects", "Synchronization and Effects") { activePanel = AdvancedPanel.SYNC_EFFECTS },
+                    ActionItem("sync_effects", playerText.synchronizationAndEffects) { activePanel = AdvancedPanel.SYNC_EFFECTS },
                 )
             }
         )
         add(
-            SubmenuItem(id = "window", label = "Window") {
+            SubmenuItem(id = "window", label = playerText.window) {
                 listOf(
-                    ToggleItem("always_on_top", "Always on Top", checked = alwaysOnTop) { toggleAlwaysOnTop() },
+                    ToggleItem("always_on_top", playerText.alwaysOnTop, checked = alwaysOnTop) { toggleAlwaysOnTop() },
                     SeparatorItem("window_sep"),
-                    ToggleItem("show_controls", "Show Playback Controls", checked = chromePinnedVisible) {
+                    ToggleItem("show_controls", playerText.showPlaybackControls, checked = chromePinnedVisible) {
                         chromePinnedVisible = !chromePinnedVisible
                         chromeVisible = chromePinnedVisible || chromeVisible
                     },
-                    ActionItem("reset_layout", "Reset Player Window Layout", enabled = false) {},
+                    ActionItem("reset_layout", playerText.resetPlayerWindowLayout, enabled = false) {},
                 )
             }
         )
         add(SeparatorItem("close_sep"))
-        add(ActionItem("close_player", "Close Player") { onClose() })
+        add(ActionItem("close_player", playerText.closePlayer) { onClose() })
+    }
+
+    // Window-level key dispatcher. Compose's onPreviewKeyEvent (below)
+    // only fires when this surface holds keyboard focus, but focus is
+    // often retained by whatever button/menu the user clicked to start
+    // playback -- leaving every hotkey dead until they manually click
+    // the video. Same pattern MpvPlayerShell uses successfully for IPTV.
+    //
+    // Only unmodified keypresses are intercepted so we don't fight the
+    // app menu bar (Ctrl+Q quit, Ctrl+F fullscreen, Ctrl+W tray, etc.).
+    androidx.compose.runtime.DisposableEffect(engine, hotkeys, channelNavigationEnabled) {
+        fun awtCode(action: DesktopPlaybackHotkeyAction): Int? =
+            hotkeys.bindingFor(action).toAwtPlaybackKeyCode()
+        val dispatcher = java.awt.KeyEventDispatcher { e ->
+            if (e.id != java.awt.event.KeyEvent.KEY_PRESSED) return@KeyEventDispatcher false
+            if (e.isControlDown || e.isAltDown || e.isMetaDown) return@KeyEventDispatcher false
+            val keyCode = e.keyCode
+            onInteraction()
+            when (keyCode) {
+                awtCode(DesktopPlaybackHotkeyAction.EXIT_PLAYBACK) -> {
+                    when {
+                        showContextMenu -> { showContextMenu = false; true }
+                        activePanel != null -> { activePanel = null; true }
+                        else -> { onClose(); true }
+                    }
+                }
+                awtCode(DesktopPlaybackHotkeyAction.PREVIOUS_CHANNEL) -> {
+                    if (channelNavigationEnabled && onPreviousChannel != null) {
+                        onPreviousChannel.invoke()
+                        showToast(playerText.previousChannel)
+                        true
+                    } else false
+                }
+                awtCode(DesktopPlaybackHotkeyAction.NEXT_CHANNEL) -> {
+                    if (channelNavigationEnabled && onNextChannel != null) {
+                        onNextChannel.invoke()
+                        showToast(playerText.nextChannel)
+                        true
+                    } else false
+                }
+                awtCode(DesktopPlaybackHotkeyAction.PLAY_PAUSE) -> {
+                    if (engine.session == null) false else {
+                        kotlinx.coroutines.runBlocking {
+                            if (engine.isPlaying()) engine.pause() else engine.play()
+                        }
+                        true
+                    }
+                }
+                awtCode(DesktopPlaybackHotkeyAction.TOGGLE_FULLSCREEN) -> {
+                    toggleFullscreen(); true
+                }
+                awtCode(DesktopPlaybackHotkeyAction.SEEK_BACKWARD) -> {
+                    val session = engine.session ?: return@KeyEventDispatcher false
+                    kotlinx.coroutines.runBlocking { session.seekRelative(-seekStepMs) }
+                    true
+                }
+                awtCode(DesktopPlaybackHotkeyAction.SEEK_FORWARD) -> {
+                    val session = engine.session ?: return@KeyEventDispatcher false
+                    kotlinx.coroutines.runBlocking { session.seekRelative(seekStepMs) }
+                    true
+                }
+                awtCode(DesktopPlaybackHotkeyAction.VOLUME_UP) -> {
+                    val session = engine.session ?: return@KeyEventDispatcher false
+                    val next = (engine.getVolume() + 5).coerceIn(0, 100)
+                    kotlinx.coroutines.runBlocking { session.setVolume(next) }
+                    onVolumeChanged?.invoke(next)
+                    true
+                }
+                awtCode(DesktopPlaybackHotkeyAction.VOLUME_DOWN) -> {
+                    val session = engine.session ?: return@KeyEventDispatcher false
+                    val next = (engine.getVolume() - 5).coerceIn(0, 100)
+                    kotlinx.coroutines.runBlocking { session.setVolume(next) }
+                    onVolumeChanged?.invoke(next)
+                    true
+                }
+                awtCode(DesktopPlaybackHotkeyAction.CYCLE_SUBTITLES) -> {
+                    cycleSubtitleTrack(); true
+                }
+                awtCode(DesktopPlaybackHotkeyAction.CYCLE_VIDEO_MODE) -> {
+                    cycleVideoMode(); true
+                }
+                awtCode(DesktopPlaybackHotkeyAction.MUTE) -> {
+                    val session = engine.session ?: return@KeyEventDispatcher false
+                    kotlinx.coroutines.runBlocking { session.setMute(!engine.isMuted()) }
+                    true
+                }
+                awtCode(DesktopPlaybackHotkeyAction.STOP_PLAYBACK) -> {
+                    onStop(); true
+                }
+                else -> false
+            }
+        }
+        java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager()
+            .addKeyEventDispatcher(dispatcher)
+        onDispose {
+            java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager()
+                .removeKeyEventDispatcher(dispatcher)
+        }
     }
 
     Box(
@@ -752,18 +1015,22 @@ fun VlcComposePlayerSurface(
                 if (matchesHotkey(event, DesktopPlaybackHotkeyAction.EXIT_PLAYBACK)) {
                     if (showContextMenu) { showContextMenu = false; return@onPreviewKeyEvent true }
                     if (activePanel != null) { activePanel = null; return@onPreviewKeyEvent true }
-                    if (isFullscreen) toggleFullscreen() else onClose()
+                    // ESC always closes the player surface. We used to
+                    // call toggleFullscreen() first when fullscreen, but
+                    // that mutated the main window's WindowState into a
+                    // broken undecorated-floating state.
+                    onClose()
                     return@onPreviewKeyEvent true
                 }
                 if (channelNavigationEnabled) {
                     if (matchesHotkey(event, DesktopPlaybackHotkeyAction.PREVIOUS_CHANNEL)) {
                         onPreviousChannel?.invoke()
-                        showToast("Previous channel")
+                        showToast(playerText.previousChannel)
                         return@onPreviewKeyEvent true
                     }
                     if (matchesHotkey(event, DesktopPlaybackHotkeyAction.NEXT_CHANNEL)) {
                         onNextChannel?.invoke()
-                        showToast("Next channel")
+                        showToast(playerText.nextChannel)
                         return@onPreviewKeyEvent true
                     }
                 }
@@ -1007,7 +1274,7 @@ fun VlcComposePlayerSurface(
         if (sessionState.isBuffering) {
             Surface(Modifier.align(Alignment.Center), color = ChromeBg, shape = RoundedCornerShape(16.dp)) {
                 Column(Modifier.padding(24.dp, 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Buffering ${sessionState.bufferedPercent.toInt()}%", color = Color.White, fontSize = 14.sp)
+                    Text(playerText.bufferingTemplate.format(sessionState.bufferedPercent.toInt()), color = Color.White, fontSize = 14.sp)
                     Spacer(Modifier.height(8.dp))
                     LinearProgressIndicator(progress = { sessionState.bufferedPercent / 100f }, Modifier.width(180.dp), color = Accent, trackColor = Color(0x40FFFFFF))
                 }
@@ -1058,6 +1325,17 @@ fun VlcComposePlayerSurface(
                             PBtn(Icons.Filled.Stop) { onStop() }
                             PBtn(Icons.Filled.FastRewind) { engine.session?.let { s -> kotlinx.coroutines.runBlocking { s.seekRelative(-seekStepMs) } } }
                             PBtn(Icons.Filled.FastForward) { engine.session?.let { s -> kotlinx.coroutines.runBlocking { s.seekRelative(seekStepMs) } } }
+                            // Record / Stop-recording. Hidden when caller
+                            // didn't supply onToggleRecord (e.g. VOD).
+                            onToggleRecord?.let { toggleRec ->
+                                PBtn(
+                                    if (isCurrentlyRecording) Icons.Filled.StopCircle
+                                    else Icons.Filled.FiberManualRecord,
+                                ) {
+                                    toggleRec()
+                                    onInteraction()
+                                }
+                            }
                         }
                         // Center time
                         Text("${fmt(sessionState.positionMs)} / ${fmt(sessionState.durationMs)}", color = Color.White, fontSize = 12.sp)
@@ -1069,13 +1347,13 @@ fun VlcComposePlayerSurface(
                             // Subtitles
                             Box { PBtn(Icons.Filled.Subtitles) { showSubtitleMenu = true; onInteraction() }
                                 DropdownMenu(showSubtitleMenu, { showSubtitleMenu = false }) {
-                                    CheckItem("Off", sessionState.selectedSubtitleTrack == null) { engine.session?.let { s -> kotlinx.coroutines.runBlocking { s.disableSubtitles(); s.refreshTracks() } }; showSubtitleMenu = false }
+                                    CheckItem(playerText.off, sessionState.selectedSubtitleTrack == null) { engine.session?.let { s -> kotlinx.coroutines.runBlocking { s.disableSubtitles(); s.refreshTracks() } }; showSubtitleMenu = false }
                                     sessionState.availableSubtitleTracks.forEach { t -> CheckItem(t.name, sessionState.selectedSubtitleTrack?.id == t.id) { engine.session?.let { s -> kotlinx.coroutines.runBlocking { s.selectSubtitleTrack(t.id); s.refreshTracks() } }; showSubtitleMenu = false } }
-                                    if (sessionState.availableSubtitleTracks.isEmpty()) DropdownMenuItem(text = { Text("No tracks", color = Color.Gray) }, onClick = {})
+                                    if (sessionState.availableSubtitleTracks.isEmpty()) DropdownMenuItem(text = { Text(playerText.noTracks, color = Color.Gray) }, onClick = {})
                                     onSearchOnlineSubtitles?.let { search ->
                                         HorizontalDivider()
                                         DropdownMenuItem(
-                                            text = { Text("Search online...") },
+                                            text = { Text(playerText.searchOnline) },
                                             onClick = { search(); showSubtitleMenu = false },
                                         )
                                     }
@@ -1091,17 +1369,17 @@ fun VlcComposePlayerSurface(
                             // Settings
                             Box { PBtn(Icons.Filled.Settings) { showSettingsMenu = true; onInteraction() }
                                 DropdownMenu(showSettingsMenu, { showSettingsMenu = false }) {
-                                    SectionLabel("Speed")
+                                    SectionLabel(playerText.speed)
                                     listOf(0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f, 3f, 4f).forEach { spd ->
                                         CheckItem("${spd}x", kotlin.math.abs(sessionState.playbackRate - spd) < 0.01f) { engine.session?.let { s -> kotlinx.coroutines.runBlocking { s.setRate(spd) } }; showSettingsMenu = false } }
-                                    SectionLabel("Audio Track")
+                                    SectionLabel(playerText.audioTrack)
                                     sessionState.availableAudioTracks.forEach { t -> CheckItem(t.name, sessionState.selectedAudioTrack?.id == t.id) { engine.session?.let { s -> kotlinx.coroutines.runBlocking { s.selectAudioTrack(t.id); s.refreshTracks() } }; showSettingsMenu = false } }
-                                    if (sessionState.availableAudioTracks.isEmpty()) DropdownMenuItem(text = { Text("No audio tracks", color = Color.Gray) }, onClick = {})
-                                    SectionLabel("Panels")
-                                    DropdownMenuItem(text = { Text("Audio Sync...") }, onClick = { activePanel = AdvancedPanel.AUDIO_SYNC; showSettingsMenu = false })
-                                    DropdownMenuItem(text = { Text("Subtitle Sync...") }, onClick = { activePanel = AdvancedPanel.SUBTITLE_SYNC; showSettingsMenu = false })
-                                    DropdownMenuItem(text = { Text("Equalizer...") }, onClick = { activePanel = AdvancedPanel.EQUALIZER; showSettingsMenu = false })
-                                    DropdownMenuItem(text = { Text("Media Info...") }, onClick = { activePanel = AdvancedPanel.MEDIA_INFO; showSettingsMenu = false })
+                                    if (sessionState.availableAudioTracks.isEmpty()) DropdownMenuItem(text = { Text(playerText.noAudioTracks, color = Color.Gray) }, onClick = {})
+                                    SectionLabel(playerText.panels)
+                                    DropdownMenuItem(text = { Text(playerText.audioSyncEllipsis) }, onClick = { activePanel = AdvancedPanel.AUDIO_SYNC; showSettingsMenu = false })
+                                    DropdownMenuItem(text = { Text(playerText.subtitleSyncEllipsis) }, onClick = { activePanel = AdvancedPanel.SUBTITLE_SYNC; showSettingsMenu = false })
+                                    DropdownMenuItem(text = { Text(playerText.equalizerEllipsis) }, onClick = { activePanel = AdvancedPanel.EQUALIZER; showSettingsMenu = false })
+                                    DropdownMenuItem(text = { Text(playerText.mediaInfoEllipsis) }, onClick = { activePanel = AdvancedPanel.MEDIA_INFO; showSettingsMenu = false })
                                 } }
                             // Cast (Chromecast / DLNA via VLC renderer discoverers)
                             if (castController != null) {
@@ -1114,14 +1392,14 @@ fun VlcComposePlayerSurface(
                                         else Icons.Filled.Cast,
                                     ) { showCastMenu = true; onInteraction() }
                                     DropdownMenu(showCastMenu, { showCastMenu = false }) {
-                                        SectionLabel("Cast to")
+                                        SectionLabel(playerText.castTo)
                                         if (castState.devices.isEmpty()) {
                                             DropdownMenuItem(
                                                 text = {
                                                     Text(
                                                         if (castState.activeDiscoverers.isEmpty())
-                                                            "Cast not available in this VLC build"
-                                                        else "Searching for devices...",
+                                                            playerText.castUnavailable
+                                                        else playerText.searchingForDevices,
                                                         color = Color.Gray,
                                                     )
                                                 },
@@ -1138,7 +1416,7 @@ fun VlcComposePlayerSurface(
                                         if (castState.connectedDeviceId != null) {
                                             HorizontalDivider()
                                             DropdownMenuItem(
-                                                text = { Text("Stop casting") },
+                                                text = { Text(playerText.stopCasting) },
                                                 onClick = {
                                                     castController.disconnect()
                                                     showCastMenu = false
@@ -1184,22 +1462,22 @@ fun VlcComposePlayerSurface(
                     Column(Modifier.padding(24.dp)) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Text(when (panel) {
-                                AdvancedPanel.EQUALIZER -> "Equalizer"
-                                AdvancedPanel.AUDIO_SYNC -> "Audio Sync"
-                                AdvancedPanel.SUBTITLE_SYNC -> "Subtitle Sync"
-                                AdvancedPanel.MEDIA_INFO -> "Media Information"
-                                AdvancedPanel.CODEC_INFO -> "Codec Information"
-                                AdvancedPanel.PLAYBACK_DIAGNOSTICS -> "Playback Diagnostics"
-                                AdvancedPanel.SYNC_EFFECTS -> "Synchronization and Effects"
-                                AdvancedPanel.JUMP_TO_TIME -> "Jump to Time"
+                                AdvancedPanel.EQUALIZER -> playerText.equalizer
+                                AdvancedPanel.AUDIO_SYNC -> playerText.audioSync
+                                AdvancedPanel.SUBTITLE_SYNC -> playerText.subtitleSync
+                                AdvancedPanel.MEDIA_INFO -> playerText.mediaInformation
+                                AdvancedPanel.CODEC_INFO -> playerText.codecInformation
+                                AdvancedPanel.PLAYBACK_DIAGNOSTICS -> playerText.playbackDiagnostics
+                                AdvancedPanel.SYNC_EFFECTS -> playerText.synchronizationAndEffects
+                                AdvancedPanel.JUMP_TO_TIME -> playerText.jumpToTime
                             }, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                             IconButton(onClick = { activePanel = null }) { Icon(Icons.Filled.Close, null, tint = Color.White) }
                         }
                         Spacer(Modifier.height(16.dp))
                         Column(Modifier.verticalScroll(rememberScrollState()).weight(1f, fill = false)) {
                             when (panel) {
-                                AdvancedPanel.AUDIO_SYNC -> DelaySyncPanel("Audio Delay", { engine.session?.getAudioDelayUs() ?: 0 }, { d -> engine.session?.let { s -> kotlinx.coroutines.runBlocking { s.setAudioDelay(d) } } })
-                                AdvancedPanel.SUBTITLE_SYNC -> DelaySyncPanel("Subtitle Delay", { engine.session?.getSubtitleDelayUs() ?: 0 }, { d -> engine.session?.let { s -> kotlinx.coroutines.runBlocking { s.setSubtitleDelay(d) } } })
+                                AdvancedPanel.AUDIO_SYNC -> DelaySyncPanel(playerText.audioDelay, { engine.session?.getAudioDelayUs() ?: 0 }, { d -> engine.session?.let { s -> kotlinx.coroutines.runBlocking { s.setAudioDelay(d) } } })
+                                AdvancedPanel.SUBTITLE_SYNC -> DelaySyncPanel(playerText.subtitleDelay, { engine.session?.getSubtitleDelayUs() ?: 0 }, { d -> engine.session?.let { s -> kotlinx.coroutines.runBlocking { s.setSubtitleDelay(d) } } })
                                 AdvancedPanel.EQUALIZER -> EqualizerPanel(engine)
                                 AdvancedPanel.MEDIA_INFO -> MediaInfoPanel(
                                     diagnostics = diagnostics,
@@ -1247,14 +1525,14 @@ private fun DelaySyncPanel(label: String, getDelay: () -> Long, setDelay: (Long)
     Spacer(Modifier.height(12.dp))
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         listOf(-250, -100, -50, 0, 50, 100, 250).forEach { step ->
-            Chip(if (step == 0) "Reset" else "${if (step > 0) "+" else ""}${step} ms") {
+            Chip(if (step == 0) ds("Reset") else "${if (step > 0) "+" else ""}${step} ms") {
                 delayMs = if (step == 0) 0f else delayMs + step
                 setDelay((delayMs * 1000).toLong())
             }
         }
     }
     Spacer(Modifier.height(8.dp))
-    Text("Positive = delayed, negative = earlier", color = Color.Gray, fontSize = 11.sp)
+    Text(ds("Positive = delayed, negative = earlier"), color = Color.Gray, fontSize = 11.sp)
 }
 
 // ── Equalizer panel (fix 1: band levels update when preset changes) ──
@@ -1263,7 +1541,7 @@ private fun DelaySyncPanel(label: String, getDelay: () -> Long, setDelay: (Long)
 @Composable
 private fun EqualizerPanel(engine: VlcPlaybackEngine) {
     val session = engine.session
-    if (session == null) { Text("No active session", color = Color.Gray); return }
+    if (session == null) { Text(ds("No active session"), color = Color.Gray); return }
 
     val presets = remember { session.getEqualizerPresets() }
     val bandFreqs = remember { session.getEqualizerBandFrequencies() }
@@ -1273,11 +1551,11 @@ private fun EqualizerPanel(engine: VlcPlaybackEngine) {
     var bandRefreshKey by remember { mutableIntStateOf(0) }
 
     // Enable/disable
-    Chip(if (enabled) "Enabled" else "Disabled", active = enabled) {
+    Chip(if (enabled) ds("Enabled") else ds("Disabled"), active = enabled) {
         enabled = !enabled; kotlinx.coroutines.runBlocking { session.setEqualizerEnabled(enabled) }
     }
     Spacer(Modifier.height(12.dp))
-    Chip("Reset") {
+    Chip(ds("Reset")) {
         selectedPreset = null
         enabled = false
         kotlinx.coroutines.runBlocking {
@@ -1291,7 +1569,7 @@ private fun EqualizerPanel(engine: VlcPlaybackEngine) {
     // Presets
     if (presets.isNotEmpty()) {
         Spacer(Modifier.height(16.dp))
-        Text("Presets", color = Color(0xAAFFFFFF), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text(ds("Presets"), color = Color(0xAAFFFFFF), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             presets.forEach { preset ->
@@ -1307,7 +1585,7 @@ private fun EqualizerPanel(engine: VlcPlaybackEngine) {
 
     // Preamp
     Spacer(Modifier.height(16.dp))
-    Text("Preamp", color = Color(0xAAFFFFFF), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+    Text(ds("Preamp"), color = Color(0xAAFFFFFF), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
     Spacer(Modifier.height(4.dp))
     var preamp by remember(bandRefreshKey) { mutableFloatStateOf(session.getEqualizerPreamp()) }
     Slider(value = preamp, onValueChange = { preamp = it; kotlinx.coroutines.runBlocking { session.setEqualizerPreamp(it) } },
@@ -1316,7 +1594,7 @@ private fun EqualizerPanel(engine: VlcPlaybackEngine) {
     // Bands - keyed on bandRefreshKey so they re-read after preset change
     if (bandFreqs.isNotEmpty()) {
         Spacer(Modifier.height(16.dp))
-        Text("Bands", color = Color(0xAAFFFFFF), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text(ds("Bands"), color = Color(0xAAFFFFFF), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(4.dp))
         bandFreqs.forEachIndexed { index, freq ->
             val label = if (freq >= 1000) "${(freq / 1000).toInt()} kHz" else "${freq.toInt()} Hz"
@@ -1337,7 +1615,7 @@ private fun EqualizerPanel(engine: VlcPlaybackEngine) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PictureModePanel(engine: VlcPlaybackEngine, selectedAspect: String, onSelect: (String) -> Unit) {
-    Text("Choose how the video fills the player area.", color = Color.Gray, fontSize = 12.sp)
+    Text(ds("Choose how the video fills the player area."), color = Color.Gray, fontSize = 12.sp)
     Spacer(Modifier.height(12.dp))
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         aspectOptions.forEach { opt ->
@@ -1354,19 +1632,19 @@ private fun PictureModePanel(engine: VlcPlaybackEngine, selectedAspect: String, 
 @Composable
 private fun MediaInfoPanel(state: VlcSessionState) {
     listOf(
-        "Status" to state.playbackStatus::class.simpleName.orEmpty(),
-        "Duration" to fmt(state.durationMs),
-        "Position" to fmt(state.positionMs),
-        "Video" to (state.videoDimensions?.let { "${it.width}x${it.height}" } ?: "N/A"),
-        "Audio Track" to (state.selectedAudioTrack?.name ?: "Default"),
-        "Subtitle Track" to (state.selectedSubtitleTrack?.name ?: "Off"),
-        "Speed" to "${state.playbackRate}x",
-        "Volume" to "${state.volume}%",
-        "Audio Delay" to "${state.audioDelayUs / 1000} ms",
-        "Subtitle Delay" to "${state.subtitleDelayUs / 1000} ms",
-        "Can Seek" to state.canSeek.toString(),
-        "Has Video" to state.hasVideo.toString(),
-        "Has Audio" to state.hasAudio.toString(),
+        ds("Status") to state.playbackStatus::class.simpleName.orEmpty(),
+        ds("Duration") to fmt(state.durationMs),
+        ds("Position") to fmt(state.positionMs),
+        ds("Video") to (state.videoDimensions?.let { "${it.width}x${it.height}" } ?: ds("N/A")),
+        ds("Audio Track") to (state.selectedAudioTrack?.name ?: ds("Default")),
+        ds("Subtitle Track") to (state.selectedSubtitleTrack?.name ?: ds("Off")),
+        ds("Speed") to "${state.playbackRate}x",
+        ds("Volume") to "${state.volume}%",
+        ds("Audio Delay") to "${state.audioDelayUs / 1000} ms",
+        ds("Subtitle Delay") to "${state.subtitleDelayUs / 1000} ms",
+        ds("Can Seek") to state.canSeek.toString(),
+        ds("Has Video") to state.hasVideo.toString(),
+        ds("Has Audio") to state.hasAudio.toString(),
     ).forEach { (label, value) ->
         Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(label, color = Color.Gray, fontSize = 12.sp); Text(value, color = Color.White, fontSize = 12.sp)
@@ -1385,34 +1663,34 @@ private fun MediaInfoPanel(
     mediaPath: String?,
 ) {
     listOf(
-        "Title" to title,
-        "Subtitle" to (subtitle ?: "None"),
-        "Source" to (mediaPath ?: diagnostics.mediaUrl ?: "Unknown"),
-        "Status" to diagnostics.playbackState,
-        "Duration" to fmt(sessionState.durationMs),
-        "Position" to fmt(sessionState.positionMs),
-        "Video" to (diagnostics.resolution ?: sessionState.videoDimensions?.let { "${it.width}x${it.height}" } ?: "N/A"),
-        "FPS" to (diagnostics.fps ?: "N/A"),
-        "Audio Track" to (sessionState.selectedAudioTrack?.name ?: diagnostics.audioTrack ?: "Default"),
-        "Subtitle Track" to (sessionState.selectedSubtitleTrack?.name ?: diagnostics.subtitleTrack ?: "Off"),
-        "Speed" to speedLabel(sessionState.playbackRate),
-        "Volume" to "${sessionState.volume}%",
-        "Audio Delay" to delayHint(sessionState.audioDelayUs),
-        "Subtitle Delay" to delayHint(sessionState.subtitleDelayUs),
+        ds("Title") to title,
+        ds("Subtitle") to (subtitle ?: ds("None")),
+        ds("Source") to (mediaPath ?: diagnostics.mediaUrl ?: ds("Unknown")),
+        ds("Status") to diagnostics.playbackState,
+        ds("Duration") to fmt(sessionState.durationMs),
+        ds("Position") to fmt(sessionState.positionMs),
+        ds("Video") to (diagnostics.resolution ?: sessionState.videoDimensions?.let { "${it.width}x${it.height}" } ?: ds("N/A")),
+        ds("FPS") to (diagnostics.fps ?: ds("N/A")),
+        ds("Audio Track") to (sessionState.selectedAudioTrack?.name ?: diagnostics.audioTrack ?: ds("Default")),
+        ds("Subtitle Track") to (sessionState.selectedSubtitleTrack?.name ?: diagnostics.subtitleTrack ?: ds("Off")),
+        ds("Speed") to speedLabel(sessionState.playbackRate),
+        ds("Volume") to "${sessionState.volume}%",
+        ds("Audio Delay") to delayHint(sessionState.audioDelayUs),
+        ds("Subtitle Delay") to delayHint(sessionState.subtitleDelayUs),
     ).forEach { (label, value) -> InfoRow(label, value) }
 }
 
 @Composable
 private fun CodecInfoPanel(diagnostics: com.torve.desktop.player.DesktopPlayerDiagnostics) {
     listOf(
-        "Container" to (diagnostics.sourceType ?: "N/A"),
-        "Video Codec" to (diagnostics.videoCodec ?: "N/A"),
-        "Audio Codec" to (diagnostics.audioCodec ?: "N/A"),
-        "Bitrate" to (diagnostics.bitrate ?: "N/A"),
-        "Resolution" to (diagnostics.resolution ?: "N/A"),
-        "FPS" to (diagnostics.fps ?: "N/A"),
-        "Audio Channels" to (diagnostics.audioChannels ?: "N/A"),
-        "Sample Rate" to (diagnostics.sampleRate ?: "N/A"),
+        ds("Container") to (diagnostics.sourceType ?: ds("N/A")),
+        ds("Video Codec") to (diagnostics.videoCodec ?: ds("N/A")),
+        ds("Audio Codec") to (diagnostics.audioCodec ?: ds("N/A")),
+        ds("Bitrate") to (diagnostics.bitrate ?: ds("N/A")),
+        ds("Resolution") to (diagnostics.resolution ?: ds("N/A")),
+        ds("FPS") to (diagnostics.fps ?: ds("N/A")),
+        ds("Audio Channels") to (diagnostics.audioChannels ?: ds("N/A")),
+        ds("Sample Rate") to (diagnostics.sampleRate ?: ds("N/A")),
     ).forEach { (label, value) -> InfoRow(label, value) }
 }
 
@@ -1423,16 +1701,16 @@ private fun PlaybackDiagnosticsPanel(
     backendLabel: String,
 ) {
     listOf(
-        "Backend" to backendLabel,
-        "State" to diagnostics.playbackState,
-        "Buffering" to if (sessionState.isBuffering) "${sessionState.bufferedPercent.toInt()}%" else "Idle",
-        "Buffer Mode" to (diagnostics.bufferingMode ?: "Auto"),
-        "Source Type" to (diagnostics.sourceType ?: "Unknown"),
-        "Source URL" to (diagnostics.mediaUrl ?: "Unknown"),
-        "Runtime" to (diagnostics.runtimePath ?: "Bundled/Auto"),
-        "VLC Version" to (diagnostics.vlcVersion ?: "Unknown"),
-        "Playback Speed" to speedLabel(diagnostics.playbackSpeed),
-        "Muted" to diagnostics.isMuted.toString(),
+        ds("Backend") to backendLabel,
+        ds("State") to diagnostics.playbackState,
+        ds("Buffering") to if (sessionState.isBuffering) "${sessionState.bufferedPercent.toInt()}%" else ds("Idle"),
+        ds("Buffer Mode") to (diagnostics.bufferingMode ?: ds("Auto")),
+        ds("Source Type") to (diagnostics.sourceType ?: ds("Unknown")),
+        ds("Source URL") to (diagnostics.mediaUrl ?: ds("Unknown")),
+        ds("Runtime") to (diagnostics.runtimePath ?: ds("Bundled/Auto")),
+        ds("VLC Version") to (diagnostics.vlcVersion ?: ds("Unknown")),
+        ds("Playback Speed") to speedLabel(diagnostics.playbackSpeed),
+        ds("Muted") to diagnostics.isMuted.toString(),
     ).forEach { (label, value) -> InfoRow(label, value) }
 }
 
@@ -1445,31 +1723,31 @@ private fun SyncAndEffectsPanel(
     onAdjustSubtitle: (Int) -> Unit,
     onOpenEqualizer: () -> Unit,
 ) {
-    Text("Quick sync controls for the current session.", color = Color.Gray, fontSize = 12.sp)
+    Text(ds("Quick sync controls for the current session."), color = Color.Gray, fontSize = 12.sp)
     Spacer(Modifier.height(12.dp))
-    Text("Audio Delay", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+    Text(ds("Audio Delay"), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     Spacer(Modifier.height(6.dp))
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         listOf(-250, -100, -50, 50, 100, 250).forEach { step ->
             Chip("${if (step > 0) "+" else ""}${step} ms") { onAdjustAudio(step) }
         }
-        Chip("Reset") { onAdjustAudio((-audioDelayUs / 1000).toInt()) }
+        Chip(ds("Reset")) { onAdjustAudio((-audioDelayUs / 1000).toInt()) }
     }
     Spacer(Modifier.height(8.dp))
     Text(delayHint(audioDelayUs), color = Color.Gray, fontSize = 11.sp)
     Spacer(Modifier.height(16.dp))
-    Text("Subtitle Delay", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+    Text(ds("Subtitle Delay"), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     Spacer(Modifier.height(6.dp))
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         listOf(-250, -100, -50, 50, 100, 250).forEach { step ->
             Chip("${if (step > 0) "+" else ""}${step} ms") { onAdjustSubtitle(step) }
         }
-        Chip("Reset") { onAdjustSubtitle((-subtitleDelayUs / 1000).toInt()) }
+        Chip(ds("Reset")) { onAdjustSubtitle((-subtitleDelayUs / 1000).toInt()) }
     }
     Spacer(Modifier.height(8.dp))
     Text(delayHint(subtitleDelayUs), color = Color.Gray, fontSize = 11.sp)
     Spacer(Modifier.height(18.dp))
-    Chip("Open Equalizer") { onOpenEqualizer() }
+    Chip(ds("Open Equalizer")) { onOpenEqualizer() }
 }
 
 @Composable
@@ -1479,24 +1757,24 @@ private fun JumpToTimePanel(
     onJump: (Long) -> Unit,
 ) {
     var jumpText by remember(positionMs) { mutableStateOf(fmt(positionMs)) }
-    Text("Enter mm:ss or hh:mm:ss.", color = Color.Gray, fontSize = 12.sp)
+    Text(ds("Enter mm:ss or hh:mm:ss."), color = Color.Gray, fontSize = 12.sp)
     Spacer(Modifier.height(12.dp))
     OutlinedTextField(
         value = jumpText,
         onValueChange = { jumpText = it },
-        label = { Text("Target time") },
+        label = { Text(ds("Target time")) },
         singleLine = true,
         modifier = Modifier.fillMaxWidth(),
     )
     Spacer(Modifier.height(10.dp))
-    Text("Duration: ${fmt(durationMs)}", color = Color(0xAAFFFFFF), fontSize = 11.sp)
+    Text(ds("Duration: %1\$s").format(fmt(durationMs)), color = Color(0xAAFFFFFF), fontSize = 11.sp)
     Spacer(Modifier.height(14.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         TextButton(onClick = { onJump(parseJumpTarget(jumpText).coerceIn(0L, durationMs)) }) {
-            Text("Jump")
+            Text(ds("Jump"))
         }
         TextButton(onClick = { jumpText = fmt(positionMs) }) {
-            Text("Use Current")
+            Text(ds("Use Current"))
         }
     }
 }

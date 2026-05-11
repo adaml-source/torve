@@ -31,9 +31,21 @@ import kotlinx.coroutines.launch
  * default fallback (Koin's `getOrNull`) if the desktop module isn't
  * present.
  */
+/**
+ * Platform-agnostic hook the VM uses to start a recording immediately
+ * (bypassing the scheduler's poll interval) and to delete recording
+ * library rows. Implemented on desktop by `DesktopRecordingService`;
+ * a no-op default keeps tests and platforms without a service working.
+ */
+interface RecordingStarter {
+    suspend fun runNow(rec: Recording) {}
+    suspend fun deleteRow(id: String) {}
+}
+
 class RecordingsViewModel(
     private val scheduler: RecordingScheduler,
-    repository: RecordingRepository,
+    private val repository: RecordingRepository,
+    private val starter: RecordingStarter = object : RecordingStarter {},
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
 
@@ -125,6 +137,16 @@ class RecordingsViewModel(
                 }
                 is RecordingScheduler.ScheduleResult.Scheduled -> {
                     _conflict.value = null
+                    // Kick off immediately if start time is now-or-past so
+                    // "Record Now" doesn't have to wait for the scheduler's
+                    // 30-second poll. Without this, a user who pressed Stop
+                    // within 30s of pressing Record would have ZERO bytes
+                    // written to disk (service hadn't yet picked up the
+                    // scheduled row) and the row would land as Cancelled.
+                    val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+                    if (outcome.recording.startMs <= now) {
+                        runCatching { starter.runNow(outcome.recording) }
+                    }
                 }
                 is RecordingScheduler.ScheduleResult.Invalid,
                 RecordingScheduler.ScheduleResult.InThePast -> {
@@ -163,6 +185,28 @@ class RecordingsViewModel(
 
     fun cancel(id: String) {
         scope.launch { scheduler.cancel(id) }
+    }
+
+    /**
+     * Permanently delete a recording row. Removes the database entry. The
+     * desktop starter implementation also deletes the .ts file from disk
+     * if one exists, so the user gets full removal in a single action.
+     * Active recordings should be cancelled first; UI surfaces a
+     * confirmation step before calling this.
+     */
+    fun delete(id: String) {
+        scope.launch {
+            // Cancel anything still running before removing the row, so the
+            // service doesn't try to write into a deleted row.
+            val current = repository.get(id)
+            if (current != null && (current.status == RecordingStatus.SCHEDULED ||
+                    current.status == RecordingStatus.RECORDING)
+            ) {
+                scheduler.cancel(id)
+            }
+            runCatching { starter.deleteRow(id) }
+            repository.delete(id)
+        }
     }
 }
 

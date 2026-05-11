@@ -46,14 +46,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.torve.android.R
+import com.torve.domain.transfer.SecretCategory
 import com.torve.presentation.transfer.RelayDeliveryState
 import com.torve.presentation.transfer.SecretsTransferSenderViewModel
 import com.torve.presentation.transfer.SenderStatus
 import com.torve.presentation.transfer.TransferCategorySpec
-import com.torve.presentation.transfer.TransferCopy
 import com.torve.presentation.transfer.TransferSecretCatalog
 import kotlinx.coroutines.launch
 
@@ -86,10 +88,10 @@ fun SecretsTransferSendScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Send credentials") },
+                title = { Text(stringResource(R.string.transfer_send_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back))
                     }
                 },
             )
@@ -106,12 +108,12 @@ fun SecretsTransferSendScreen(
             Spacer(Modifier.height(0.dp))
 
             Text(
-                text = TransferCopy.SEND_STEP1_HEADER,
+                text = stringResource(R.string.transfer_send_step1_header),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = TransferCopy.SEND_STEP1_EXPLAINER,
+                text = stringResource(R.string.transfer_send_step1_explainer),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -175,21 +177,21 @@ fun SecretsTransferSendScreen(
                         strokeWidth = 2.dp,
                     )
                     Spacer(Modifier.width(8.dp))
-                    Text("Generating…")
+                    Text(stringResource(R.string.transfer_generating))
                 } else {
-                    Text("Generate sealed code")
+                    Text(stringResource(R.string.transfer_generate_sealed_code))
                 }
             }
 
             when (val status = state.status) {
                 SenderStatus.Idle -> Unit
                 SenderStatus.Generating -> StatusBanner(
-                    title = "Sealing credentials",
-                    body = "Credentials stay local while the encrypted envelope is generated.",
+                    title = stringResource(R.string.transfer_sealing_credentials_title),
+                    body = stringResource(R.string.transfer_sealing_credentials_body),
                     tone = TransferBannerTone.Info,
                 )
                 is SenderStatus.Error -> StatusBanner(
-                    title = "Could not generate code",
+                    title = stringResource(R.string.transfer_generate_code_failed),
                     body = status.message,
                     tone = TransferBannerTone.Error,
                 )
@@ -219,13 +221,13 @@ private fun ScanSection(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = "Scan QR from receiving device",
+                text = stringResource(R.string.transfer_scan_qr_from_receiver),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
             )
             if (scannerStatus is ScannerUnavailable.PermissionDenied) {
                 Text(
-                    text = TransferCopy.SEND_CAMERA_DENIED,
+                    text = stringResource(R.string.transfer_send_camera_denied),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )
@@ -243,9 +245,9 @@ private fun ScanSection(
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
-                TextButton(onClick = onToggleScanner) { Text("Close camera") }
+                TextButton(onClick = onToggleScanner) { Text(stringResource(R.string.transfer_close_camera)) }
             } else {
-                OutlinedButton(onClick = onToggleScanner) { Text("Open camera") }
+                OutlinedButton(onClick = onToggleScanner) { Text(stringResource(R.string.transfer_open_camera)) }
             }
         }
     }
@@ -258,20 +260,20 @@ private fun PasteSection(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
-            text = TransferCopy.SEND_RECEIVER_FIELD_LABEL,
+            text = stringResource(R.string.transfer_send_receiver_field_label),
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold,
         )
         OutlinedTextField(
             value = value,
             onValueChange = onChange,
-            label = { Text(TransferCopy.SEND_RECEIVER_FIELD_PLACEHOLDER) },
+            label = { Text(stringResource(R.string.transfer_send_receiver_field_placeholder)) },
             singleLine = false,
             modifier = Modifier.fillMaxWidth().heightIn(min = 90.dp),
         )
         if (value.isBlank()) {
             Text(
-                text = TransferCopy.SEND_RECEIVER_EMPTY_HINT,
+                text = stringResource(R.string.transfer_send_receiver_empty_hint),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -286,7 +288,7 @@ private fun CategoryPicker(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
-            text = TransferCopy.SEND_STEP2_HEADER,
+            text = stringResource(R.string.transfer_send_step2_header),
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold,
         )
@@ -317,9 +319,9 @@ private fun CategoryRow(
         ) {
             Checkbox(checked = checked, onCheckedChange = onCheckedChange)
             Column(modifier = Modifier.weight(1f)) {
-                Text(spec.title, style = MaterialTheme.typography.bodyMedium)
+                Text(transferCategoryTitle(spec.category), style = MaterialTheme.typography.bodyMedium)
                 Text(
-                    spec.description,
+                    transferCategoryDescription(spec.category),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -331,44 +333,41 @@ private fun CategoryRow(
 @Composable
 private fun ReadyBlock(status: SenderStatus.Ready) {
     val context = LocalContext.current
-    val included = status.includedCategories.joinToString { TransferSecretCatalog.titleFor(it) }
+    val categoryTitles = transferCategoryTitles()
+    val included = status.includedCategories.joinToString { categoryTitles.getValue(it) }
     val missing = status.categoriesWithoutSecrets
         .takeIf { it.isNotEmpty() }
-        ?.joinToString { TransferSecretCatalog.titleFor(it) }
+        ?.joinToString { categoryTitles.getValue(it) }
     val missingCompanion = status.categoriesMissingCompanionConfig
         .takeIf { it.isNotEmpty() }
-        ?.joinToString { TransferSecretCatalog.titleFor(it) }
+        ?.joinToString { categoryTitles.getValue(it) }
+    val includedLabel = included.ifBlank { stringResource(R.string.transfer_selected_categories) }
+    val readySummary = if (status.configCount > 0) {
+        stringResource(
+            R.string.transfer_send_ready_body_with_config,
+            status.secretCount,
+            status.configCount,
+            includedLabel,
+        )
+    } else {
+        stringResource(R.string.transfer_send_ready_body, status.secretCount, includedLabel)
+    }
+    val readyBody = listOfNotNull(
+        readySummary,
+        missing?.let { stringResource(R.string.transfer_no_local_credentials_for, it) },
+    ).joinToString(" ")
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         StatusBanner(
-            title = "Sealed code ready",
-            body = buildString {
-                append("Encrypted ")
-                append(status.secretCount)
-                append(" credential record")
-                if (status.secretCount != 1) append("s")
-                if (status.configCount > 0) {
-                    append(" + ")
-                    append(status.configCount)
-                    append(" config record")
-                    if (status.configCount != 1) append("s")
-                }
-                append(" for: ")
-                append(included.ifBlank { "selected categories" })
-                if (missing != null) {
-                    append(". No local credentials found for: ")
-                    append(missing)
-                }
-                append(".")
-            },
+            title = stringResource(R.string.transfer_sealed_code_ready),
+            body = readyBody,
             tone = TransferBannerTone.Success,
         )
 
         if (missingCompanion != null) {
             StatusBanner(
-                title = "Companion config missing",
-                body = "Tokens for $missingCompanion are included, but their server URL " +
-                    "is not set on this device. The receiver will need to fill it in manually.",
+                title = stringResource(R.string.transfer_companion_config_missing_title),
+                body = stringResource(R.string.transfer_companion_config_missing_body, missingCompanion),
                 tone = TransferBannerTone.Warning,
             )
         }
@@ -377,7 +376,7 @@ private fun ReadyBlock(status: SenderStatus.Ready) {
 
         SealedCodeBlock(
             envelopeJson = status.envelopeJson,
-            onCopy = { copyToClipboard(context, "Torve sealed code", status.envelopeJson) },
+            onCopy = { copyToClipboard(context, context.getString(R.string.transfer_clipboard_sealed_code), status.envelopeJson) },
         )
     }
 }
@@ -387,19 +386,17 @@ private fun RelayDeliveryBanner(state: RelayDeliveryState) {
     when (state) {
         RelayDeliveryState.NotAttempted -> Unit
         RelayDeliveryState.Posting -> StatusBanner(
-            title = "Delivering through relay…",
-            body = "Posting the encrypted bundle to the Torve backend so the receiver can " +
-                "pull it automatically.",
+            title = stringResource(R.string.transfer_relay_delivering_title),
+            body = stringResource(R.string.transfer_relay_delivering_body),
             tone = TransferBannerTone.Info,
         )
         RelayDeliveryState.Delivered -> StatusBanner(
-            title = "Delivered to the receiver",
-            body = "The encrypted bundle is on the relay; the receiver will import on its " +
-                "next poll.",
+            title = stringResource(R.string.transfer_relay_delivered_title),
+            body = stringResource(R.string.transfer_relay_delivered_body),
             tone = TransferBannerTone.Success,
         )
         is RelayDeliveryState.Failed -> StatusBanner(
-            title = "Relay delivery failed",
+            title = stringResource(R.string.transfer_relay_delivery_failed),
             body = state.reason,
             tone = TransferBannerTone.Warning,
         )
@@ -410,7 +407,7 @@ private fun RelayDeliveryBanner(state: RelayDeliveryState) {
 private fun SealedCodeBlock(envelopeJson: String, onCopy: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
-            text = "Manual fallback — sealed code",
+            text = stringResource(R.string.transfer_manual_fallback_sealed_code),
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold,
         )
@@ -427,8 +424,38 @@ private fun SealedCodeBlock(envelopeJson: String, onCopy: () -> Unit) {
                 )
             }
         }
-        TextButton(onClick = onCopy) { Text("Copy sealed code") }
+        TextButton(onClick = onCopy) { Text(stringResource(R.string.transfer_copy_sealed_code)) }
     }
+}
+
+@Composable
+private fun transferCategoryTitle(category: SecretCategory): String = when (category) {
+    SecretCategory.DEBRID -> stringResource(R.string.transfer_category_debrid)
+    SecretCategory.IPTV -> stringResource(R.string.transfer_category_iptv)
+    SecretCategory.PLEX_JELLYFIN -> stringResource(R.string.transfer_category_plex_jellyfin)
+    SecretCategory.TRAKT_SIMKL -> stringResource(R.string.transfer_category_trakt_simkl)
+    SecretCategory.AI_KEYS -> stringResource(R.string.transfer_category_ai_keys)
+    SecretCategory.PANDA -> stringResource(R.string.transfer_category_panda)
+}
+
+@Composable
+private fun transferCategoryTitles(): Map<SecretCategory, String> = mapOf(
+    SecretCategory.DEBRID to stringResource(R.string.transfer_category_debrid),
+    SecretCategory.IPTV to stringResource(R.string.transfer_category_iptv),
+    SecretCategory.PLEX_JELLYFIN to stringResource(R.string.transfer_category_plex_jellyfin),
+    SecretCategory.TRAKT_SIMKL to stringResource(R.string.transfer_category_trakt_simkl),
+    SecretCategory.AI_KEYS to stringResource(R.string.transfer_category_ai_keys),
+    SecretCategory.PANDA to stringResource(R.string.transfer_category_panda),
+)
+
+@Composable
+private fun transferCategoryDescription(category: SecretCategory): String = when (category) {
+    SecretCategory.DEBRID -> stringResource(R.string.transfer_category_debrid_desc)
+    SecretCategory.IPTV -> stringResource(R.string.transfer_category_iptv_desc)
+    SecretCategory.PLEX_JELLYFIN -> stringResource(R.string.transfer_category_plex_jellyfin_desc)
+    SecretCategory.TRAKT_SIMKL -> stringResource(R.string.transfer_category_trakt_simkl_desc)
+    SecretCategory.AI_KEYS -> stringResource(R.string.transfer_category_ai_keys_desc)
+    SecretCategory.PANDA -> stringResource(R.string.transfer_category_panda_desc)
 }
 
 @Composable

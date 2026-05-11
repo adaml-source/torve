@@ -116,6 +116,10 @@ internal fun TvHomeScreen(
 
     val focusMemory = rememberTvFocusMemory()
     val emptyMessage = state.error ?: stringResource(R.string.tv_no_data)
+    val onNowTitle = stringResource(R.string.tv_home_on_now)
+    val availableNowTitle = stringResource(R.string.tv_home_available_now)
+    val downloadsOnDesktopTitle = stringResource(R.string.tv_home_downloads_on_desktop)
+    val recentlyAddedTitle = stringResource(R.string.tv_home_recently_added_sources)
 
     val rails = remember(
         state,
@@ -123,8 +127,16 @@ internal fun TvHomeScreen(
         customSections,
         homeLayoutOrder,
         outcomeState,
+        availableNowTitle,
+        downloadsOnDesktopTitle,
+        recentlyAddedTitle,
     ) {
-        buildOutcomeRails(outcomeState) +
+        buildOutcomeRails(
+            outcome = outcomeState,
+            availableNowTitle = availableNowTitle,
+            downloadsOnDesktopTitle = downloadsOnDesktopTitle,
+            recentlyAddedTitle = recentlyAddedTitle,
+        ) +
             buildTvHomeRails(
                 state = state,
                 sectionConfigs = sectionConfigs,
@@ -184,6 +196,7 @@ internal fun TvHomeScreen(
         outcomeState.onNow,
         heroOverlay,
         onLiveChannelClick,
+        onNowTitle,
     ) {
         val banner = outcomeState.providerBanner
         val onNow = outcomeState.onNow
@@ -201,7 +214,7 @@ internal fun TvHomeScreen(
                 heroOverlay?.invoke()
                 if (showOnNow) {
                     TvOnNowRail(
-                        title = "On Now",
+                        title = onNowTitle,
                         channels = onNow,
                         onChannelClick = { ch -> onLiveChannelClick?.invoke(ch) },
                     )
@@ -244,26 +257,31 @@ private fun NetworkType.toLanlibraryMode(): NetworkMode = when (this) {
  * can play immediately. Empty buckets are skipped, so the rest of the
  * (TMDB-shaped) rails fall into place when nothing's playable.
  */
-private fun buildOutcomeRails(outcome: TvHomeOutcomeUiState): List<TvContentRail> {
+private fun buildOutcomeRails(
+    outcome: TvHomeOutcomeUiState,
+    availableNowTitle: String,
+    downloadsOnDesktopTitle: String,
+    recentlyAddedTitle: String,
+): List<TvContentRail> {
     val out = mutableListOf<TvContentRail>()
     if (outcome.availableNow.isNotEmpty()) {
         out += TvContentRail(
             key = "outcome:available_now",
-            title = "Available Now",
+            title = availableNowTitle,
             items = outcome.availableNow,
         )
     }
     if (outcome.downloadsOnDesktop.isNotEmpty()) {
         out += TvContentRail(
             key = "outcome:downloads_on_desktop",
-            title = "Downloads on Desktop",
+            title = downloadsOnDesktopTitle,
             items = outcome.downloadsOnDesktop,
         )
     }
     if (outcome.recentlyAdded.isNotEmpty()) {
         out += TvContentRail(
             key = "outcome:recently_added",
-            title = "Recently Added From My Sources",
+            title = recentlyAddedTitle,
             items = outcome.recentlyAdded,
         )
     }

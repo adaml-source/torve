@@ -1,6 +1,7 @@
 package com.torve.data.channels
 
 import com.torve.domain.model.Channel
+import com.torve.domain.model.ChannelContentType
 import com.torve.domain.model.M3uPlaylist
 
 class M3uParser {
@@ -161,5 +162,19 @@ private class ChannelBuilder(val playlistId: String) {
         vlcOptions = vlcOptions.toList(),
         kodiProps = kodiProps.toMap(),
         playlistId = playlistId,
+        contentType = inferContentType(url, groupTitle),
     )
+
+    private fun inferContentType(url: String, groupTitle: String?): ChannelContentType {
+        val path = url.substringBefore('?').substringBefore('#').lowercase()
+        return when {
+            path.contains("/movie/") || path.contains("/vod/movies") -> ChannelContentType.VOD_MOVIE
+            path.contains("/series/") || path.contains("/vod/series") -> ChannelContentType.VOD_SERIES
+            path.endsWith(".mkv") || path.endsWith(".mp4") || path.endsWith(".avi") ||
+                path.endsWith(".m4v") || path.endsWith(".mov") || path.endsWith(".wmv") ||
+                path.endsWith(".webm") -> ChannelContentType.VOD_MOVIE
+            groupTitle?.startsWith("VOD:", ignoreCase = true) == true -> ChannelContentType.VOD_MOVIE
+            else -> ChannelContentType.UNKNOWN
+        }
+    }
 }

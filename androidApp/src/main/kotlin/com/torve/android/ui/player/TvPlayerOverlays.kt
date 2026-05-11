@@ -19,10 +19,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -64,6 +72,7 @@ import com.torve.android.ui.theme.Gunmetal
 import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
+import com.torve.data.subtitles.languageInfo
 import com.torve.domain.player.TrackDescription
 import kotlinx.coroutines.delay
 
@@ -76,27 +85,27 @@ private enum class TrackTab {
 fun TvTrackSelectionOverlay(
     subtitleTracks: List<TrackDescription>,
     audioTracks: List<TrackDescription>,
+    showSubtitlesOnly: Boolean = true,
+    initialTab: Int = 0,
     onSelectSubtitle: (TrackDescription?) -> Unit,
     onSelectAudio: (TrackDescription) -> Unit,
     onDismiss: () -> Unit,
+    onDownloadSubtitles: (() -> Unit)? = null,
+    onSubtitleDelay: (() -> Unit)? = null,
 ) {
     BackHandler(onBack = onDismiss)
 
     val subtitlesLabel = stringResource(R.string.player_subtitles)
     val audioLabel = stringResource(R.string.player_audio)
-    val tabs = remember(subtitleTracks, audioTracks) {
-        buildList {
-            if (subtitleTracks.isNotEmpty()) add(TrackTab.SUBTITLES)
-            if (audioTracks.isNotEmpty()) add(TrackTab.AUDIO)
-        }
-    }
 
-    var selectedTab by remember(tabs) {
-        mutableStateOf(tabs.firstOrNull() ?: TrackTab.SUBTITLES)
-    }
+    // Never show tabs — each button opens the relevant section directly.
+    // selectedTab is derived from which button was pressed.
+    val selectedTab = if (showSubtitlesOnly) TrackTab.SUBTITLES else TrackTab.AUDIO
+    val tabs = listOf(selectedTab)
 
     val tabRequesters = remember(tabs) { List(tabs.size) { FocusRequester() } }
     val firstRowRequester = remember { FocusRequester() }
+    var dismissKey by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(tabs) {
         if (tabs.size > 1) {
@@ -106,10 +115,17 @@ fun TvTrackSelectionOverlay(
         }
     }
 
+    // Auto-dismiss after 5s of inactivity; resets on every user interaction.
+    LaunchedEffect(dismissKey) {
+        delay(3_000)
+        onDismiss()
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Obsidian.copy(alpha = 0.96f)),
+            .background(Obsidian.copy(alpha = 0.96f))
+            .onPreviewKeyEvent { dismissKey++; false },
     ) {
         Column(
             modifier = Modifier
@@ -123,41 +139,13 @@ fun TvTrackSelectionOverlay(
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                text = "Back to close. Press Enter to select.",
+                text = if (showSubtitlesOnly) subtitlesLabel else audioLabel,
                 style = MaterialTheme.typography.bodySmall,
                 color = Silver,
                 modifier = Modifier.padding(top = 6.dp),
             )
 
-            if (tabs.size > 1) {
-                Row(
-                    modifier = Modifier.padding(top = 18.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    tabs.forEachIndexed { index, tab ->
-                        TvOverlayTabChip(
-                            label = if (tab == TrackTab.SUBTITLES) subtitlesLabel else audioLabel,
-                            isSelected = selectedTab == tab,
-                            modifier = Modifier.focusRequester(tabRequesters[index]),
-                            onClick = { selectedTab = tab },
-                            onMoveLeft = {
-                                if (index > 0) {
-                                    selectedTab = tabs[index - 1]
-                                    requestFocusSafely(tabRequesters[index - 1])
-                                }
-                            },
-                            onMoveRight = {
-                                if (index < tabs.lastIndex) {
-                                    selectedTab = tabs[index + 1]
-                                    requestFocusSafely(tabRequesters[index + 1])
-                                }
-                            },
-                        )
-                    }
-                }
-            }
-
-            val showSubtitles = selectedTab == TrackTab.SUBTITLES
+            val showSubtitles = showSubtitlesOnly
 
             LazyColumn(
                 modifier = Modifier
@@ -177,11 +165,30 @@ fun TvTrackSelectionOverlay(
                         )
                     }
                     items(subtitleTracks, key = { "sub_${it.id}_${it.label}" }) { track ->
-                        TvTrackRow(
-                            label = track.label,
-                            isSelected = track.isSelected,
+                        SubtitleTrackRow(
+                            track = track,
                             onClick = { onSelectSubtitle(track) },
                         )
+                    }
+                    if (onSubtitleDelay != null) {
+                        item(key = "subtitle_delay") {
+                            TvTrackRow(
+                                label = "Subtitle Delay",
+                                isSelected = false,
+                                leadingIcon = Icons.Default.Timer,
+                                onClick = { dismissKey++; onSubtitleDelay() },
+                            )
+                        }
+                    }
+                    if (onDownloadSubtitles != null) {
+                        item(key = "download_subtitles") {
+                            TvTrackRow(
+                                label = stringResource(R.string.player_download_subtitles),
+                                isSelected = false,
+                                leadingIcon = Icons.Default.FileDownload,
+                                onClick = { dismissKey++; onDownloadSubtitles() },
+                            )
+                        }
                     }
                 } else {
                     if (audioTracks.isEmpty()) {
@@ -195,9 +202,8 @@ fun TvTrackSelectionOverlay(
                         }
                     }
                     items(audioTracks, key = { "audio_${it.id}_${it.label}" }) { track ->
-                        TvTrackRow(
-                            label = track.label,
-                            isSelected = track.isSelected,
+                        AudioTrackRow(
+                            track = track,
                             modifier = if (tabs.size <= 1 && audioTracks.firstOrNull() == track) {
                                 Modifier.focusRequester(firstRowRequester)
                             } else {
@@ -223,9 +229,15 @@ fun TvAudioDelayOverlay(
 
     var localDelay by remember(currentDelayMs) { mutableIntStateOf(currentDelayMs) }
     val sliderFocusRequester = remember { FocusRequester() }
+    var dismissKey by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(Unit) {
         requestFocusWithRetry(sliderFocusRequester)
+    }
+
+    LaunchedEffect(dismissKey) {
+        delay(3_000)
+        onDismiss()
     }
 
     val delayLabel = stringResource(R.string.player_audio_delay_value, localDelay)
@@ -233,6 +245,7 @@ fun TvAudioDelayOverlay(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .onPreviewKeyEvent { dismissKey++; false }
             .background(Obsidian.copy(alpha = 0.95f)),
         contentAlignment = Alignment.Center,
     ) {
@@ -302,6 +315,87 @@ fun TvAudioDelayOverlay(
     }
 }
 @Composable
+fun TvSubtitleDelayOverlay(
+    currentDelayMs: Int,
+    onSave: (Int) -> Unit,
+    onReset: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    BackHandler(onBack = onDismiss)
+    var localDelay by remember(currentDelayMs) { mutableIntStateOf(currentDelayMs) }
+    val sliderFocusRequester = remember { FocusRequester() }
+    var dismissKey by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(Unit) { requestFocusWithRetry(sliderFocusRequester) }
+    LaunchedEffect(dismissKey) { delay(3_000); onDismiss() }
+
+    val delayLabel = run {
+        val sign = if (localDelay >= 0) "+" else ""
+        "$sign${localDelay / 1000}.${(kotlin.math.abs(localDelay) % 1000) / 100}s"
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .onPreviewKeyEvent { dismissKey++; false }
+            .background(Obsidian.copy(alpha = 0.95f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth(0.76f)
+                .clip(RoundedCornerShape(18.dp))
+                .background(Charcoal)
+                .padding(horizontal = 28.dp, vertical = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text(
+                text = "Subtitle Delay",
+                style = MaterialTheme.typography.headlineSmall,
+                color = Snow,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = "Left/Right adjusts by 100 ms. Positive = subtitles appear later.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Silver,
+            )
+            TvDpadSlider(
+                value = localDelay,
+                range = -10000..10000,
+                step = 100,
+                label = "Subtitle Delay",
+                formatValue = { delayLabel },
+                focusRequester = sliderFocusRequester,
+                onValueChange = { localDelay = it },
+                onCenterClick = { onSave(localDelay) },
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                TvOverlayActionButton(
+                    label = "Save",
+                    selected = true,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onSave(localDelay) },
+                )
+                TvOverlayActionButton(
+                    label = stringResource(R.string.common_reset),
+                    modifier = Modifier.weight(1f),
+                    onClick = { localDelay = 0; onReset() },
+                )
+                TvOverlayActionButton(
+                    label = stringResource(R.string.common_close),
+                    modifier = Modifier.weight(1f),
+                    onClick = onDismiss,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun TvEqualizerOverlay(
     equalizer: AudioEqualizer,
     onDismiss: () -> Unit,
@@ -321,15 +415,22 @@ fun TvEqualizerOverlay(
             if (hz >= 1000) "${hz / 1000}k" else "$hz"
         }
     }
+    var dismissKey by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(Unit) {
         requestFocusWithRetry(firstFocusRequester)
     }
 
+    LaunchedEffect(dismissKey) {
+        delay(3_000)
+        onDismiss()
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Obsidian.copy(alpha = 0.96f)),
+            .background(Obsidian.copy(alpha = 0.96f))
+            .onPreviewKeyEvent { dismissKey++; false },
     ) {
         Column(
             modifier = Modifier
@@ -603,6 +704,7 @@ private fun TvTrackRow(
     label: String,
     isSelected: Boolean,
     modifier: Modifier = Modifier,
+    leadingIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
     onClick: () -> Unit,
 ) {
     val reduceMotion = rememberTvReduceMotionPreference()
@@ -648,11 +750,21 @@ private fun TvTrackRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyLarge,
-            color = if (isSelected || focused) Snow else Silver,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (leadingIcon != null) {
+                Icon(
+                    imageVector = leadingIcon,
+                    contentDescription = null,
+                    tint = if (focused) Amber else Silver,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (isSelected || focused) Snow else Silver,
+            )
+        }
         if (isSelected) {
             Icon(
                 imageVector = Icons.Default.Check,
@@ -912,6 +1024,518 @@ private fun isConfirmKey(key: Key): Boolean {
     return key == Key.DirectionCenter || key == Key.Enter || key == Key.NumPadEnter
 }
 
+/**
+ * A subtitle result ready to display. Either [directUrl] (Stremio addon, URL usable immediately)
+ * or [osFileId] (OpenSubtitles, requires a getDownloadUrl() call before playback) will be set.
+ */
+data class SubtitleCandidate(
+    val flagEmoji: String,
+    val languageName: String,
+    val languageCode: String,
+    val displayLabel: String,
+    val directUrl: String? = null,
+    val mimeType: String? = null,
+    val osFileId: Int? = null,
+    val downloadCount: Int = 0,
+    val fromTrusted: Boolean = false,
+    val hearingImpaired: Boolean = false,
+    val aiTranslated: Boolean = false,
+    val ratings: Float = 0f,
+)
+
+sealed class SubtitleFetchState {
+    data object Idle : SubtitleFetchState()
+    data object Loading : SubtitleFetchState()
+    data class Results(val subtitles: List<SubtitleCandidate>) : SubtitleFetchState()
+    data object NoKey : SubtitleFetchState()
+    data object Empty : SubtitleFetchState()
+    data object Error : SubtitleFetchState()
+}
+
+@Composable
+fun TvSubtitleSearchOverlay(
+    state: SubtitleFetchState,
+    onSelect: (SubtitleCandidate) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    BackHandler(onBack = onDismiss)
+    val firstRowRequester = remember { FocusRequester() }
+    var selectedLanguage by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(state) {
+        if (state is SubtitleFetchState.Results && state.subtitles.isNotEmpty()) {
+            selectedLanguage = null
+            delay(150)
+            runCatching { firstRowRequester.requestFocus() }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Obsidian.copy(alpha = 0.96f))
+            .onPreviewKeyEvent { false },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 32.dp, vertical = 12.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.player_download_subtitles),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = Snow,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = "OpenSubtitles.com",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Silver,
+                )
+            }
+
+            when (state) {
+                SubtitleFetchState.Loading -> {
+                    Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator(color = Amber, modifier = Modifier.size(48.dp))
+                            Spacer(Modifier.height(16.dp))
+                            Text("Searching for subtitles…", color = Silver, style = MaterialTheme.typography.bodyLarge)
+                        }
+                    }
+                }
+                SubtitleFetchState.NoKey -> {
+                    Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                        Text(
+                            "No subtitle source available.\n\nEither install a subtitle addon in Settings → Addons,\nor add an OpenSubtitles.com API key in Settings → Advanced.",
+                            color = Silver,
+                            style = MaterialTheme.typography.bodyLarge,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        )
+                    }
+                }
+                SubtitleFetchState.Error -> {
+                    Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                        Text(
+                            "Subtitle search failed.\nCheck your internet connection and OpenSubtitles API key in Settings.",
+                            color = Silver,
+                            style = MaterialTheme.typography.bodyLarge,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        )
+                    }
+                }
+                SubtitleFetchState.Empty -> {
+                    Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                        Text(
+                            "No subtitles found for this title on OpenSubtitles.com.",
+                            color = Silver,
+                            style = MaterialTheme.typography.bodyLarge,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        )
+                    }
+                }
+                is SubtitleFetchState.Results -> {
+                    val languages = remember(state.subtitles) {
+                        state.subtitles
+                            .map { it.languageCode to "${it.flagEmoji} ${it.languageName}" }
+                            .distinctBy { it.first }
+                    }
+                    val filtered = remember(state.subtitles, selectedLanguage) {
+                        if (selectedLanguage == null) state.subtitles
+                        else state.subtitles.filter { it.languageCode == selectedLanguage }
+                    }
+
+                    if (languages.size > 1) {
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                            state = rememberLazyListState(),
+                        ) {
+                            item(key = "all") {
+                                SubtitleFilterPill(
+                                    label = "All",
+                                    isSelected = selectedLanguage == null,
+                                    modifier = if (selectedLanguage == null) Modifier.focusRequester(firstRowRequester) else Modifier,
+                                    onClick = { selectedLanguage = null },
+                                )
+                            }
+                            items(languages, key = { it.first }) { (code, label) ->
+                                SubtitleFilterPill(
+                                    label = label,
+                                    isSelected = selectedLanguage == code,
+                                    modifier = if (selectedLanguage == code) Modifier.focusRequester(firstRowRequester) else Modifier,
+                                    onClick = { selectedLanguage = if (selectedLanguage == code) null else code },
+                                )
+                            }
+                        }
+                    }
+
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        itemsIndexed(filtered, key = { idx, sub -> "$idx-${sub.osFileId}-${sub.directUrl}" }) { idx, sub ->
+                            SubtitleResultRow(
+                                index = idx + 1,
+                                candidate = sub,
+                                modifier = if (idx == 0) Modifier.focusRequester(firstRowRequester) else Modifier,
+                                onClick = { onSelect(sub) },
+                            )
+                        }
+                    }
+                }
+                SubtitleFetchState.Idle -> { /* nothing shown */ }
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun SubtitleTrackRow(
+    track: TrackDescription,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val reduceMotion = rememberTvReduceMotionPreference()
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (reduceMotion) 1f else if (focused) 1.02f else 1f,
+        label = "subTrackScale",
+    )
+    val bg by animateColorAsState(
+        targetValue = when {
+            focused          -> Amber
+            track.isSelected -> AmberSubtle
+            else             -> Graphite.copy(alpha = 0.75f)
+        },
+        label = "subTrackBg",
+    )
+    val textColor = if (focused) Obsidian else Snow
+    val subColor  = if (focused) Obsidian.copy(alpha = 0.75f) else Silver
+
+    // Language info from track.language code; fall back to parsing the label
+    val (flag, langName) = remember(track.language, track.label) {
+        when {
+            !track.language.isNullOrBlank() -> languageInfo(track.language!!)
+            else -> {
+                // Label might be "🇬🇧 English · filename" — extract language part
+                val lang = track.label.substringBefore('·').trim()
+                if (lang.isNotBlank()) ("" to lang) else ("🌐" to track.label)
+            }
+        }
+    }
+    // Detail line: anything after the first '·' in the label (e.g. filename from download)
+    val detail = track.label.substringAfter('·', "").trim().ifBlank { null }
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .scale(scale)
+            .onFocusChanged { focused = it.isFocused }
+            .focusable()
+            .onPreviewKeyEvent { ev ->
+                if (ev.type == KeyEventType.KeyDown && isConfirmKey(ev.key)) { onClick(); true } else false
+            }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            )
+            .clip(RoundedCornerShape(12.dp))
+            .background(bg)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = if (flag.isNotBlank()) "$flag  $langName" else langName,
+                style = MaterialTheme.typography.titleSmall,
+                color = textColor,
+                fontWeight = FontWeight.SemiBold,
+            )
+            if (detail != null) {
+                Text(
+                    text = detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = subColor,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 3.dp),
+                )
+            }
+        }
+        if (track.isSelected) {
+            Icon(
+                imageVector = Icons.Default.Check,
+                contentDescription = null,
+                tint = if (focused) Obsidian else Amber,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
+}
+
+private fun audioCodecLabel(mimeType: String?): String? = when (mimeType?.lowercase()) {
+    "audio/eac3-joc"                      -> "Dolby Atmos"
+    "audio/eac3"                          -> "Dolby Digital+"
+    "audio/ac3"                           -> "Dolby Digital"
+    "audio/truehd"                        -> "Dolby TrueHD"
+    "audio/vnd.dts.uhd", "audio/dts-uhd" -> "DTS:X"
+    "audio/vnd.dts.hd"                   -> "DTS-HD"
+    "audio/vnd.dts", "audio/x-dts"       -> "DTS"
+    "audio/aac", "audio/mp4a-latm"        -> "AAC"
+    "audio/mpeg"                          -> "MP3"
+    "audio/opus"                          -> "Opus"
+    "audio/vorbis"                        -> "Vorbis"
+    "audio/flac"                          -> "FLAC"
+    "audio/raw", "audio/l16"             -> "PCM"
+    else                                  -> null
+}
+
+private fun channelLayoutLabel(count: Int?): String? = when (count) {
+    1    -> "Mono"
+    2    -> "Stereo"
+    6    -> "5.1"
+    8    -> "7.1"
+    10   -> "7.1.2"
+    12   -> "7.1.4"
+    else -> count?.let { "${it}ch" }
+}
+
+@Composable
+private fun AudioTrackRow(
+    track: TrackDescription,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val reduceMotion = rememberTvReduceMotionPreference()
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (reduceMotion) 1f else if (focused) 1.02f else 1f,
+        label = "audioScale",
+    )
+    val bg by animateColorAsState(
+        targetValue = when {
+            focused       -> Amber
+            track.isSelected -> AmberSubtle
+            else          -> Graphite.copy(alpha = 0.75f)
+        },
+        label = "audioBg",
+    )
+    val textColor = if (focused) Obsidian else Snow
+    val subColor  = if (focused) Obsidian.copy(alpha = 0.75f) else Silver
+
+    val (flag, langName) = remember(track.language) {
+        languageInfo(track.language ?: track.label)
+    }
+    val codec   = audioCodecLabel(track.formatHint)
+    val layout  = channelLayoutLabel(track.channelCount)
+    val details = listOfNotNull(codec, layout).joinToString(" · ")
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .scale(scale)
+            .onFocusChanged { focused = it.isFocused }
+            .focusable()
+            .onPreviewKeyEvent { ev ->
+                if (ev.type == KeyEventType.KeyDown && isConfirmKey(ev.key)) { onClick(); true } else false
+            }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            )
+            .clip(RoundedCornerShape(12.dp))
+            .background(bg)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                text = "$flag  $langName",
+                style = MaterialTheme.typography.titleSmall,
+                color = textColor,
+                fontWeight = FontWeight.SemiBold,
+            )
+            if (track.isSelected) {
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = null,
+                    tint = if (focused) Obsidian else Amber,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+        if (details.isNotBlank()) {
+            Text(
+                text = details,
+                style = MaterialTheme.typography.bodySmall,
+                color = subColor,
+                modifier = Modifier.padding(top = 3.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SubtitleFilterPill(
+    label: String,
+    isSelected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    val bg by animateColorAsState(
+        targetValue = if (isFocused || isSelected) Amber else Graphite,
+        label = "pillBg",
+    )
+    Box(
+        modifier = modifier
+            .onFocusChanged { isFocused = it.isFocused }
+            .focusable()
+            .onPreviewKeyEvent { ev ->
+                if (ev.type == KeyEventType.KeyDown && isConfirmKey(ev.key)) { onClick(); true } else false
+            }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            )
+            .clip(RoundedCornerShape(50))
+            .background(bg)
+            .padding(horizontal = 14.dp, vertical = 5.dp),
+    ) {
+        Text(
+            text = label,
+            color = if (isFocused || isSelected) Obsidian else Silver,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+@Composable
+private fun SubtitleResultRow(
+    index: Int,
+    candidate: SubtitleCandidate,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val reduceMotion = rememberTvReduceMotionPreference()
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(targetValue = if (reduceMotion) 1f else if (focused) 1.02f else 1f, label = "subScale")
+    val bg by animateColorAsState(
+        targetValue = if (focused) Amber else Graphite.copy(alpha = 0.75f),
+        label = "subBg",
+    )
+    val textColor = if (focused) Obsidian else Snow
+    val subColor = if (focused) Obsidian.copy(alpha = 0.75f) else Silver
+
+    // Star rating: API returns 0-10; display as filled stars out of 5
+    val stars = if (candidate.ratings > 0f) {
+        val full = (candidate.ratings / 2f).coerceIn(0f, 5f)
+        buildString {
+            val fullStars = full.toInt()
+            val half = full - fullStars >= 0.5f
+            repeat(fullStars) { append('★') }
+            if (half && fullStars < 5) append('½')
+            repeat((5 - fullStars - (if (half) 1 else 0)).coerceAtLeast(0)) { append('☆') }
+        }
+    } else null
+
+    // Bottom-line label: prefer the subtitle's own label if it's meaningful,
+    // then a filename from the URL, then "Subtitle N" so rows are always distinct.
+    val resolvedLabel: String = run {
+        val base = candidate.displayLabel.trim()
+        val langName = candidate.languageName
+        if (base.isNotBlank() && base != langName) return@run base
+        val urlSegment = (candidate.directUrl ?: "")
+            .substringBefore('?').substringAfterLast('/').ifBlank { null }
+        if (urlSegment != null && urlSegment.contains('.')) return@run urlSegment
+        "Subtitle $index"
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .scale(scale)
+            .onFocusChanged { focused = it.isFocused }
+            .focusable()
+            .onPreviewKeyEvent { ev ->
+                if (ev.type == KeyEventType.KeyDown && isConfirmKey(ev.key)) { onClick(); true } else false
+            }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            )
+            .clip(RoundedCornerShape(10.dp))
+            .background(bg)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+    ) {
+        // Top line: flag + language name + badges
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "${candidate.flagEmoji}  ${candidate.languageName}",
+                style = MaterialTheme.typography.titleSmall,
+                color = textColor,
+                fontWeight = FontWeight.SemiBold,
+            )
+            if (candidate.fromTrusted) {
+                Text("✓", color = if (focused) Obsidian else Amber, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+            }
+            if (candidate.hearingImpaired) {
+                Text("SDH", color = subColor, style = MaterialTheme.typography.labelSmall)
+            }
+            if (candidate.aiTranslated) {
+                Text("AI", color = subColor, style = MaterialTheme.typography.labelSmall)
+            }
+        }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.padding(top = 3.dp),
+        ) {
+            Text(
+                text = resolvedLabel,
+                style = MaterialTheme.typography.bodySmall,
+                color = subColor,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+            if (stars != null) {
+                Text(
+                    text = stars,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (focused) Obsidian else Amber,
+                )
+            }
+            if (candidate.downloadCount > 0) {
+                Text(
+                    text = "↓${candidate.downloadCount}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = subColor,
+                )
+            }
+        }
+    }
+}
 
 private suspend fun requestFocusWithRetry(requester: FocusRequester?) {
     if (requester == null) return

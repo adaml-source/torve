@@ -69,7 +69,6 @@ fun parseBackendError(responseBody: String): BackendError {
             )
         }
         null -> BackendError()
-        else -> BackendError()
     }
 }
 

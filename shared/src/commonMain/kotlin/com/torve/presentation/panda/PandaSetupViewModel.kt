@@ -445,6 +445,31 @@ class PandaSetupViewModel(
                 try {
                     val result = debridClient.pollDeviceAuth(debridType, code.deviceCode, code.userCode)
                     if (result.done && result.apiKey != null) {
+                        // Persist credentials to IntegrationSecretStore so the
+                        // shared rdTokenRefresher can find them at runtime.
+                        // Without this, the access token expires after ~24h and
+                        // refresh always returns null (because the OAuth bundle
+                        // it needs - refresh_token, client_id, client_secret -
+                        // was never stored), forcing the user to re-authenticate.
+                        // Mirrors Android's SettingsViewModel.kt:651-658.
+                        integrationSecretStore.put(
+                            debridSecretKey(debridType),
+                            result.apiKey,
+                        )
+                        result.oauthTokens?.let { tokens ->
+                            integrationSecretStore.put(
+                                IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN,
+                                tokens.refreshToken,
+                            )
+                            integrationSecretStore.put(
+                                IntegrationSecretKey.DEBRID_RD_CLIENT_ID,
+                                tokens.clientId,
+                            )
+                            integrationSecretStore.put(
+                                IntegrationSecretKey.DEBRID_RD_CLIENT_SECRET,
+                                tokens.clientSecret,
+                            )
+                        }
                         _state.update {
                             it.copy(
                                 debridApiKey = result.apiKey,
@@ -460,6 +485,13 @@ class PandaSetupViewModel(
             }
             _state.update { it.copy(deviceCode = null, error = "Authorization timed out. Try again.") }
         }
+    }
+
+    private fun debridSecretKey(provider: DebridServiceType): IntegrationSecretKey = when (provider) {
+        DebridServiceType.REAL_DEBRID -> IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID
+        DebridServiceType.ALL_DEBRID -> IntegrationSecretKey.DEBRID_API_KEY_ALL_DEBRID
+        DebridServiceType.PREMIUMIZE -> IntegrationSecretKey.DEBRID_API_KEY_PREMIUMIZE
+        DebridServiceType.TORBOX -> IntegrationSecretKey.DEBRID_API_KEY_TORBOX
     }
 
     fun setApiKeyInput(key: String) {
@@ -945,6 +977,13 @@ class PandaSetupViewModel(
                     integrationSecretStore.put(secretKey, s.debridApiKey)
                     prefsRepo.setString("debrid_provider", debridType.name)
                 }
+                prefsRepo.setString("panda_download_client", s.downloadClient)
+                prefsRepo.setString("panda_usenet_provider", if (s.enableUsenet) s.usenetProvider else "none")
+                prefsRepo.setString(
+                    "panda_indexer_subkeys",
+                    s.nzbIndexers.filter { it.type != "none" && it.url.isNotBlank() }
+                        .joinToString("\n") { "${it.type}|${it.url}" },
+                )
 
                 // Mirror the user's typed Panda secrets into the device's
                 // secret store. Panda always returns these as `[redacted]`
@@ -965,6 +1004,11 @@ class PandaSetupViewModel(
                             key = IntegrationSecretKey.PANDA_INDEXER_API_KEY,
                             value = row.apiKey,
                             subKey = subKey,
+                        )
+                        integrationSecretStore.put(
+                            key = IntegrationSecretKey.PANDA_INDEXER_API_KEY,
+                            value = row.apiKey,
+                            subKey = row.type,
                         )
                     }
                 }
@@ -1247,7 +1291,12 @@ class PandaSetupViewModel(
                 // secret store so the next offline / signed-out hydrate still
                 // reaches them. Idempotent — same put() shape as saveConfigAndInstall.
                 if (secrets != null) {
-                    secret(secrets.debridApiKey)?.let { /* no IntegrationSecretKey today; skip */ }
+                    secret(secrets.debridApiKey)?.let { key ->
+                        val dtype = toDebridServiceType(config.debridService)
+                        if (dtype != null) {
+                            integrationSecretStore.put(debridSecretKey(dtype), key)
+                        }
+                    }
                     secret(secrets.usenetPassword)?.let { v ->
                         if (config.usenetProvider != "none") {
                             integrationSecretStore.put(
@@ -1282,9 +1331,22 @@ class PandaSetupViewModel(
                                 value = row.apiKey,
                                 subKey = "${row.type}|${row.url}",
                             )
+                            integrationSecretStore.put(
+                                key = IntegrationSecretKey.PANDA_INDEXER_API_KEY,
+                                value = row.apiKey,
+                                subKey = row.type,
+                            )
                         }
                     }
                 }
+
+                prefsRepo.setString("panda_download_client", config.downloadClient)
+                prefsRepo.setString("panda_usenet_provider", if (config.enableUsenet) config.usenetProvider else "none")
+                prefsRepo.setString(
+                    "panda_indexer_subkeys",
+                    cleanedIndexerRows.filter { it.type != "none" && it.url.isNotBlank() }
+                        .joinToString("\n") { "${it.type}|${it.url}" },
+                )
 
                 println("TORVE PANDA ┃ checkExistingConfig hydrated: serverHasSecrets=$secretsOnServer enableUsenet=${config.enableUsenet} usenetProvider=${config.usenetProvider} indexerCount=${cleanedIndexerRows.size} cachedIndexerKeys=${cleanedIndexerRows.count { it.apiKey.isNotBlank() }}")
 

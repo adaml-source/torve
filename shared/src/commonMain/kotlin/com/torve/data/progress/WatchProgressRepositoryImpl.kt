@@ -7,6 +7,11 @@ import com.torve.data.simkl.SimklClient
 import com.torve.data.simkl.SimklIds
 import com.torve.data.simkl.SimklSyncBody
 import com.torve.data.simkl.SimklSyncItem
+import com.torve.data.trakt.TraktHistoryBody
+import com.torve.data.trakt.TraktHistoryEpisodeEntry
+import com.torve.data.trakt.TraktHistorySeasonEntry
+import com.torve.data.trakt.TraktHistoryShow
+import com.torve.data.trakt.TraktIds
 import com.torve.data.trakt.api.TraktAuthorizedApi
 import com.torve.data.trakt.repo.TraktSyncRepository
 import com.torve.db.TorveDatabase
@@ -17,6 +22,7 @@ import com.torve.domain.model.WatchProgress
 import com.torve.domain.model.extractImdbIdOrNull
 import com.torve.domain.model.extractTmdbIdOrNull
 import com.torve.domain.repository.WatchProgressRepository
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
@@ -55,7 +61,7 @@ class WatchProgressRepositoryImpl(
         // This updates the DB so next read will have the URLs.
         val needsEnrichment = rows.filter { it.poster_url == null || it.backdrop_url == null }
         if (needsEnrichment.isNotEmpty()) {
-            kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+            CoroutineScope(Dispatchers.IO).launch {
                 for (row in needsEnrichment) {
                     val tmdbId = row.media_id.extractTmdbIdOrNull() ?: continue
                     val isMovie = row.media_type == "movie"
@@ -147,22 +153,61 @@ class WatchProgressRepositoryImpl(
             val tmdbId = progress.mediaId.extractTmdbIdOrNull() ?: return
             val imdbId = resolveImdbId(progress.mediaId, progress.mediaType, tmdbId)
             runCatching {
-                traktSyncRepo.enqueueHistoryAdd(
-                    tmdbId = tmdbId,
-                    mediaType = progress.mediaType,
-                    imdbId = imdbId,
-                )
+                if (
+                    progress.mediaType == MediaType.SERIES &&
+                    progress.seasonNumber != null &&
+                    progress.episodeNumber != null
+                ) {
+                    traktApi.addToHistory(
+                        TraktHistoryBody(
+                            shows = listOf(
+                                TraktHistoryShow(
+                                    ids = TraktIds(tmdb = tmdbId, imdb = imdbId),
+                                    seasons = listOf(
+                                        TraktHistorySeasonEntry(
+                                            number = progress.seasonNumber,
+                                            episodes = listOf(TraktHistoryEpisodeEntry(number = progress.episodeNumber)),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    )
+                } else if (progress.mediaType == MediaType.MOVIE) {
+                    traktSyncRepo.enqueueHistoryAdd(
+                        tmdbId = tmdbId,
+                        mediaType = MediaType.MOVIE,
+                        imdbId = imdbId,
+                    )
+                    traktSyncRepo.flushPendingWrites()
+                }
+            }.onFailure {
+                runCatching {
+                    if (
+                        progress.mediaType == MediaType.SERIES &&
+                        progress.seasonNumber != null &&
+                        progress.episodeNumber != null
+                    ) {
+                        traktSyncRepo.enqueueEpisodeHistoryAdd(
+                            tmdbId = tmdbId,
+                            imdbId = imdbId,
+                            season = progress.seasonNumber,
+                            episode = progress.episodeNumber,
+                        )
+                    } else if (progress.mediaType == MediaType.MOVIE) {
+                        traktSyncRepo.enqueueHistoryAdd(
+                            tmdbId = tmdbId,
+                            mediaType = MediaType.MOVIE,
+                            imdbId = imdbId,
+                        )
+                    }
+                }
             }
-            runCatching { traktSyncRepo.flushPendingWrites() }
             runCatching {
                 val token = integrationSecretStore.get(IntegrationSecretKey.SIMKL_ACCESS_TOKEN)
-                if (!token.isNullOrBlank()) {
+                if (!token.isNullOrBlank() && progress.mediaType == MediaType.MOVIE) {
                     val ids = SimklIds(tmdb = tmdbId, imdb = imdbId)
-                    val body = if (progress.mediaType == MediaType.MOVIE) {
-                        SimklSyncBody(movies = listOf(SimklSyncItem(ids)))
-                    } else {
-                        SimklSyncBody(shows = listOf(SimklSyncItem(ids)))
-                    }
+                    val body = SimklSyncBody(movies = listOf(SimklSyncItem(ids)))
                     simklClient.addToHistory(token, body)
                 }
             }

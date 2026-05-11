@@ -168,6 +168,8 @@ internal fun TvMediaRails(
     onMediaFocused: ((MediaItem) -> Unit)? = null,
     onSeeAll: ((railKey: String, title: String) -> Unit)? = null,
     heroOverlay: (@Composable () -> Unit)? = null,
+    leadingContent: (@Composable () -> Unit)? = null,
+    leadingContentFocusRequester: FocusRequester? = null,
     shouldAutoFocus: Boolean = true,
     browseLayout: TvBrowseLayout = TvBrowseLayout.INFO_PANEL,
     contextMenuActionsForItem: ((MediaItem, Float?) -> List<TvMediaContextMenuAction>)? = null,
@@ -342,6 +344,12 @@ internal fun TvMediaRails(
                     }
                 }
 
+                if (leadingContent != null) {
+                    item(key = "leading_content") {
+                        leadingContent()
+                    }
+                }
+
                 itemsIndexed(rails, key = { _, row -> row.key }) { rowIndex, row ->
                     val rowListState = rememberLazyListState()
                     rowListStateByKey[row.key] = rowListState
@@ -370,7 +378,7 @@ internal fun TvMediaRails(
                             itemsIndexed(
                                 items = row.items,
                                 key = { itemIndex, item ->
-                                    item.tmdbId?.let { "tmdb_${item.type}_$it" }
+                                    item.tmdbId?.let { "tmdb_${item.type}_${it}_$itemIndex" }
                                         ?: "${item.type}_${item.id}_$itemIndex"
                                 },
                             ) { itemIndex, item ->
@@ -408,7 +416,9 @@ internal fun TvMediaRails(
                                         // Only redirect UP to the header when the hero overlay
                                         // is actually rendered — otherwise the FocusRequester
                                         // is unattached and causes a crash.
-                                        if (rowIndex == 0 && headerFocusRequester != null && heroOverlay != null) {
+                                        if (rowIndex == 0 && leadingContentFocusRequester != null) {
+                                            up = leadingContentFocusRequester
+                                        } else if (rowIndex == 0 && headerFocusRequester != null && heroOverlay != null) {
                                             up = headerFocusRequester
                                         }
                                     }
@@ -471,7 +481,9 @@ internal fun TvMediaRails(
                                         modifier = Modifier
                                             .focusRequester(seeAllRequester)
                                             .focusProperties {
-                                                if (rowIndex == 0 && headerFocusRequester != null && heroOverlay != null) {
+                                                if (rowIndex == 0 && leadingContentFocusRequester != null) {
+                                                    up = leadingContentFocusRequester
+                                                } else if (rowIndex == 0 && headerFocusRequester != null && heroOverlay != null) {
                                                     up = headerFocusRequester
                                                 }
                                             },
@@ -521,6 +533,10 @@ private fun TvPosterCard(
         targetValue = if (focused) AmberLight else Color.Transparent,
         label = "posterBorder",
     )
+
+    LaunchedEffect(focused, item) {
+        if (focused) onFocused()
+    }
 
     Box(
         modifier = modifier

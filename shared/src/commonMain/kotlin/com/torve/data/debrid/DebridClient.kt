@@ -30,6 +30,10 @@ import kotlinx.serialization.json.JsonObject
  * Returns the new access token, or null if refresh is not possible.
  */
 class RdAuthException(message: String) : Exception(message)
+class DebridMissingException(message: String) : Exception(message)
+class DebridNeedsReconnectException(message: String) : Exception(message)
+class DebridNoCachedStreamException(message: String) : Exception(message)
+class DebridServiceUnavailableException(message: String) : Exception(message)
 
 fun interface RdTokenRefresher {
     suspend fun refresh(): String?
@@ -204,7 +208,7 @@ class DebridClient(
                         println("TORVE_RD: token refreshed, retrying resolve")
                         rdResolveStream(newKey, infoHash, fileIdx)
                     } else {
-                        throw Exception("Session expired. Please re-authenticate in Settings.")
+                        throw DebridNeedsReconnectException("Real-Debrid needs reconnecting. Open Panda settings.")
                     }
                 }
             }
@@ -213,8 +217,6 @@ class DebridClient(
             DebridServiceType.TORBOX -> tbResolveStream(apiKey, infoHash, fileIdx)
         }
     }
-
-    /** Also wrap unrestrictUrl with the same refresh logic. */
 
     /**
      * Unrestrict a direct hoster URL.
@@ -226,15 +228,17 @@ class DebridClient(
     ): ResolvedStream {
         return when (provider) {
             DebridServiceType.REAL_DEBRID -> {
-                val file = rdUnrestrictLink(apiKey, url)
-                val transcode = if (file.streamable) rdGetTranscodeUrls(apiKey, file.id) else null
-                ResolvedStream(
-                    url = file.download,
-                    service = provider,
-                    fileName = file.filename,
-                    mimeType = file.mimeType,
-                    transcodeUrls = transcode,
-                )
+                try {
+                    rdUnrestrictUrlInternal(apiKey, url, provider)
+                } catch (e: RdAuthException) {
+                    val newKey = rdTokenRefresher?.refresh()
+                    if (newKey != null) {
+                        println("TORVE_RD: token refreshed, retrying unrestrict")
+                        rdUnrestrictUrlInternal(newKey, url, provider)
+                    } else {
+                        throw DebridNeedsReconnectException("Real-Debrid needs reconnecting. Open Panda settings.")
+                    }
+                }
             }
             DebridServiceType.ALL_DEBRID -> {
                 val resp: AdResponse<AdUnlockData> = httpClient.get("$AD_BASE/link/unlock") {
@@ -300,7 +304,7 @@ class DebridClient(
         clientId: String,
         clientSecret: String,
     ): RdOAuthTokens {
-        val resp: RdTokenResponse = httpClient.submitForm(
+        val rawResp = httpClient.submitForm(
             url = "$RD_OAUTH/token",
             formParameters = Parameters.build {
                 append("client_id", clientId)
@@ -308,7 +312,13 @@ class DebridClient(
                 append("code", refreshToken)
                 append("grant_type", "http://oauth.net/grant_type/device/1.0")
             },
-        ).body()
+        )
+        val bodyText = rawResp.bodyAsText()
+        println("TORVE_RD: token refresh HTTP ${rawResp.status.value} body=$bodyText")
+        if (rawResp.status.value !in 200..299) {
+            throw Exception("Token refresh failed (${rawResp.status.value}): $bodyText")
+        }
+        val resp: RdTokenResponse = json.decodeFromString(bodyText)
         return RdOAuthTokens(
             accessToken = resp.accessToken,
             refreshToken = resp.refreshToken.ifEmpty { refreshToken },
@@ -409,18 +419,45 @@ class DebridClient(
         return resp.id
     }
 
+    /**
+     * Internal Real-Debrid hoster-URL unrestrict path. Lifted out of
+     * [unrestrictUrl] so the auth-retry wrapper can call this twice
+     * (once with the original key, once with a refreshed key) on 401.
+     */
+    private suspend fun rdUnrestrictUrlInternal(
+        apiKey: String,
+        url: String,
+        provider: DebridServiceType,
+    ): ResolvedStream {
+        val file = rdUnrestrictLink(apiKey, url)
+        val transcode = if (file.streamable) rdGetTranscodeUrls(apiKey, file.id) else null
+        return ResolvedStream(
+            url = file.download,
+            service = provider,
+            fileName = file.filename,
+            mimeType = file.mimeType,
+            transcodeUrls = transcode,
+        )
+    }
+
     private suspend fun rdSelectFiles(apiKey: String, torrentId: String, files: String = "all") {
-        httpClient.submitForm(
+        val rawResp = httpClient.submitForm(
             url = "$RD_BASE/torrents/selectFiles/$torrentId",
             formParameters = Parameters.build { append("files", files) },
         ) {
             header("Authorization", "Bearer $apiKey")
+        }
+        if (rawResp.status.value == 401) {
+            throw RdAuthException("Session token expired (HTTP 401, selectFiles)")
         }
     }
 
     private suspend fun rdGetTorrentInfo(apiKey: String, torrentId: String): RdTorrentInfoResponse {
         val rawResp = httpClient.get("$RD_BASE/torrents/info/$torrentId") {
             header("Authorization", "Bearer $apiKey")
+        }
+        if (rawResp.status.value == 401) {
+            throw RdAuthException("Session token expired (HTTP 401, torrentInfo)")
         }
         val bodyText = rawResp.bodyAsText()
         if (torrentId.isBlank()) {
@@ -430,12 +467,16 @@ class DebridClient(
     }
 
     private suspend fun rdUnrestrictLink(apiKey: String, link: String): UnrestrictedFile {
-        val resp: RdUnrestrictResponse = httpClient.submitForm(
+        val rawResp = httpClient.submitForm(
             url = "$RD_BASE/unrestrict/link",
             formParameters = Parameters.build { append("link", link) },
         ) {
             header("Authorization", "Bearer $apiKey")
-        }.body()
+        }
+        if (rawResp.status.value == 401) {
+            throw RdAuthException("Session token expired (HTTP 401, unrestrictLink)")
+        }
+        val resp: RdUnrestrictResponse = json.decodeFromString(rawResp.bodyAsText())
         return UnrestrictedFile(
             id = resp.id,
             filename = resp.filename,
@@ -446,10 +487,22 @@ class DebridClient(
     }
 
     private suspend fun rdGetTranscodeUrls(apiKey: String, fileId: String): TranscodeUrls? {
-        return try {
-            val resp: RdTranscodeResponse = httpClient.get("$RD_BASE/streaming/transcode/$fileId") {
+        // Don't swallow 401 here: it must propagate so the caller's
+        // refresh-retry wrapper can do its job. Other errors (404 for
+        // non-streamable files, transient 5xx, etc.) are still treated
+        // as "no transcode available" since transcode is optional.
+        val rawResp = try {
+            httpClient.get("$RD_BASE/streaming/transcode/$fileId") {
                 header("Authorization", "Bearer $apiKey")
-            }.body()
+            }
+        } catch (_: Exception) {
+            return null
+        }
+        if (rawResp.status.value == 401) {
+            throw RdAuthException("Session token expired (HTTP 401, transcode)")
+        }
+        return try {
+            val resp: RdTranscodeResponse = json.decodeFromString(rawResp.bodyAsText())
             TranscodeUrls(
                 mp4 = resp.liveMP4?.full,
                 hls = resp.apple?.full,
@@ -505,6 +558,13 @@ class DebridClient(
             }
             if (info.status in listOf("error", "dead", "magnet_error")) {
                 throw Exception("Download failed: ${info.status}")
+            }
+            // Cached torrents transition to "downloaded" within a few seconds of
+            // file selection. Staying in "downloading" means RD is fetching it from
+            // scratch — fail fast so the caller can try the next source rather than
+            // blocking for up to 60 seconds per stream.
+            if (attempt >= 3 && info.status == "downloading") {
+                throw Exception("Not cached on Real-Debrid — try a different source.")
             }
             delay(2000)
         }

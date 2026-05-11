@@ -185,8 +185,8 @@ class StreamScorer {
         if (mode == AutoSourceMode.QUALITY_FIRST) {
             return when (quality) {
                 StreamQuality.REMUX_4K -> if (preferences.allow4kAuto) 16 else 4
-                StreamQuality.UHD_4K -> if (preferences.allow4kAuto) 15 else 6
-                StreamQuality.FHD_1080P -> 14
+                StreamQuality.UHD_4K -> if (preferences.allow4kAuto) 16 else 6
+                StreamQuality.FHD_1080P -> 12
                 StreamQuality.HD_720P -> 9
                 StreamQuality.SD_480P -> 6
                 StreamQuality.UNKNOWN -> 8

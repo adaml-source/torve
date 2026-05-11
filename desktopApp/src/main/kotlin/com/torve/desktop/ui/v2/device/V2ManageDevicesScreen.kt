@@ -61,7 +61,7 @@ fun V2ManageDevicesScreen(
     ) {
         TorvePageHeader(
             title = ds("Manage Devices"),
-            subtitle = "Active devices sharing your premium access. Remove a device to free up a slot.",
+            subtitle = ds("Active devices sharing your premium access. Remove a device to free up a slot."),
             trailing = {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TorveBadge(
@@ -91,21 +91,22 @@ fun V2ManageDevicesScreen(
         if (state.capReached) {
             TorveBanner(
                 title = ds("Device limit reached"),
-                description = "You're at ${state.maxActiveDevices} active devices. Remove one below to " +
-                    "activate another device.",
+                description = ds("You're at %1\$d active devices. Remove one below to activate another device.")
+                    .format(state.maxActiveDevices),
                 tone = TorveBannerTone.Warning,
             )
         }
 
         TorveSectionCard(
             title = ds("Active devices"),
-            supportingText = "Swaps remaining in the last 30 days: ${state.swapsRemaining.coerceAtLeast(0)}",
+            supportingText = ds("Swaps remaining in the last 30 days: %1\$d")
+                .format(state.swapsRemaining.coerceAtLeast(0)),
         ) {
             val activeDevices = state.devices.filter { it.removed_at == null }
             if (activeDevices.isEmpty()) {
                 TorvePlaceholderState(
                     title = ds("No active devices"),
-                    description = "Sign in on another device to see it listed here.",
+                    description = ds("Sign in on another device to see it listed here."),
                 )
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -124,15 +125,15 @@ fun V2ManageDevicesScreen(
         if (removedDevices.isNotEmpty()) {
             TorveSectionCard(
                 title = ds("Recently removed"),
-                supportingText = "These slots are freed up and available for new devices.",
+                supportingText = ds("These slots are freed up and available for new devices."),
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     removedDevices.forEach { device ->
                         TorveListRow(
                             title = device.device_name,
-                            subtitle = "${device.platform} • ${device.device_type} • removed",
+                            subtitle = "${device.platform} • ${device.device_type} • ${ds("removed")}",
                             trailing = {
-                                TorveBadge("Removed", tone = TorveBadgeTone.Neutral)
+                                TorveBadge(ds("Removed"), tone = TorveBadgeTone.Neutral)
                             },
                         )
                     }
@@ -141,7 +142,7 @@ fun V2ManageDevicesScreen(
         }
 
         Text(
-            text = "Devices become inactive after 45 days without use and free up automatically.",
+            text = ds("Devices become inactive after 45 days without use and free up automatically."),
             style = MaterialTheme.typography.bodySmall,
             color = colors.textSecondary,
         )
@@ -172,7 +173,7 @@ private fun DeviceRow(
                 if (device.is_current) {
                     TorveBadge(ds("This device"), tone = TorveBadgeTone.Accent)
                 } else if (device.is_active) {
-                    TorveBadge("Active", tone = TorveBadgeTone.Success)
+                    TorveBadge(ds("Active"), tone = TorveBadgeTone.Success)
                 }
                 if (!device.is_current) {
                     TorveGhostButton(
@@ -190,7 +191,7 @@ private fun DeviceRow(
             onDismissRequest = { showConfirm = false },
             title = { Text(ds("Remove device?"), fontWeight = FontWeight.SemiBold) },
             text = {
-                Text("Remove ${device.device_name}? It will need to be re-activated to access premium content.")
+                Text(ds("Remove %1\$s? It will need to be re-activated to access premium content.").format(device.device_name))
             },
             confirmButton = {
                 TextButton(onClick = {

@@ -1,5 +1,13 @@
 package com.torve.android.providerhealth
 
+import android.Manifest
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import com.torve.data.addon.StremioAddonClient
 import com.torve.data.debrid.DebridClient
 import com.torve.data.trakt.auth.TraktTokenStore
@@ -7,6 +15,7 @@ import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.integrations.LibraryOverlayService
 import com.torve.domain.model.DebridServiceType
+import com.torve.domain.providerhealth.ProviderHealthStatus
 import com.torve.domain.providerhealth.ProviderHealthRepository
 import com.torve.domain.repository.AddonRepository
 import com.torve.domain.repository.PreferencesRepository
@@ -28,6 +37,8 @@ import com.torve.presentation.providerhealth.TraktProviderHealthChecker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
 /**
@@ -57,13 +68,46 @@ class AndroidProviderHealthInit(
     private val channelsViewModel: ChannelsViewModel,
     private val pandaConfigStateStore: PandaConfigStateStore,
     private val refreshOnSettings: ProviderHealthRefreshOnSettings,
+    private val context: android.content.Context,
 ) {
     @Volatile
     private var started: Boolean = false
 
+    companion object {
+        private const val HEALTH_CHANNEL_ID = "provider_health"
+        private const val HEALTH_NOTIF_ID = 2001
+    }
+
     /** Long-running scope for the settings-driven re-run observer. */
     private val observerScope: CoroutineScope =
         CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    private fun ensureHealthChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                HEALTH_CHANNEL_ID,
+                "Service alerts",
+                NotificationManager.IMPORTANCE_DEFAULT,
+            )
+            val nm = context.getSystemService(android.content.Context.NOTIFICATION_SERVICE)
+                as NotificationManager
+            nm.createNotificationChannel(channel)
+        }
+    }
+
+    private fun postHealthNotification(label: String, message: String) {
+        ensureHealthChannel()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+        ) return
+        val notification = NotificationCompat.Builder(context, HEALTH_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_notify_error)
+            .setContentTitle("Connection problem")
+            .setContentText("$label: $message")
+            .build()
+        NotificationManagerCompat.from(context).notify(HEALTH_NOTIF_ID, notification)
+    }
 
     suspend fun start() {
         if (started) return
@@ -71,12 +115,41 @@ class AndroidProviderHealthInit(
 
         repository.load()
 
+        // Refresh the RD OAuth access token eagerly so an expired token
+        // doesn't surface as a bad_token 401 on the first play attempt.
+        // Only runs when a refresh token is stored (i.e. device-auth flow
+        // was used). API-key users have no refresh token so this is a no-op.
+        if (secretStore.get(IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN) != null) {
+            runCatching { debridClient.rdTokenRefresher?.refresh() }
+        }
+
         // ── Debrid: one checker per provider. UNCONFIGURED when no key. ─
+        // apiKeySource checks secretStore first (persisted after any
+        // save or checkExistingConfig), then falls back to
+        // PandaConfigStateStore (populated while the Panda VM is live).
+        // This means the checker always has a key if Panda has been
+        // opened in this session, even before the user re-saves.
+        val pandaDebridProviderMap = mapOf(
+            "realdebrid" to DebridServiceType.REAL_DEBRID,
+            "alldebrid" to DebridServiceType.ALL_DEBRID,
+            "premiumize" to DebridServiceType.PREMIUMIZE,
+            "torbox" to DebridServiceType.TORBOX,
+        )
         DebridServiceType.entries.forEach { provider ->
             coordinator.register(
                 DebridProviderHealthChecker(
                     provider = provider,
-                    apiKeySource = { secretStore.get(secretKey(provider)) },
+                    apiKeySource = {
+                        secretStore.get(secretKey(provider))?.takeIf { it.isNotBlank() }
+                            ?: run {
+                                val state = pandaConfigStateStore.current
+                                val stateProvider = pandaDebridProviderMap[state.selectedProvider?.id]
+                                if (stateProvider == provider &&
+                                    state.debridApiKey.isNotBlank() &&
+                                    !state.debridApiKey.contains("redact", ignoreCase = true)
+                                ) state.debridApiKey else null
+                            }
+                    },
                     debridClient = debridClient,
                 ),
             )
@@ -147,26 +220,130 @@ class AndroidProviderHealthInit(
             ),
         )
 
-        // ── Panda Usenet stack (state projection from PandaConfigStateStore) ──
-        // The store is a singleton mirror that the wizard's VM publishes
-        // its `_state` into; reading `current` here gives a faithful view
-        // even when no VM is constructed (returns the default
-        // `PandaSetupUiState()` whose `isEditMode = false` → checkers
-        // report UNCONFIGURED — exactly what we want on a fresh device).
-        coordinator.register(
-            PandaUsenetProviderHealthChecker(stateSource = { pandaConfigStateStore.current }),
-        )
-        coordinator.register(
-            PandaUsenetProviderProviderHealthChecker(stateSource = { pandaConfigStateStore.current }),
-        )
-        coordinator.register(
-            PandaDownloadClientProviderHealthChecker(stateSource = { pandaConfigStateStore.current }),
-        )
+        // ── Panda Usenet stack ─────────────────────────────────────────
+        // stateSource prefers PandaConfigStateStore (live, set by the VM
+        // on every wizard session). When the store hasn't been hydrated
+        // yet (isEditMode = false), it falls back to prefs + secretStore
+        // so checks are accurate on cold start without opening Panda.
+        // panda_download_client / panda_usenet_provider / panda_indexer_subkeys
+        // are written by saveConfigAndInstall and checkExistingConfig.
+        val pandaStateSource: suspend () -> com.torve.presentation.panda.PandaSetupUiState = {
+            val live = pandaConfigStateStore.current
+            if (live.isEditMode) {
+                live
+            } else {
+                // If no Panda token exists the user hasn't configured Panda at all.
+                val hasPandaToken = secretStore.get(IntegrationSecretKey.PANDA_TOKEN) != null
+                if (!hasPandaToken) {
+                    live
+                } else {
+                    // Panda IS configured. Resolve credentials from secretStore without
+                    // requiring the user to open the Panda screen first. Works correctly
+                    // on fresh install, on app update, and on every cold start.
+                    //
+                    // Strategy: prefer the pref-stored name (written by saveConfigAndInstall
+                    // / checkExistingConfig on this version), then scan known names so the
+                    // fallback works even before those prefs have been written once.
+                    val prefClient = runCatching { prefs.getString("panda_download_client") }.getOrNull()
+                    val prefProvider = runCatching { prefs.getString("panda_usenet_provider") }.getOrNull()
+                    val prefIndexerSubkeys = runCatching { prefs.getString("panda_indexer_subkeys") }.getOrNull() ?: ""
+
+                    val knownClients = buildList {
+                        if (!prefClient.isNullOrBlank() && prefClient != "none") add(prefClient)
+                        addAll(listOf("torbox", "sabnzbd", "nzbget", "nzbvortex"))
+                    }.distinct()
+                    val downloadClient = knownClients.firstOrNull { c ->
+                        secretStore.get(IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_API_KEY, subKey = c)?.isNotBlank() == true ||
+                            secretStore.get(IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_PASSWORD, subKey = c)?.isNotBlank() == true
+                    } ?: "none"
+                    val downloadClientApiKey = if (downloadClient != "none")
+                        secretStore.get(IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_API_KEY, subKey = downloadClient) ?: ""
+                    else ""
+                    val downloadClientPassword = if (downloadClient != "none")
+                        secretStore.get(IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_PASSWORD, subKey = downloadClient) ?: ""
+                    else ""
+
+                    val knownProviders = buildList {
+                        if (!prefProvider.isNullOrBlank() && prefProvider != "none") add(prefProvider)
+                        addAll(listOf("easynews", "newshosting", "generic"))
+                    }.distinct()
+                    val usenetProvider = knownProviders.firstOrNull { p ->
+                        secretStore.get(IntegrationSecretKey.PANDA_USENET_PASSWORD, subKey = p)?.isNotBlank() == true
+                    } ?: "none"
+                    val usenetPassword = if (usenetProvider != "none")
+                        secretStore.get(IntegrationSecretKey.PANDA_USENET_PASSWORD, subKey = usenetProvider) ?: ""
+                    else ""
+
+                    // Enumerate all stored indexer subkeys directly from secretStore.
+                    // Subkeys have the format "type|url" — we don't need to know them
+                    // in advance because getSubKeys() reads the SharedPreferences key
+                    // names (which are not encrypted) and filters by prefix. Works
+                    // immediately after any app update without any user action.
+                    val indexerRows: List<com.torve.data.panda.NzbIndexerRow> = secretStore
+                        .getSubKeys(IntegrationSecretKey.PANDA_INDEXER_API_KEY)
+                        .filter { it.contains("|") } // skip type-only entries
+                        .mapNotNull { subKey ->
+                            val apiKey = secretStore.get(IntegrationSecretKey.PANDA_INDEXER_API_KEY, subKey = subKey)
+                                ?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                            val (type, url) = subKey.split("|", limit = 2)
+                            com.torve.data.panda.NzbIndexerRow(type = type, url = url, apiKey = apiKey)
+                        }
+
+                    com.torve.presentation.panda.PandaSetupUiState(
+                        isEditMode = true,
+                        downloadClient = downloadClient,
+                        downloadClientApiKey = downloadClientApiKey,
+                        downloadClientPassword = downloadClientPassword,
+                        enableUsenet = usenetProvider != "none",
+                        usenetProvider = usenetProvider,
+                        usenetPassword = usenetPassword,
+                        nzbIndexers = indexerRows.ifEmpty { com.torve.presentation.panda.PandaSetupUiState().nzbIndexers },
+                    )
+                }
+            }
+        }
+        coordinator.register(PandaUsenetProviderHealthChecker(stateSource = pandaStateSource))
+        coordinator.register(PandaUsenetProviderProviderHealthChecker(stateSource = pandaStateSource))
+        coordinator.register(PandaDownloadClientProviderHealthChecker(stateSource = pandaStateSource))
 
         // Observe settings-refresh signals (Panda save success, Debrid
         // token rotation, integration changes). One long-running
         // collector; exits with the scope on process death.
         observerScope.launch { refreshOnSettings.observe() }
+
+        // Re-run all checks whenever PandaSetupViewModel hydrates the
+        // store. checkExistingConfig() writes credentials (including the
+        // debrid API key) to secretStore BEFORE updating the state, so
+        // by the time this collector fires, secretStore already has the
+        // fresh keys and every checker — including debrid — gets accurate
+        // results.
+        observerScope.launch {
+            @OptIn(kotlinx.coroutines.FlowPreview::class)
+            pandaConfigStateStore.state
+                .drop(1) // skip initial default-unconfigured emission
+                .debounce(500L)
+                .collect { coordinator.runAll() }
+        }
+
+        // Run all checks once at startup so the status section shows
+        // real state immediately (debrid, Plex/Jellyfin, etc. all read
+        // directly from secretStore and don't need a prior navigation).
+        coordinator.runAll()
+
+        // Collect status transitions and notify on GREEN→RED
+        observerScope.launch {
+            var prev = emptyMap<String, ProviderHealthStatus>()
+            coordinator.entries.collect { entries ->
+                entries.forEach { entry ->
+                    val wasOk = prev[entry.providerKey] == ProviderHealthStatus.GREEN
+                    val nowBad = entry.status == ProviderHealthStatus.RED
+                    if (wasOk && nowBad) {
+                        postHealthNotification(entry.label, entry.message ?: "Connection lost")
+                    }
+                }
+                prev = entries.associate { it.providerKey to it.status }
+            }
+        }
     }
 
     /**

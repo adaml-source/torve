@@ -68,7 +68,8 @@ fun V2DeviceLimitReachedScreen(
     ) {
         TorvePageHeader(
             title = ds("Activate this device"),
-            subtitle = "You're at ${state.maxActiveDevices} active devices. Free up a slot to start watching here.",
+            subtitle = ds("You're at %1\$d active devices. Free up a slot to start watching here.")
+                .format(state.maxActiveDevices),
             trailing = {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TorveBadge(
@@ -82,14 +83,14 @@ fun V2DeviceLimitReachedScreen(
 
         TorveBanner(
             title = ds("Premium is ready"),
-            description = "Your subscription is active, but this device isn't among your " +
-                "${state.maxActiveDevices} allowed slots yet. Remove one of the devices below to activate here.",
+            description = ds("Your subscription is active, but this device isn't among your %1\$d allowed slots yet. Remove one of the devices below to activate here.")
+                .format(state.maxActiveDevices),
             tone = TorveBannerTone.Warning,
         )
 
         state.errorKey?.let { key ->
             TorveBanner(
-                title = "Couldn't update devices",
+                title = ds("Couldn't update devices"),
                 description = key,
                 tone = TorveBannerTone.Error,
             )
@@ -97,13 +98,14 @@ fun V2DeviceLimitReachedScreen(
 
         TorveSectionCard(
             title = ds("Active devices"),
-            supportingText = "Swaps remaining in the last 30 days: ${state.swapsRemaining.coerceAtLeast(0)}",
+            supportingText = ds("Swaps remaining in the last 30 days: %1\$d")
+                .format(state.swapsRemaining.coerceAtLeast(0)),
         ) {
             val activeDevices = state.devices.filter { it.is_active && it.removed_at == null }
             if (activeDevices.isEmpty()) {
                 TorvePlaceholderState(
-                    title = "Loading devices...",
-                    description = "Fetching your current device list from the backend.",
+                    title = ds("Loading devices..."),
+                    description = ds("Fetching your current device list from the backend."),
                 )
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -129,7 +131,7 @@ fun V2DeviceLimitReachedScreen(
         }
 
         Text(
-            text = "Removing a device revokes its access immediately. Up to 3 swaps are allowed per 30 days.",
+            text = ds("Removing a device revokes its access immediately. Up to 3 swaps are allowed per 30 days."),
             style = MaterialTheme.typography.bodySmall,
             color = colors.textSecondary,
         )
@@ -169,12 +171,10 @@ private fun DeviceSlotRow(
     if (showConfirm) {
         AlertDialog(
             onDismissRequest = { showConfirm = false },
-            title = { Text("Remove ${device.device_name}?", fontWeight = FontWeight.SemiBold) },
+            title = { Text(ds("Remove %1\$s?").format(device.device_name), fontWeight = FontWeight.SemiBold) },
             text = {
                 Text(
-                    "This will revoke its access and activate this device instead. " +
-                        "You can re-activate the other device later, but it counts as one of your 3 " +
-                        "swaps per 30 days.",
+                    ds("This will revoke its access and activate this device instead. You can re-activate the other device later, but it counts as one of your 3 swaps per 30 days."),
                 )
             },
             confirmButton = {

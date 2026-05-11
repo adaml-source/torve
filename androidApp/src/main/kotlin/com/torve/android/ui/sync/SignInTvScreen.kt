@@ -35,8 +35,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.torve.android.R
 import com.torve.android.sync.SyncCoordinator
 import com.torve.android.ui.transfer.QrScannerView
 import com.torve.android.ui.transfer.cameraPermissionGranted
@@ -101,12 +103,12 @@ fun SignInTvScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Sign in a TV") },
+                title = { Text(stringResource(R.string.sign_in_tv_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
+                            contentDescription = stringResource(R.string.common_back),
                         )
                     }
                 },
@@ -122,7 +124,7 @@ fun SignInTvScreen(
         ) {
             if (authUser == null && !state.isAuthenticated) {
                 Text(
-                    "You need to be signed in on this phone before you can sign in a TV.",
+                    stringResource(R.string.sign_in_tv_need_signed_in),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.error,
                 )
@@ -130,7 +132,7 @@ fun SignInTvScreen(
             }
 
             Text(
-                "Open Torve on your TV, go to Settings → \"Sign in with your phone\". Then either scan the QR code below, or type the 6-character code shown next to it.",
+                stringResource(R.string.sign_in_tv_instructions),
                 style = MaterialTheme.typography.bodyMedium,
             )
 
@@ -143,7 +145,7 @@ fun SignInTvScreen(
                         },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text("Scan QR on TV")
+                        Text(stringResource(R.string.sign_in_tv_scan_qr))
                     }
                 } else {
                     Box(
@@ -171,12 +173,12 @@ fun SignInTvScreen(
                         onClick = { scannerOpen = false },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text("Cancel scan")
+                        Text(stringResource(R.string.sign_in_tv_cancel_scan))
                     }
                 }
             } else {
                 Text(
-                    "This phone has no camera available — use the manual code below.",
+                    stringResource(R.string.sign_in_tv_no_camera),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -184,14 +186,14 @@ fun SignInTvScreen(
 
             Spacer(Modifier.height(8.dp))
             Text(
-                "Or enter the 6-character code shown on the TV",
+                stringResource(R.string.sign_in_tv_enter_code_title),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
             )
             OutlinedTextField(
                 value = manualCode,
                 onValueChange = { manualCode = it },
-                label = { Text("TV sign-in code") },
+                label = { Text(stringResource(R.string.sign_in_tv_code_label)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -205,7 +207,7 @@ fun SignInTvScreen(
                 enabled = manualCode.isNotBlank() && !state.isLoading,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text("Sign in this TV")
+                Text(stringResource(R.string.sign_in_tv_submit))
             }
 
             state.error?.let {

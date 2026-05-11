@@ -7,7 +7,6 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Movie
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SportsSoccer
 import androidx.compose.material.icons.filled.Tv
@@ -41,6 +40,11 @@ object TvRoutes {
         return "tv_see_all/${Uri.encode(railKey)}/${Uri.encode(mediaType)}/${Uri.encode(title)}"
     }
 
+    const val VOD_SERIES_DETAILS = "tv_vod_series_details/{cacheKey}"
+    fun vodSeriesDetails(cacheKey: String): String {
+        return "tv_vod_series_details/${Uri.encode(cacheKey)}"
+    }
+
     const val DETAILS = "tv_details/{type}/{id}?autoPlay={autoPlay}&handoffPositionMs={handoffPositionMs}"
     fun details(
         type: String,
@@ -63,7 +67,8 @@ object TvRoutes {
             "&posterUrl={posterUrl}&backdropUrl={backdropUrl}" +
             "&seasonNumber={seasonNumber}&episodeNumber={episodeNumber}" +
             "&showTmdbId={showTmdbId}&showImdbId={showImdbId}&fallbackUrl={fallbackUrl}" +
-            "&startPositionMs={startPositionMs}&autoSourceSelection={autoSourceSelection}"
+            "&startPositionMs={startPositionMs}&autoSourceSelection={autoSourceSelection}" +
+            "&episodeName={episodeName}"
 
     fun player(
         url: String,
@@ -75,6 +80,7 @@ object TvRoutes {
         backdropUrl: String = "",
         seasonNumber: Int? = null,
         episodeNumber: Int? = null,
+        episodeName: String = "",
         showTmdbId: Int? = null,
         showImdbId: String? = null,
         startPositionMs: Long = 0L,
@@ -92,7 +98,8 @@ object TvRoutes {
             "&showImdbId=${Uri.encode(showImdbId.orEmpty())}" +
             "&fallbackUrl=${Uri.encode(fallbackUrl)}" +
             "&startPositionMs=$startPositionMs" +
-            "&autoSourceSelection=$autoSourceSelection"
+            "&autoSourceSelection=$autoSourceSelection" +
+            "&episodeName=${Uri.encode(episodeName)}"
     }
 }
 
@@ -102,7 +109,6 @@ val tvTopDestinations = listOf(
     TvTopDestination(TvRoutes.SHOWS, R.string.nav_tv_shows, Icons.Filled.Tv),
     TvTopDestination(TvRoutes.IPTV, R.string.tv_nav_iptv, Icons.Filled.LiveTv),
     TvTopDestination(TvRoutes.SPORTS, R.string.tv_nav_sports, Icons.Filled.SportsSoccer),
-    TvTopDestination(TvRoutes.SEARCH, R.string.tv_nav_search, Icons.Filled.Search),
     TvTopDestination(TvRoutes.LIBRARY, R.string.tv_nav_library, Icons.Filled.Bookmark),
     TvTopDestination(TvRoutes.SETTINGS, R.string.tv_nav_settings, Icons.Filled.Settings),
 )

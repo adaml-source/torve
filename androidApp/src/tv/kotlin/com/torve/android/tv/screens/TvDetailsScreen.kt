@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -57,6 +58,7 @@ import androidx.compose.ui.zIndex
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -124,8 +126,13 @@ import com.torve.presentation.tvhome.TvSourcePicker
 import com.torve.presentation.tvhome.TvSourcePickerOption
 import com.torve.presentation.tvhome.TvSourcePickerState
 import com.torve.presentation.watchlist.WatchlistViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
+
+private enum class TvStreamSourceFilter(val label: String) {
+    ALL("All"), TORRENT("Torrent"), USENET("Usenet")
+}
 
 private sealed class DownloadAction {
     data object None : DownloadAction()
@@ -147,6 +154,7 @@ fun TvDetailsScreen(
         season: Int?,
         episode: Int?,
         autoSourceSelection: Boolean,
+        episodeName: String,
     ) -> Unit,
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
@@ -198,6 +206,14 @@ fun TvDetailsScreen(
     val downloadAllFocusRequester = remember { FocusRequester() }
     val firstStreamFocusRequester = remember { FocusRequester() }
     val listState = rememberLazyListState()
+    var tvStreamFilter by remember { mutableStateOf(TvStreamSourceFilter.ALL) }
+    val filteredStreams = remember(state.streams, tvStreamFilter) {
+        when (tvStreamFilter) {
+            TvStreamSourceFilter.ALL -> state.streams
+            TvStreamSourceFilter.TORRENT -> state.streams.filter { it.infoHash != null }
+            TvStreamSourceFilter.USENET -> state.streams.filter { it.infoHash == null }
+        }
+    }
     var didAutoPlay by rememberSaveable(type, id) { mutableStateOf(false) }
     var pendingDownloadAction by remember { mutableStateOf<DownloadAction>(DownloadAction.None) }
     var showWatchlistPicker by remember { mutableStateOf(false) }
@@ -250,14 +266,21 @@ fun TvDetailsScreen(
         detailViewModel.loadDetail(type, id)
     }
 
-    // Refresh watch state when returning from player (lifecycle ON_RESUME).
+    // Refresh watch state and restore focus when returning from player (lifecycle ON_RESUME).
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
-        var resumeCount = 0
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                if (resumeCount++ > 0) {
-                    detailViewModel.refreshWatchState()
+                detailViewModel.refreshWatchState()
+                // Scroll list to top so the Play button is in the viewport, then focus it.
+                // The button label changes (Play → Resume) after refreshWatchState; without
+                // scrolling, the button is off-screen in LazyColumn and requestFocus fails silently.
+                coroutineScope.launch {
+                    listState.scrollToItem(0)
+                    delay(300)
+                    runCatching { playFocusRequester.requestFocus() }
+                    delay(400)
+                    runCatching { playFocusRequester.requestFocus() }
                 }
             }
         }
@@ -267,6 +290,15 @@ fun TvDetailsScreen(
 
     LaunchedEffect(state.mediaItem?.id) {
         if (state.mediaItem != null) {
+            runCatching { playFocusRequester.requestFocus() }
+        }
+    }
+
+    // Also re-request when watchProgress or watchedEpisodes update — covers the case
+    // where the key changes but the postDelayed already fired.
+    LaunchedEffect(state.watchProgress, state.watchedEpisodes) {
+        if (state.mediaItem != null) {
+            kotlinx.coroutines.delay(300)
             runCatching { playFocusRequester.requestFocus() }
         }
     }
@@ -323,7 +355,7 @@ fun TvDetailsScreen(
     }
 
     // Usenet source-sheet warmup hook. Mirrors the phone DetailScreen
-    // wiring exactly â€” keyed on the boolean only so it fires once per
+    // wiring exactly â€" keyed on the boolean only so it fires once per
     // falseâ†’true transition of showStreamPicker, not on incidental
     // recomposition. No-op when there are no Usenet candidates.
     LaunchedEffect(state.showStreamPicker) {
@@ -340,6 +372,8 @@ fun TvDetailsScreen(
     LaunchedEffect(state.usenetPlaybackIntent) {
         val intent = state.usenetPlaybackIntent ?: return@LaunchedEffect
         val media = state.mediaItem ?: return@LaunchedEffect
+        val epName = state.seasonDetail?.episodes
+            ?.find { it.episodeNumber == state.streamContextEpisode }?.name.orEmpty()
         onPlayResolved(
             intent.url,
             "",
@@ -347,6 +381,7 @@ fun TvDetailsScreen(
             state.streamContextSeason,
             state.streamContextEpisode,
             state.autoPlayStream != null,
+            epName,
         )
         detailViewModel.consumeUsenetPlaybackIntent()
     }
@@ -365,16 +400,16 @@ fun TvDetailsScreen(
         // Don't navigate to player if this resolve was for a download action
         if (pendingDownloadAction !is DownloadAction.None) return@LaunchedEffect
 
-        val playbackUrl = resolved.transcodeUrls?.mp4
-            ?: resolved.transcodeUrls?.hls
-            ?: resolved.url
-
-        val fallbackUrl = when (playbackUrl) {
-            resolved.url -> resolved.transcodeUrls?.hls ?: resolved.transcodeUrls?.mp4 ?: ""
-            resolved.transcodeUrls?.mp4 -> resolved.transcodeUrls?.hls ?: resolved.url
-            else -> resolved.url
+        val urlCandidates = if (resolved.service != null) {
+            listOf(resolved.url, resolved.transcodeUrls?.hls, resolved.transcodeUrls?.mp4)
+        } else {
+            listOf(resolved.transcodeUrls?.mp4, resolved.transcodeUrls?.hls, resolved.url)
         }
+        val playbackUrl = urlCandidates.firstOrNull { !it.isNullOrBlank() }.orEmpty()
+        val fallbackUrl = urlCandidates.firstOrNull { !it.isNullOrBlank() && it != playbackUrl }.orEmpty()
 
+        val epName = state.seasonDetail?.episodes
+            ?.find { it.episodeNumber == state.streamContextEpisode }?.name.orEmpty()
         onPlayResolved(
             playbackUrl,
             fallbackUrl,
@@ -382,6 +417,7 @@ fun TvDetailsScreen(
             state.streamContextSeason,
             state.streamContextEpisode,
             state.autoPlayStream != null,
+            epName,
         )
         detailViewModel.clearResolvedStream()
     }
@@ -437,7 +473,7 @@ fun TvDetailsScreen(
     ) {
         if (mediaItem != null) {
             val item = mediaItem
-            // â”€â”€ Hero backdrop + title + buttons â”€â”€
+            // â"€â"€ Hero backdrop + title + buttons â"€â"€
             item(key = "hero") {
                 Box(
                     modifier = Modifier
@@ -503,7 +539,7 @@ fun TvDetailsScreen(
                             )
                         }
 
-                        // â”€â”€ Library status indicator â”€â”€
+                        // â"€â"€ Library status indicator â"€â"€
                         if (state.isInLibrary) {
                             Text(
                                 text = stringResource(R.string.tv_detail_in_library),
@@ -517,7 +553,7 @@ fun TvDetailsScreen(
                         }
 
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            // â”€â”€ Play button with debrid check + loading phases â”€â”€
+                            // â"€â"€ Play button with debrid check + loading phases â"€â"€
                             val streamLocked = isLockedFeature(TvEntitledFeature.STREAM_PLAYBACK)
                             val playText = when {
                                 streamLocked -> TvPremiumAccess.UNLOCK_WITH_LIFETIME_LABEL
@@ -554,7 +590,7 @@ fun TvDetailsScreen(
                                     runPremiumAction(TvEntitledFeature.STREAM_PLAYBACK) {
                                         // Movies: surface the source picker if there's
                                         // a non-Provider option (LocalFile or LAN). For
-                                        // series, the next-episode flow stays as-is â€”
+                                        // series, the next-episode flow stays as-is â€"
                                         // route disambiguation per-episode is too rich
                                         // to hang on the picker without an episode
                                         // context map. Series picker integration is a
@@ -601,7 +637,7 @@ fun TvDetailsScreen(
                                                 wifiOnlyForLan = settingsState.lanPlaybackWifiOnly,
                                             )
                                             // If the only option is Provider (or no real
-                                            // options at all), skip the sheet â€” preserve
+                                            // options at all), skip the sheet â€" preserve
                                             // existing behavior.
                                             val hasNonProvider = picker.options.any { opt ->
                                                 opt.route is PlaybackRoute.LocalFile ||
@@ -675,7 +711,7 @@ fun TvDetailsScreen(
                                 },
                             )
 
-                            // â”€â”€ Mark Watched + Rate (Trakt only) â”€â”€
+                            // â"€â"€ Mark Watched + Rate (Trakt only) â"€â"€
                             if (settingsState.traktConnected) {
                                 TvActionButton(
                                     text = if (state.isMarkedWatched) {
@@ -718,13 +754,13 @@ fun TvDetailsScreen(
                                 )
                             }
 
-                            // Download buttons removed â€” TV is stream-only
+                            // Download buttons removed â€" TV is stream-only
                         }
                     }
                 }
             }
 
-            // â”€â”€ Tagline â”€â”€
+            // â"€â"€ Tagline â"€â"€
             if (!item.tagline.isNullOrBlank()) {
                 item(key = "tagline") {
                     Text(
@@ -737,7 +773,7 @@ fun TvDetailsScreen(
                 }
             }
 
-            // â”€â”€ Genre pills â”€â”€
+            // â"€â"€ Genre pills â"€â"€
             if (item.genres.isNotEmpty()) {
                 item(key = "genres") {
                     Row(
@@ -758,7 +794,7 @@ fun TvDetailsScreen(
                 }
             }
 
-            // â”€â”€ Multi-source ratings â”€â”€
+            // â"€â"€ Multi-source ratings â"€â"€
             val ratingPrefs = settingsState.ratingPrefs
             val detailRatings = item.ratings.withFallbackTmdbScore(item.rating)
             if (detailRatings != null &&
@@ -796,7 +832,7 @@ fun TvDetailsScreen(
                 }
             }
 
-            // â”€â”€ Overview â”€â”€
+            // â"€â"€ Overview â"€â"€
             if (!item.overview.isNullOrBlank()) {
                 item(key = "overview") {
                     Text(
@@ -810,7 +846,7 @@ fun TvDetailsScreen(
                 }
             }
 
-            // â”€â”€ Where to Watch â”€â”€
+            // â"€â"€ Where to Watch â"€â"€
             item(key = "where_to_watch") {
                 val offers = state.availability?.offers.orEmpty()
                 val grouped = offers.groupBy { it.offerType }
@@ -880,7 +916,7 @@ fun TvDetailsScreen(
                                                     chipFocused = it.isFocused
                                                     if (it.isFocused) onContentFocused(chipReq)
                                                 }
-                                                // Info-only â€” no external links
+                                                // Info-only â€" no external links
                                                 .padding(horizontal = 12.dp, vertical = 6.dp),
                                         ) {
                                             Row(
@@ -926,7 +962,7 @@ fun TvDetailsScreen(
                 }
             }
 
-            // â”€â”€ Director â”€â”€
+            // â"€â"€ Director â"€â"€
             if (!item.director.isNullOrBlank()) {
                 item(key = "director") {
                     Row(modifier = Modifier.padding(bottom = 10.dp)) {
@@ -945,7 +981,7 @@ fun TvDetailsScreen(
                 }
             }
 
-            // â”€â”€ Cast â”€â”€
+            // â"€â"€ Cast â"€â"€
             if (item.cast.isNotEmpty()) {
                 item(key = "cast") {
                     Text(
@@ -971,7 +1007,7 @@ fun TvDetailsScreen(
                 }
             }
 
-            // â”€â”€ Episode picker for series â”€â”€
+            // â"€â"€ Episode picker for series â"€â"€
             if (item.type == MediaType.SERIES && item.seasons.isNotEmpty()) {
                 item(key = "episodes") {
                     Spacer(modifier = Modifier.height(4.dp))
@@ -1021,7 +1057,7 @@ fun TvDetailsScreen(
                 }
             }
 
-            // â”€â”€ Similar titles â”€â”€
+            // â"€â"€ Similar titles â"€â"€
             if (state.similar.isNotEmpty()) {
                 item(key = "similar") {
                     Text(
@@ -1045,7 +1081,7 @@ fun TvDetailsScreen(
                 }
             }
 
-            // â”€â”€ Watchlist service picker â”€â”€
+            // â"€â"€ Watchlist service picker â"€â"€
             if (showWatchlistPicker && mediaItem != null) {
                 item(key = "watchlist_picker_header") {
                     Text(
@@ -1168,7 +1204,7 @@ fun TvDetailsScreen(
                 }
             }
 
-            // â”€â”€ Auto-play status â”€â”€
+            // â"€â"€ Auto-play status â"€â"€
             if (state.autoPlayMessage != null) {
                 item(key = "autoplay_status") {
                     Column(modifier = Modifier.padding(top = 14.dp)) {
@@ -1191,7 +1227,7 @@ fun TvDetailsScreen(
                 }
             }
 
-            // â”€â”€ Resolve error â”€â”€
+            // â"€â"€ Resolve error â"€â"€
             if (state.isLoadingStreams || state.isResolving || state.streams.isNotEmpty()) {
                 item(key = "playback_readiness") {
                     DetailPlaybackReadinessCard(
@@ -1207,7 +1243,7 @@ fun TvDetailsScreen(
             }
 
             // Preparing is now a full-screen overlay rendered outside the
-            // lazy list â€” see the overlay block at the end of this scope.
+            // lazy list â€" see the overlay block at the end of this scope.
             if (state.resolveError != null) {
                 item(key = "resolve_error") {
                     Text(
@@ -1219,9 +1255,9 @@ fun TvDetailsScreen(
                 }
             }
 
-            // â”€â”€ Stream Picker (when auto-play is off or auto-play failed) â”€â”€
+            // â"€â"€ Stream Picker (when auto-play is off or auto-play failed) â"€â"€
             if (state.showStreamPicker && state.streams.isNotEmpty()) {
-                val groups = groupPlaybackOptionStreams(state.streams, state.startupCandidates)
+                val groups = groupPlaybackOptionStreams(filteredStreams, state.startupCandidates)
                 val startupCandidateMap = state.startupCandidates.associateBy { it.streamKey }
                 val firstStreamKey = groups.firstOrNull()?.items?.firstOrNull()?.streamUiKey()
                 item(key = "picker_header") {
@@ -1233,18 +1269,52 @@ fun TvDetailsScreen(
                         modifier = Modifier.padding(top = 18.dp, bottom = 8.dp),
                     )
                 }
+                item(key = "picker_filter_pills") {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(bottom = 10.dp),
+                    ) {
+                        TvStreamSourceFilter.entries.forEach { filter ->
+                            val isActive = tvStreamFilter == filter
+                            var pillFocused by remember { mutableStateOf(false) }
+                            val pillBg = when {
+                                isActive -> Amber
+                                pillFocused -> Amber.copy(alpha = 0.3f)
+                                else -> Gunmetal
+                            }
+                            val pillTextColor = if (isActive) Obsidian else Snow
+                            Box(
+                                modifier = Modifier
+                                    .background(pillBg, RoundedCornerShape(20.dp))
+                                    .border(1.dp, if (pillFocused || isActive) Amber else Steel.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
+                                    .onFocusChanged { pillFocused = it.isFocused }
+                                    .focusable()
+                                    .clickable { tvStreamFilter = filter }
+                                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = filter.label,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                                    color = pillTextColor,
+                                )
+                            }
+                        }
+                    }
+                }
                 groups.forEach { group ->
-                    item(key = "picker_group_${group.title}") {
+                    item(key = "picker_group_${group.titleRes}") {
                         Column(modifier = Modifier.padding(bottom = 6.dp)) {
                             Text(
-                                text = group.title,
+                                text = stringResource(group.titleRes),
                                 style = MaterialTheme.typography.labelLarge,
                                 color = Amber,
                                 fontWeight = FontWeight.SemiBold,
                             )
-                            group.subtitle?.let {
+                            group.subtitleRes?.let {
                                 Text(
-                                    text = it,
+                                    text = stringResource(it),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = Silver,
                                 )
@@ -1253,7 +1323,7 @@ fun TvDetailsScreen(
                     }
                     itemsIndexed(
                         group.items,
-                        key = { index, stream -> "stream_${group.title}_${index}_${stream.streamUiKey()}" },
+                        key = { index, stream -> "stream_${group.titleRes}_${index}_${stream.streamUiKey()}" },
                     ) { _, stream ->
                     val startupCandidate = startupCandidateMap[stream.streamUiKey()]
                     val req = if (stream.streamUiKey() == firstStreamKey) {
@@ -1333,11 +1403,11 @@ fun TvDetailsScreen(
                                 Text(
                                     text = buildString {
                                         append(stream.quality)
-                                        stream.codec?.let { append(" Â· $it") }
-                                        stream.hdr?.let { append(" Â· $it") }
-                                        stream.size?.let { append(" Â· $it") }
+                                        stream.codec?.let { append(" · $it") }
+                                        stream.hdr?.let { append(" · $it") }
+                                        stream.size?.let { append(" · $it") }
                                         if (stream.languages.isNotEmpty()) {
-                                            append(" Â· \uD83D\uDDE3 ")
+                                            append(" · \uD83D\uDDE3 ")
                                             append(stream.languages.joinToString(", "))
                                         }
                                     },
@@ -1369,8 +1439,8 @@ fun TvDetailsScreen(
                                 Text(
                                     text = buildString {
                                         append(stream.addonName)
-                                        stream.source?.let { append(" Â· $it") }
-                                        stream.seeds?.let { if (it > 0) append(" Â· $it seeds") }
+                                        stream.source?.let { append(" · $it") }
+                                        stream.seeds?.let { if (it > 0) append(" · $it seeds") }
                                     },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Amber,
@@ -1398,7 +1468,7 @@ fun TvDetailsScreen(
                 }
             }
 
-            // â”€â”€ Error â”€â”€
+            // â"€â"€ Error â"€â"€
             if (state.streamsError != null) {
                 item(key = "error") {
                     Text(
@@ -1424,10 +1494,10 @@ fun TvDetailsScreen(
 
     } // end LazyColumn
 
-    // Preparing overlay â€” rendered inside the Box but outside the
+    // Preparing overlay â€" rendered inside the Box but outside the
     // LazyColumn so it always layers above the detail surface, blocking
     // D-pad interaction with the rest of the UI until the probe resolves
-    // or the user cancels. Must live in a @Composable scope (Box) â€” not
+    // or the user cancels. Must live in a @Composable scope (Box) â€" not
     // in the LazyColumn's LazyListScope lambda.
     val preparing = state.preparing
     if (preparing != null) {
@@ -1437,7 +1507,7 @@ fun TvDetailsScreen(
         )
     }
 
-    // â”€â”€ Source picker (Prompt 11C) â”€â”€
+    // â"€â"€ Source picker (Prompt 11C) â"€â"€
     // Sits above the rest of the detail content. D-pad OK on a row
     // either launches the player directly (LocalFile / LAN) or
     // dismisses the sheet and re-enters the existing fetchStreams
@@ -1454,6 +1524,8 @@ fun TvDetailsScreen(
                     detailViewModel.fetchStreams(season = sourcePickerSeason, episode = sourcePickerEpisode)
                     return@TvSourcePickerSheet
                 }
+                val pickerEpName = state.seasonDetail?.episodes
+                    ?.find { it.episodeNumber == sourcePickerEpisode }?.name.orEmpty()
                 when (val route = option.route) {
                     is PlaybackRoute.LocalFile -> {
                         onPlayResolved(
@@ -1463,10 +1535,11 @@ fun TvDetailsScreen(
                             sourcePickerSeason,
                             sourcePickerEpisode,
                             true,
+                            pickerEpName,
                         )
                     }
                     is PlaybackRoute.LanDesktopStream -> {
-                        // Stage headers BEFORE navigating â€” PlayerScreen
+                        // Stage headers BEFORE navigating — PlayerScreen
                         // attaches X-Torve-Lan-Auth before play().
                         PendingLanPlaybackHandoff.stage(route)
                         onPlayResolved(
@@ -1476,17 +1549,18 @@ fun TvDetailsScreen(
                             sourcePickerSeason,
                             sourcePickerEpisode,
                             true,
+                            pickerEpName,
                         )
                     }
                     is PlaybackRoute.ProviderStream -> {
                         // Synthetic "Provider" sentinel handled above.
                         // A real ProviderStream URL here would be
-                        // unusual â€” fall back to fetchStreams to keep
+                        // unusual â€" fall back to fetchStreams to keep
                         // the source disambiguation flow.
                         detailViewModel.fetchStreams(season = sourcePickerSeason, episode = sourcePickerEpisode)
                     }
                     PlaybackRoute.ReDownload -> {
-                        // No-op â€” the picker only emits ReDownload when
+                        // No-op â€" the picker only emits ReDownload when
                         // there's nothing else, and the build pre-check
                         // already filters those out.
                     }
@@ -1546,7 +1620,7 @@ private suspend fun buildDetailPickerState(
         localFilePath = localFilePath,
         lanRoute = lanRoute,
         // The detail screen always assumes provider streams might
-        // resolve â€” the existing fetchStreams() will tell the user if
+        // resolve â€" the existing fetchStreams() will tell the user if
         // none are actually available.
         providerAvailable = true,
         networkMode = networkMode,
@@ -1630,7 +1704,7 @@ private fun TvActionButton(
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
             }
-            // Always focusable â€” guard click internally so focus is never ejected
+            // Always focusable â€" guard click internally so focus is never ejected
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -1764,7 +1838,7 @@ private fun TvRatingChip(label: String, value: String, iconRes: Int? = null) {
 /**
  * TV-friendly full-screen overlay for the preparing state. D-pad focus
  * defaults to the Cancel button so the user always has an obvious exit.
- * Sized for couch viewing â€” larger spinner, bigger type, centered panel.
+ * Sized for couch viewing â€" larger spinner, bigger type, centered panel.
  */
 @Composable
 internal fun TvStreamPreparingOverlay(
@@ -1772,10 +1846,22 @@ internal fun TvStreamPreparingOverlay(
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val cancelFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(200)
+        runCatching { cancelFocus.requestFocus() }
+    }
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.88f)),
+            .background(Color.Black.copy(alpha = 0.88f))
+            .focusable()
+            .onPreviewKeyEvent { keyEvent ->
+                if (keyEvent.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_BACK &&
+                    keyEvent.nativeKeyEvent.action == android.view.KeyEvent.ACTION_UP) {
+                    onCancel(); true
+                } else true  // swallow all keys — overlay is modal
+            },
         contentAlignment = Alignment.Center,
     ) {
         Column(
@@ -1839,7 +1925,10 @@ internal fun TvStreamPreparingOverlay(
                 Spacer(Modifier.height(28.dp))
                 androidx.compose.material3.OutlinedButton(
                     onClick = onCancel,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(cancelFocus)
+                        .focusable(),
                     shape = RoundedCornerShape(14.dp),
                 ) {
                     Text(

@@ -44,6 +44,7 @@ import kotlin.test.assertTrue
 class TransferImportCompletionNotifierTest {
 
     private val fixedNow = 1_700_000_000_000L
+    private val envelopeJsonFormat = Json { encodeDefaults = true }
 
     @Test
     fun manualPasteSuccessBumpsNotifierExactlyOnce() = runTest {
@@ -97,8 +98,7 @@ class TransferImportCompletionNotifierTest {
             ),
             expiresAtEpochMs = active.handshake.expiresAtEpochMs,
         )
-        val envelopeJson = Json { encodeDefaults = true }
-            .encodeToString(SealedSecretsEnvelope.serializer(), envelope)
+        val envelopeJson = envelopeJsonFormat.encodeToString(SealedSecretsEnvelope.serializer(), envelope)
 
         vm.updateEnvelopeText(envelopeJson)
         val before = notifier.lastImportEpochMs.value

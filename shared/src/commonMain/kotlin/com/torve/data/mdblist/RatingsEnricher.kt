@@ -89,8 +89,15 @@ class RatingsEnricher(
         val tmdbId = item.tmdbId ?: item.id.extractTmdbIdOrNull()
         val existing = item.ratings
 
-        // 1. Build cache key
+        // Extract IMDB ID from item fields first (no network). Used as cache key
+        // fallback when tmdbId is null (e.g. Stremio items arriving as "tt0403358").
+        val quickImdbId = item.imdbId?.takeIf { it.startsWith("tt") }
+            ?: item.id.extractImdbIdOrNull()
+
+        // 1. Build cache key — prefer TMDB ID, fall back to IMDB ID so items that
+        // arrive without a tmdbId still hit/populate the cache.
         val cacheKey = tmdbId?.let { "${item.type.name}:$it" }
+            ?: quickImdbId?.let { "${item.type.name}:$it" }
 
         // 2. Check persistent SQLite cache — fresh (< 30 days)? return cached ratings
         cacheKey?.let {
@@ -103,9 +110,8 @@ class RatingsEnricher(
             }
         }
 
-        // Resolve IMDb ID (needed by OMDB + MDBList + Trakt)
-        val imdbId = item.imdbId?.takeIf { it.startsWith("tt") }
-            ?: item.id.extractImdbIdOrNull()
+        // Resolve IMDb ID — use the quick one already extracted, or look it up via TMDB
+        val imdbId = quickImdbId
             ?: tmdbId?.let { resolveImdbIdForTmdb(item.type, it) }
 
         // Accumulate ratings from all tiers
@@ -269,8 +275,11 @@ class RatingsEnricher(
      * rail until refreshRatings catches up seconds later.
      */
     fun hydrateFromCache(item: MediaItem): MediaItem {
-        val tmdbId = item.tmdbId ?: item.id.extractTmdbIdOrNull() ?: return item
-        val cacheKey = "${item.type.name}:$tmdbId"
+        val tmdbId = item.tmdbId ?: item.id.extractTmdbIdOrNull()
+        val imdbId = item.imdbId?.takeIf { it.startsWith("tt") } ?: item.id.extractImdbIdOrNull()
+        val cacheKey = tmdbId?.let { "${item.type.name}:$it" }
+            ?: imdbId?.let { "${item.type.name}:$it" }
+            ?: return item
         val cached = cacheRepo.getCached(cacheKey) ?: return item
         return item.copy(
             tmdbId = tmdbId,

@@ -3,6 +3,7 @@ package com.torve.presentation.calendar
 import com.torve.data.trakt.TraktCalendarEpisode
 import com.torve.data.trakt.api.TraktAuthorizedApi
 import com.torve.data.trakt.auth.TraktTokenStore
+import com.torve.domain.repository.PreferencesRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -21,6 +22,7 @@ import kotlinx.datetime.toLocalDateTime
 class CalendarViewModel(
     private val traktApi: TraktAuthorizedApi,
     private val tokenStore: TraktTokenStore,
+    private val prefsRepo: PreferencesRepository,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(CalendarUiState())
@@ -34,10 +36,27 @@ class CalendarViewModel(
         checkConnectionAndLoad()
     }
 
+    fun setEpisodeNotificationsEnabled(enabled: Boolean) {
+        scope.launch {
+            if (enabled) {
+                prefsRepo.setString(KEY_EPISODE_NOTIFICATIONS_ENABLED, "true")
+            } else {
+                prefsRepo.setString(KEY_EPISODE_NOTIFICATIONS_ENABLED, "false")
+            }
+            _state.update { it.copy(episodeNotificationsEnabled = enabled) }
+        }
+    }
+
     private fun checkConnectionAndLoad() {
         scope.launch {
             val connected = tokenStore.accessToken().isNullOrBlank().not()
-            _state.update { it.copy(traktConnected = connected) }
+            val notificationsEnabled = prefsRepo.getString(KEY_EPISODE_NOTIFICATIONS_ENABLED) == "true"
+            _state.update {
+                it.copy(
+                    traktConnected = connected,
+                    episodeNotificationsEnabled = connected && notificationsEnabled,
+                )
+            }
             if (connected) {
                 loadCalendar()
             }
@@ -95,5 +114,9 @@ class CalendarViewModel(
                 else -> "2_$key"
             }
         })
+    }
+
+    companion object {
+        const val KEY_EPISODE_NOTIFICATIONS_ENABLED = "calendar_episode_notifications_enabled"
     }
 }

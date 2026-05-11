@@ -30,6 +30,11 @@ fun escapeForBuildConfig(value: String): String {
 
 kotlin {
     jvmToolchain(17)
+    compilerOptions {
+        freeCompilerArgs.add("-Xexpect-actual-classes")
+        freeCompilerArgs.add("-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi")
+        freeCompilerArgs.add("-opt-in=kotlinx.coroutines.FlowPreview")
+    }
 
     androidTarget {
         compilerOptions {

@@ -13,6 +13,7 @@ import com.torve.data.device.DeviceListDto
 import com.torve.data.device.ManagedDeviceDto
 import com.torve.data.subscription.SubscriptionEntitlementCacheKeys
 import com.torve.data.trakt.repo.TraktSyncRepository
+import com.torve.db.TorveDatabase
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationStorageMode
 import com.torve.domain.model.ChannelPlaylist
@@ -20,6 +21,7 @@ import com.torve.domain.model.PlaylistType
 import com.torve.domain.repository.WatchHistoryRepository
 import com.torve.domain.repository.WatchProgressRepository
 import com.torve.domain.repository.WatchlistRepository
+import com.torve.domain.security.SecureStorage
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.settings.SettingsRefreshNotifier
 import com.torve.platform.torveVerboseLog
@@ -94,6 +96,8 @@ private data class PlaylistSyncResult(
 class AccountSessionCoordinator(
     private val authClient: AuthClient,
     private val deviceApi: DeviceApi,
+    private val database: TorveDatabase,
+    private val secureStorage: SecureStorage,
     private val accountSettingsRepository: AccountSettingsRepository,
     private val integrationSecretStore: com.torve.domain.integrations.IntegrationSecretStore,
     private val accountSettingsApi: AccountSettingsApi,
@@ -164,9 +168,24 @@ class AccountSessionCoordinator(
      * Full teardown of session state.
      */
     suspend fun signOut() {
-        torveVerboseLog { "[SignOut] Playlist/credential cleanup started" }
+        clearLocalAccountData(reason = "sign_out")
+    }
+
+    /**
+     * Clear every account-scoped local row and secret on this device.
+     *
+     * This intentionally does not depend on the current auth user. Some
+     * callsites receive session-expired/revoked-device events after
+     * [AuthClient] already cleared the active user, so using the current
+     * user id here would miss the previous account's cached libraries,
+     * IPTV rows, preferences, and credentials.
+     */
+    suspend fun clearLocalAccountData(reason: String) {
+        torveVerboseLog { "[SignOut] Local account cleanup started reason=$reason" }
         integrationSecretStore.clearAllSecrets()
         torveVerboseLog { "[SignOut] Encrypted secret store cleared" }
+        runCatching { secureStorage.removeByPrefix("xtream_pwd_") }
+        torveVerboseLog { "[SignOut] Xtream secure credential prefix cleared" }
         for (key in integrationSecretStore.legacyPreferenceSecretKeys) {
             prefsRepo.remove(key)
         }
@@ -176,15 +195,52 @@ class AccountSessionCoordinator(
         prefsRepo.remove(SubscriptionEntitlementCacheKeys.VERIFIED_IS_DEVICE_ACTIVATED)
         prefsRepo.remove(SubscriptionEntitlementCacheKeys.VERIFIED_DEVICE_BLOCK_REASON)
         torveVerboseLog { "[SignOut] Legacy preference secrets cleared" }
+        purgeAccountScopedDatabaseRows()
+        torveVerboseLog { "[SignOut] SQLite account rows cleared" }
         runCatching { channelRepo.clearAll() }
-        torveVerboseLog { "[SignOut] SQLite playlists/channels/favorites/recents cleared" }
+        runCatching { watchlistRepo.clear() }
+        runCatching { watchProgressRepo.clearAllProgress() }
+        runCatching { watchHistoryRepo.clearAll() }
+        runCatching { traktSyncRepo.clearLocalData() }
+        torveVerboseLog { "[SignOut] Repository caches cleared" }
         runCatching { addonSyncService.clearSyncStateOnSignOut() }
         torveVerboseLog { "[SignOut] Addon sync metadata cleared" }
         accountSettingsRepository.clearSessionState()
         _state.value = AccountSessionState()
         _restoreProgress.value = RestoreProgress()
         settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
-        torveVerboseLog { "[SignOut] Playlist/credential cleanup finished" }
+        torveVerboseLog { "[SignOut] Local account cleanup finished reason=$reason" }
+    }
+
+    private fun purgeAccountScopedDatabaseRows() {
+        val queries = database.torveQueries
+        queries.transaction {
+            queries.deleteAllMetadataCache()
+            queries.clearAllProgressForAllUsers()
+            queries.deleteAllAccountPreferences()
+            queries.deleteAllAddonsForAllUsers()
+            queries.deleteAllDebridAccountsForAllUsers()
+            queries.deleteAllChannelsForAllUsers()
+            queries.deleteAllIptvFavoritesForAllUsers()
+            queries.clearRecentChannelsForAllUsers()
+            queries.deleteAllCategoryConfigsForAllUsers()
+            queries.clearHiddenChannels()
+            queries.deleteAllEpgChannelsForAllUsers()
+            queries.deleteAllEpgProgrammesForAllUsers()
+            queries.deleteAllPlaylistsForAllUsers()
+            queries.deleteAllDownloadsForAllUsers()
+            queries.deleteAllSubscriptionsForAllUsers()
+            queries.deleteAllProfilesForAllUsers()
+            queries.deleteAllShelfConfigsForAllUsers()
+            queries.clearWatchlistForAllUsers()
+            queries.clearAllHistoryForAllUsers()
+            queries.clearResolveMemory()
+            queries.clearTraktRatings()
+            queries.clearTraktSyncState()
+            queries.clearTraktQueue()
+            queries.deleteAllRatings()
+            queries.deleteAllCatalogTopItems()
+        }
     }
 
     /**

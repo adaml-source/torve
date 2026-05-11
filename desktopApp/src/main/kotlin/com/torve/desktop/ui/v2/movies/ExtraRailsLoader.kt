@@ -4,6 +4,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import com.torve.data.mdblist.MdbListApi
+import com.torve.data.mdblist.RatingsEnricher
+import com.torve.domain.integrations.IntegrationSecretKey
+import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.model.MediaItem
 import com.torve.domain.repository.MetadataRepository
 import kotlinx.coroutines.Dispatchers
@@ -39,15 +43,43 @@ val tvExtraRails: List<ExtraRailDef> = listOf(
     ExtraRailDef("TV_GENRE_80", "Crime Shows", genreId = 80),
 )
 
+/**
+ * Loads the "extra rails" (genre-specific + Now Playing / Upcoming) and
+ * enriches them with MDBList/IMDb/Trakt ratings the same way
+ * CatalogViewModel enriches the first three rails (Trending / Popular /
+ * Top Rated). Earlier this skipped enrichment entirely, so rails 4+
+ * showed posters with TMDB-only metadata while rails 1-3 carried the
+ * full pill set -- the visible asymmetry the user reported.
+ *
+ * Two-phase to match the ViewModel's behaviour:
+ *   1. Synchronous cache hydrate -- fast, fills pills on first paint
+ *      from local RatingsCacheRepository.
+ *   2. Async MDBList enrichment -- replaces the rail's items as fresh
+ *      ratings come back. Recomposition picks up the new state.
+ */
 @Composable
 fun rememberExtraRails(
     metadataRepo: MetadataRepository,
     mediaType: String, // "movie" or "tv"
 ): Map<String, List<MediaItem>> {
     val state = remember(mediaType) { mutableStateOf<Map<String, List<MediaItem>>>(emptyMap()) }
+
+    // Resolved lazily via Koin so the function still works in previews
+    // / tests where these dependencies aren't wired.
+    val ratingsEnricher = remember {
+        runCatching {
+            org.koin.mp.KoinPlatform.getKoin().get<RatingsEnricher>()
+        }.getOrNull()
+    }
+    val secretStore = remember {
+        runCatching {
+            org.koin.mp.KoinPlatform.getKoin().get<IntegrationSecretStore>()
+        }.getOrNull()
+    }
+
     LaunchedEffect(mediaType) {
         val defs = if (mediaType == "movie") movieExtraRails else tvExtraRails
-        val loaded = coroutineScope {
+        val raw = coroutineScope {
             defs.map { def ->
                 async(Dispatchers.IO) {
                     val items = runCatching {
@@ -67,7 +99,39 @@ fun rememberExtraRails(
                 }
             }.awaitAll().toMap()
         }
-        state.value = loaded
+
+        // Phase 1: fast cache hydrate. Render with whatever ratings
+        // we already have locally so pills don't pop in late.
+        val hydrated = if (ratingsEnricher != null) {
+            raw.mapValues { (_, items) -> ratingsEnricher.hydrateListFromCache(items) }
+        } else {
+            raw
+        }
+        state.value = hydrated
+
+        // Phase 2: async enrichment from MDBList. Same key resolution
+        // as CatalogViewModel's enrichAndUpdateItems().
+        if (ratingsEnricher != null) {
+            val apiKey = runCatching {
+                secretStore?.get(IntegrationSecretKey.MDBLIST_API_KEY)
+                    ?: MdbListApi.DEFAULT_API_KEY
+            }.getOrDefault(MdbListApi.DEFAULT_API_KEY)
+
+            // Enrich each rail in parallel. Each rail updates the
+            // shared state map as soon as it's done, so pills appear
+            // progressively rather than waiting on the slowest rail.
+            coroutineScope {
+                raw.forEach { (sectionId, items) ->
+                    async(Dispatchers.IO) {
+                        val enriched = runCatching {
+                            ratingsEnricher.enrichList(items, apiKey)
+                        }.getOrDefault(items)
+                        state.value = state.value + (sectionId to enriched)
+                    }
+                }
+            }
+        }
     }
+
     return state.value
 }

@@ -83,6 +83,7 @@ import com.torve.android.tv.screens.LiveSettingsOverlay
 import com.torve.android.tv.screens.buildTvLiveTerminalFailurePresentation
 import com.torve.android.tv.screens.shouldShowTvLiveTuneProgress
 import com.torve.domain.model.Channel
+import com.torve.domain.model.ChannelCategory
 import com.torve.domain.model.EnrichedChannel
 import com.torve.domain.model.EpgProgramme
 import com.torve.domain.model.canonicalEpgChannelKey
@@ -92,9 +93,12 @@ import com.torve.domain.player.PlayerEngine
 import com.torve.domain.player.PlayerListener
 import com.torve.domain.player.PlayerState
 import com.torve.domain.player.TrackDescription
+import com.torve.presentation.channels.CategoryNameCleaner
 import com.torve.presentation.channels.ChannelsViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.koin.compose.koinInject
 import java.util.Locale
 
@@ -250,6 +254,8 @@ fun TvLivePlayerScreen(
     var currentChannel by remember { mutableStateOf<Channel?>(null) }
     var currentGroupName by remember { mutableStateOf(groupName) }
     var channelNumber by remember { mutableIntStateOf(1) }
+    var playbackGroupChannels by remember { mutableStateOf<List<EnrichedChannel>>(emptyList()) }
+    var playbackGuideProgrammes by remember { mutableStateOf<Map<String, List<EpgProgramme>>>(emptyMap()) }
     var activeReplayProgramme by remember { mutableStateOf<EpgProgramme?>(null) }
     var playbackUrlOverride by remember { mutableStateOf<String?>(null) }
     var reloadNonce by remember { mutableIntStateOf(0) }
@@ -583,6 +589,23 @@ fun TvLivePlayerScreen(
         }
     }
 
+    suspend fun loadPlaybackGroupData(
+        playlistId: String,
+        groupName: String,
+    ): Pair<List<EnrichedChannel>, Map<String, List<EpgProgramme>>> {
+        val channels = withContext(Dispatchers.IO) {
+            viewModel.getChannelsForCategoryDirect(playlistId, groupName)
+        }
+        val programmes = if (channels.isNotEmpty()) {
+            withContext(Dispatchers.IO) {
+                viewModel.getProgrammesForChannelsDirect(playlistId, channels)
+            }
+        } else {
+            emptyMap()
+        }
+        return channels to programmes
+    }
+
     fun canReplayProgramme(channel: Channel, programme: EpgProgramme): Boolean {
         if (!viewModel.canCatchup(channel)) return false
         if (programme.endTime > System.currentTimeMillis()) return false
@@ -648,6 +671,38 @@ fun TvLivePlayerScreen(
     // are reserved for explicit recovery/fallback paths — never during a normal
     // zap.  This keeps the surface alive and avoids the black-flash / race
     // conditions that come with tearing down and rebuilding the player.
+    LaunchedEffect(currentGroupName, currentChannel?.playlistId, state.selectedPlaylistId) {
+        val ch = currentChannel ?: return@LaunchedEffect
+        val playlistId = ch.playlistId.takeIf { it.isNotBlank() }
+            ?: state.selectedPlaylistId
+            ?: return@LaunchedEffect
+        val group = currentGroupName.takeIf { it.isNotBlank() }
+            ?: ch.groupTitle?.takeIf { it.isNotBlank() }
+            ?: return@LaunchedEffect
+
+        playbackGroupChannels = listOf(EnrichedChannel(channel = ch))
+        playbackGuideProgrammes = emptyMap()
+
+        try {
+            val (channels, programmes) = loadPlaybackGroupData(playlistId, group)
+            playbackGroupChannels = if (channels.isEmpty()) {
+                listOf(EnrichedChannel(channel = ch))
+            } else {
+                channels
+            }
+            playbackGuideProgrammes = programmes
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            Log.w(
+                "TvLivePlayerScreen",
+                "Failed to load playback group data playlist=$playlistId group=$group error=${error.message}",
+            )
+            playbackGroupChannels = listOf(EnrichedChannel(channel = ch))
+            playbackGuideProgrammes = emptyMap()
+        }
+    }
+
     LaunchedEffect(currentChannel?.url, playbackUrlOverride, reloadNonce) {
         playbackLaunchGeneration += 1
         val launchGeneration = playbackLaunchGeneration
@@ -1220,8 +1275,13 @@ fun TvLivePlayerScreen(
 
     // ── Channel zapping helper ──
     // Cache the flattened channel list so flatMap doesn't run on every zap.
-    val allZapChannels = remember(state.categories) {
-        state.categories.flatMap { it.channels }
+    val zapChannels = remember(playbackGroupChannels, currentGroupName, state.categories) {
+        playbackGroupChannels.ifEmpty {
+            state.categories
+                .firstOrNull { categoryMatchesGroup(it, currentGroupName) }
+                ?.channels
+                .orEmpty()
+        }
     }
     // Throttle zap to prevent cascading channel switches from rapid D-pad repeats.
     var lastZapMs by remember { mutableLongStateOf(0L) }
@@ -1232,17 +1292,16 @@ fun TvLivePlayerScreen(
         lastZapMs = now
 
         val ch = currentChannel ?: return
-        val currentIdx = allZapChannels.indexOfFirst { it.channel.url == ch.url }
-        if (currentIdx < 0 || allZapChannels.isEmpty()) return
+        val currentIdx = zapChannels.indexOfFirst { it.channel.url == ch.url }
+        if (currentIdx < 0 || zapChannels.isEmpty()) return
 
-        val newIdx = (currentIdx + delta).mod(allZapChannels.size)
-        val newEnriched = allZapChannels[newIdx]
+        val newIdx = (currentIdx + delta).mod(zapChannels.size)
+        val newEnriched = zapChannels[newIdx]
         com.torve.android.debug.AnrDebugLogger.logZapChannel(delta, newEnriched.channel.name)
-        val (group, idx) = findChannelGroupAndIndex(newEnriched.channel, state.categories)
         selectLiveChannel(
             channel = newEnriched.channel,
-            group = group ?: currentGroupName,
-            index = idx,
+            group = currentGroupName.ifBlank { newEnriched.channel.groupTitle.orEmpty() },
+            index = newIdx,
         )
     }
 
@@ -1299,10 +1358,34 @@ fun TvLivePlayerScreen(
     }
 
     // ── Build enriched current channel for overlays ──
-    val enrichedCurrentChannel: EnrichedChannel? = remember(currentChannel?.url, state.categories) {
+    val enrichedCurrentChannel: EnrichedChannel? = remember(
+        currentChannel?.url,
+        playbackGroupChannels,
+        playbackGuideProgrammes,
+        state.categories,
+    ) {
         currentChannel?.let { ch ->
-            findChannelByUrl(ch.url, state.categories.flatMap { it.channels })
+            val base = findChannelByUrl(ch.url, playbackGroupChannels)
+                ?: findChannelByUrl(ch.url, state.categories.flatMap { it.channels })
                 ?: EnrichedChannel(channel = ch, currentProgramme = null, nextProgramme = null)
+            val lookupChannel = base.channel
+            val lookupPlaylistId = lookupChannel.playlistId.takeIf { it.isNotBlank() } ?: ch.playlistId
+            val epgKey = canonicalEpgChannelKey(
+                playlistId = lookupPlaylistId,
+                channel = lookupChannel,
+            )
+            val programmes = epgKey?.let(playbackGuideProgrammes::get).orEmpty()
+            if (programmes.isEmpty()) {
+                base
+            } else {
+                val now = System.currentTimeMillis()
+                base.copy(
+                    currentProgramme = programmes.firstOrNull { it.startTime <= now && it.endTime > now }
+                        ?: base.currentProgramme,
+                    nextProgramme = programmes.firstOrNull { it.startTime > now }
+                        ?: base.nextProgramme,
+                )
+            }
         }
     }
     val displayCurrentChannel = remember(enrichedCurrentChannel, activeReplayProgramme) {
@@ -1316,18 +1399,72 @@ fun TvLivePlayerScreen(
             )
         }
     }
-    val currentChannelProgrammes = remember(enrichedCurrentChannel, state.guideProgrammes) {
+    val currentChannelProgrammes = remember(enrichedCurrentChannel, playbackGuideProgrammes, state.guideProgrammes) {
         val enriched = enrichedCurrentChannel ?: return@remember emptyList()
         val epgKey = canonicalEpgChannelKey(
             playlistId = enriched.channel.playlistId,
             channel = enriched.channel,
         ) ?: return@remember emptyList()
-        state.guideProgrammes[epgKey]
+        (playbackGuideProgrammes[epgKey] ?: state.guideProgrammes[epgKey])
             .orEmpty()
             .sortedBy(EpgProgramme::startTime)
     }
 
     // ── UI ──
+    val playbackCategories = remember(state.categories, playbackGroupChannels, currentGroupName) {
+        if (playbackGroupChannels.isEmpty()) {
+            state.categories
+        } else {
+            var mergedCurrentGroup = false
+            val merged = state.categories.map { category ->
+                if (categoryMatchesGroup(category, currentGroupName)) {
+                    mergedCurrentGroup = true
+                    category.copy(
+                        channels = playbackGroupChannels,
+                        channelCount = playbackGroupChannels.size,
+                    )
+                } else {
+                    category
+                }
+            }
+            if (mergedCurrentGroup || currentGroupName.isBlank()) {
+                merged
+            } else {
+                merged + ChannelCategory(
+                    name = currentGroupName,
+                    channelCount = playbackGroupChannels.size,
+                    channels = playbackGroupChannels,
+                )
+            }
+        }
+    }
+    val playbackGuideChannels = remember(playbackGroupChannels, state.guideChannels) {
+        playbackGroupChannels.ifEmpty { state.guideChannels }
+    }
+    val playbackProgrammes = remember(state.guideProgrammes, playbackGuideProgrammes) {
+        state.guideProgrammes + playbackGuideProgrammes
+    }
+
+    fun tuneToPlaybackChannel(channel: Channel, preferredGroupName: String? = null) {
+        val group = preferredGroupName?.takeIf { it.isNotBlank() }
+            ?: playbackCategories.firstOrNull { category ->
+                category.channels.any { it.channel.url == channel.url }
+            }?.name
+            ?: channel.groupTitle.orEmpty()
+        val index = playbackCategories
+            .firstOrNull { categoryMatchesGroup(it, group) }
+            ?.channels
+            ?.indexOfFirst { it.channel.url == channel.url }
+            ?.takeIf { it >= 0 }
+            ?: 0
+        selectLiveChannel(
+            channel = channel,
+            group = group,
+            index = index,
+            dismissOverlays = true,
+        )
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1586,14 +1723,7 @@ fun TvLivePlayerScreen(
                         openOverlay(LivePlayerOverlay.CHANNEL_LIST)
                     },
                     onTuneChannel = { ch ->
-                        tuneToChannel(ch, state.categories) { newCh, group, idx ->
-                            selectLiveChannel(
-                                channel = newCh,
-                                group = group,
-                                index = idx,
-                                dismissOverlays = true,
-                            )
-                        }
+                        tuneToPlaybackChannel(ch)
                     },
                     onClearRecent = {
                         viewModel.clearRecentlyViewed()
@@ -1738,18 +1868,11 @@ fun TvLivePlayerScreen(
             exit = fadeOut(),
         ) {
             LiveEpgGuideOverlay(
-                guideChannels = state.guideChannels,
-                guideProgrammes = state.guideProgrammes,
+                guideChannels = playbackGuideChannels,
+                guideProgrammes = playbackProgrammes,
                 currentChannelUrl = currentChannel?.url ?: "",
                 onTuneChannel = { ch ->
-                    tuneToChannel(ch, state.categories) { newCh, group, idx ->
-                        selectLiveChannel(
-                            channel = newCh,
-                            group = group,
-                            index = idx,
-                            dismissOverlays = true,
-                        )
-                    }
+                    tuneToPlaybackChannel(ch)
                 },
                 onShowChannelList = {
                     openOverlay(LivePlayerOverlay.CHANNEL_LIST)
@@ -1764,21 +1887,25 @@ fun TvLivePlayerScreen(
             exit = fadeOut(),
         ) {
             LiveChannelListOverlay(
-                categories = state.categories,
+                categories = playbackCategories,
                 currentChannelUrl = currentChannel?.url ?: "",
                 currentGroupName = currentGroupName,
                 favoriteChannels = state.favorites,
                 onTuneChannel = { ch, selectedGroupName ->
-                    tuneToChannel(ch, state.categories, selectedGroupName) { newCh, group, idx ->
-                        selectLiveChannel(
-                            channel = newCh,
-                            group = group,
-                            index = idx,
-                            dismissOverlays = true,
-                        )
-                    }
+                    tuneToPlaybackChannel(ch, selectedGroupName)
                 },
                 onToggleFavorite = { viewModel.toggleFavorite(it) },
+                onLoadCategoryChannels = { categoryName ->
+                    val playlistId = currentChannel?.playlistId?.takeIf { it.isNotBlank() }
+                        ?: state.selectedPlaylistId
+                    if (playlistId == null) {
+                        emptyList()
+                    } else {
+                        withContext(Dispatchers.IO) {
+                            viewModel.getChannelsForCategoryDirect(playlistId, categoryName)
+                        }
+                    }
+                },
                 onDismiss = {
                     closeOverlayOrReturnToPrevious()
                 },
@@ -2063,6 +2190,29 @@ private fun findChannelByUrl(
     url: String,
     enrichedChannels: List<EnrichedChannel>,
 ): EnrichedChannel? = enrichedChannels.firstOrNull { it.channel.url == url }
+
+private fun categoryMatchesGroup(
+    category: ChannelCategory,
+    groupName: String,
+): Boolean {
+    val rawGroupName = groupName.trim()
+    if (rawGroupName.isBlank()) return false
+
+    val categoryName = category.name.trim()
+    if (categoryName.equals(rawGroupName, ignoreCase = true)) return true
+
+    val cleanedGroupName = CategoryNameCleaner.clean(rawGroupName).name.trim()
+    if (cleanedGroupName.isNotBlank() && categoryName.equals(cleanedGroupName, ignoreCase = true)) {
+        return true
+    }
+
+    val cleanedCategoryName = CategoryNameCleaner.clean(categoryName).name.trim()
+    return cleanedCategoryName.isNotBlank() &&
+        (
+            cleanedCategoryName.equals(rawGroupName, ignoreCase = true) ||
+                cleanedCategoryName.equals(cleanedGroupName, ignoreCase = true)
+            )
+}
 
 private fun findChannelGroupAndIndex(
     channel: Channel,

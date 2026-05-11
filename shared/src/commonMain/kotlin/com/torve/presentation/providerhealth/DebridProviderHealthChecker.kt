@@ -32,12 +32,7 @@ class DebridProviderHealthChecker(
         if (key == null) {
             return base().copy(
                 status = ProviderHealthStatus.UNCONFIGURED,
-                // Debrid providers are configured through the Panda
-                // integration on desktop / mobile. Surfacing the path
-                // up-front in the message saves a round-trip to a
-                // dead-end Account screen looking for an API-key field
-                // that isn't there.
-                message = "Not connected. Connect $label via the Panda integration.",
+                message = "Not connected. Connect $label via Settings → Integrations.",
                 nextAction = "Set up $label via Panda",
             )
         }
@@ -48,20 +43,34 @@ class DebridProviderHealthChecker(
                 nextAction = "Retry",
             )
         }
-        return if (result.success) {
-            base().copy(
+        if (result.success) {
+            return base().copy(
                 status = ProviderHealthStatus.GREEN,
                 message = "$label is connected.",
                 nextAction = null,
             )
-        } else {
-            base().copy(
-                status = ProviderHealthStatus.RED,
-                message = result.error?.takeIf { it.isNotBlank() }
-                    ?: "$label rejected the API key.",
-                nextAction = "Re-enter API key",
-            )
         }
+        // Verification failed — for Real-Debrid, attempt a silent token refresh
+        // before reporting RED. OAuth access tokens expire; a successful refresh
+        // means the session is still valid and should be surfaced as GREEN.
+        if (provider == DebridServiceType.REAL_DEBRID) {
+            val refreshed = runCatching { debridClient.rdTokenRefresher?.refresh() }.getOrNull()
+            if (refreshed != null) {
+                val refreshResult = runCatching { debridClient.verifyApiKey(provider, refreshed) }.getOrNull()
+                if (refreshResult?.success == true) {
+                    return base().copy(
+                        status = ProviderHealthStatus.GREEN,
+                        message = "$label is connected.",
+                        nextAction = null,
+                    )
+                }
+            }
+        }
+        return base().copy(
+            status = ProviderHealthStatus.RED,
+            message = "session expired — reconnect in Settings → Integrations",
+            nextAction = "Re-enter API key",
+        )
     }
 
     private fun base(): ProviderHealthEntry = ProviderHealthEntry(

@@ -1,13 +1,29 @@
 package com.torve.data.channels
 
 import com.torve.domain.model.Channel
+import com.torve.domain.model.ChannelContentType
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
 import io.ktor.client.request.parameter
 import io.ktor.client.statement.bodyAsText
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.datetime.Clock
 
 /**
  * Xtream Codes API client.
@@ -40,7 +56,8 @@ class XtreamClient(
         username: String,
         password: String,
     ): List<XtreamCategory> {
-        return getJson(server, username, password, action = "get_live_categories")
+        return getJsonRows(server, username, password, action = "get_live_categories")
+            .map { it.toXtreamCategory() }
     }
 
     /**
@@ -52,13 +69,13 @@ class XtreamClient(
         password: String,
         categoryId: String? = null,
     ): List<XtreamLiveStream> {
-        return getJson(
+        return getJsonRows(
             server = server,
             username = username,
             password = password,
             action = "get_live_streams",
             extraParams = categoryId?.let { mapOf("category_id" to it) }.orEmpty(),
-        )
+        ).map { it.toXtreamLiveStream() }
     }
 
     /**
@@ -69,7 +86,8 @@ class XtreamClient(
         username: String,
         password: String,
     ): List<XtreamCategory> {
-        return getJson(server, username, password, action = "get_vod_categories")
+        return getJsonRows(server, username, password, action = "get_vod_categories")
+            .map { it.toXtreamCategory() }
     }
 
     /**
@@ -81,13 +99,13 @@ class XtreamClient(
         password: String,
         categoryId: String? = null,
     ): List<XtreamVodStream> {
-        return getJson(
+        return getJsonRows(
             server = server,
             username = username,
             password = password,
             action = "get_vod_streams",
             extraParams = categoryId?.let { mapOf("category_id" to it) }.orEmpty(),
-        )
+        ).map { it.toXtreamVodStream() }
     }
 
     /**
@@ -98,7 +116,8 @@ class XtreamClient(
         username: String,
         password: String,
     ): List<XtreamCategory> {
-        return getJson(server, username, password, action = "get_series_categories")
+        return getJsonRows(server, username, password, action = "get_series_categories")
+            .map { it.toXtreamCategory() }
     }
 
     /**
@@ -110,12 +129,41 @@ class XtreamClient(
         password: String,
         categoryId: String? = null,
     ): List<XtreamSeries> {
-        return getJson(
+        return getJsonRows(
             server = server,
             username = username,
             password = password,
             action = "get_series",
             extraParams = categoryId?.let { mapOf("category_id" to it) }.orEmpty(),
+        ).map { it.toXtreamSeries() }
+    }
+
+    /**
+     * Fetch full series details, including playable episode ids.
+     *
+     * Xtream list rows are show containers. Playback must use an episode id
+     * from get_series_info, not the series_id from get_series.
+     */
+    suspend fun getSeriesInfo(
+        server: String,
+        username: String,
+        password: String,
+        seriesId: String,
+    ): XtreamSeriesInfo {
+        val raw = httpClient.get("${server.trimEnd('/')}/player_api.php") {
+            parameter("username", username)
+            parameter("password", password)
+            parameter("action", "get_series_info")
+            parameter("series_id", seriesId)
+            parameter("_t", Clock.System.now().toEpochMilliseconds().toString())
+        }.bodyAsText()
+        val root = json.parseToJsonElement(raw) as? JsonObject
+            ?: return XtreamSeriesInfo(seriesId = seriesId)
+        val info = (root["info"] as? JsonObject)?.toXtreamSeries()?.copy(seriesId = seriesId)
+        return XtreamSeriesInfo(
+            seriesId = seriesId,
+            info = info,
+            episodes = root["episodes"].toXtreamSeriesEpisodes(),
         )
     }
 
@@ -133,6 +181,24 @@ class XtreamClient(
             extraParams.forEach { (key, value) -> parameter(key, value) }
         }.bodyAsText()
         return json.decodeFromString(raw)
+    }
+
+    private suspend fun getJsonRows(
+        server: String,
+        username: String,
+        password: String,
+        action: String,
+        extraParams: Map<String, String> = emptyMap(),
+    ): List<JsonObject> {
+        val raw = httpClient.get("${server.trimEnd('/')}/player_api.php") {
+            parameter("username", username)
+            parameter("password", password)
+            parameter("action", action)
+            parameter("_t", Clock.System.now().toEpochMilliseconds().toString())
+            extraParams.forEach { (key, value) -> parameter(key, value) }
+        }.bodyAsText()
+        val element = json.parseToJsonElement(raw)
+        return element.flexRows()
     }
 
     /**
@@ -166,6 +232,7 @@ class XtreamClient(
                     null
                 },
                 playlistId = playlistId,
+                contentType = ChannelContentType.LIVE,
             )
         }
     }
@@ -186,12 +253,76 @@ class XtreamClient(
             val categoryName = categoryMap[stream.categoryId]?.categoryName
             val ext = stream.containerExtension ?: "mp4"
             val streamUrl = "${server.trimEnd('/')}/movie/$username/$password/${stream.streamId}.$ext"
+            val inferredContentType = if (categoryName.looksLikeXtreamSeriesCategory()) {
+                ChannelContentType.VOD_SERIES
+            } else {
+                ChannelContentType.VOD_MOVIE
+            }
             Channel(
                 name = stream.name ?: "Unknown",
                 url = streamUrl,
+                tvgName = stream.name,
                 tvgLogo = stream.streamIcon,
                 groupTitle = categoryName?.let { "VOD: $it" } ?: "VOD",
+                channelNumber = stream.num,
+                kodiProps = buildMap {
+                    put("vod_stream_id", stream.streamId)
+                    stream.categoryId?.takeIf { it.isNotBlank() }?.let { put("vod_category_id", it) }
+                    stream.containerExtension?.takeIf { it.isNotBlank() }?.let { put("vod_container_extension", it) }
+                    stream.rating?.takeIf { it.isNotBlank() }?.let { put("vod_rating", it) }
+                    stream.rating5Based?.takeIf { it > 0.0 }?.let { put("vod_rating_5based", it.toString()) }
+                    stream.youtubeTrailer?.takeIf { it.isNotBlank() }?.let { put("vod_youtube_trailer", it) }
+                    stream.genre?.takeIf { it.isNotBlank() }?.let { put("vod_genre", it) }
+                    if (inferredContentType == ChannelContentType.VOD_SERIES) {
+                        put("vod_inferred_series", "true")
+                    }
+                },
                 playlistId = playlistId,
+                contentType = inferredContentType,
+            )
+        }
+    }
+
+    /**
+     * Convert Xtream series catalog entries to Channel models so VOD Movies/Shows
+     * can be separated by the provider's native movie vs series endpoints.
+     */
+    fun mapSeriesToChannels(
+        series: List<XtreamSeries>,
+        categories: List<XtreamCategory>,
+        server: String,
+        username: String,
+        password: String,
+        playlistId: String,
+    ): List<Channel> {
+        val categoryMap = categories.associateBy { it.categoryId }
+        return series.map { show ->
+            val categoryName = categoryMap[show.categoryId]?.categoryName
+            val seriesUrl = "${server.trimEnd('/')}/series/$username/$password/${show.seriesId}.mp4"
+            Channel(
+                name = show.name ?: "Unknown",
+                url = seriesUrl,
+                tvgName = show.name,
+                tvgLogo = show.cover,
+                groupTitle = categoryName?.let { "VOD: $it" } ?: "VOD",
+                channelNumber = show.num,
+                kodiProps = buildMap {
+                    put("vod_series_id", show.seriesId)
+                    show.categoryId?.takeIf { it.isNotBlank() }?.let { put("vod_category_id", it) }
+                    show.rating?.takeIf { it.isNotBlank() }?.let { put("vod_rating", it) }
+                    show.rating5Based?.takeIf { it > 0.0 }?.let { put("vod_rating_5based", it.toString()) }
+                    show.lastModified?.takeIf { it.isNotBlank() }?.let { put("vod_last_modified", it) }
+                    show.plot?.takeIf { it.isNotBlank() }?.let { put("vod_plot", it) }
+                    show.cast?.takeIf { it.isNotBlank() }?.let { put("vod_cast", it) }
+                    show.director?.takeIf { it.isNotBlank() }?.let { put("vod_director", it) }
+                    show.genre?.takeIf { it.isNotBlank() }?.let { put("vod_genre", it) }
+                    show.releaseDate?.takeIf { it.isNotBlank() }?.let { put("vod_release_date", it) }
+                    show.backdropPath.firstOrNull()?.takeIf { it.isNotBlank() }?.let { put("vod_backdrop", it) }
+                    show.youtubeTrailer?.takeIf { it.isNotBlank() }?.let { put("vod_youtube_trailer", it) }
+                    show.episodeRunTime?.takeIf { it.isNotBlank() }?.let { put("vod_episode_run_time", it) }
+                },
+                playlistId = playlistId,
+                contentType = ChannelContentType.VOD_SERIES,
             )
         }
     }
@@ -234,43 +365,346 @@ data class XtreamAuthInfo(
 
 @Serializable
 data class XtreamCategory(
-    @SerialName("category_id") val categoryId: String = "",
-    @SerialName("category_name") val categoryName: String = "",
-    @SerialName("parent_id") val parentId: Int = 0,
+    @SerialName("category_id")
+    @Serializable(with = FlexibleXtreamStringSerializer::class)
+    val categoryId: String = "",
+    @SerialName("category_name")
+    @Serializable(with = FlexibleXtreamStringSerializer::class)
+    val categoryName: String = "",
+    @SerialName("parent_id")
+    @Serializable(with = FlexibleXtreamIntSerializer::class)
+    val parentId: Int = 0,
 )
 
 @Serializable
 data class XtreamLiveStream(
+    @Serializable(with = FlexibleXtreamNullableIntSerializer::class)
     val num: Int? = null,
     val name: String? = null,
     @SerialName("stream_type") val streamType: String? = null,
-    @SerialName("stream_id") val streamId: Int = 0,
+    @SerialName("stream_id")
+    @Serializable(with = FlexibleXtreamStringSerializer::class)
+    val streamId: String = "",
     @SerialName("stream_icon") val streamIcon: String? = null,
-    @SerialName("epg_channel_id") val epgChannelId: String? = null,
-    @SerialName("category_id") val categoryId: String? = null,
-    @SerialName("tv_archive") val tvArchive: Int? = null,
-    @SerialName("tv_archive_duration") val tvArchiveDuration: Int? = null,
+    @SerialName("epg_channel_id")
+    @Serializable(with = FlexibleXtreamNullableStringSerializer::class)
+    val epgChannelId: String? = null,
+    @SerialName("category_id")
+    @Serializable(with = FlexibleXtreamNullableStringSerializer::class)
+    val categoryId: String? = null,
+    @SerialName("tv_archive")
+    @Serializable(with = FlexibleXtreamNullableIntSerializer::class)
+    val tvArchive: Int? = null,
+    @SerialName("tv_archive_duration")
+    @Serializable(with = FlexibleXtreamNullableIntSerializer::class)
+    val tvArchiveDuration: Int? = null,
 )
 
 @Serializable
 data class XtreamVodStream(
+    @Serializable(with = FlexibleXtreamNullableIntSerializer::class)
     val num: Int? = null,
     val name: String? = null,
     @SerialName("stream_type") val streamType: String? = null,
-    @SerialName("stream_id") val streamId: Int = 0,
+    @SerialName("stream_id")
+    @Serializable(with = FlexibleXtreamStringSerializer::class)
+    val streamId: String = "",
     @SerialName("stream_icon") val streamIcon: String? = null,
-    @SerialName("category_id") val categoryId: String? = null,
-    @SerialName("container_extension") val containerExtension: String? = null,
+    @SerialName("category_id")
+    @Serializable(with = FlexibleXtreamNullableStringSerializer::class)
+    val categoryId: String? = null,
+    @SerialName("container_extension")
+    @Serializable(with = FlexibleXtreamNullableStringSerializer::class)
+    val containerExtension: String? = null,
+    @Serializable(with = FlexibleXtreamNullableStringSerializer::class)
     val rating: String? = null,
+    @SerialName("rating_5based")
+    @Serializable(with = FlexibleXtreamNullableDoubleSerializer::class)
+    val rating5Based: Double? = null,
+    @SerialName("youtube_trailer")
+    @Serializable(with = FlexibleXtreamNullableStringSerializer::class)
+    val youtubeTrailer: String? = null,
+    @Serializable(with = FlexibleXtreamNullableStringSerializer::class)
+    val genre: String? = null,
 )
 
 @Serializable
 data class XtreamSeries(
+    @Serializable(with = FlexibleXtreamNullableIntSerializer::class)
     val num: Int? = null,
     val name: String? = null,
-    @SerialName("series_id") val seriesId: Int = 0,
+    @SerialName("series_id")
+    @Serializable(with = FlexibleXtreamStringSerializer::class)
+    val seriesId: String = "",
+    @Serializable(with = FlexibleXtreamNullableStringSerializer::class)
     val cover: String? = null,
-    @SerialName("category_id") val categoryId: String? = null,
+    @Serializable(with = FlexibleXtreamNullableStringSerializer::class)
+    val plot: String? = null,
+    @Serializable(with = FlexibleXtreamNullableStringSerializer::class)
+    val cast: String? = null,
+    @Serializable(with = FlexibleXtreamNullableStringSerializer::class)
+    val director: String? = null,
+    @Serializable(with = FlexibleXtreamNullableStringSerializer::class)
+    val genre: String? = null,
+    @SerialName("releaseDate")
+    @Serializable(with = FlexibleXtreamNullableStringSerializer::class)
+    val releaseDate: String? = null,
+    @SerialName("category_id")
+    @Serializable(with = FlexibleXtreamNullableStringSerializer::class)
+    val categoryId: String? = null,
+    @Serializable(with = FlexibleXtreamNullableStringSerializer::class)
     val rating: String? = null,
-    @SerialName("last_modified") val lastModified: String? = null,
+    @SerialName("rating_5based")
+    @Serializable(with = FlexibleXtreamNullableDoubleSerializer::class)
+    val rating5Based: Double? = null,
+    @SerialName("last_modified")
+    @Serializable(with = FlexibleXtreamNullableStringSerializer::class)
+    val lastModified: String? = null,
+    @SerialName("backdrop_path")
+    @Serializable(with = FlexibleXtreamStringListSerializer::class)
+    val backdropPath: List<String> = emptyList(),
+    @SerialName("youtube_trailer")
+    @Serializable(with = FlexibleXtreamNullableStringSerializer::class)
+    val youtubeTrailer: String? = null,
+    @SerialName("episode_run_time")
+    @Serializable(with = FlexibleXtreamNullableStringSerializer::class)
+    val episodeRunTime: String? = null,
 )
+
+data class XtreamSeriesInfo(
+    val seriesId: String,
+    val info: XtreamSeries? = null,
+    val episodes: List<XtreamSeriesEpisode> = emptyList(),
+)
+
+data class XtreamSeriesEpisode(
+    val id: String,
+    val episodeNum: Int? = null,
+    val title: String? = null,
+    val containerExtension: String? = null,
+    val season: Int? = null,
+    val directSource: String? = null,
+    val movieImage: String? = null,
+    val plot: String? = null,
+    val durationSecs: Int? = null,
+    val rating: Double? = null,
+)
+
+private object FlexibleXtreamStringSerializer : KSerializer<String> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("FlexibleXtreamString", PrimitiveKind.STRING)
+
+    override fun deserialize(decoder: Decoder): String {
+        val jsonDecoder = decoder as? JsonDecoder ?: return decoder.decodeString()
+        return jsonDecoder.decodeJsonElement().flexStringOrNull().orEmpty()
+    }
+
+    override fun serialize(encoder: Encoder, value: String) {
+        encoder.encodeString(value)
+    }
+}
+
+private object FlexibleXtreamNullableStringSerializer : KSerializer<String?> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("FlexibleXtreamNullableString", PrimitiveKind.STRING)
+
+    override fun deserialize(decoder: Decoder): String? {
+        val jsonDecoder = decoder as? JsonDecoder ?: return decoder.decodeString().ifBlank { null }
+        return jsonDecoder.decodeJsonElement().flexStringOrNull()
+    }
+
+    override fun serialize(encoder: Encoder, value: String?) {
+        encoder.encodeString(value.orEmpty())
+    }
+}
+
+private object FlexibleXtreamIntSerializer : KSerializer<Int> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("FlexibleXtreamInt", PrimitiveKind.INT)
+
+    override fun deserialize(decoder: Decoder): Int {
+        val jsonDecoder = decoder as? JsonDecoder ?: return decoder.decodeInt()
+        return jsonDecoder.decodeJsonElement().flexIntOrNull() ?: 0
+    }
+
+    override fun serialize(encoder: Encoder, value: Int) {
+        encoder.encodeInt(value)
+    }
+}
+
+private object FlexibleXtreamNullableIntSerializer : KSerializer<Int?> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("FlexibleXtreamNullableInt", PrimitiveKind.INT)
+
+    override fun deserialize(decoder: Decoder): Int? {
+        val jsonDecoder = decoder as? JsonDecoder ?: return runCatching { decoder.decodeInt() }.getOrNull()
+        return jsonDecoder.decodeJsonElement().flexIntOrNull()
+    }
+
+    override fun serialize(encoder: Encoder, value: Int?) {
+        encoder.encodeString(value?.toString().orEmpty())
+    }
+}
+
+private object FlexibleXtreamNullableDoubleSerializer : KSerializer<Double?> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("FlexibleXtreamNullableDouble", PrimitiveKind.DOUBLE)
+
+    override fun deserialize(decoder: Decoder): Double? {
+        val jsonDecoder = decoder as? JsonDecoder ?: return runCatching { decoder.decodeDouble() }.getOrNull()
+        return jsonDecoder.decodeJsonElement().flexDoubleOrNull()
+    }
+
+    override fun serialize(encoder: Encoder, value: Double?) {
+        encoder.encodeString(value?.toString().orEmpty())
+    }
+}
+
+private object FlexibleXtreamStringListSerializer : KSerializer<List<String>> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("FlexibleXtreamStringList", PrimitiveKind.STRING)
+
+    override fun deserialize(decoder: Decoder): List<String> {
+        val jsonDecoder = decoder as? JsonDecoder ?: return decoder.decodeString()
+            .takeIf { it.isNotBlank() }
+            ?.let(::listOf)
+            .orEmpty()
+        return jsonDecoder.decodeJsonElement().flexStringList()
+    }
+
+    override fun serialize(encoder: Encoder, value: List<String>) {
+        encoder.encodeString(value.joinToString(","))
+    }
+}
+
+private fun JsonObject.toXtreamCategory(): XtreamCategory = XtreamCategory(
+    categoryId = get("category_id").flexStringOrNull().orEmpty(),
+    categoryName = get("category_name").flexStringOrNull().orEmpty(),
+    parentId = get("parent_id").flexIntOrNull() ?: 0,
+)
+
+private fun JsonObject.toXtreamLiveStream(): XtreamLiveStream = XtreamLiveStream(
+    num = get("num").flexIntOrNull(),
+    name = get("name").flexStringOrNull(),
+    streamType = get("stream_type").flexStringOrNull(),
+    streamId = get("stream_id").flexStringOrNull().orEmpty(),
+    streamIcon = get("stream_icon").flexStringOrNull(),
+    epgChannelId = get("epg_channel_id").flexStringOrNull(),
+    categoryId = get("category_id").flexStringOrNull(),
+    tvArchive = get("tv_archive").flexIntOrNull(),
+    tvArchiveDuration = get("tv_archive_duration").flexIntOrNull(),
+)
+
+private fun JsonObject.toXtreamVodStream(): XtreamVodStream = XtreamVodStream(
+    num = get("num").flexIntOrNull(),
+    name = get("name").flexStringOrNull(),
+    streamType = get("stream_type").flexStringOrNull(),
+    streamId = get("stream_id").flexStringOrNull().orEmpty(),
+    streamIcon = get("stream_icon").flexStringOrNull(),
+    categoryId = get("category_id").flexStringOrNull(),
+    containerExtension = get("container_extension").flexStringOrNull(),
+    rating = get("rating").flexStringOrNull(),
+    rating5Based = get("rating_5based").flexDoubleOrNull(),
+    youtubeTrailer = get("youtube_trailer").flexStringOrNull(),
+    genre = get("genre").flexStringOrNull(),
+)
+
+private fun JsonObject.toXtreamSeries(): XtreamSeries = XtreamSeries(
+    num = get("num").flexIntOrNull(),
+    name = get("name").flexStringOrNull(),
+    seriesId = get("series_id").flexStringOrNull().orEmpty(),
+    cover = get("cover").flexStringOrNull(),
+    plot = get("plot").flexStringOrNull(),
+    cast = get("cast").flexStringOrNull(),
+    director = get("director").flexStringOrNull(),
+    genre = get("genre").flexStringOrNull(),
+    releaseDate = get("releaseDate").flexStringOrNull(),
+    categoryId = get("category_id").flexStringOrNull(),
+    rating = get("rating").flexStringOrNull(),
+    rating5Based = get("rating_5based").flexDoubleOrNull(),
+    lastModified = get("last_modified").flexStringOrNull(),
+    backdropPath = get("backdrop_path").flexStringList(),
+    youtubeTrailer = get("youtube_trailer").flexStringOrNull(),
+    episodeRunTime = get("episode_run_time").flexStringOrNull(),
+)
+
+private fun JsonElement?.toXtreamSeriesEpisodes(): List<XtreamSeriesEpisode> = when (this) {
+    is JsonArray -> mapNotNull { (it as? JsonObject)?.toXtreamSeriesEpisode() }
+    is JsonObject -> flatMap { (seasonKey, value) ->
+        val fallbackSeason = seasonKey.toIntOrNull()
+        when (value) {
+            is JsonArray -> value.mapNotNull { (it as? JsonObject)?.toXtreamSeriesEpisode(fallbackSeason) }
+            is JsonObject -> value.values.mapNotNull { (it as? JsonObject)?.toXtreamSeriesEpisode(fallbackSeason) }
+            else -> emptyList()
+        }
+    }
+    else -> emptyList()
+}
+
+private fun JsonObject.toXtreamSeriesEpisode(fallbackSeason: Int? = null): XtreamSeriesEpisode {
+    val info = get("info") as? JsonObject
+    return XtreamSeriesEpisode(
+        id = get("id").flexStringOrNull().orEmpty(),
+        episodeNum = get("episode_num").flexIntOrNull(),
+        title = get("title").flexStringOrNull(),
+        containerExtension = get("container_extension").flexStringOrNull(),
+        season = get("season").flexIntOrNull() ?: fallbackSeason,
+        directSource = get("direct_source").flexStringOrNull(),
+        movieImage = info?.get("movie_image").flexStringOrNull(),
+        plot = info?.get("plot").flexStringOrNull(),
+        durationSecs = info?.get("duration_secs").flexIntOrNull(),
+        rating = info?.get("rating").flexDoubleOrNull(),
+    )
+}
+
+private fun JsonElement.flexRows(): List<JsonObject> = when (this) {
+    is JsonArray -> mapNotNull { it as? JsonObject }
+    is JsonObject -> {
+        val nestedArray = listOf("data", "results", "items", "streams", "series", "movies", "vod")
+            .firstNotNullOfOrNull { key -> get(key) as? JsonArray }
+        nestedArray?.mapNotNull { it as? JsonObject }
+            ?: values.mapNotNull { it as? JsonObject }
+    }
+    else -> emptyList()
+}
+
+private fun String?.looksLikeXtreamSeriesCategory(): Boolean {
+    val text = this?.lowercase().orEmpty()
+    if (text.isBlank()) return false
+    return text.contains("series") ||
+        text.contains("serien") ||
+        text.contains("serie") ||
+        text.contains("shows") ||
+        text.contains("tv show") ||
+        text.contains("staffel") ||
+        text.contains("season") ||
+        text.contains("episode") ||
+        text.contains("episod")
+}
+
+private fun JsonElement?.flexStringOrNull(): String? = when (this) {
+    null, is JsonNull -> null
+    is JsonPrimitive -> contentOrNull?.takeIf { it.isNotBlank() }
+    is JsonArray -> firstOrNull().flexStringOrNull()
+    else -> toString().takeIf { it.isNotBlank() && it != "null" }
+}
+
+private fun JsonElement?.flexIntOrNull(): Int? = when (this) {
+    null, is JsonNull -> null
+    is JsonPrimitive -> intOrNull ?: contentOrNull?.toDoubleOrNull()?.toInt()
+    is JsonArray -> firstOrNull().flexIntOrNull()
+    else -> toString().toDoubleOrNull()?.toInt()
+}
+
+private fun JsonElement?.flexDoubleOrNull(): Double? = when (this) {
+    null, is JsonNull -> null
+    is JsonPrimitive -> contentOrNull?.toDoubleOrNull()
+    is JsonArray -> firstOrNull().flexDoubleOrNull()
+    else -> toString().toDoubleOrNull()
+}
+
+private fun JsonElement?.flexStringList(): List<String> = when (this) {
+    null, is JsonNull -> emptyList()
+    is JsonArray -> mapNotNull { it.flexStringOrNull() }.filter { it.isNotBlank() }
+    else -> flexStringOrNull()?.takeIf { it.isNotBlank() }?.let(::listOf).orEmpty()
+}

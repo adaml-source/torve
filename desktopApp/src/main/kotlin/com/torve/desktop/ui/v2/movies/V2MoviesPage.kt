@@ -26,8 +26,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -74,6 +76,9 @@ fun V2MoviesPage(
     val state by catalogViewModel.state.collectAsState()
     val colors = TorveDesktopThemeTokens.colors
     val nzbScope = rememberCoroutineScope()
+    // Local in-page search filter. Stays UI-side: filters the visible
+    // grid/items by title without firing a network search.
+    var pageSearchQuery by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) { if (!state.shelvesLoaded) catalogViewModel.loadCatalog() }
     LaunchedEffect(nzbCatalogService, nzbIndexerType, nzbIndexerUrl, nzbIndexerApiKey) {
@@ -117,6 +122,37 @@ fun V2MoviesPage(
                 ),
             )
 
+            val isFilteredView = state.selectedGenreId != null ||
+                state.filter.isActive ||
+                state.providerId != null ||
+                pageSearchQuery.isNotBlank()
+
+            // Filtered path: no parent verticalScroll. The earlier
+            // structure nested LazyVerticalGrid inside a vertically-
+            // scrollable Column, which Compose rejects (infinity height
+            // constraints crash visible as a runtime error dialog when
+            // the user clicks a genre pill). Split the two layouts so
+            // the LazyVerticalGrid gets bounded constraints from
+            // Modifier.weight(1f) and provides its own scrolling.
+            if (isFilteredView) {
+                Column(Modifier.fillMaxSize()) {
+                    Spacer(Modifier.height(72.dp))
+                    V2CatalogFilterBar(
+                        catalogViewModel = catalogViewModel,
+                        mediaType = CatalogMediaType.MOVIE,
+                        searchQuery = pageSearchQuery,
+                        onSearchQueryChange = { pageSearchQuery = it },
+                    )
+                    FilteredCatalogGrid(
+                        catalogViewModel = catalogViewModel,
+                        onOpenDetail = onOpenDetail,
+                        searchQuery = pageSearchQuery,
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                    )
+                }
+                return@Box
+            }
+
             Column(Modifier.fillMaxSize().verticalScroll(scrollState)) {
                 // Hero area
                 Box(Modifier.fillMaxWidth().height(vpH * 0.75f)) {
@@ -145,16 +181,13 @@ fun V2MoviesPage(
                 V2CatalogFilterBar(
                     catalogViewModel = catalogViewModel,
                     mediaType = CatalogMediaType.MOVIE,
+                    searchQuery = pageSearchQuery,
+                    onSearchQueryChange = { pageSearchQuery = it },
                 )
 
-                val isFilteredView = state.selectedGenreId != null || state.filter.isActive
-                if (isFilteredView) {
-                    FilteredCatalogGrid(
-                        catalogViewModel = catalogViewModel,
-                        onOpenDetail = onOpenDetail,
-                    )
-                    return@Column
-                }
+                // Filtered path is handled above (separate Column without
+                // verticalScroll, sibling to this one). When we reach here
+                // the catalog is in unfiltered/rails mode.
 
                 // Rails (10 total: 3 core + 7 extra).
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -232,10 +265,34 @@ fun V2MoviesPage(
 private fun FilteredCatalogGrid(
     catalogViewModel: CatalogViewModel,
     onOpenDetail: (MediaItem) -> Unit,
+    searchQuery: String = "",
+    modifier: Modifier = Modifier,
 ) {
     val state by catalogViewModel.state.collectAsState()
     val colors = TorveDesktopThemeTokens.colors
     val gridState = rememberLazyGridState()
+    val visibleItems = remember(state.items, searchQuery) {
+        val needle = searchQuery.trim().lowercase()
+        if (needle.isEmpty()) state.items
+        else state.items.filter { it.title.lowercase().contains(needle) }
+    }
+    // UI-side diagnostic: log when the grid recomposes with a count.
+    // If state.items has 20 items but visibleItems shows 0, search
+    // filter is the culprit. If both are 0, state.items is actually
+    // empty (despite the VM logs claiming otherwise).
+    LaunchedEffect(state.items.size, visibleItems.size, searchQuery) {
+        runCatching {
+            val home = System.getProperty("user.home") ?: return@runCatching
+            val base = System.getenv("LOCALAPPDATA")?.let { java.io.File(it) }
+                ?: java.io.File(home, ".torve")
+            val dir = java.io.File(base, "Torve").apply { mkdirs() }
+            java.io.File(dir, "launch-guard.log").appendText(
+                "${java.time.Instant.now()} CATALOG_GRID render movies state.items=${state.items.size} " +
+                    "visibleItems=${visibleItems.size} search='$searchQuery' " +
+                    "isLoading=${state.isLoading}" + System.lineSeparator(),
+            )
+        }
+    }
 
     // Trigger loadMore when the user scrolls near the end.
     LaunchedEffect(gridState, state.items.size, state.hasMore) {
@@ -253,9 +310,9 @@ private fun FilteredCatalogGrid(
         contentPadding = PaddingValues(start = 72.dp, end = 24.dp, top = 8.dp, bottom = 24.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
     ) {
-        items(state.items, key = { it.id }) { item ->
+        items(visibleItems, key = { it.id }) { item ->
             V2PosterCard(
                 item.title,
                 item.posterUrl,

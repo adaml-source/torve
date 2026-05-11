@@ -65,6 +65,7 @@ import com.torve.desktop.mpv.MpvRuntimeLocator
 import com.torve.desktop.ui.components.TorveBadge
 import com.torve.desktop.ui.components.TorveBadgeTone
 import com.torve.desktop.ui.components.TorveBanner
+import com.torve.desktop.ui.components.TorveDropdownScaffold
 import com.torve.desktop.ui.components.TorveBannerTone
 import com.torve.desktop.ui.components.TorveFilterChip
 import com.torve.desktop.ui.components.TorveGhostButton
@@ -119,6 +120,7 @@ private enum class SettingsCategory(
     INTEGRATIONS("Integrations", "Sync, APIs, media servers"),
     ADDONS("Add-ons", "Source extensions and manifests"),
     PLAYLISTS("Playlists", "M3U and Xtream live TV"),
+    RECORDING("Recording", "Live TV recording defaults and behavior"),
     ABOUT("About", "Version, diagnostics, runtime"),
 }
 
@@ -317,6 +319,7 @@ fun V2SettingsPage(
                     channelsViewModel = channelsViewModel,
                     onOpenRecordings = onOpenRecordings,
                 )
+                SettingsCategory.RECORDING -> RecordingSection()
                 SettingsCategory.ABOUT -> AboutSection(
                     settingsViewModel = settingsViewModel,
                 )
@@ -698,6 +701,20 @@ private fun CustomizationSection(
                 onPick = { picked -> settingsViewModel.setSportsDownloadPath(picked) },
                 onClear = { settingsViewModel.setSportsDownloadPath("") },
             )
+            FolderPickerRow(
+                label = "Recordings Folder",
+                path = settingsState.recordingDownloadPath,
+                onPick = { picked -> settingsViewModel.setRecordingDownloadPath(picked) },
+                onClear = { settingsViewModel.setRecordingDownloadPath("") },
+            )
+            if (settingsState.recordingDownloadPath.isBlank()) {
+                Text(
+                    text = "Live TV recording is disabled until a Recordings Folder is set. " +
+                        "Recordings are filed under <folder>/<channel>/<title> - <timestamp>.ts.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TorveDesktopThemeTokens.colors.textSecondary,
+                )
+            }
             Text(
                 text = "Extra Scan Folders",
                 style = MaterialTheme.typography.labelLarge,
@@ -784,16 +801,17 @@ private fun FolderPickerRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = path.ifBlank { "Not set - click Browse to choose" },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (path.isBlank()) colors.textMuted else colors.textPrimary,
-                )
-            }
+            Text(
+                text = path.ifBlank { "Not set" },
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (path.isBlank()) colors.textSecondary else colors.textPrimary,
+                modifier = Modifier.weight(1f),
+            )
             TorveSecondaryButton(
                 text = "Browse...",
-                onClick = { pickDirectory(title = label, initialPath = path)?.let(onPick) },
+                onClick = {
+                    pickDirectory(title = label, initialPath = path)?.let { onPick(it) }
+                },
             )
             if (path.isNotBlank()) {
                 TorveGhostButton(text = "Clear", onClick = onClear)
@@ -801,6 +819,7 @@ private fun FolderPickerRow(
         }
     }
 }
+
 
 @Composable
 private fun DesktopHotkeysEditor(
@@ -2413,7 +2432,169 @@ private fun categoryBadge(
 
         SettingsCategory.ADDONS -> installedAddons.size.toString()
         SettingsCategory.PLAYLISTS -> channelsState.playlists.size.toString()
+        SettingsCategory.RECORDING -> null
         SettingsCategory.ABOUT -> null
+    }
+}
+
+@Composable
+private fun RecordingSection() {
+    val prefsRepo = remember {
+        org.koin.mp.KoinPlatform.getKoin()
+            .get<com.torve.domain.repository.PreferencesRepository>()
+    }
+    var prefs by remember {
+        mutableStateOf(com.torve.domain.recording.RecordingPreferences())
+    }
+    LaunchedEffect(Unit) {
+        prefs = com.torve.domain.recording.RecordingPreferences.load(prefsRepo)
+    }
+    val scope = rememberCoroutineScope()
+    fun save(next: com.torve.domain.recording.RecordingPreferences) {
+        prefs = next
+        scope.launch {
+            com.torve.domain.recording.RecordingPreferences.save(prefsRepo, next)
+        }
+    }
+    val durationOptions = listOf(
+        30 to "30 minutes",
+        60 to "1 hour",
+        120 to "2 hours",
+        180 to "3 hours",
+        240 to "4 hours",
+        0 to "Until I stop",
+    )
+    val rollOptions = listOf(0, 1, 2, 5, 10, 15, 30)
+    val concurrentOptions = listOf(1, 2, 3, 4, 5)
+    var durationOpen by remember { mutableStateOf(false) }
+    var preRollOpen by remember { mutableStateOf(false) }
+    var postRollOpen by remember { mutableStateOf(false) }
+    var concurrentOpen by remember { mutableStateOf(false) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        TorveSectionCard(
+            title = ds("Recording Defaults"),
+            supportingText = "Used by the Live TV record button and EPG record menu. " +
+                "Pre-roll starts the recording N minutes early; post-roll keeps it running " +
+                "N minutes past the scheduled end. Set higher post-roll for sports.",
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Default record duration:",
+                    modifier = Modifier.weight(1f),
+                    color = TorveDesktopThemeTokens.colors.textSecondary,
+                )
+                Box {
+                    TorveGhostButton(
+                        text = durationOptions.firstOrNull { it.first == prefs.defaultDurationMin }
+                            ?.second ?: "${prefs.defaultDurationMin} min",
+                        onClick = { durationOpen = true },
+                    )
+                    TorveDropdownScaffold(
+                        expanded = durationOpen,
+                        onDismissRequest = { durationOpen = false },
+                        items = durationOptions.map { (min, label) ->
+                            label to {
+                                durationOpen = false
+                                save(prefs.copy(defaultDurationMin = min))
+                            }
+                        },
+                    )
+                }
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Start N minutes early (pre-roll):",
+                    modifier = Modifier.weight(1f),
+                    color = TorveDesktopThemeTokens.colors.textSecondary,
+                )
+                Box {
+                    TorveGhostButton(
+                        text = "${prefs.preRollMin} min",
+                        onClick = { preRollOpen = true },
+                    )
+                    TorveDropdownScaffold(
+                        expanded = preRollOpen,
+                        onDismissRequest = { preRollOpen = false },
+                        items = rollOptions.map { min ->
+                            "$min min" to {
+                                preRollOpen = false
+                                save(prefs.copy(preRollMin = min))
+                            }
+                        },
+                    )
+                }
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Keep recording N minutes after end (post-roll):",
+                    modifier = Modifier.weight(1f),
+                    color = TorveDesktopThemeTokens.colors.textSecondary,
+                )
+                Box {
+                    TorveGhostButton(
+                        text = "${prefs.postRollMin} min",
+                        onClick = { postRollOpen = true },
+                    )
+                    TorveDropdownScaffold(
+                        expanded = postRollOpen,
+                        onDismissRequest = { postRollOpen = false },
+                        items = rollOptions.map { min ->
+                            "$min min" to {
+                                postRollOpen = false
+                                save(prefs.copy(postRollMin = min))
+                            }
+                        },
+                    )
+                }
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Max concurrent recordings:",
+                    modifier = Modifier.weight(1f),
+                    color = TorveDesktopThemeTokens.colors.textSecondary,
+                )
+                Box {
+                    TorveGhostButton(
+                        text = "${prefs.maxConcurrent}",
+                        onClick = { concurrentOpen = true },
+                    )
+                    TorveDropdownScaffold(
+                        expanded = concurrentOpen,
+                        onDismissRequest = { concurrentOpen = false },
+                        items = concurrentOptions.map { n ->
+                            "$n" to {
+                                concurrentOpen = false
+                                save(prefs.copy(maxConcurrent = n))
+                            }
+                        },
+                    )
+                }
+            }
+        }
+        TorveSectionCard(
+            title = ds("Behavior"),
+            supportingText = "How partial recordings and stops are handled.",
+        ) {
+            TorveListRow(
+                title = "Partial recordings preserved",
+                subtitle = "When you press Stop on an in-progress recording, the bytes " +
+                    "already on disk are saved as a Completed recording (instead of being " +
+                    "discarded as Cancelled).",
+            )
+        }
     }
 }
 
@@ -2510,20 +2691,19 @@ private fun AboutSection(
             }
         }
 
+
         val onLabel = ds("On")
         val offLabel = ds("Off")
         TorveSectionCard(
             title = ds("Diagnostics & Updates"),
-            supportingText = "Crash reporting and the in-app update channel are configured " +
-                "via environment variables at launch. This section shows the live state - " +
-                "set these on the launcher script or system env to enable.",
+            supportingText = ds("Crash reporting and the in-app update channel are configured via environment variables at launch. This section shows the live state - set these on the launcher script or system env to enable."),
         ) {
             // Sentry
             val sentryEnabled = System.getenv(com.torve.desktop.diagnostics.SentryBootstrap.DSN_ENV)
                 ?.takeIf { it.isNotBlank() } != null
             TorveListRow(
-                title = "Crash reporting (Sentry)",
-                subtitle = if (sentryEnabled) "Enabled" else "Disabled - DSN not set",
+                title = ds("Crash reporting (Sentry)"),
+                subtitle = if (sentryEnabled) ds("Enabled") else ds("Disabled - DSN not set"),
                 trailing = {
                     TorveBadge(
                         text = if (sentryEnabled) onLabel else offLabel,
@@ -2532,7 +2712,7 @@ private fun AboutSection(
                 },
             )
             TorveListRow(
-                title = "Sentry env var",
+                title = ds("Sentry env var"),
                 subtitle = com.torve.desktop.diagnostics.SentryBootstrap.DSN_ENV,
                 trailing = {
                     TorveGhostButton(
@@ -2554,8 +2734,8 @@ private fun AboutSection(
             val updateFeed = System.getenv(com.torve.desktop.updates.UpdateChecker.FEED_ENV)?.takeIf { it.isNotBlank() }
             val updateChannel = updateFeed ?: updateRepo?.let { "github.com/$it" }
             TorveListRow(
-                title = "Update channel",
-                subtitle = updateChannel ?: "Disabled - no repo or feed configured",
+                title = ds("Update channel"),
+                subtitle = updateChannel ?: ds("Disabled - no repo or feed configured"),
                 trailing = {
                     TorveBadge(
                         text = if (updateChannel != null) onLabel else offLabel,
@@ -2564,7 +2744,7 @@ private fun AboutSection(
                 },
             )
             TorveListRow(
-                title = "Update env vars",
+                title = ds("Update env vars"),
                 subtitle = "${com.torve.desktop.updates.UpdateChecker.REPO_ENV} (owner/name) or " +
                     "${com.torve.desktop.updates.UpdateChecker.FEED_ENV} (full URL - appcast XML or GitHub JSON)",
             )
@@ -2578,8 +2758,8 @@ private fun AboutSection(
                 mutableStateOf(com.torve.desktop.updates.UpdateCheckerPreferences.isAutoCheckEnabled())
             }
             TorveListRow(
-                title = "Check on launch",
-                subtitle = "Run the update check automatically when Torve starts.",
+                title = ds("Check on launch"),
+                subtitle = ds("Run the update check automatically when Torve starts."),
                 trailing = {
                     androidx.compose.material3.Switch(
                         checked = autoCheck,
@@ -3941,15 +4121,13 @@ private fun SourcesSection(
 
     // ── LAN library serving (Phase 3 Slice C / Prompt 9B) ─────────
     val lanStatusLabel = when {
-        !settingsState.lanServingEnabled -> "Off - desktop talks only to itself."
-        !settingsState.lanServingBindToLan -> "Loopback only - peers on this LAN cannot connect."
-        else -> "LAN published - peers on this network can authenticate and stream."
+        !settingsState.lanServingEnabled -> ds("Off - desktop talks only to itself.")
+        !settingsState.lanServingBindToLan -> ds("Loopback only - peers on this LAN cannot connect.")
+        else -> ds("LAN published - peers on this network can authenticate and stream.")
     }
     TorveSectionCard(
-        title = "LAN library",
-        supportingText = "Let this desktop serve its downloaded media to other devices on your local network. " +
-            "Off by default. Enable serving first, then opt into LAN-bind to publish a hub other devices " +
-            "can discover.",
+        title = ds("LAN library"),
+        supportingText = ds("Let this desktop serve its downloaded media to other devices on your local network. Off by default. Enable serving first, then opt into LAN-bind to publish a hub other devices can discover."),
     ) {
         Text(
             text = lanStatusLabel,
@@ -3957,26 +4135,26 @@ private fun SourcesSection(
             color = TorveDesktopThemeTokens.colors.textSecondary,
         )
         PreferenceToggleRow(
-            title = "Enable LAN serving",
+            title = ds("Enable LAN serving"),
             subtitle = if (settingsState.lanServingEnabled)
-                "Server is running. Sign-out or disabling this toggle stops it immediately."
+                ds("Server is running. Sign-out or disabling this toggle stops it immediately.")
             else
-                "Server is stopped.",
+                ds("Server is stopped."),
             checked = settingsState.lanServingEnabled,
             onCheckedChange = settingsViewModel::setLanServingEnabled,
         )
         PreferenceToggleRow(
-            title = "Allow other devices on this network",
+            title = ds("Allow other devices on this network"),
             subtitle = if (settingsState.lanServingBindToLan)
-                "Server is bound to your LAN interface; the hub is published to the registry. Disable to revert to loopback only."
+                ds("Server is bound to your LAN interface; the hub is published to the registry. Disable to revert to loopback only.")
             else
-                "Loopback only - flip to allow LAN-discovered TV / mobile to authenticate and stream.",
+                ds("Loopback only - flip to allow LAN-discovered TV / mobile to authenticate and stream."),
             checked = settingsState.lanServingBindToLan,
             onCheckedChange = settingsViewModel::setLanServingBindToLan,
         )
         PreferenceToggleRow(
-            title = "LAN streams require Wi-Fi (peer setting)",
-            subtitle = "Mobile / TV peers refuse to play LAN streams on cellular when this is on. Local files always play.",
+            title = ds("LAN streams require Wi-Fi (peer setting)"),
+            subtitle = ds("Mobile / TV peers refuse to play LAN streams on cellular when this is on. Local files always play."),
             checked = settingsState.lanPlaybackWifiOnly,
             onCheckedChange = settingsViewModel::setLanPlaybackWifiOnly,
         )
@@ -3988,13 +4166,14 @@ private fun SourcesSection(
         var cleanupSummary by remember { mutableStateOf<String?>(null) }
         var cleanupRunning by remember { mutableStateOf(false) }
         val cleanupScope = rememberCoroutineScope()
+        val cleanupSummaryTemplate = ds("Freed %1\$d MB across %2\$d title(s); skipped %3\$d.")
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TorveSecondaryButton(
-                text = if (cleanupRunning) "Working..." else "Free up space (watched downloads)",
+                text = if (cleanupRunning) ds("Working...") else ds("Free up space (watched downloads)"),
                 onClick = {
                     cleanupRunning = true
                     cleanupSummary = null
@@ -4009,7 +4188,7 @@ private fun SourcesSection(
                         val skipped = outcomes
                             .filterIsInstance<com.torve.desktop.lanlibrary.WatchedDownloadCleanup.CleanupOutcome.Skipped>()
                         val freedMb = deleted.sumOf { it.freedBytes } / (1024 * 1024)
-                        cleanupSummary = "Freed ${freedMb} MB across ${deleted.size} title(s); skipped ${skipped.size}."
+                        cleanupSummary = cleanupSummaryTemplate.format(freedMb, deleted.size, skipped.size)
                         cleanupRunning = false
                     }
                 },
@@ -4029,16 +4208,15 @@ private fun SourcesSection(
     // State hoisted above the Provider Health card so repair-action
     // buttons there can flip this flag.
     TorveSectionCard(
-        title = "Receive credentials from another device",
-        supportingText = "Show a one-time QR/session code for encrypted credential transfer. " +
-            "The handshake stays on this device; expires in 10 minutes.",
+        title = ds("Receive credentials from another device"),
+        supportingText = ds("Show a one-time QR/session code for encrypted credential transfer. The handshake stays on this device; expires in 10 minutes."),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
         ) {
             TorvePrimaryButton(
-                text = if (transferReceiveOpen) "Hide" else "Show receive code",
+                text = if (transferReceiveOpen) ds("Hide") else ds("Show receive code"),
                 onClick = { transferReceiveOpen = !transferReceiveOpen },
             )
         }
@@ -4057,16 +4235,15 @@ private fun SourcesSection(
 
     var transferSendOpen by remember { mutableStateOf(false) }
     TorveSectionCard(
-        title = "Send credentials to another device",
-        supportingText = "Sending starts on the device you want to set up. Open Receive " +
-            "credentials there first to get a code, then bring it back here.",
+        title = ds("Send credentials to another device"),
+        supportingText = ds("Sending starts on the device you want to set up. Open Receive credentials there first to get a code, then bring it back here."),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
         ) {
             TorvePrimaryButton(
-                text = if (transferSendOpen) "Hide" else "Open sender",
+                text = if (transferSendOpen) ds("Hide") else ds("Open sender"),
                 onClick = { transferSendOpen = !transferSendOpen },
             )
         }

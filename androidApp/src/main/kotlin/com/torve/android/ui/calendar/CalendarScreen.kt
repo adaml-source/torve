@@ -1,5 +1,11 @@
 package com.torve.android.ui.calendar
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -27,6 +33,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -35,11 +42,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.torve.android.R
+import com.torve.android.notification.EpisodeNotificationWorker
 import com.torve.android.ui.components.SectionHeader
 import com.torve.android.ui.components.ShimmerBox
 import com.torve.android.ui.theme.Amber
@@ -65,6 +74,33 @@ fun CalendarScreen(
     viewModel: CalendarViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
+    val context = LocalContext.current
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            viewModel.setEpisodeNotificationsEnabled(true)
+            EpisodeNotificationWorker.schedule(context)
+        }
+    }
+    val onNotificationToggle: (Boolean) -> Unit = { enabled ->
+        if (enabled) {
+            val hasPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS,
+                ) == PackageManager.PERMISSION_GRANTED
+            if (hasPermission) {
+                viewModel.setEpisodeNotificationsEnabled(true)
+                EpisodeNotificationWorker.schedule(context)
+            } else {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        } else {
+            viewModel.setEpisodeNotificationsEnabled(false)
+            EpisodeNotificationWorker.cancel(context)
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -146,6 +182,11 @@ fun CalendarScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         color = Torve.colors.textSecondary,
                     )
+                    Spacer(Modifier.height(20.dp))
+                    CalendarNotificationToggle(
+                        enabled = state.episodeNotificationsEnabled,
+                        onCheckedChange = onNotificationToggle,
+                    )
                 }
             }
 
@@ -166,20 +207,34 @@ fun CalendarScreen(
                             contentAlignment = Alignment.BottomStart,
                         ) {
                             Column(
-                                modifier = Modifier.padding(start = 16.dp, bottom = 16.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
                             ) {
-                                Text(
-                                    text = stringResource(R.string.calendar_title),
-                                    style = MaterialTheme.typography.displayMedium,
-                                    color = Snow,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                                Spacer(Modifier.height(4.dp))
-                                Text(
-                                    text = "${state.episodes.size} upcoming episodes",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = Amber,
-                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.Bottom,
+                                ) {
+                                    Column {
+                                        Text(
+                                            text = stringResource(R.string.calendar_title),
+                                            style = MaterialTheme.typography.displayMedium,
+                                            color = Snow,
+                                            fontWeight = FontWeight.Bold,
+                                        )
+                                        Spacer(Modifier.height(4.dp))
+                                        Text(
+                                            text = stringResource(R.string.calendar_upcoming_count, state.episodes.size),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = Amber,
+                                        )
+                                    }
+                                    CalendarNotificationToggle(
+                                        enabled = state.episodeNotificationsEnabled,
+                                        onCheckedChange = onNotificationToggle,
+                                    )
+                                }
                             }
                         }
                     }
@@ -221,6 +276,41 @@ fun CalendarScreen(
                 Icons.AutoMirrored.Rounded.ArrowBack,
                 contentDescription = stringResource(R.string.common_back),
                 tint = Snow,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CalendarNotificationToggle(
+    enabled: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = Charcoal.copy(alpha = 0.78f),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column {
+                Text(
+                    text = stringResource(R.string.calendar_notify_toggle),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Snow,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = stringResource(R.string.calendar_notify_toggle_desc),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Torve.colors.textSecondary,
+                )
+            }
+            Switch(
+                checked = enabled,
+                onCheckedChange = onCheckedChange,
             )
         }
     }

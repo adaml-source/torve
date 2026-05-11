@@ -26,8 +26,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -76,6 +78,7 @@ fun V2ShowsPage(
     val state by catalogViewModel.state.collectAsState()
     val colors = TorveDesktopThemeTokens.colors
     val nzbScope = rememberCoroutineScope()
+    var pageSearchQuery by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) { if (!state.shelvesLoaded) catalogViewModel.loadCatalog() }
     LaunchedEffect(nzbTvCatalogService, nzbIndexerType, nzbIndexerUrl, nzbIndexerApiKey) {
@@ -119,6 +122,30 @@ fun V2ShowsPage(
                 ),
             )
 
+            val isFilteredView = state.selectedGenreId != null ||
+                state.filter.isActive ||
+                state.providerId != null ||
+                pageSearchQuery.isNotBlank()
+
+            if (isFilteredView) {
+                Column(Modifier.fillMaxSize()) {
+                    Spacer(Modifier.height(72.dp))
+                    V2CatalogFilterBar(
+                        catalogViewModel = catalogViewModel,
+                        mediaType = CatalogMediaType.TV,
+                        searchQuery = pageSearchQuery,
+                        onSearchQueryChange = { pageSearchQuery = it },
+                    )
+                    FilteredShowsGrid(
+                        catalogViewModel = catalogViewModel,
+                        onOpenDetail = onOpenDetail,
+                        searchQuery = pageSearchQuery,
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                    )
+                }
+                return@Box
+            }
+
             Column(Modifier.fillMaxSize().verticalScroll(scrollState)) {
                 // Hero area
                 Box(Modifier.fillMaxWidth().height(vpH * 0.75f)) {
@@ -147,16 +174,13 @@ fun V2ShowsPage(
                 V2CatalogFilterBar(
                     catalogViewModel = catalogViewModel,
                     mediaType = CatalogMediaType.TV,
+                    searchQuery = pageSearchQuery,
+                    onSearchQueryChange = { pageSearchQuery = it },
                 )
 
-                val isFilteredView = state.selectedGenreId != null || state.filter.isActive
-                if (isFilteredView) {
-                    FilteredShowsGrid(
-                        catalogViewModel = catalogViewModel,
-                        onOpenDetail = onOpenDetail,
-                    )
-                    return@Column
-                }
+                // Filtered path is handled above (separate Column without
+                // verticalScroll). When we reach here the catalog is in
+                // unfiltered/rails mode.
 
                 // Rails (10 total: 3 core + 7 extra).
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -230,10 +254,17 @@ fun V2ShowsPage(
 private fun FilteredShowsGrid(
     catalogViewModel: CatalogViewModel,
     onOpenDetail: (MediaItem) -> Unit,
+    searchQuery: String = "",
+    modifier: Modifier = Modifier,
 ) {
     val state by catalogViewModel.state.collectAsState()
     val colors = TorveDesktopThemeTokens.colors
     val gridState = rememberLazyGridState()
+    val visibleItems = remember(state.items, searchQuery) {
+        val needle = searchQuery.trim().lowercase()
+        if (needle.isEmpty()) state.items
+        else state.items.filter { it.title.lowercase().contains(needle) }
+    }
 
     LaunchedEffect(gridState, state.items.size, state.hasMore) {
         androidx.compose.runtime.snapshotFlow {
@@ -251,9 +282,9 @@ private fun FilteredShowsGrid(
         contentPadding = PaddingValues(start = 72.dp, end = 24.dp, top = 8.dp, bottom = 24.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
     ) {
-        items(state.items, key = { it.id }) { item ->
+        items(visibleItems, key = { it.id }) { item ->
             V2PosterCard(
                 item.title,
                 item.posterUrl,

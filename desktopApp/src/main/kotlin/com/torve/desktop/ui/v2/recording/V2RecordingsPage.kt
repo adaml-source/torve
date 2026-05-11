@@ -67,6 +67,7 @@ fun V2RecordingsPage(
         val backLabel = ds("Back")
         val cancelLabel = ds("Cancel")
         val playLocalLabel = ds("Play local")
+        val deleteLabel = ds("Delete")
         TorvePageHeader(
             title = ds("My Recordings"),
             subtitle = ds("Scheduled, active, completed, and failed IPTV recordings."),
@@ -97,11 +98,17 @@ fun V2RecordingsPage(
                 rows = state.completed,
                 action = { row ->
                     val canPlay = row.filePath != null
-                    TorvePrimaryButton(
-                        text = playLocalLabel,
-                        onClick = { onPlayLocal(row) },
-                        enabled = canPlay,
-                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TorvePrimaryButton(
+                            text = playLocalLabel,
+                            onClick = { onPlayLocal(row) },
+                            enabled = canPlay,
+                        )
+                        TorveGhostButton(
+                            text = deleteLabel,
+                            onClick = { vm.delete(row.id) },
+                        )
+                    }
                 },
             )
         }
@@ -109,7 +116,15 @@ fun V2RecordingsPage(
             RecordingSection(
                 title = ds("Failed and cancelled"),
                 rows = state.failed,
-                action = { /* read-only */ },
+                action = { row ->
+                    // Allow the user to clear out cancelled / failed rows.
+                    // No file to play (status FAILED or CANCELLED), so the
+                    // single action is delete.
+                    TorveGhostButton(
+                        text = deleteLabel,
+                        onClick = { vm.delete(row.id) },
+                    )
+                },
             )
         }
     }

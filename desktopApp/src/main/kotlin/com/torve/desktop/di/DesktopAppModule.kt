@@ -47,6 +47,7 @@ val desktopAppModule = module {
                     s.showDownloadPath.takeIf { it.isNotBlank() },
                     s.adultDownloadPath.takeIf { it.isNotBlank() },
                     s.sportsDownloadPath.takeIf { it.isNotBlank() },
+                    s.recordingDownloadPath.takeIf { it.isNotBlank() },
                 ).map { java.io.File(it) }
             },
         )
@@ -119,15 +120,22 @@ val desktopAppModule = module {
             scheduler = get(),
             repository = get(),
             allowlist = get(),
-            // Recordings land under the configured movies download path
-            // so they're already inside the existing
-            // DownloadFolderAllowlist. UI surfaces the choice; this
-            // provider just reads the latest setting.
+            // Recording goes to its own dedicated folder (Settings →
+            // Preferences → Downloads → Recordings folder). Returns null
+            // when the user hasn't set one -- the UI surfaces this as a
+            // "Set a recordings folder first" notification rather than
+            // silently scribbling into the movies folder.
             recordingsRootProvider = {
                 val s = get<com.torve.presentation.settings.SettingsViewModel>().state.value
-                s.movieDownloadPath.takeIf { it.isNotBlank() }?.let { java.io.File(it) }
+                s.recordingDownloadPath.takeIf { it.isNotBlank() }?.let { java.io.File(it) }
             },
         )
+    }
+    // Bind the DesktopRecordingService instance as the shared
+    // RecordingStarter so the RecordingsViewModel can call runNow()
+    // and deleteRow() without depending on the desktop module.
+    single<com.torve.presentation.recording.RecordingStarter> {
+        get<com.torve.desktop.recording.DesktopRecordingService>()
     }
 
     // Desktop wires its own ProviderHealthChecker set into the shared

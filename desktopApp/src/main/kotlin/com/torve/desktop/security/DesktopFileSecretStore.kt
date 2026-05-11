@@ -88,6 +88,15 @@ class DesktopFileSecretStore : IntegrationSecretStore, SecureStorage {
         }
     }
 
+    override suspend fun removeByPrefix(prefix: String) {
+        synchronized(lock) {
+            properties.stringPropertyNames()
+                .filter { it.startsWith(prefix) }
+                .forEach(properties::remove)
+            save()
+        }
+    }
+
     private fun modeKey(key: IntegrationSecretKey): String = "${key.name}_mode"
 
     private fun load() {

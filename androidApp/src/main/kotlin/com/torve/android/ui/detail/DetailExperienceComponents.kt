@@ -1,4 +1,4 @@
-package com.torve.android.ui.detail
+﻿package com.torve.android.ui.detail
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -13,10 +13,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.annotation.StringRes
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.torve.android.R
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Ash
 import com.torve.android.ui.theme.Charcoal
@@ -38,8 +41,8 @@ import com.torve.presentation.detail.PlaybackStartupPhase
 import com.torve.presentation.detail.PlaybackStartupStatus
 
 internal data class DetailPlaybackOptionGroup(
-    val title: String,
-    val subtitle: String? = null,
+    @StringRes val titleRes: Int,
+    @StringRes val subtitleRes: Int? = null,
     val items: List<ParsedStream>,
 )
 
@@ -56,6 +59,15 @@ private data class DetailPlaybackSummary(
 private data class StreamBadge(
     val label: String,
     val tone: Color,
+)
+
+private data class StreamBadgeLabels(
+    val fastStart: String,
+    val recentSuccess: String,
+    val inYourCloud: String,
+    val cached: String,
+    val direct: String,
+    val bestFit: String,
 )
 
 internal fun groupPlaybackOptionStreams(
@@ -83,8 +95,8 @@ internal fun groupPlaybackOptionStreams(
         if (fastStart.isNotEmpty()) {
             add(
                 DetailPlaybackOptionGroup(
-                    title = "Fast Start",
-                    subtitle = "Trusted quick-start options",
+                    titleRes = R.string.stream_group_fast_start,
+                    subtitleRes = R.string.stream_group_fast_start_subtitle,
                     items = fastStart,
                 ),
             )
@@ -92,8 +104,8 @@ internal fun groupPlaybackOptionStreams(
         if (bestFit.isNotEmpty()) {
             add(
                 DetailPlaybackOptionGroup(
-                    title = if (fastStart.isEmpty()) "Best Fit" else "More Great Matches",
-                    subtitle = "Ranked for this device",
+                    titleRes = if (fastStart.isEmpty()) R.string.stream_group_best_fit else R.string.stream_group_more_great_matches,
+                    subtitleRes = R.string.stream_group_ranked_for_device,
                     items = bestFit,
                 ),
             )
@@ -101,8 +113,8 @@ internal fun groupPlaybackOptionStreams(
         if (more.isNotEmpty()) {
             add(
                 DetailPlaybackOptionGroup(
-                    title = "More Options",
-                    subtitle = "Extra fallbacks and alternates",
+                    titleRes = R.string.stream_group_more_options,
+                    subtitleRes = R.string.stream_group_more_options_subtitle,
                     items = more,
                 ),
             )
@@ -121,35 +133,34 @@ internal fun DetailPlaybackReadinessCard(
     modifier: Modifier = Modifier,
 ) {
     val summary = summarizePlaybackOptions(streams, startupCandidates)
+    val summaryParts = listOfNotNull(
+        if (summary.cached > 0) stringResource(R.string.detail_cached_count, summary.cached) else null,
+        if (summary.direct > 0) stringResource(R.string.detail_direct_count, summary.direct) else null,
+        if (summary.recommended > 0) stringResource(R.string.detail_best_fit_count, summary.recommended) else null,
+        if (summary.total > 0) stringResource(R.string.detail_total_count, summary.total) else null,
+    ).joinToString(" • ")
     val primary = when {
-        isResolving -> "Opening the best playback option."
-        startupStatus?.phase == PlaybackStartupPhase.LOADING_STARTUP_CANDIDATES -> "Preparing quick-start playback options."
-        startupStatus?.phase == PlaybackStartupPhase.ATTEMPTING_STARTUP_AUTOPLAY -> "Trying the fastest trusted option."
-        startupStatus?.phase == PlaybackStartupPhase.STARTUP_CANDIDATE_FAILED -> "Checking more playback options."
-        startupStatus?.phase == PlaybackStartupPhase.FALLING_BACK_TO_FULL_FETCH -> "Loading more playback options."
-        isLoadingStreams && streams.isEmpty() -> "Checking connected services and ranking playback options."
+        isResolving -> stringResource(R.string.detail_opening_best_option)
+        startupStatus?.phase == PlaybackStartupPhase.LOADING_STARTUP_CANDIDATES -> stringResource(R.string.detail_preparing_quick_start)
+        startupStatus?.phase == PlaybackStartupPhase.ATTEMPTING_STARTUP_AUTOPLAY -> stringResource(R.string.detail_trying_fastest_option)
+        startupStatus?.phase == PlaybackStartupPhase.STARTUP_CANDIDATE_FAILED -> stringResource(R.string.detail_checking_more_options)
+        startupStatus?.phase == PlaybackStartupPhase.FALLING_BACK_TO_FULL_FETCH -> stringResource(R.string.detail_loading_more_options)
+        isLoadingStreams && streams.isEmpty() -> stringResource(R.string.detail_checking_services)
         summary.total > 0 && summary.fastStart > 0 && isLoadingMoreSources ->
-            "${summary.fastStart} fast-start options ready. Checking more in the background."
+            stringResource(R.string.detail_fast_start_ready_checking_more, summary.fastStart)
         summary.total > 0 ->
-            "${summary.fastStart} fast start • ${summary.readyNow} ready now • ${summary.more} more options"
+            stringResource(R.string.detail_playback_summary, summary.fastStart, summary.readyNow, summary.more)
         else -> null
     } ?: return
 
     val secondary = when {
-        isResolving -> "Torve keeps ranked fallbacks ready if this first attempt does not start cleanly."
+        isResolving -> stringResource(R.string.detail_ranked_fallbacks_ready)
         startupStatus?.phase == PlaybackStartupPhase.STARTUP_CANDIDATE_FAILED ->
-            "The quickest option did not start, so broader results are being checked."
+            stringResource(R.string.detail_quickest_option_failed)
         startupStatus?.phase == PlaybackStartupPhase.FALLING_BACK_TO_FULL_FETCH || isLoadingMoreSources ->
-            "Quick-start options stay visible while more playback choices are added."
-        isLoadingStreams -> "Immediate options are surfaced first, then broader results are ranked for this device."
-        else -> buildString {
-            val parts = mutableListOf<String>()
-            if (summary.cached > 0) parts += "${summary.cached} cached"
-            if (summary.direct > 0) parts += "${summary.direct} direct"
-            if (summary.recommended > 0) parts += "${summary.recommended} best fit"
-            if (summary.total > 0) parts += "${summary.total} total"
-            append(parts.joinToString(" • "))
-        }
+            stringResource(R.string.detail_quick_start_stays_visible)
+        isLoadingStreams -> stringResource(R.string.detail_immediate_options_first)
+        else -> summaryParts
     }
 
     Column(
@@ -174,15 +185,15 @@ internal fun DetailPlaybackReadinessCard(
         if (summary.total > 0) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 DetailExperienceBadge(
-                    label = "Fast ${summary.fastStart}",
+                    label = stringResource(R.string.detail_fast_badge, summary.fastStart),
                     tone = if (summary.fastStart > 0) Amber else Gunmetal,
                 )
                 DetailExperienceBadge(
-                    label = "Ready ${summary.readyNow}",
+                    label = stringResource(R.string.detail_ready_badge, summary.readyNow),
                     tone = if (summary.readyNow > 0) Emerald else Gunmetal,
                 )
                 DetailExperienceBadge(
-                    label = "Best fit ${summary.recommended}",
+                    label = stringResource(R.string.detail_best_fit_badge, summary.recommended),
                     tone = if (summary.recommended > 0) Snow else Gunmetal,
                 )
             }
@@ -212,14 +223,20 @@ internal fun DetailRatingsAttribution(
     ) {
         if (activeProviders.isNotEmpty()) {
             Text(
-                text = "Ratings shown from ${activeProviders.joinToString(", ") { it.displayName }}.",
+                text = stringResource(
+                    R.string.detail_ratings_shown_from,
+                    activeProviders.joinToString(", ") { it.displayName },
+                ),
                 style = MaterialTheme.typography.bodySmall,
                 color = Ash,
             )
         }
         if (prefs.showTorveScoreOnDetailPage && torveInputs.isNotEmpty()) {
             Text(
-                text = "Torve Score blends ${torveInputs.joinToString(", ") { it.displayName }} using your selected weights.",
+                text = stringResource(
+                    R.string.detail_torve_score_blends,
+                    torveInputs.joinToString(", ") { it.displayName },
+                ),
                 style = MaterialTheme.typography.bodySmall,
                 color = Amber,
                 fontWeight = FontWeight.Medium,
@@ -235,7 +252,15 @@ internal fun StreamExperienceBadges(
     startupCandidate: StartupCandidate? = null,
     modifier: Modifier = Modifier,
 ) {
-    val badges = badgesForStream(stream, startupCandidate).take(3)
+    val labels = StreamBadgeLabels(
+        fastStart = stringResource(R.string.detail_fast_start),
+        recentSuccess = stringResource(R.string.detail_recent_success),
+        inYourCloud = stringResource(R.string.detail_in_your_cloud),
+        cached = stringResource(R.string.detail_cached),
+        direct = stringResource(R.string.detail_direct),
+        bestFit = stringResource(R.string.detail_best_fit),
+    )
+    val badges = badgesForStream(stream, startupCandidate, labels).take(3)
     if (badges.isEmpty()) return
 
     FlowRow(
@@ -258,20 +283,22 @@ internal fun StreamReadinessLabel(
     startupCandidate: StartupCandidate? = null,
     modifier: Modifier = Modifier,
 ) {
+    val isFastStart = startupCandidate != null && StartupPlaybackPolicy.isHighConfidenceAutoplayCandidate(startupCandidate)
+    val isReadyNow = stream.isReadyNow()
     val text = when {
-        startupCandidate != null && StartupPlaybackPolicy.isHighConfidenceAutoplayCandidate(startupCandidate) -> "Fast start"
-        stream.isReadyNow() -> "Ready now"
-        startupCandidate?.readinessState == ReadinessState.READY_WITH_RESOLVE -> "Ready when picked"
-        startupCandidate?.readinessState == ReadinessState.LOOKUP_ONLY -> "Additional option"
+        isFastStart -> stringResource(R.string.detail_fast_start)
+        isReadyNow -> stringResource(R.string.detail_ready_now)
+        startupCandidate?.readinessState == ReadinessState.READY_WITH_RESOLVE -> stringResource(R.string.detail_ready_when_picked)
+        startupCandidate?.readinessState == ReadinessState.LOOKUP_ONLY -> stringResource(R.string.detail_additional_option)
         else -> null
     } ?: return
 
     Text(
         text = text,
         style = MaterialTheme.typography.labelMedium,
-        color = when (text) {
-            "Fast start" -> Amber
-            "Ready now" -> Emerald
+        color = when {
+            isFastStart -> Amber
+            isReadyNow -> Emerald
             else -> Ash
         },
         modifier = modifier,
@@ -296,30 +323,31 @@ private fun DetailExperienceBadge(
 private fun badgesForStream(
     stream: ParsedStream,
     startupCandidate: StartupCandidate?,
+    labels: StreamBadgeLabels,
 ): List<StreamBadge> {
     val badges = linkedMapOf<String, StreamBadge>()
     val reasons = startupCandidate?.confidenceReasons.orEmpty().toSet()
 
     if (startupCandidate != null && StartupPlaybackPolicy.isHighConfidenceAutoplayCandidate(startupCandidate)) {
-        badges["Fast start"] = StreamBadge("Fast start", Amber)
+        badges[labels.fastStart] = StreamBadge(labels.fastStart, Amber)
     }
     if (reasons.contains(StartupConfidenceReasonCode.RECENT_SUCCESS)) {
-        badges["Recent success"] = StreamBadge("Recent success", Emerald)
+        badges[labels.recentSuccess] = StreamBadge(labels.recentSuccess, Emerald)
     }
     if (
         reasons.contains(StartupConfidenceReasonCode.CONNECTED_SERVICE_MATCH) ||
         startupCandidate?.provenance?.kind == CandidateProvenanceKind.INVENTORY_MATCH
     ) {
-        badges["In your cloud"] = StreamBadge("In your cloud", Emerald)
+        badges[labels.inYourCloud] = StreamBadge(labels.inYourCloud, Emerald)
     }
     if (stream.isCached || reasons.contains(StartupConfidenceReasonCode.HASH_CACHED)) {
-        badges["Cached"] = StreamBadge("Cached", Emerald)
+        badges[labels.cached] = StreamBadge(labels.cached, Emerald)
     }
     if (stream.isDirectCandidate() || reasons.contains(StartupConfidenceReasonCode.DIRECT_PLAYABLE_URL)) {
-        badges["Direct"] = StreamBadge("Direct", Amber)
+        badges[labels.direct] = StreamBadge(labels.direct, Amber)
     }
     if (stream.score >= 85) {
-        badges["Best fit"] = StreamBadge("Best fit", Snow)
+        badges[labels.bestFit] = StreamBadge(labels.bestFit, Snow)
     }
 
     return badges.values.toList()

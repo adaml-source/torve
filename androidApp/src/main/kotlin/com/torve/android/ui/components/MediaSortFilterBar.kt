@@ -30,7 +30,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.torve.android.R
 
 /**
  * Sort/filter strip used by SeeAll-style screens and the Library tab.
@@ -66,13 +68,13 @@ fun MediaSortFilterBar(
             )
             if (availableYearRange != null) {
                 YearDropdown(
-                    label = "From",
+                    label = stringResource(R.string.filter_from),
                     range = availableYearRange,
                     selected = selectedYearFrom,
                     onSelected = { onYearRangeChanged(it, selectedYearTo) },
                 )
                 YearDropdown(
-                    label = "To",
+                    label = stringResource(R.string.filter_to),
                     range = availableYearRange,
                     selected = selectedYearTo,
                     onSelected = { onYearRangeChanged(selectedYearFrom, it) },
@@ -83,7 +85,7 @@ fun MediaSortFilterBar(
             if (anyFilterActive) {
                 AssistChip(
                     onClick = onClearFilters,
-                    label = { Text("Clear") },
+                    label = { Text(stringResource(R.string.common_clear)) },
                     leadingIcon = { Icon(Icons.Default.Clear, contentDescription = null) },
                 )
             }
@@ -126,7 +128,7 @@ private fun SortDropdown(
     var expanded by remember { mutableStateOf(false) }
     AssistChip(
         onClick = { expanded = true },
-        label = { Text("Sort: ${current.label}", style = MaterialTheme.typography.labelMedium) },
+        label = { Text(stringResource(R.string.sort_label, current.label), style = MaterialTheme.typography.labelMedium) },
         leadingIcon = { Icon(Icons.Default.Sort, contentDescription = null) },
         trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null) },
         colors = AssistChipDefaults.assistChipColors(),
@@ -152,14 +154,15 @@ private fun YearDropdown(
     onSelected: (Int?) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val anyLabel = stringResource(R.string.filter_any)
     AssistChip(
         onClick = { expanded = true },
-        label = { Text("$label: ${selected?.toString() ?: "Any"}", style = MaterialTheme.typography.labelMedium) },
+        label = { Text("$label: ${selected?.toString() ?: anyLabel}", style = MaterialTheme.typography.labelMedium) },
         trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null) },
     )
     DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
         DropdownMenuItem(
-            text = { Text("Any") },
+            text = { Text(anyLabel) },
             onClick = {
                 onSelected(null)
                 expanded = false

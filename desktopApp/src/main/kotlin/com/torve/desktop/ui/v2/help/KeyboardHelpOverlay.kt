@@ -43,6 +43,7 @@ import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
 @Composable
 fun KeyboardHelpOverlay(onDismiss: () -> Unit) {
     val colors = TorveDesktopThemeTokens.colors
+    val shortcutGroups = localizedShortcutGroups()
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -68,7 +69,7 @@ fun KeyboardHelpOverlay(onDismiss: () -> Unit) {
             Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        "Keyboard shortcuts",
+                        ds("Keyboard shortcuts"),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = colors.textPrimary,
@@ -81,7 +82,7 @@ fun KeyboardHelpOverlay(onDismiss: () -> Unit) {
                     modifier = Modifier.fillMaxWidth().heightIn(max = 460.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    items(SHORTCUT_GROUPS) { group ->
+                    items(shortcutGroups) { group ->
                         ShortcutGroup(group)
                     }
                 }
@@ -151,46 +152,47 @@ private fun ShortcutKeys(keys: List<String>) {
 private data class Shortcut(val keys: List<String>, val description: String)
 private data class ShortcutGroup(val name: String, val shortcuts: List<Shortcut>)
 
-private val SHORTCUT_GROUPS: List<ShortcutGroup> = listOf(
+@Composable
+private fun localizedShortcutGroups(): List<ShortcutGroup> = listOf(
     ShortcutGroup(
-        name = "Navigation",
+        name = ds("Navigation"),
         shortcuts = listOf(
-            Shortcut(modAndKey("1"), "Home"),
-            Shortcut(modAndKey("2"), "Movies"),
-            Shortcut(modAndKey("3"), "Shows"),
-            Shortcut(modAndKey("4"), "Search"),
-            Shortcut(modAndKey("5"), "Library"),
-            Shortcut(modAndKey("6"), "Live TV"),
-            Shortcut(modAndKey(","), "Open Settings"),
-            Shortcut(modAndKey("W"), "Close topmost overlay"),
+            Shortcut(modAndKey("1"), ds("Home")),
+            Shortcut(modAndKey("2"), ds("Movies")),
+            Shortcut(modAndKey("3"), ds("Shows")),
+            Shortcut(modAndKey("4"), ds("Search")),
+            Shortcut(modAndKey("5"), ds("Library")),
+            Shortcut(modAndKey("6"), ds("Live TV")),
+            Shortcut(modAndKey(","), ds("Open Settings")),
+            Shortcut(modAndKey("W"), ds("Close topmost overlay")),
         ),
     ),
     ShortcutGroup(
-        name = "Power user",
+        name = ds("Power user"),
         shortcuts = listOf(
-            Shortcut(modAndKey("K"), "Open command palette"),
-            Shortcut(modAndKey("/"), "Show this keyboard help"),
-            Shortcut(modAndKey("Q"), "Quit Torve"),
+            Shortcut(modAndKey("K"), ds("Open command palette")),
+            Shortcut(modAndKey("/"), ds("Show this keyboard help")),
+            Shortcut(modAndKey("Q"), ds("Quit Torve")),
         ),
     ),
     ShortcutGroup(
-        name = "Player (when video is playing)",
+        name = ds("Player (when video is playing)"),
         shortcuts = listOf(
-            Shortcut(listOf("Space"), "Play / pause"),
-            Shortcut(listOf("F"), "Toggle fullscreen"),
-            Shortcut(listOf("F11"), "Toggle fullscreen"),
-            Shortcut(listOf("Left"), "Seek back"),
-            Shortcut(listOf("Right"), "Seek forward"),
-            Shortcut(listOf("Up"), "Volume up"),
-            Shortcut(listOf("Down"), "Volume down"),
-            Shortcut(listOf("C"), "Change subtitles"),
-            Shortcut(listOf("V"), "Change video mode"),
-            Shortcut(listOf("PageUp", "PageDown"), "Previous / next IPTV channel"),
-            Shortcut(listOf("M"), "Mute toggle"),
-            Shortcut(listOf("S"), "Stop"),
-            Shortcut(listOf("Esc"), "Exit fullscreen / close player"),
-            Shortcut(listOf("H", "J"), "Subtitle delay - / +"),
-            Shortcut(listOf("K", "L"), "Audio delay - / +"),
+            Shortcut(listOf("Space"), ds("Play / pause")),
+            Shortcut(listOf("F"), ds("Toggle fullscreen")),
+            Shortcut(listOf("F11"), ds("Toggle fullscreen")),
+            Shortcut(listOf("Left"), ds("Seek back")),
+            Shortcut(listOf("Right"), ds("Seek forward")),
+            Shortcut(listOf("Up"), ds("Volume up")),
+            Shortcut(listOf("Down"), ds("Volume down")),
+            Shortcut(listOf("C"), ds("Change subtitles")),
+            Shortcut(listOf("V"), ds("Change video mode")),
+            Shortcut(listOf("PageUp", "PageDown"), ds("Previous / next IPTV channel")),
+            Shortcut(listOf("M"), ds("Mute toggle")),
+            Shortcut(listOf("S"), ds("Stop")),
+            Shortcut(listOf("Esc"), ds("Exit fullscreen / close player")),
+            Shortcut(listOf("H", "J"), ds("Subtitle delay - / +")),
+            Shortcut(listOf("K", "L"), ds("Audio delay - / +")),
         ),
     ),
 )

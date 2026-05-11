@@ -6,14 +6,22 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.ui.layout.ContentScale
+import coil3.compose.AsyncImage
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
@@ -63,7 +71,10 @@ import com.torve.android.ui.theme.Gunmetal
 import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Torve
+import com.torve.android.ui.theme.Charcoal
 import com.torve.domain.model.Channel
+import com.torve.domain.model.ChannelCategory
+import com.torve.domain.model.EnrichedChannel
 import com.torve.presentation.channels.ChannelsSubTab
 import com.torve.presentation.channels.ChannelsViewModel
 import org.koin.compose.koinInject
@@ -139,7 +150,7 @@ fun ChannelsScreen(
                             modifier = Modifier.weight(1f),
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
-                            items(state.playlists) { playlist ->
+                            items(state.playlists, key = { it.id }) { playlist ->
                                 val selected = state.selectedPlaylistId == playlist.id
                                 FilterChip(
                                     selected = selected,
@@ -233,6 +244,16 @@ fun ChannelsScreen(
                         channels = state.channels,
                         guideProgrammes = state.guideProgrammes,
                         isLoading = state.isLoadingChannels && state.guideProgrammes.isEmpty(),
+                        onChannelPlay = { channel ->
+                            viewModel.recordChannelViewed(channel)
+                            onChannelPlay(channel)
+                        },
+                    )
+
+                    ChannelsSubTab.MOVIES -> VodMoviesContent(
+                        categories = state.vodCategories,
+                        expandedCategories = state.expandedVodCategories,
+                        onToggleCategory = { viewModel.toggleVodCategoryExpanded(it) },
                         onChannelPlay = { channel ->
                             viewModel.recordChannelViewed(channel)
                             onChannelPlay(channel)
@@ -450,6 +471,108 @@ private fun StyledTextField(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun VodMoviesContent(
+    categories: List<ChannelCategory>,
+    expandedCategories: Set<String>,
+    onToggleCategory: (String) -> Unit,
+    onChannelPlay: (Channel) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (categories.isEmpty()) {
+        Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+            androidx.compose.material3.CircularProgressIndicator(color = Amber)
+        }
+        return
+    }
+
+    LazyColumn(modifier = modifier.fillMaxSize()) {
+        categories.forEach { category ->
+            val expanded = category.name in expandedCategories
+            item(key = "header_${category.name}") {
+                CategoryHeader(
+                    name = category.name,
+                    channelCount = category.channelCount,
+                    qualityTags = emptySet(),
+                    isExpanded = expanded,
+                    onToggle = { onToggleCategory(category.name) },
+                )
+            }
+            if (expanded) {
+                if (category.channels.isEmpty()) {
+                    item(key = "loading_${category.name}") {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().height(160.dp),
+                            contentAlignment = androidx.compose.ui.Alignment.Center,
+                        ) {
+                            androidx.compose.material3.CircularProgressIndicator(
+                                color = Amber,
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
+                    }
+                } else {
+                    item(key = "grid_${category.name}") {
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(3),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(((category.channels.size / 3 + 1) * 180).coerceAtMost(540).dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                                horizontal = 12.dp, vertical = 8.dp,
+                            ),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            userScrollEnabled = false,
+                        ) {
+                            items(category.channels, key = { it.channel.url }) { enriched ->
+                                VodPosterCard(
+                                    channel = enriched.channel,
+                                    onClick = { onChannelPlay(enriched.channel) },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VodPosterCard(
+    channel: Channel,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    androidx.compose.material3.Card(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth(),
+        colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Charcoal),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+    ) {
+        Column {
+            AsyncImage(
+                model = channel.tvgLogo,
+                contentDescription = channel.name,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(2f / 3f),
+                contentScale = ContentScale.Crop,
+                error = null,
+            )
+            androidx.compose.material3.Text(
+                text = channel.name,
+                style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                color = Snow,
+                maxLines = 2,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+            )
         }
     }
 }

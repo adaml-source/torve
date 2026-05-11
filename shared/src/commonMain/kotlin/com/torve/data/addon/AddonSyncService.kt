@@ -120,12 +120,16 @@ class AddonSyncService(
             if (!force && !isStale(nowMs)) return
 
             try {
-                // Collapse Panda duplicates on the server BEFORE computing the merge plan.
-                // Without this, stale Panda rows (e.g. left over from a failed delete) would
-                // get re-installed locally on every sync, producing duplicates for the user.
-                runCatching { collapsePandaDuplicates(token, keepManifestUrl = null) }
-
-                val serverAddons = accountSettingsApi.getAddons(token)
+                val fetchedServerAddons = accountSettingsApi.getAddons(token)
+                // Collapse Panda duplicates on the already-fetched server snapshot BEFORE
+                // computing the merge plan. This avoids an extra unconditional getAddons()
+                // call on every sync while still preventing stale Panda rows from being
+                // re-installed locally.
+                val serverAddons = collapsePandaDuplicates(
+                    token = token,
+                    serverAddons = fetchedServerAddons,
+                    keepManifestUrl = null,
+                )
                 addonPolicyRepository?.updateFromServer(serverAddons)
                 torveVerboseLog { "ADDON_SYNC_STARTED count=${serverAddons.size} reason=$reason" }
 
@@ -409,8 +413,20 @@ class AddonSyncService(
      */
     private suspend fun collapsePandaDuplicates(token: String, keepManifestUrl: String?) {
         val serverAddons = runCatching { accountSettingsApi.getAddons(token) }.getOrNull().orEmpty()
+        collapsePandaDuplicates(
+            token = token,
+            serverAddons = serverAddons,
+            keepManifestUrl = keepManifestUrl,
+        )
+    }
+
+    private suspend fun collapsePandaDuplicates(
+        token: String,
+        serverAddons: List<AddonDto>,
+        keepManifestUrl: String?,
+    ): List<AddonDto> {
         val pandaAddons = serverAddons.filter { isPandaServerAddon(it) }
-        if (pandaAddons.size <= 1) return
+        if (pandaAddons.size <= 1) return serverAddons
 
         val normalizedKeep = keepManifestUrl?.let { normalizeManifestUrl(it) }
         val keep = when {
@@ -418,19 +434,24 @@ class AddonSyncService(
                 normalizeManifestUrl(it.manifestUrl) == normalizedKeep
             } ?: pandaAddons.maxByOrNull { it.updatedAt }
             else -> pandaAddons.maxByOrNull { it.updatedAt }
-        } ?: return
+        } ?: return serverAddons
 
+        val removedIds = mutableSetOf<String>()
         pandaAddons.filter { it.id != keep.id }.forEach { stale ->
-            runCatching {
+            val removed = runCatching {
                 accountSettingsApi.removeAddon(token, stale.id)
                 // Also drop any local row pointing at the stale URL so the next merge
                 // pass doesn't try to push it back.
                 addonRepo.removeAddon(stale.manifestUrl)
+            }.isSuccess
+            if (removed) {
+                removedIds += stale.id
             }
             torveVerboseLog {
                 "ADDON_PANDA_DEDUP removed_id=${stale.id} kept_id=${keep.id}"
             }
         }
+        return serverAddons.filterNot { it.id in removedIds }
     }
 
     private fun isPandaAddon(addon: InstalledAddon): Boolean {

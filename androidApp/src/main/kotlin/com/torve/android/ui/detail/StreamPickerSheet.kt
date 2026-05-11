@@ -29,6 +29,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -46,9 +50,15 @@ import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Torve
+import com.torve.android.ui.theme.Gunmetal
 import com.torve.data.addon.ParsedStream
 import com.torve.data.usenet.model.UsenetCandidateStates
 import com.torve.domain.model.StartupCandidate
+
+private enum class StreamSourceFilter { ALL, TORRENT, USENET }
+
+private fun ParsedStream.sourceFilter(): StreamSourceFilter =
+    if (infoHash != null) StreamSourceFilter.TORRENT else StreamSourceFilter.USENET
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -70,8 +80,13 @@ fun StreamPickerSheet(
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var activeFilter by remember { mutableStateOf(StreamSourceFilter.ALL) }
 
-    val groups = groupPlaybackOptionStreams(streams, startupCandidates)
+    val filteredStreams = remember(streams, activeFilter) {
+        if (activeFilter == StreamSourceFilter.ALL) streams
+        else streams.filter { it.sourceFilter() == activeFilter }
+    }
+    val groups = groupPlaybackOptionStreams(filteredStreams, startupCandidates)
     val startupCandidateMap = startupCandidates.associateBy { it.streamKey }
 
     ModalBottomSheet(
@@ -107,7 +122,7 @@ fun StreamPickerSheet(
                         color = Snow,
                     )
                     Text(
-                        text = stringResource(R.string.picker_streams_found, streams.size),
+                        text = stringResource(R.string.picker_streams_found, filteredStreams.size),
                         style = MaterialTheme.typography.bodySmall,
                         color = Torve.colors.textTertiary,
                     )
@@ -121,7 +136,36 @@ fun StreamPickerSheet(
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(
+                    StreamSourceFilter.ALL to stringResource(R.string.catalog_all),
+                    StreamSourceFilter.TORRENT to stringResource(R.string.stream_filter_torrent),
+                    StreamSourceFilter.USENET to stringResource(R.string.stream_filter_usenet_nzb),
+                ).forEach { (filter, label) ->
+                    val selected = activeFilter == filter
+                    Box(
+                        modifier = Modifier
+                            .background(
+                                if (selected) Amber else Gunmetal,
+                                RoundedCornerShape(20.dp),
+                            )
+                            .clickable { activeFilter = filter }
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (selected) Charcoal else Torve.colors.textSecondary,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
 
             DetailPlaybackReadinessCard(
                 streams = streams,
@@ -162,7 +206,10 @@ fun StreamPickerSheet(
                 ) {
                     groups.forEach { group ->
                         item {
-                            GroupHeader(group.title, group.subtitle)
+                            GroupHeader(
+                                stringResource(group.titleRes),
+                                group.subtitleRes?.let { stringResource(it) },
+                            )
                         }
                         items(group.items) { stream ->
                             StreamItem(
@@ -303,7 +350,7 @@ private fun StreamItem(
                     if (stream.languages.isNotEmpty()) {
                         MetaChip("\uD83D\uDDE3 " + stream.languages.joinToString(", "))
                     }
-                    stream.seeds?.let { MetaChip("$it seeds") }
+                    stream.seeds?.let { MetaChip(stringResource(R.string.stream_seed_count, it)) }
                 }
                 Spacer(Modifier.height(6.dp))
                 StreamExperienceBadges(

@@ -76,6 +76,8 @@ class ChannelRepositoryImpl(
         private const val EPG_STATE_ERROR = "ERROR"
         private const val EPG_DEBUG_LOG_ENABLED = false
         private const val CHANNEL_DEBUG_LOG_ENABLED = false
+        private const val XTREAM_SERIES_CATEGORY_FALLBACK_SMALL_CATALOG = 10
+        private const val PLAYLIST_CACHE_MAX_CHANNELS = 10_000
     }
 
     // ── Secure Xtream password storage ────────────────────────
@@ -256,8 +258,18 @@ class ChannelRepositoryImpl(
         )
 
         // Also fetch VOD
-        val vodCategories = try { xtreamClient.getVodCategories(server, username, password) } catch (_: Exception) { emptyList() }
-        val vodStreams = try { xtreamClient.getVodStreams(server, username, password) } catch (_: Exception) { emptyList() }
+        val vodCategories = try {
+            xtreamClient.getVodCategories(server, username, password)
+        } catch (t: Exception) {
+            channelDebugLog("Xtream VOD category fetch failed for playlist $id: ${t.message}")
+            emptyList()
+        }
+        val vodStreams = try {
+            xtreamClient.getVodStreams(server, username, password)
+        } catch (t: Exception) {
+            channelDebugLog("Xtream VOD movie fetch failed for playlist $id: ${t.message}")
+            emptyList()
+        }
         val vodChannels = xtreamClient.mapVodToChannels(
             streams = vodStreams,
             categories = vodCategories,
@@ -266,8 +278,29 @@ class ChannelRepositoryImpl(
             password = password,
             playlistId = id,
         )
+        val seriesCategories = try {
+            xtreamClient.getSeriesCategories(server, username, password)
+        } catch (t: Exception) {
+            channelDebugLog("Xtream series category fetch failed for playlist $id: ${t.message}")
+            emptyList()
+        }
+        val series = fetchXtreamSeriesCatalog(
+            server = server,
+            username = username,
+            password = password,
+            playlistId = id,
+            seriesCategories = seriesCategories,
+        )
+        val seriesChannels = xtreamClient.mapSeriesToChannels(
+            series = series,
+            categories = seriesCategories,
+            server = server,
+            username = username,
+            password = password,
+            playlistId = id,
+        )
 
-        val allChannels = channels + vodChannels
+        val allChannels = channels + vodChannels + seriesChannels
         // Store password in secure storage, never in SQLite
         saveXtreamPassword(id, password)
         persistPlaylistSnapshot(
@@ -296,6 +329,99 @@ class ChannelRepositoryImpl(
             username = username,
             password = password, // in-memory only for immediate use
         )
+    }
+
+    private suspend fun fetchXtreamSeriesCatalog(
+        server: String,
+        username: String,
+        password: String,
+        playlistId: String,
+        seriesCategories: List<XtreamCategory>,
+    ): List<XtreamSeries> {
+        val unfiltered = try {
+            xtreamClient.getSeries(server, username, password)
+        } catch (t: Exception) {
+            channelDebugLog("Xtream series fetch failed for playlist $playlistId: ${t.message}")
+            emptyList()
+        }
+
+        val shouldFetchByCategory = seriesCategories.isNotEmpty() &&
+            (
+                unfiltered.isEmpty() ||
+                    unfiltered.size <= XTREAM_SERIES_CATEGORY_FALLBACK_SMALL_CATALOG ||
+                    unfiltered.size < seriesCategories.size
+                )
+        if (!shouldFetchByCategory) {
+            println("XtreamSeriesCatalog: playlistId=$playlistId mode=all rows=${unfiltered.size} categories=${seriesCategories.size}")
+            return unfiltered.dedupeXtreamSeries()
+        }
+
+        println("XtreamSeriesCatalog: playlistId=$playlistId mode=category-fallback all=${unfiltered.size} categories=${seriesCategories.size}")
+        val byCategory = mutableListOf<XtreamSeries>()
+        seriesCategories.forEach { category ->
+            val categoryId = category.categoryId.takeIf { it.isNotBlank() } ?: return@forEach
+            val rows = try {
+                xtreamClient.getSeries(server, username, password, categoryId = categoryId)
+            } catch (t: Exception) {
+                channelDebugLog(
+                    "Xtream series category fetch failed playlistId=$playlistId categoryId=$categoryId: ${t.message}",
+                )
+                emptyList()
+            }
+            byCategory += rows
+        }
+        val merged = (unfiltered + byCategory).dedupeXtreamSeries()
+        println("XtreamSeriesCatalog: playlistId=$playlistId category-fallback-result all=${unfiltered.size} byCategory=${byCategory.size} merged=${merged.size} categories=${seriesCategories.size}")
+        return merged
+    }
+
+    private fun List<XtreamSeries>.dedupeXtreamSeries(): List<XtreamSeries> {
+        val byProviderIdentity = linkedMapOf<String, XtreamSeries>()
+        forEach { show ->
+            val providerKey = show.seriesId
+                .trim()
+                .takeIf { it.isNotBlank() && it != "0" }
+                ?.let { "series:$it" }
+                ?: "title:${show.name.normalizedSeriesKey()}:cover:${show.cover.orEmpty()}"
+            val existing = byProviderIdentity[providerKey]
+            byProviderIdentity[providerKey] = chooseBetterXtreamSeries(existing, show)
+        }
+
+        val byTitle = linkedMapOf<String, XtreamSeries>()
+        byProviderIdentity.values.forEach { show ->
+            val titleKey = show.name.normalizedSeriesKey().takeIf { it.isNotBlank() }
+                ?: show.seriesId.trim().takeIf { it.isNotBlank() }
+                ?: show.cover.orEmpty()
+            val existing = byTitle[titleKey]
+            byTitle[titleKey] = chooseBetterXtreamSeries(existing, show)
+        }
+        return byTitle.values.toList()
+    }
+
+    private fun chooseBetterXtreamSeries(
+        existing: XtreamSeries?,
+        candidate: XtreamSeries,
+    ): XtreamSeries {
+        if (existing == null) return candidate
+        return if (candidate.seriesDisplayScore() > existing.seriesDisplayScore()) candidate else existing
+    }
+
+    private fun XtreamSeries.seriesDisplayScore(): Int {
+        return listOfNotNull(
+            cover.takeIf { !it.isNullOrBlank() },
+            plot.takeIf { !it.isNullOrBlank() },
+            rating.takeIf { !it.isNullOrBlank() },
+            genre.takeIf { !it.isNullOrBlank() },
+            backdropPath.firstOrNull(),
+        ).size
+    }
+
+    private fun String?.normalizedSeriesKey(): String {
+        return orEmpty()
+            .lowercase()
+            .replace(Regex("""\(\d{4}\)|\[\d{4}]"""), "")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
     }
 
     override suspend fun removePlaylist(id: String) {
@@ -389,11 +515,42 @@ class ChannelRepositoryImpl(
                 playlistId = playlistId,
             )
 
-            val vodCategories = try { xtreamClient.getVodCategories(playlist.server, playlist.username, xtreamPassword) } catch (_: Exception) { emptyList() }
-            val vodStreams = try { xtreamClient.getVodStreams(playlist.server, playlist.username, xtreamPassword) } catch (_: Exception) { emptyList() }
+            val vodCategories = try {
+                xtreamClient.getVodCategories(playlist.server, playlist.username, xtreamPassword)
+            } catch (t: Exception) {
+                channelDebugLog("Xtream VOD category refresh failed for playlist $playlistId: ${t.message}")
+                emptyList()
+            }
+            val vodStreams = try {
+                xtreamClient.getVodStreams(playlist.server, playlist.username, xtreamPassword)
+            } catch (t: Exception) {
+                channelDebugLog("Xtream VOD movie refresh failed for playlist $playlistId: ${t.message}")
+                emptyList()
+            }
             val vodChannels = xtreamClient.mapVodToChannels(
                 streams = vodStreams,
                 categories = vodCategories,
+                server = playlist.server,
+                username = playlist.username,
+                password = xtreamPassword,
+                playlistId = playlistId,
+            )
+            val seriesCategories = try {
+                xtreamClient.getSeriesCategories(playlist.server, playlist.username, xtreamPassword)
+            } catch (t: Exception) {
+                channelDebugLog("Xtream series category refresh failed for playlist $playlistId: ${t.message}")
+                emptyList()
+            }
+            val series = fetchXtreamSeriesCatalog(
+                server = playlist.server,
+                username = playlist.username,
+                password = xtreamPassword,
+                playlistId = playlistId,
+                seriesCategories = seriesCategories,
+            )
+            val seriesChannels = xtreamClient.mapSeriesToChannels(
+                series = series,
+                categories = seriesCategories,
                 server = playlist.server,
                 username = playlist.username,
                 password = xtreamPassword,
@@ -405,7 +562,7 @@ class ChannelRepositoryImpl(
                 password = xtreamPassword,
             )
 
-            val allChannels = channels + vodChannels
+            val allChannels = channels + vodChannels + seriesChannels
             persistPlaylistSnapshot(
                 playlistId = playlist.id,
                 playlistName = playlist.name,
@@ -478,7 +635,7 @@ class ChannelRepositoryImpl(
     override suspend fun getChannels(playlistId: String): List<Channel> {
         repairChannelCatalogIfNeeded(playlistId)
         return playlistCache[playlistId] ?: loadChannelsFromDatabase(playlistId).also { persisted ->
-            if (persisted.isNotEmpty()) {
+            if (persisted.isNotEmpty() && persisted.size <= PLAYLIST_CACHE_MAX_CHANNELS) {
                 playlistCache[playlistId] = persisted
             }
         }
@@ -534,6 +691,24 @@ class ChannelRepositoryImpl(
             val next = epgId?.let(nextProgrammeByChannelId::get)
             EnrichedChannel(markedCh, current, next)
         }
+    }
+
+    override suspend fun getLiveCategoryCounts(playlistId: String): List<Pair<String, Long>> {
+        repairChannelCatalogIfNeeded(playlistId)
+        val generationId = getActiveChannelGeneration(playlistId) ?: return emptyList()
+        return database.torveQueries
+            .getLiveCategoryCountsForPlaylist(userId = uid(), playlistId = playlistId, generationId = generationId)
+            .executeAsList()
+            .map { row -> (row.group_title ?: "Ungrouped") to row.channel_count }
+    }
+
+    override suspend fun getVodCategoryCounts(playlistId: String): List<Pair<String, Long>> {
+        repairChannelCatalogIfNeeded(playlistId)
+        val generationId = getActiveChannelGeneration(playlistId) ?: return emptyList()
+        return database.torveQueries
+            .getVodCategoryCountsForPlaylist(userId = uid(), playlistId = playlistId, generationId = generationId)
+            .executeAsList()
+            .map { row -> (row.group_title ?: "VOD") to row.channel_count }
     }
 
     /**
@@ -886,8 +1061,133 @@ class ChannelRepositoryImpl(
         playlistId: String,
         type: ChannelContentType,
     ): List<EnrichedChannel> {
-        val enriched = getEnrichedChannels(playlistId)
-        return enriched.filter { it.channel.contentType == type }
+        repairChannelCatalogIfNeeded(playlistId)
+        val generationId = getActiveChannelGeneration(playlistId) ?: return emptyList()
+        val favoriteIds = database.torveQueries.getAllFavorites(userId = uid()).executeAsList()
+            .map { it.channel_id }
+            .toSet()
+        return database.torveQueries
+            .getChannelsForPlaylistContentType(
+                userId = uid(),
+                playlistId = playlistId,
+                generationId = generationId,
+                contentType = type.name,
+            )
+            .executeAsList()
+            .map { row ->
+                val channel = Channel(
+                    name = row.name,
+                    url = row.stream_url,
+                    tvgId = row.tvg_id,
+                    tvgName = row.tvg_name,
+                    tvgLogo = row.logo_url,
+                    groupTitle = row.group_title,
+                    tvgLanguage = row.tvg_language,
+                    tvgCountry = row.tvg_country,
+                    tvgShift = row.tvg_shift?.toInt(),
+                    channelNumber = row.channel_number?.toInt(),
+                    duration = row.duration.toInt(),
+                    catchupType = row.catchup_type,
+                    catchupDays = row.catchup_days?.toInt(),
+                    catchupSource = row.catchup_source,
+                    userAgent = row.user_agent,
+                    vlcOptions = decodeVlcOptions(row.vlc_options),
+                    kodiProps = decodeKodiProps(row.kodi_props),
+                    playlistId = playlistId,
+                    contentType = parseContentType(row.content_type),
+                )
+                val markedChannel = if (channelIdentityCandidates(channel).any(favoriteIds::contains)) {
+                    channel.copy(isFavorite = true)
+                } else {
+                    channel
+                }
+                EnrichedChannel(markedChannel)
+            }
+    }
+
+    override suspend fun getVodSeriesEpisodes(channel: Channel): List<Channel> {
+        if (channel.contentType != ChannelContentType.VOD_SERIES) return channel
+            .takeIf { it.url.isNotBlank() }
+            ?.let(::listOf)
+            .orEmpty()
+        val seriesId = channel.kodiProps["vod_series_id"]?.takeIf { it.isNotBlank() }
+            ?: return emptyList()
+        val playlist = database.torveQueries
+            .getPlaylist(userId = uid(), playlistId = channel.playlistId)
+            .executeAsOneOrNull()
+            ?: return emptyList()
+        if (playlist.type != "xtream" || playlist.server == null || playlist.username == null) return emptyList()
+        val password = loadXtreamPassword(channel.playlistId) ?: return emptyList()
+        val seriesInfo = runCatching {
+            xtreamClient.getSeriesInfo(
+                server = playlist.server,
+                username = playlist.username,
+                password = password,
+                seriesId = seriesId,
+            )
+        }.getOrElse { error ->
+            println("XtreamSeriesPlayback: failed seriesId=$seriesId playlistId=${channel.playlistId}: ${error.message}")
+            return emptyList()
+        }
+        val episodes = seriesInfo.episodes
+            .filter { it.directSource?.isNotBlank() == true || it.id.isNotBlank() }
+            .sortedWith(
+                compareBy<XtreamSeriesEpisode>(
+                    { it.season?.takeIf { season -> season > 0 } ?: Int.MAX_VALUE },
+                    { it.episodeNum?.takeIf { episodeNum -> episodeNum > 0 } ?: Int.MAX_VALUE },
+                    { it.id },
+                ),
+            )
+
+        return episodes.map { episode ->
+            val episodeUrl = episode.directSource
+                ?.takeIf { it.isNotBlank() && it.startsWith("http", ignoreCase = true) }
+                ?: run {
+                    val ext = episode.containerExtension
+                        ?.trim()
+                        ?.trimStart('.')
+                        ?.takeIf { it.isNotBlank() }
+                        ?: "mp4"
+                    "${playlist.server.trimEnd('/')}/series/${playlist.username}/$password/${episode.id}.$ext"
+                }
+            val seasonNumber = episode.season?.takeIf { it > 0 }
+            val episodeNumber = episode.episodeNum?.takeIf { it > 0 }
+            val episodeLabel = when {
+                seasonNumber != null && episodeNumber != null -> {
+                    val title = episode.title?.takeIf { it.isNotBlank() }
+                    "S${seasonNumber}E${episodeNumber}" + title?.let { " - $it" }.orEmpty()
+                }
+                !episode.title.isNullOrBlank() -> episode.title
+                else -> channel.name
+            }
+            channel.copy(
+                name = "${channel.name} - $episodeLabel",
+                url = episodeUrl,
+                tvgName = episodeLabel,
+                tvgLogo = episode.movieImage ?: channel.tvgLogo,
+                duration = episode.durationSecs ?: channel.duration,
+                kodiProps = channel.kodiProps + buildMap {
+                    put("vod_episode_id", episode.id)
+                    episode.containerExtension?.takeIf { it.isNotBlank() }?.let { put("vod_episode_container_extension", it) }
+                    seasonNumber?.let { put("vod_season_number", it.toString()) }
+                    episodeNumber?.let { put("vod_episode_number", it.toString()) }
+                    episode.rating?.takeIf { it > 0.0 }?.let { put("vod_episode_rating", it.toString()) }
+                    episode.plot?.takeIf { it.isNotBlank() }?.let { put("vod_episode_plot", it) }
+                },
+                contentType = ChannelContentType.VOD_SERIES,
+            )
+        }
+    }
+
+    override suspend fun resolveFirstVodSeriesEpisode(channel: Channel): Channel? {
+        return getVodSeriesEpisodes(channel).firstOrNull()?.also { episode ->
+            println(
+                "XtreamSeriesPlayback: resolved seriesId=${channel.kodiProps["vod_series_id"].orEmpty()} " +
+                    "episodeId=${episode.kodiProps["vod_episode_id"].orEmpty()} " +
+                    "season=${episode.kodiProps["vod_season_number"] ?: "-1"} " +
+                    "episode=${episode.kodiProps["vod_episode_number"] ?: "-1"}",
+            )
+        }
     }
 
     private fun persistPlaylistSnapshot(
@@ -903,14 +1203,20 @@ class ChannelRepositoryImpl(
         updatedAt: Long,
     ) {
         val existingGeneration = getActiveChannelGeneration(playlistId)
-        val existingChannels = if (existingGeneration != null) {
-            loadChannelsFromGeneration(playlistId, existingGeneration)
+        val existingChannelCount = if (existingGeneration != null) {
+            database.torveQueries
+                .getTotalChannelCountForPlaylist(
+                    userId = uid(),
+                    playlistId = playlistId,
+                    generationId = existingGeneration,
+                )
+                .executeAsOne()
         } else {
-            emptyList()
+            0L
         }
-        if (!shouldAcceptIncomingChannelSnapshot(existingChannels.size, channels.size)) {
+        if (!shouldAcceptIncomingChannelSnapshot(existingChannelCount.toInt(), channels.size)) {
             channelDebugLog(
-                "ChannelCatalog: rejected empty replacement playlistId=$playlistId existing=${existingChannels.size} incoming=${channels.size}",
+                "ChannelCatalog: rejected empty replacement playlistId=$playlistId existing=$existingChannelCount incoming=${channels.size}",
             )
             return
         }
@@ -965,7 +1271,11 @@ class ChannelRepositoryImpl(
         }
         clearStagedChannelGeneration(playlistId)
 
-        playlistCache[playlistId] = channels
+        if (channels.size <= PLAYLIST_CACHE_MAX_CHANNELS) {
+            playlistCache[playlistId] = channels
+        } else {
+            playlistCache.remove(playlistId)
+        }
         channelDebugLog(
             "ChannelCatalog: committed playlistId=$playlistId generation=$nextGeneration channels=${channels.size}",
         )
@@ -1018,7 +1328,7 @@ class ChannelRepositoryImpl(
             cached.firstOrNull { channelMatchesIdentity(it, storedId) }?.let { return it }
         }
         val localChannels = loadChannelsFromDatabase(playlistId)
-        if (localChannels.isNotEmpty()) {
+        if (localChannels.isNotEmpty() && localChannels.size <= PLAYLIST_CACHE_MAX_CHANNELS) {
             playlistCache[playlistId] = localChannels
         }
         return localChannels.firstOrNull { channelMatchesIdentity(it, storedId) }
@@ -1394,7 +1704,7 @@ class ChannelRepositoryImpl(
         var skippedHidden = 0
 
         val channels = playlistCache[playlistId] ?: loadChannelsFromDatabase(playlistId).also { persisted ->
-            if (persisted.isNotEmpty()) {
+            if (persisted.isNotEmpty() && persisted.size <= PLAYLIST_CACHE_MAX_CHANNELS) {
                 playlistCache[playlistId] = persisted
             }
         }

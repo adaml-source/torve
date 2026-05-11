@@ -41,6 +41,8 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -139,6 +141,9 @@ fun TvIptvScreen(
     val sidebarFocusRequester = remember { FocusRequester() }
     val focusedCategoryFocusRequester = remember { FocusRequester() }
     val sidebarListState = rememberLazyListState()
+    var iptvSearchFieldFocused by remember { mutableStateOf(false) }
+    val iptvFocusManager = LocalFocusManager.current
+    val iptvKeyboardController = LocalSoftwareKeyboardController.current
 
     onFirstContentRequester(focusedCategoryFocusRequester)
 
@@ -177,6 +182,10 @@ fun TvIptvScreen(
 
     BackHandler(enabled = isActive) {
         when {
+            iptvSearchFieldFocused -> {
+                iptvKeyboardController?.hide()
+                iptvFocusManager.clearFocus()
+            }
             state.showFilterSheet -> viewModel.toggleFilterSheet()
             state.showCategoryManager -> viewModel.toggleCategoryManager()
             else -> onNavigateUp()
@@ -251,6 +260,7 @@ fun TvIptvScreen(
     ) {
         val actualCategories = state.categories
             .filter { it.channels.isNotEmpty() || it.channelCount > 0 }
+            .filterNot { it.name.startsWith("VOD:", ignoreCase = true) || it.name.equals("VOD", ignoreCase = true) }
             .sortedWith(compareBy<ChannelCategory>({ (it.countryCode ?: "ZZZ").uppercase() }, { it.name.lowercase() }))
 
         val filteredFavorites = state.favorites.filter {
@@ -595,12 +605,14 @@ fun TvIptvScreen(
                     com.torve.android.ui.components.TorveSearchField(
                         value = iptvSearchQuery,
                         onValueChange = { iptvSearchQuery = it },
-                        placeholder = "Search channels",
+                        placeholder = stringResource(R.string.tv_iptv_search_hint),
                         showFocusRing = true,
+                        editOnClick = true,
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 8.dp, vertical = 6.dp)
-                            .focusProperties { left = railFocusRequester },
+                            .focusProperties { left = railFocusRequester }
+                            .onFocusChanged { iptvSearchFieldFocused = it.isFocused },
                     )
                 }
 

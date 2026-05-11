@@ -8,4 +8,5 @@ data class CalendarUiState(
     val episodes: List<TraktCalendarEpisode> = emptyList(),
     val groupedEpisodes: Map<String, List<TraktCalendarEpisode>> = emptyMap(),
     val traktConnected: Boolean = false,
+    val episodeNotificationsEnabled: Boolean = false,
 )

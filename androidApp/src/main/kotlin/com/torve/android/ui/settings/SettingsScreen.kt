@@ -104,7 +104,6 @@ import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Steel
 import com.torve.android.ui.theme.Torve
 import com.torve.android.ui.transfer.RestoreSetupRecoveryCard
-import com.torve.android.ui.transfer.providerSettingsRouteFor
 import com.torve.data.account.AccountSettingsRepository
 import com.torve.android.sync.SyncCoordinator
 import com.torve.presentation.addon.AddonViewModel
@@ -155,7 +154,7 @@ fun SettingsScreen(
     onTransferDiagnosticsClick: () -> Unit = {},
     onStartSetupClick: () -> Unit = {},
     onSetupPandaClick: () -> Unit = {},
-    onOpenProviderRoute: (route: String) -> Unit = {},
+    onStatusRepairClick: () -> Unit = {},
     viewModel: SettingsViewModel = koinInject(),
     syncCoordinator: SyncCoordinator = koinInject(),
     authClient: AuthClient = koinInject(),
@@ -435,7 +434,7 @@ fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
                     ) {
-                        Text("Sign in a TV with this phone")
+                        Text(stringResource(R.string.settings_sign_in_tv_with_phone))
                     }
                     Spacer(Modifier.height(8.dp))
                     var showSignOutConfirm by remember { mutableStateOf(false) }
@@ -457,8 +456,8 @@ fun SettingsScreen(
                                 TextButton(onClick = {
                                     showSignOutConfirm = false
                                     scope.launch {
-                                        authClient.logout()
                                         accountSessionCoordinator.signOut()
+                                        authClient.logout()
                                     }
                                 }) {
                                     Text(stringResource(R.string.settings_sign_out), color = Amber)
@@ -657,19 +656,7 @@ fun SettingsScreen(
 
         if (subscriptionState.isLoggedIn) {
             Spacer(Modifier.height(8.dp))
-            // ─── Settings IA: Status & Repair (Prompt 16) ──────────
-            // Unified provider status section. Sources its truth from
-            // the shared ProviderStatusMapper so cards here can never
-            // disagree with status text rendered elsewhere. Each card
-            // gets exactly one CTA — no second button parsed out of a
-            // message field.
-            ProviderStatusSection(
-                onConfigure = { entry ->
-                    providerSettingsRouteFor(entry.category)?.let(onOpenProviderRoute)
-                },
-                onRefresh = {},
-                onDiagnose = { onDiagnosticsClick() },
-            )
+            ProviderStatusSummaryCard(onViewAll = onStatusRepairClick)
             Spacer(Modifier.height(16.dp))
             // ─── Configure Sources ──────────────────────────────────
             // The actual credential editors. Status/repair lives above

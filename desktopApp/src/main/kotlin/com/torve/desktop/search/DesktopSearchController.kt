@@ -1,5 +1,9 @@
 package com.torve.desktop.search
 
+import com.torve.data.mdblist.MdbListApi
+import com.torve.data.mdblist.RatingsEnricher
+import com.torve.domain.integrations.IntegrationSecretKey
+import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.Season
@@ -31,6 +35,8 @@ data class DesktopSearchDetailUiState(
 
 class DesktopSearchController(
     private val metadataRepository: MetadataRepository,
+    private val ratingsEnricher: RatingsEnricher? = null,
+    private val integrationSecretStore: IntegrationSecretStore? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val started = AtomicBoolean(false)
@@ -97,7 +103,7 @@ class DesktopSearchController(
             }
 
             val type = item.type.toTmdbType()
-            val detail = runCatching { metadataRepository.getDetail(type, tmdbId) }.getOrElse { error ->
+            val rawDetail = runCatching { metadataRepository.getDetail(type, tmdbId) }.getOrElse { error ->
                 _state.update {
                     it.copy(
                         detailItem = item,
@@ -108,8 +114,13 @@ class DesktopSearchController(
                 return@launch
             }
 
-            val similar = runCatching { metadataRepository.getSimilar(type, tmdbId) }
+            val rawSimilar = runCatching { metadataRepository.getSimilar(type, tmdbId) }
                 .getOrDefault(emptyList())
+
+            // Phase 1: hydrate from local ratings cache so the user sees
+            // multi-pill ratings on first paint when they're cached.
+            val detail = ratingsEnricher?.hydrateFromCache(rawDetail) ?: rawDetail
+            val similar = ratingsEnricher?.hydrateListFromCache(rawSimilar) ?: rawSimilar
 
             _state.update {
                 it.copy(
@@ -122,6 +133,12 @@ class DesktopSearchController(
                     selectedEpisodeNumber = episodeNumber,
                 )
             }
+
+            // Phase 2: async enrich via MDBList/OMDB/Trakt. Until this
+            // commit the desktop detail page never enriched at all -- it
+            // only ever showed TMDB pills because DesktopSearchController
+            // was constructed with just the metadata repo, no enricher.
+            launchEnrich(detail, similar)
             (seasonNumber ?: detail.seasons.firstOrNull()?.seasonNumber)?.let { resolvedSeason ->
                 selectSeason(
                     seasonNumber = resolvedSeason,
@@ -181,6 +198,50 @@ class DesktopSearchController(
 
     fun clearActionMessage() {
         _state.update { it.copy(actionMessage = null) }
+    }
+
+    /**
+     * Background MDBList/OMDB/Trakt enrichment for the detail item and
+     * its Related rail. The phase-1 cache hydrate already happened in
+     * selectResult; this fires a fresh API pass so newly-discovered
+     * items get full pill coverage instead of TMDB-only.
+     *
+     * Best-effort: failures are swallowed, the user just keeps the
+     * cache-hydrate state if the API doesn't respond.
+     */
+    private fun launchEnrich(detail: MediaItem, similar: List<MediaItem>) {
+        val enricher = ratingsEnricher ?: return
+        scope.launch {
+            val apiKey = runCatching {
+                integrationSecretStore?.get(IntegrationSecretKey.MDBLIST_API_KEY)
+                    ?: MdbListApi.DEFAULT_API_KEY
+            }.getOrDefault(MdbListApi.DEFAULT_API_KEY)
+
+            // Detail item — single enrich. Swap into state when done so
+            // the header pills update without flicker.
+            launch {
+                runCatching { enricher.enrichSingle(detail, apiKey) }
+                    .getOrNull()
+                    ?.let { enriched ->
+                        // Only overwrite if the user is still on the same item.
+                        if (_state.value.detailItem?.id == detail.id) {
+                            _state.update { it.copy(detailItem = enriched) }
+                        }
+                    }
+            }
+            // Similar list — bulk enrich, single state update at the end.
+            if (similar.isNotEmpty()) {
+                launch {
+                    runCatching { enricher.enrichList(similar, apiKey) }
+                        .getOrNull()
+                        ?.let { enriched ->
+                            if (_state.value.detailItem?.id == detail.id) {
+                                _state.update { it.copy(similarItems = enriched) }
+                            }
+                        }
+                }
+            }
+        }
     }
 }
 

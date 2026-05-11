@@ -17,6 +17,8 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.torve.data.trakt.api.TraktAuthorizedApi
 import com.torve.data.trakt.auth.TraktTokenStore
+import com.torve.domain.repository.PreferencesRepository
+import com.torve.presentation.calendar.CalendarViewModel
 import org.koin.java.KoinJavaComponent.getKoin
 import java.util.concurrent.TimeUnit
 
@@ -29,7 +31,11 @@ class EpisodeNotificationWorker(
         return try {
             val tokenStore: TraktTokenStore = getKoin().get()
             val traktApi: TraktAuthorizedApi = getKoin().get()
+            val prefsRepo: PreferencesRepository = getKoin().get()
 
+            val notificationsEnabled =
+                prefsRepo.getString(CalendarViewModel.KEY_EPISODE_NOTIFICATIONS_ENABLED) == "true"
+            if (!notificationsEnabled) return Result.success()
             val accessToken = tokenStore.accessToken()
             if (accessToken.isNullOrBlank()) return Result.success()
 
@@ -108,6 +114,15 @@ class EpisodeNotificationWorker(
 
         fun cancel(context: Context) {
             WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
+        }
+
+        suspend fun scheduleIfEnabled(context: Context) {
+            val prefsRepo: PreferencesRepository = getKoin().get()
+            if (prefsRepo.getString(CalendarViewModel.KEY_EPISODE_NOTIFICATIONS_ENABLED) == "true") {
+                schedule(context)
+            } else {
+                cancel(context)
+            }
         }
     }
 }

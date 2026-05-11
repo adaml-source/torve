@@ -524,15 +524,30 @@ compose.desktop {
             "-Dtorve.desktop.channel=$releaseChannel",
             "-Dtorve.update.feed=$updateFeedUrl",
             "-Dtorve.update.repo=$updateRepo",
+            // Java's HttpURLConnection pools max 5 connections per host
+            // by default. With ~32 parallel image loads on a detail
+            // page (cast circles + Related rail + backdrop + logo +
+            // episode posters), 27 sit in queue waiting for a slot.
+            // 12s read timeout per slot = 1+ minute total wait. 64
+            // simultaneous connections is well within the OS limit and
+            // matches what HTTP/2 clients negotiate.
+            "-Dhttp.maxConnections=64",
+            "-Dhttp.keepAlive=true",
+            // sun.net.http defaults reuse an idle connection only if
+            // it's been idle <5s; bump so connections stay warm across
+            // a typical page-load burst without re-handshaking TLS.
+            "-Dhttp.keepAlive.timeout=30",
             // -splash:<path> is JDK's built-in launch-time splash. The
             // image is shown by the launcher before any class is loaded,
             // so it covers the JVM init + Compose first-frame gap that
             // otherwise leaves the user staring at an empty desktop for
-            // ~350ms. The image lives in runtime/common/torve-splash.png
-            // (appResourcesRootDir is wired to `runtime/`, so the file
-            // lands at \$APPDIR/torve-splash.png after install). The
-            // splash auto-closes when the main Window becomes visible.
-            "-splash:${'$'}APPDIR/torve-splash.png",
+            // ~350ms. The image lives in runtime/common/torve-splash.png;
+            // appResourcesRootDir is wired to `runtime/`, and Compose
+            // Desktop's jpackage layout places those files under
+            // \$APPDIR/resources/ (verified by extracting the MSI:
+            // Torve\app\resources\torve-splash.png).
+            // The splash auto-closes when the main Window becomes visible.
+            "-splash:${'$'}APPDIR/resources/torve-splash.png",
         )
 
         nativeDistributions {

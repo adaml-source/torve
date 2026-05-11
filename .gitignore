@@ -105,6 +105,7 @@ tv_focus_audit.txt
 
 # Build outputs not yet covered
 desktopApp/build/
+*.wixobj
 
 # Smoke harness scratch — live run artefacts. The harness lives in
 # scripts/smoke/ and the matrix doc in docs/smoke/; the per-run result

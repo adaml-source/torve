@@ -53,6 +53,14 @@ import com.torve.domain.model.Season
 import com.torve.domain.model.WatchProgress
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import kotlinx.coroutines.launch
 
 @Composable
 fun TvEpisodePicker(
@@ -72,6 +80,12 @@ fun TvEpisodePicker(
 ) {
     val seasonsLabel = stringResource(R.string.tv_episodes_title)
     val firstEpisodeRequester = remember { FocusRequester() }
+    val episodesListState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    // Reset episode scroll whenever the season changes
+    androidx.compose.runtime.LaunchedEffect(selectedSeason) {
+        episodesListState.scrollToItem(0)
+    }
     Column(
         verticalArrangement = Arrangement.spacedBy(16.dp),
         modifier = Modifier.fillMaxWidth(),
@@ -102,7 +116,16 @@ fun TvEpisodePicker(
                     isSelected = season.seasonNumber == selectedSeason,
                     modifier = Modifier
                         .focusRequester(requester)
-                        .focusProperties { down = firstEpisodeRequester },
+                        .onPreviewKeyEvent { keyEvent ->
+                            if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.DirectionDown) {
+                                scope.launch {
+                                    episodesListState.scrollToItem(0)
+                                    kotlinx.coroutines.delay(80)
+                                    runCatching { firstEpisodeRequester.requestFocus() }
+                                }
+                                true
+                            } else false
+                        },
                     onFocused = { onContentFocused(requester) },
                     onClick = { onSeasonSelected(season.seasonNumber) },
                 )
@@ -112,7 +135,16 @@ fun TvEpisodePicker(
                 item(key = "dl_season") {
                     TvDownloadSeasonChip(
                         seasonNumber = selectedSeason,
-                        modifier = Modifier.focusProperties { down = firstEpisodeRequester },
+                        modifier = Modifier.onPreviewKeyEvent { keyEvent ->
+                            if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.DirectionDown) {
+                                scope.launch {
+                                    episodesListState.scrollToItem(0)
+                                    kotlinx.coroutines.delay(80)
+                                    runCatching { firstEpisodeRequester.requestFocus() }
+                                }
+                                true
+                            } else false
+                        },
                         onFocused = {},
                         onClick = { onSeasonDownload(selectedSeason) },
                     )
@@ -135,6 +167,7 @@ fun TvEpisodePicker(
 
             seasonDetail != null && seasonDetail.episodes.isNotEmpty() -> {
                 LazyRow(
+                    state = episodesListState,
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                     contentPadding = PaddingValues(start = 8.dp, end = 16.dp),
                 ) {
@@ -241,11 +274,32 @@ private fun TvEpisodeCard(
     modifier: Modifier = Modifier,
 ) {
     var focused by remember { mutableStateOf(false) }
+    var longPressHandled by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(targetValue = if (focused) 1.06f else 1f, label = "episodeScale")
     val borderColor by animateColorAsState(
         targetValue = if (focused) AmberLight else Color.Transparent,
         label = "episodeBorder",
     )
+
+    // Format air date: "YYYY-MM-DD" → "May 9, 2026" / "Airs May 9, 2026"
+    val todayStr = remember {
+        val cal = java.util.Calendar.getInstance()
+        String.format(
+            "%04d-%02d-%02d",
+            cal.get(java.util.Calendar.YEAR),
+            cal.get(java.util.Calendar.MONTH) + 1,
+            cal.get(java.util.Calendar.DAY_OF_MONTH),
+        )
+    }
+    val airDateText: String? = remember(episode.airDate) {
+        val d = episode.airDate ?: return@remember null
+        val parts = d.split("-")
+        if (parts.size != 3) return@remember d
+        val months = arrayOf("Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec")
+        val month = parts[1].toIntOrNull()?.minus(1)?.let { months.getOrNull(it) } ?: return@remember d
+        val formatted = "$month ${parts[2].trimStart('0')}, ${parts[0]}"
+        if (d > todayStr) "Airs $formatted" else formatted
+    }
 
     Box(
         modifier = modifier
@@ -256,6 +310,30 @@ private fun TvEpisodeCard(
             .border(2.dp, borderColor, RoundedCornerShape(12.dp))
             .clip(RoundedCornerShape(12.dp))
             .onFocusChanged { focused = it.isFocused }
+            .onPreviewKeyEvent { keyEvent ->
+                val kc = keyEvent.nativeKeyEvent.keyCode
+                if (kc == android.view.KeyEvent.KEYCODE_DPAD_CENTER || kc == android.view.KeyEvent.KEYCODE_ENTER) {
+                    when {
+                        keyEvent.nativeKeyEvent.action == android.view.KeyEvent.ACTION_DOWN &&
+                            keyEvent.nativeKeyEvent.repeatCount == 0 -> {
+                            longPressHandled = false
+                            false
+                        }
+                        keyEvent.nativeKeyEvent.action == android.view.KeyEvent.ACTION_DOWN &&
+                            keyEvent.nativeKeyEvent.repeatCount >= 20 && !longPressHandled -> {
+                            longPressHandled = true
+                            onLongClick()
+                            true
+                        }
+                        // Consume key-up after a long press so combinedClickable doesn't also fire onClick
+                        keyEvent.nativeKeyEvent.action == android.view.KeyEvent.ACTION_UP && longPressHandled -> {
+                            longPressHandled = false
+                            true
+                        }
+                        else -> false
+                    }
+                } else false
+            }
             .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -301,12 +379,41 @@ private fun TvEpisodeCard(
                     overflow = TextOverflow.Ellipsis,
                     fontWeight = FontWeight.SemiBold,
                 )
-                if (episode.runtime != null) {
-                    Text(
-                        text = "${episode.runtime}m",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Silver,
-                    )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val metaText = buildString {
+                        if (episode.runtime != null) append("${episode.runtime}m")
+                        if (airDateText != null) {
+                            if (isNotEmpty()) append(" · ")
+                            append(airDateText)
+                        }
+                    }
+                    if (metaText.isNotEmpty()) {
+                        Text(
+                            text = metaText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Silver,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                    }
+                    if (episode.rating > 0.0) {
+                        Box(
+                            modifier = Modifier
+                                .background(Amber.copy(alpha = 0.18f), RoundedCornerShape(4.dp))
+                                .padding(horizontal = 4.dp, vertical = 1.dp),
+                        ) {
+                            Text(
+                                text = "★ ${"%.1f".format(episode.rating)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AmberLight,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                    }
                 }
             }
         }

@@ -32,15 +32,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.torve.android.R
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Charcoal
 import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Torve
 import com.torve.android.ui.transfer.AndroidTransferQrRenderer
+import com.torve.android.sync.SyncCoordinator
 import com.torve.presentation.pairing.TvPairingSignInViewModel
 import com.torve.presentation.session.AccountSessionCoordinator
 import kotlinx.coroutines.launch
@@ -59,6 +62,7 @@ fun TvPairingSignInScreen(
     onSignedIn: () -> Unit,
     viewModel: TvPairingSignInViewModel = koinInject(),
     accountSessionCoordinator: AccountSessionCoordinator = koinInject(),
+    syncCoordinator: SyncCoordinator = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
     val scope = rememberCoroutineScope()
@@ -72,6 +76,9 @@ fun TvPairingSignInScreen(
             // device registration, settings + integrations restore,
             // playlist sync, etc.
             runCatching { accountSessionCoordinator.bootstrapAfterSignIn() }
+            // Refresh SyncCoordinator so isAuthenticated updates immediately
+            // without requiring an app restart.
+            syncCoordinator.refreshDevices()
             onSignedIn()
         }
     }
@@ -88,7 +95,7 @@ fun TvPairingSignInScreen(
         }) {
             Icon(
                 Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Back",
+                contentDescription = stringResource(R.string.common_back),
                 tint = Snow,
             )
         }
@@ -96,14 +103,14 @@ fun TvPairingSignInScreen(
         Spacer(Modifier.height(16.dp))
 
         Text(
-            text = "Sign in with your phone",
+            text = stringResource(R.string.tv_pairing_sign_in_title),
             style = MaterialTheme.typography.headlineLarge,
             fontWeight = FontWeight.Bold,
             color = Snow,
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = "Scan this QR code with the Torve app on your phone, or open Settings → Devices and enter the code below.",
+            text = stringResource(R.string.tv_pairing_sign_in_desc),
             style = MaterialTheme.typography.bodyLarge,
             color = Torve.colors.textSecondary,
         )
@@ -120,7 +127,7 @@ fun TvPairingSignInScreen(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator(color = Amber)
                         Spacer(Modifier.height(16.dp))
-                        Text("Preparing a sign-in code…", color = Snow)
+                        Text(stringResource(R.string.tv_pairing_preparing_code), color = Snow)
                     }
                 }
                 is TvPairingSignInViewModel.State.Active -> {
@@ -132,21 +139,21 @@ fun TvPairingSignInScreen(
                 TvPairingSignInViewModel.State.Expired -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = "Code expired",
+                            text = stringResource(R.string.tv_pairing_code_expired_title),
                             style = MaterialTheme.typography.titleLarge,
                             color = Snow,
                             fontWeight = FontWeight.SemiBold,
                         )
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            text = "The pairing code timed out. Generate a new one and try again.",
+                            text = stringResource(R.string.tv_pairing_code_expired_desc),
                             color = Torve.colors.textSecondary,
                         )
                         Spacer(Modifier.height(24.dp))
                         Button(
                             onClick = { scope.launch { viewModel.restart() } },
                         ) {
-                            Text("Generate new code")
+                            Text(stringResource(R.string.tv_pairing_generate_new_code))
                         }
                     }
                 }
@@ -155,7 +162,10 @@ fun TvPairingSignInScreen(
                     // away. Show a confirmation glimpse until then.
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            "Welcome${s.displayName?.let { ", $it" } ?: ""}!",
+                            stringResource(
+                                R.string.tv_pairing_welcome_format,
+                                s.displayName?.let { ", $it" }.orEmpty(),
+                            ),
                             style = MaterialTheme.typography.headlineMedium,
                             color = Snow,
                             fontWeight = FontWeight.Bold,
@@ -167,7 +177,7 @@ fun TvPairingSignInScreen(
                 is TvPairingSignInViewModel.State.Error -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            "Couldn't sign in",
+                            stringResource(R.string.tv_pairing_error_title),
                             style = MaterialTheme.typography.titleLarge,
                             color = Snow,
                             fontWeight = FontWeight.SemiBold,
@@ -180,7 +190,7 @@ fun TvPairingSignInScreen(
                         )
                         Spacer(Modifier.height(24.dp))
                         OutlinedButton(onClick = { scope.launch { viewModel.restart() } }) {
-                            Text("Try again", color = Amber)
+                            Text(stringResource(R.string.tv_pairing_try_again), color = Amber)
                         }
                     }
                 }
@@ -206,7 +216,7 @@ private fun ActiveContent(qr: ImageBitmap?, code: String) {
             ) {
                 Image(
                     bitmap = qr,
-                    contentDescription = "Sign-in QR code",
+                    contentDescription = stringResource(R.string.tv_pairing_qr_content_description),
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -218,7 +228,7 @@ private fun ActiveContent(qr: ImageBitmap?, code: String) {
                     .background(Charcoal),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("QR unavailable", color = Snow)
+                Text(stringResource(R.string.tv_pairing_qr_unavailable), color = Snow)
             }
         }
 
@@ -237,7 +247,7 @@ private fun ActiveContent(qr: ImageBitmap?, code: String) {
         }
 
         Text(
-            text = "Waiting for your phone…",
+            text = stringResource(R.string.tv_pairing_waiting_phone),
             style = MaterialTheme.typography.bodyMedium,
             color = Torve.colors.textTertiary,
         )

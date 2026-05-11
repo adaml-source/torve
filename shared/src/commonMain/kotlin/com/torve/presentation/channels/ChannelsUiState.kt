@@ -8,7 +8,7 @@ import com.torve.domain.model.ChannelPlaylist
 import com.torve.domain.player.LiveAudioOutputMode
 import com.torve.domain.repository.PlaylistAddProgress
 
-enum class ChannelsSubTab { LIVE, FAVOURITES, GUIDE }
+enum class ChannelsSubTab { LIVE, FAVOURITES, GUIDE, MOVIES }
 
 enum class ChannelsViewMode { LIST, GRID }
 
@@ -44,6 +44,8 @@ data class ChannelsUiState(
     val searchResults: List<Channel> = emptyList(),
     val selectedChannel: Channel? = null,
     val programmes: List<EpgProgramme> = emptyList(),
+    val vodCategories: List<ChannelCategory> = emptyList(),
+    val expandedVodCategories: Set<String> = emptySet(),
     val isLoading: Boolean = false,
     val isLoadingChannels: Boolean = false,
     val isAddingPlaylist: Boolean = false,
@@ -87,8 +89,19 @@ data class ChannelsUiState(
     val isLoadingGuide: Boolean = false,
     val guideError: String? = null,
     val epgState: EpgState = EpgState.NotConfigured,
+    // Guide filter + sort controls (desktop EPG)
+    val guideSearchQuery: String = "",
+    val guideSortMode: GuideSortMode = GuideSortMode.NUMBER,
     // Audio output (TV live player)
     val audioPassthroughEnabled: Boolean = false,
     val preferSurroundCodecs: Boolean = true,
     val liveAudioOutputMode: LiveAudioOutputMode = LiveAudioOutputMode.PREFER_COMPATIBLE,
 )
+
+/**
+ * Sort mode for the EPG guide channel list (desktop). NUMBER preserves
+ * the playlist's channel-number ordering (Xtream catalogue order or m3u
+ * file order); NAME sorts alphabetically; EPG_FIRST puts channels with
+ * EPG-matched programmes ahead of empty rows.
+ */
+enum class GuideSortMode { NUMBER, NAME, EPG_FIRST }

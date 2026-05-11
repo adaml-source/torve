@@ -3,6 +3,8 @@ package com.torve.data.addon
 import com.torve.data.acceleration.AccelerationApi
 import com.torve.data.acceleration.AccelerationOutcomeDto
 import com.torve.data.debrid.DebridClient
+import com.torve.data.debrid.DebridMissingException
+import com.torve.data.debrid.DebridNoCachedStreamException
 import com.torve.db.Stream_resolve_memory
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
@@ -294,8 +296,8 @@ class StreamRepositoryImpl(
                     // Hoster URL that needs unrestricting (Real-Debrid, etc.).
                     // Without a provider we can't proceed.
                     if (provider == null || apiKey.isBlank()) {
-                        throw IllegalStateException(
-                            "Stream requires a debrid provider to unrestrict, but none is configured.",
+                        throw DebridMissingException(
+                            "Connect Real-Debrid in Panda to use this stream.",
                         )
                     }
                     debridClient.unrestrictUrl(provider, apiKey, stream.directUrl)
@@ -304,8 +306,8 @@ class StreamRepositoryImpl(
                 val infoHash = stream.infoHash
                     ?: throw Exception("Stream has no infoHash or direct URL")
                 if (provider == null || apiKey.isBlank()) {
-                    throw IllegalStateException(
-                        "Torrent streams require a debrid provider, but none is configured.",
+                    throw DebridMissingException(
+                        "Connect Real-Debrid in Panda to use torrent streams.",
                     )
                 }
                 debridClient.resolveStream(
@@ -341,7 +343,7 @@ class StreamRepositoryImpl(
         }
 
         if (providers.isEmpty()) {
-            throw IllegalStateException(
+            throw DebridMissingException(
                 "No debrid provider is configured — playback can't unrestrict this source.",
             )
         }
@@ -359,7 +361,7 @@ class StreamRepositoryImpl(
                 attempts += "${provider.name}: ${e.message ?: e::class.simpleName ?: "unknown"}"
             }
         }
-        throw NoSuchElementException(
+        throw DebridNoCachedStreamException(
             "Tried " + providers.size + " debrid provider(s) — none produced a playable URL. " +
                 "Common cause: the source isn't cached on any of them. Tried: " +
                 attempts.joinToString("; "),

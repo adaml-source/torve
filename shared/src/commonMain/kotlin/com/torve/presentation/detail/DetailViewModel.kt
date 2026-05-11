@@ -3,6 +3,9 @@ package com.torve.presentation.detail
 import com.torve.data.addon.ParsedStream
 import com.torve.data.addon.StreamSelector
 import com.torve.data.addon.isAddonHostedUrl
+import com.torve.data.debrid.DebridMissingException
+import com.torve.data.debrid.DebridNeedsReconnectException
+import com.torve.data.debrid.DebridNoCachedStreamException
 import com.torve.data.contentpolicy.ContentPolicyCacheInvalidationCoordinator
 import com.torve.data.contentpolicy.ContentPolicyRepository
 import com.torve.data.kodi.KodiClient
@@ -260,6 +263,7 @@ class DetailViewModel(
         currentType = type
         currentId = id
         scope.launch {
+            detailDiagLog("loadDetail enter type=$type id=$id")
             _state.update { it.copy(isLoading = true, error = null) }
             try {
                 val rawItem = ratingsEnricher.hydrateFromCache(metadataRepo.getDetail(type, id))
@@ -293,6 +297,12 @@ class DetailViewModel(
                     allowSensitiveBecauseUserReachedSensitiveParent = allowSensitiveFromParent,
                 ).items
                 _state.update { it.copy(similar = filteredSimilar) }
+                // Enrich similar (Related rail) the same way CatalogViewModel
+                // enriches its first three rails. Previously this only
+                // hydrated from the local cache, so newly-fetched related
+                // items showed TMDB-only pills until the user had
+                // navigated to each individually.
+                enrichSimilarRatings(filteredSimilar)
 
                 // Load watch progress — merge local SQLDelight row with the
                 // backend's latest report (cross-device resume). Whichever has
@@ -300,20 +310,18 @@ class DetailViewModel(
                 // it's null/fails we fall through to local-only behavior, so
                 // users without an account or with flaky connectivity see no
                 // regression.
-                if (item != null) {
-                    val local = watchProgressRepo.getProgress(item.id)
-                    val remote = watchStateRemoteSource?.getLatest(item.id)
-                    val merged = mergeWatchProgress(local = local, remote = remote, item = item)
-                    // If remote wins, persist to local DB so the next cold
-                    // start shows the right Resume position even offline.
-                    if (merged != null && merged !== local) {
-                        runCatching { watchProgressRepo.saveProgress(merged) }
-                    }
-                    val rating = item.tmdbId?.let { tmdbId ->
-                        runCatching { traktSyncRepo.getUserRating(tmdbId, item.type) }.getOrNull()
-                    }
-                    _state.update { it.copy(watchProgress = merged, userRating = rating) }
+                val local = watchProgressRepo.getProgress(item.id)
+                val remote = watchStateRemoteSource?.getLatest(item.id)
+                val merged = mergeWatchProgress(local = local, remote = remote, item = item)
+                // If remote wins, persist to local DB so the next cold
+                // start shows the right Resume position even offline.
+                if (merged != null && merged !== local) {
+                    runCatching { watchProgressRepo.saveProgress(merged) }
                 }
+                val rating = item.tmdbId?.let { tmdbId ->
+                    runCatching { traktSyncRepo.getUserRating(tmdbId, item.type) }.getOrNull()
+                }
+                _state.update { it.copy(watchProgress = merged, userRating = rating) }
 
                 // Auto-load first season for TV shows
                 if (type == "tv" && item.seasons.isNotEmpty()) {
@@ -326,8 +334,10 @@ class DetailViewModel(
                 warmupLikelyPlaybackTarget(ContentWarmupTrigger.DETAIL_OPEN)
                 loadAvailability(item)
                 loadLibraryStatus(item)
+                detailDiagLog("loadDetail about to call enrichRatings id=${item.id}")
                 enrichRatings(item)
             } catch (e: Exception) {
+                detailDiagLog("loadDetail FAILED id=$id error=${e.message}")
                 _state.update { it.copy(isLoading = false, error = com.torve.presentation.error.UserFacingError.CONTENT_LOAD_FAILED.messageKey) }
             }
         }
@@ -384,8 +394,78 @@ class DetailViewModel(
                     ContentFilterAction.ALLOW_FULL -> enriched
                     else -> contentPolicyFilter.run { enriched.asStubDetail() }
                 }
+                val r = filtered.ratings
+                val msg = "enrichRatings done id=${item.id} tmdbId=${filtered.tmdbId} " +
+                    "imdbId=${filtered.imdbId} ratings=" +
+                    "(tmdb=${r?.tmdbScore} imdb=${r?.imdbScore} rt=${r?.rottenTomatoesScore} " +
+                    "trakt=${r?.traktScore} mc=${r?.metacriticScore} mdb=${r?.mdblistScore})"
+                println("TORVE_DETAIL: $msg")
+                detailDiagLog(msg)
                 _state.update { it.copy(mediaItem = filtered) }
-            } catch (_: Exception) { }
+            } catch (e: Exception) {
+                val msg = "enrichRatings FAILED id=${item.id} error=${e.message}"
+                println("TORVE_DETAIL: $msg")
+                detailDiagLog(msg)
+            }
+        }
+    }
+
+    /**
+     * Asynchronously enriches the Related rail items via MDBList/OMDB/Trakt
+     * after the cache hydrate. Mirrors CatalogViewModel.enrichAndUpdateItems().
+     * Replaces state.similar with the enriched list so the rail's pills
+     * match the detail page itself instead of staying TMDB-only.
+     */
+    private fun enrichSimilarRatings(items: List<com.torve.domain.model.MediaItem>) {
+        if (items.isEmpty()) return
+        scope.launch {
+            val apiKey = try {
+                integrationSecretStore.get(IntegrationSecretKey.MDBLIST_API_KEY)
+                    ?: prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY)
+                    ?: MdbListApi.DEFAULT_API_KEY
+            } catch (_: Exception) { MdbListApi.DEFAULT_API_KEY }
+            try {
+                val enriched = ratingsEnricher.enrichList(items, apiKey)
+                val withRatingsCount = enriched.count {
+                    val r = it.ratings ?: return@count false
+                    r.imdbScore != null || r.rottenTomatoesScore != null ||
+                        r.traktScore != null || r.metacriticScore != null
+                }
+                detailDiagLog(
+                    "enrichSimilar done size=${items.size} withRatings=$withRatingsCount apiKey=${apiKeySummary(apiKey)}",
+                )
+                _state.update { it.copy(similar = enriched) }
+            } catch (e: Exception) {
+                val msg = "enrichSimilar FAILED size=${items.size} error=${e.message}"
+                println("TORVE_DETAIL: $msg")
+                detailDiagLog(msg)
+            }
+        }
+    }
+
+    private fun apiKeySummary(apiKey: String): String = when {
+        apiKey.isBlank() -> "<blank>"
+        apiKey == MdbListApi.DEFAULT_API_KEY -> "<DEFAULT_PLACEHOLDER>"
+        apiKey.contains("INSERT") -> "<placeholder>"
+        else -> "<set:${apiKey.length}chars>"
+    }
+
+    private fun detailDiagLog(message: String) {
+        runCatching {
+            // Re-use the launch-guard log file so the user has a single
+            // path to copy/paste back. File-based because jpackage
+            // Windows builds swallow stdout for windowed apps.
+            val home = System.getProperty("user.home") ?: return@runCatching
+            // %LOCALAPPDATA% on Windows; ~/.torve everywhere else.
+            val base = System.getenv("LOCALAPPDATA")?.let { java.io.File(it) }
+                ?: java.io.File(home, ".torve")
+            val dir = java.io.File(base, "Torve")
+            dir.mkdirs()
+            val file = java.io.File(dir, "launch-guard.log")
+            file.appendText(
+                "${java.time.Instant.now()} TorveDetail $message" +
+                    System.lineSeparator(),
+            )
         }
     }
 
@@ -1411,6 +1491,24 @@ class DetailViewModel(
         } catch (e: Exception) {
             com.torve.data.addon.StreamRuntimeTelemetry.recordFatalError(hostKey)
             streamRepo.reportPlaybackOutcome(stream, provider, success = false)
+            // Auth failure: retrying with different streams won't help — surface
+            // immediately so the user knows to reconnect their debrid account.
+            if (
+                e is DebridMissingException ||
+                e is DebridNeedsReconnectException ||
+                e.message?.contains("Session expired") == true ||
+                e.message?.contains("reconnect", ignoreCase = true) == true
+            ) {
+                _state.update {
+                    it.copy(
+                        isResolving = false,
+                        autoPlayMessage = null,
+                        showStreamPicker = true,
+                        streamsError = streamResolveErrorMessage(e),
+                    )
+                }
+                return
+            }
             _state.update {
                 it.copy(
                     autoPlayMessage = "Stream failed, trying next...",
@@ -1548,9 +1646,23 @@ class DetailViewModel(
                     )
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
             com.torve.data.addon.StreamRuntimeTelemetry.recordFatalError(hostKey)
             streamRepo.reportPlaybackOutcome(stream, provider, success = false)
+            if (e is DebridMissingException || e is DebridNeedsReconnectException) {
+                _state.update {
+                    it.copy(
+                        autoPlayMessage = null,
+                        isResolving = false,
+                        showStreamPicker = true,
+                        streamsError = streamResolveErrorMessage(e),
+                    )
+                }
+                return AutoResolveResult(
+                    resolved = false,
+                    attemptedKeys = currentAttemptedKeys,
+                )
+            }
             _state.update {
                 it.copy(
                     autoPlayMessage = "Stream failed, trying next...",
@@ -1574,6 +1686,39 @@ class DetailViewModel(
         if (stream.hdr != null) parts.add(stream.hdr)
         if (stream.size != null) parts.add(stream.size)
         return "Playing: ${parts.joinToString(" · ")}"
+    }
+
+    private fun streamResolveErrorKey(error: Exception): String {
+        val message = error.message.orEmpty()
+        return when {
+            error is DebridMissingException ->
+                com.torve.presentation.error.UserFacingError.STREAM_REAL_DEBRID_MISSING.messageKey
+            error is DebridNeedsReconnectException ->
+                com.torve.presentation.error.UserFacingError.STREAM_REAL_DEBRID_RECONNECT.messageKey
+            error is DebridNoCachedStreamException ->
+                com.torve.presentation.error.UserFacingError.STREAM_NO_CACHED_SOURCE.messageKey
+            message.contains("Session expired", ignoreCase = true) ||
+                message.contains("re-authenticate", ignoreCase = true) ||
+                message.contains("reconnect", ignoreCase = true) ->
+                com.torve.presentation.error.UserFacingError.STREAM_REAL_DEBRID_RECONNECT.messageKey
+            message.contains("not cached", ignoreCase = true) ||
+                message.contains("isn't cached", ignoreCase = true) ||
+                message.contains("none produced a playable URL", ignoreCase = true) ->
+                com.torve.presentation.error.UserFacingError.STREAM_NO_CACHED_SOURCE.messageKey
+            else -> com.torve.presentation.error.UserFacingError.STREAM_RESOLVE_FAILED.messageKey
+        }
+    }
+
+    private fun streamResolveErrorMessage(error: Exception): String {
+        return when (streamResolveErrorKey(error)) {
+            com.torve.presentation.error.UserFacingError.STREAM_REAL_DEBRID_MISSING.messageKey ->
+                "Connect Real-Debrid in Panda to use this stream."
+            com.torve.presentation.error.UserFacingError.STREAM_REAL_DEBRID_RECONNECT.messageKey ->
+                "Real-Debrid needs reconnecting. Open Settings > Advanced > Panda."
+            com.torve.presentation.error.UserFacingError.STREAM_NO_CACHED_SOURCE.messageKey ->
+                "No cached stream is available for this title."
+            else -> "Could not resolve this stream."
+        }
     }
 
     fun resolveStream(stream: ParsedStream, provider: DebridServiceType?, apiKey: String) {
@@ -1604,7 +1749,7 @@ class DetailViewModel(
                 println("TORVE_RESOLVE: Exception ${e::class.simpleName}: ${e.message}")
                 streamRepo.reportPlaybackOutcome(stream, provider, success = false)
                 _state.update {
-                    it.copy(isResolving = false, resolveError = com.torve.presentation.error.UserFacingError.STREAM_RESOLVE_FAILED.messageKey)
+                    it.copy(isResolving = false, resolveError = streamResolveErrorKey(e))
                 }
             }
         }
@@ -2050,11 +2195,29 @@ class DetailViewModel(
                 // Clear partial playback progress for this episode so the resolver
                 // does not immediately surface it as "Resume".
                 watchProgressRepo.deleteProgress(item.id)
-                // Update UI state
+                // Update UI state immediately so it doesn't flicker back on reload
                 val newWatched = _state.value.watchedEpisodes - episodeKey(seasonNumber, episodeNumber)
                 _state.update { it.copy(watchedEpisodes = newWatched, watchProgress = null) }
                 resolveNextEpisode()
             } catch (_: Exception) { }
+            // Remove from Trakt so syncFromTrakt cannot re-import this episode.
+            val tmdbId = item.tmdbId ?: return@launch
+            val ids = com.torve.data.trakt.TraktIds(tmdb = tmdbId)
+            val season = com.torve.data.trakt.TraktHistorySeasonEntry(
+                number = seasonNumber,
+                episodes = listOf(com.torve.data.trakt.TraktHistoryEpisodeEntry(number = episodeNumber)),
+            )
+            val show = com.torve.data.trakt.TraktHistoryShow(ids = ids, seasons = listOf(season))
+            try {
+                traktApi.removeFromHistory(com.torve.data.trakt.TraktRemoveHistoryBody(shows = listOf(show)))
+            } catch (_: Exception) {
+                traktSyncRepo.enqueueEpisodeHistoryRemove(
+                    tmdbId = tmdbId,
+                    imdbId = item.imdbId,
+                    season = seasonNumber,
+                    episode = episodeNumber,
+                )
+            }
         }
     }
 

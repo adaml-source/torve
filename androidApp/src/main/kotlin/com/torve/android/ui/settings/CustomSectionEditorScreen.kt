@@ -781,7 +781,10 @@ fun CustomSectionEditorScreen(
                 ),
                 shape = RoundedCornerShape(12.dp),
             ) {
-                Text(if (isEditing) "Save Changes" else "Create Section", fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (isEditing) stringResource(R.string.custom_save_changes) else stringResource(R.string.custom_create_section),
+                    fontWeight = FontWeight.SemiBold,
+                )
             }
 
             Spacer(Modifier.height(24.dp))

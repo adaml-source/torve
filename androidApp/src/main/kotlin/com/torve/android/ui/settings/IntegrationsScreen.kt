@@ -76,6 +76,7 @@ import androidx.compose.ui.res.stringResource
 import com.torve.android.R
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
+import com.torve.domain.model.DebridServiceType
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.usenet.NzbdavSetupViewModel
 import com.torve.presentation.usenet.NzbdavStatus
@@ -137,6 +138,109 @@ fun IntegrationsScreen(
         )
 
         Spacer(Modifier.height(16.dp))
+
+        // ── Debrid ──────────────────────────────────────────────────────────
+        IntegrationCard(
+            title = "Debrid",
+            description = "Stream torrents instantly via Real-Debrid, AllDebrid, Premiumize, or TorBox.",
+        ) {
+            when {
+                state.debridConnected && state.debridDeviceCode == null -> {
+                    // Connected: show account info + disconnect / re-auth
+                    val providerLabel = when (state.debridProvider) {
+                        DebridServiceType.REAL_DEBRID -> "Real-Debrid"
+                        DebridServiceType.ALL_DEBRID -> "AllDebrid"
+                        DebridServiceType.PREMIUMIZE -> "Premiumize"
+                        DebridServiceType.TORBOX -> "TorBox"
+                    }
+                    val accountLabel = state.debridUser?.username?.let { "$providerLabel — $it" } ?: "$providerLabel connected"
+                    Text(
+                        text = accountLabel,
+                        color = Emerald,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    state.debridUser?.expiresAt?.let { exp ->
+                        Spacer(Modifier.height(2.dp))
+                        Text("Premium until $exp", color = Silver, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { viewModel.disconnectDebrid() },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Ruby),
+                            modifier = Modifier.weight(1f),
+                        ) { Text("Disconnect") }
+                        Button(
+                            onClick = { viewModel.startDebridDeviceAuth() },
+                            colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
+                            modifier = Modifier.weight(1f),
+                        ) { Text("Re-authenticate") }
+                    }
+                }
+                state.debridDeviceCode != null -> {
+                    // Device auth in progress
+                    val code = state.debridDeviceCode!!
+                    Text(
+                        "Visit the link below and enter the code to connect:",
+                        color = Silver,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    DeviceCodeSection(userCode = code.userCode, verificationUrl = code.verificationUrl)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = { viewModel.disconnectDebrid() },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Silver),
+                    ) { Text("Cancel") }
+                }
+                else -> {
+                    // Not connected: provider picker + connect button
+                    DebridServiceType.entries.forEach { provider ->
+                        val label = when (provider) {
+                            DebridServiceType.REAL_DEBRID -> "Real-Debrid"
+                            DebridServiceType.ALL_DEBRID -> "AllDebrid"
+                            DebridServiceType.PREMIUMIZE -> "Premiumize"
+                            DebridServiceType.TORBOX -> "TorBox"
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { viewModel.setDebridProvider(provider) }
+                                .padding(vertical = 2.dp),
+                        ) {
+                            RadioButton(
+                                selected = state.debridProvider == provider,
+                                onClick = { viewModel.setDebridProvider(provider) },
+                                colors = RadioButtonDefaults.colors(selectedColor = Amber),
+                            )
+                            Text(label, color = Snow, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                    state.debridError?.let { err ->
+                        Spacer(Modifier.height(4.dp))
+                        Text(err, color = Ruby, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = { viewModel.startDebridDeviceAuth() },
+                        enabled = !state.debridLoading,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
+                    ) {
+                        if (state.debridLoading) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Obsidian)
+                            Spacer(Modifier.width(8.dp))
+                        }
+                        Text("Connect via device code")
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
 
         // ── OMDB ──
         IntegrationCard(

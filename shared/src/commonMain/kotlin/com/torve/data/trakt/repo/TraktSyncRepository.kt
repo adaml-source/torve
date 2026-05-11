@@ -1,7 +1,9 @@
 package com.torve.data.trakt.repo
 
 import com.torve.data.trakt.TraktHistoryBody
+import com.torve.data.trakt.TraktHistoryEpisodeEntry
 import com.torve.data.trakt.TraktHistoryMovie
+import com.torve.data.trakt.TraktHistorySeasonEntry
 import com.torve.data.trakt.TraktHistoryShow
 import com.torve.data.trakt.TraktIds
 import com.torve.data.trakt.TraktRatingMovie
@@ -28,6 +30,8 @@ interface TraktSyncRepository {
     suspend fun enqueueWatchlistRemove(tmdbId: Int, mediaType: MediaType, imdbId: String?)
     suspend fun enqueueHistoryAdd(tmdbId: Int, mediaType: MediaType, imdbId: String?)
     suspend fun enqueueHistoryRemove(tmdbId: Int, mediaType: MediaType, imdbId: String?)
+    suspend fun enqueueEpisodeHistoryAdd(tmdbId: Int, imdbId: String?, season: Int, episode: Int)
+    suspend fun enqueueEpisodeHistoryRemove(tmdbId: Int, imdbId: String?, season: Int, episode: Int)
     suspend fun flushPendingWrites(maxItems: Int = 50): Int
     suspend fun clearLocalData()
 }
@@ -143,6 +147,32 @@ class TraktSyncRepositoryImpl(
         )
     }
 
+    override suspend fun enqueueEpisodeHistoryAdd(tmdbId: Int, imdbId: String?, season: Int, episode: Int) {
+        enqueue(
+            ACTION_HISTORY_ADD,
+            TraktQueuePayload(
+                tmdbId = tmdbId,
+                mediaType = MediaType.SERIES.toStorageType(),
+                imdbId = imdbId,
+                seasonNumber = season,
+                episodeNumber = episode,
+            ),
+        )
+    }
+
+    override suspend fun enqueueEpisodeHistoryRemove(tmdbId: Int, imdbId: String?, season: Int, episode: Int) {
+        enqueue(
+            ACTION_HISTORY_REMOVE,
+            TraktQueuePayload(
+                tmdbId = tmdbId,
+                mediaType = MediaType.SERIES.toStorageType(),
+                imdbId = imdbId,
+                seasonNumber = season,
+                episodeNumber = episode,
+            ),
+        )
+    }
+
     override suspend fun flushPendingWrites(maxItems: Int): Int {
         if (tokenStore.accessToken().isNullOrBlank()) return 0
         val now = Clock.System.now().toEpochMilliseconds()
@@ -219,6 +249,8 @@ class TraktSyncRepositoryImpl(
         val ids = TraktIds(tmdb = payload.tmdbId, imdb = payload.imdbId)
         return if (payload.mediaType == "movie") {
             TraktHistoryBody(movies = listOf(TraktHistoryMovie(ids)))
+        } else if (payload.seasonNumber != null && payload.episodeNumber != null) {
+            TraktHistoryBody(shows = listOf(episodeScopedShow(ids, payload.seasonNumber, payload.episodeNumber)))
         } else {
             TraktHistoryBody(shows = listOf(TraktHistoryShow(ids)))
         }
@@ -228,10 +260,23 @@ class TraktSyncRepositoryImpl(
         val ids = TraktIds(tmdb = payload.tmdbId, imdb = payload.imdbId)
         return if (payload.mediaType == "movie") {
             TraktRemoveHistoryBody(movies = listOf(TraktHistoryMovie(ids)))
+        } else if (payload.seasonNumber != null && payload.episodeNumber != null) {
+            TraktRemoveHistoryBody(shows = listOf(episodeScopedShow(ids, payload.seasonNumber, payload.episodeNumber)))
         } else {
             TraktRemoveHistoryBody(shows = listOf(TraktHistoryShow(ids)))
         }
     }
+
+    private fun episodeScopedShow(ids: TraktIds, season: Int, episode: Int): TraktHistoryShow =
+        TraktHistoryShow(
+            ids = ids,
+            seasons = listOf(
+                TraktHistorySeasonEntry(
+                    number = season,
+                    episodes = listOf(TraktHistoryEpisodeEntry(number = episode)),
+                ),
+            ),
+        )
 
     private fun buildRatingsBody(
         tmdbId: Int,
@@ -272,6 +317,8 @@ data class TraktQueuePayload(
     val mediaType: String,
     val imdbId: String? = null,
     val rating: Int? = null,
+    val seasonNumber: Int? = null,
+    val episodeNumber: Int? = null,
 )
 
 data class WatchlistMergePlan(

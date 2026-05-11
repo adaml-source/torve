@@ -168,11 +168,17 @@ private class AndroidFakeChannelRepository(
     @Volatile
     var refreshStarted: Boolean = false
 
-    override suspend fun addPlaylist(name: String, url: String, epgUrl: String?): ChannelPlaylist {
+    override suspend fun addPlaylist(
+        name: String,
+        url: String,
+        epgUrl: String?,
+        id: String?,
+        onProgress: ((com.torve.domain.repository.PlaylistAddProgress) -> Unit)?,
+    ): ChannelPlaylist {
         error("Not used")
     }
 
-    override suspend fun addXtreamPlaylist(name: String, server: String, username: String, password: String): ChannelPlaylist {
+    override suspend fun addXtreamPlaylist(name: String, server: String, username: String, password: String, id: String?): ChannelPlaylist {
         error("Not used")
     }
 
@@ -190,7 +196,7 @@ private class AndroidFakeChannelRepository(
         persistedChannels[playlistId] = remoteChannels[playlistId].orEmpty()
     }
 
-    override suspend fun refreshEpg(playlistId: String) = Unit
+    override suspend fun refreshEpg(playlistId: String, hiddenChannelIds: Set<String>) = Unit
 
     override suspend fun getChannels(playlistId: String): List<Channel> = persistedChannels[playlistId].orEmpty()
 
@@ -238,10 +244,59 @@ private class AndroidFakeChannelRepository(
         recents.clear()
     }
 
+    override suspend fun clearAll() {
+        persistedChannels.clear()
+        favorites.clear()
+        recents.clear()
+    }
+
     override suspend fun getChannelsByContentType(
         playlistId: String,
         type: ChannelContentType,
     ): List<EnrichedChannel> {
         return getEnrichedChannels(playlistId).filter { it.channel.contentType == type }
     }
+
+    override suspend fun getCategoryCounts(playlistId: String): List<Pair<String, Long>> {
+        return getChannelsByGroup(playlistId).map { (group, channels) -> group to channels.size.toLong() }
+    }
+
+    override suspend fun getLiveCategoryCounts(playlistId: String): List<Pair<String, Long>> {
+        return getChannelsByGroup(playlistId)
+            .mapValues { (_, channels) ->
+                channels.filter { it.contentType == ChannelContentType.LIVE || it.contentType == ChannelContentType.UNKNOWN }
+            }
+            .filter { (group, channels) ->
+                channels.isNotEmpty() &&
+                    !group.startsWith("VOD:", ignoreCase = true) &&
+                    !group.equals("VOD", ignoreCase = true)
+            }
+            .map { (group, channels) -> group to channels.size.toLong() }
+    }
+
+    override suspend fun getVodCategoryCounts(playlistId: String): List<Pair<String, Long>> {
+        return getChannelsByGroup(playlistId).mapNotNull { (group, channels) ->
+            val isVodGroup = group.startsWith("VOD:", ignoreCase = true) || group.equals("VOD", ignoreCase = true)
+            val vodChannels = if (isVodGroup) {
+                channels
+            } else {
+                channels.filter {
+                    it.contentType == ChannelContentType.VOD_MOVIE || it.contentType == ChannelContentType.VOD_SERIES
+                }
+            }
+            if (vodChannels.isEmpty()) null else group to vodChannels.size.toLong()
+        }
+    }
+
+    override suspend fun getChannelsForCategory(playlistId: String, categoryName: String): List<Channel> {
+        return getChannelsByGroup(playlistId)[categoryName].orEmpty()
+    }
+
+    override suspend fun getTotalChannelCount(playlistId: String): Long {
+        return getChannels(playlistId).size.toLong()
+    }
+
+    override fun syncHiddenChannelsToDb(hiddenIds: Set<String>) = Unit
+
+    override fun getHiddenChannelIds(): Set<String> = emptySet()
 }

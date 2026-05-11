@@ -58,6 +58,7 @@ import com.torve.domain.model.RatingSource
 import com.torve.domain.model.allowsTmdbRatingProvider
 import com.torve.domain.model.deriveProvidersToRender
 import com.torve.domain.model.hasAnyEnabledDisplayValue
+import com.torve.domain.model.extractTmdbIdOrNull
 import com.torve.domain.model.withFallbackTmdbScore
 import com.torve.domain.repository.MetadataRepository
 import com.torve.android.ui.components.getRatingValue
@@ -110,7 +111,7 @@ fun TvFocusDetailsPanel(
     ) {
         val item = focusedItem ?: return@LaunchedEffect
         val itemKey = "${item.type}:${item.tmdbId ?: item.id}"
-        val tmdbId = item.tmdbId ?: return@LaunchedEffect
+        val tmdbId = item.tmdbId ?: item.id.extractTmdbIdOrNull()
         // Skip if already in static cache
         if (enrichedItemCache.containsKey(itemKey)) return@LaunchedEffect
         // Skip only when the item already has values for the user's selected
@@ -123,12 +124,12 @@ fun TvFocusDetailsPanel(
 
         enrichScope.launch {
             try {
-                // Fetch TMDB detail for imdbId + cast + overview
                 val mediaType = if (item.type == MediaType.MOVIE) "movie" else "tv"
-                val detail = withContext(Dispatchers.IO) {
+                val detail = if (tmdbId != null) withContext(Dispatchers.IO) {
                     runCatching { metadataRepo.getDetail(mediaType, tmdbId) }.getOrNull()
-                }
+                } else null
                 val itemWithDetail = item.copy(
+                    tmdbId = tmdbId ?: detail?.tmdbId ?: item.tmdbId,
                     imdbId = detail?.imdbId ?: item.imdbId,
                     overview = item.overview ?: detail?.overview,
                     genres = item.genres.ifEmpty { detail?.genres ?: emptyList() },
@@ -184,7 +185,7 @@ fun TvFocusDetailsPanel(
                 val cached = enrichedItemCache[itemKey]
                 val base = if (cached != null) {
                     item.copy(
-                        ratings = item.ratings ?: cached.ratings,
+                        ratings = cached.ratings ?: item.ratings,
                         overview = item.overview ?: cached.overview,
                         genres = item.genres.ifEmpty { cached.genres },
                         year = item.year ?: cached.year,
@@ -272,10 +273,17 @@ private fun FocusPanelContent(
         val settingsViewModel: SettingsViewModel = koinInject()
         val settingsState by settingsViewModel.state.collectAsState()
         val ratingPrefs = settingsState.ratingPrefs
+        val fallbackRating = item.rating
         val ratings = item.ratings.withFallbackTmdbScore(item.rating)
         if (ratings != null && ratings.hasAnyEnabledDisplayValue(ratingPrefs)) {
             Spacer(Modifier.height(14.dp))
             RatingsRow(ratings, ratingPrefs)
+        } else if (fallbackRating != null && fallbackRating > 0.0) {
+            Spacer(Modifier.height(14.dp))
+            FallbackRatingRow(fallbackRating)
+        } else if (ratings != null && hasAnyRating(ratings)) {
+            Spacer(Modifier.height(14.dp))
+            RatingsRow(ratings)
         }
 
         // 5. Synopsis — TV-readable size, expanded with poster removed
@@ -519,7 +527,8 @@ private fun CastChip(castMember: CastMember) {
 private fun hasAnyRating(r: MediaRatings): Boolean {
     return r.imdbScore != null || r.tmdbScore != null ||
         r.rottenTomatoesScore != null || r.rtAudienceScore != null ||
-        r.metacriticScore != null
+        r.metacriticScore != null || r.letterboxdScore != null ||
+        r.traktScore != null || r.mdblistScore != null || r.malScore != null
 }
 
 @Composable

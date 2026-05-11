@@ -106,6 +106,7 @@ private data class DesktopRuntime(
     val libraryDetailController: DesktopSearchController,
     val searchController: DesktopSearchController,
     val channelsViewModel: ChannelsViewModel,
+    val channelRepository: ChannelRepository,
     val addonRepository: AddonRepository,
     val homeViewModel: HomeViewModel,
     val searchViewModel: SearchViewModel,
@@ -174,8 +175,29 @@ internal fun nonMacAccel(key: Key): KeyShortcut? =
 @Volatile
 internal var globalTray: com.torve.desktop.tray.DesktopSystemTray? = null
 
+/**
+ * In-app alert state. Backed by a [MutableStateFlow] so any Composable
+ * in the V2App tree can observe it and render an AlertDialog.
+ *
+ * Tray balloons are unreliable while the main window is fullscreen on
+ * Windows -- DWM frequently suppresses them and the user never sees the
+ * notification. We therefore *also* push the message into an in-app
+ * dialog so it always becomes visible.
+ */
+data class DesktopAlert(val title: String, val body: String)
+
+internal val desktopAlertFlow: kotlinx.coroutines.flow.MutableStateFlow<DesktopAlert?> =
+    kotlinx.coroutines.flow.MutableStateFlow(null)
+
+fun desktopAlertDismiss() {
+    desktopAlertFlow.value = null
+}
+
 fun desktopNotify(title: String, body: String) {
+    // Tray balloon (best-effort -- may be hidden by DWM under fullscreen).
     globalTray?.notify(title, body)
+    // Reliable, always-visible in-app dialog.
+    desktopAlertFlow.value = DesktopAlert(title, body)
 }
 
 /**
@@ -186,6 +208,15 @@ fun desktopNotify(title: String, body: String) {
  */
 @Volatile
 internal var globalUpdateChecker: com.torve.desktop.updates.UpdateChecker? = null
+
+/**
+ * Process-wide reference to the catalog top-cache worker. The Movies
+ * and TV Shows pages subscribe to its progress flow to render a
+ * pre-cache banner ("Pre-caching catalog: 7/35 genres...") while the
+ * background pass is running. Null until bootstrap completes.
+ */
+@Volatile
+internal var globalCatalogTopWorker: com.torve.data.catalog.CatalogTopCacheWorker? = null
 
 /**
  * Process-wide LocalLibraryRepository singleton. The library page reads
@@ -208,9 +239,34 @@ internal val globalReminderStore: com.torve.desktop.reminders.EpgReminderStore b
 private val loginFullscreenPreview: Boolean =
     System.getProperty("torve.desktop.loginFullscreenPreview", "true").toBoolean()
 
-fun main() = application {
+fun main() {
+    // Splash BEFORE application { ... } starts composing. The Compose
+    // Window won't become visible for ~350ms, and even then the
+    // iconify dance briefly minimizes/restores it -- showing the
+    // splash up front means the user sees a premium Torve loading
+    // surface for the entire launch race instead of a black window.
+    // The launch guard disposes this splash after iconify completes.
+    if (System.getProperty("os.name", "").lowercase().contains("win")) {
+        com.torve.desktop.launch.globalLaunchSplash =
+            com.torve.desktop.launch.showTorveLaunchSplash()
+    }
+    application {
     com.torve.platform.TorveRuntimeDebug.verboseLoggingEnabled = true
     val releaseInfo = DesktopReleaseInfo.current()
+    // Launch-guard observability. Logged once at the top of the
+    // application lifecycle so cold-launch traces can correlate
+    // strategy + renderer + the rest of the guard timeline.
+    com.torve.desktop.launch.launchGuardLog(
+        "start",
+        "os" to System.getProperty("os.name", "?"),
+        "renderer" to (
+            System.getProperty("skiko.renderApi")
+                ?: System.getenv("SKIKO_RENDER_API")
+                ?: "default"
+        ),
+        "strategy" to com.torve.desktop.launch.resolveLaunchGuardStrategy().token,
+        "version" to releaseInfo.version,
+    )
     // Sentry init must happen before the uncaught handler installs so the
     // first crash of the session has a place to go. DSN is read from
     // TORVE_SENTRY_DSN - no DSN means the SDK is a no-op (zero network
@@ -328,16 +384,46 @@ fun main() = application {
         // No flicker, no flash, no alt-tab required -- the OS just
         // paints an already-content-ready window the first time.
         LaunchedEffect(Unit) {
-            // Two delays: a short one for an initial nudge, and a
-            // longer fallback. Most launches succeed within the
-            // first; the second handles slow GPUs / cold disks.
             kotlinx.coroutines.delay(350)
             windowVisible = true
-            // Once visible, ensure focus + bring-to-front so it
-            // doesn't slip behind whatever the user clicked the
-            // taskbar from.
-            window.toFront()
-            window.requestFocus()
+        }
+
+        // First-composition signal. LaunchedEffect(Unit) fires when
+        // composition completes its first pass for this scope, so this
+        // is approximately when Compose has populated its scene graph
+        // (NOT when the GPU has presented the frame -- Skiko's render
+        // pipeline is asynchronous from composition).
+        LaunchedEffect(Unit) {
+            com.torve.desktop.launch.launchGuardLog("first_composition_started")
+        }
+
+        // Once the window is actually realized on screen, run the
+        // configured launch guard. The guard works around a Skiko
+        // first-surface init race on Windows where the JFrame becomes
+        // visible before DWM has attached its composition surface, so
+        // the window sits black until something forces a full repaint.
+        // Strategy is selected via TORVE_LAUNCH_GUARD env var; default
+        // is "native" (JNA SetForegroundWindow + RedrawWindow), which
+        // does not blink the taskbar.
+        LaunchedEffect(windowVisible) {
+            if (!windowVisible) return@LaunchedEffect
+            com.torve.desktop.launch.launchGuardLog("main_visible")
+            // Wait for the JFrame to be fully realized and for
+            // Compose to schedule its first composition. Too short
+            // (<100ms) and the guard runs before the back buffer
+            // holds anything worth showing.
+            kotlinx.coroutines.delay(200)
+            com.torve.desktop.launch.runLaunchGuard(
+                mainFrame = window,
+                strategy = com.torve.desktop.launch.resolveLaunchGuardStrategy(),
+            )
+            // Dismiss the launch splash AFTER the iconify dance
+            // completes, plus a tiny buffer for the restored window
+            // to actually present a frame. The splash was shown in
+            // main() before application{} started, so this is the
+            // first chance the guard has had to dispose it.
+            kotlinx.coroutines.delay(100)
+            com.torve.desktop.launch.dismissTorveLaunchSplash()
         }
 
         // Install AWT-level subtitle drop target on the JFrame backing this
@@ -362,8 +448,18 @@ fun main() = application {
                 /* root-pane DropTarget is GC'd with the window */
             }
         }
+        // Run bootstrap on Dispatchers.IO so the EDT stays free during
+        // cold launch. produceState's producer block by default runs on
+        // the composition coroutine context (EDT on Compose Desktop),
+        // which means a synchronous Koin DI startup (1-3s) blocks
+        // composition + first paint. That EDT block was making the
+        // launch guard fire AFTER the user had already alt-tabbed,
+        // and was leaving Compose's first frame unrendered when the
+        // window appeared, producing the persistent black-window race.
         val bootstrapState by produceState<BootstrapState>(initialValue = BootstrapState.Starting) {
-            value = bootstrapDesktop()
+            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                bootstrapDesktop()
+            }
             bootstrapStateHolder.value = value
         }
 
@@ -431,6 +527,7 @@ fun main() = application {
             tray = trayHolder.value,
             onExit = ::exitApplication,
         )
+    }
     }
 }
 
@@ -554,10 +651,15 @@ private fun bootstrapDesktop(): BootstrapState {
             ),
             libraryDetailController = DesktopSearchController(
                 metadataRepository = metadataRepository,
+                ratingsEnricher = koin.get<com.torve.data.mdblist.RatingsEnricher>(),
+                integrationSecretStore = koin.get<com.torve.domain.integrations.IntegrationSecretStore>(),
             ),
             searchController = DesktopSearchController(
                 metadataRepository = metadataRepository,
+                ratingsEnricher = koin.get<com.torve.data.mdblist.RatingsEnricher>(),
+                integrationSecretStore = koin.get<com.torve.domain.integrations.IntegrationSecretStore>(),
             ),
+            channelRepository = channelRepository,
             channelsViewModel = channelsViewModel,
             addonRepository = addonRepository,
             homeViewModel = homeViewModel,
@@ -577,6 +679,7 @@ private fun bootstrapDesktop(): BootstrapState {
                 prefsRepo = prefsRepo,
                 ratingsEnricher = koin.get<com.torve.data.mdblist.RatingsEnricher>(),
                 integrationSecretStore = koin.get<com.torve.domain.integrations.IntegrationSecretStore>(),
+                catalogTopCache = koin.get<com.torve.data.catalog.CatalogTopCacheRepository>(),
             ),
             tvShowsCatalogViewModel = com.torve.presentation.catalog.CatalogViewModel(
                 metadataRepo = metadataRepository,
@@ -586,6 +689,7 @@ private fun bootstrapDesktop(): BootstrapState {
                 prefsRepo = prefsRepo,
                 ratingsEnricher = koin.get<com.torve.data.mdblist.RatingsEnricher>(),
                 integrationSecretStore = koin.get<com.torve.domain.integrations.IntegrationSecretStore>(),
+                catalogTopCache = koin.get<com.torve.data.catalog.CatalogTopCacheRepository>(),
             ),
             metadataRepository = metadataRepository,
             seeAllViewModel = koin.get<SeeAllViewModel>(),
@@ -617,6 +721,26 @@ private fun bootstrapDesktop(): BootstrapState {
         // is enforced inside the service.
         runCatching { koin.get<com.torve.desktop.recording.DesktopRecordingService>().start() }
             .onFailure { println("Torve desktop bootstrap: recording service start failed: ${it.message}") }
+
+        // Pre-cache the top ~1000 highly-rated titles per genre per
+        // media type, AND pre-warm the disk image cache for the top
+        // 100 posters per genre. By the time the user clicks any
+        // genre chip, both metadata and posters are local — the click
+        // renders instantly with no network round-trip.
+        //
+        // Construct directly (not via Koin) so we can wire the
+        // desktop-side poster prefetcher. The shared single defaults
+        // to no prefetch for platforms without an image cache.
+        runCatching {
+            val worker = com.torve.data.catalog.CatalogTopCacheWorker(
+                repository = koin.get<com.torve.data.catalog.CatalogTopCacheRepository>(),
+                posterPrefetcher = { urls ->
+                    com.torve.desktop.ui.v2.components.prefetchImagesToDisk(urls)
+                },
+            )
+            globalCatalogTopWorker = worker
+            worker.start()
+        }.onFailure { println("Torve desktop bootstrap: catalog top-cache worker start failed: ${it.message}") }
 
         println("Torve desktop bootstrap: DI startup succeeded")
         BootstrapState.Ready(runtime)
@@ -898,6 +1022,7 @@ private fun DesktopRuntimePane(
             settingsViewModel = runtime.settingsViewModel,
             pandaSetupViewModel = runtime.pandaSetupViewModel,
             channelsViewModel = runtime.channelsViewModel,
+            channelRepository = runtime.channelRepository,
             addonRepository = runtime.addonRepository,
             watchlistViewModel = runtime.watchlistViewModel,
             downloadViewModel = runtime.downloadViewModel,

@@ -20,7 +20,7 @@ import com.torve.presentation.panda.PandaSetupUiState
  * proxy for "ready to use on this device."
  */
 class PandaUsenetProviderHealthChecker(
-    private val stateSource: () -> PandaSetupUiState,
+    private val stateSource: suspend () -> PandaSetupUiState,
 ) : ProviderHealthChecker {
 
     override val providerKey: String = "panda:usenet_indexer"
@@ -88,7 +88,7 @@ class PandaUsenetProviderHealthChecker(
  * narrow on purpose: only debrid-NZB clients short-circuit the check.
  */
 class PandaUsenetProviderProviderHealthChecker(
-    private val stateSource: () -> PandaSetupUiState,
+    private val stateSource: suspend () -> PandaSetupUiState,
 ) : ProviderHealthChecker {
 
     override val providerKey: String = "panda:usenet_provider"
@@ -149,7 +149,7 @@ class PandaUsenetProviderProviderHealthChecker(
  * password) on file.
  */
 class PandaDownloadClientProviderHealthChecker(
-    private val stateSource: () -> PandaSetupUiState,
+    private val stateSource: suspend () -> PandaSetupUiState,
 ) : ProviderHealthChecker {
 
     override val providerKey: String = "panda:download_client"

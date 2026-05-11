@@ -43,7 +43,7 @@ class CatchupResolverTest {
             streams = listOf(
                 XtreamLiveStream(
                     name = "WOW SKY SPORT F1 HD",
-                    streamId = 98765,
+                    streamId = "98765",
                     epgChannelId = "wow.sky.sport.f1.hd",
                     tvArchive = 1,
                     tvArchiveDuration = 7,

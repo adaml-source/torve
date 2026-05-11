@@ -112,7 +112,9 @@ import com.torve.android.ui.settings.MdbListSettingsScreen
 import com.torve.android.ui.settings.CardStyleSettingsScreen
 import com.torve.android.ui.settings.RatingSettingsScreen
 import com.torve.android.ui.settings.SensitiveMaterialSettingsScreen
+import com.torve.android.ui.settings.StatusRepairScreen
 import com.torve.android.ui.settings.StreamingServicesSettingsScreen
+import com.torve.android.ui.transfer.providerSettingsRouteFor
 import com.torve.android.ui.stats.StatsScreen
 import com.torve.android.ui.watchlist.WatchlistScreen
 import com.torve.android.ui.setup.SetupIntentHubScreen
@@ -147,6 +149,7 @@ import com.torve.presentation.subscription.SubscriptionViewModel
 import com.torve.presentation.watchlist.WatchlistViewModel
 import com.torve.presentation.home.HomeViewModel
 import org.koin.compose.koinInject
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -278,6 +281,7 @@ private const val VERIFY_EMAIL_ROUTE = "verify_email"
 private const val SETUP_CHOICE_ROUTE = "setup_choice"
 private const val SETUP_ROUTE = "setup"
 private const val TV_HOME_ROUTE = "tv_home"
+private const val DEVICE_ACCESS_MONITOR_INTERVAL_MS = 30_000L
 
 private fun mobileOnboardingCompleteKey(userId: String): String =
     "mobile_onboarding_complete_$userId"
@@ -292,6 +296,18 @@ private fun String?.requiresDeviceManagement(): Boolean =
         "no_activation_slots",
         "swap_limit_reached",
     )
+
+private fun String?.isRemoteDeviceRevocationReason(): Boolean =
+    when (this?.trim()?.lowercase()) {
+        "device_removed",
+        "device_revoked",
+        "device_deactivated",
+        "device_inactive",
+        "removed_from_active_devices",
+        "active_device_removed",
+        -> true
+        else -> false
+    }
 
 private fun String?.isAuthOrOnboardingRoute(): Boolean =
     this in setOf(
@@ -340,6 +356,7 @@ fun TorveNavGraph(
     val searchViewModel: SearchViewModel = koinInject()
     val subscriptionViewModel: SubscriptionViewModel = koinInject()
     val syncCoordinator: SyncCoordinator = koinInject()
+    val accountSessionCoordinator: com.torve.presentation.session.AccountSessionCoordinator = koinInject()
     val watchlistState by watchlistViewModel.state.collectAsState()
     val subscriptionState by subscriptionViewModel.state.collectAsState()
     val syncState by syncCoordinator.state.collectAsState()
@@ -409,6 +426,38 @@ fun TorveNavGraph(
             requestLifetimeUnlock(blockedFeature)
         }
         syncCoordinator.clearBlockedFeature()
+    }
+
+    var handledDeviceRevocationForUser by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(
+        authUser?.id,
+        subscriptionState.hasEntitlement,
+        subscriptionState.isDeviceActivated,
+        subscriptionState.deviceBlockReason,
+    ) {
+        val userId = authUser?.id?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
+        if (handledDeviceRevocationForUser == userId) return@LaunchedEffect
+        if (
+            subscriptionState.hasEntitlement &&
+            !subscriptionState.isDeviceActivated &&
+            subscriptionState.deviceBlockReason.isRemoteDeviceRevocationReason()
+        ) {
+            handledDeviceRevocationForUser = userId
+            accountSessionCoordinator.clearLocalAccountData(reason = "device_revoked")
+            authClient.logout()
+            navController.navigate(MOBILE_ROOT_ROUTE) {
+                popUpTo(0) { inclusive = true }
+                launchSingleTop = true
+            }
+        }
+    }
+
+    LaunchedEffect(authUser?.id) {
+        if (authUser?.id.isNullOrBlank()) return@LaunchedEffect
+        while (true) {
+            delay(DEVICE_ACCESS_MONITOR_INTERVAL_MS)
+            subscriptionViewModel.loadSubscription()
+        }
     }
 
     val metadataRepo: MetadataRepository = koinInject()
@@ -649,7 +698,6 @@ fun TorveNavGraph(
 
     Box(modifier = Modifier.fillMaxSize()) {
         // ── Restore progress ──
-        val accountSessionCoordinator: com.torve.presentation.session.AccountSessionCoordinator = koinInject()
         val restoreProgress by accountSessionCoordinator.restoreProgress.collectAsState()
 
         // Non-blocking sync indicator during early bootstrap phase
@@ -1069,7 +1117,7 @@ fun TorveNavGraph(
                             onReceiveCredentialsClick = { navController.navigate("transfer_receive") },
                             onTransferDiagnosticsClick = { navController.navigate("transfer_diagnostics") },
                             onStartSetupClick = { navController.navigate(SETUP_CHOICE_ROUTE) },
-                            onOpenProviderRoute = { route -> navController.navigate(route) },
+                            onStatusRepairClick = { navController.navigate("status_repair") },
                         )
                     }
                 }
@@ -1348,7 +1396,7 @@ fun TorveNavGraph(
                     onReceiveCredentialsClick = { navController.navigate("transfer_receive") },
                     onTransferDiagnosticsClick = { navController.navigate("transfer_diagnostics") },
                     onStartSetupClick = { navController.navigate(SETUP_CHOICE_ROUTE) },
-                    onOpenProviderRoute = { route -> navController.navigate(route) },
+                    onStatusRepairClick = { navController.navigate("status_repair") },
                 )
             }
 
@@ -1817,6 +1865,15 @@ fun TorveNavGraph(
             composable("sensitive_material_settings") {
                 SensitiveMaterialSettingsScreen(
                     onBack = { navController.popBackStack() },
+                )
+            }
+
+            // Status & Repair detail screen
+            composable("status_repair") {
+                StatusRepairScreen(
+                    onBack = { navController.popBackStack() },
+                    onNavigate = { route -> navController.navigate(route) },
+                    onDiagnose = { navController.navigate("diagnostics") },
                 )
             }
 

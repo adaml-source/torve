@@ -101,8 +101,20 @@ data class TraktHistoryMovie(
 )
 
 @Serializable
+data class TraktHistoryEpisodeEntry(
+    val number: Int,
+)
+
+@Serializable
+data class TraktHistorySeasonEntry(
+    val number: Int,
+    val episodes: List<TraktHistoryEpisodeEntry>,
+)
+
+@Serializable
 data class TraktHistoryShow(
     val ids: TraktIds,
+    val seasons: List<TraktHistorySeasonEntry>? = null,
 )
 
 @Serializable

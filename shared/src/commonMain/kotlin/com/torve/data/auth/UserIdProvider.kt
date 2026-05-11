@@ -17,9 +17,17 @@ package com.torve.data.auth
 class UserIdProvider(
     private val authClientProvider: () -> AuthClient,
 ) {
-    /** Current user id, or empty string when signed out. */
-    fun currentUserId(): String = authClientProvider().authUserFlow.value?.id ?: ""
+    companion object {
+        const val SIGNED_OUT_USER_ID = "__torve_signed_out__"
+    }
+
+    /** Current user id, or null when signed out. */
+    fun currentUserIdOrNull(): String? =
+        authClientProvider().authUserFlow.value?.id?.takeIf { it.isNotBlank() }
+
+    /** Current user id, or a non-user sentinel when signed out. */
+    fun currentUserId(): String = currentUserIdOrNull() ?: SIGNED_OUT_USER_ID
 
     /** Whether a user is currently signed in. */
-    fun isSignedIn(): Boolean = authClientProvider().authUserFlow.value != null
+    fun isSignedIn(): Boolean = currentUserIdOrNull() != null
 }

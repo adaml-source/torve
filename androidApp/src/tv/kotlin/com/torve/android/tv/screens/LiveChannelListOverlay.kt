@@ -78,6 +78,7 @@ fun LiveChannelListOverlay(
     favoriteChannels: List<Channel>,
     onTuneChannel: (Channel, String) -> Unit,
     onToggleFavorite: (Channel) -> Unit,
+    onLoadCategoryChannels: (suspend (String) -> List<EnrichedChannel>)? = null,
     onDismiss: () -> Unit = {},
 ) {
     BackHandler { onDismiss() }
@@ -104,14 +105,32 @@ fun LiveChannelListOverlay(
     var selectedGroupIndex by remember(currentChannelUrl) {
         mutableIntStateOf(initialGroupIndex)
     }
+    var loadedCategoryChannels by remember(categories) {
+        mutableStateOf<Map<String, List<EnrichedChannel>>>(emptyMap())
+    }
+    var loadingCategoryName by remember { mutableStateOf<String?>(null) }
 
-    val filteredCategories = remember(categories, searchQuery) {
+    val categoriesWithLoadedChannels = remember(categories, loadedCategoryChannels) {
+        categories.map { category ->
+            loadedCategoryChannels[category.name]?.let { loadedChannels ->
+                category.copy(
+                    channels = loadedChannels,
+                    channelCount = loadedChannels.size,
+                )
+            } ?: category
+        }
+    }
+
+    val filteredCategories = remember(categoriesWithLoadedChannels, searchQuery) {
         val query = searchQuery.trim()
         if (query.isBlank()) {
-            categories
+            categoriesWithLoadedChannels
         } else {
             val normalized = query.lowercase()
-            categories.mapNotNull { category ->
+            categoriesWithLoadedChannels.mapNotNull { category ->
+                if (category.name.contains(normalized, ignoreCase = true)) {
+                    return@mapNotNull category
+                }
                 val channels = category.channels.filter { enriched ->
                     enriched.channel.name.contains(normalized, ignoreCase = true) ||
                         enriched.currentProgramme?.title?.contains(normalized, ignoreCase = true) == true ||
@@ -140,6 +159,7 @@ fun LiveChannelListOverlay(
     if (selectedGroupIndex > maxIndex) selectedGroupIndex = maxIndex
     val selectedCategory = filteredCategories.getOrNull(selectedGroupIndex)
     val channelsInGroup = selectedCategory?.channels ?: emptyList()
+    val isLoadingSelectedCategory = selectedCategory?.name == loadingCategoryName
     val initialChannelIndex = remember(channelsInGroup, currentChannelUrl) {
         channelsInGroup.indexOfFirst { it.channel.url == currentChannelUrl }.takeIf { it >= 0 } ?: 0
     }
@@ -148,19 +168,48 @@ fun LiveChannelListOverlay(
     }
     var previewChannelUrl by remember(currentChannelUrl) { mutableStateOf(currentChannelUrl) }
     var shouldAutoFocusChannels by remember { mutableStateOf(true) }
-    val previewEnriched = remember(previewChannelUrl, currentChannelUrl, categories) {
-        categories.flatMap { it.channels }.firstOrNull { it.channel.url == previewChannelUrl }
-            ?: categories.flatMap { it.channels }.firstOrNull { it.channel.url == currentChannelUrl }
+    val previewEnriched = remember(previewChannelUrl, currentChannelUrl, categoriesWithLoadedChannels) {
+        categoriesWithLoadedChannels.flatMap { it.channels }.firstOrNull { it.channel.url == previewChannelUrl }
+            ?: categoriesWithLoadedChannels.flatMap { it.channels }.firstOrNull { it.channel.url == currentChannelUrl }
     }
 
     if (focusedChannelIndex > channelsInGroup.lastIndex) {
         focusedChannelIndex = channelsInGroup.lastIndex.coerceAtLeast(0)
     }
 
+    LaunchedEffect(selectedCategory?.name, selectedCategory?.channels?.size, selectedCategory?.channelCount) {
+        val category = selectedCategory ?: return@LaunchedEffect
+        val loader = onLoadCategoryChannels ?: return@LaunchedEffect
+        if (
+            category.channels.isNotEmpty() ||
+            category.channelCount <= 0 ||
+            loadedCategoryChannels.containsKey(category.name)
+        ) {
+            return@LaunchedEffect
+        }
+
+        loadingCategoryName = category.name
+        try {
+            val loadedChannels = loader(category.name)
+            loadedCategoryChannels = loadedCategoryChannels + (category.name to loadedChannels)
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            android.util.Log.w(
+                "LiveChannelListOverlay",
+                "Failed to load category ${category.name}: ${error.message}",
+            )
+            loadedCategoryChannels = loadedCategoryChannels + (category.name to emptyList())
+        } finally {
+            if (loadingCategoryName == category.name) {
+                loadingCategoryName = null
+            }
+        }
+    }
 
     LaunchedEffect(selectedGroupIndex, channelsInGroup, currentChannelUrl) {
         if (channelsInGroup.isEmpty()) {
-            if (shouldAutoFocusChannels) {
+            if (shouldAutoFocusChannels && !isLoadingSelectedCategory) {
                 try { groupFocus.requestFocus() } catch (_: IllegalStateException) {}
                 shouldAutoFocusChannels = false
             }
@@ -288,7 +337,10 @@ fun LiveChannelListOverlay(
                                 .onFocusChanged { if (it.isFocused) selectedGroupIndex = index }
                                 .onPreviewKeyEvent { event ->
                                     if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionRight) {
-                                        runCatching { channelFocus.requestFocus() }
+                                        shouldAutoFocusChannels = true
+                                        if (category.channels.isNotEmpty()) {
+                                            runCatching { channelFocus.requestFocus() }
+                                        }
                                         true
                                     } else {
                                         false
@@ -336,7 +388,11 @@ fun LiveChannelListOverlay(
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            text = stringResource(R.string.tv_live_no_channels_in_list),
+                            text = if (isLoadingSelectedCategory) {
+                                stringResource(R.string.common_loading)
+                            } else {
+                                stringResource(R.string.tv_live_no_channels_in_list)
+                            },
                             color = Silver,
                             fontSize = 14.sp,
                         )

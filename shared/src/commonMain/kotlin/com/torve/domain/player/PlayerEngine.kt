@@ -92,6 +92,10 @@ interface PlayerEngine {
     fun setAudioDelay(delayMs: Int) {}
     fun getAudioDelay(): Int = 0
 
+    // Subtitle delay (ms): positive = show later, negative = show earlier
+    fun setSubtitleDelay(delayMs: Int) {}
+    fun getSubtitleDelay(): Int = 0
+
     // Audio session (Android) — used for equalizer/audio effects
     fun getAudioSessionId(): Int = 0
 

@@ -18,17 +18,22 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.torve.android.R
 import com.torve.android.ui.auth.VerificationBanner
 import com.torve.data.auth.AuthClient
+import com.torve.presentation.session.AccountSessionCoordinator
 import kotlinx.coroutines.launch
+import org.koin.compose.koinInject
 
 @Composable
 fun VerifyEmailGateScreen(
     authClient: AuthClient,
     onVerified: () -> Unit,
     onSignedOut: () -> Unit,
+    accountSessionCoordinator: AccountSessionCoordinator = koinInject(),
 ) {
     val scope = rememberCoroutineScope()
     val user by authClient.authUserFlow.collectAsState()
@@ -49,16 +54,16 @@ fun VerifyEmailGateScreen(
         verticalArrangement = Arrangement.Center,
     ) {
         Text(
-            text = "Confirm your email",
+            text = stringResource(R.string.verify_gate_title),
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
         )
         Spacer(Modifier.height(10.dp))
         Text(
             text = if (email.isBlank()) {
-                "Confirm your email before setting up sources."
+                stringResource(R.string.verify_gate_body_no_email)
             } else {
-                "We sent a confirmation link to $email. Confirm it, then continue to setup."
+                stringResource(R.string.verify_gate_body_email, email)
             },
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -82,7 +87,7 @@ fun VerifyEmailGateScreen(
             },
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("I've confirmed my email")
+            Text(stringResource(R.string.verify_gate_confirmed))
         }
         Spacer(Modifier.height(8.dp))
         OutlinedButton(
@@ -95,11 +100,11 @@ fun VerifyEmailGateScreen(
             },
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Send email again")
+            Text(stringResource(R.string.verify_gate_send_again))
         }
         Spacer(Modifier.height(8.dp))
         Text(
-            text = "Next: choose how you want to watch. Use Panda for Debrid/Usenet, add IPTV for live TV, or connect Plex/Jellyfin.",
+            text = stringResource(R.string.verify_gate_next),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -107,12 +112,13 @@ fun VerifyEmailGateScreen(
         TextButton(
             onClick = {
                 scope.launch {
+                    accountSessionCoordinator.signOut()
                     authClient.logout()
                     onSignedOut()
                 }
             },
         ) {
-            Text("Use a different account")
+            Text(stringResource(R.string.verify_gate_different_account))
         }
     }
 }

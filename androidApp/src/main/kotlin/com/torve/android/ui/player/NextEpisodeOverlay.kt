@@ -1,5 +1,6 @@
 package com.torve.android.ui.player
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,11 +27,15 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.foundation.focusable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -47,9 +52,11 @@ fun NextEpisodeOverlay(
     onPlayNow: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    // Force focus onto Play Now so D-pad navigation works on TV.
     val playNowFocus = remember { FocusRequester() }
+    var playNowFocused by remember { mutableStateOf(false) }
+    var cancelFocused by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(300)
         runCatching { playNowFocus.requestFocus() }
     }
     Box(
@@ -94,9 +101,14 @@ fun NextEpisodeOverlay(
                         enabled = !isResolving,
                         modifier = Modifier
                             .focusRequester(playNowFocus)
-                            .focusable(),
+                            .onFocusChanged { playNowFocused = it.isFocused }
+                            .focusable()
+                            .then(
+                                if (playNowFocused) Modifier.border(3.dp, Color.White, RoundedCornerShape(8.dp))
+                                else Modifier
+                            ),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Amber,
+                            containerColor = if (playNowFocused) Amber else Amber.copy(alpha = 0.75f),
                             contentColor = Color.Black,
                         ),
                         shape = RoundedCornerShape(8.dp),
@@ -121,9 +133,18 @@ fun NextEpisodeOverlay(
                     }
                     TextButton(
                         onClick = onCancel,
-                        modifier = Modifier.focusable(),
+                        modifier = Modifier
+                            .onFocusChanged { cancelFocused = it.isFocused }
+                            .focusable()
+                            .then(
+                                if (cancelFocused) Modifier.border(2.dp, Color.White.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                                else Modifier
+                            ),
                     ) {
-                        Text(stringResource(R.string.common_cancel), color = Color.White.copy(alpha = 0.7f))
+                        Text(
+                            stringResource(R.string.common_cancel),
+                            color = if (cancelFocused) Color.White else Color.White.copy(alpha = 0.7f),
+                        )
                     }
                     if (!isResolving && countdown > 0) {
                         Text(

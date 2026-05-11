@@ -97,7 +97,8 @@ class NewznabClient(
         category: String,
         maxItems: Int,
         pageSize: Int = 100,
-    ): List<NewznabItem> = paginate(maxItems, pageSize) { offset, limit ->
+        onProgress: ((fetched: Int, max: Int) -> Unit)? = null,
+    ): List<NewznabItem> = paginate(maxItems, pageSize, onProgress) { offset, limit ->
         browse(baseUrl, apiKey, category, offset, limit)
     }
 
@@ -108,20 +109,20 @@ class NewznabClient(
         query: String,
         maxItems: Int,
         pageSize: Int = 100,
-    ): List<NewznabItem> = paginate(maxItems, pageSize) { offset, limit ->
+        onProgress: ((fetched: Int, max: Int) -> Unit)? = null,
+    ): List<NewznabItem> = paginate(maxItems, pageSize, onProgress) { offset, limit ->
         search(baseUrl, apiKey, category, query, offset, limit)
     }
 
     private suspend fun paginate(
         maxItems: Int,
         pageSize: Int,
+        onProgress: ((fetched: Int, max: Int) -> Unit)? = null,
         fetchPage: suspend (offset: Int, limit: Int) -> List<NewznabItem>,
     ): List<NewznabItem> {
         if (maxItems <= 0) return emptyList()
         val seen = LinkedHashMap<String, NewznabItem>()
         var offset = 0
-        // Hard guardrail so a malformed indexer can't pull us into an
-        // infinite loop if it always returns a non-empty page.
         val maxPages = (maxItems + pageSize - 1) / pageSize + 1
         repeat(maxPages) {
             val page = fetchPage(offset, pageSize)
@@ -131,6 +132,7 @@ class NewznabClient(
                 if (key !in seen) seen[key] = item
             }
             offset += pageSize
+            onProgress?.invoke(seen.size.coerceAtMost(maxItems), maxItems)
             if (seen.size >= maxItems) return@repeat
         }
         return seen.values.toList().sortedByPubDateDesc().take(maxItems)

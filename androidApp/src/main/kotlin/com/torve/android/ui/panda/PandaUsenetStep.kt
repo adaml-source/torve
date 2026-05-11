@@ -354,7 +354,7 @@ private fun NzbIndexerSection(state: PandaSetupUiState, viewModel: PandaSetupVie
         onClick = { viewModel.addIndexer() },
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Text("Add another indexer", color = Amber)
+        Text(stringResource(R.string.panda_setup_usenet_add_indexer), color = Amber)
     }
 }
 

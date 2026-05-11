@@ -42,7 +42,9 @@ import com.torve.desktop.ui.components.TorveGhostButton
 import com.torve.desktop.ui.components.TorvePrimaryButton
 import com.torve.desktop.ui.components.TorveSectionCard
 import com.torve.desktop.ui.components.TorveTextField
+import com.torve.desktop.ui.l10n.ds
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
+import com.torve.domain.transfer.SecretCategory
 import com.torve.domain.transfer.TransferApplyResult
 import com.torve.domain.transfer.TransferDecryptResult
 import com.torve.presentation.transfer.ReceiverState
@@ -101,14 +103,14 @@ fun SecretsTransferReceiveScreen(
 @Composable
 private fun IdlePlaceholder(onClose: () -> Unit) {
     TorveSectionCard(
-        title = "Receive credentials",
-        supportingText = "Preparing a one-time handshake...",
+        title = ds("Receive credentials"),
+        supportingText = ds("Preparing a one-time handshake..."),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
         ) {
-            TorveGhostButton(text = "Close", onClick = onClose)
+            TorveGhostButton(text = ds("Close"), onClick = onClose)
         }
     }
 }
@@ -126,8 +128,8 @@ private fun ActiveReceiver(
     }
 
     TorveSectionCard(
-        title = com.torve.presentation.transfer.TransferCopy.RECEIVE_HEADER,
-        supportingText = com.torve.presentation.transfer.TransferCopy.RECEIVE_PRIMARY_EXPLAINER_DESKTOP,
+        title = ds(com.torve.presentation.transfer.TransferCopy.RECEIVE_HEADER),
+        supportingText = ds(com.torve.presentation.transfer.TransferCopy.RECEIVE_PRIMARY_EXPLAINER_DESKTOP),
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -153,14 +155,14 @@ private fun ActiveReceiver(
                         if (qrBitmap != null) {
                             Image(
                                 bitmap = qrBitmap,
-                                contentDescription = "Credential transfer QR code",
+                                contentDescription = ds("Credential transfer QR code"),
                                 modifier = Modifier.fillMaxWidth(),
                                 contentScale = ContentScale.Fit,
                                 filterQuality = FilterQuality.None,
                             )
                         } else {
                             Text(
-                                "QR rendering unavailable.",
+                                ds("QR rendering unavailable."),
                                 color = Color.Black,
                                 style = MaterialTheme.typography.bodySmall,
                             )
@@ -174,8 +176,9 @@ private fun ActiveReceiver(
                 ) {
                     CountdownRow(remainingSeconds = state.remainingSeconds)
                     Text(
-                        text = "${com.torve.presentation.transfer.TransferCopy.RECEIVE_SHORT_CODE_LABEL} " +
-                            "(paste on the sending device):",
+                        text = ds("%1\$s (paste on the sending device):").format(
+                            ds(com.torve.presentation.transfer.TransferCopy.RECEIVE_SHORT_CODE_LABEL),
+                        ),
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.textSecondary,
                     )
@@ -202,10 +205,10 @@ private fun ActiveReceiver(
             }
 
             TorveBanner(
-                title = "End-to-end encrypted",
-                description = "The QR holds this device's one-time public key - it's safe to share " +
-                    "with the other Torve device. The private half of this handshake never leaves " +
-                    "this device, and the Torve backend never sees credentials in the clear.",
+                title = ds("End-to-end encrypted"),
+                description = ds(
+                    "The QR holds this device's one-time public key - it's safe to share with the other Torve device. The private half of this handshake never leaves this device, and the Torve backend never sees credentials in the clear.",
+                ),
                 tone = TorveBannerTone.Info,
             )
 
@@ -220,7 +223,7 @@ private fun ActiveReceiver(
 
             if (relayRegistered) {
                 TorveGhostButton(
-                    text = if (advancedOpen) "Hide manual paste" else "Advanced: paste sealed code manually",
+                    text = if (advancedOpen) ds("Hide manual paste") else ds("Advanced: paste sealed code manually"),
                     onClick = { advancedOpen = !advancedOpen },
                 )
             }
@@ -229,7 +232,7 @@ private fun ActiveReceiver(
                 TorveTextField(
                     value = state.envelopeText,
                     onValueChange = onEnvelopeChanged,
-                    label = "Sealed credential code from sender",
+                    label = ds("Sealed credential code from sender"),
                     singleLine = false,
                     placeholder = "{\"version\":1,...}",
                     enabled = !state.importing,
@@ -252,13 +255,13 @@ private fun ActiveReceiver(
             ) {
                 if (advancedOpen) {
                     TorvePrimaryButton(
-                        text = if (state.importing) "Importing..." else "Import sealed code",
+                        text = if (state.importing) ds("Importing...") else ds("Import sealed code"),
                         enabled = !state.importing,
                         onClick = onImport,
                     )
                     Spacer(Modifier.width(8.dp))
                 }
-                TorveGhostButton(text = "Cancel and close", onClick = onCancel)
+                TorveGhostButton(text = ds("Cancel and close"), onClick = onCancel)
             }
         }
     }
@@ -285,7 +288,7 @@ private fun CountdownRow(remainingSeconds: Long) {
                 .padding(horizontal = 10.dp, vertical = 4.dp),
         ) {
             Text(
-                text = "Expires in %d:%02d".format(mm, ss),
+                text = ds("Expires in %1\$d:%2\$02d").format(mm, ss),
                 style = MaterialTheme.typography.labelMedium,
                 color = tone,
                 fontWeight = FontWeight.SemiBold,
@@ -301,12 +304,12 @@ private fun ImportedReceiver(
     onClose: () -> Unit,
 ) {
     TorveSectionCard(
-        title = "Credentials imported",
-        supportingText = "Imported ${result.applyResult.applied} credential record(s).",
+        title = ds("Credentials imported"),
+        supportingText = ds("Imported %1\$d credential record(s).").format(result.applyResult.applied),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             TorveBanner(
-                title = "Import complete",
+                title = ds("Import complete"),
                 description = importDescription(result),
                 tone = TorveBannerTone.Success,
             )
@@ -314,9 +317,9 @@ private fun ImportedReceiver(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
             ) {
-                TorveGhostButton(text = "Close", onClick = onClose)
+                TorveGhostButton(text = ds("Close"), onClick = onClose)
                 Spacer(Modifier.width(8.dp))
-                TorvePrimaryButton(text = "New handshake", onClick = onNewHandshake)
+                TorvePrimaryButton(text = ds("New handshake"), onClick = onNewHandshake)
             }
         }
     }
@@ -328,108 +331,106 @@ private fun ExpiredReceiver(
     onClose: () -> Unit,
 ) {
     TorveSectionCard(
-        title = "Receive credentials",
-        supportingText = "This handshake expired. Generate a new one or close this surface.",
+        title = ds("Receive credentials"),
+        supportingText = ds("This handshake expired. Generate a new one or close this surface."),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
         ) {
             Spacer(Modifier.width(0.dp))
-            TorveGhostButton(text = "Close", onClick = onClose)
+            TorveGhostButton(text = ds("Close"), onClick = onClose)
             Spacer(Modifier.width(8.dp))
-            TorvePrimaryButton(text = "New handshake", onClick = onRestart)
+            TorvePrimaryButton(text = ds("New handshake"), onClick = onRestart)
         }
     }
 }
 
+@Composable
 private fun importTitle(result: TransferImportResult): String = when (result) {
-    is TransferImportResult.Success -> "Credentials imported"
-    is TransferImportResult.MalformedEnvelope -> "Invalid sealed code"
+    is TransferImportResult.Success -> ds("Credentials imported")
+    is TransferImportResult.MalformedEnvelope -> ds("Invalid sealed code")
     is TransferImportResult.DecryptFailure -> when (result.result) {
-        TransferDecryptResult.Expired -> "Sealed code expired"
-        TransferDecryptResult.AuthenticationFailure -> "Could not decrypt code"
-        is TransferDecryptResult.UnsupportedVersion -> "Unsupported transfer version"
-        TransferDecryptResult.Replayed -> "Code already used"
-        TransferDecryptResult.EnvelopePayloadMismatch -> "Code failed integrity check"
-        is TransferDecryptResult.Malformed -> "Malformed sealed code"
-        is TransferDecryptResult.Success -> "Credentials imported"
+        TransferDecryptResult.Expired -> ds("Sealed code expired")
+        TransferDecryptResult.AuthenticationFailure -> ds("Could not decrypt code")
+        is TransferDecryptResult.UnsupportedVersion -> ds("Unsupported transfer version")
+        TransferDecryptResult.Replayed -> ds("Code already used")
+        TransferDecryptResult.EnvelopePayloadMismatch -> ds("Code failed integrity check")
+        is TransferDecryptResult.Malformed -> ds("Malformed sealed code")
+        is TransferDecryptResult.Success -> ds("Credentials imported")
     }
     is TransferImportResult.ApplyFailure -> when (result.result) {
-        TransferApplyResult.DuplicateNonce -> "Code already used"
-        is TransferApplyResult.NothingApplied -> "Nothing to import"
-        is TransferApplyResult.StoreFailure -> "Import failed"
-        is TransferApplyResult.Success -> "Credentials imported"
+        TransferApplyResult.DuplicateNonce -> ds("Code already used")
+        is TransferApplyResult.NothingApplied -> ds("Nothing to import")
+        is TransferApplyResult.StoreFailure -> ds("Import failed")
+        is TransferApplyResult.Success -> ds("Credentials imported")
     }
-    TransferImportResult.NoActiveSession -> "No active receive session"
-    TransferImportResult.MissingPrivateKey -> "Receive session is no longer usable"
+    TransferImportResult.NoActiveSession -> ds("No active receive session")
+    TransferImportResult.MissingPrivateKey -> ds("Receive session is no longer usable")
 }
 
+@Composable
 private fun importDescription(result: TransferImportResult): String = when (result) {
-    is TransferImportResult.Success -> buildString {
+    is TransferImportResult.Success -> {
         val applied = result.applyResult.applied
         val configCount = result.applyResult.configApplied
+        val categoryTitles = transferCategoryTitles()
+        val parts = mutableListOf<String>()
         if (configCount > 0) {
-            append("Credentials and setup details imported. Some providers may take a moment to reconnect. ")
+            parts += ds("Credentials and setup details imported. Some providers may take a moment to reconnect.")
         } else {
-            append("Credentials imported. Some providers may take a moment to reconnect. ")
+            parts += ds("Credentials imported. Some providers may take a moment to reconnect.")
         }
-        append("Imported ")
-        append(applied)
-        append(" credential record")
-        if (applied != 1) append("s")
-        if (configCount > 0) {
-            append(" + ")
-            append(configCount)
-            append(" companion config record")
-            if (configCount != 1) append("s")
+        parts += if (configCount > 0) {
+            ds("Imported %1\$d credential record(s) + %2\$d companion config record(s).")
+                .format(applied, configCount)
+        } else {
+            ds("Imported %1\$d credential record(s).").format(applied)
         }
-        append(".")
         if (result.applyResult.skippedKeyNames.isNotEmpty()) {
-            append(" Skipped unknown keys: ")
-            append(result.applyResult.skippedKeyNames.joinToString())
-            append(".")
+            parts += ds("Skipped unknown keys: %1\$s.").format(result.applyResult.skippedKeyNames.joinToString())
         }
         if (result.applyResult.skippedConfigKeys.isNotEmpty()) {
-            append(" Skipped config keys not on the receiver allowlist: ")
-            append(result.applyResult.skippedConfigKeys.joinToString())
-            append(".")
+            parts += ds("Skipped config keys not on the receiver allowlist: %1\$s.")
+                .format(result.applyResult.skippedConfigKeys.joinToString())
         }
         if (result.applyResult.categoriesMissingCompanionConfig.isNotEmpty()) {
-            append(" Imported credentials but missing companion config for: ")
-            append(result.applyResult.categoriesMissingCompanionConfig.joinToString { it.name })
-            append(". Fill in the matching server URL in Settings to finish setup.")
+            val names = result.applyResult.categoriesMissingCompanionConfig.joinToString { categoryTitles.getValue(it) }
+            parts += ds(
+                "Imported credentials but missing companion config for: %1\$s. Fill in the matching server URL in Settings to finish setup.",
+            ).format(names)
         }
+        parts.joinToString(" ")
     }
     is TransferImportResult.MalformedEnvelope -> result.reason
     is TransferImportResult.DecryptFailure -> when (val decrypt = result.result) {
-        TransferDecryptResult.Expired -> "Ask the sender to generate a fresh sealed code."
-        TransferDecryptResult.AuthenticationFailure -> "This code was not sealed for this receive session, or it was changed."
-        is TransferDecryptResult.UnsupportedVersion -> "This app cannot read transfer version ${decrypt.seenVersion}."
-        TransferDecryptResult.Replayed -> "This transfer nonce has already been consumed on this device."
-        TransferDecryptResult.EnvelopePayloadMismatch -> "The envelope and payload expiry values do not match."
+        TransferDecryptResult.Expired -> ds("Ask the sender to generate a fresh sealed code.")
+        TransferDecryptResult.AuthenticationFailure -> ds("This code was not sealed for this receive session, or it was changed.")
+        is TransferDecryptResult.UnsupportedVersion -> ds("This app cannot read transfer version %1\$d.").format(decrypt.seenVersion)
+        TransferDecryptResult.Replayed -> ds("This transfer nonce has already been consumed on this device.")
+        TransferDecryptResult.EnvelopePayloadMismatch -> ds("The envelope and payload expiry values do not match.")
         is TransferDecryptResult.Malformed -> decrypt.reason
-        is TransferDecryptResult.Success -> "Imported ${decrypt.payload.secrets.size} credential record(s)."
+        is TransferDecryptResult.Success -> ds("Imported %1\$d credential record(s).").format(decrypt.payload.secrets.size)
     }
     is TransferImportResult.ApplyFailure -> when (val apply = result.result) {
-        TransferApplyResult.DuplicateNonce -> "This transfer nonce has already been consumed on this device."
-        is TransferApplyResult.NothingApplied -> "No known credential keys were found in the payload."
-        is TransferApplyResult.StoreFailure -> buildString {
-            append(apply.message)
-            if (apply.rollbackAttempted) {
-                append(
-                    if (apply.rollbackSucceeded) {
-                        " Rollback succeeded; existing credentials were restored."
-                    } else {
-                        " Rollback failed; verify credentials manually."
-                    },
-                )
+        TransferApplyResult.DuplicateNonce -> ds("This transfer nonce has already been consumed on this device.")
+        is TransferApplyResult.NothingApplied -> ds("No known credential keys were found in the payload.")
+        is TransferApplyResult.StoreFailure -> {
+            val rollback = if (apply.rollbackAttempted) {
+                if (apply.rollbackSucceeded) {
+                    ds("Rollback succeeded; existing credentials were restored.")
+                } else {
+                    ds("Rollback failed; verify credentials manually.")
+                }
+            } else {
+                null
             }
+            listOfNotNull(apply.message, rollback).joinToString(" ")
         }
-        is TransferApplyResult.Success -> "Imported ${apply.applied} credential record(s)."
+        is TransferApplyResult.Success -> ds("Imported %1\$d credential record(s).").format(apply.applied)
     }
-    TransferImportResult.NoActiveSession -> "Generate a receive code first."
-    TransferImportResult.MissingPrivateKey -> "Generate a new receive code and try again."
+    TransferImportResult.NoActiveSession -> ds("Generate a receive code first.")
+    TransferImportResult.MissingPrivateKey -> ds("Generate a new receive code and try again.")
 }
 
 @Composable
@@ -440,23 +441,32 @@ private fun RelayStatusBanner(status: RelayStatus) {
             // local-only banner and the paste flow as primary action.
         }
         RelayStatus.Registering -> TorveBanner(
-            title = "Setting up auto-import...",
-            description = "Asking the Torve backend to forward a encrypted bundle to this device.",
+            title = ds("Setting up auto-import..."),
+            description = ds("Asking the Torve backend to forward an encrypted bundle to this device."),
             tone = TorveBannerTone.Info,
         )
         is RelayStatus.Registered -> TorveBanner(
-            title = "Auto-import is on",
-            description = "When the sender posts the encrypted bundle, this device imports it " +
-                "automatically. Manual paste stays available under Advanced.",
+            title = ds("Auto-import is on"),
+            description = ds("When the sender posts the encrypted bundle, this device imports it automatically. Manual paste stays available under Advanced."),
             tone = TorveBannerTone.Success,
         )
         is RelayStatus.Unavailable -> TorveBanner(
-            title = "Auto-import unavailable",
-            description = status.reason + " Use the paste field below.",
+            title = ds("Auto-import unavailable"),
+            description = ds("%1\$s Use the paste field below.").format(status.reason),
             tone = TorveBannerTone.Warning,
         )
     }
 }
+
+@Composable
+private fun transferCategoryTitles(): Map<SecretCategory, String> = mapOf(
+    SecretCategory.DEBRID to ds("Debrid"),
+    SecretCategory.IPTV to ds("IPTV"),
+    SecretCategory.PLEX_JELLYFIN to ds("Plex / Jellyfin"),
+    SecretCategory.TRAKT_SIMKL to ds("Trakt / SIMKL"),
+    SecretCategory.AI_KEYS to ds("AI and metadata keys"),
+    SecretCategory.PANDA to ds("Panda / Usenet"),
+)
 
 private fun importTone(result: TransferImportResult): TorveBannerTone = when (result) {
     is TransferImportResult.Success ->

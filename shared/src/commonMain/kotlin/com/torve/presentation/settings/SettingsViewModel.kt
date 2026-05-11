@@ -1,6 +1,7 @@
 package com.torve.presentation.settings
 
 import com.torve.presentation.error.defaultMessage
+import com.torve.data.auth.UserIdProvider
 import com.torve.data.ai.AiProvider
 import com.torve.data.ai.AiSuggestClient
 import com.torve.data.debrid.DebridClient
@@ -80,6 +81,7 @@ class SettingsViewModel(
     private val aiSuggestClient: AiSuggestClient,
     private val settingsRefreshNotifier: SettingsRefreshNotifier,
     private val addonRepo: AddonRepository,
+    private val userIdProvider: UserIdProvider,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(SettingsUiState())
@@ -87,6 +89,7 @@ class SettingsViewModel(
 
     private var debridPollJob: Job? = null
     private var traktPollJob: Job? = null
+    private var rdStartupRefreshDone = false
 
     /**
      * Callback to push an integration credential to the backend.
@@ -150,12 +153,25 @@ class SettingsViewModel(
         const val KEY_REGEX_PATTERNS = "regex_patterns"
         const val KEY_STREAM_GROUPS = "stream_groups"
         const val KEY_DEDUPE_RESULTS = "dedupe_results"
+        // Recording preferences. See RecordingPreferences for the typed
+        // wrapper. Stored as plain strings so they survive serialization.
+        const val KEY_RECORDING_DEFAULT_DURATION_MIN = "recording_default_duration_min"
+        const val KEY_RECORDING_PRE_ROLL_MIN = "recording_pre_roll_min"
+        const val KEY_RECORDING_POST_ROLL_MIN = "recording_post_roll_min"
+        const val KEY_RECORDING_MAX_CONCURRENT = "recording_max_concurrent"
+        // Dedicated folder for recordings. Distinct from movie/tv download
+        // paths because users frequently want recordings on a different
+        // disk (often a media server NAS share). When empty, the record
+        // button surfaces a "set the path first" notification rather than
+        // silently failing or scribbling into the movies folder.
+        const val KEY_RECORDING_DOWNLOAD_PATH = "recording_download_path"
         const val KEY_CLAUDE_API_KEY = "claude_api_key"
         const val KEY_AI_PROVIDER = "ai_provider"
         const val KEY_CHATGPT_API_KEY = "chatgpt_api_key"
         const val KEY_GEMINI_API_KEY = "gemini_api_key"
         const val KEY_PERPLEXITY_API_KEY = "perplexity_api_key"
         const val KEY_DEEPSEEK_API_KEY = "deepseek_api_key"
+        const val KEY_OPENSUBTITLES_API_KEY = "opensubtitles_api_key"
         const val KEY_OMDB_API_KEY = "omdb_api_key"
         const val KEY_MDBLIST_API_KEY = "mdblist_api_key"
         const val KEY_JELLYFIN_SERVER_URL = "jellyfin_server_url"
@@ -262,6 +278,12 @@ class SettingsViewModel(
 
     private fun loadSavedSettings() {
         scope.launch {
+            if (!userIdProvider.isSignedIn()) {
+                rdStartupRefreshDone = false
+                _state.value = SettingsUiState()
+                return@launch
+            }
+
             val provider = prefsRepo.getString(KEY_DEBRID_PROVIDER)?.let {
                 try { DebridServiceType.valueOf(it) } catch (_: Exception) { null }
             } ?: DebridServiceType.REAL_DEBRID
@@ -283,6 +305,29 @@ class SettingsViewModel(
                 integrationSecretStore.remove(IntegrationSecretKey.DEBRID_API_KEY)
                 prefsRepo.remove(KEY_DEBRID_API_KEY)
             }
+            // One-shot startup refresh: if we have RD OAuth credentials and haven't
+            // refreshed yet this session, get a fresh access token now so the first
+            // play attempt never hits a bad_token 401.
+            if (!rdStartupRefreshDone && provider == DebridServiceType.REAL_DEBRID) {
+                rdStartupRefreshDone = true
+                val refreshToken = integrationSecretStore.get(IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN)
+                val clientId = integrationSecretStore.get(IntegrationSecretKey.DEBRID_RD_CLIENT_ID)
+                val clientSecret = integrationSecretStore.get(IntegrationSecretKey.DEBRID_RD_CLIENT_SECRET)
+                println("TORVE_RD: startup refresh check — hasRefreshToken=${refreshToken != null} hasClientId=${clientId != null} hasClientSecret=${clientSecret != null}")
+                if (refreshToken != null && clientId != null && clientSecret != null) {
+                    try {
+                        val tokens = debridClient.rdRefreshAccessToken(refreshToken, clientId, clientSecret)
+                        integrationSecretStore.put(IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID, tokens.accessToken)
+                        integrationSecretStore.put(IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN, tokens.refreshToken)
+                        prefsRepo.setString(KEY_DEBRID_RD_EXPIRES_AT, tokens.expiresAt.toString())
+                        allDebridKeys[provider] = tokens.accessToken
+                        println("TORVE_RD: startup refresh OK, new token length=${tokens.accessToken.length}")
+                    } catch (e: Exception) {
+                        println("TORVE_RD: startup refresh failed — ${e.message}")
+                    }
+                }
+            }
+
             val apiKey = allDebridKeys[provider] ?: ""
             println("[SettingsLoad] Debrid provider=$provider apiKey=${if (apiKey.isNotBlank()) "${apiKey.length} chars" else "EMPTY"} providers=${allDebridKeys.keys}")
             // Trakt: secure store is authoritative. Migrate legacy pref keys once.
@@ -378,6 +423,7 @@ class SettingsViewModel(
             val showDownloadPath = prefsRepo.getString(KEY_SHOW_DOWNLOAD_PATH) ?: ""
             val adultDownloadPath = prefsRepo.getString(KEY_ADULT_DOWNLOAD_PATH) ?: ""
             val sportsDownloadPath = prefsRepo.getString(KEY_SPORTS_DOWNLOAD_PATH) ?: ""
+            val recordingDownloadPath = prefsRepo.getString(KEY_RECORDING_DOWNLOAD_PATH) ?: ""
             val downloadScanFolders = prefsRepo.getString(KEY_DOWNLOAD_SCAN_FOLDERS)?.let {
                 try { jsonParser.decodeFromString<List<String>>(it) } catch (_: Exception) { emptyList() }
             } ?: emptyList()
@@ -420,6 +466,7 @@ class SettingsViewModel(
             val geminiApiKey = integrationSecretStore.get(IntegrationSecretKey.GEMINI_API_KEY) ?: ""
             val perplexityApiKey = integrationSecretStore.get(IntegrationSecretKey.PERPLEXITY_API_KEY) ?: ""
             val deepSeekApiKey = integrationSecretStore.get(IntegrationSecretKey.DEEPSEEK_API_KEY) ?: ""
+            val opensubtitlesApiKey = integrationSecretStore.get(IntegrationSecretKey.OPENSUBTITLES_API_KEY) ?: ""
             val omdbApiKey = integrationSecretStore.get(IntegrationSecretKey.OMDB_API_KEY) ?: ""
             val mdblistApiKey = integrationSecretStore.get(IntegrationSecretKey.MDBLIST_API_KEY) ?: ""
             val jellyfinServerUrl = prefsRepo.getString(KEY_JELLYFIN_SERVER_URL) ?: ""
@@ -506,6 +553,7 @@ class SettingsViewModel(
                     showDownloadPath = showDownloadPath,
                     adultDownloadPath = adultDownloadPath,
                     sportsDownloadPath = sportsDownloadPath,
+                    recordingDownloadPath = recordingDownloadPath,
                     downloadScanFolders = downloadScanFolders,
                     codecPreference = codecPreference,
                     hdrMode = hdrMode,
@@ -519,6 +567,7 @@ class SettingsViewModel(
                     geminiApiKey = geminiApiKey,
                     perplexityApiKey = perplexityApiKey,
                     deepSeekApiKey = deepSeekApiKey,
+                    opensubtitlesApiKey = opensubtitlesApiKey,
                     omdbApiKey = omdbApiKey,
                     omdbValidationResult = null,
                     aiKeyValidationResult = null,
@@ -1247,6 +1296,17 @@ class SettingsViewModel(
     }
 
     // -------------------------------------------------------------------------
+    // OpenSubtitles
+    // -------------------------------------------------------------------------
+
+    fun setOpenSubtitlesApiKey(key: String) {
+        _state.update { it.copy(opensubtitlesApiKey = key) }
+        scope.launch {
+            integrationSecretStore.put(IntegrationSecretKey.OPENSUBTITLES_API_KEY, key)
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // OMDB
     // -------------------------------------------------------------------------
 
@@ -1736,6 +1796,12 @@ class SettingsViewModel(
         val sanitized = path.trim()
         _state.update { it.copy(movieDownloadPath = sanitized) }
         scope.launch { prefsRepo.setString(KEY_MOVIE_DOWNLOAD_PATH, sanitized) }
+    }
+
+    fun setRecordingDownloadPath(path: String) {
+        val sanitized = path.trim()
+        _state.update { it.copy(recordingDownloadPath = sanitized) }
+        scope.launch { prefsRepo.setString(KEY_RECORDING_DOWNLOAD_PATH, sanitized) }
     }
 
     fun setShowDownloadPath(path: String) {

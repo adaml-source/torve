@@ -173,18 +173,23 @@ val sharedModule = module {
         val secretStore: com.torve.domain.integrations.IntegrationSecretStore = get()
         val settingsRefreshNotifier: com.torve.presentation.settings.SettingsRefreshNotifier = get()
         client.rdTokenRefresher = com.torve.data.debrid.RdTokenRefresher {
-            val refreshToken = secretStore.get(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN) ?: return@RdTokenRefresher null
-            val clientId = secretStore.get(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_RD_CLIENT_ID) ?: return@RdTokenRefresher null
-            val clientSecret = secretStore.get(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_RD_CLIENT_SECRET) ?: return@RdTokenRefresher null
+            val refreshToken = secretStore.get(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN)
+            val clientId = secretStore.get(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_RD_CLIENT_ID)
+            val clientSecret = secretStore.get(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_RD_CLIENT_SECRET)
+            println("TORVE_RD: refresh attempt — hasRefreshToken=${refreshToken != null} hasClientId=${clientId != null} hasClientSecret=${clientSecret != null}")
+            if (refreshToken == null || clientId == null || clientSecret == null) {
+                println("TORVE_RD: refresh aborted — missing credentials, user must reconnect RD")
+                return@RdTokenRefresher null
+            }
             try {
                 val tokens = client.rdRefreshAccessToken(refreshToken, clientId, clientSecret)
-                // Persist new tokens
+                println("TORVE_RD: refresh succeeded, new token length=${tokens.accessToken.length}")
                 secretStore.put(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID, tokens.accessToken)
                 secretStore.put(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN, tokens.refreshToken)
                 settingsRefreshNotifier.notifyRefresh(kotlinx.datetime.Clock.System.now().toEpochMilliseconds())
                 tokens.accessToken
             } catch (e: Exception) {
-                torveVerboseLog { "TORVE_RD: token refresh failed: ${e.message}" }
+                println("TORVE_RD: refresh failed — ${e.message}")
                 null
             }
         }
@@ -214,6 +219,14 @@ val sharedModule = module {
     // OMDB + Ratings
     single { OmdbClient(get(), get(), get()) }
     single { RatingsEnricher(get(), get(), get(), get(), get()) }
+
+    // Catalog top-cache: pre-paginated top-1000 per genre (movie/tv).
+    single { com.torve.data.catalog.CatalogTopCacheRepository(get(), get()) }
+    // Worker default = no poster prefetch. Desktop replaces this single
+    // with a prefetcher-wired version in its module so disk-image cache
+    // is pre-warmed; mobile platforms without an equivalent image cache
+    // get the metadata-only behavior.
+    single { com.torve.data.catalog.CatalogTopCacheWorker(get(), posterPrefetcher = null) }
 
     // Kodi
     single { KodiClient(get()) }
@@ -256,6 +269,7 @@ val sharedModule = module {
     single { StreamSelector(get()) }
     single { CatalogAggregator(get()) }
     single { SubtitleAggregator(get()) }
+    single { com.torve.data.subtitles.OpenSubtitlesClient(get(), get()) }
     single { StreamAggregator(get(), get(), get()) }
 
     // Stream Repository
@@ -276,7 +290,7 @@ val sharedModule = module {
     single<ContentChannelProvider> { get<MutableContentChannelProvider>() }
     single { AccountSettingsApi(get(), baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL }, channelProvider = get()) }
     single<AccountSettingsRepository> { AccountSettingsRepositoryImpl(get(), get(), get(), get()) }
-    single<PreferencesRepository> { AccountAwarePreferencesRepository(get(), get()) }
+    single<PreferencesRepository> { AccountAwarePreferencesRepository(get(), get(), get()) }
     single { SettingsRefreshNotifier() }
     single { DeviceRegistrationNotifier() }
     single { AddonPolicyRepository(get(), get()) }
@@ -367,7 +381,7 @@ val sharedModule = module {
             authClient = get(),
         )
     }
-    single { AccountSessionCoordinator(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { AccountSessionCoordinator(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
 
     // Provider-health primitives. Repository hydrates from prefs on first
     // load; the coordinator holds in-memory checker registrations and is
@@ -669,6 +683,11 @@ val sharedModule = module {
         com.torve.presentation.recording.RecordingsViewModel(
             scheduler = get(),
             repository = get(),
+            // Starter is platform-supplied; default no-op when no
+            // RecordingStarter single is registered (e.g. on iOS
+            // before recording lands there).
+            starter = getOrNull()
+                ?: object : com.torve.presentation.recording.RecordingStarter {},
         )
     }
     single {
@@ -742,7 +761,7 @@ val sharedModule = module {
     }
     factoryOf(::PersonViewModel)
     single {
-        SettingsViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()).also { vm ->
+        SettingsViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()).also { vm ->
             // Wire integration save callback — breaks circular dep by using lazy resolution.
             vm.onIntegrationSaved = { type, credential, label ->
                 get<AccountSessionCoordinator>().saveIntegrationToBackend(type, credential, label)
@@ -830,7 +849,7 @@ val sharedModule = module {
             epgCorrectionViewModel = get(),
         )
     }
-    factory { CalendarViewModel(get(), get()) }
+    factory { CalendarViewModel(get(), get(), get()) }
     factory { DownloadViewModel(get(), contentPolicyRepository = get(), contentPolicyFilter = ContentPolicyFilter()) }
     factory { DownloadCatalogueViewModel(get(), get(), get(), get(), contentPolicyRepository = get(), contentPolicyFilter = ContentPolicyFilter()) }
     factoryOf(::ProfileViewModel)

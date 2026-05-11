@@ -16,6 +16,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -29,6 +30,7 @@ import com.torve.android.ui.theme.Charcoal
 import com.torve.android.ui.theme.Ruby
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Torve
+import com.torve.domain.providerhealth.ProviderHealthCategory
 import com.torve.domain.providerhealth.ProviderHealthEntry
 import com.torve.presentation.providerhealth.ProviderActionKind
 import com.torve.presentation.providerhealth.ProviderHealthCoordinator
@@ -190,4 +192,81 @@ private fun ProviderStatusKind.headlineColor(): Color = when (this) {
     ProviderStatusKind.NEEDS_CREDENTIALS -> Torve.colors.textTertiary
     ProviderStatusKind.LAST_CHECK_FAILED -> Ruby
     ProviderStatusKind.CHECKING -> Torve.colors.textSecondary
+}
+
+/**
+ * Compact summary card for the main Settings list. Shows overall health
+ * at a glance — one dot, one headline, one button. The full per-provider
+ * breakdown lives on its own Status & Repair screen.
+ */
+@Composable
+fun ProviderStatusSummaryCard(
+    onViewAll: () -> Unit,
+    coordinator: ProviderHealthCoordinator = koinInject(),
+    modifier: Modifier = Modifier,
+) {
+    val entries by coordinator.entries.collectAsState()
+    if (entries.isEmpty()) return
+
+    val views = ProviderStatusMapper.mapAll(entries)
+
+    val debridConnected = views.any {
+        it.entry.category == ProviderHealthCategory.DEBRID && it.kind == ProviderStatusKind.CONNECTED
+    }
+    val usenetReady = views.any {
+        it.entry.category == ProviderHealthCategory.USENET_INDEXER && it.kind == ProviderStatusKind.CONNECTED
+    } && views.any {
+        it.entry.category == ProviderHealthCategory.DOWNLOAD_CLIENT && it.kind == ProviderStatusKind.CONNECTED
+    }
+    val iptvConnected = views.any {
+        it.entry.category == ProviderHealthCategory.IPTV && it.kind == ProviderStatusKind.CONNECTED
+    }
+    val overallKind = when {
+        debridConnected || usenetReady -> ProviderStatusKind.CONNECTED
+        iptvConnected -> ProviderStatusKind.CONFIGURED_NOT_VERIFIED
+        else -> views.minByOrNull { it.kind.sortPriority }?.kind ?: ProviderStatusKind.NEEDS_CREDENTIALS
+    }
+    val headline = when {
+        debridConnected || usenetReady -> "Watching enabled"
+        iptvConnected -> "Live TV only — no debrid or Usenet"
+        else -> {
+            val issueCount = views.count {
+                it.kind == ProviderStatusKind.LAST_CHECK_FAILED || it.kind == ProviderStatusKind.NEEDS_CREDENTIALS
+            }
+            if (issueCount == 1) "1 provider needs attention" else "$issueCount providers need attention"
+        }
+    }
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Charcoal),
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                StatusDot(overallKind)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Status & Repair",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Snow,
+                    )
+                    Text(
+                        text = headline,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = overallKind.headlineColor(),
+                    )
+                }
+            }
+            OutlinedButton(
+                onClick = onViewAll,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("View all")
+            }
+        }
+    }
 }

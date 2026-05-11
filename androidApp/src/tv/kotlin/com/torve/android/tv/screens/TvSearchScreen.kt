@@ -1,5 +1,6 @@
 package com.torve.android.tv.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
@@ -93,6 +94,7 @@ fun TvSearchScreen(
     var showFilters by rememberSaveable { mutableStateOf(true) }
     val inputFocusRequester = remember { FocusRequester() }
     val voiceButtonFocusRequester = remember { FocusRequester() }
+    val firstResultRequester = remember { FocusRequester() }
     val voiceController = rememberVoiceInputController(
         prompt = "Search for movies and shows",
         onTranscript = { spokenQuery ->
@@ -104,6 +106,25 @@ fun TvSearchScreen(
 
     val popularQueries = remember {
         listOf("Action", "Comedy", "Sci-Fi", "Drama", "Thriller", "Animation")
+    }
+    val resultsMode = query.trim().length >= 2 || results.isNotEmpty() || loading || error != null
+
+    LaunchedEffect(resultsMode) {
+        showFilters = !resultsMode
+    }
+
+    LaunchedEffect(resultsMode, loading, results.firstOrNull()?.id) {
+        if (resultsMode && !loading && results.isNotEmpty()) {
+            kotlinx.coroutines.delay(80)
+            runCatching { firstResultRequester.requestFocus() }
+        }
+    }
+
+    BackHandler(enabled = resultsMode && showFilters) {
+        showFilters = false
+        if (results.isNotEmpty()) {
+            runCatching { firstResultRequester.requestFocus() }
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -248,14 +269,27 @@ fun TvSearchScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(start = 40.dp, top = 18.dp, end = 34.dp, bottom = 22.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+            .background(Obsidian)
+            .padding(
+                start = 122.dp,
+                top = if (resultsMode) 30.dp else 54.dp,
+                end = 56.dp,
+                bottom = 34.dp,
+            ),
+        verticalArrangement = Arrangement.spacedBy(if (resultsMode) 12.dp else 20.dp),
     ) {
         Column(
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .width(if (resultsMode) 620.dp else 980.dp)
+                    .height(if (resultsMode) 50.dp else 72.dp)
+                    .clip(RoundedCornerShape(if (resultsMode) 16.dp else 22.dp))
+                    .background(Charcoal.copy(alpha = 0.78f))
+                    .border(1.dp, Steel.copy(alpha = 0.72f), RoundedCornerShape(if (resultsMode) 16.dp else 22.dp))
+                    .padding(start = 18.dp, end = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 TvClickToEditOutlinedTextField(
@@ -289,18 +323,21 @@ fun TvSearchScreen(
                         tint = Amber,
                     )
                 }
-                val filterToggleRequester = remember { FocusRequester() }
-                TvSearchChip(
-                    text = if (showFilters) stringResource(R.string.tv_search_hide_filters) else stringResource(R.string.tv_search_show_filters),
-                    modifier = Modifier
-                        .focusRequester(filterToggleRequester)
-                        .focusProperties { left = voiceButtonFocusRequester },
-                    onFocused = { onContentFocused(filterToggleRequester) },
-                    onClick = { showFilters = !showFilters },
-                )
             }
+            val filterToggleRequester = remember { FocusRequester() }
+            TvSearchChip(
+                text = "Filters",
+                modifier = Modifier
+                    .focusRequester(filterToggleRequester)
+                    .focusProperties {
+                        left = railFocusRequester
+                        up = inputFocusRequester
+                    },
+                onFocused = { onContentFocused(filterToggleRequester) },
+                onClick = { showFilters = !showFilters },
+            )
 
-            if (showFilters) {
+            if (showFilters || !resultsMode) {
             // Search mode toggle row
             Row(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -311,7 +348,10 @@ fun TvSearchScreen(
                     selected = searchMode == SearchMode.STANDARD,
                     modifier = Modifier
                         .focusRequester(stdRequester)
-                        .focusProperties { left = railFocusRequester },
+                        .focusProperties {
+                            left = railFocusRequester
+                            up = inputFocusRequester
+                        },
                     onFocused = { onContentFocused(stdRequester) },
                     onClick = { searchMode = SearchMode.STANDARD },
                 )
@@ -321,7 +361,9 @@ fun TvSearchScreen(
                     TvSearchChip(
                         text = stringResource(R.string.tv_search_mode_ai),
                         selected = searchMode == SearchMode.AI,
-                        modifier = Modifier.focusRequester(aiRequester),
+                        modifier = Modifier
+                            .focusRequester(aiRequester)
+                            .focusProperties { up = inputFocusRequester },
                         onFocused = { onContentFocused(aiRequester) },
                         onClick = { searchMode = SearchMode.AI },
                     )
@@ -329,7 +371,9 @@ fun TvSearchScreen(
                     TvSearchChip(
                         text = "${stringResource(R.string.tv_search_mode_ai)} (${stringResource(R.string.tv_search_ai_configure)})",
                         selected = false,
-                        modifier = Modifier.focusRequester(aiRequester),
+                        modifier = Modifier
+                            .focusRequester(aiRequester)
+                            .focusProperties { up = inputFocusRequester },
                         onFocused = { onContentFocused(aiRequester) },
                         onClick = { /* disabled — no API key */ },
                     )
@@ -344,7 +388,12 @@ fun TvSearchScreen(
                 TvSearchChip(
                     text = stringResource(R.string.tv_search_all),
                     selected = filterType == null,
-                    modifier = Modifier.focusRequester(allReq).focusProperties { left = railFocusRequester },
+                    modifier = Modifier
+                        .focusRequester(allReq)
+                        .focusProperties {
+                            left = railFocusRequester
+                            up = inputFocusRequester
+                        },
                     onFocused = { onContentFocused(allReq) },
                     onClick = { filterType = null },
                 )
@@ -352,7 +401,9 @@ fun TvSearchScreen(
                 TvSearchChip(
                     text = stringResource(R.string.tv_search_movies),
                     selected = filterType == "movie",
-                    modifier = Modifier.focusRequester(movieReq),
+                    modifier = Modifier
+                        .focusRequester(movieReq)
+                        .focusProperties { up = inputFocusRequester },
                     onFocused = { onContentFocused(movieReq) },
                     onClick = { filterType = "movie" },
                 )
@@ -360,7 +411,9 @@ fun TvSearchScreen(
                 TvSearchChip(
                     text = stringResource(R.string.tv_search_tv_shows),
                     selected = filterType == "tv",
-                    modifier = Modifier.focusRequester(tvReq),
+                    modifier = Modifier
+                        .focusRequester(tvReq)
+                        .focusProperties { up = inputFocusRequester },
                     onFocused = { onContentFocused(tvReq) },
                     onClick = { filterType = "tv" },
                 )
@@ -399,7 +452,7 @@ fun TvSearchScreen(
             } // end showFilters (mode chips, filter chips, voice status)
         }
 
-        if (showFilters) {
+        if (showFilters && !resultsMode) {
         Text(
             text = stringResource(R.string.tv_section_popular_searches),
             style = MaterialTheme.typography.titleLarge,
@@ -445,11 +498,43 @@ fun TvSearchScreen(
             }
 
             results.isEmpty() -> {
-                Text(
-                    text = stringResource(R.string.tv_search_empty),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = Silver,
-                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(240.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(Charcoal.copy(alpha = 0.54f))
+                        .border(1.dp, Steel.copy(alpha = 0.42f), RoundedCornerShape(24.dp))
+                        .padding(28.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Text(
+                        text = "Start typing or pick a popular search",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = Snow,
+                    )
+                    Text(
+                        text = "Find movies, shows, channels, and addons across your sources.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = Silver,
+                    )
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        contentPadding = PaddingValues(top = 8.dp),
+                    ) {
+                        items(listOf("Recently added", "4K movies", "Anime", "New episodes")) { term ->
+                            val requester = remember(term) { FocusRequester() }
+                            TvSearchChip(
+                                text = term,
+                                modifier = Modifier
+                                    .focusRequester(requester)
+                                    .focusProperties { left = railFocusRequester },
+                                onFocused = { onContentFocused(requester) },
+                                onClick = { query = term },
+                            )
+                        }
+                    }
+                }
             }
 
             else -> {
@@ -468,17 +553,11 @@ fun TvSearchScreen(
                     )
                 }
 
-                Text(
-                    text = stringResource(R.string.tv_section_search_results),
-                    style = MaterialTheme.typography.titleLarge,
-                    color = Snow,
-                )
-
                 LazyVerticalGrid(
-                    columns = GridCells.Fixed(5),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    contentPadding = PaddingValues(bottom = 16.dp),
+                    columns = GridCells.Fixed(6),
+                    verticalArrangement = Arrangement.spacedBy(20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp),
+                    contentPadding = PaddingValues(top = 10.dp, bottom = 24.dp, start = 4.dp, end = 4.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     itemsIndexed(
@@ -491,15 +570,15 @@ fun TvSearchScreen(
                         TvSearchResultCard(
                             item = item,
                             modifier = Modifier
-                                .width(166.dp)
+                                .then(if (index == 0) Modifier.focusRequester(firstResultRequester) else Modifier.focusRequester(requester))
                                 .aspectRatio(2f / 3f)
-                                .focusRequester(requester)
                                 .focusProperties {
-                                    if (index % 5 == 0) {
+                                    if (index % 6 == 0) {
                                         left = railFocusRequester
                                     }
+                                    up = inputFocusRequester
                                 },
-                            onFocused = { onContentFocused(requester) },
+                            onFocused = { onContentFocused(if (index == 0) firstResultRequester else requester) },
                             onClick = { onMediaClick(item) },
                         )
                     }
@@ -528,9 +607,9 @@ private fun TvSearchChip(
         label = "chipBorder",
     )
     val bgColor = when {
-        selected -> Amber.copy(alpha = 0.15f)
-        focused -> Graphite
-        else -> Charcoal
+        selected -> Amber.copy(alpha = 0.16f)
+        focused -> Graphite.copy(alpha = 0.78f)
+        else -> Charcoal.copy(alpha = 0.58f)
     }
     Box(
         modifier = modifier
@@ -545,14 +624,14 @@ private fun TvSearchChip(
             )
             .zIndex(if (focused) 1f else 0f)
             .scale(scale)
-            .border(2.dp, borderColor, RoundedCornerShape(14.dp))
-            .clip(RoundedCornerShape(14.dp))
+            .border(1.dp, borderColor, RoundedCornerShape(18.dp))
+            .clip(RoundedCornerShape(18.dp))
             .background(bgColor)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .padding(horizontal = 16.dp, vertical = 9.dp),
     ) {
         Text(
             text = text,
-            style = MaterialTheme.typography.titleMedium,
+            style = MaterialTheme.typography.titleSmall,
             color = if (selected) Amber else Snow,
         )
     }
@@ -566,7 +645,7 @@ private fun TvSearchResultCard(
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(targetValue = if (focused) 1.05f else 1f, label = "resultScale")
+    val scale by animateFloatAsState(targetValue = if (focused) 1.07f else 1f, label = "resultScale")
     val borderColor by animateColorAsState(
         targetValue = if (focused) AmberLight else Color.Transparent,
         label = "resultBorder",
@@ -584,7 +663,7 @@ private fun TvSearchResultCard(
             )
             .zIndex(if (focused) 1f else 0f)
             .scale(scale)
-            .border(2.dp, borderColor, RoundedCornerShape(12.dp))
+            .border(3.dp, borderColor, RoundedCornerShape(12.dp))
             .clip(RoundedCornerShape(12.dp)),
     ) {
         AsyncImage(
