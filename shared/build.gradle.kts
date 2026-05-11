@@ -4,7 +4,7 @@ import java.util.Properties
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.kotlin.serialization)
-    alias(libs.plugins.android.library)
+    id("com.android.kotlin.multiplatform.library")
     alias(libs.plugins.sqldelight)
 }
 
@@ -28,6 +28,26 @@ fun escapeForBuildConfig(value: String): String {
         .replace("\"", "\\\"")
 }
 
+val generatedAndroidTmdbApiKeyDir = layout.buildDirectory.dir("generated/torve/tmdb/androidMain/kotlin")
+val generateAndroidTmdbApiKey by tasks.registering {
+    val apiKey = providers.provider { readTmdbApiKey() }
+    inputs.property("tmdbApiKey", apiKey)
+    outputs.dir(generatedAndroidTmdbApiKeyDir)
+    doLast {
+        val file = generatedAndroidTmdbApiKeyDir.get()
+            .file("com/torve/data/metadata/TmdbGeneratedApiKey.android.kt")
+            .asFile
+        file.parentFile.mkdirs()
+        file.writeText(
+            """
+            package com.torve.data.metadata
+
+            internal const val ANDROID_TMDB_API_KEY: String = "${escapeForBuildConfig(readTmdbApiKey())}"
+            """.trimIndent() + "\n",
+        )
+    }
+}
+
 kotlin {
     jvmToolchain(17)
     compilerOptions {
@@ -36,7 +56,10 @@ kotlin {
         freeCompilerArgs.add("-opt-in=kotlinx.coroutines.FlowPreview")
     }
 
-    androidTarget {
+    android {
+        namespace = "com.torve.shared"
+        compileSdk = 36
+        minSdk = 24
         compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
         }
@@ -84,10 +107,13 @@ kotlin {
             implementation(libs.qrcode.kotlin)
         }
 
-        androidMain.dependencies {
-            implementation(libs.ktor.okhttp)
-            implementation(libs.sqldelight.android)
-            implementation(libs.kotlinx.coroutines.android)
+        androidMain {
+            kotlin.srcDir(generateAndroidTmdbApiKey)
+            dependencies {
+                implementation(libs.ktor.okhttp)
+                implementation(libs.sqldelight.android)
+                implementation(libs.kotlinx.coroutines.android)
+            }
         }
 
         val desktopMain by getting {
@@ -115,22 +141,6 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.ktor.mock)
         }
-    }
-}
-
-android {
-    namespace = "com.torve.shared"
-    compileSdk = 36
-    defaultConfig {
-        minSdk = 24
-        buildConfigField("String", "TMDB_API_KEY", "\"${escapeForBuildConfig(readTmdbApiKey())}\"")
-    }
-    buildFeatures {
-        buildConfig = true
-    }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
     }
 }
 
