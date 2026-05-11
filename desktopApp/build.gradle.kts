@@ -421,7 +421,10 @@ tasks.register("packageMsiCloseApp") {
             throw GradleException("jpackage failed with exit code $exit")
         }
 
-        val produced = outDirFile.listFiles { f -> f.name.endsWith(".msi") }?.firstOrNull()
+        val expectedMsi = outDirFile.resolve("Torve-$torveVersion.msi")
+        val produced = expectedMsi.takeIf { it.exists() }
+            ?: outDirFile.listFiles { f -> f.name.endsWith(".msi") }
+                ?.maxByOrNull { it.lastModified() }
         if (produced == null) {
             throw GradleException("jpackage finished but no .msi found in ${outDirFile.absolutePath}")
         }
@@ -586,6 +589,8 @@ compose.desktop {
             licenseFile.set(layout.projectDirectory.file("LICENSE"))
 
             windows {
+                msiPackageVersion = torveAppVersion
+                exePackageVersion = torveAppVersion
                 // Per-machine install (visible in Add/Remove Programs for
                 // every user). Per-user installs are easier to push but
                 // make the auto-update story messier.
