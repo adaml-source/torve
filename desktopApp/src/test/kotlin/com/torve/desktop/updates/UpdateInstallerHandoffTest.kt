@@ -116,12 +116,12 @@ class UpdateInstallerHandoffTest {
         )
 
         assertTrue(phase is UpdateInstallerHandoff.Phase.HandedOff, "phase=$phase")
-        assertNotNull(launchedFile, "osLauncher should have been invoked")
+        val launched = assertNotNull(launchedFile, "osLauncher should have been invoked")
         val onDisk = phase.installer
         assertTrue(onDisk.exists(), "installer should still exist on disk after handoff")
         assertEquals(payload.size.toLong(), onDisk.length(), "downloaded size mismatch")
-        assertEquals(onDisk.absolutePath, launchedFile?.absolutePath, "wrong file passed to launcher")
-        assertEquals(payload.size.toLong(), launchedFile!!.length())
+        assertEquals(onDisk.absolutePath, launched.absolutePath, "wrong file passed to launcher")
+        assertEquals(payload.size.toLong(), launched.length())
 
         onDisk.delete()
     }

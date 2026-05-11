@@ -510,7 +510,7 @@ internal fun TvSettingsScreen(
     fun buildVisibleSuggestedAddons(installedUrls: Set<String>): List<com.torve.android.ui.settings.PopularAddon> {
         return POPULAR_ADDONS.filter { addon ->
             val isPanda = addon.url.contains("panda", ignoreCase = true) ||
-                addon.actionUrl?.contains("panda", ignoreCase = true) == true
+                addon.actionUrl.contains("panda", ignoreCase = true)
             !isPanda && addon.url !in installedUrls
         }
     }
@@ -1941,8 +1941,8 @@ internal fun TvSettingsScreen(
             .onPreviewKeyEvent { event ->
                 if (hasPendingExactSettingsRestore) {
                     logSettingsFocus(
-                        "list_key_suppressed key=${event.key} token=${pendingSettingsOrigin?.restoreToken ?: -1L} " +
-                            "reason=${pendingSettingsOrigin?.reason ?: "none"}",
+                        "list_key_suppressed key=${event.key} token=${pendingSettingsOrigin.restoreToken} " +
+                            "reason=${pendingSettingsOrigin.reason}",
                     )
                     return@onPreviewKeyEvent false
                 }
@@ -2031,7 +2031,7 @@ internal fun TvSettingsScreen(
                                 if (hasPendingExactSettingsRestore) {
                                     logSettingsFocus(
                                         "category_key_suppressed category=${category.name} key=${event.key} " +
-                                            "token=${pendingSettingsOrigin?.restoreToken ?: -1L}",
+                                            "token=${pendingSettingsOrigin.restoreToken}",
                                     )
                                     return@onPreviewKeyEvent false
                                 }
@@ -2081,7 +2081,7 @@ internal fun TvSettingsScreen(
                             } else {
                                 logSettingsFocus(
                                     "category_focus_ignored category=${category.name} " +
-                                        "token=${pendingSettingsOrigin?.restoreToken ?: -1L}",
+                                        "token=${pendingSettingsOrigin.restoreToken}",
                                 )
                             }
                         },
@@ -5902,17 +5902,14 @@ internal fun TvSettingsScreen(
             val title = when (overlay) {
                 is TvAboutOverlayState.Terms -> stringResource(R.string.tv_settings_terms)
                 is TvAboutOverlayState.Legal -> stringResource(R.string.tv_settings_legal)
-                else -> ""
             }
             val url = when (overlay) {
                 is TvAboutOverlayState.Terms -> "https://torve.app/terms.html"
                 is TvAboutOverlayState.Legal -> "https://torve.app/privacy.html"
-                else -> ""
             }
             val fallbackAsset = when (overlay) {
                 is TvAboutOverlayState.Terms -> "terms.html"
                 is TvAboutOverlayState.Legal -> "privacy.html"
-                else -> ""
             }
             val documentState = rememberTvDocumentContentState(
                 url = url,

@@ -93,7 +93,7 @@ enum class PremiumFeature {
 
 data class PremiumFeaturePolicy(
     val access: PremiumFeatureAccess,
-    @StringRes val titleRes: Int,
+    @param:StringRes val titleRes: Int,
 )
 
 object PremiumAccess {

@@ -1,5 +1,5 @@
 [versions]
-kotlin = "2.2.10"
+kotlin = "2.3.21"
 agp = "9.0.1"
 compose-plugin = "1.7.3"
 ktor = "3.0.3"

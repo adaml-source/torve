@@ -49,7 +49,6 @@ dependencies {
     implementation(libs.jna)
     implementation(libs.jna.platform)
     implementation(libs.vlcj)
-    implementation(libs.qrcode.kotlin)
     implementation(libs.kotlinx.serialization.json)
     // NewPipeExtractor â€” pure-JVM YouTube URL resolver, used as the
     // first-line fallback in TrailerOverlay. YouTube periodically breaks

@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreImage.CIFilterBuiltins
 import shared
 
 /// Settings → "Receive credentials from another device" surface.
@@ -136,14 +137,18 @@ struct SecretsTransferReceiveScreen: View {
 
     private func renderQrImage(_ payload: String) -> UIImage? {
         guard !payload.isEmpty else { return nil }
-        let pngBytes = TransferQrBytes.shared.renderPngBytes(payload: payload)
-        let count = Int(pngBytes.size)
-        guard count > 0 else { return nil }
-        var data = Data(count: count)
-        for i in 0..<count {
-            data[i] = UInt8(bitPattern: pngBytes.get(index: Int32(i)))
+        let filter = CIFilter.qrCodeGenerator()
+        filter.setValue(Data(payload.utf8), forKey: "inputMessage")
+        filter.setValue("M", forKey: "inputCorrectionLevel")
+        guard let output = filter.outputImage else { return nil }
+
+        let size: CGFloat = 280
+        let scale = size / max(output.extent.width, output.extent.height)
+        let transformed = output.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        guard let cgImage = CIContext().createCGImage(transformed, from: transformed.extent) else {
+            return nil
         }
-        return UIImage(data: data)
+        return UIImage(cgImage: cgImage)
     }
 
     // MARK: - Sub-components

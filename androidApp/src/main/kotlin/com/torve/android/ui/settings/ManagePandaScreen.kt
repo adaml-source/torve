@@ -158,9 +158,9 @@ fun ManagePandaScreen(
                 color = Snow,
             )
 
-            if (isInstalled && pandaAddon?.manifest?.version != null) {
+            pandaAddon?.manifest?.version?.let { version ->
                 Text(
-                    stringResource(R.string.manage_panda_version, pandaAddon.manifest.version),
+                    stringResource(R.string.manage_panda_version, version),
                     style = MaterialTheme.typography.bodySmall,
                     color = Silver,
                 )
@@ -179,7 +179,7 @@ fun ManagePandaScreen(
             HorizontalDivider(color = Steel.copy(alpha = 0.15f))
             Spacer(Modifier.height(16.dp))
 
-            if (isInstalled) {
+            if (pandaAddon != null) {
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -197,7 +197,7 @@ fun ManagePandaScreen(
                     Switch(
                         checked = isEnabled,
                         onCheckedChange = { enabled ->
-                            pandaAddon?.let { viewModel.toggleAddon(it.manifestUrl, enabled) }
+                            viewModel.toggleAddon(pandaAddon.manifestUrl, enabled)
                         },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Amber,
@@ -288,7 +288,7 @@ fun ManagePandaScreen(
                     )
                 }
 
-                if (isInstalled) {
+                if (pandaAddon != null) {
                     // Management-token section. Gated on the addon being installed
                     // so we never surface tooling for a config the user can't
                     // actually address.
@@ -363,7 +363,7 @@ fun ManagePandaScreen(
                             // local addon row is dropped independently so both
                             // paths converge on a clean slate.
                             pandaViewModel.deleteConfig()
-                            pandaAddon?.let { viewModel.removeAddon(it.manifestUrl) }
+                            viewModel.removeAddon(pandaAddon.manifestUrl)
                         },
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Ruby),

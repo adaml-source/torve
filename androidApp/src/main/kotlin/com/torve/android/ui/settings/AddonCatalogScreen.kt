@@ -76,8 +76,8 @@ enum class AddonCategory(val labelRes: Int) {
 }
 
 data class PopularAddon(
-    @StringRes val nameRes: Int,
-    @StringRes val descriptionRes: Int,
+    @param:StringRes val nameRes: Int,
+    @param:StringRes val descriptionRes: Int,
     val url: String,
     val categories: List<AddonCategory>,
     val logo: String? = null,
@@ -320,14 +320,12 @@ fun AddonCatalogScreen(
                                 fontWeight = FontWeight.Medium,
                                 color = if (isRestricted) Ash else Snow,
                             )
-                            addon.manifest.description?.let { desc ->
-                                Text(
-                                    desc,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Silver,
-                                    maxLines = 1,
-                                )
-                            }
+                            Text(
+                                addon.manifest.description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Silver,
+                                maxLines = 1,
+                            )
                             if (isRestricted) {
                                 Text(
                                     stringResource(R.string.addon_restricted_label),

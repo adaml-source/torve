@@ -1310,10 +1310,9 @@ fun PlayerScreen(
 
         try {
             val detail = metadataRepo.getDetail("tv", showTmdbId)
-            val validSeasons = detail?.seasons
-                ?.filter { it.seasonNumber > 0 }
-                ?.sortedBy { it.seasonNumber }
-                ?: return@LaunchedEffect
+            val validSeasons = detail.seasons
+                .filter { it.seasonNumber > 0 }
+                .sortedBy { it.seasonNumber }
 
             // Only load current season and next season to avoid excess API calls
             val seasonsToLoad = validSeasons.filter {
@@ -2095,7 +2094,7 @@ fun PlayerScreen(
 
     LaunchedEffect(engine, supportsLiveBufferControl) {
         liveBufferDurationMs = when {
-            supportsLiveBufferControl -> (engine as ExoPlayerEngine).liveBufferDurationMs
+            supportsLiveBufferControl -> engine.liveBufferDurationMs
             else -> ExoPlayerEngine.DEFAULT_LIVE_BUFFER_MS
         }
     }
