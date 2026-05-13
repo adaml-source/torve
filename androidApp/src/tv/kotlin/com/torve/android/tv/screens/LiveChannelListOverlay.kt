@@ -79,6 +79,7 @@ fun LiveChannelListOverlay(
     onTuneChannel: (Channel, String) -> Unit,
     onToggleFavorite: (Channel) -> Unit,
     onLoadCategoryChannels: (suspend (String) -> List<EnrichedChannel>)? = null,
+    preloadedChannelsByCategory: Map<String, List<EnrichedChannel>> = emptyMap(),
     onDismiss: () -> Unit = {},
 ) {
     BackHandler { onDismiss() }
@@ -94,10 +95,8 @@ fun LiveChannelListOverlay(
             currentChannelUrl = currentChannelUrl,
         )
     }
-    android.util.Log.d(
-        "GroupDebug",
-        "currentGroupName='$currentGroupName' currentChannelUrl='$currentChannelUrl' initialGroupIndex=$initialGroupIndex categories=${categories.map { it.name }.take(5)}",
-    )
+    // (debug log removed — it ran `categories.map { it.name }` on every recomposition,
+    // allocating 160+ strings per navigation tick and contributing to the GC-induced ANR.)
     val groupListState = rememberLazyListState(
         initialFirstVisibleItemIndex = initialGroupIndex.coerceAtLeast(0),
     )
@@ -105,8 +104,8 @@ fun LiveChannelListOverlay(
     var selectedGroupIndex by remember(currentChannelUrl) {
         mutableIntStateOf(initialGroupIndex)
     }
-    var loadedCategoryChannels by remember(categories) {
-        mutableStateOf<Map<String, List<EnrichedChannel>>>(emptyMap())
+    var loadedCategoryChannels by remember(categories, preloadedChannelsByCategory) {
+        mutableStateOf<Map<String, List<EnrichedChannel>>>(preloadedChannelsByCategory)
     }
     var loadingCategoryName by remember { mutableStateOf<String?>(null) }
 
@@ -157,8 +156,12 @@ fun LiveChannelListOverlay(
 
     val maxIndex = (filteredCategories.size - 1).coerceAtLeast(0)
     if (selectedGroupIndex > maxIndex) selectedGroupIndex = maxIndex
-    val selectedCategory = filteredCategories.getOrNull(selectedGroupIndex)
-    val channelsInGroup = selectedCategory?.channels ?: emptyList()
+    val selectedCategory = remember(filteredCategories, selectedGroupIndex) {
+        filteredCategories.getOrNull(selectedGroupIndex)
+    }
+    val channelsInGroup = remember(selectedCategory) {
+        selectedCategory?.channels ?: emptyList()
+    }
     val isLoadingSelectedCategory = selectedCategory?.name == loadingCategoryName
     val initialChannelIndex = remember(channelsInGroup, currentChannelUrl) {
         channelsInGroup.indexOfFirst { it.channel.url == currentChannelUrl }.takeIf { it >= 0 } ?: 0
@@ -168,9 +171,21 @@ fun LiveChannelListOverlay(
     }
     var previewChannelUrl by remember(currentChannelUrl) { mutableStateOf(currentChannelUrl) }
     var shouldAutoFocusChannels by remember { mutableStateOf(true) }
-    val previewEnriched = remember(previewChannelUrl, currentChannelUrl, categoriesWithLoadedChannels) {
-        categoriesWithLoadedChannels.flatMap { it.channels }.firstOrNull { it.channel.url == previewChannelUrl }
-            ?: categoriesWithLoadedChannels.flatMap { it.channels }.firstOrNull { it.channel.url == currentChannelUrl }
+    // Build a URL → channel index once, then look up by URL in O(1). Previously this
+    // flatMap'd ALL channels in ALL categories on every recomposition, allocating tens
+    // of thousands of list entries per navigation tick — the main-thread allocation
+    // pressure was triggering ANRs during overlay navigation on Fire TV.
+    val channelsByUrl = remember(categoriesWithLoadedChannels) {
+        val map = HashMap<String, EnrichedChannel>()
+        for (cat in categoriesWithLoadedChannels) {
+            for (ch in cat.channels) {
+                map.putIfAbsent(ch.channel.url, ch)
+            }
+        }
+        map
+    }
+    val previewEnriched = remember(previewChannelUrl, currentChannelUrl, channelsByUrl) {
+        channelsByUrl[previewChannelUrl] ?: channelsByUrl[currentChannelUrl]
     }
 
     if (focusedChannelIndex > channelsInGroup.lastIndex) {

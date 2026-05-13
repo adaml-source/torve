@@ -60,6 +60,7 @@ internal object TvSettingsItemIds {
     const val APPEARANCE_POSTER_TITLES = "settings/appearance/poster_titles"
     const val LIBRARY_CHANNELS = "settings/library/channels"
     const val LIBRARY_ADD_PLAYLIST = "settings/library/add_playlist"
+    const val LIBRARY_REFRESH_EPG = "settings/library/refresh_epg"
     const val LIBRARY_MANAGE_CHANNELS = "settings/library/manage_channels"
     const val CONNECTIONS_PAIRING = "settings/connections/pairing"
     const val CONNECTIONS_TRAKT = "settings/connections/trakt"

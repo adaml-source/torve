@@ -329,6 +329,13 @@
     <string name="tv_settings_channels_visible">%1$d / %2$d visible</string>
     <string name="tv_settings_no_categories">No channel groups loaded — select a playlist first</string>
 
+    <string name="tv_settings_refresh_epg_title">Refresh EPG</string>
+    <string name="tv_settings_refresh_epg_subtitle">Download fresh programme guide data for the selected playlist</string>
+    <string name="tv_settings_refresh_epg_subtitle_loaded">Guide ready: %1$d programmes cached</string>
+    <string name="tv_settings_refresh_epg_loading">Refreshing guide...</string>
+    <string name="tv_settings_refresh_epg_not_configured">Add a guide URL to the selected playlist first</string>
+    <string name="tv_settings_refresh_epg_started">EPG refresh started</string>
+
     <!-- Settings reorganization -->
     <string name="tv_settings_section_stream_quality">Stream Quality &amp; Playback</string>
     <string name="tv_settings_section_language_region">Language &amp; Region</string>
@@ -378,6 +385,8 @@
     <string name="tv_catalog_search_shows_heading">Search TV Shows</string>
     <string name="tv_catalog_search_movies_subtitle">Search inside Movies</string>
     <string name="tv_catalog_search_shows_subtitle">Search inside TV Shows</string>
+    <string name="tv_catalog_movies_preparing">Movies are being prepared in the background</string>
+    <string name="tv_catalog_shows_preparing">TV Shows are being prepared in the background</string>
     <string name="tv_search_ai_provider_required">Set up an AI provider in Settings before using AI Search.</string>
     <string name="tv_iptv_filter_chip">Filter: %s</string>
     <string name="tv_iptv_sort_chip">Sort: %s</string>

@@ -166,6 +166,17 @@ class MetadataRepositoryImpl(
         return api.getPersonDetail(personId)
     }
 
+    override suspend fun getPersonImageUrls(personId: Int): List<String> {
+        return api.getImages("person", personId)
+            .profiles
+            .sortedWith(
+                compareByDescending<TmdbImageItem> { it.voteAverage * (it.voteCount.coerceAtLeast(1)) }
+                    .thenByDescending { it.width * it.height },
+            )
+            .mapNotNull { image -> TmdbMappers.profileUrl(image.filePath, size = "w342") }
+            .distinct()
+    }
+
     override suspend fun getSeasonDetail(tvId: Int, seasonNumber: Int): Season {
         val detail = api.getTvSeasonDetail(tvId, seasonNumber)
         return Season(

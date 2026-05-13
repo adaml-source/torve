@@ -73,6 +73,7 @@ import com.torve.android.player.toDiagnosticSummary
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Snow
+import com.torve.android.tv.TvScreenCache
 import com.torve.android.tv.screens.LiveChannelInfoOverlay
 import com.torve.android.tv.screens.LiveChannelListOverlay
 import com.torve.android.tv.screens.LiveEpgGuideOverlay
@@ -82,11 +83,13 @@ import com.torve.android.tv.screens.LivePlaybackMenuOverlay
 import com.torve.android.tv.screens.LiveSettingsOverlay
 import com.torve.android.tv.screens.buildTvLiveTerminalFailurePresentation
 import com.torve.android.tv.screens.shouldShowTvLiveTuneProgress
+import com.torve.data.auth.AuthClient
 import com.torve.domain.model.Channel
 import com.torve.domain.model.ChannelCategory
 import com.torve.domain.model.EnrichedChannel
 import com.torve.domain.model.EpgProgramme
-import com.torve.domain.model.canonicalEpgChannelKey
+import com.torve.domain.model.programmesForEpgChannel
+import com.torve.domain.repository.DeviceLocalSettingsRepository
 import com.torve.domain.player.LiveAudioOutputMode
 import com.torve.domain.player.LiveTuneState
 import com.torve.domain.player.PlayerEngine
@@ -177,6 +180,7 @@ fun TvLivePlayerScreen(
     groupName: String,
     onBack: () -> Unit,
     viewModel: ChannelsViewModel = koinInject(),
+    localSettingsRepo: DeviceLocalSettingsRepository = koinInject(),
 ) {
     val context = LocalContext.current
     val state by viewModel.state.collectAsState()
@@ -589,23 +593,6 @@ fun TvLivePlayerScreen(
         }
     }
 
-    suspend fun loadPlaybackGroupData(
-        playlistId: String,
-        groupName: String,
-    ): Pair<List<EnrichedChannel>, Map<String, List<EpgProgramme>>> {
-        val channels = withContext(Dispatchers.IO) {
-            viewModel.getChannelsForCategoryDirect(playlistId, groupName)
-        }
-        val programmes = if (channels.isNotEmpty()) {
-            withContext(Dispatchers.IO) {
-                viewModel.getProgrammesForChannelsDirect(playlistId, channels)
-            }
-        } else {
-            emptyMap()
-        }
-        return channels to programmes
-    }
-
     fun canReplayProgramme(channel: Channel, programme: EpgProgramme): Boolean {
         if (!viewModel.canCatchup(channel)) return false
         if (programme.endTime > System.currentTimeMillis()) return false
@@ -682,25 +669,6 @@ fun TvLivePlayerScreen(
 
         playbackGroupChannels = listOf(EnrichedChannel(channel = ch))
         playbackGuideProgrammes = emptyMap()
-
-        try {
-            val (channels, programmes) = loadPlaybackGroupData(playlistId, group)
-            playbackGroupChannels = if (channels.isEmpty()) {
-                listOf(EnrichedChannel(channel = ch))
-            } else {
-                channels
-            }
-            playbackGuideProgrammes = programmes
-        } catch (error: kotlinx.coroutines.CancellationException) {
-            throw error
-        } catch (error: Throwable) {
-            Log.w(
-                "TvLivePlayerScreen",
-                "Failed to load playback group data playlist=$playlistId group=$group error=${error.message}",
-            )
-            playbackGroupChannels = listOf(EnrichedChannel(channel = ch))
-            playbackGuideProgrammes = emptyMap()
-        }
     }
 
     LaunchedEffect(currentChannel?.url, playbackUrlOverride, reloadNonce) {
@@ -1370,11 +1338,13 @@ fun TvLivePlayerScreen(
                 ?: EnrichedChannel(channel = ch, currentProgramme = null, nextProgramme = null)
             val lookupChannel = base.channel
             val lookupPlaylistId = lookupChannel.playlistId.takeIf { it.isNotBlank() } ?: ch.playlistId
-            val epgKey = canonicalEpgChannelKey(
+                .takeIf { it.isNotBlank() }
+                ?: state.selectedPlaylistId.orEmpty()
+            val programmes = programmesForEpgChannel(
+                programmesByChannelKey = playbackGuideProgrammes,
                 playlistId = lookupPlaylistId,
                 channel = lookupChannel,
             )
-            val programmes = epgKey?.let(playbackGuideProgrammes::get).orEmpty()
             if (programmes.isEmpty()) {
                 base
             } else {
@@ -1401,12 +1371,20 @@ fun TvLivePlayerScreen(
     }
     val currentChannelProgrammes = remember(enrichedCurrentChannel, playbackGuideProgrammes, state.guideProgrammes) {
         val enriched = enrichedCurrentChannel ?: return@remember emptyList()
-        val epgKey = canonicalEpgChannelKey(
-            playlistId = enriched.channel.playlistId,
+        val lookupPlaylistId = enriched.channel.playlistId
+            .takeIf { it.isNotBlank() }
+            ?: state.selectedPlaylistId.orEmpty()
+        programmesForEpgChannel(
+            programmesByChannelKey = playbackGuideProgrammes,
+            playlistId = lookupPlaylistId,
             channel = enriched.channel,
-        ) ?: return@remember emptyList()
-        (playbackGuideProgrammes[epgKey] ?: state.guideProgrammes[epgKey])
-            .orEmpty()
+        ).ifEmpty {
+            programmesForEpgChannel(
+                programmesByChannelKey = state.guideProgrammes,
+                playlistId = lookupPlaylistId,
+                channel = enriched.channel,
+            )
+        }
             .sortedBy(EpgProgramme::startTime)
     }
 
@@ -1443,6 +1421,25 @@ fun TvLivePlayerScreen(
     }
     val playbackProgrammes = remember(state.guideProgrammes, playbackGuideProgrammes) {
         state.guideProgrammes + playbackGuideProgrammes
+    }
+
+    fun withPlaybackGuide(enriched: EnrichedChannel): EnrichedChannel {
+        val lookupPlaylistId = enriched.channel.playlistId
+            .takeIf { it.isNotBlank() }
+            ?: state.selectedPlaylistId.orEmpty()
+        val programmes = programmesForEpgChannel(
+            programmesByChannelKey = playbackProgrammes,
+            playlistId = lookupPlaylistId,
+            channel = enriched.channel,
+        ).sortedBy(EpgProgramme::startTime)
+        if (programmes.isEmpty()) return enriched
+        val now = System.currentTimeMillis()
+        return enriched.copy(
+            currentProgramme = programmes.firstOrNull { it.startTime <= now && it.endTime > now }
+                ?: enriched.currentProgramme,
+            nextProgramme = programmes.firstOrNull { it.startTime > now }
+                ?: enriched.nextProgramme,
+        )
     }
 
     fun tuneToPlaybackChannel(channel: Channel, preferredGroupName: String? = null) {
@@ -1870,6 +1867,7 @@ fun TvLivePlayerScreen(
             LiveEpgGuideOverlay(
                 guideChannels = playbackGuideChannels,
                 guideProgrammes = playbackProgrammes,
+                playlistId = state.selectedPlaylistId,
                 currentChannelUrl = currentChannel?.url ?: "",
                 onTuneChannel = { ch ->
                     tuneToPlaybackChannel(ch)
@@ -1886,6 +1884,15 @@ fun TvLivePlayerScreen(
             enter = fadeIn(),
             exit = fadeOut(),
         ) {
+            // Reuse the shelves that the channels screen already loaded into TvScreenCache.
+            // Same key format/lookup as TvIptvScreen — pre-populates the overlay so most
+            // categories render without a fresh DB query and no main-thread allocation churn.
+            val preloadedShelfMap = remember(state.selectedPlaylistId, state.xxxEnabled, playbackProgrammes) {
+                val key = liveShelvesCacheKey(state.selectedPlaylistId, state.xxxEnabled)
+                TvScreenCache.get<Map<String, LiveShelfLoad>>(key)
+                    ?.mapValues { (_, shelf) -> shelf.channels.map(::withPlaybackGuide) }
+                    .orEmpty()
+            }
             LiveChannelListOverlay(
                 categories = playbackCategories,
                 currentChannelUrl = currentChannel?.url ?: "",
@@ -1895,17 +1902,37 @@ fun TvLivePlayerScreen(
                     tuneToPlaybackChannel(ch, selectedGroupName)
                 },
                 onToggleFavorite = { viewModel.toggleFavorite(it) },
+                // Local-cache-only restore for categories that were warmed by
+                // CatalogWarmupWorker but not yet touched on the Channels page.
+                // This deliberately avoids the old getChannelsForCategoryDirect()
+                // DB/full-catalog path that caused playback overlay ANRs/OOMs.
                 onLoadCategoryChannels = { categoryName ->
                     val playlistId = currentChannel?.playlistId?.takeIf { it.isNotBlank() }
                         ?: state.selectedPlaylistId
-                    if (playlistId == null) {
+                    if (playlistId.isNullOrBlank()) {
                         emptyList()
                     } else {
-                        withContext(Dispatchers.IO) {
-                            viewModel.getChannelsForCategoryDirect(playlistId, categoryName)
+                        val restored = withContext(Dispatchers.IO) {
+                            val userId = localSettingsRepo.getString(AuthClient.KEY_AUTH_USER_ID)
+                            userId?.let {
+                                readLiveBootstrapShelf(
+                                    localSettingsRepo = localSettingsRepo,
+                                    userId = it,
+                                    playlistId = playlistId,
+                                    categoryName = categoryName,
+                                )
+                            }
+                        }?.filterAdult(allowAdult = state.xxxEnabled)
+                        val channels = restored?.channels.orEmpty().map(::withPlaybackGuide)
+                        if (channels.isNotEmpty()) {
+                            val key = liveShelvesCacheKey(state.selectedPlaylistId, state.xxxEnabled)
+                            val existing = TvScreenCache.get<Map<String, LiveShelfLoad>>(key).orEmpty()
+                            TvScreenCache.put(key, existing + (categoryName to restored!!))
                         }
+                        channels
                     }
                 },
+                preloadedChannelsByCategory = preloadedShelfMap,
                 onDismiss = {
                     closeOverlayOrReturnToPrevious()
                 },

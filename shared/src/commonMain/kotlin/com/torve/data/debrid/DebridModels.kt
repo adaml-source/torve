@@ -90,6 +90,12 @@ data class RdAddMagnetResponse(
 )
 
 @Serializable
+data class RdErrorResponse(
+    val error: String = "",
+    @SerialName("error_code") val errorCode: Int? = null,
+)
+
+@Serializable
 data class RdTorrentFile(
     val id: Int = 0,
     val path: String = "",

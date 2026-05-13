@@ -15,7 +15,9 @@ class PreferencesRepositoryImpl(
 
         fun isDeviceLocalKey(key: String): Boolean =
             key.startsWith("auth_") ||
-                key.startsWith("subscription_backend_verified_")
+                key.startsWith("subscription_backend_verified_") ||
+                key.startsWith("channels_bootstrap_") ||
+                key.startsWith("vod_bootstrap_")
     }
 
     private fun userIdForKeyOrNull(key: String): String? {

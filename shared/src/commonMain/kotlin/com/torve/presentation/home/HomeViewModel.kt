@@ -71,6 +71,7 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.builtins.SetSerializer
 import kotlinx.serialization.builtins.serializer
@@ -118,6 +119,23 @@ class HomeViewModel(
         val mdbListShelves: List<CatalogShelf>,
     )
 
+    @Serializable
+    private data class HomeSnapshot(
+        val savedAtMs: Long,
+        val shelves: List<CatalogShelf> = emptyList(),
+        val heroItem: MediaItem? = null,
+        val continueWatching: List<com.torve.domain.model.WatchProgress> = emptyList(),
+        val watchlistShelf: CatalogShelf? = null,
+        val watchlistItems: List<MediaItem> = emptyList(),
+        val becauseYouWatched: List<CatalogShelf> = emptyList(),
+        val hiddenGemsShelf: CatalogShelf? = null,
+        val recentlyWatched: List<MediaItem> = emptyList(),
+        val customShelves: Map<String, List<MediaItem>> = emptyMap(),
+        val addonShelves: List<CatalogShelf> = emptyList(),
+        val addonShelfVisibility: Map<String, Boolean> = emptyMap(),
+        val mdbListShelves: List<CatalogShelf> = emptyList(),
+    )
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(HomeUiState())
     val state: StateFlow<HomeUiState> = _state.asStateFlow()
@@ -159,7 +177,9 @@ class HomeViewModel(
             _customSections.value = loadCustomSections()
             _addonShelfVisibility.value = loadAddonShelfVisibility()
             _homeLayoutOrder.value = ensureAllSectionsInLayoutOrder(loadHomeLayoutOrder())
-            loadHomeScreen()
+            if (!restoreFreshHomeSnapshot()) {
+                loadHomeScreen()
+            }
         }
         scope.launch {
             // Debounce: on app start the settings-refresh notifier fires
@@ -172,7 +192,9 @@ class HomeViewModel(
                 .collect {
                     _sectionConfigs.value = loadSectionConfigs()
                     _homeLayoutOrder.value = ensureAllSectionsInLayoutOrder(loadHomeLayoutOrder())
-                    loadHomeScreen()
+                    if (!restoreFreshHomeSnapshot()) {
+                        loadHomeScreen()
+                    }
                 }
         }
         if (invalidationCoordinator != null) {
@@ -511,6 +533,78 @@ class HomeViewModel(
             emptySet()
         }
     }
+
+    private suspend fun restoreFreshHomeSnapshot(): Boolean {
+        val saved = try { prefsRepo.getString(HOME_SNAPSHOT_KEY) } catch (_: Exception) { null }
+        if (saved.isNullOrBlank()) return false
+        val snapshot = try {
+            json.decodeFromString<HomeSnapshot>(saved)
+        } catch (_: Exception) {
+            return false
+        }
+        if (currentTimeMillis() - snapshot.savedAtMs > HOME_SNAPSHOT_MAX_AGE_MS) return false
+        if (
+            snapshot.shelves.isEmpty() &&
+            snapshot.continueWatching.isEmpty() &&
+            snapshot.watchlistItems.isEmpty() &&
+            snapshot.addonShelves.isEmpty() &&
+            snapshot.mdbListShelves.isEmpty()
+        ) {
+            return false
+        }
+        val hydratedContinueWatching = hydrateContinueWatchingFromCache(snapshot.continueWatching)
+        _state.value = _state.value.copy(
+            shelves = snapshot.shelves,
+            heroItem = snapshot.heroItem ?: snapshot.shelves.firstOrNull()?.items?.firstOrNull(),
+            continueWatching = snapshot.continueWatching,
+            continueWatchingRatings = buildRatingsLookup(
+                hydratedContinueWatching +
+                    snapshot.shelves.flatMap { it.items } +
+                    snapshot.watchlistItems +
+                    snapshot.becauseYouWatched.flatMap { it.items } +
+                    (snapshot.hiddenGemsShelf?.items ?: emptyList()) +
+                    snapshot.recentlyWatched +
+                    snapshot.customShelves.values.flatten() +
+                    snapshot.addonShelves.flatMap { it.items } +
+                    snapshot.mdbListShelves.flatMap { it.items },
+            ),
+            watchlistShelf = snapshot.watchlistShelf,
+            watchlistItems = snapshot.watchlistItems,
+            becauseYouWatched = snapshot.becauseYouWatched,
+            hiddenGemsShelf = snapshot.hiddenGemsShelf,
+            recentlyWatched = snapshot.recentlyWatched,
+            customShelves = snapshot.customShelves,
+            addonShelves = snapshot.addonShelves,
+            addonShelfVisibility = snapshot.addonShelfVisibility,
+            mdbListShelves = snapshot.mdbListShelves,
+            isLoading = false,
+            error = null,
+        )
+        torveVerboseLog { "HOME_TAB restored persisted snapshot shelves=${snapshot.shelves.size}" }
+        return true
+    }
+
+    private suspend fun persistHomeSnapshot(state: HomeUiState) {
+        if (!state.hasRenderableContent()) return
+        val snapshot = HomeSnapshot(
+            savedAtMs = currentTimeMillis(),
+            shelves = state.shelves,
+            heroItem = state.heroItem,
+            continueWatching = state.continueWatching,
+            watchlistShelf = state.watchlistShelf,
+            watchlistItems = state.watchlistItems,
+            becauseYouWatched = state.becauseYouWatched,
+            hiddenGemsShelf = state.hiddenGemsShelf,
+            recentlyWatched = state.recentlyWatched,
+            customShelves = state.customShelves,
+            addonShelves = state.addonShelves,
+            addonShelfVisibility = state.addonShelfVisibility,
+            mdbListShelves = state.mdbListShelves,
+        )
+        runCatching { prefsRepo.setString(HOME_SNAPSHOT_KEY, json.encodeToString(snapshot)) }
+    }
+
+    private fun currentTimeMillis(): Long = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
 
     fun loadHomeScreen() {
         val keepContentVisible = _state.value.hasRenderableContent()
@@ -1144,6 +1238,7 @@ class HomeViewModel(
                     }
                 }
 
+                persistHomeSnapshot(_state.value)
                 loadProviderLogos()
 
                 // Background enrichment: add MDBList multi-source ratings
@@ -1701,6 +1796,8 @@ class HomeViewModel(
     }
 
     companion object {
+        private const val HOME_SNAPSHOT_KEY = "home_snapshot_v1"
+        private const val HOME_SNAPSHOT_MAX_AGE_MS = 6L * 60L * 60L * 1000L
         private const val KEY_RATINGS_CACHE_VERSION = "ratings_cache_version"
 
         // Bump when enrichment semantics change in a way that should

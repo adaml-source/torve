@@ -21,9 +21,11 @@ import io.ktor.http.ContentType
 import io.ktor.http.Parameters
 import io.ktor.http.ParametersBuilder
 import io.ktor.http.contentType
+import io.ktor.http.encodeURLParameter
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Callback to refresh an expired RD OAuth token.
@@ -34,6 +36,7 @@ class DebridMissingException(message: String) : Exception(message)
 class DebridNeedsReconnectException(message: String) : Exception(message)
 class DebridNoCachedStreamException(message: String) : Exception(message)
 class DebridServiceUnavailableException(message: String) : Exception(message)
+class DebridSourceBlockedException(message: String) : Exception(message)
 
 fun interface RdTokenRefresher {
     suspend fun refresh(): String?
@@ -45,6 +48,13 @@ class DebridClient(
     private val accelerationApi: AccelerationApi? = null,
     var rdTokenRefresher: RdTokenRefresher? = null,
 ) {
+    private data class CacheCheckEntry(
+        val cached: Boolean,
+        val observedAt: Long,
+    )
+
+    private val cacheCheckMemory = mutableMapOf<String, CacheCheckEntry>()
+
     companion object {
         const val RD_BASE = "https://api.real-debrid.com/rest/1.0"
         const val RD_OAUTH = "https://api.real-debrid.com/oauth/v2"
@@ -57,10 +67,46 @@ class DebridClient(
         const val AD_AGENT = "torve"
         const val PM_CLIENT_ID = "888228107"
         const val PM_OAUTH_PREFIX = "pm-oauth:"
+        const val CACHE_CHECK_POSITIVE_TTL_MS = 30 * 60 * 1000L
+        const val CACHE_CHECK_NEGATIVE_TTL_MS = 10 * 60 * 1000L
+        val VIDEO_EXTENSIONS = setOf("mkv", "mp4", "avi", "m4v", "mov", "webm", "ts")
+        val DEFAULT_TORRENT_TRACKERS = listOf(
+            "udp://tracker.opentrackr.org:1337/announce",
+            "udp://open.stealth.si:80/announce",
+            "udp://tracker.openbittorrent.com:6969/announce",
+            "udp://exodus.desync.com:6969/announce",
+        )
     }
 
     private fun pmAccessToken(credential: String): String? =
         credential.takeIf { it.startsWith(PM_OAUTH_PREFIX) }?.removePrefix(PM_OAUTH_PREFIX)
+
+    private fun normalizeInfoHash(infoHash: String): String {
+        val normalized = infoHash
+            .trim()
+            .removePrefix("urn:btih:")
+            .removePrefix("btih:")
+            .substringBefore('&')
+            .substringBefore('?')
+            .trim()
+            .lowercase()
+        if (!normalized.matches(Regex("^[a-f0-9]{40}$"))) {
+            throw IllegalArgumentException("Invalid torrent hash.")
+        }
+        return normalized
+    }
+
+    private fun buildHashOnlyMagnet(infoHash: String, displayName: String?): String {
+        val params = mutableListOf("xt=urn:btih:$infoHash")
+        displayName
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { params += "dn=${it.encodeURLParameter()}" }
+        DEFAULT_TORRENT_TRACKERS.forEach { tracker ->
+            params += "tr=${tracker.encodeURLParameter()}"
+        }
+        return "magnet:?" + params.joinToString("&")
+    }
 
     private fun HttpRequestBuilder.pmAuthorize(credential: String) {
         val accessToken = pmAccessToken(credential)
@@ -148,12 +194,39 @@ class DebridClient(
         infoHashes: List<String>,
     ): Map<String, Boolean> {
         if (infoHashes.isEmpty() || apiKey.isBlank()) return emptyMap()
+        val normalizedHashes = infoHashes
+            .mapNotNull { runCatching { normalizeInfoHash(it) }.getOrNull() }
+            .distinct()
+        if (normalizedHashes.isEmpty()) return emptyMap()
+        val now = currentTimeMillis()
+        val credentialKey = apiKey.hashCode()
+        val cachedResults = mutableMapOf<String, Boolean>()
+        val misses = normalizedHashes.filter { hash ->
+            val key = cacheCheckKey(provider, credentialKey, hash)
+            val entry = cacheCheckMemory[key]
+            val ttl = if (entry?.cached == true) CACHE_CHECK_POSITIVE_TTL_MS else CACHE_CHECK_NEGATIVE_TTL_MS
+            if (entry != null && now - entry.observedAt <= ttl) {
+                cachedResults[hash] = entry.cached
+                false
+            } else {
+                true
+            }
+        }
+        if (misses.isEmpty()) return cachedResults
         return try {
             val result = when (provider) {
-                DebridServiceType.REAL_DEBRID -> rdCheckCache(apiKey, infoHashes)
-                DebridServiceType.ALL_DEBRID -> adCheckCache(apiKey, infoHashes)
-                DebridServiceType.PREMIUMIZE -> pmCheckCache(apiKey, infoHashes)
-                DebridServiceType.TORBOX -> tbCheckCache(apiKey, infoHashes)
+                DebridServiceType.REAL_DEBRID -> rdCheckCache(apiKey, misses)
+                DebridServiceType.ALL_DEBRID -> adCheckCache(apiKey, misses)
+                DebridServiceType.PREMIUMIZE -> pmCheckCache(apiKey, misses)
+                DebridServiceType.TORBOX -> tbCheckCache(apiKey, misses)
+            }
+            result.forEach { (hash, cached) ->
+                val normalized = runCatching { normalizeInfoHash(hash) }.getOrNull() ?: return@forEach
+                cacheCheckMemory[cacheCheckKey(provider, credentialKey, normalized)] = CacheCheckEntry(
+                    cached = cached,
+                    observedAt = now,
+                )
+                cachedResults[normalized] = cached
             }
             accelerationApi?.reportHashes(
                 providerType = provider.apiValue,
@@ -164,9 +237,12 @@ class DebridClient(
                     )
                 },
             )
-            result
-        } catch (_: Exception) {
-            emptyMap()
+            cachedResults
+        } catch (e: Exception) {
+            if (e is RdAuthException || e is DebridNeedsReconnectException || e is DebridServiceUnavailableException) {
+                throw e
+            }
+            cachedResults
         }
     }
 
@@ -196,25 +272,36 @@ class DebridClient(
         apiKey: String,
         infoHash: String,
         fileIdx: Int? = null,
+        magnetUrl: String? = null,
+        displayName: String? = null,
+        season: Int? = null,
+        episode: Int? = null,
     ): ResolvedStream {
+        val normalizedHash = normalizeInfoHash(infoHash)
+        val hashOnlyMagnet = buildHashOnlyMagnet(normalizedHash, displayName)
+        val magnet = magnetUrl
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: hashOnlyMagnet
+        val magnetMode = if (magnetUrl.isNullOrBlank()) "hash_only" else "full_magnet"
         return when (provider) {
             DebridServiceType.REAL_DEBRID -> {
                 try {
-                    rdResolveStream(apiKey, infoHash, fileIdx)
+                    rdResolveStream(apiKey, normalizedHash, magnet, magnetMode, fileIdx, season, episode)
                 } catch (e: RdAuthException) {
                     // Token expired — try refresh and retry once
                     val newKey = rdTokenRefresher?.refresh()
                     if (newKey != null) {
                         println("TORVE_RD: token refreshed, retrying resolve")
-                        rdResolveStream(newKey, infoHash, fileIdx)
+                        rdResolveStream(newKey, normalizedHash, magnet, magnetMode, fileIdx, season, episode)
                     } else {
                         throw DebridNeedsReconnectException("Real-Debrid needs reconnecting. Open Panda settings.")
                     }
                 }
             }
-            DebridServiceType.ALL_DEBRID -> adResolveStream(apiKey, infoHash, fileIdx)
-            DebridServiceType.PREMIUMIZE -> pmResolveStream(apiKey, infoHash)
-            DebridServiceType.TORBOX -> tbResolveStream(apiKey, infoHash, fileIdx)
+            DebridServiceType.ALL_DEBRID -> adResolveStream(apiKey, normalizedHash, magnet, magnetMode, fileIdx)
+            DebridServiceType.PREMIUMIZE -> pmResolveStream(apiKey, normalizedHash, magnet, magnetMode)
+            DebridServiceType.TORBOX -> tbResolveStream(apiKey, normalizedHash, magnet, magnetMode, fileIdx)
         }
     }
 
@@ -314,9 +401,9 @@ class DebridClient(
             },
         )
         val bodyText = rawResp.bodyAsText()
-        println("TORVE_RD: token refresh HTTP ${rawResp.status.value} body=$bodyText")
+        println("TORVE_RD: token refresh HTTP ${rawResp.status.value}")
         if (rawResp.status.value !in 200..299) {
-            throw Exception("Token refresh failed (${rawResp.status.value}): $bodyText")
+            throw Exception("Token refresh failed (${rawResp.status.value}).")
         }
         val resp: RdTokenResponse = json.decodeFromString(bodyText)
         return RdOAuthTokens(
@@ -411,12 +498,25 @@ class DebridClient(
             header("Authorization", "Bearer $apiKey")
         }
         val bodyText = rawResp.bodyAsText()
-        println("TORVE_RD: addMagnet HTTP ${rawResp.status.value} body=$bodyText")
+        println("TORVE_RD: addMagnet HTTP ${rawResp.status.value}")
         if (rawResp.status.value == 401) {
             throw RdAuthException("Session token expired (HTTP 401)")
         }
+        if (rawResp.status.value !in 200..299) {
+            val rdError = runCatching { json.decodeFromString<RdErrorResponse>(bodyText) }.getOrNull()
+            val errorName = rdError?.error.orEmpty()
+            val errorCode = rdError?.errorCode
+            if (rawResp.status.value == 451 || errorCode == 35 || errorName.equals("infringing_file", ignoreCase = true)) {
+                throw DebridSourceBlockedException("Real-Debrid blocked this source. Try another source.")
+            }
+            if (rawResp.status.value in 500..599) {
+                throw DebridServiceUnavailableException("Real-Debrid is unavailable right now. Try again later.")
+            }
+            throw Exception("Real-Debrid rejected this source (HTTP ${rawResp.status.value}). Try another source.")
+        }
         val resp: RdAddMagnetResponse = json.decodeFromString(bodyText)
-        return resp.id
+        return resp.id.takeIf { it.isNotBlank() }
+            ?: throw Exception("Real-Debrid did not return a torrent id. Try another source.")
     }
 
     /**
@@ -453,6 +553,9 @@ class DebridClient(
     }
 
     private suspend fun rdGetTorrentInfo(apiKey: String, torrentId: String): RdTorrentInfoResponse {
+        if (torrentId.isBlank()) {
+            throw Exception("Real-Debrid did not return a torrent id. Try another source.")
+        }
         val rawResp = httpClient.get("$RD_BASE/torrents/info/$torrentId") {
             header("Authorization", "Bearer $apiKey")
         }
@@ -460,8 +563,11 @@ class DebridClient(
             throw RdAuthException("Session token expired (HTTP 401, torrentInfo)")
         }
         val bodyText = rawResp.bodyAsText()
-        if (torrentId.isBlank()) {
-            println("TORVE_RD: getTorrentInfo HTTP ${rawResp.status.value} (blank torrentId!) body=${bodyText.take(200)}")
+        if (rawResp.status.value !in 200..299) {
+            if (rawResp.status.value in 500..599) {
+                throw DebridServiceUnavailableException("Real-Debrid is unavailable right now. Try again later.")
+            }
+            throw Exception("Real-Debrid torrent lookup failed (HTTP ${rawResp.status.value}). Try another source.")
         }
         return json.decodeFromString(bodyText)
     }
@@ -516,17 +622,65 @@ class DebridClient(
     private suspend fun rdResolveStream(
         apiKey: String,
         infoHash: String,
+        magnet: String,
+        magnetMode: String,
         fileIdx: Int?,
+        season: Int?,
+        episode: Int?,
     ): ResolvedStream {
-        val magnet = "magnet:?xt=urn:btih:$infoHash"
+        println("TORVE_RD: resolve hash=${infoHash.redactedHash()} fileIdx=$fileIdx magnetMode=$magnetMode")
+        if (magnetMode == "hash_only") {
+            val cached = try {
+                rdCheckCache(apiKey, listOf(infoHash))[infoHash]
+            } catch (e: Exception) {
+                if (e is RdAuthException || e is DebridServiceUnavailableException) throw e
+                println("TORVE_RD: hashOnlyCacheCheck unknown hash=${infoHash.redactedHash()} reason=${e::class.simpleName}")
+                null
+            }
+            println("TORVE_RD: hashOnlyCacheCheck hash=${infoHash.redactedHash()} cached=${cached ?: "unknown"}")
+            if (cached == false) {
+                rdResolveExistingTorrentByHash(apiKey, infoHash, fileIdx, season, episode)?.let { return it }
+                throw DebridNoCachedStreamException("Not cached on Real-Debrid.")
+            }
+            rdResolveExistingTorrentByHash(apiKey, infoHash, fileIdx, season, episode)?.let { return it }
+        }
 
         // 1. Add magnet
-        val torrentId = rdAddMagnet(apiKey, magnet)
-        println("TORVE_RD: addMagnet done torrentId=$torrentId fileIdx=$fileIdx")
+        val torrentId = try {
+            rdAddMagnet(apiKey, magnet)
+        } catch (e: DebridSourceBlockedException) {
+            rdResolveExistingTorrentByHash(apiKey, infoHash, fileIdx, season, episode)?.let { return it }
+            throw e
+        }
+        println("TORVE_RD: addMagnet accepted fileIdx=$fileIdx")
 
-        // 2. Get torrent info to find file IDs, then select the target file
+        return rdResolveTorrentId(apiKey, infoHash, torrentId, fileIdx, season, episode, origin = "addMagnet")
+    }
+
+    private suspend fun rdResolveExistingTorrentByHash(
+        apiKey: String,
+        infoHash: String,
+        fileIdx: Int?,
+        season: Int?,
+        episode: Int?,
+    ): ResolvedStream? {
+        val existingId = rdFindExistingTorrentId(apiKey, infoHash) ?: return null
+        println("TORVE_RD: existingTorrent match hash=${infoHash.redactedHash()}")
+        return rdResolveTorrentId(apiKey, infoHash, existingId, fileIdx, season, episode, origin = "inventory")
+    }
+
+    private suspend fun rdResolveTorrentId(
+        apiKey: String,
+        infoHash: String,
+        torrentId: String,
+        fileIdx: Int?,
+        season: Int?,
+        episode: Int?,
+        origin: String,
+    ): ResolvedStream {
+        // Get torrent info to find file IDs, then select the target file
         val initialInfo = rdGetTorrentInfo(apiKey, torrentId)
-        println("TORVE_RD: initialInfo status=${initialInfo.status} files=${initialInfo.files.size} links=${initialInfo.links.size}")
+        println("TORVE_RD: initialInfo origin=$origin status=${initialInfo.status} files=${initialInfo.files.size} links=${initialInfo.links.size}")
 
         // Select specific file if possible; fall back to "all" if no fileIdx
         val filesToSelect = if (fileIdx != null && initialInfo.files.isNotEmpty()) {
@@ -534,13 +688,13 @@ class DebridClient(
             val rdFileId = initialInfo.files.getOrNull(fileIdx)?.id
                 ?: (fileIdx + 1) // Fallback: assume 1-based offset
             rdFileId.toString()
+        } else if (season != null && episode != null && initialInfo.files.isNotEmpty()) {
+            selectEpisodeVideoFile(initialInfo.files, season, episode)?.id?.toString()
+                ?: selectLargestVideoFile(initialInfo.files)?.id?.toString()
+                ?: "all"
         } else if (initialInfo.files.isNotEmpty()) {
             // No fileIdx — select the largest video file
-            val videoExts = setOf("mkv", "mp4", "avi", "mov", "wmv", "flv", "webm", "ts", "m4v")
-            val largestVideo = initialInfo.files
-                .filter { f -> videoExts.any { ext -> f.path.lowercase().endsWith(".$ext") } }
-                .maxByOrNull { it.bytes }
-            largestVideo?.id?.toString() ?: "all"
+            selectLargestVideoFile(initialInfo.files)?.id?.toString() ?: "all"
         } else {
             "all"
         }
@@ -575,7 +729,7 @@ class DebridClient(
 
         // 4. Unrestrict the first link (we selected only the target file)
         val file = rdUnrestrictLink(apiKey, links.first())
-        println("TORVE_RD: unrestricted filename=${file.filename} download=${file.download.take(80)}")
+        println("TORVE_RD: unrestricted filename=${file.filename} streamable=${file.streamable}")
 
         // 5. Get transcode URLs
         val transcode = if (file.streamable) rdGetTranscodeUrls(apiKey, file.id) else null
@@ -587,6 +741,41 @@ class DebridClient(
             mimeType = file.mimeType,
             transcodeUrls = transcode,
         )
+    }
+
+    private fun selectLargestVideoFile(files: List<RdTorrentFile>): RdTorrentFile? {
+        return files
+            .filter { file -> isVideoFile(file.path) && !isJunkVideoFile(file.path) }
+            .maxByOrNull { it.bytes }
+    }
+
+    private fun selectEpisodeVideoFile(
+        files: List<RdTorrentFile>,
+        season: Int,
+        episode: Int,
+    ): RdTorrentFile? {
+        val seasonPadded = season.toString().padStart(2, '0')
+        val episodePadded = episode.toString().padStart(2, '0')
+        val patterns = listOf(
+            Regex("""(?i)\bs$seasonPadded[\s._-]*e$episodePadded\b"""),
+            Regex("""(?i)\b$season[xX]$episodePadded\b"""),
+            Regex("""(?i)\b$season[xX]$episode\b"""),
+        )
+        return files
+            .filter { file -> isVideoFile(file.path) && !isJunkVideoFile(file.path) }
+            .filter { file -> patterns.any { pattern -> pattern.containsMatchIn(file.path) } }
+            .maxByOrNull { it.bytes }
+    }
+
+    private fun isVideoFile(path: String): Boolean {
+        val lower = path.lowercase()
+        return VIDEO_EXTENSIONS.any { ext -> lower.endsWith(".$ext") }
+    }
+
+    private fun isJunkVideoFile(path: String): Boolean {
+        val lower = path.lowercase()
+        return listOf("sample", "trailer", "extras", "featurette", "behind.the.scenes", "behind-the-scenes")
+            .any { token -> lower.contains(token) }
     }
 
     // -------------------------------------------------------------------------
@@ -652,9 +841,19 @@ class DebridClient(
     private suspend fun adResolveStream(
         apiKey: String,
         infoHash: String,
+        magnet: String,
+        magnetMode: String,
         fileIdx: Int?,
     ): ResolvedStream {
-        val magnet = "magnet:?xt=urn:btih:$infoHash"
+        println("TORVE_AD: resolve hash=${infoHash.redactedHash()} fileIdx=$fileIdx magnetMode=$magnetMode")
+        if (magnetMode == "hash_only") {
+            try {
+                val cached = adCheckCache(apiKey, listOf(infoHash))[infoHash] == true
+                println("TORVE_AD: hashOnlyCacheCheck hash=${infoHash.redactedHash()} cached=$cached")
+            } catch (e: Exception) {
+                println("TORVE_AD: hashOnlyCacheCheck skipped hash=${infoHash.redactedHash()} reason=${e::class.simpleName}: ${e.message}")
+            }
+        }
 
         // 1. Upload magnet
         val uploadResp: AdResponse<AdMagnetUploadData> = httpClient.get("$AD_BASE/magnet/upload") {
@@ -774,8 +973,18 @@ class DebridClient(
     private suspend fun pmResolveStream(
         apiKey: String,
         infoHash: String,
+        magnet: String,
+        magnetMode: String,
     ): ResolvedStream {
-        val magnet = "magnet:?xt=urn:btih:$infoHash"
+        println("TORVE_PM: resolve hash=${infoHash.redactedHash()} magnetMode=$magnetMode")
+        if (magnetMode == "hash_only") {
+            try {
+                val cached = pmCheckCache(apiKey, listOf(infoHash))[infoHash] == true
+                println("TORVE_PM: hashOnlyCacheCheck hash=${infoHash.redactedHash()} cached=$cached")
+            } catch (e: Exception) {
+                println("TORVE_PM: hashOnlyCacheCheck skipped hash=${infoHash.redactedHash()} reason=${e::class.simpleName}: ${e.message}")
+            }
+        }
 
         // Premiumize directdl handles cached torrents
         val resp: PmDirectDlResponse = httpClient.submitForm(
@@ -836,9 +1045,19 @@ class DebridClient(
     private suspend fun tbResolveStream(
         apiKey: String,
         infoHash: String,
+        magnet: String,
+        magnetMode: String,
         fileIdx: Int?,
     ): ResolvedStream {
-        val magnet = "magnet:?xt=urn:btih:$infoHash"
+        println("TORVE_TB: resolve hash=${infoHash.redactedHash()} fileIdx=$fileIdx magnetMode=$magnetMode")
+        if (magnetMode == "hash_only") {
+            try {
+                val cached = tbCheckCache(apiKey, listOf(infoHash))[infoHash] == true
+                println("TORVE_TB: hashOnlyCacheCheck hash=${infoHash.redactedHash()} cached=$cached")
+            } catch (e: Exception) {
+                println("TORVE_TB: hashOnlyCacheCheck skipped hash=${infoHash.redactedHash()} reason=${e::class.simpleName}: ${e.message}")
+            }
+        }
 
         // 1. Create torrent
         val createResp: TbResponse<TbTorrentData> = httpClient.submitForm(
@@ -899,9 +1118,19 @@ class DebridClient(
     private suspend fun rdCheckCache(apiKey: String, hashes: List<String>): Map<String, Boolean> {
         // RD /torrents/instantAvailability/{hash1}/{hash2}/...
         val hashPath = hashes.joinToString("/")
-        val respText = httpClient.get("$RD_BASE/torrents/instantAvailability/$hashPath") {
+        val rawResp = httpClient.get("$RD_BASE/torrents/instantAvailability/$hashPath") {
             header("Authorization", "Bearer $apiKey")
-        }.bodyAsText()
+        }
+        if (rawResp.status.value == 401) {
+            throw RdAuthException("Session token expired (HTTP 401, instantAvailability)")
+        }
+        if (rawResp.status.value !in 200..299) {
+            if (rawResp.status.value in 500..599) {
+                throw DebridServiceUnavailableException("Real-Debrid is unavailable right now. Try again later.")
+            }
+            throw Exception("Real-Debrid cache check failed (HTTP ${rawResp.status.value}).")
+        }
+        val respText = rawResp.bodyAsText()
 
         val result = mutableMapOf<String, Boolean>()
         val parsed = json.parseToJsonElement(respText)
@@ -926,6 +1155,24 @@ class DebridClient(
             header("Authorization", "Bearer $apiKey")
         }.bodyAsText()
         return extractInventoryItems(json.parseToJsonElement(raw))
+    }
+
+    private suspend fun rdFindExistingTorrentId(apiKey: String, infoHash: String): String? {
+        return try {
+            val normalized = normalizeInfoHash(infoHash).lowercase()
+            rdGetInventory(apiKey).firstNotNullOfOrNull { item ->
+                val hash = item["hash"]?.jsonPrimitive?.content?.let(::normalizeInfoHash)?.lowercase()
+                if (hash == normalized) {
+                    item["id"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+                } else {
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            if (e is RdAuthException || e is DebridServiceUnavailableException) throw e
+            println("TORVE_RD: inventory lookup skipped hash=${infoHash.redactedHash()} reason=${e::class.simpleName}: ${e.message}")
+            null
+        }
     }
 
     private suspend fun adCheckCache(apiKey: String, hashes: List<String>): Map<String, Boolean> {
@@ -1016,4 +1263,14 @@ class DebridClient(
     }
 
     private fun currentTimeMillis(): Long = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+
+    private fun cacheCheckKey(
+        provider: DebridServiceType,
+        credentialKey: Int,
+        infoHash: String,
+    ): String = "${provider.name}:$credentialKey:$infoHash"
+}
+
+private fun String.redactedHash(): String {
+    return if (length <= 10) "<hash>" else "${take(6)}...${takeLast(4)}"
 }

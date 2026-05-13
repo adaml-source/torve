@@ -59,6 +59,11 @@ class CatalogTopCacheWorker(
         }
     }
 
+    suspend fun runNow() {
+        if (currentJob?.isActive == true) return
+        runOnce()
+    }
+
     private suspend fun runOnce() {
         val movieGenres = TmdbGenres.MOVIE_GENRES.entries
         val tvGenres = TmdbGenres.TV_GENRES.entries

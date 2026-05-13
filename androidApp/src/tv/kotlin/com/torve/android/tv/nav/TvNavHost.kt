@@ -50,6 +50,7 @@ internal fun TvNavHost(
     onHomeLayoutBack: () -> Unit = { navController.popBackStack() },
     // Focus state cleanup handled in TvRoot via isSubRouteActive LaunchedEffect
     onRatingsBack: () -> Unit = { navController.popBackStack() },
+    onPandaSetupBack: () -> Unit = { navController.popBackStack() },
     onSeeAllBack: () -> Unit = { navController.popBackStack() },
     onDetailsBack: () -> Unit = { navController.popBackStack() },
     onBeforeDetailsNavigateFromSeeAll: () -> Unit = {},
@@ -109,8 +110,8 @@ internal fun TvNavHost(
 
         composable(TvRoutes.PANDA_SETUP) {
             TvPandaSetupScreen(
-                onBack = { navController.popBackStack() },
-                onComplete = { navController.popBackStack() },
+                onBack = onPandaSetupBack,
+                onComplete = onPandaSetupBack,
             )
         }
 

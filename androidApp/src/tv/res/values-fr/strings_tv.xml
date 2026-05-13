@@ -179,6 +179,8 @@
     <string name="tv_catalog_search_shows_heading">Rechercher des s\u00e9ries</string>
     <string name="tv_catalog_search_movies_subtitle">Rechercher dans Films</string>
     <string name="tv_catalog_search_shows_subtitle">Rechercher dans S\u00e9ries</string>
+    <string name="tv_catalog_movies_preparing">Les films sont pr\u00e9par\u00e9s en arri\u00e8re-plan</string>
+    <string name="tv_catalog_shows_preparing">Les s\u00e9ries sont pr\u00e9par\u00e9es en arri\u00e8re-plan</string>
     <string name="tv_search_ai_provider_required">Configurez un fournisseur d\'IA dans les param\u00e8tres avant d\'utiliser la recherche IA.</string>
     <string name="tv_settings_panda_streaming_setup">Configuration streaming Panda</string>
     <string name="tv_settings_panda_streaming_setup_desc">Configurez debrid, usenet, clients de t\u00e9l\u00e9chargement, IPTV et sant\u00e9 des fournisseurs au m\u00eame endroit.</string>
@@ -354,6 +356,13 @@
     <string name="tv_settings_hide_all">Tout masquer</string>
     <string name="tv_settings_channels_visible">%1$d / %2$d visibles</string>
     <string name="tv_settings_no_categories">Aucun groupe de cha\u00eenes charg\u00e9 \u2014 s\u00e9lectionnez d\'abord une playlist</string>
+
+    <string name="tv_settings_refresh_epg_title">Actualiser l\'EPG</string>
+    <string name="tv_settings_refresh_epg_subtitle">T\u00e9l\u00e9charge des donn\u00e9es de guide r\u00e9centes pour la playlist s\u00e9lectionn\u00e9e</string>
+    <string name="tv_settings_refresh_epg_subtitle_loaded">Guide pr\u00eat : %1$d programmes en cache</string>
+    <string name="tv_settings_refresh_epg_loading">Actualisation du guide...</string>
+    <string name="tv_settings_refresh_epg_not_configured">Ajoutez d\'abord une URL de guide \u00e0 la playlist s\u00e9lectionn\u00e9e</string>
+    <string name="tv_settings_refresh_epg_started">Actualisation EPG lanc\u00e9e</string>
 
     <!-- Settings reorganization -->
     <string name="tv_settings_section_stream_quality">Qualit\u00e9 de flux &amp; lecture</string>

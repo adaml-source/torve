@@ -1,27 +1,38 @@
 package com.torve.android.tv.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -54,17 +65,20 @@ import com.torve.android.ui.theme.*
 import com.torve.domain.integrations.LibraryOverlayService
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.torve.android.tv.components.TvFocusDetailsPanel
 import com.torve.data.mdblist.MdbListApi
 import com.torve.data.mdblist.RatingsEnricher
+import com.torve.data.metadata.TmdbMappers
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.model.MediaItem
 import com.torve.domain.repository.PreferencesRepository
 import com.torve.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.torve.domain.model.MediaType
@@ -96,11 +110,13 @@ internal fun TvSeeAllScreen(
     val ratingsEnricher: RatingsEnricher = koinInject()
     val prefsRepo: PreferencesRepository = koinInject()
     val secretStore: IntegrationSecretStore = koinInject()
+    val isPersonCreditsRail = railKey.startsWith("person_credits_")
     val items = remember { mutableStateListOf<MediaItem>() }
     var currentPage by remember { mutableIntStateOf(1) }
     var totalPages by remember { mutableIntStateOf(Int.MAX_VALUE) }
     var loading by remember { mutableStateOf(false) }
     var initialLoad by remember { mutableStateOf(true) }
+    var personPanelInfo by remember(railKey) { mutableStateOf<TvPersonPanelInfo?>(null) }
     val gridState = rememberLazyGridState()
     val firstItemFocusRequester = remember { FocusRequester() }
     val focusRestoreController = rememberTvModalFocusRestoreController(key = "see_all_${railKey}_$mediaType")
@@ -157,9 +173,27 @@ internal fun TvSeeAllScreen(
         if (loading || page > totalPages) return
         loading = true
         try {
-            if (railKey.startsWith("person_credits_")) {
+            if (isPersonCreditsRail) {
                 val personId = railKey.removePrefix("person_credits_").toIntOrNull()
                 if (personId != null && page == 1) {
+                    personPanelInfo = TvPersonPanelInfo(name = title)
+                    runCatching { metadataRepo.getPersonDetail(personId) }
+                        .getOrNull()
+                        ?.let { person ->
+                            personPanelInfo = TvPersonPanelInfo(
+                                name = person.name.ifBlank { title },
+                                profileUrl = TmdbMappers.profileUrl(person.profilePath, size = "w342"),
+                                imageUrls = (
+                                    listOfNotNull(TmdbMappers.profileUrl(person.profilePath, size = "w342")) +
+                                        runCatching { metadataRepo.getPersonImageUrls(personId) }
+                                            .getOrDefault(emptyList())
+                                    ).distinct(),
+                                biography = person.biography,
+                                knownFor = person.knownForDepartment.orEmpty(),
+                                birthday = person.birthday,
+                                placeOfBirth = person.placeOfBirth,
+                            )
+                        }
                     val credits = metadataRepo.getPersonCredits(personId)
                     items.addAll(credits)
                 }
@@ -248,6 +282,7 @@ internal fun TvSeeAllScreen(
         totalPages = Int.MAX_VALUE
         loading = false
         initialLoad = true
+        personPanelInfo = null
         initialFocusHandled = false
         loadPage(1)
     }
@@ -333,27 +368,37 @@ internal fun TvSeeAllScreen(
 
     Row(modifier = Modifier.fillMaxSize()) {
         // Info panel — left side
-        TvFocusDetailsPanel(
-            focusedItem = focusedMediaItem,
-            modifier = Modifier.width(340.dp),
-        )
+        if (isPersonCreditsRail) {
+            TvPersonInfoPanel(
+                info = personPanelInfo,
+                fallbackTitle = title,
+                modifier = Modifier.width(340.dp),
+            )
+        } else {
+            TvFocusDetailsPanel(
+                focusedItem = focusedMediaItem,
+                modifier = Modifier.width(340.dp),
+            )
+        }
 
     Column(
         modifier = Modifier
             .weight(1f)
             .padding(start = 16.dp, top = 32.dp, end = 34.dp, bottom = 16.dp),
     ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.headlineMedium,
-            color = Snow,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(bottom = 16.dp),
-        )
+        if (!isPersonCreditsRail) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.headlineMedium,
+                color = Snow,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(bottom = 16.dp),
+            )
+        }
 
         if (sortOptions.isNotEmpty()) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
                 modifier = Modifier.padding(bottom = 16.dp),
             ) {
                 sortOptions.forEachIndexed { index, option ->
@@ -505,6 +550,162 @@ internal fun TvSeeAllScreen(
 
 }
 
+private data class TvPersonPanelInfo(
+    val name: String,
+    val profileUrl: String? = null,
+    val imageUrls: List<String> = emptyList(),
+    val biography: String = "",
+    val knownFor: String = "",
+    val birthday: String? = null,
+    val placeOfBirth: String? = null,
+)
+
+@Composable
+private fun TvPersonInfoPanel(
+    info: TvPersonPanelInfo?,
+    fallbackTitle: String,
+    modifier: Modifier = Modifier,
+) {
+    val displayName = info?.name?.takeIf { it.isNotBlank() } ?: fallbackTitle
+    val imageUrls = (info?.imageUrls.orEmpty() + listOfNotNull(info?.profileUrl)).distinct()
+    val birthLine = listOfNotNull(
+        info?.birthday?.takeIf { it.isNotBlank() },
+        info?.placeOfBirth?.takeIf { it.isNotBlank() },
+    ).joinToString(" · ")
+    val biography = info?.biography.orEmpty()
+    var imageIndex by remember(imageUrls) { mutableIntStateOf(0) }
+    val currentImageUrl = imageUrls.getOrNull(imageIndex.coerceIn(0, (imageUrls.size - 1).coerceAtLeast(0)))
+    val bioScrollState = rememberScrollState()
+    var bioFocused by remember { mutableStateOf(false) }
+    val bioBorderColor by animateColorAsState(
+        targetValue = if (bioFocused) Amber else Steel.copy(alpha = 0.24f),
+        label = "personBioBorder",
+    )
+
+    LaunchedEffect(imageUrls) {
+        imageIndex = 0
+        if (imageUrls.size > 1) {
+            while (true) {
+                delay(4_500L)
+                imageIndex = (imageIndex + 1) % imageUrls.size
+            }
+        }
+    }
+
+    LaunchedEffect(biography, bioScrollState.maxValue) {
+        bioScrollState.scrollTo(0)
+        if (biography.isNotBlank() && bioScrollState.maxValue > 0) {
+            while (true) {
+                delay(2_000L)
+                bioScrollState.animateScrollTo(
+                    value = bioScrollState.maxValue,
+                    animationSpec = tween(
+                        durationMillis = (bioScrollState.maxValue * 72).coerceIn(22_000, 58_000),
+                        easing = LinearEasing,
+                    ),
+                )
+                delay(1_200L)
+                bioScrollState.scrollTo(0)
+            }
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(
+                Brush.radialGradient(
+                    colors = listOf(
+                        Graphite.copy(alpha = 0.98f),
+                        Charcoal.copy(alpha = 0.96f),
+                        Color.Black.copy(alpha = 0.96f),
+                    ),
+                ),
+            ),
+    ) {
+        if (!currentImageUrl.isNullOrBlank()) {
+            Crossfade(
+                targetState = currentImageUrl,
+                label = "personPanelBackdrop",
+            ) { imageUrl ->
+                AsyncImage(
+                    model = imageUrl,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Black.copy(alpha = 0.12f),
+                                Charcoal.copy(alpha = 0.58f),
+                                Color.Black.copy(alpha = 0.96f),
+                            ),
+                        ),
+                    ),
+            )
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp, vertical = 28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+        Spacer(Modifier.weight(1f))
+        Text(
+            text = displayName,
+            style = MaterialTheme.typography.headlineSmall,
+            color = Snow,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (birthLine.isNotBlank()) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = birthLine,
+                style = MaterialTheme.typography.bodySmall,
+                color = Silver,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (biography.isNotBlank()) {
+            Spacer(Modifier.height(18.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(230.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color.Black.copy(alpha = 0.28f))
+                    .border(1.dp, bioBorderColor, RoundedCornerShape(16.dp))
+                    .onFocusChanged { bioFocused = it.isFocused }
+                    .focusable()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+            ) {
+                Text(
+                    text = biography,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Silver,
+                    modifier = Modifier.verticalScroll(bioScrollState),
+                )
+            }
+        } else if (info == null) {
+            Spacer(Modifier.height(20.dp))
+            CircularProgressIndicator(
+                modifier = Modifier.size(28.dp),
+                color = Amber,
+                strokeWidth = 2.dp,
+            )
+        }
+        }
+    }
+}
+
 private enum class TvSeeAllSortKey {
     DEFAULT,
     RATING_DESC,
@@ -590,6 +791,8 @@ private fun TvSeeAllSortButton(
 
     Box(
         modifier = modifier
+            .height(38.dp)
+            .widthIn(min = 58.dp, max = 112.dp)
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
@@ -602,13 +805,17 @@ private fun TvSeeAllSortButton(
                 indication = null,
                 onClick = onClick,
             )
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(horizontal = 10.dp),
+        contentAlignment = Alignment.Center,
     ) {
         Text(
             text = label,
-            style = MaterialTheme.typography.labelLarge,
+            style = MaterialTheme.typography.labelMedium,
             color = contentColor,
             fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
         )
     }
 }

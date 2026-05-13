@@ -23,6 +23,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -50,6 +53,9 @@ internal fun TvOnNowRail(
     channels: List<EnrichedChannel>,
     onChannelClick: (EnrichedChannel) -> Unit,
     modifier: Modifier = Modifier,
+    firstTileFocusRequester: FocusRequester? = null,
+    railFocusRequester: FocusRequester? = null,
+    onContentFocused: ((FocusRequester) -> Unit)? = null,
 ) {
     if (channels.isEmpty()) return
     Column(
@@ -68,9 +74,17 @@ internal fun TvOnNowRail(
             contentPadding = PaddingValues(horizontal = 24.dp),
         ) {
             items(channels, key = { it.channel.url }) { channel ->
+                val isFirst = channel == channels.firstOrNull()
                 OnNowTile(
                     channel = channel,
                     onClick = { onChannelClick(channel) },
+                    focusRequester = firstTileFocusRequester?.takeIf { isFirst },
+                    railFocusRequester = railFocusRequester?.takeIf { isFirst },
+                    onFocused = {
+                        if (isFirst && firstTileFocusRequester != null) {
+                            onContentFocused?.invoke(firstTileFocusRequester)
+                        }
+                    },
                 )
             }
         }
@@ -81,6 +95,9 @@ internal fun TvOnNowRail(
 private fun OnNowTile(
     channel: EnrichedChannel,
     onClick: () -> Unit,
+    focusRequester: FocusRequester? = null,
+    railFocusRequester: FocusRequester? = null,
+    onFocused: () -> Unit = {},
 ) {
     var focused by remember { mutableStateOf(false) }
     val container = if (focused) Color(0x3326C6DA) else Color(0x14FFFFFF)
@@ -89,9 +106,14 @@ private fun OnNowTile(
         modifier = Modifier
             .width(280.dp)
             .height(120.dp)
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .then(if (railFocusRequester != null) Modifier.focusProperties { left = railFocusRequester } else Modifier)
             .background(container, RoundedCornerShape(12.dp))
             .border(1.dp, borderColor, RoundedCornerShape(12.dp))
-            .onFocusChanged { focused = it.isFocused }
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused()
+            }
             .focusable()
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),

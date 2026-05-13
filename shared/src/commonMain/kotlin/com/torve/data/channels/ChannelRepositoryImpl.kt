@@ -1,6 +1,7 @@
 package com.torve.data.channels
 
 import com.torve.data.auth.UserIdProvider
+import com.torve.db.Iptv_channel
 import com.torve.db.TorveDatabase
 import com.torve.domain.model.EnrichedChannel
 import com.torve.domain.model.EpgData
@@ -13,9 +14,12 @@ import com.torve.domain.model.PlaylistType
 import com.torve.domain.model.channelIdentityCandidates
 import com.torve.domain.model.channelMatchesIdentity
 import com.torve.domain.model.canonicalEpgChannelKey
+import com.torve.domain.model.epgChannelLookupKeys
 import com.torve.domain.model.stableChannelId
 import com.torve.domain.repository.ChannelRepository
+import com.torve.domain.repository.ChannelPlaylistSummary
 import com.torve.domain.repository.PlaylistAddProgress
+import com.torve.domain.repository.VodCategoryTypeCount
 import com.torve.data.network.HttpClientFactory
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.timeout
@@ -493,6 +497,17 @@ class ChannelRepositoryImpl(
         }
     }
 
+    override suspend fun getPlaylistSummaries(): List<ChannelPlaylistSummary> {
+        return database.torveQueries.getPlaylistSummaries(userId = uid()).executeAsList().map { row ->
+            ChannelPlaylistSummary(
+                id = row.id,
+                name = row.name,
+                channelCount = row.channel_count.toInt(),
+                type = row.type,
+            )
+        }
+    }
+
     override suspend fun refreshPlaylist(playlistId: String) {
         repairChannelCatalogIfNeeded(playlistId)
         val playlist = database.torveQueries.getPlaylist(userId = uid(), playlistId = playlistId).executeAsOneOrNull()
@@ -602,14 +617,10 @@ class ChannelRepositoryImpl(
 
     override suspend fun refreshEpg(playlistId: String, hiddenChannelIds: Set<String>) {
         refreshEpgMutexFor(playlistId).withLock {
-            // Fast path: while we waited for the lock, an earlier caller
-            // may have already populated the cache. Skip the network
-            // round trip in that case so two callers never download the
-            // same 40MB XMLTV file back-to-back.
-            if (epgCache[playlistId]?.programmes?.isNotEmpty() == true) {
-                println("ChannelsEPG: refreshEpg skipped — cache already populated playlistId=$playlistId")
-                return
-            }
+            // This method is used by the explicit "Refresh EPG" action and by
+            // the scheduled worker. Do not skip just because a small/stale cache
+            // exists; that made manual refresh a no-op when only a handful of
+            // programmes had been ingested.
             val playlist = database.torveQueries.getPlaylist(userId = uid(), playlistId = playlistId).executeAsOneOrNull()
                 ?: return
             val epgXtreamPw = if (playlist.type == "xtream") loadXtreamPassword(playlistId) else null
@@ -683,12 +694,12 @@ class ChannelRepositoryImpl(
 
             if (epg == null) return@map EnrichedChannel(markedCh)
 
-            val epgId = canonicalEpgChannelKey(
+            val epgKeys = epgChannelLookupKeys(
                 playlistId = playlistId,
                 channel = markedCh,
             )
-            val current = epgId?.let(currentProgrammeByChannelId::get)
-            val next = epgId?.let(nextProgrammeByChannelId::get)
+            val current = epgKeys.firstNotNullOfOrNull(currentProgrammeByChannelId::get)
+            val next = epgKeys.firstNotNullOfOrNull(nextProgrammeByChannelId::get)
             EnrichedChannel(markedCh, current, next)
         }
     }
@@ -711,6 +722,21 @@ class ChannelRepositoryImpl(
             .map { row -> (row.group_title ?: "VOD") to row.channel_count }
     }
 
+    override suspend fun getVodCategoryTypeCounts(playlistId: String): List<VodCategoryTypeCount> {
+        repairChannelCatalogIfNeeded(playlistId)
+        val generationId = getActiveChannelGeneration(playlistId) ?: return emptyList()
+        return database.torveQueries
+            .getVodCategoryTypeCountsForPlaylist(userId = uid(), playlistId = playlistId, generationId = generationId)
+            .executeAsList()
+            .map { row ->
+                VodCategoryTypeCount(
+                    groupTitle = row.group_title ?: "VOD",
+                    contentType = parseContentType(row.content_type),
+                    count = row.channel_count,
+                )
+            }
+    }
+
     /**
      * Lightweight category listing — returns category names with channel counts
      * without loading any channel objects into memory.
@@ -725,25 +751,20 @@ class ChannelRepositoryImpl(
             return results.map { row -> (row.group_title ?: "Ungrouped") to row.channel_count }
         }
         // Active generation has no data — find any generation that does.
-        val fallbackGeneration = database.torveQueries
-            .getChannelsForPlaylistGeneration(userId = uid(), playlistId = playlistId, generationId = generationId)
-            .executeAsList()
-        if (fallbackGeneration.isEmpty()) {
-            // Try loading via getChannels which handles catalog repair and cache rebuild.
-            val channels = getChannels(playlistId)
-            val repairedGeneration = getActiveChannelGeneration(playlistId) ?: return emptyList()
-            return database.torveQueries
-                .getCategoryCountsForPlaylist(userId = uid(), playlistId = playlistId, generationId = repairedGeneration)
-                .executeAsList()
-                .map { row -> (row.group_title ?: "Ungrouped") to row.channel_count }
-        }
-        return results.map { row -> (row.group_title ?: "Ungrouped") to row.channel_count }
+        val rowCount = database.torveQueries
+            .getTotalChannelCountForPlaylist(userId = uid(), playlistId = playlistId, generationId = generationId)
+            .executeAsOne()
+        channelDebugLog(
+            "ChannelCatalog: category count empty playlistId=$playlistId generation=$generationId rowCount=$rowCount",
+        )
+        return emptyList()
     }
 
     /**
      * Load channels for a single category only — avoids materializing the full playlist.
      */
     override suspend fun getChannelsForCategory(playlistId: String, categoryName: String): List<Channel> {
+        repairChannelCatalogIfNeeded(playlistId)
         val generationId = getActiveChannelGeneration(playlistId) ?: return emptyList()
         val rows = if (categoryName == "Ungrouped") {
             database.torveQueries
@@ -779,10 +800,59 @@ class ChannelRepositoryImpl(
         }
     }
 
+    override suspend fun getChannelsForContentType(
+        playlistId: String,
+        type: ChannelContentType,
+        limit: Int,
+    ): List<Channel> {
+        repairChannelCatalogIfNeeded(playlistId)
+        val generationId = getActiveChannelGeneration(playlistId) ?: return emptyList()
+        return database.torveQueries
+            .getChannelsForPlaylistContentTypeLimited(
+                userId = uid(),
+                playlistId = playlistId,
+                generationId = generationId,
+                contentType = type.name,
+                rowLimit = limit.toLong(),
+            )
+            .executeAsList()
+            .map { row -> row.toDomainChannel() }
+    }
+
+    override suspend fun getChannelsForCategoryContentType(
+        playlistId: String,
+        categoryName: String,
+        type: ChannelContentType,
+        limit: Int,
+    ): List<Channel> {
+        repairChannelCatalogIfNeeded(playlistId)
+        val generationId = getActiveChannelGeneration(playlistId) ?: return emptyList()
+        val rows = if (categoryName == "Ungrouped") {
+            database.torveQueries.getChannelsForPlaylistCategoryNullContentType(
+                userId = uid(),
+                playlistId = playlistId,
+                generationId = generationId,
+                contentType = type.name,
+                rowLimit = limit.toLong(),
+            )
+        } else {
+            database.torveQueries.getChannelsForPlaylistCategoryContentType(
+                userId = uid(),
+                playlistId = playlistId,
+                generationId = generationId,
+                groupTitle = categoryName,
+                contentType = type.name,
+                rowLimit = limit.toLong(),
+            )
+        }
+        return rows.executeAsList().map { row -> row.toDomainChannel() }
+    }
+
     /**
      * Get total channel count without loading any channel objects.
      */
     override suspend fun getTotalChannelCount(playlistId: String): Long {
+        repairChannelCatalogIfNeeded(playlistId)
         val generationId = getActiveChannelGeneration(playlistId) ?: return 0L
         return database.torveQueries
             .getTotalChannelCountForPlaylist(userId = uid(), playlistId = playlistId, generationId = generationId)
@@ -1294,29 +1364,31 @@ class ChannelRepositoryImpl(
         return database.torveQueries
             .getChannelsForPlaylistGeneration(userId = uid(), playlistId = playlistId, generationId = generationId)
             .executeAsList()
-            .map { row ->
-                Channel(
-                    name = row.name,
-                    url = row.stream_url,
-                    tvgId = row.tvg_id,
-                    tvgName = row.tvg_name,
-                    tvgLogo = row.logo_url,
-                    groupTitle = row.group_title,
-                    tvgLanguage = row.tvg_language,
-                    tvgCountry = row.tvg_country,
-                    tvgShift = row.tvg_shift?.toInt(),
-                    channelNumber = row.channel_number?.toInt(),
-                    duration = row.duration.toInt(),
-                    catchupType = row.catchup_type,
-                    catchupDays = row.catchup_days?.toInt(),
-                    catchupSource = row.catchup_source,
-                    userAgent = row.user_agent,
-                    vlcOptions = decodeVlcOptions(row.vlc_options),
-                    kodiProps = decodeKodiProps(row.kodi_props),
-                    playlistId = playlistId,
-                    contentType = parseContentType(row.content_type),
-                )
-            }
+            .map { row -> row.toDomainChannel() }
+    }
+
+    private fun Iptv_channel.toDomainChannel(): Channel {
+        return Channel(
+            name = name,
+            url = stream_url,
+            tvgId = tvg_id,
+            tvgName = tvg_name,
+            tvgLogo = logo_url,
+            groupTitle = group_title,
+            tvgLanguage = tvg_language,
+            tvgCountry = tvg_country,
+            tvgShift = tvg_shift?.toInt(),
+            channelNumber = channel_number?.toInt(),
+            duration = duration.toInt(),
+            catchupType = catchup_type,
+            catchupDays = catchup_days?.toInt(),
+            catchupSource = catchup_source,
+            userAgent = user_agent,
+            vlcOptions = decodeVlcOptions(vlc_options),
+            kodiProps = decodeKodiProps(kodi_props),
+            playlistId = playlist_id,
+            contentType = parseContentType(content_type),
+        )
     }
 
     private fun resolveChannelByStoredId(
@@ -1327,11 +1399,16 @@ class ChannelRepositoryImpl(
         if (cached != null) {
             cached.firstOrNull { channelMatchesIdentity(it, storedId) }?.let { return it }
         }
-        val localChannels = loadChannelsFromDatabase(playlistId)
-        if (localChannels.isNotEmpty() && localChannels.size <= PLAYLIST_CACHE_MAX_CHANNELS) {
-            playlistCache[playlistId] = localChannels
-        }
-        return localChannels.firstOrNull { channelMatchesIdentity(it, storedId) }
+        val generationId = getActiveChannelGeneration(playlistId) ?: return null
+        return database.torveQueries
+            .getChannelForPlaylistGeneration(
+                userId = uid(),
+                playlistId = playlistId,
+                generationId = generationId,
+                stableId = storedId,
+            )
+            .executeAsOneOrNull()
+            ?.toDomainChannel()
     }
 
     private fun parseContentType(value: String): ChannelContentType {
@@ -1703,15 +1780,22 @@ class ChannelRepositoryImpl(
         val allowedKeys = mutableSetOf<String>()
         var skippedHidden = 0
 
-        val channels = playlistCache[playlistId] ?: loadChannelsFromDatabase(playlistId).also { persisted ->
-            if (persisted.isNotEmpty() && persisted.size <= PLAYLIST_CACHE_MAX_CHANNELS) {
-                playlistCache[playlistId] = persisted
-            }
-        }
+        val generationId = getActiveChannelGeneration(playlistId) ?: return EpgChannelMapping(
+            byXmltvId = emptyMap(),
+            byNormalizedName = emptyMap(),
+            allowedCanonicalKeys = emptySet(),
+        )
+        val channels = database.torveQueries
+            .getEpgChannelMappingRowsForPlaylist(
+                userId = uid(),
+                playlistId = playlistId,
+                generationId = generationId,
+            )
+            .executeAsList()
         channels.forEach { channel ->
             // Skip hidden channels — their EPG data won't be ingested.
             if (hiddenChannelIds.isNotEmpty() &&
-                channelIdentityCandidates(channel).any(hiddenChannelIds::contains)
+                hiddenChannelIds.contains(channel.stable_id)
             ) {
                 skippedHidden++
                 return@forEach
@@ -1719,15 +1803,16 @@ class ChannelRepositoryImpl(
 
             val canonical = canonicalEpgChannelKey(
                 playlistId = playlistId,
-                channel = channel,
+                tvgId = channel.tvg_id,
+                name = channel.name,
             ) ?: return@forEach
             allowedKeys += canonical
 
-            channel.tvgId?.trim()?.takeIf { it.isNotEmpty() }?.let { tvgId ->
+            channel.tvg_id?.trim()?.takeIf { it.isNotEmpty() }?.let { tvgId ->
                 byXmltvId.putIfAbsent(tvgId, canonical)
                 byNormalizedName.putIfAbsent(normalizeEpgMatchKey(tvgId), canonical)
             }
-            channel.tvgName?.trim()?.takeIf { it.isNotEmpty() }?.let { tvgName ->
+            channel.tvg_name?.trim()?.takeIf { it.isNotEmpty() }?.let { tvgName ->
                 byNormalizedName.putIfAbsent(normalizeEpgMatchKey(tvgName), canonical)
             }
             channel.name.trim().takeIf { it.isNotEmpty() }?.let { name ->
@@ -1852,6 +1937,18 @@ class ChannelRepositoryImpl(
             }
         }
         return out.toString()
+    }
+
+    private fun canonicalEpgChannelKey(
+        playlistId: String,
+        tvgId: String?,
+        name: String,
+    ): String? {
+        val normalizedPlaylistId = playlistId.trim().ifEmpty { return null }
+        tvgId?.trim()?.takeIf { it.isNotEmpty() }?.let { return "$normalizedPlaylistId::$it" }
+        val normalizedName = normalizeEpgMatchKey(name)
+        if (normalizedName.isEmpty()) return null
+        return "$normalizedPlaylistId::$normalizedName"
     }
 
     private fun clearEpgGenerationRows(playlistId: String, generationId: Long) {

@@ -96,7 +96,6 @@ import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material3.Icon
 import com.torve.android.download.DownloadWorker
 import com.torve.data.download.BulkDownloadManager
-import com.torve.domain.model.AvailabilityOfferType
 import com.torve.domain.model.CandidateProvenanceKind
 import com.torve.domain.model.ContentWarmupTrigger
 import com.torve.domain.model.Download
@@ -109,6 +108,8 @@ import com.torve.domain.model.deriveProvidersToRender
 import com.torve.domain.model.hasAnyEnabledDisplayValue
 import com.torve.domain.model.withFallbackTmdbScore
 import com.torve.android.tv.components.TvSourcePickerSheet
+import com.torve.data.addon.isTorrentOrDebridStream
+import com.torve.data.addon.isUsenetStream
 import com.torve.domain.lanlibrary.NetworkMode
 import com.torve.domain.lanlibrary.PlaybackRoute
 import com.torve.domain.repository.DownloadRepository
@@ -131,8 +132,10 @@ import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
 private enum class TvStreamSourceFilter(val label: String) {
-    ALL("All"), TORRENT("Torrent"), USENET("Usenet")
+    ALL("All"), TORRENT("Torrent/RD"), USENET("Usenet")
 }
+
+private const val TV_USENET_PREPARING_NOTIFICATION_TAG = "tv_usenet_preparing"
 
 private sealed class DownloadAction {
     data object None : DownloadAction()
@@ -205,13 +208,14 @@ fun TvDetailsScreen(
     val downloadMovieFocusRequester = remember { FocusRequester() }
     val downloadAllFocusRequester = remember { FocusRequester() }
     val firstStreamFocusRequester = remember { FocusRequester() }
+    var restoreFocusAfterPreparingCancel by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     var tvStreamFilter by remember { mutableStateOf(TvStreamSourceFilter.ALL) }
     val filteredStreams = remember(state.streams, tvStreamFilter) {
         when (tvStreamFilter) {
             TvStreamSourceFilter.ALL -> state.streams
-            TvStreamSourceFilter.TORRENT -> state.streams.filter { it.infoHash != null }
-            TvStreamSourceFilter.USENET -> state.streams.filter { it.infoHash == null }
+            TvStreamSourceFilter.TORRENT -> state.streams.filter { it.isTorrentOrDebridStream() }
+            TvStreamSourceFilter.USENET -> state.streams.filter { it.isUsenetStream() }
         }
     }
     var didAutoPlay by rememberSaveable(type, id) { mutableStateOf(false) }
@@ -244,6 +248,11 @@ fun TvDetailsScreen(
     // downloadToastMessage replaced by TvNotificationQueue
 
     BackHandler(onBack = onBack)
+    DisposableEffect(Unit) {
+        onDispose {
+            TvNotificationQueue.clear(TV_USENET_PREPARING_NOTIFICATION_TAG)
+        }
+    }
     BackHandler(enabled = showWatchlistPicker) {
         showWatchlistPicker = false
         watchlistModalRestoreController.requestRestore()
@@ -306,7 +315,21 @@ fun TvDetailsScreen(
     // Surface stream errors as visible notifications
     LaunchedEffect(state.streamsError) {
         state.streamsError?.let { error ->
-            TvNotificationQueue.post(error, NotificationType.ERROR)
+            TvNotificationQueue.clear(TV_USENET_PREPARING_NOTIFICATION_TAG)
+            TvNotificationQueue.post(resolveTvDetailMessage(context, error), NotificationType.ERROR)
+        }
+    }
+
+    LaunchedEffect(state.resolveError) {
+        state.resolveError?.let { error ->
+            TvNotificationQueue.clear(TV_USENET_PREPARING_NOTIFICATION_TAG)
+            TvNotificationQueue.post(resolveTvDetailMessage(context, error), NotificationType.ERROR)
+        }
+    }
+
+    LaunchedEffect(state.preparing) {
+        if (state.preparing != null) {
+            TvNotificationQueue.clear(TV_USENET_PREPARING_NOTIFICATION_TAG)
         }
     }
 
@@ -354,6 +377,28 @@ fun TvDetailsScreen(
         }
     }
 
+    LaunchedEffect(
+        restoreFocusAfterPreparingCancel,
+        state.preparing,
+        state.showStreamPicker,
+        state.streams.size,
+    ) {
+        if (restoreFocusAfterPreparingCancel && state.preparing == null) {
+            kotlinx.coroutines.delay(120)
+            if (state.showStreamPicker && state.streams.isNotEmpty()) {
+                val pickerIndex = listState.layoutInfo.totalItemsCount - state.streams.size - 1
+                if (pickerIndex >= 0) {
+                    listState.animateScrollToItem(pickerIndex.coerceAtLeast(0))
+                }
+                kotlinx.coroutines.delay(50)
+                runCatching { firstStreamFocusRequester.requestFocus() }
+            } else {
+                runCatching { playFocusRequester.requestFocus() }
+            }
+            restoreFocusAfterPreparingCancel = false
+        }
+    }
+
     // Usenet source-sheet warmup hook. Mirrors the phone DetailScreen
     // wiring exactly â€" keyed on the boolean only so it fires once per
     // falseâ†’true transition of showStreamPicker, not on incidental
@@ -372,6 +417,7 @@ fun TvDetailsScreen(
     LaunchedEffect(state.usenetPlaybackIntent) {
         val intent = state.usenetPlaybackIntent ?: return@LaunchedEffect
         val media = state.mediaItem ?: return@LaunchedEffect
+        TvNotificationQueue.clear(TV_USENET_PREPARING_NOTIFICATION_TAG)
         val epName = state.seasonDetail?.episodes
             ?.find { it.episodeNumber == state.streamContextEpisode }?.name.orEmpty()
         onPlayResolved(
@@ -397,6 +443,7 @@ fun TvDetailsScreen(
     LaunchedEffect(state.resolvedStream, state.mediaItem, pendingDownloadAction) {
         val resolved = state.resolvedStream ?: return@LaunchedEffect
         val media = state.mediaItem ?: return@LaunchedEffect
+        TvNotificationQueue.clear(TV_USENET_PREPARING_NOTIFICATION_TAG)
         // Don't navigate to player if this resolve was for a download action
         if (pendingDownloadAction !is DownloadAction.None) return@LaunchedEffect
 
@@ -846,126 +893,38 @@ fun TvDetailsScreen(
                 }
             }
 
-            // â"€â"€ Where to Watch â"€â"€
-            item(key = "where_to_watch") {
-                val offers = state.availability?.offers.orEmpty()
-                val grouped = offers.groupBy { it.offerType }
-                if (state.isLoadingAvailability) {
-                    Row(
-                        modifier = Modifier.padding(bottom = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            color = Amber,
-                            strokeWidth = 2.dp,
-                        )
-                        Text(
-                            text = stringResource(R.string.tv_detail_where_to_watch),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = Ash,
-                        )
-                    }
-                } else if (offers.isNotEmpty()) {
-                    Column(modifier = Modifier.padding(bottom = 14.dp)) {
-                        Text(
-                            text = stringResource(R.string.tv_detail_where_to_watch),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = Ash,
-                            modifier = Modifier.padding(bottom = 8.dp),
-                        )
-                        val typeOrder = listOf(
-                            AvailabilityOfferType.SUBSCRIPTION,
-                            AvailabilityOfferType.FREE,
-                            AvailabilityOfferType.ADS,
-                            AvailabilityOfferType.RENT,
-                            AvailabilityOfferType.BUY,
-                        )
-                        typeOrder.forEach { offerType ->
-                            val typeOffers = grouped[offerType] ?: return@forEach
-                            val label = when (offerType) {
-                                AvailabilityOfferType.SUBSCRIPTION -> "Stream"
-                                AvailabilityOfferType.FREE -> "Free"
-                                AvailabilityOfferType.ADS -> "Ads"
-                                AvailabilityOfferType.RENT -> "Rent"
-                                AvailabilityOfferType.BUY -> "Buy"
-                            }
-                            Row(
-                                modifier = Modifier.padding(bottom = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    text = label,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Silver,
-                                    modifier = Modifier.width(52.dp),
-                                )
-                                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    items(typeOffers, key = { "${it.providerName}_${it.offerType}" }) { offer ->
-                                        val chipReq = remember { FocusRequester() }
-                                        var chipFocused by remember { mutableStateOf(false) }
-                                        val chipBorderColor by animateColorAsState(targetValue = if (chipFocused) Amber else Steel.copy(alpha = 0.3f), label = "offerChipBorder")
-                                        Box(
-                                            modifier = Modifier
-                                                .border(2.dp, chipBorderColor, RoundedCornerShape(8.dp))
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(if (chipFocused) Amber.copy(alpha = 0.2f) else Gunmetal)
-                                                .focusRequester(chipReq)
-                                                .onFocusChanged {
-                                                    chipFocused = it.isFocused
-                                                    if (it.isFocused) onContentFocused(chipReq)
-                                                }
-                                                // Info-only â€" no external links
-                                                .padding(horizontal = 12.dp, vertical = 6.dp),
-                                        ) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                            ) {
-                                                if (!offer.logoUrl.isNullOrBlank()) {
-                                                    AsyncImage(
-                                                        model = offer.logoUrl,
-                                                        contentDescription = offer.providerName,
-                                                        modifier = Modifier
-                                                            .size(18.dp)
-                                                            .clip(RoundedCornerShape(4.dp)),
-                                                        contentScale = ContentScale.Fit,
-                                                    )
-                                                }
-                                                Text(
-                                                    text = offer.providerName,
-                                                    style = MaterialTheme.typography.labelMedium,
-                                                    color = if (chipFocused) Amber else Snow,
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } else if (state.availabilityError != null) {
-                    Text(
-                        text = state.availabilityError.orEmpty(),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Ruby.copy(alpha = 0.7f),
-                        modifier = Modifier.padding(bottom = 14.dp),
-                    )
-                } else if (!state.isLoading && state.availability != null) {
-                    Text(
-                        text = stringResource(R.string.tv_detail_no_offers),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Ash,
-                        modifier = Modifier.padding(bottom = 14.dp),
-                    )
-                }
-            }
-
             // â"€â"€ Director â"€â"€
             if (!item.director.isNullOrBlank()) {
                 item(key = "director") {
-                    Row(modifier = Modifier.padding(bottom = 10.dp)) {
+                    val directorId = item.directorId
+                    val directorReq = remember { FocusRequester() }
+                    var directorFocused by remember { mutableStateOf(false) }
+                    val directorBorderColor by animateColorAsState(
+                        targetValue = if (directorFocused) Amber else Color.Transparent,
+                        label = "directorBorder",
+                    )
+                    val directorModifier = if (directorId != null) {
+                        Modifier
+                            .padding(bottom = 10.dp)
+                            .border(2.dp, directorBorderColor, RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (directorFocused) Amber.copy(alpha = 0.16f) else Color.Transparent)
+                            .focusRequester(directorReq)
+                            .onFocusChanged {
+                                directorFocused = it.isFocused
+                                if (it.isFocused) onContentFocused(directorReq)
+                            }
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                            ) {
+                                onCastClick(directorId, item.director.orEmpty())
+                            }
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                    } else {
+                        Modifier.padding(bottom = 10.dp)
+                    }
+                    Row(modifier = directorModifier) {
                         Text(
                             text = stringResource(R.string.tv_detail_director) + "  ",
                             style = MaterialTheme.typography.labelLarge,
@@ -1247,7 +1206,7 @@ fun TvDetailsScreen(
             if (state.resolveError != null) {
                 item(key = "resolve_error") {
                     Text(
-                        text = state.resolveError.orEmpty(),
+                        text = resolveTvDetailMessage(context, state.resolveError),
                         style = MaterialTheme.typography.bodyMedium,
                         color = Ruby.copy(alpha = 0.7f),
                         modifier = Modifier.padding(top = 14.dp),
@@ -1353,6 +1312,19 @@ fun TvDetailsScreen(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null,
                             ) {
+                                if (stream.isUsenetStream()) {
+                                    TvNotificationQueue.post(
+                                        message = context.getString(R.string.stream_preparing_title),
+                                        type = NotificationType.INFO,
+                                        tag = TV_USENET_PREPARING_NOTIFICATION_TAG,
+                                        durationMs = null,
+                                    )
+                                } else {
+                                    TvNotificationQueue.post(
+                                        context.getString(R.string.stream_resolving),
+                                        NotificationType.INFO,
+                                    )
+                                }
                                 // USENET_NZBDAV rows go through the shared
                                 // NzbDAV resolver; everything else stays on
                                 // the existing debrid/addon resolve path.
@@ -1472,7 +1444,7 @@ fun TvDetailsScreen(
             if (state.streamsError != null) {
                 item(key = "error") {
                     Text(
-                        text = state.streamsError.orEmpty(),
+                        text = resolveTvDetailMessage(context, state.streamsError),
                         style = MaterialTheme.typography.bodyMedium,
                         color = Ruby.copy(alpha = 0.7f),
                         modifier = Modifier.padding(top = 14.dp),
@@ -1503,7 +1475,10 @@ fun TvDetailsScreen(
     if (preparing != null) {
         TvStreamPreparingOverlay(
             state = preparing,
-            onCancel = { detailViewModel.cancelPreparing() },
+            onCancel = {
+                restoreFocusAfterPreparingCancel = true
+                detailViewModel.cancelPreparing()
+            },
         )
     }
 
@@ -1669,6 +1644,16 @@ private fun TvSimilarCard(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
         )
+    }
+}
+
+private fun resolveTvDetailMessage(context: android.content.Context, message: String?): String {
+    if (message.isNullOrBlank()) return ""
+    val shouldResolveAsKey = message.startsWith("error_") || message.startsWith("usenet_")
+    return if (shouldResolveAsKey) {
+        com.torve.android.error.resolveErrorKey(context, message) ?: message
+    } else {
+        message
     }
 }
 
@@ -1847,20 +1832,24 @@ internal fun TvStreamPreparingOverlay(
     modifier: Modifier = Modifier,
 ) {
     val cancelFocus = remember { androidx.compose.ui.focus.FocusRequester() }
-    androidx.compose.runtime.LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(200)
-        runCatching { cancelFocus.requestFocus() }
+    var cancelFocused by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(state.canCancel) {
+        if (state.canCancel) {
+            kotlinx.coroutines.delay(200)
+            runCatching { cancelFocus.requestFocus() }
+        }
     }
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.88f))
-            .focusable()
             .onPreviewKeyEvent { keyEvent ->
                 if (keyEvent.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_BACK &&
                     keyEvent.nativeKeyEvent.action == android.view.KeyEvent.ACTION_UP) {
                     onCancel(); true
-                } else true  // swallow all keys — overlay is modal
+                } else {
+                    false
+                }
             },
         contentAlignment = Alignment.Center,
     ) {
@@ -1914,20 +1903,19 @@ internal fun TvStreamPreparingOverlay(
                 fontWeight = FontWeight.Medium,
             )
 
-            Spacer(Modifier.height(20.dp))
-            Text(
-                stringResource(R.string.stream_preparing_subnote),
-                style = MaterialTheme.typography.bodyMedium,
-                color = Silver,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            )
             if (state.canCancel) {
                 Spacer(Modifier.height(28.dp))
                 androidx.compose.material3.OutlinedButton(
                     onClick = onCancel,
                     modifier = Modifier
                         .fillMaxWidth()
+                        .border(
+                            width = if (cancelFocused) 2.dp else 1.dp,
+                            color = if (cancelFocused) Amber else Steel.copy(alpha = 0.35f),
+                            shape = RoundedCornerShape(14.dp),
+                        )
                         .focusRequester(cancelFocus)
+                        .onFocusChanged { cancelFocused = it.isFocused }
                         .focusable(),
                     shape = RoundedCornerShape(14.dp),
                 ) {

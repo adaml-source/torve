@@ -196,6 +196,12 @@ CREATE TABLE iptv_playlist (
 getAllPlaylists:
 SELECT * FROM iptv_playlist WHERE user_id = :userId ORDER BY name ASC;
 
+getPlaylistSummaries:
+SELECT id, name, channel_count, type
+FROM iptv_playlist
+WHERE user_id = :userId
+ORDER BY name ASC;
+
 getPlaylist:
 SELECT * FROM iptv_playlist WHERE user_id = :userId AND id = :playlistId;
 
@@ -256,6 +262,12 @@ CREATE INDEX idx_iptv_channel_user_playlist_generation_sort
 CREATE INDEX idx_iptv_channel_user_playlist_generation_group
     ON iptv_channel(user_id, playlist_id, generation_id, group_title);
 
+CREATE INDEX idx_iptv_channel_user_playlist_generation_content_sort
+    ON iptv_channel(user_id, playlist_id, generation_id, content_type, sort_index);
+
+CREATE INDEX idx_iptv_channel_user_playlist_generation_content_group_sort
+    ON iptv_channel(user_id, playlist_id, generation_id, content_type, group_title, sort_index);
+
 getChannelsForPlaylistGeneration:
 SELECT *
 FROM iptv_channel
@@ -289,6 +301,15 @@ WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :gener
 GROUP BY group_title
 ORDER BY group_title ASC;
 
+getVodCategoryTypeCountsForPlaylist:
+SELECT group_title, content_type, COUNT(*) AS channel_count
+FROM iptv_channel
+WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :generationId
+  AND (group_title LIKE 'VOD:%' OR content_type = 'VOD_MOVIE' OR content_type = 'VOD_SERIES')
+  AND NOT EXISTS (SELECT 1 FROM iptv_hidden_channel WHERE hidden_id = stable_id)
+GROUP BY group_title, content_type
+ORDER BY group_title ASC, content_type ASC;
+
 getChannelsForPlaylistCategory:
 SELECT *
 FROM iptv_channel
@@ -309,6 +330,34 @@ FROM iptv_channel
 WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :generationId AND content_type = :contentType
   AND NOT EXISTS (SELECT 1 FROM iptv_hidden_channel WHERE hidden_id = stable_id)
 ORDER BY sort_index ASC;
+
+getChannelsForPlaylistContentTypeLimited:
+SELECT *
+FROM iptv_channel
+WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :generationId AND content_type = :contentType
+  AND NOT EXISTS (SELECT 1 FROM iptv_hidden_channel WHERE hidden_id = stable_id)
+ORDER BY sort_index ASC
+LIMIT :rowLimit;
+
+getChannelsForPlaylistCategoryContentType:
+SELECT *
+FROM iptv_channel
+WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :generationId
+  AND group_title = :groupTitle
+  AND content_type = :contentType
+  AND NOT EXISTS (SELECT 1 FROM iptv_hidden_channel WHERE hidden_id = stable_id)
+ORDER BY sort_index ASC
+LIMIT :rowLimit;
+
+getChannelsForPlaylistCategoryNullContentType:
+SELECT *
+FROM iptv_channel
+WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :generationId
+  AND group_title IS NULL
+  AND content_type = :contentType
+  AND NOT EXISTS (SELECT 1 FROM iptv_hidden_channel WHERE hidden_id = stable_id)
+ORDER BY sort_index ASC
+LIMIT :rowLimit;
 
 getTotalChannelCountForPlaylist:
 SELECT COUNT(*) AS total_count
@@ -345,6 +394,14 @@ getChannelForPlaylistGeneration:
 SELECT *
 FROM iptv_channel
 WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :generationId AND stable_id = :stableId;
+
+getEpgChannelMappingRowsForPlaylist:
+SELECT stable_id, name, tvg_id, tvg_name
+FROM iptv_channel
+WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :generationId
+  AND content_type != 'VOD_MOVIE' AND content_type != 'VOD_SERIES'
+  AND NOT EXISTS (SELECT 1 FROM iptv_hidden_channel WHERE hidden_id = stable_id)
+ORDER BY sort_index ASC;
 
 insertChannel:
 INSERT OR REPLACE INTO iptv_channel (

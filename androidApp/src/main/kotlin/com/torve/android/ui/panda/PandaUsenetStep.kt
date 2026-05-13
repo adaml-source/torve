@@ -1,7 +1,10 @@
 package com.torve.android.ui.panda
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -238,12 +241,23 @@ private fun ProviderCard(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(if (selected) Amber.copy(alpha = 0.15f) else Gunmetal)
-            .clickable(onClick = onClick)
+            .border(
+                width = if (isFocused) 3.dp else 1.dp,
+                color = if (isFocused) Amber else if (selected) Amber.copy(alpha = 0.55f) else Steel.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(12.dp),
+            )
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            )
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

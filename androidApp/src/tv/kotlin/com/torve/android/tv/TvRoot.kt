@@ -8,12 +8,14 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -21,6 +23,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -39,6 +42,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.LocalContext
@@ -49,6 +53,7 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.torve.android.R
+import com.torve.android.background.BackgroundWork
 import com.torve.android.deeplink.TorveAppLink
 import com.torve.android.deeplink.TorveAppLinkTarget
 import com.torve.android.premium.rememberEffectivePremiumAccessTier
@@ -168,6 +173,7 @@ fun TvRoot(
     val navController = rememberNavController()
     val context = LocalContext.current
     val rootScope = rememberCoroutineScope()
+    val backgroundWorkStatus by rememberTvBackgroundWorkStatus(context)
 
     // Resolve heavy singletons off the main thread so the first frame renders
     // instantly.  The background pre-warm in TorveApp usually wins the race,
@@ -237,10 +243,6 @@ fun TvRoot(
     val tvPrefs = remember(context) {
         context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE)
     }
-
-    // Eager ChannelsViewModel creation: triggers cache-first init immediately
-    // on app start so cached categories are ready before the user navigates to IPTV.
-    val channelsViewModel: com.torve.presentation.channels.ChannelsViewModel = org.koin.compose.koinInject()
 
     /* ── Sub-route tracking (NavHost only handles details/player/see-all/sub-screens) ── */
     val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -481,8 +483,10 @@ fun TvRoot(
     var railInteractionEpoch by remember { mutableStateOf(0) }
     var pendingContentEntryRoute by remember { mutableStateOf<String?>(null) }
     var pendingRailEntryRoute by remember { mutableStateOf<String?>(null) }
+    var pendingRailEntryRequestNonce by remember { mutableIntStateOf(0) }
     var pendingSettingsSubpageEntryRoute by remember { mutableStateOf<String?>(null) }
     var pendingSettingsDestinationReturnItemId by remember { mutableStateOf<String?>(null) }
+    var pendingPandaSetupReturnSettingsItemId by remember { mutableStateOf<String?>(null) }
     var homeLayoutEntryReady by remember { mutableStateOf(false) }
     var ratingsEntryReady by remember { mutableStateOf(false) }
     var focusedSettingsSubpageEntryRoute by remember { mutableStateOf<String?>(null) }
@@ -495,6 +499,14 @@ fun TvRoot(
     var previousSelectedTopRoute by remember { mutableStateOf(selectedTopRoute) }
     var previousSettingsDestination by remember { mutableStateOf(settingsDestination) }
     var previousIsRailFocused by remember { mutableStateOf(isRailFocused) }
+    var backgroundWorkWasBlocking by remember { mutableStateOf(false) }
+
+    LaunchedEffect(backgroundWorkStatus.blockNavigation) {
+        if (backgroundWorkWasBlocking && !backgroundWorkStatus.blockNavigation) {
+            focusRestoreTrigger++
+        }
+        backgroundWorkWasBlocking = backgroundWorkStatus.blockNavigation
+    }
 
     LaunchedEffect(signedInUserId) {
         progressByMediaId.clear()
@@ -505,6 +517,7 @@ fun TvRoot(
             pendingFocusBackRestore = null
             pendingRailEntryRoute = null
             pendingSettingsSubpageEntryRoute = null
+            pendingPandaSetupReturnSettingsItemId = null
             selectedTopRoute = TvRoutes.HOME
             highlightedTopRoute = TvRoutes.HOME
             confirmedTopRoute = TvRoutes.HOME
@@ -868,6 +881,7 @@ fun TvRoot(
             confirmedTopRoute = route
             pendingContentEntryRoute = null
             pendingRailEntryRoute = route
+            pendingRailEntryRequestNonce += 1
             runCatching { railFocusRequester.requestFocus() }
         }
     }
@@ -1172,9 +1186,19 @@ fun TvRoot(
     // Notification collector — show each notification for 2.4s then clear
     LaunchedEffect(Unit) {
         TvNotificationQueue.events.collectLatest { notification ->
+            if (notification.clear) {
+                if (notification.tag == null || activeNotification?.tag == notification.tag) {
+                    activeNotification = null
+                }
+                return@collectLatest
+            }
             activeNotification = notification
-            delay(2400)
-            activeNotification = null
+            notification.durationMs?.let { durationMs ->
+                delay(durationMs)
+                if (activeNotification?.tag == notification.tag && activeNotification?.message == notification.message) {
+                    activeNotification = null
+                }
+            }
         }
     }
 
@@ -1614,6 +1638,7 @@ fun TvRoot(
                     isExpanded = if (showRail) isRailExpanded else false,
                     railFocusRequester = railFocusRequester,
                     preferredEntryRoute = pendingRailEntryRoute,
+                    preferredEntryRequestNonce = pendingRailEntryRequestNonce,
                     modifier = Modifier
                         .alpha(if (showRail) 1f else 0f)
                         .focusProperties {
@@ -2001,53 +2026,53 @@ fun TvRoot(
                                         shouldAutoFocus = pendingContentEntryRoute == TvRoutes.SHOWS,
                                     )
 
-                                    TvRoutes.IPTV -> TvIptvScreen(
-                                        viewModel = channelsViewModel,
-                                        railFocusRequester = railFocusRequester,
-                                        onChannelPlay = { channel ->
-                                            if (TvPremiumAccess.isPremiumLocked(TvEntitledFeature.STREAM_PLAYBACK, accessTier)) {
-                                                requestLifetimeUnlock(TvEntitledFeature.STREAM_PLAYBACK)
-                                            } else {
-                                                navController.navigate(
-                                                    TvRoutes.livePlayer(
-                                                        channelUrl = channel.url,
-                                                        channelName = channel.name,
-                                                        groupName = channel.groupTitle.orEmpty(),
-                                                    ),
-                                                ) {
-                                                    launchSingleTop = true
+                                    TvRoutes.IPTV -> {
+                                        val channelsViewModel: ChannelsViewModel = org.koin.compose.koinInject()
+                                        TvIptvScreen(
+                                            viewModel = channelsViewModel,
+                                            railFocusRequester = railFocusRequester,
+                                            onChannelPlay = { channel ->
+                                                if (TvPremiumAccess.isPremiumLocked(TvEntitledFeature.STREAM_PLAYBACK, accessTier)) {
+                                                    requestLifetimeUnlock(TvEntitledFeature.STREAM_PLAYBACK)
+                                                } else {
+                                                    navController.navigate(
+                                                        TvRoutes.livePlayer(
+                                                            channelUrl = channel.url,
+                                                            channelName = channel.name,
+                                                            groupName = channel.groupTitle.orEmpty(),
+                                                        ),
+                                                    ) {
+                                                        launchSingleTop = true
+                                                    }
                                                 }
-                                            }
-                                        },
-                                        onOpenEpgSettings = {
-                                            openSettingsToChannels = true
-                                            pendingSettingsAppLinkItemId = TvSettingsItemIds.LIBRARY_MANAGE_CHANNELS
-                                            settingsDestination = TvSettingsDestination.MAIN
-                                            settingsFocusStateMachine.selectedCategory = TvSettingsCategory.LIBRARY
-                                            pendingNavJob?.cancel()
-                                            pendingNavJob = null
-                                            selectedTopRoute = TvRoutes.SETTINGS
-                                            highlightedTopRoute = TvRoutes.SETTINGS
-                                            confirmedTopRoute = TvRoutes.SETTINGS
-                                            pendingRailEntryRoute = null
-                                            pendingContentEntryRoute = TvRoutes.SETTINGS
-                                            focusRestoreTrigger++
-                                        },
-                                        onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.IPTV] = it },
-                                        onContentFocused = { lastFocusedContentByRoute[TvRoutes.IPTV] = it },
-                                        shouldAutoFocus = pendingContentEntryRoute == TvRoutes.IPTV,
-                                        isActive = true,
-                                        isSubRouteActive = isSubRouteActive,
-                                        isRailFocused = isRailFocused,
-                                        isRailExpanded = isRailExpanded,
-                                        onCollapseRail = { isRailExpanded = false },
-                                        onNavigateUp = {
-                                            selectedTopRoute = TvRoutes.HOME
-                                            highlightedTopRoute = TvRoutes.HOME
-                                            confirmedTopRoute = TvRoutes.HOME
-                                            pendingContentEntryRoute = null
-                                        },
-                                    )
+                                            },
+                                            onOpenEpgSettings = {
+                                                openSettingsToChannels = true
+                                                pendingSettingsAppLinkItemId = TvSettingsItemIds.LIBRARY_MANAGE_CHANNELS
+                                                settingsDestination = TvSettingsDestination.MAIN
+                                                settingsFocusStateMachine.selectedCategory = TvSettingsCategory.LIBRARY
+                                                pendingNavJob?.cancel()
+                                                pendingNavJob = null
+                                                selectedTopRoute = TvRoutes.SETTINGS
+                                                highlightedTopRoute = TvRoutes.SETTINGS
+                                                confirmedTopRoute = TvRoutes.SETTINGS
+                                                pendingRailEntryRoute = null
+                                                pendingContentEntryRoute = TvRoutes.SETTINGS
+                                                focusRestoreTrigger++
+                                            },
+                                            onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.IPTV] = it },
+                                            onContentFocused = { lastFocusedContentByRoute[TvRoutes.IPTV] = it },
+                                            shouldAutoFocus = pendingContentEntryRoute == TvRoutes.IPTV,
+                                            isActive = true,
+                                            isSubRouteActive = isSubRouteActive,
+                                            isRailFocused = isRailFocused,
+                                            isRailExpanded = isRailExpanded,
+                                            onCollapseRail = { isRailExpanded = false },
+                                            onNavigateUp = {
+                                                moveFocusToRailForRoute(TvRoutes.IPTV)
+                                            },
+                                        )
+                                    }
 
                                     TvRoutes.SPORTS -> TvSportsScreen(
                                         railFocusRequester = railFocusRequester,
@@ -2068,6 +2093,7 @@ fun TvRoot(
                                             }
                                         },
                                         onOpenPandaSetup = {
+                                            pendingPandaSetupReturnSettingsItemId = null
                                             navController.navigate(TvRoutes.PANDA_SETUP)
                                         },
                                         onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.SPORTS] = it },
@@ -2208,6 +2234,7 @@ fun TvRoot(
                                                     navController.navigate(TvRoutes.RATINGS_SETTINGS)
                                                 },
                                                 onNavigateToPandaSetup = {
+                                                    pendingPandaSetupReturnSettingsItemId = TvSettingsItemIds.ADVANCED_PANDA
                                                     navController.navigate(TvRoutes.PANDA_SETUP)
                                                 },
                                                 onNavigateToSendCredentials = {
@@ -2336,6 +2363,24 @@ fun TvRoot(
                             )
                             navController.popBackStack()
                         },
+                        onPandaSetupBack = {
+                            val returnItemId = pendingPandaSetupReturnSettingsItemId
+                            if (returnItemId != null) {
+                                Log.d("TvSettingsFocus", "route_return item=$returnItemId reason=panda_setup_return")
+                                settingsDestination = TvSettingsDestination.MAIN
+                                selectedTopRoute = TvRoutes.SETTINGS
+                                highlightedTopRoute = TvRoutes.SETTINGS
+                                confirmedTopRoute = TvRoutes.SETTINGS
+                                pendingContentEntryRoute = TvRoutes.SETTINGS
+                                settingsFocusStateMachine.requestRestore(
+                                    itemId = returnItemId,
+                                    reason = "panda_setup_return",
+                                )
+                                pendingPandaSetupReturnSettingsItemId = null
+                                focusRestoreTrigger++
+                            }
+                            navController.popBackStack()
+                        },
                         onRequestLifetimeUnlock = requestLifetimeUnlock,
                         isStreamPlaybackLocked = TvPremiumAccess.isPremiumLocked(
                             TvEntitledFeature.STREAM_PLAYBACK,
@@ -2450,6 +2495,8 @@ fun TvRoot(
         }
     }
 
+    TvBackgroundWorkOverlay(backgroundWorkStatus)
+
     activeNotification?.let { notification ->
         val borderColor = when (notification.type) {
             NotificationType.SUCCESS -> Emerald
@@ -2469,6 +2516,106 @@ fun TvRoot(
         }
     }
     } // end rootHasFocus Box
+}
+
+private data class TvBackgroundWorkStatus(
+    val visible: Boolean = false,
+    val label: String = "",
+    val progress: Float = 0f,
+    val blockNavigation: Boolean = false,
+)
+
+@Composable
+private fun rememberTvBackgroundWorkStatus(
+    context: Context,
+): androidx.compose.runtime.State<TvBackgroundWorkStatus> {
+    return produceState(initialValue = TvBackgroundWorkStatus(), context) {
+        val manager = androidx.work.WorkManager.getInstance(context.applicationContext)
+        while (true) {
+            val infos = withContext(Dispatchers.IO) {
+                runCatching {
+                    manager.getWorkInfosByTag(BackgroundWork.TAG_HEAVY_PRELOAD).get()
+                }.getOrDefault(emptyList())
+            }
+            val activeInfos = infos.filter { info ->
+                info.state == androidx.work.WorkInfo.State.RUNNING ||
+                    info.state == androidx.work.WorkInfo.State.ENQUEUED ||
+                    info.state == androidx.work.WorkInfo.State.BLOCKED
+            }
+            val runningInfo = activeInfos.firstOrNull { it.state == androidx.work.WorkInfo.State.RUNNING }
+                ?: activeInfos.firstOrNull()
+            value = if (runningInfo == null) {
+                TvBackgroundWorkStatus()
+            } else {
+                val progress = runningInfo.progress.getFloat(BackgroundWork.KEY_PROGRESS, 0f)
+                    .coerceIn(0f, 1f)
+                val isRunning = runningInfo.state == androidx.work.WorkInfo.State.RUNNING
+                TvBackgroundWorkStatus(
+                    visible = isRunning,
+                    label = runningInfo.progress.getString(BackgroundWork.KEY_LABEL)
+                        ?: "Preparing cached content",
+                    progress = progress,
+                    blockNavigation = isRunning &&
+                        runningInfo.progress.getBoolean(BackgroundWork.KEY_BLOCK_NAVIGATION, false),
+                )
+            }
+            delay(1_000L)
+        }
+    }
+}
+
+@Composable
+private fun TvBackgroundWorkOverlay(status: TvBackgroundWorkStatus) {
+    if (!status.visible) return
+
+    val blockerRequester = remember { FocusRequester() }
+    LaunchedEffect(status.blockNavigation) {
+        if (status.blockNavigation) {
+            delay(30L)
+            runCatching { blockerRequester.requestFocus() }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .zIndex(250f)
+            .then(
+                if (status.blockNavigation) {
+                    Modifier
+                        .focusRequester(blockerRequester)
+                        .focusable()
+                        .onPreviewKeyEvent { true }
+                } else {
+                    Modifier
+                },
+            ),
+        contentAlignment = Alignment.TopEnd,
+    ) {
+        androidx.compose.foundation.layout.Column(
+            modifier = Modifier
+                .width(280.dp)
+                .padding(top = 18.dp, end = 20.dp)
+                .background(Charcoal.copy(alpha = 0.90f), RoundedCornerShape(12.dp))
+                .border(1.dp, AmberSubtle, RoundedCornerShape(12.dp))
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = status.label,
+                color = Snow,
+                style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+            )
+            androidx.compose.material3.LinearProgressIndicator(
+                progress = { status.progress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(Modifier),
+                color = com.torve.android.ui.theme.Amber,
+                trackColor = com.torve.android.ui.theme.Steel.copy(alpha = 0.45f),
+            )
+        }
+    }
 }
 
 private const val TV_PREF_KEY_MEDIA_FAVORITES = "tv_media_favorites"

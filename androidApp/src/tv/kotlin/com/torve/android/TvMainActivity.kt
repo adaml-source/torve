@@ -14,7 +14,10 @@ import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
@@ -26,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.dp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.torve.android.deeplink.TorveAppLink
 import com.torve.android.deeplink.TorveAppLinkParser
@@ -40,8 +44,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.koin.java.KoinJavaComponent.getKoin
 import android.graphics.Color as AndroidColor
 
@@ -56,7 +62,7 @@ import android.graphics.Color as AndroidColor
  */
 class TvMainActivity : AppCompatActivity() {
     companion object {
-        private const val FULL_UI_START_DELAY_MS = 160L
+        private const val FULL_UI_START_DELAY_MS = 5_000L
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -163,12 +169,27 @@ class TvMainActivity : AppCompatActivity() {
         startAuthEventCollection()
         setContent {
             var showFullUi by remember { mutableStateOf(false) }
+            var startupMessage by remember { mutableStateOf("Preparing Torve") }
 
             LaunchedEffect(Unit) {
-                // Render one lightweight Compose frame before loading the full TV
-                // shell so slower Fire TV devices do not spend first draw budget
-                // in TvRoot composition and focus graph setup.
-                kotlinx.coroutines.delay(FULL_UI_START_DELAY_MS)
+                val startedAt = System.currentTimeMillis()
+                startupMessage = "Restoring local cache"
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        val koin = getKoin()
+                        koin.get<com.torve.db.TorveDatabase>()
+                        koin.get<com.torve.data.auth.AuthClient>().getAuthenticatedUser()
+                        koin.get<com.torve.domain.repository.ChannelRepository>().getPlaylistSummaries()
+                        koin.get<com.torve.presentation.channels.ChannelsViewModel>()
+                        koin.get<com.torve.domain.repository.MetadataRepository>()
+                        koin.get<com.torve.presentation.settings.SettingsViewModel>()
+                    }
+                }
+                val elapsed = System.currentTimeMillis() - startedAt
+                if (elapsed < FULL_UI_START_DELAY_MS) {
+                    startupMessage = "Preparing navigation"
+                    delay(FULL_UI_START_DELAY_MS - elapsed)
+                }
                 com.torve.android.debug.AnrDebugLogger.log("STARTUP showFullUi = true")
                 showFullUi = true
             }
@@ -181,13 +202,21 @@ class TvMainActivity : AppCompatActivity() {
                             .background(Obsidian),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(
-                            text = "TORVE",
-                            color = Color.White,
-                            fontSize = 42.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 6.sp,
-                        )
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "TORVE",
+                                color = Color.White,
+                                fontSize = 42.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 6.sp,
+                            )
+                            Spacer(Modifier.height(18.dp))
+                            Text(
+                                text = startupMessage,
+                                color = Color.White.copy(alpha = 0.72f),
+                                fontSize = 16.sp,
+                            )
+                        }
                     }
                 } else {
                     TvRoot(

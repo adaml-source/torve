@@ -13,6 +13,7 @@ enum class HomeSection(
 ) {
     SEARCH_BAR("Search Bar", true, -1),
     HERO("Featured", true, 0),
+    ON_NOW("On now", true, 1),
     CONTINUE_WATCHING("Continue Watching", true, 1),
     WATCHLIST("My Watchlist", true, 2),
     WATCHLIST_MOVIES("Watchlist — Movies", false, 3),
@@ -70,4 +71,3 @@ fun updateSectionPresetId(
 /** Returns true if this shelf matches the given HomeSection based on shelf id. */
 fun CatalogShelf.matchesSection(section: HomeSection): Boolean =
     section.shelfId != null && id == section.shelfId
-

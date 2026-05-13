@@ -688,7 +688,8 @@ fun HomeScreen(
                                 }
                             }
                             // SEARCH_BAR is a floating overlay, not a LazyColumn section
-                            HomeSection.SEARCH_BAR -> {}
+                            HomeSection.SEARCH_BAR,
+                            HomeSection.ON_NOW -> {}
                         }
                     }
                     is CustomItem -> {

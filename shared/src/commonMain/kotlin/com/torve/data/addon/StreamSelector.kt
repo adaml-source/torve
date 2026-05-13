@@ -57,7 +57,11 @@ class StreamSelector(
                 val base = scorer.score(stream, preferences)
                 val qualityBias = modeQualityBias(stream, preferences)
                 val hostAdj = StreamRuntimeTelemetry.reliabilityAdjustment(StreamRuntimeTelemetry.keyForStream(stream)) / 2
-                val directPlayableBonus = if (stream.directUrl != null && stream.infoHash == null) 2 else 0
+                val directPlayableBonus = when {
+                    stream.isAddonHostedUrl() -> 12
+                    stream.directUrl != null -> 14
+                    else -> 0
+                }
                 stream.copy(score = (base + qualityBias + hostAdj + directPlayableBonus).coerceIn(0, 100))
             }
             .sortedByDescending { it.score }
@@ -126,8 +130,9 @@ class StreamSelector(
     }
 
     private fun streamKey(stream: ParsedStream): String {
-        return stream.infoHash
-            ?: stream.directUrl
+        return stream.directUrl
+            ?: stream.magnetUrl
+            ?: stream.infoHash
             ?: listOf(
                 stream.addonName,
                 stream.title,

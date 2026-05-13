@@ -4169,7 +4169,7 @@ private suspend fun List<ParsedStream>.firstResolvedOrNull(
 }
 
 private fun playerStreamKey(stream: ParsedStream): String {
-    return stream.accelerationSourceKey ?: stream.infoHash ?: stream.directUrl ?: "${stream.addonName}:${stream.title}"
+    return stream.accelerationSourceKey ?: stream.directUrl ?: stream.magnetUrl ?: stream.infoHash ?: "${stream.addonName}:${stream.title}"
 }
 
 private suspend fun resolveAndPlayNextEpisode(

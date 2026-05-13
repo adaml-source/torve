@@ -1886,7 +1886,16 @@ class SettingsViewModel(
     fun isTraktConnected(): Boolean = _state.value.traktConnected
 
     fun getDebridAccounts(): Map<DebridServiceType, String> {
-        return _state.value.connectedDebridProviders
+        val providers = _state.value.connectedDebridProviders
+            .filterValues { it.isNotBlank() }
+        if (providers.isNotEmpty()) return providers
+
+        val legacyKey = _state.value.debridApiKey.trim()
+        return if (legacyKey.isNotBlank()) {
+            mapOf(_state.value.debridProvider to legacyKey)
+        } else {
+            emptyMap()
+        }
     }
 
     // -------------------------------------------------------------------------

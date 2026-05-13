@@ -90,7 +90,7 @@ fun HomeCustomizeSheet(
     var orderedSections by remember {
         mutableStateOf(
             sections
-                .filter { it.section != HomeSection.DIRECTORS }
+                .filter { it.section != HomeSection.DIRECTORS && it.section != HomeSection.ON_NOW }
                 .sortedBy { it.order }
         )
     }
@@ -124,7 +124,7 @@ fun HomeCustomizeSheet(
                 TextButton(onClick = {
                     onReset()
                     orderedSections = HomeSection.entries
-                        .filter { it != HomeSection.DIRECTORS }
+                        .filter { it != HomeSection.DIRECTORS && it != HomeSection.ON_NOW }
                         .map { HomeSectionConfig(it, it.defaultEnabled, it.defaultOrder) }
                         .sortedBy { it.order }
                 }) {
@@ -282,6 +282,7 @@ private fun SectionConfigRow(
 fun HomeSection.icon(): ImageVector = when (this) {
     HomeSection.SEARCH_BAR -> Icons.Rounded.Search
     HomeSection.HERO -> Icons.AutoMirrored.Rounded.FeaturedPlayList
+    HomeSection.ON_NOW -> Icons.Rounded.Tv
     HomeSection.CONTINUE_WATCHING -> Icons.Rounded.PlayCircleOutline
     HomeSection.WATCHLIST -> Icons.Rounded.BookmarkBorder
     HomeSection.WATCHLIST_MOVIES -> Icons.Rounded.Theaters

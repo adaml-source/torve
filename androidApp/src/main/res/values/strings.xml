@@ -1902,6 +1902,7 @@
     <string name="error_streams_load_failed">Could not load streams. Please try again.</string>
     <string name="error_stream_resolve_failed">Could not resolve stream. Try another source.</string>
     <string name="error_stream_resolve_timeout">Stream resolution timed out. Try another source.</string>
+    <string name="error_stream_real_debrid_source_blocked">Real-Debrid blocked this source. Try another source.</string>
     <string name="stream_preparing_title">Preparing your stream</string>
     <string name="stream_preparing_body">%1$s is fetching this release from Usenet. This usually takes a minute or two.</string>
     <string name="stream_preparing_elapsed">Waiting %1$s</string>
@@ -2021,7 +2022,7 @@
     <string name="stream_group_ranked_for_device">Ranked for this device</string>
     <string name="stream_group_more_options">More Options</string>
     <string name="stream_group_more_options_subtitle">Extra fallbacks and alternates</string>
-    <string name="stream_filter_torrent">Torrent</string>
+    <string name="stream_filter_torrent">Torrent/RD</string>
     <string name="stream_filter_usenet_nzb">Usenet / NZB</string>
     <string name="stream_seed_count">%1$d seeds</string>
     <string name="detail_cached_count">%1$d cached</string>

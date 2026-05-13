@@ -52,13 +52,19 @@ import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Torve
 import com.torve.android.ui.theme.Gunmetal
 import com.torve.data.addon.ParsedStream
+import com.torve.data.addon.isTorrentOrDebridStream
+import com.torve.data.addon.isUsenetStream
 import com.torve.data.usenet.model.UsenetCandidateStates
 import com.torve.domain.model.StartupCandidate
 
 private enum class StreamSourceFilter { ALL, TORRENT, USENET }
 
 private fun ParsedStream.sourceFilter(): StreamSourceFilter =
-    if (infoHash != null) StreamSourceFilter.TORRENT else StreamSourceFilter.USENET
+    when {
+        isUsenetStream() -> StreamSourceFilter.USENET
+        isTorrentOrDebridStream() -> StreamSourceFilter.TORRENT
+        else -> StreamSourceFilter.TORRENT
+    }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

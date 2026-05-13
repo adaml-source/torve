@@ -59,7 +59,7 @@ import com.torve.android.ui.theme.Snow
 import com.torve.domain.model.Channel
 import com.torve.domain.model.EnrichedChannel
 import com.torve.domain.model.EpgProgramme
-import com.torve.domain.model.canonicalEpgChannelKey
+import com.torve.domain.model.programmesForEpgChannel
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -79,6 +79,7 @@ private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
 fun LiveEpgGuideOverlay(
     guideChannels: List<EnrichedChannel>,
     guideProgrammes: Map<String, List<EpgProgramme>>,
+    playlistId: String? = null,
     currentChannelUrl: String,
     onTuneChannel: (Channel) -> Unit,
     onShowChannelList: () -> Unit,
@@ -198,16 +199,15 @@ fun LiveEpgGuideOverlay(
                         key = { index, ch -> "${index}_${ch.channel.url}" },
                     ) { index, enrichedChannel ->
                         val isCurrentChannel = enrichedChannel.channel.url == currentChannelUrl
-                        val channelProgs = remember(enrichedChannel.channel, guideProgrammes) {
-                            val key = canonicalEpgChannelKey(
-                                playlistId = enrichedChannel.channel.playlistId,
+                        val channelProgs = remember(enrichedChannel.channel, guideProgrammes, playlistId) {
+                            val lookupPlaylistId = enrichedChannel.channel.playlistId
+                                .takeIf { it.isNotBlank() }
+                                ?: playlistId.orEmpty()
+                            programmesForEpgChannel(
+                                programmesByChannelKey = guideProgrammes,
+                                playlistId = lookupPlaylistId,
                                 channel = enrichedChannel.channel,
                             )
-                            if (key.isNullOrBlank()) {
-                                emptyList()
-                            } else {
-                                guideProgrammes[key].orEmpty()
-                            }
                         }
 
                         EpgChannelRow(
@@ -465,5 +465,3 @@ private fun ProgrammeCell(
         }
     }
 }
-
-

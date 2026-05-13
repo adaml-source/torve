@@ -3,7 +3,10 @@ package com.torve.android.ui.panda
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -34,6 +37,8 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -79,30 +84,47 @@ fun PandaAuthStep(
 
         // Connected state
         if (state.authConnected) {
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
                     .background(Amber.copy(alpha = 0.15f))
                     .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Icon(Icons.Default.Check, null, tint = Amber, modifier = Modifier.size(24.dp))
-                Spacer(Modifier.width(12.dp))
-                Column {
-                    Text(
-                        stringResource(R.string.panda_setup_auth_connected),
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Amber,
-                    )
-                    if (state.existingCredentialDetected) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Check, null, tint = Amber, modifier = Modifier.size(24.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Column {
                         Text(
-                            "Using existing ${provider.name} credentials",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Silver,
+                            stringResource(R.string.panda_setup_auth_connected),
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Amber,
                         )
+                        if (state.existingCredentialDetected) {
+                            Text(
+                                "Using existing ${provider.name} credentials",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Silver,
+                            )
+                        }
                     }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    FocusRingOutlinedButton(
+                        text = stringResource(R.string.storage_reauth_action),
+                        onClick = { viewModel.reconnectSelectedDebrid() },
+                        modifier = Modifier.weight(1f),
+                    )
+                    FocusRingOutlinedButton(
+                        text = stringResource(R.string.common_disconnect),
+                        onClick = { viewModel.disconnectSelectedDebrid() },
+                        modifier = Modifier.weight(1f),
+                    )
                 }
             }
             return
@@ -147,6 +169,28 @@ fun PandaAuthStep(
             Spacer(Modifier.height(12.dp))
             Text(error, color = Ruby, style = MaterialTheme.typography.bodySmall)
         }
+    }
+}
+
+@Composable
+private fun FocusRingOutlinedButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier.border(
+            width = if (isFocused) 2.dp else 1.dp,
+            color = if (isFocused) Amber else Steel.copy(alpha = 0.45f),
+            shape = RoundedCornerShape(12.dp),
+        ),
+        shape = RoundedCornerShape(12.dp),
+        interactionSource = interactionSource,
+    ) {
+        Text(text, color = if (isFocused) Amber else Snow, fontWeight = FontWeight.SemiBold)
     }
 }
 

@@ -30,6 +30,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -49,6 +51,7 @@ import com.torve.presentation.panda.PandaSetupViewModel
 fun PandaProviderStep(
     state: PandaSetupUiState,
     viewModel: PandaSetupViewModel,
+    entryFocusRequester: FocusRequester? = null,
 ) {
     Column(
         modifier = Modifier
@@ -86,7 +89,7 @@ fun PandaProviderStep(
             }
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                state.providers.forEach { provider ->
+                state.providers.forEachIndexed { index, provider ->
                     val isSelected = state.selectedProvider?.id == provider.id
                     // Track focus via the InteractionSource so the
                     // card draws an Amber border whenever the D-pad
@@ -105,9 +108,16 @@ fun PandaProviderStep(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .then(
+                                if (index == 0 && entryFocusRequester != null) {
+                                    Modifier.focusRequester(entryFocusRequester)
+                                } else {
+                                    Modifier
+                                },
+                            )
                             .clip(RoundedCornerShape(12.dp))
                             .background(if (isSelected) Amber.copy(alpha = 0.15f) else Gunmetal)
-                            .border(2.dp, borderColor, RoundedCornerShape(12.dp))
+                            .border(if (isFocused) 3.dp else 2.dp, borderColor, RoundedCornerShape(12.dp))
                             .clickable(
                                 interactionSource = interactionSource,
                                 indication = null,

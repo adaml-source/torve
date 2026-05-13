@@ -1,7 +1,10 @@
 package com.torve.android.ui.panda
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,9 +21,13 @@ import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -38,6 +45,7 @@ import com.torve.presentation.panda.PandaSetupViewModel
 fun PandaSourcesStep(
     state: PandaSetupUiState,
     viewModel: PandaSetupViewModel,
+    entryFocusRequester: FocusRequester? = null,
 ) {
     Column(
         modifier = Modifier
@@ -62,6 +70,7 @@ fun PandaSourcesStep(
         val grouped = state.sourceProviders.groupBy { it.category }
         val categoryOrder = listOf("movies", "series", "general", "anime", "regional")
 
+        var firstFocusableAttached = false
         categoryOrder.forEach { category ->
             val providers = grouped[category] ?: return@forEach
             val categoryLabel = when (category) {
@@ -84,12 +93,31 @@ fun PandaSourcesStep(
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 providers.forEach { source ->
                     val checked = source.id in state.enabledSources
+                    val attachEntryFocus = !firstFocusableAttached && entryFocusRequester != null
+                    if (attachEntryFocus) firstFocusableAttached = true
+                    val interactionSource = remember(source.id) { MutableInteractionSource() }
+                    val isFocused by interactionSource.collectIsFocusedAsState()
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .then(
+                                if (attachEntryFocus) {
+                                    Modifier.focusRequester(entryFocusRequester)
+                                } else {
+                                    Modifier
+                                },
+                            )
                             .clip(RoundedCornerShape(10.dp))
                             .background(if (checked) Amber.copy(alpha = 0.08f) else Gunmetal)
-                            .clickable { viewModel.toggleSource(source.id) }
+                            .border(
+                                width = if (isFocused) 2.dp else 1.dp,
+                                color = if (isFocused) Amber else Steel.copy(alpha = 0.25f),
+                                shape = RoundedCornerShape(10.dp),
+                            )
+                            .clickable(
+                                interactionSource = interactionSource,
+                                indication = null,
+                            ) { viewModel.toggleSource(source.id) }
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {

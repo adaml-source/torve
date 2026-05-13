@@ -2,9 +2,11 @@ package com.torve.android
 
 import android.app.Application
 import com.torve.android.billing.BillingManager
+import com.torve.android.catalog.CatalogWarmupWorker
 import com.torve.android.di.androidAppModule
 import com.torve.android.di.storeBillingModule
 import com.torve.android.download.DownloadWorker
+import com.torve.android.epg.EpgWarmupWorker
 import com.torve.android.notification.EpisodeNotificationWorker
 import com.torve.android.sync.TraktSyncWorker
 import com.torve.data.acceleration.AccelerationInventorySyncService
@@ -71,6 +73,8 @@ class TorveApp : Application() {
             launch { runCatching { getKoin().get<BillingManager>().initialize() } }
             launch {
                 TraktSyncWorker.schedule(this@TorveApp)
+                EpgWarmupWorker.schedule(this@TorveApp)
+                CatalogWarmupWorker.schedule(this@TorveApp)
                 DownloadWorker.ensureChannel(this@TorveApp)
             }
             launch {
@@ -89,7 +93,6 @@ class TorveApp : Application() {
                     val init = getKoin()
                         .get<com.torve.android.providerhealth.AndroidProviderHealthInit>()
                     init.start()
-                    init.refreshAll()
                 }
             }
 

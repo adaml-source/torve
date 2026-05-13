@@ -90,7 +90,8 @@ class StreamScorer {
         var score = 0
 
         if (stream.isCached) score += 12
-        if (stream.infoHash == null && stream.directUrl != null) score += 5
+        if (stream.isAddonHostedUrl()) score += 16
+        if (stream.directUrl != null) score += 12
         if (stream.recentSuccessCount > 0) {
             score += minOf(8, 3 + (stream.recentSuccessCount * 2))
         }

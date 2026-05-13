@@ -46,6 +46,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import com.torve.android.catalog.SportsBootstrapJson
+import com.torve.android.catalog.SportsBootstrapPayload
+import com.torve.android.catalog.sportsBootstrapKey
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Charcoal
 import com.torve.android.ui.theme.Graphite
@@ -60,14 +63,19 @@ import com.torve.data.usenet.TorBoxUsenetClient
 import com.torve.domain.sports.SportBucket
 import com.torve.domain.usenet.UsenetIndexerCategoryMap
 import com.torve.domain.usenet.UsenetIndexerUrlResolver
+import com.torve.domain.repository.PreferencesRepository
+import com.torve.domain.repository.DeviceLocalSettingsRepository
+import com.torve.domain.integrations.IntegrationSecretKey
+import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.presentation.panda.PandaConfigStateStore
-import com.torve.presentation.panda.PandaSetupViewModel
 import com.torve.presentation.usenet.NzbBrowseStateHolder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import org.koin.compose.koinInject
-import org.koin.mp.KoinPlatform
+import com.torve.data.auth.AuthClient
 
 /**
  * TV Sports catalog. Cross-platform Newznab + TorBox plumbing now lives
@@ -92,9 +100,18 @@ fun TvSportsScreen(
     pandaStore: PandaConfigStateStore = koinInject(),
     newznab: NewznabClient = koinInject(),
     torbox: TorBoxUsenetClient = koinInject(),
+    prefsRepo: PreferencesRepository = koinInject(),
+    localSettingsRepo: DeviceLocalSettingsRepository = koinInject(),
+    secretStore: IntegrationSecretStore = koinInject(),
 ) {
     val pandaState by pandaStore.state.collectAsState()
     val scope = rememberCoroutineScope()
+    var localSportsIndexer by remember { mutableStateOf<LocalSportsIndexer?>(null) }
+    LaunchedEffect(Unit) {
+        localSportsIndexer = withContext(Dispatchers.IO) {
+            resolveLocalSportsIndexer(secretStore, prefsRepo)
+        }
+    }
 
     // Hydrate the PandaConfigStateStore by instantiating the VM once.
     // Without this, a user who's never opened the Panda wizard in
@@ -106,21 +123,27 @@ fun TvSportsScreen(
     // the credential resolution below. Discarding the VM reference
     // is fine — it's a factory and gets GC'd as soon as the launch
     // finishes; the store retains the hydrated state.
-    LaunchedEffect(Unit) {
-        runCatching { KoinPlatform.getKoin().get<PandaSetupViewModel>() }
-    }
+    // Do not hydrate Panda through its setup ViewModel from Sports. That path
+    // can hit the network on screen entry. Sports reads persisted credentials
+    // directly and lets the warmup worker refresh result caches.
 
     // Resolve indexer + TorBox credentials from the live Panda state.
     // Mirrors the desktop V2SportsPage logic but reads directly from
     // the store rather than hand-threaded params.
     val activeIndexer = pandaState.nzbIndexers.firstOrNull { it.type != "none" && it.apiKey.isNotBlank() }
-    val indexerType = activeIndexer?.type ?: pandaState.nzbIndexer.takeIf { it != "none" } ?: ""
+    val indexerType = activeIndexer?.type
+        ?: localSportsIndexer?.type
+        ?: pandaState.nzbIndexer.takeIf { it != "none" }
+        ?: ""
     val indexerUrl = if (activeIndexer != null) {
         UsenetIndexerUrlResolver.resolve(activeIndexer.type, activeIndexer.url)
+    } else if (localSportsIndexer != null) {
+        localSportsIndexer?.url.orEmpty()
     } else if (pandaState.nzbIndexer != "none") {
         UsenetIndexerUrlResolver.resolve(pandaState.nzbIndexer, "")
     } else ""
     val indexerKey = activeIndexer?.apiKey
+        ?: localSportsIndexer?.apiKey
         ?: pandaState.nzbIndexerApiKey.takeIf { it.isNotBlank() }
         ?: ""
     val torboxKey = if (pandaState.downloadClient.equals("torbox", ignoreCase = true) &&
@@ -129,6 +152,10 @@ fun TvSportsScreen(
     val configured = indexerUrl.isNotBlank() && indexerKey.isNotBlank()
 
     val pageKey = "tv_sports"
+    val sportsCacheKey = remember(indexerUrl, indexerKey) {
+        "tv_sports_cache:${indexerUrl.hashCode()}:${indexerKey.hashCode()}"
+    }
+    val sportsJson = remember { Json { ignoreUnknownKeys = true } }
     val pageState by NzbBrowseStateHolder.flow(pageKey).collectAsState()
     val savedOnce = remember { NzbBrowseStateHolder.get(pageKey) }
     var query by remember { mutableStateOf(savedOnce.query) }
@@ -149,7 +176,13 @@ fun TvSportsScreen(
         val q = query
         val bucket = selectedBucket
         NzbBrowseStateHolder.startFetch(pageKey) {
-            NzbBrowseStateHolder.update(pageKey) { it.copy(loading = true, errorText = null, progress = null) }
+            NzbBrowseStateHolder.update(pageKey) {
+                it.copy(
+                    loading = it.items.isEmpty(),
+                    errorText = null,
+                    progress = if (it.items.isEmpty()) null else "Refreshing cached sports releases...",
+                )
+            }
             try {
                 val sportsCat = UsenetIndexerCategoryMap.sportsCategoriesFor(indexerType)
                 val items = if (q.isBlank()) {
@@ -178,16 +211,82 @@ fun TvSportsScreen(
                         scrollOffset = listState.firstVisibleItemScrollOffset,
                     )
                 }
+                withContext(Dispatchers.IO) {
+                    val payload = TvSportsCachePayload(
+                        savedAtMs = System.currentTimeMillis(),
+                        query = q,
+                        selectedSportBucket = bucket?.name,
+                        items = items,
+                    )
+                    prefsRepo.setString(
+                        sportsCacheKey,
+                        sportsJson.encodeToString(TvSportsCachePayload.serializer(), payload),
+                    )
+                }
             } catch (t: Throwable) {
                 NzbBrowseStateHolder.update(pageKey) {
-                    it.copy(loading = false, progress = null, items = emptyList(), errorText = t.message ?: "Indexer call failed.")
+                    it.copy(
+                        loading = false,
+                        progress = null,
+                        items = it.items,
+                        errorText = t.message ?: "Indexer call failed.",
+                    )
                 }
             }
         }
     }
 
     LaunchedEffect(indexerUrl, indexerKey) {
-        if (configured && pageState.items.isEmpty() && !NzbBrowseStateHolder.isFetching(pageKey)) startFetch()
+        if (!configured) return@LaunchedEffect
+        var restoredFromCache = false
+        if (NzbBrowseStateHolder.get(pageKey).items.isEmpty()) {
+            val restored = withContext(Dispatchers.IO) {
+                runCatching {
+                    val userId = localSettingsRepo.getString(AuthClient.KEY_AUTH_USER_ID)
+                    val bootstrap = userId?.let { id ->
+                        localSettingsRepo.getString(sportsBootstrapKey(id, indexerUrl, indexerKey))
+                            ?.takeIf { it.isNotBlank() }
+                            ?.let { SportsBootstrapJson.decodeFromString(SportsBootstrapPayload.serializer(), it) }
+                            ?.let { payload ->
+                                TvSportsCachePayload(
+                                    savedAtMs = payload.savedAtMs,
+                                    query = payload.query,
+                                    selectedSportBucket = payload.selectedSportBucket,
+                                    items = payload.items,
+                                )
+                            }
+                    }
+                    bootstrap ?: prefsRepo.getString(sportsCacheKey)
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { sportsJson.decodeFromString(TvSportsCachePayload.serializer(), it) }
+                }.getOrNull()
+            }
+            if (restored != null && restored.items.isNotEmpty()) {
+                restoredFromCache = true
+                query = restored.query
+                selectedBucket = restored.selectedSportBucket?.let { name ->
+                    SportBucket.entries.firstOrNull { it.name == name }
+                }
+                NzbBrowseStateHolder.put(
+                    pageKey,
+                    NzbBrowseStateHolder.State(
+                        query = restored.query,
+                        items = restored.items,
+                        loading = false,
+                        selectedSportBucket = restored.selectedSportBucket,
+                    ),
+                )
+            }
+        }
+        if (!restoredFromCache && NzbBrowseStateHolder.get(pageKey).items.isEmpty()) {
+            NzbBrowseStateHolder.update(pageKey) {
+                it.copy(
+                    loading = false,
+                    progress = null,
+                    errorText = "Sports releases are being prepared in the background.",
+                )
+            }
+        }
     }
 
     // Classify each item once per load. Recomputed on filter change.
@@ -534,3 +633,53 @@ private fun humanBytes(bytes: Long): String {
     val whole = (v * 100).toInt() / 100.0
     return "$whole ${units[i]}"
 }
+
+private data class LocalSportsIndexer(
+    val type: String,
+    val url: String,
+    val apiKey: String,
+)
+
+private suspend fun resolveLocalSportsIndexer(
+    secretStore: IntegrationSecretStore,
+    prefsRepo: PreferencesRepository,
+): LocalSportsIndexer? {
+    val fromSecrets = secretStore
+        .getSubKeys(IntegrationSecretKey.PANDA_INDEXER_API_KEY)
+        .filter { it.contains("|") }
+        .mapNotNull { subKey ->
+            val apiKey = secretStore.get(IntegrationSecretKey.PANDA_INDEXER_API_KEY, subKey)
+                ?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val (type, url) = subKey.split("|", limit = 2)
+            LocalSportsIndexer(
+                type = type,
+                url = UsenetIndexerUrlResolver.resolve(type, url),
+                apiKey = apiKey,
+            )
+        }
+        .firstOrNull()
+    if (fromSecrets != null) return fromSecrets
+
+    val type = prefsRepo.getString("panda_nzb_indexer")
+        ?: prefsRepo.getString("nzb_indexer")
+        ?: return null
+    val apiKey = prefsRepo.getString("panda_nzb_indexer_api_key")
+        ?: prefsRepo.getString("nzb_indexer_api_key")
+        ?: return null
+    val url = prefsRepo.getString("panda_nzb_indexer_url")
+        ?: prefsRepo.getString("nzb_indexer_url")
+        ?: ""
+    return LocalSportsIndexer(
+        type = type,
+        url = UsenetIndexerUrlResolver.resolve(type, url),
+        apiKey = apiKey,
+    )
+}
+
+@Serializable
+private data class TvSportsCachePayload(
+    val savedAtMs: Long,
+    val query: String = "",
+    val selectedSportBucket: String? = null,
+    val items: List<NewznabItem> = emptyList(),
+)

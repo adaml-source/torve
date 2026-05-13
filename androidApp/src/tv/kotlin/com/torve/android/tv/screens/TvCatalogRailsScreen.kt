@@ -78,8 +78,13 @@ import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Steel
 import com.torve.android.ui.components.TorveSearchField
+import com.torve.android.catalog.CatalogRailsBootstrapJson
+import com.torve.android.catalog.CatalogRailsBootstrapPayload
+import com.torve.android.catalog.catalogRailsBootstrapKey
 import com.torve.data.ai.KeywordSearchResult
 import com.torve.data.ai.KeywordSearchService
+import com.torve.data.auth.AuthClient
+import com.torve.data.catalog.CatalogTopCacheRepository
 import com.torve.data.network.catalogContentLoadErrorMessage
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
@@ -89,19 +94,14 @@ import com.torve.domain.model.RatingDisplayPrefs
 import com.torve.domain.model.hasAnyEnabledDisplayValue
 import com.torve.domain.model.withFallbackTmdbScore
 import com.torve.domain.repository.MetadataRepository
-import com.torve.domain.repository.PreferencesRepository
-import com.torve.data.mdblist.MdbListApi
+import com.torve.domain.repository.DeviceLocalSettingsRepository
 import com.torve.data.mdblist.RatingsEnricher
-import com.torve.domain.integrations.IntegrationSecretKey
-import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.presentation.home.HomeViewModel
 import com.torve.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.decodeFromString
 import org.koin.compose.koinInject
 
 private data class CatalogRailsUiState(
@@ -141,9 +141,10 @@ internal fun TvCatalogRailsScreen(
     registerFocusHandle: ((TvScreenFocusHandle?) -> Unit)? = null,
 ) {
     val metadataRepo: MetadataRepository = koinInject()
+    val authClient: AuthClient = koinInject()
+    val localSettingsRepo: DeviceLocalSettingsRepository = koinInject()
+    val catalogTopCache: CatalogTopCacheRepository = koinInject()
     val ratingsEnricher: RatingsEnricher = koinInject()
-    val prefsRepo: PreferencesRepository = koinInject()
-    val secretStore: IntegrationSecretStore = koinInject()
     val keywordSearchService: KeywordSearchService = koinInject()
     val homeViewModel: HomeViewModel = koinInject()
     val settingsViewModel: SettingsViewModel = koinInject()
@@ -229,6 +230,24 @@ internal fun TvCatalogRailsScreen(
     LaunchedEffect(mediaType) {
         if (uiState.rails.isNotEmpty()) return@LaunchedEffect
         uiState = CatalogRailsUiState(loading = true)
+        val cachedState = withContext(Dispatchers.IO) {
+            loadCachedCatalogRails(
+                mediaType = mediaType,
+                genreSpecs = genreSpecs,
+                userId = authClient.getAuthenticatedUser()?.id,
+                localSettingsRepo = localSettingsRepo,
+                catalogTopCache = catalogTopCache,
+                ratingsEnricher = ratingsEnricher,
+                trendingLabel = trendingLabel,
+                popularLabel = popularLabel,
+                topRatedLabel = topRatedLabel,
+            )
+        }
+        uiState = cachedState.also { TvScreenCache.put(cacheKey, it) }
+    }
+
+    /*
+        Disabled: screen-entry network loading belongs in CatalogWarmupWorker.
         uiState = try {
             val rails = coroutineScope {
                 val trendingDeferred = async { metadataRepo.getTrending(mediaType) }
@@ -340,6 +359,8 @@ internal fun TvCatalogRailsScreen(
         }
     }
 
+    */
+
     val continueWatchingLabel = stringResource(
         if (isMovieCatalog) R.string.tv_section_continue_watching_movies
         else R.string.tv_section_continue_watching_shows,
@@ -421,7 +442,10 @@ internal fun TvCatalogRailsScreen(
         }
     }
 
-    val emptyMessage = uiState.error ?: stringResource(R.string.tv_no_data)
+    val preparingMessage = stringResource(
+        if (isMovieCatalog) R.string.tv_catalog_movies_preparing else R.string.tv_catalog_shows_preparing,
+    )
+    val emptyMessage = uiState.error ?: preparingMessage
     val searchEntryRequester = remember(mediaType) { FocusRequester() }
     if (searchActive) {
         TvCatalogContextualSearchSurface(
@@ -1145,6 +1169,75 @@ private fun TvCatalogSearchResultCard(
                 }
             }
         }
+    }
+}
+
+private suspend fun loadCachedCatalogRails(
+    mediaType: String,
+    genreSpecs: List<GenreSpec>,
+    userId: String?,
+    localSettingsRepo: DeviceLocalSettingsRepository,
+    catalogTopCache: CatalogTopCacheRepository,
+    ratingsEnricher: RatingsEnricher,
+    trendingLabel: String,
+    popularLabel: String,
+    topRatedLabel: String,
+): CatalogRailsUiState {
+    val fromBootstrap = userId
+        ?.let { id -> localSettingsRepo.getString(catalogRailsBootstrapKey(id, mediaType)) }
+        ?.let { cached ->
+            runCatching {
+                CatalogRailsBootstrapJson.decodeFromString<CatalogRailsBootstrapPayload>(cached)
+            }.getOrNull()
+        }
+        ?.rails
+        ?.mapNotNull { rail ->
+            if (rail.items.isEmpty()) return@mapNotNull null
+            TvContentRail(
+                key = rail.key,
+                title = catalogRailTitle(rail.key, mediaType, genreSpecs, trendingLabel, popularLabel, topRatedLabel),
+                items = rail.items,
+            )
+        }
+        .orEmpty()
+
+    val rails = if (fromBootstrap.isNotEmpty()) {
+        fromBootstrap
+    } else {
+        genreSpecs.mapNotNull { spec ->
+            val items = runCatching {
+                catalogTopCache.getTop(mediaType, spec.id, limit = 24)
+            }.getOrDefault(emptyList())
+            if (items.isEmpty()) null else TvContentRail(
+                key = "genre_${mediaType}_${spec.id}",
+                title = spec.label,
+                items = items,
+            )
+        }
+    }
+
+    return CatalogRailsUiState(
+        loading = false,
+        rails = rails
+            .dedupeAcrossRails()
+            .hydrateRailsFromRatingCache(ratingsEnricher),
+    )
+}
+
+private fun catalogRailTitle(
+    key: String,
+    mediaType: String,
+    genreSpecs: List<GenreSpec>,
+    trendingLabel: String,
+    popularLabel: String,
+    topRatedLabel: String,
+): String {
+    return when (key) {
+        "trending_$mediaType" -> trendingLabel
+        "popular_$mediaType" -> popularLabel
+        "top_rated_$mediaType" -> topRatedLabel
+        else -> genreSpecs.firstOrNull { key == "genre_${mediaType}_${it.id}" }?.label
+            ?: key.substringAfterLast('_').replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
     }
 }
 

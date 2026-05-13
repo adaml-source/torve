@@ -839,6 +839,7 @@ val sharedModule = module {
         ChannelsViewModel(
             channelRepo = get(),
             prefsRepo = get(),
+            localSettingsRepo = get(),
             catchupResolver = get(),
             backgroundDispatcher = kotlinx.coroutines.Dispatchers.IO,
             playlistBackup = get(),

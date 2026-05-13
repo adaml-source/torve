@@ -61,7 +61,7 @@ import com.torve.android.ui.theme.Steel
 import com.torve.domain.model.Channel
 import com.torve.domain.model.EnrichedChannel
 import com.torve.domain.model.EpgProgramme
-import com.torve.domain.model.canonicalEpgChannelKey
+import com.torve.domain.model.programmesForEpgChannel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -92,6 +92,7 @@ private data class EpgWindowCell(
 internal fun TvEpgGrid(
     channels: List<EnrichedChannel>,
     guideProgrammes: Map<String, List<EpgProgramme>>,
+    playlistId: String? = null,
     windowStartMs: Long,
     windowEndMs: Long,
     canPageBackward: Boolean,
@@ -200,16 +201,15 @@ internal fun TvEpgGrid(
                     items = channels,
                     key = { index, enriched -> "${enriched.channel.url}#$index" },
                 ) { rowIndex, enriched ->
-                    val programmes = remember(enriched.channel, guideProgrammes) {
-                        val key = canonicalEpgChannelKey(
-                            playlistId = enriched.channel.playlistId,
+                    val programmes = remember(enriched.channel, guideProgrammes, playlistId) {
+                        val lookupPlaylistId = enriched.channel.playlistId
+                            .takeIf { it.isNotBlank() }
+                            ?: playlistId.orEmpty()
+                        programmesForEpgChannel(
+                            programmesByChannelKey = guideProgrammes,
+                            playlistId = lookupPlaylistId,
                             channel = enriched.channel,
                         )
-                        if (key.isNullOrBlank()) {
-                            emptyList()
-                        } else {
-                            guideProgrammes[key].orEmpty()
-                        }
                     }
                     val cells = remember(programmes, windowStartMs, windowEndMs) {
                         buildWindowCells(

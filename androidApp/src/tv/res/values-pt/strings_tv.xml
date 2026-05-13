@@ -179,6 +179,8 @@
     <string name="tv_catalog_search_shows_heading">Pesquisar s\u00e9ries</string>
     <string name="tv_catalog_search_movies_subtitle">Pesquisar em Filmes</string>
     <string name="tv_catalog_search_shows_subtitle">Pesquisar em S\u00e9ries</string>
+    <string name="tv_catalog_movies_preparing">Filmes est\u00e3o sendo preparados em segundo plano</string>
+    <string name="tv_catalog_shows_preparing">S\u00e9ries est\u00e3o sendo preparadas em segundo plano</string>
     <string name="tv_search_ai_provider_required">Configure um provedor de IA nas Configura\u00e7\u00f5es antes de usar a Pesquisa IA.</string>
     <string name="tv_settings_panda_streaming_setup">Configura\u00e7\u00e3o de streaming do Panda</string>
     <string name="tv_settings_panda_streaming_setup_desc">Configure debrid, usenet, clientes de download, IPTV e sa\u00fade dos provedores em um s\u00f3 lugar.</string>
@@ -354,6 +356,13 @@
     <string name="tv_settings_hide_all">Ocultar tudo</string>
     <string name="tv_settings_channels_visible">%1$d / %2$d vis\u00edveis</string>
     <string name="tv_settings_no_categories">Nenhum grupo de canais carregado \u2014 selecione uma playlist primeiro</string>
+
+    <string name="tv_settings_refresh_epg_title">Atualizar EPG</string>
+    <string name="tv_settings_refresh_epg_subtitle">Baixa dados novos do guia para a playlist selecionada</string>
+    <string name="tv_settings_refresh_epg_subtitle_loaded">Guia pronto: %1$d programas em cache</string>
+    <string name="tv_settings_refresh_epg_loading">Atualizando guia...</string>
+    <string name="tv_settings_refresh_epg_not_configured">Adicione primeiro uma URL de guia \u00e0 playlist selecionada</string>
+    <string name="tv_settings_refresh_epg_started">Atualiza\u00e7\u00e3o de EPG iniciada</string>
 
     <!-- Settings reorganization -->
     <string name="tv_settings_section_stream_quality">Qualidade de stream &amp; reprodu\u00e7\u00e3o</string>

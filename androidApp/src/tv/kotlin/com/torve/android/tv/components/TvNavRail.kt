@@ -63,6 +63,7 @@ import com.torve.android.ui.theme.AmberSubtle
 import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
+import kotlinx.coroutines.delay
 
 private val RAIL_EXPANDED_WIDTH = 160.dp
 
@@ -75,6 +76,7 @@ fun TvNavRail(
     isExpanded: Boolean,
     railFocusRequester: FocusRequester,
     preferredEntryRoute: String? = null,
+    preferredEntryRequestNonce: Int = 0,
     onRailFocusChanged: (Boolean) -> Unit,
     onPreferredEntryRouteConsumed: () -> Unit = {},
     onMoveToContent: (String) -> Unit,
@@ -223,6 +225,16 @@ fun TvNavRail(
             }
         }
         prevRailHasFocus = railHasFocus
+    }
+
+    LaunchedEffect(preferredEntryRoute, preferredEntryRequestNonce) {
+        val route = preferredEntryRoute ?: return@LaunchedEffect
+        val requester = itemRequesters[route] ?: return@LaunchedEffect
+        runCatching { requester.requestFocus() }
+        delay(16)
+        runCatching { requester.requestFocus() }
+        delay(48)
+        runCatching { requester.requestFocus() }
     }
 }
 

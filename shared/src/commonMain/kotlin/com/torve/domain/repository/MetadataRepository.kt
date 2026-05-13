@@ -23,6 +23,7 @@ interface MetadataRepository {
     suspend fun getHomeShelves(): List<CatalogShelf>
     suspend fun getPersonCredits(personId: Int): List<MediaItem>
     suspend fun getPersonDetail(personId: Int): TmdbPerson
+    suspend fun getPersonImageUrls(personId: Int): List<String> = emptyList()
     suspend fun getSeasonDetail(tvId: Int, seasonNumber: Int): Season
 
     suspend fun getTrendingPaged(type: String, page: Int = 1): PagedResult

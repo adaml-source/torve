@@ -13,7 +13,6 @@ import io.ktor.client.request.get
 import io.ktor.client.request.head
 import io.ktor.client.request.header
 import io.ktor.client.statement.HttpResponse
-import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.isSuccess
 import kotlinx.serialization.SerialName
@@ -81,6 +80,7 @@ class StreamRepositoryImpl(
         val title: String?,
         val season: Int?,
         val episode: Int?,
+        val debridSignature: String,
     ) {
         val contentKey: String = buildString {
             append(type.name)
@@ -90,6 +90,8 @@ class StreamRepositoryImpl(
             append(season ?: -1)
             append(':')
             append(episode ?: -1)
+            append(':')
+            append(debridSignature)
         }
     }
 
@@ -131,6 +133,7 @@ class StreamRepositoryImpl(
             title = title,
             season = season,
             episode = episode,
+            debridSignature = debridSignature(debridAccounts),
         )
         val now = Clock.System.now().toEpochMilliseconds()
         val cached = memoryMutex.withLock {
@@ -248,7 +251,9 @@ class StreamRepositoryImpl(
             // ExoPlayer follows redirects itself, so both are playable.
             code in 200..299 || code in 300..399 -> StreamReadiness.Ready(url)
             code == 504 -> {
-                val body = runCatching { response.bodyAsText() }.getOrNull().orEmpty()
+                val body = runCatching {
+                    response.safeAddonBodyAsText(maxBytes = PANDA_READINESS_ERROR_BODY_MAX_BYTES)
+                }.getOrNull().orEmpty()
                 val parsed = runCatching {
                     readinessJson.decodeFromString(AddonNotReadyErrorBody.serializer(), body)
                 }.getOrNull()
@@ -282,17 +287,19 @@ class StreamRepositoryImpl(
             // directUrl is the per-user Panda endpoint that serves it). Earlier
             // logic gated this on `infoHash == null`, which forced those
             // streams through Real-Debrid even when no debrid was configured.
+            val magnetUrl = stream.magnetUrl
+                ?: stream.directUrl?.takeIf { it.isMagnetUri() }
             val resolved = if (stream.directUrl != null && stream.isAddonHostedUrl()) {
                 // Don't probe here — the caller (DetailViewModel) does the
                 // readiness check via probeStreamReadiness so it can render
                 // a preparing UI while we wait.
                 ResolvedStream(url = stream.directUrl, service = null)
-            } else if (stream.directUrl != null && stream.infoHash == null) {
+            } else if (magnetUrl == null && stream.directUrl != null) {
                 if (isNzbDownloadLink(stream.directUrl)) {
                     // Raw .nzb link from a non-Panda addon — can't be played
                     // without a download client resolving it first.
                     throw Exception("NZB files require a download client (NZBget/SABnzbd). Configure one in Panda settings.")
-                } else {
+                } else if (stream.infoHash == null) {
                     // Hoster URL that needs unrestricting (Real-Debrid, etc.).
                     // Without a provider we can't proceed.
                     if (provider == null || apiKey.isBlank()) {
@@ -301,10 +308,16 @@ class StreamRepositoryImpl(
                         )
                     }
                     debridClient.unrestrictUrl(provider, apiKey, stream.directUrl)
+                } else {
+                    // Configured Stremio addons such as Torrentio+Debrid can
+                    // return both an infoHash and a ready debrid URL. The URL
+                    // is the playable artifact; do not discard it and fall
+                    // back to addMagnet/hash-only resolving.
+                    ResolvedStream(url = stream.directUrl, service = provider)
                 }
             } else {
-                val infoHash = stream.infoHash
-                    ?: throw Exception("Stream has no infoHash or direct URL")
+                val infoHash = stream.infoHash ?: magnetUrl?.extractBtihInfoHash()
+                    ?: throw Exception("Stream has no infoHash, magnet, or direct URL")
                 if (provider == null || apiKey.isBlank()) {
                     throw DebridMissingException(
                         "Connect Real-Debrid in Panda to use torrent streams.",
@@ -315,6 +328,10 @@ class StreamRepositoryImpl(
                     apiKey = apiKey,
                     infoHash = infoHash,
                     fileIdx = stream.fileIdx,
+                    magnetUrl = magnetUrl,
+                    displayName = stream.title,
+                    season = memoryMutex.withLock { lastRequestByStreamKey[streamMemoryKey(stream)] }?.season,
+                    episode = memoryMutex.withLock { lastRequestByStreamKey[streamMemoryKey(stream)] }?.episode,
                 )
             }.requirePlayableUrl()
 
@@ -378,8 +395,9 @@ class StreamRepositoryImpl(
             ?: request?.imdbId?.takeIf { it.isNotBlank() }?.let { "imdb:$it" }
             ?: return
         val sourceKey = stream.accelerationSourceKey
-            ?: stream.infoHash
             ?: stream.directUrl
+            ?: stream.magnetUrl
+            ?: stream.infoHash
             ?: return
         // The acceleration backend requires a provider label. Addon-hosted
         // flows (Panda etc.) resolve without a local provider; fall back to
@@ -631,7 +649,7 @@ class StreamRepositoryImpl(
     private fun ParsedStream.toStartupBackendModel(
         request: SourceAccelerationRequest,
     ): StartupCandidateBackendModel {
-        val isDirect = directUrl != null && infoHash == null
+        val isDirect = directUrl != null
         val confidenceReasons = accelerationConfidenceReasons.ifEmpty {
             buildList {
                 add(
@@ -686,7 +704,7 @@ class StreamRepositoryImpl(
             addonName = addon_name,
             qualityLabel = quality,
             sourceLabel = source_name,
-            readinessState = if (direct_url != null && info_hash == null) {
+            readinessState = if (direct_url != null) {
                 ReadinessState.READY_NOW
             } else {
                 ReadinessState.READY_WITH_RESOLVE
@@ -760,20 +778,32 @@ class StreamRepositoryImpl(
         // accurate status rather than us timing out client-side and
         // falling back to Preparing on guesswork.
         const val PANDA_READINESS_PROBE_TIMEOUT_MS = 30_000L
+        const val PANDA_READINESS_ERROR_BODY_MAX_BYTES = 64 * 1024
     }
 }
 
 private fun startupIdentityKey(stream: ParsedStream): String {
     return stream.accelerationSourceKey
-        ?: stream.infoHash
         ?: stream.directUrl
+        ?: stream.magnetUrl
+        ?: stream.infoHash
         ?: "${stream.addonName}|${stream.title}|${stream.quality}|${stream.source.orEmpty()}"
 }
 
 private fun streamMemoryKey(stream: ParsedStream): String {
-    return stream.infoHash
-        ?: stream.directUrl
+    return stream.directUrl
+        ?: stream.magnetUrl
+        ?: stream.infoHash
         ?: "${stream.addonName}|${stream.title}|${stream.quality}|${stream.source.orEmpty()}"
+}
+
+private fun debridSignature(accounts: Map<DebridServiceType, String>): String {
+    if (accounts.isEmpty()) return "none"
+    return accounts.entries
+        .filter { it.value.isNotBlank() }
+        .sortedBy { it.key.name }
+        .joinToString("|") { (provider, key) -> "${provider.name}:${key.hashCode()}" }
+        .ifBlank { "none" }
 }
 
 private fun ResolvedStream.requirePlayableUrl(): ResolvedStream {

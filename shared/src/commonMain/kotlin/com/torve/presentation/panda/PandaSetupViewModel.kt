@@ -520,6 +520,44 @@ class PandaSetupViewModel(
         }
     }
 
+    fun disconnectSelectedDebrid() {
+        val provider = _state.value.selectedProvider ?: return
+        val debridType = toDebridServiceType(provider.id)
+        pollJob?.cancel()
+        if (debridType != null) {
+            scope.launch {
+                integrationSecretStore.remove(debridSecretKey(debridType))
+                if (debridType == DebridServiceType.REAL_DEBRID) {
+                    integrationSecretStore.remove(IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN)
+                    integrationSecretStore.remove(IntegrationSecretKey.DEBRID_RD_CLIENT_ID)
+                    integrationSecretStore.remove(IntegrationSecretKey.DEBRID_RD_CLIENT_SECRET)
+                }
+            }
+        }
+        _state.update {
+            it.copy(
+                debridApiKey = "",
+                apiKeyInput = "",
+                authConnected = false,
+                existingCredentialDetected = false,
+                deviceCode = null,
+                authLoading = false,
+                error = null,
+            )
+        }
+    }
+
+    fun reconnectSelectedDebrid() {
+        val supportsOAuth = _state.value.selectedProvider?.authMethods?.contains("oauth") == true
+        disconnectSelectedDebrid()
+        _state.update {
+            it.copy(authMethod = if (supportsOAuth) "oauth" else "apikey")
+        }
+        if (supportsOAuth) {
+            startOAuth()
+        }
+    }
+
     // Usenet setters
     fun setEnableUsenet(enabled: Boolean) { _state.update { it.copy(enableUsenet = enabled) } }
     fun setUsenetProvider(provider: String) { _state.update { it.copy(usenetProvider = provider) } }

@@ -179,6 +179,8 @@
     <string name="tv_catalog_search_shows_heading">Dizi ara</string>
     <string name="tv_catalog_search_movies_subtitle">Filmler i\u00e7inde ara</string>
     <string name="tv_catalog_search_shows_subtitle">Diziler i\u00e7inde ara</string>
+    <string name="tv_catalog_movies_preparing">Filmler arka planda haz\u0131rlan\u0131yor</string>
+    <string name="tv_catalog_shows_preparing">Diziler arka planda haz\u0131rlan\u0131yor</string>
     <string name="tv_search_ai_provider_required">AI Arama\'y\u0131 kullanmadan \u00f6nce Ayarlar\'da bir AI sa\u011flay\u0131c\u0131s\u0131 kurun.</string>
     <string name="tv_settings_panda_streaming_setup">Panda streaming kurulumu</string>
     <string name="tv_settings_panda_streaming_setup_desc">Debrid, usenet, indirme istemcileri, IPTV ve sa\u011flay\u0131c\u0131 durumunu tek yerden yap\u0131land\u0131r\u0131n.</string>
@@ -354,6 +356,13 @@
     <string name="tv_settings_hide_all">T\u00fcm\u00fcn\u00fc gizle</string>
     <string name="tv_settings_channels_visible">%1$d / %2$d g\u00f6r\u00fcn\u00fcr</string>
     <string name="tv_settings_no_categories">Y\u00fckl\u00fc kanal grubu yok \u2014 \u00f6nce bir oynatma listesi se\u00e7in</string>
+
+    <string name="tv_settings_refresh_epg_title">EPG\'yi yenile</string>
+    <string name="tv_settings_refresh_epg_subtitle">Se\u00e7ili oynatma listesi i\u00e7in yeni rehber verilerini indirir</string>
+    <string name="tv_settings_refresh_epg_subtitle_loaded">Rehber haz\u0131r: %1$d program \u00f6nbellekte</string>
+    <string name="tv_settings_refresh_epg_loading">Rehber yenileniyor...</string>
+    <string name="tv_settings_refresh_epg_not_configured">\u00d6nce se\u00e7ili oynatma listesine bir rehber URL\'si ekleyin</string>
+    <string name="tv_settings_refresh_epg_started">EPG yenileme ba\u015flat\u0131ld\u0131</string>
 
     <!-- Settings reorganization -->
     <string name="tv_settings_section_stream_quality">Yay\u0131n kalitesi &amp; oynatma</string>

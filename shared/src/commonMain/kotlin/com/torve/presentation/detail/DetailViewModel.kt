@@ -6,6 +6,8 @@ import com.torve.data.addon.isAddonHostedUrl
 import com.torve.data.debrid.DebridMissingException
 import com.torve.data.debrid.DebridNeedsReconnectException
 import com.torve.data.debrid.DebridNoCachedStreamException
+import com.torve.data.debrid.DebridServiceUnavailableException
+import com.torve.data.debrid.DebridSourceBlockedException
 import com.torve.data.contentpolicy.ContentPolicyCacheInvalidationCoordinator
 import com.torve.data.contentpolicy.ContentPolicyRepository
 import com.torve.data.kodi.KodiClient
@@ -48,6 +50,7 @@ import com.torve.data.mdblist.RatingsEnricher
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.data.usenet.UsenetMapper
+import com.torve.data.usenet.model.UsenetAvailability
 import com.torve.data.usenet.model.UsenetCandidatePayload
 import com.torve.data.usenet.model.UsenetCandidateStates
 import com.torve.data.usenet.model.UsenetCandidateUiModel
@@ -1020,6 +1023,37 @@ class DetailViewModel(
         activeUsenetSelectionStartedAt = Clock.System.now().toEpochMilliseconds()
         initialUsenetCandidateId = candidateId
         activeUsenetFallbackIndex = 0
+        activeUsenetCandidateId = candidateId
+
+        _state.update { state ->
+            val now = Clock.System.now().toEpochMilliseconds()
+            val previous = state.usenetCandidates[candidateId]
+            val preparingRow = previous?.copy(
+                availabilityState = UsenetAvailability.PREPARING,
+                isSelected = true,
+                jobId = null,
+                resolvedStream = null,
+                displayMessageKey = UsenetUserMessageKey.PREPARING,
+                failureMessageKey = null,
+                lastStateChangeAt = now,
+            ) ?: UsenetCandidateUiModel(
+                candidateId = candidateId,
+                title = stream.title,
+                qualityLabel = stream.quality.takeIf { it.isNotBlank() },
+                sizeLabel = stream.size,
+                badge = "Usenet",
+                availabilityState = UsenetAvailability.PREPARING,
+                isSelected = true,
+                displayMessageKey = UsenetUserMessageKey.PREPARING,
+                lastStateChangeAt = now,
+            )
+            state.copy(
+                isResolving = true,
+                resolveError = null,
+                autoPlayMessage = resolvingStatusMessage(stream, provider = null),
+                usenetCandidates = mergeSidecarRow(state.usenetCandidates, preparingRow),
+            )
+        }
 
         val selectionInitialState = UsenetTelemetryState.from(
             _state.value.usenetCandidates[candidateId]?.availabilityState,
@@ -1061,7 +1095,14 @@ class DetailViewModel(
                         // updated by every iteration of this loop and
                         // also by fresh taps; if it's drifted, drop.
                         if (activeUsenetCandidateId == tryingThis.candidateId) {
-                            _state.update { it.copy(usenetPlaybackIntent = terminal.stream) }
+                            _state.update {
+                                it.copy(
+                                    isResolving = false,
+                                    autoPlayMessage = null,
+                                    resolveError = null,
+                                    usenetPlaybackIntent = terminal.stream,
+                                )
+                            }
                             // If we got here via fallback (not the row
                             // the user originally tapped), emit the
                             // paired "fallback_succeeded" event.
@@ -1082,6 +1123,12 @@ class DetailViewModel(
                         // no jobId / poller was available. Row is already
                         // PREPARING via the mapper; the user re-taps to
                         // retry. Not an auto-advance case.
+                        _state.update {
+                            it.copy(
+                                isResolving = false,
+                                autoPlayMessage = "Usenet is still preparing this stream.",
+                            )
+                        }
                         return@launch
                     }
                     is ResolveOutcome.Failed -> {
@@ -1112,6 +1159,13 @@ class DetailViewModel(
                         }
                     }
                 }
+            }
+            _state.update {
+                it.copy(
+                    isResolving = false,
+                    autoPlayMessage = null,
+                    resolveError = "Usenet source is unavailable. Try another source.",
+                )
             }
         }
     }
@@ -1372,13 +1426,23 @@ class DetailViewModel(
 
     private fun ParsedStream.presentationKey(): String {
         return accelerationSourceKey
-            ?: infoHash
             ?: directUrl
+            ?: magnetUrl
+            ?: infoHash
             ?: "${addonName}|${title}|${quality}|${source.orEmpty()}"
     }
 
     private fun ParsedStream.isInstantPlaybackCandidate(): Boolean {
-        return isCached || (directUrl != null && infoHash == null)
+        return isCached || directUrl != null
+    }
+
+    private fun removeFailedStreamCandidate(stream: ParsedStream) {
+        val failedKey = stream.presentationKey()
+        _state.update { current ->
+            current.copy(
+                streams = current.streams.filterNot { it.presentationKey() == failedKey },
+            )
+        }
     }
 
     private suspend fun autoResolveStream(
@@ -1416,12 +1480,13 @@ class DetailViewModel(
                 isResolving = true,
                 resolveError = null,
                 autoPlayStream = stream,
+                autoPlayMessage = resolvingStatusMessage(stream, provider),
                 fallbackAttempt = attemptIndex,
             )
         }
 
         try {
-            println("TORVE_AUTORESOLVE: attempt=$attemptIndex hash=${stream.infoHash} provider=$provider keyLen=${apiKey.length}")
+            println("TORVE_AUTORESOLVE: attempt=$attemptIndex hash=${stream.infoHash?.let { "${it.take(6)}...${it.takeLast(4)}" }} provider=$provider keyLen=${apiKey.length}")
             val resolved = withTimeoutOrNull(90_000L) {
                 streamRepo.resolveStream(stream, provider, apiKey)
             }
@@ -1437,7 +1502,7 @@ class DetailViewModel(
                 autoResolveStream(streams, attemptIndex + 1, preferences)
                 return
             }
-            println("TORVE_AUTORESOLVE: Success url=${resolved.url?.take(80)}")
+            println("TORVE_AUTORESOLVE: Success resolvedUrl=${resolved.url.isNotBlank()}")
             com.torve.data.addon.StreamRuntimeTelemetry.recordStartupSuccess(hostKey, 0L)
             val url = resolved.url.orEmpty()
             // Non-addon URLs are playable immediately — same as the fast
@@ -1493,12 +1558,7 @@ class DetailViewModel(
             streamRepo.reportPlaybackOutcome(stream, provider, success = false)
             // Auth failure: retrying with different streams won't help — surface
             // immediately so the user knows to reconnect their debrid account.
-            if (
-                e is DebridMissingException ||
-                e is DebridNeedsReconnectException ||
-                e.message?.contains("Session expired") == true ||
-                e.message?.contains("reconnect", ignoreCase = true) == true
-            ) {
+            if (e.shouldStopAutoResolveAndShowUser()) {
                 _state.update {
                     it.copy(
                         isResolving = false,
@@ -1566,6 +1626,7 @@ class DetailViewModel(
                 isResolving = true,
                 resolveError = null,
                 autoPlayStream = stream,
+                autoPlayMessage = resolvingStatusMessage(stream, provider),
                 fallbackAttempt = attemptIndex,
             )
         }
@@ -1649,7 +1710,7 @@ class DetailViewModel(
         } catch (e: Exception) {
             com.torve.data.addon.StreamRuntimeTelemetry.recordFatalError(hostKey)
             streamRepo.reportPlaybackOutcome(stream, provider, success = false)
-            if (e is DebridMissingException || e is DebridNeedsReconnectException) {
+            if (e.shouldStopAutoResolveAndShowUser()) {
                 _state.update {
                     it.copy(
                         autoPlayMessage = null,
@@ -1688,6 +1749,28 @@ class DetailViewModel(
         return "Playing: ${parts.joinToString(" · ")}"
     }
 
+    private fun Exception.shouldStopAutoResolveAndShowUser(): Boolean {
+        val message = this.message.orEmpty()
+        return this is DebridMissingException ||
+            this is DebridNeedsReconnectException ||
+            this is DebridServiceUnavailableException ||
+            message.contains("Session expired", ignoreCase = true) ||
+            message.contains("reconnect", ignoreCase = true) ||
+            message.contains("infringing_file", ignoreCase = true)
+    }
+
+    private fun resolvingStatusMessage(stream: ParsedStream, provider: DebridServiceType?): String {
+        return when {
+            stream.accelerationProvenanceKind == com.torve.domain.model.CandidateProvenanceKind.USENET_NZBDAV ->
+                "Preparing Usenet stream..."
+            stream.isAddonHostedUrl() -> "Checking cloud stream readiness..."
+            provider == DebridServiceType.REAL_DEBRID -> "Resolving with Real-Debrid..."
+            provider != null -> "Resolving with ${provider.label}..."
+            stream.infoHash != null -> "Connect Real-Debrid in Panda to resolve this torrent stream."
+            else -> "Resolving stream..."
+        }
+    }
+
     private fun streamResolveErrorKey(error: Exception): String {
         val message = error.message.orEmpty()
         return when {
@@ -1695,8 +1778,19 @@ class DetailViewModel(
                 com.torve.presentation.error.UserFacingError.STREAM_REAL_DEBRID_MISSING.messageKey
             error is DebridNeedsReconnectException ->
                 com.torve.presentation.error.UserFacingError.STREAM_REAL_DEBRID_RECONNECT.messageKey
+            error is DebridSourceBlockedException ->
+                com.torve.presentation.error.UserFacingError.STREAM_REAL_DEBRID_SOURCE_BLOCKED.messageKey
             error is DebridNoCachedStreamException ->
                 com.torve.presentation.error.UserFacingError.STREAM_NO_CACHED_SOURCE.messageKey
+            error is DebridServiceUnavailableException ->
+                com.torve.presentation.error.UserFacingError.INTEGRATION_SERVICE_UNAVAILABLE.messageKey
+            message.contains("token refresh failed", ignoreCase = true) ||
+                message.contains("refresh failed", ignoreCase = true) ->
+                com.torve.presentation.error.UserFacingError.STREAM_REAL_DEBRID_REFRESH_FAILED.messageKey
+            message.contains("401", ignoreCase = true) ||
+                message.contains("403", ignoreCase = true) ||
+                message.contains("invalid api key", ignoreCase = true) ->
+                com.torve.presentation.error.UserFacingError.STREAM_REAL_DEBRID_RECONNECT.messageKey
             message.contains("Session expired", ignoreCase = true) ||
                 message.contains("re-authenticate", ignoreCase = true) ||
                 message.contains("reconnect", ignoreCase = true) ->
@@ -1705,6 +1799,9 @@ class DetailViewModel(
                 message.contains("isn't cached", ignoreCase = true) ||
                 message.contains("none produced a playable URL", ignoreCase = true) ->
                 com.torve.presentation.error.UserFacingError.STREAM_NO_CACHED_SOURCE.messageKey
+            message.contains("blocked this source", ignoreCase = true) ||
+                message.contains("infringing_file", ignoreCase = true) ->
+                com.torve.presentation.error.UserFacingError.STREAM_REAL_DEBRID_SOURCE_BLOCKED.messageKey
             else -> com.torve.presentation.error.UserFacingError.STREAM_RESOLVE_FAILED.messageKey
         }
     }
@@ -1715,6 +1812,8 @@ class DetailViewModel(
                 "Connect Real-Debrid in Panda to use this stream."
             com.torve.presentation.error.UserFacingError.STREAM_REAL_DEBRID_RECONNECT.messageKey ->
                 "Real-Debrid needs reconnecting. Open Settings > Advanced > Panda."
+            com.torve.presentation.error.UserFacingError.STREAM_REAL_DEBRID_SOURCE_BLOCKED.messageKey ->
+                "Real-Debrid blocked this source. Try another source."
             com.torve.presentation.error.UserFacingError.STREAM_NO_CACHED_SOURCE.messageKey ->
                 "No cached stream is available for this title."
             else -> "Could not resolve this stream."
@@ -1728,10 +1827,11 @@ class DetailViewModel(
                 it.copy(
                     isResolving = true,
                     resolveError = null,
+                    autoPlayMessage = resolvingStatusMessage(stream, provider),
                     preparing = null,
                 )
             }
-            println("TORVE_RESOLVE: Starting resolve hash=${stream.infoHash} url=${stream.directUrl} provider=$provider keyLen=${apiKey.length}")
+            println("TORVE_RESOLVE: Starting resolve hash=${stream.infoHash?.let { "${it.take(6)}...${it.takeLast(4)}" }} hasUrl=${stream.directUrl != null} provider=$provider keyLen=${apiKey.length}")
             try {
                 val resolved = withTimeoutOrNull(90_000L) {
                     streamRepo.resolveStream(stream, provider, apiKey)
@@ -1740,7 +1840,11 @@ class DetailViewModel(
                     println("TORVE_RESOLVE: Timed out after 90s")
                     streamRepo.reportPlaybackOutcome(stream, provider, success = false)
                     _state.update {
-                        it.copy(isResolving = false, resolveError = com.torve.presentation.error.UserFacingError.STREAM_RESOLVE_TIMEOUT.messageKey)
+                        it.copy(
+                            isResolving = false,
+                            autoPlayMessage = null,
+                            resolveError = com.torve.presentation.error.UserFacingError.STREAM_RESOLVE_TIMEOUT.messageKey,
+                        )
                     }
                     return@launch
                 }
@@ -1748,8 +1852,15 @@ class DetailViewModel(
             } catch (e: Exception) {
                 println("TORVE_RESOLVE: Exception ${e::class.simpleName}: ${e.message}")
                 streamRepo.reportPlaybackOutcome(stream, provider, success = false)
+                if (e is DebridSourceBlockedException || e is DebridNoCachedStreamException) {
+                    removeFailedStreamCandidate(stream)
+                }
                 _state.update {
-                    it.copy(isResolving = false, resolveError = streamResolveErrorKey(e))
+                    it.copy(
+                        isResolving = false,
+                        autoPlayMessage = null,
+                        resolveError = streamResolveErrorKey(e),
+                    )
                 }
             }
         }
@@ -1776,6 +1887,7 @@ class DetailViewModel(
             _state.update {
                 it.copy(
                     isResolving = false,
+                    autoPlayMessage = null,
                     resolveError = com.torve.presentation.error.UserFacingError.STREAM_RESOLVE_FAILED.messageKey,
                 )
             }
@@ -1786,6 +1898,7 @@ class DetailViewModel(
                 it.copy(
                     resolvedStream = resolved,
                     isResolving = false,
+                    autoPlayMessage = null,
                     showStreamPicker = false,
                     preparing = null,
                 )
@@ -1798,13 +1911,14 @@ class DetailViewModel(
                     it.copy(
                         resolvedStream = resolved.copy(url = readiness.finalUrl),
                         isResolving = false,
+                        autoPlayMessage = null,
                         showStreamPicker = false,
                         preparing = null,
                     )
                 }
             }
             com.torve.domain.repository.StreamReadiness.Preparing -> {
-                _state.update { it.copy(isResolving = false) }
+                _state.update { it.copy(isResolving = false, autoPlayMessage = null) }
                 startPreparingLoop(stream, url, resolved)
             }
             is com.torve.domain.repository.StreamReadiness.Failed -> {
@@ -1812,6 +1926,7 @@ class DetailViewModel(
                 _state.update {
                     it.copy(
                         isResolving = false,
+                        autoPlayMessage = null,
                         resolveError = readiness.reason,
                     )
                 }
@@ -1853,6 +1968,7 @@ class DetailViewModel(
                     canCancel = true,
                 ),
                 resolveError = null,
+                autoPlayMessage = null,
                 // Close the source picker so the user doesn't accidentally
                 // pick a different stream while the current one is warming
                 // up. The preparing overlay is the full-screen surface now.
@@ -1917,7 +2033,14 @@ class DetailViewModel(
     /** Overlay Cancel / back navigation entry point. Safe to call when idle. */
     fun cancelPreparing() {
         cancelPreparingLoop()
-        _state.update { it.copy(preparing = null) }
+        _state.update { state ->
+            state.copy(
+                preparing = null,
+                isResolving = false,
+                autoPlayMessage = null,
+                showStreamPicker = state.showStreamPicker || state.streams.isNotEmpty(),
+            )
+        }
     }
 
     private fun cancelPreparingLoop() {
@@ -1976,11 +2099,19 @@ class DetailViewModel(
                         it.copy(isResolving = false, showStreamPicker = true)
                     }
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
                 com.torve.data.addon.StreamRuntimeTelemetry.recordFatalError(hostKey)
                 streamRepo.reportPlaybackOutcome(fallback, provider, success = false)
                 _state.update {
-                    it.copy(isResolving = false, showStreamPicker = true)
+                    it.copy(
+                        isResolving = false,
+                        showStreamPicker = true,
+                        resolveError = if (e.shouldStopAutoResolveAndShowUser()) {
+                            streamResolveErrorKey(e)
+                        } else {
+                            it.resolveError
+                        },
+                    )
                 }
             }
         }

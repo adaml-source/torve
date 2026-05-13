@@ -22,6 +22,19 @@ data class PlaylistAddProgress(
     enum class Phase { DOWNLOADING, PARSING, SAVING }
 }
 
+data class VodCategoryTypeCount(
+    val groupTitle: String,
+    val contentType: ChannelContentType,
+    val count: Long,
+)
+
+data class ChannelPlaylistSummary(
+    val id: String,
+    val name: String,
+    val channelCount: Int,
+    val type: String,
+)
+
 interface ChannelRepository {
     suspend fun addPlaylist(
         name: String,
@@ -34,6 +47,14 @@ interface ChannelRepository {
     suspend fun removePlaylist(id: String)
     suspend fun updatePlaylistEpgUrl(playlistId: String, epgUrl: String?)
     suspend fun getPlaylists(): List<ChannelPlaylist>
+    suspend fun getPlaylistSummaries(): List<ChannelPlaylistSummary> = getPlaylists().map {
+        ChannelPlaylistSummary(
+            id = it.id,
+            name = it.name,
+            channelCount = it.channelCount,
+            type = it.type.name.lowercase(),
+        )
+    }
     suspend fun refreshPlaylist(playlistId: String)
     suspend fun refreshEpg(playlistId: String, hiddenChannelIds: Set<String> = emptySet())
     suspend fun getChannels(playlistId: String): List<Channel>
@@ -56,7 +77,25 @@ interface ChannelRepository {
     suspend fun getCategoryCounts(playlistId: String): List<Pair<String, Long>>
     suspend fun getLiveCategoryCounts(playlistId: String): List<Pair<String, Long>>
     suspend fun getVodCategoryCounts(playlistId: String): List<Pair<String, Long>>
+    suspend fun getVodCategoryTypeCounts(playlistId: String): List<VodCategoryTypeCount> = emptyList()
     suspend fun getChannelsForCategory(playlistId: String, categoryName: String): List<Channel>
+    suspend fun getChannelsForContentType(
+        playlistId: String,
+        type: ChannelContentType,
+        limit: Int = 160,
+    ): List<Channel> = getChannelsByContentType(playlistId, type).take(limit).map { it.channel }
+
+    suspend fun getChannelsForCategoryContentType(
+        playlistId: String,
+        categoryName: String,
+        type: ChannelContentType,
+        limit: Int = 160,
+    ): List<Channel> = getChannelsForCategory(playlistId, categoryName)
+        .asSequence()
+        .filter { it.contentType == type }
+        .take(limit)
+        .toList()
+
     suspend fun getTotalChannelCount(playlistId: String): Long
     suspend fun getVodSeriesEpisodes(channel: Channel): List<Channel> = emptyList()
     suspend fun resolveFirstVodSeriesEpisode(channel: Channel): Channel? = null

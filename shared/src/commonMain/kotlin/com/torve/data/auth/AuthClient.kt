@@ -246,10 +246,13 @@ class AuthClient(
      */
     suspend fun getAuthenticatedUser(): AuthUser? {
         val accessToken = getValidAccessToken()
-        if (accessToken.isNullOrBlank()) {
-            return if (hasStoredSession()) getCurrentUser() else null
+        val user = if (accessToken.isNullOrBlank()) {
+            if (hasStoredSession()) getCurrentUser() else null
+        } else {
+            getCurrentUser()
         }
-        return getCurrentUser()
+        _authUser.value = user
+        return user
     }
 
     suspend fun checkVerificationStatus(): Boolean {

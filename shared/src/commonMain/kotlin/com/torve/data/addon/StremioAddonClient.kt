@@ -2,12 +2,16 @@ package com.torve.data.addon
 
 import com.torve.domain.model.MediaType
 import io.ktor.client.HttpClient
-import io.ktor.client.call.body
 import io.ktor.client.request.get
 import io.ktor.client.request.header
-import io.ktor.client.statement.bodyAsText
 import io.ktor.http.encodeURLPathPart
 import kotlinx.serialization.json.Json
+
+private const val ADDON_MANIFEST_MAX_BYTES = 256 * 1024
+private const val ADDON_STREAM_MAX_BYTES = 2 * 1024 * 1024
+private const val ADDON_CATALOG_MAX_BYTES = 2 * 1024 * 1024
+private const val ADDON_META_MAX_BYTES = 512 * 1024
+private const val ADDON_SUBTITLE_MAX_BYTES = 512 * 1024
 
 /**
  * Generic Stremio addon client that supports any addon conforming
@@ -27,7 +31,7 @@ class StremioAddonClient(
             header("Accept", "application/json,text/plain;q=0.9,*/*;q=0.8")
             header("Accept-Language", "en-US,en;q=0.9")
         }
-        val body = response.bodyAsText()
+        val body = response.safeAddonBodyAsText(maxBytes = ADDON_MANIFEST_MAX_BYTES)
         val trimmed = body.trimStart()
         if (!trimmed.startsWith("{")) {
             throw IllegalStateException(
@@ -68,17 +72,21 @@ class StremioAddonClient(
             // didn't, and the desktop got zero results while the
             // Android build (different Ktor engine -> different default
             // UA) worked with the same Panda config.
-            val response: StremioStreamResponse = httpClient.get(url) {
+            val response = httpClient.get(url) {
                 header("User-Agent", "Mozilla/5.0 (Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
                 header("Accept", "application/json,text/plain;q=0.9,*/*;q=0.8")
                 header("Accept-Language", "en-US,en;q=0.9")
-            }.body()
+            }
+            val streamResponse = json.decodeFromString<StremioStreamResponse>(
+                response.safeAddonBodyAsText(maxBytes = ADDON_STREAM_MAX_BYTES),
+            )
             val addonName = try {
                 getManifest(baseUrl).name
             } catch (_: Exception) {
                 baseUrl.substringAfter("://").substringBefore("/")
             }
-            response.streams.map { StreamParser.parse(it, addonName, addonBaseUrl = baseUrl) }
+            val addonOrigin = addonOriginForStream(baseUrl)
+            streamResponse.streams.map { StreamParser.parse(it, addonName, addonBaseUrl = addonOrigin) }
         } catch (e: Exception) {
             emptyList()
         }
@@ -128,7 +136,7 @@ class StremioAddonClient(
         }
         return try {
             val response = httpClient.get(url)
-            json.decodeFromString(response.bodyAsText())
+            json.decodeFromString(response.safeAddonBodyAsText(maxBytes = ADDON_CATALOG_MAX_BYTES))
         } catch (_: Exception) {
             StremioCatalogResponse()
         }
@@ -146,7 +154,7 @@ class StremioAddonClient(
         val url = "${baseUrl.trimEnd('/')}/meta/$type/$id.json"
         return try {
             val response = httpClient.get(url)
-            json.decodeFromString(response.bodyAsText())
+            json.decodeFromString(response.safeAddonBodyAsText(maxBytes = ADDON_META_MAX_BYTES))
         } catch (_: Exception) {
             StremioMetaResponse()
         }
@@ -164,9 +172,24 @@ class StremioAddonClient(
         val url = "${baseUrl.trimEnd('/')}/subtitles/$type/$id.json"
         return try {
             val response = httpClient.get(url)
-            json.decodeFromString(response.bodyAsText())
+            json.decodeFromString(response.safeAddonBodyAsText(maxBytes = ADDON_SUBTITLE_MAX_BYTES))
         } catch (_: Exception) {
             StremioSubtitleResponse()
         }
+    }
+}
+
+private fun addonOriginForStream(baseUrl: String): String {
+    val trimmed = baseUrl.trimEnd('/')
+    val scheme = trimmed.substringBefore("://", missingDelimiterValue = "")
+    val host = trimmed
+        .substringAfter("://", missingDelimiterValue = trimmed)
+        .substringBefore("/")
+        .substringBefore("?")
+        .substringBefore("#")
+    return if (scheme.isNotBlank() && host.isNotBlank()) {
+        "$scheme://$host"
+    } else {
+        trimmed
     }
 }

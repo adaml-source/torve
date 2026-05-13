@@ -168,6 +168,7 @@ internal fun TvMediaRails(
     onMediaFocused: ((MediaItem) -> Unit)? = null,
     onSeeAll: ((railKey: String, title: String) -> Unit)? = null,
     heroOverlay: (@Composable () -> Unit)? = null,
+    heroOverlayFocusRequester: FocusRequester? = null,
     leadingContent: (@Composable () -> Unit)? = null,
     leadingContentFocusRequester: FocusRequester? = null,
     shouldAutoFocus: Boolean = true,
@@ -418,6 +419,8 @@ internal fun TvMediaRails(
                                         // is unattached and causes a crash.
                                         if (rowIndex == 0 && leadingContentFocusRequester != null) {
                                             up = leadingContentFocusRequester
+                                        } else if (rowIndex == 0 && heroOverlayFocusRequester != null) {
+                                            up = heroOverlayFocusRequester
                                         } else if (rowIndex == 0 && headerFocusRequester != null && heroOverlay != null) {
                                             up = headerFocusRequester
                                         }
@@ -483,6 +486,8 @@ internal fun TvMediaRails(
                                             .focusProperties {
                                                 if (rowIndex == 0 && leadingContentFocusRequester != null) {
                                                     up = leadingContentFocusRequester
+                                                } else if (rowIndex == 0 && heroOverlayFocusRequester != null) {
+                                                    up = heroOverlayFocusRequester
                                                 } else if (rowIndex == 0 && headerFocusRequester != null && heroOverlay != null) {
                                                     up = headerFocusRequester
                                                 }

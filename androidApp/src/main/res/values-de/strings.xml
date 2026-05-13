@@ -1930,7 +1930,7 @@
     <string name="stream_group_ranked_for_device">Für dieses Gerät sortiert</string>
     <string name="stream_group_more_options">Weitere Optionen</string>
     <string name="stream_group_more_options_subtitle">Zusätzliche Ausweichoptionen und Alternativen</string>
-    <string name="stream_filter_torrent">Torrent</string>
+    <string name="stream_filter_torrent">Torrent/RD</string>
     <string name="stream_filter_usenet_nzb">Usenet / NZB</string>
     <string name="stream_seed_count">%1$d Seeds</string>
     <string name="detail_cached_count">%1$d gecacht</string>

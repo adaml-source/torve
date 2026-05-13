@@ -253,11 +253,10 @@ class XtreamClient(
             val categoryName = categoryMap[stream.categoryId]?.categoryName
             val ext = stream.containerExtension ?: "mp4"
             val streamUrl = "${server.trimEnd('/')}/movie/$username/$password/${stream.streamId}.$ext"
-            val inferredContentType = if (categoryName.looksLikeXtreamSeriesCategory()) {
-                ChannelContentType.VOD_SERIES
-            } else {
-                ChannelContentType.VOD_MOVIE
-            }
+            // Xtream exposes movies and series through separate endpoints. Treating
+            // movie categories such as "Netflix" or "Anime" as series based on
+            // labels makes Movies/Shows drift and duplicates provider data.
+            val contentType = ChannelContentType.VOD_MOVIE
             Channel(
                 name = stream.name ?: "Unknown",
                 url = streamUrl,
@@ -273,12 +272,9 @@ class XtreamClient(
                     stream.rating5Based?.takeIf { it > 0.0 }?.let { put("vod_rating_5based", it.toString()) }
                     stream.youtubeTrailer?.takeIf { it.isNotBlank() }?.let { put("vod_youtube_trailer", it) }
                     stream.genre?.takeIf { it.isNotBlank() }?.let { put("vod_genre", it) }
-                    if (inferredContentType == ChannelContentType.VOD_SERIES) {
-                        put("vod_inferred_series", "true")
-                    }
                 },
                 playlistId = playlistId,
-                contentType = inferredContentType,
+                contentType = contentType,
             )
         }
     }
@@ -666,20 +662,6 @@ private fun JsonElement.flexRows(): List<JsonObject> = when (this) {
             ?: values.mapNotNull { it as? JsonObject }
     }
     else -> emptyList()
-}
-
-private fun String?.looksLikeXtreamSeriesCategory(): Boolean {
-    val text = this?.lowercase().orEmpty()
-    if (text.isBlank()) return false
-    return text.contains("series") ||
-        text.contains("serien") ||
-        text.contains("serie") ||
-        text.contains("shows") ||
-        text.contains("tv show") ||
-        text.contains("staffel") ||
-        text.contains("season") ||
-        text.contains("episode") ||
-        text.contains("episod")
 }
 
 private fun JsonElement?.flexStringOrNull(): String? = when (this) {

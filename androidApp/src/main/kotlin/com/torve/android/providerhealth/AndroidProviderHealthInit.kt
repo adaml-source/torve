@@ -37,8 +37,6 @@ import com.torve.presentation.providerhealth.TraktProviderHealthChecker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
 /**
@@ -311,24 +309,12 @@ class AndroidProviderHealthInit(
         // collector; exits with the scope on process death.
         observerScope.launch { refreshOnSettings.observe() }
 
-        // Re-run all checks whenever PandaSetupViewModel hydrates the
-        // store. checkExistingConfig() writes credentials (including the
-        // debrid API key) to secretStore BEFORE updating the state, so
-        // by the time this collector fires, secretStore already has the
         // fresh keys and every checker — including debrid — gets accurate
         // results.
-        observerScope.launch {
-            @OptIn(kotlinx.coroutines.FlowPreview::class)
-            pandaConfigStateStore.state
-                .drop(1) // skip initial default-unconfigured emission
-                .debounce(500L)
-                .collect { coordinator.runAll() }
-        }
-
-        // Run all checks once at startup so the status section shows
-        // real state immediately (debrid, Plex/Jellyfin, etc. all read
-        // directly from secretStore and don't need a prior navigation).
-        coordinator.runAll()
+        // Do not run network/provider probes automatically at app startup.
+        // The TV shell must stay responsive and render cached state first;
+        // explicit settings refreshes and credential-transfer completion still
+        // drive runAll()/runCheck() when the user needs fresh health status.
 
         // Collect status transitions and notify on GREEN→RED
         observerScope.launch {

@@ -30,6 +30,65 @@ fun canonicalEpgChannelKey(channel: Channel): String? {
     )
 }
 
+fun epgChannelLookupKeys(
+    playlistId: String,
+    channel: Channel,
+): List<String> {
+    val normalizedPlaylistId = playlistId.trim().ifEmpty { return emptyList() }
+    val keys = LinkedHashSet<String>()
+
+    fun addRaw(value: String?) {
+        value?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { keys += normalizedPlaylistId + EPG_KEY_SEPARATOR + it }
+    }
+
+    fun addNormalized(value: String?) {
+        value?.let(::normalizeEpgChannelName)
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { keys += normalizedPlaylistId + EPG_KEY_SEPARATOR + it }
+    }
+
+    canonicalEpgChannelKey(normalizedPlaylistId, channel)?.let(keys::add)
+    addRaw(channel.tvgId)
+    addNormalized(channel.tvgId)
+    addNormalized(channel.tvgName)
+    addNormalized(channel.name)
+
+    return keys.toList()
+}
+
+fun epgChannelLookupKeys(channel: Channel): List<String> {
+    return epgChannelLookupKeys(
+        playlistId = channel.playlistId,
+        channel = channel,
+    )
+}
+
+fun programmesForEpgChannel(
+    programmesByChannelKey: Map<String, List<EpgProgramme>>,
+    playlistId: String,
+    channel: Channel,
+): List<EpgProgramme> {
+    if (programmesByChannelKey.isEmpty()) return emptyList()
+    return epgChannelLookupKeys(playlistId, channel)
+        .firstNotNullOfOrNull { key ->
+            programmesByChannelKey[key]?.takeIf { it.isNotEmpty() }
+        }
+        .orEmpty()
+}
+
+fun programmesForEpgChannel(
+    programmesByChannelKey: Map<String, List<EpgProgramme>>,
+    channel: Channel,
+): List<EpgProgramme> {
+    return programmesForEpgChannel(
+        programmesByChannelKey = programmesByChannelKey,
+        playlistId = channel.playlistId,
+        channel = channel,
+    )
+}
+
 private fun normalizeEpgChannelName(value: String): String {
     val trimmed = value.trim()
     if (trimmed.isEmpty()) return ""

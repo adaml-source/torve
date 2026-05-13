@@ -12,7 +12,13 @@ object StreamParser {
         addonBaseUrl: String? = null,
     ): ParsedStream {
         val nameParts = (stream.name ?: "").split("\n")
-        val addonName = nameParts.firstOrNull()?.takeIf { it.isNotBlank() } ?: fallbackAddonName
+        val rawAddonName = nameParts.firstOrNull()?.trim()?.takeIf { it.isNotBlank() }
+        val isPandaOrigin = isPandaAddon(fallbackAddonName, addonBaseUrl)
+        val addonName = if (isPandaOrigin) {
+            "Panda"
+        } else {
+            rawAddonName ?: fallbackAddonName
+        }
         val qualityFromName = nameParts.getOrNull(1) ?: ""
 
         val title = stream.title ?: stream.behaviorHints?.filename ?: "Unknown"
@@ -37,28 +43,69 @@ object StreamParser {
         val source = if (lines.size > 1) {
             lines.last().replace(Regex("[⚙️]"), "").trim().takeIf { it.isNotBlank() }
         } else null
+        val displaySource = if (isPandaOrigin) {
+            distinctSourceSegments(
+                rawAddonName?.takeUnless { it.equals(addonName, ignoreCase = true) },
+                source,
+            )
+        } else {
+            source
+        }
 
         val fullText = title
         val hdr = extractHdr(fullText)
         val audioCodec = extractAudioCodec(fullText)
         val languages = extractLanguages(fullText)
+        val cachedByAddon = hasDebridCachedMarker(
+            text = listOfNotNull(stream.name, stream.title, stream.behaviorHints?.filename).joinToString("\n"),
+        )
+
+        val primaryUrl = stream.url?.trim()?.takeIf { it.isNotBlank() }
+        val externalUrl = stream.externalUrl?.trim()?.takeIf { it.isNotBlank() }
+        val explicitMagnet = stream.magnet?.trim()?.takeIf { it.isNotBlank() && it.isMagnetUri() }
+        val magnetUrl = listOfNotNull(primaryUrl, externalUrl, explicitMagnet)
+            .firstOrNull { it.isMagnetUri() }
+        val directUrl = primaryUrl?.takeUnless { it.isMagnetUri() }
+        val resolvedInfoHash = listOfNotNull(
+            stream.infoHash,
+            stream.infoHashSnake,
+            stream.hash,
+            magnetUrl?.extractBtihInfoHash(),
+        ).firstNotNullOfOrNull { candidate ->
+            candidate.normalizeBtihInfoHash()
+        }
 
         return ParsedStream(
             addonName = addonName,
             quality = quality,
             title = mainTitle,
-            infoHash = stream.infoHash,
+            infoHash = resolvedInfoHash,
             fileIdx = stream.fileIdx,
-            directUrl = stream.url,
+            magnetUrl = magnetUrl,
+            directUrl = directUrl,
             size = size,
             codec = codec,
             seeds = seeds,
-            source = source,
+            source = displaySource,
+            isCached = cachedByAddon,
             hdr = hdr,
             audioCodec = audioCodec,
             languages = languages,
             addonBaseUrl = addonBaseUrl,
         )
+    }
+
+    private fun isPandaAddon(fallbackAddonName: String, addonBaseUrl: String?): Boolean {
+        return fallbackAddonName.contains("Panda", ignoreCase = true) ||
+            addonBaseUrl?.contains("panda.torve.app", ignoreCase = true) == true
+    }
+
+    private fun distinctSourceSegments(vararg segments: String?): String? {
+        val values = segments
+            .mapNotNull { it?.trim()?.takeIf(String::isNotBlank) }
+            .distinctBy { it.lowercase() }
+            .filterNot { it.equals("Panda", ignoreCase = true) }
+        return values.joinToString(" · ").takeIf { it.isNotBlank() }
     }
 
     /**
@@ -125,5 +172,21 @@ object StreamParser {
             Regex("\\bAAC\\b").containsMatchIn(t) -> "AAC"
             else -> null
         }
+    }
+
+    private fun hasDebridCachedMarker(text: String): Boolean {
+        val t = text.uppercase()
+        return listOf(
+            "RD+",
+            "AD+",
+            "PM+",
+            "TB+",
+            "REALDEBRID+",
+            "REAL-DEBRID+",
+            "ALLDEBRID+",
+            "ALL-DEBRID+",
+            "PREMIUMIZE+",
+            "TORBOX+",
+        ).any { marker -> t.contains(marker) }
     }
 }

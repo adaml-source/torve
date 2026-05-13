@@ -47,6 +47,8 @@ import com.torve.desktop.ui.components.TorveSectionCard
 import com.torve.desktop.ui.detail.DesktopTrustBadge
 import com.torve.desktop.ui.detail.sourceTrustBadges
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
+import com.torve.data.addon.containsKnownTorrentProviderMarker
+import com.torve.data.addon.containsUsenetMarker
 
 enum class DesktopDockVisualState {
     HIDDEN,
@@ -664,8 +666,6 @@ enum class SourceProviderType(val label: String) {
 
 private fun classifyCandidate(candidate: DesktopPlaybackSourceCandidate): SourceProviderType {
     val url = candidate.directUrl.orEmpty()
-    val titleLower = candidate.title.lowercase()
-    val sourceLower = candidate.source?.lowercase().orEmpty()
 
     // NZB / Usenet detection: explicit `/nzb/` segment in Panda's
     // per-user URL, `.nzb` extension, or NZB markers in the rendered
@@ -674,21 +674,28 @@ private fun classifyCandidate(candidate: DesktopPlaybackSourceCandidate): Source
     val looksLikeNzb = url.contains("/nzb/", ignoreCase = true) ||
         url.endsWith(".nzb", ignoreCase = true) ||
         url.contains("/easynews/", ignoreCase = true) ||
-        url.contains("/torbox/", ignoreCase = true) ||
-        sourceLower.contains("nzb") ||
-        sourceLower.contains("usenet") ||
-        sourceLower.contains("easynews") ||
-        sourceLower.contains("torbox") ||
-        titleLower.contains("[nzb]") ||
-        titleLower.contains("scenenzb") ||
-        titleLower.contains("usenet")
+        candidate.source.containsUsenetMarker() ||
+        candidate.title.containsUsenetMarker()
     if (looksLikeNzb) return SourceProviderType.USENET
 
-    // Torrent / debrid: an infoHash means the underlying source is a
-    // torrent. The cached flag splits "ready to play via debrid" from
-    // "uncached, would need to be added to debrid first".
-    if (candidate.infoHash != null) {
-        return if (candidate.isCached) SourceProviderType.DEBRID_CACHED else SourceProviderType.TORRENT
+    // Torrent / debrid: infoHash/magnet-style rows and configured debrid
+    // add-ons such as Torrentio+RD may render as direct URLs after the
+    // provider pre-resolves them. Keep those in the torrent/debrid axis
+    // instead of calling them generic direct streams.
+    val looksLikeTorrentOrDebrid = candidate.infoHash != null ||
+        candidate.addonName.containsKnownTorrentProviderMarker() ||
+        candidate.source.containsKnownTorrentProviderMarker() ||
+        candidate.title.containsKnownTorrentProviderMarker() ||
+        (
+            candidate.addonBaseUrl?.contains("panda.torve.app", ignoreCase = true) == true &&
+                candidate.directUrl != null
+            )
+    if (looksLikeTorrentOrDebrid) {
+        return if (candidate.isCached || candidate.directUrl != null) {
+            SourceProviderType.DEBRID_CACHED
+        } else {
+            SourceProviderType.TORRENT
+        }
     }
 
     // Everything else with a directUrl is a direct stream (hoster URL,

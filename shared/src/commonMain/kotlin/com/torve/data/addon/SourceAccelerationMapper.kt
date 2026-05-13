@@ -92,7 +92,7 @@ object SourceAccelerationMapper {
 
     fun backendCandidateToParsedStream(model: StartupAccelerationCandidateDto): ParsedStream? {
         val sourceKey = model.sourceKey?.trim().takeIf { !it.isNullOrBlank() }
-        val infoHash = model.infoHash?.trim()?.takeIf { it.isNotBlank() }
+        val infoHash = model.infoHash?.normalizeBtihInfoHash()
         val directUrl = model.directUrl?.trim()?.takeIf { it.isNotBlank() }
         if (sourceKey == null && infoHash == null && directUrl == null) return null
 

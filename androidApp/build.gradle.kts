@@ -1,5 +1,6 @@
 import java.util.Properties
 import java.io.FileInputStream
+import org.gradle.api.tasks.bundling.Zip
 
 plugins {
     alias(libs.plugins.android.application)
@@ -36,21 +37,24 @@ android {
         }
     }
 
-    val baseVersionCode = 71
+    val baseVersionCode = 74
 
     defaultConfig {
         applicationId = "com.torve.app"
         minSdk = 24
         targetSdk = 36
         versionCode = baseVersionCode
-        versionName = "1.0.61"
+        versionName = "1.0.64"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         multiDexEnabled = true
         multiDexKeepProguard = file("multidex-config.pro")
-        manifestPlaceholders["torveAllowBackup"] = "true"
+        manifestPlaceholders["torveAllowBackup"] = "false"
 
         // Default: both ARM ABIs.  Pass -PabiOverride=arm64-v8a for fast dev builds.
         ndk {
+            // Include native debug symbol metadata for release bundles so
+            // Play Console can symbolicate native crashes/ANRs.
+            debugSymbolLevel = "FULL"
             val override = providers.gradleProperty("abiOverride").orNull
             if (override != null) {
                 abiFilters += override
@@ -131,6 +135,41 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+}
+
+fun registerGooglePlayNativeSymbolsTask(variantName: String, mergeTaskName: String) {
+    val capitalizedVariant = variantName.replaceFirstChar { it.uppercaseChar() }
+    tasks.register<Zip>("package${capitalizedVariant}NativeSymbols") {
+        group = "distribution"
+        description = "Packages native debug symbols for manual Google Play upload for $variantName."
+        dependsOn(mergeTaskName)
+        val mergedLibs = layout.buildDirectory.dir(
+            "intermediates/merged_native_libs/$variantName/$mergeTaskName/out/lib",
+        )
+        from(mergedLibs) {
+            include("arm64-v8a/**", "armeabi-v7a/**")
+        }
+        destinationDirectory.set(layout.buildDirectory.dir("outputs/native-debug-symbols/$variantName"))
+        archiveFileName.set("native-debug-symbols.zip")
+    }
+}
+
+registerGooglePlayNativeSymbolsTask(
+    variantName = "googleMobileRelease",
+    mergeTaskName = "mergeGoogleMobileReleaseNativeLibs",
+)
+registerGooglePlayNativeSymbolsTask(
+    variantName = "googleTvRelease",
+    mergeTaskName = "mergeGoogleTvReleaseNativeLibs",
+)
+
+tasks.register("packageGooglePlayNativeSymbols") {
+    group = "distribution"
+    description = "Packages native debug symbol zips for Google Play mobile and TV release bundles."
+    dependsOn(
+        "packageGoogleMobileReleaseNativeSymbols",
+        "packageGoogleTvReleaseNativeSymbols",
+    )
 }
 
 kotlin {

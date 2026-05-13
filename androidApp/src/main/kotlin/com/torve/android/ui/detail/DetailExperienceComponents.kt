@@ -396,9 +396,9 @@ private fun hasRatingValue(
     return ratings.hasValueFor(source)
 }
 
-private fun ParsedStream.isDirectCandidate(): Boolean = directUrl != null && infoHash == null
+private fun ParsedStream.isDirectCandidate(): Boolean = directUrl != null
 
 private fun ParsedStream.isReadyNow(): Boolean = isCached || isDirectCandidate()
 
 internal fun ParsedStream.streamUiKey(): String =
-    accelerationSourceKey ?: infoHash ?: directUrl ?: "$addonName|$title|$quality|${source.orEmpty()}"
+    accelerationSourceKey ?: directUrl ?: magnetUrl ?: infoHash ?: "$addonName|$title|$quality|${source.orEmpty()}"

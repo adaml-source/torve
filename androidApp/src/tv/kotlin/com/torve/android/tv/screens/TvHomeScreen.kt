@@ -113,6 +113,7 @@ internal fun TvHomeScreen(
     val outcomeState by outcomeViewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
     val coroutineScope = rememberCoroutineScope()
+    val onNowFocusRequester = remember { FocusRequester() }
 
     val focusMemory = rememberTvFocusMemory()
     val emptyMessage = state.error ?: stringResource(R.string.tv_no_data)
@@ -194,14 +195,22 @@ internal fun TvHomeScreen(
     val composedHeroOverlay: (@Composable () -> Unit)? = remember(
         outcomeState.providerBanner,
         outcomeState.onNow,
+        sectionConfigs,
         heroOverlay,
         onLiveChannelClick,
         onNowTitle,
+        onNowFocusRequester,
+        railFocusRequester,
+        onContentFocused,
     ) {
         val banner = outcomeState.providerBanner
         val onNow = outcomeState.onNow
-        val showOnNow = onNow.isNotEmpty() && onLiveChannelClick != null
-        if (banner == null && !showOnNow && heroOverlay == null) {
+        val showOnNow = sectionConfigs
+            .firstOrNull { it.section == HomeSection.ON_NOW }
+            ?.enabled
+            ?: HomeSection.ON_NOW.defaultEnabled
+        val showOnNowRail = showOnNow && onNow.isNotEmpty() && onLiveChannelClick != null
+        if (banner == null && !showOnNowRail && heroOverlay == null) {
             null
         } else {
             @Composable {
@@ -212,11 +221,14 @@ internal fun TvHomeScreen(
                     )
                 }
                 heroOverlay?.invoke()
-                if (showOnNow) {
+                if (showOnNowRail) {
                     TvOnNowRail(
                         title = onNowTitle,
                         channels = onNow,
                         onChannelClick = { ch -> onLiveChannelClick?.invoke(ch) },
+                        firstTileFocusRequester = onNowFocusRequester,
+                        railFocusRequester = railFocusRequester,
+                        onContentFocused = onContentFocused,
                     )
                 }
             }
@@ -237,6 +249,14 @@ internal fun TvHomeScreen(
         onMediaFocused = onMediaFocused,
         onSeeAll = onSeeAll,
         heroOverlay = composedHeroOverlay,
+        heroOverlayFocusRequester = onNowFocusRequester.takeIf {
+            outcomeState.onNow.isNotEmpty() &&
+                onLiveChannelClick != null &&
+                (
+                    sectionConfigs.firstOrNull { config -> config.section == HomeSection.ON_NOW }?.enabled
+                        ?: HomeSection.ON_NOW.defaultEnabled
+                    )
+        },
         shouldAutoFocus = shouldAutoFocus,
         browseLayout = browseLayout,
         contextMenuActionsForItem = contextMenuActionsForItem,
@@ -362,6 +382,7 @@ private fun buildBuiltInRails(
     return when (config.section) {
         HomeSection.SEARCH_BAR,
         HomeSection.HERO,
+        HomeSection.ON_NOW,
         HomeSection.STREAMING_SERVICES,
         HomeSection.ACTORS,
         HomeSection.DIRECTORS,

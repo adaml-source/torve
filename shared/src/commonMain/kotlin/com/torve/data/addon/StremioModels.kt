@@ -17,9 +17,12 @@ data class StremioStream(
     val name: String? = null,
     val title: String? = null,
     val infoHash: String? = null,
+    @SerialName("info_hash") val infoHashSnake: String? = null,
+    val hash: String? = null,
     val fileIdx: Int? = null,
     val url: String? = null,
     val externalUrl: String? = null,
+    val magnet: String? = null,
     val ytId: String? = null,
     val behaviorHints: StemioBehaviorHints? = null,
 )
@@ -38,6 +41,7 @@ data class ParsedStream(
     val title: String,
     val infoHash: String? = null,
     val fileIdx: Int? = null,
+    val magnetUrl: String? = null,
     val directUrl: String? = null,
     val size: String? = null,
     val codec: String? = null,
@@ -79,6 +83,78 @@ data class ParsedStream(
     val usenetCandidate: com.torve.data.usenet.model.UsenetCandidatePayload? = null,
 )
 
+enum class ResolvableStreamKind {
+    DIRECT_URL,
+    MAGNET,
+    INFO_HASH_ONLY,
+    INVALID,
+}
+
+fun ParsedStream.resolvableKind(): ResolvableStreamKind = when {
+    directUrl != null -> ResolvableStreamKind.DIRECT_URL
+    magnetUrl != null -> ResolvableStreamKind.MAGNET
+    infoHash != null -> ResolvableStreamKind.INFO_HASH_ONLY
+    else -> ResolvableStreamKind.INVALID
+}
+
+fun ParsedStream.isPandaStream(): Boolean =
+    addonName.equals("Panda", ignoreCase = true) ||
+        addonBaseUrl?.contains("panda.torve.app", ignoreCase = true) == true
+
+fun ParsedStream.isUsenetStream(): Boolean =
+    accelerationProvenanceKind == CandidateProvenanceKind.USENET_NZBDAV ||
+        accelerationProviderType?.contains("usenet", ignoreCase = true) == true ||
+        source.containsUsenetMarker() ||
+        title.containsUsenetMarker() ||
+        directUrl?.contains("/nzb/", ignoreCase = true) == true ||
+        directUrl?.contains("/easynews/", ignoreCase = true) == true ||
+        directUrl?.endsWith(".nzb", ignoreCase = true) == true
+
+fun ParsedStream.isTorrentOrDebridStream(): Boolean =
+    !isUsenetStream() && (
+        infoHash != null ||
+            magnetUrl != null ||
+            addonName.containsKnownTorrentProviderMarker() ||
+            source.containsKnownTorrentProviderMarker() ||
+            title.containsKnownTorrentProviderMarker() ||
+            (isPandaStream() && directUrl != null)
+        )
+
+fun String?.containsUsenetMarker(): Boolean {
+    val value = this ?: return false
+    return listOf(
+        "usenet",
+        "easynews",
+        "nzb",
+        "newznab",
+        "scenenzb",
+    ).any { marker -> value.contains(marker, ignoreCase = true) }
+}
+
+fun String?.containsKnownTorrentProviderMarker(): Boolean {
+    val value = this ?: return false
+    return listOf(
+        "yts",
+        "eztv",
+        "1337",
+        "pirate",
+        "torrent",
+        "nyaa",
+        "kickass",
+        "rutor",
+        "rutracker",
+        "rarbg",
+        "magnet",
+        "rd+",
+        "rd download",
+        "real-debrid",
+        "realdebrid",
+        "alldebrid",
+        "premiumize",
+        "torbox",
+    ).any { marker -> value.contains(marker, ignoreCase = true) }
+}
+
 /**
  * True when this stream's [directUrl] is served by the addon that produced it
  * — not a hoster URL that needs debrid unrestriction. Compared by host (not
@@ -89,6 +165,33 @@ fun ParsedStream.isAddonHostedUrl(): Boolean {
     val addonHost = addonBaseUrl?.let { extractHost(it) } ?: return false
     val streamHost = directUrl?.let { extractHost(it) } ?: return false
     return addonHost.equals(streamHost, ignoreCase = true)
+}
+
+internal fun String.isMagnetUri(): Boolean =
+    trimStart().startsWith("magnet:", ignoreCase = true)
+
+internal fun String.extractBtihInfoHash(): String? {
+    if (!isMagnetUri()) return null
+    val xtValue = split('&')
+        .firstOrNull { part -> part.substringBefore('=').equals("magnet:?xt", ignoreCase = true) || part.substringBefore('=').equals("xt", ignoreCase = true) }
+        ?.substringAfter('=', missingDelimiterValue = "")
+        ?.substringAfterLast(':')
+        ?.substringBefore('&')
+        ?.trim()
+    return xtValue
+        ?.replace("%3A", ":", ignoreCase = true)
+        ?.normalizeBtihInfoHash()
+}
+
+internal fun String.normalizeBtihInfoHash(): String? {
+    val normalized = trim()
+        .removePrefix("urn:btih:")
+        .removePrefix("btih:")
+        .substringBefore('&')
+        .substringBefore('?')
+        .trim()
+        .lowercase()
+    return normalized.takeIf { it.matches(Regex("^[a-f0-9]{40}$")) }
 }
 
 // Multiplatform URL.host isn't available in commonMain; pull the host out by

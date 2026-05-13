@@ -256,6 +256,7 @@ data class TmdbImageItem(
 @Serializable
 data class TmdbImages(
     val logos: List<TmdbImageItem> = emptyList(),
+    val profiles: List<TmdbImageItem> = emptyList(),
 )
 
 @Serializable

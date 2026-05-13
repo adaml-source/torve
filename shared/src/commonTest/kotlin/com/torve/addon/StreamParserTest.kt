@@ -3,6 +3,8 @@ package com.torve.addon
 import com.torve.data.addon.StemioBehaviorHints
 import com.torve.data.addon.StremioStream
 import com.torve.data.addon.StreamParser
+import com.torve.data.addon.isTorrentOrDebridStream
+import com.torve.data.addon.isUsenetStream
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -14,14 +16,14 @@ class StreamParserTest {
         val stream = StremioStream(
             name = "Torrentio\n4K",
             title = "Movie.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.x265\n💾 15.2 GB\n👤 150\n⚙️ YTS",
-            infoHash = "abc123def456",
+            infoHash = "abcdef1234567890abcdef1234567890abcdef12",
             fileIdx = 0,
         )
         val parsed = StreamParser.parse(stream)
         assertEquals("Torrentio", parsed.addonName)
         assertEquals("4K", parsed.quality)
         assertEquals("Movie.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.x265", parsed.title)
-        assertEquals("abc123def456", parsed.infoHash)
+        assertEquals("abcdef1234567890abcdef1234567890abcdef12", parsed.infoHash)
         assertEquals(0, parsed.fileIdx)
         assertEquals("15.2 GB", parsed.size)
         assertEquals(150, parsed.seeds)
@@ -50,6 +52,55 @@ class StreamParserTest {
         )
         val parsed = StreamParser.parse(stream, "MyAddon")
         assertEquals("MyAddon", parsed.addonName)
+    }
+
+    @Test
+    fun parse_pandaStreamKeepsPandaAsAddonName() {
+        val stream = StremioStream(
+            name = "1337x\n1080p",
+            title = "Movie.2024.1080p.WEB-DL\n1337x",
+            url = "https://panda.torve.app/u/token/stream/movie.mp4",
+        )
+
+        val parsed = StreamParser.parse(
+            stream = stream,
+            fallbackAddonName = "Panda",
+            addonBaseUrl = "https://panda.torve.app",
+        )
+
+        assertEquals("Panda", parsed.addonName)
+        assertEquals("1337x", parsed.source)
+    }
+
+    @Test
+    fun sourceClassification_keepsDirectRealDebridStreamsInTorrentFilter() {
+        val parsed = StreamParser.parse(
+            StremioStream(
+                name = "[RD+] Torrentio\n1080p",
+                title = "Movie.2024.1080p.WEB-DL",
+                url = "https://real-debrid.example/download/movie.mkv",
+            ),
+            fallbackAddonName = "Torrentio",
+        )
+
+        assertEquals(true, parsed.isTorrentOrDebridStream())
+        assertEquals(false, parsed.isUsenetStream())
+    }
+
+    @Test
+    fun sourceClassification_keepsPandaNzbStreamsInUsenetFilter() {
+        val parsed = StreamParser.parse(
+            StremioStream(
+                name = "SceneNZBs\n1080p",
+                title = "Movie.2024.1080p.WEB-DL\nSceneNZBs",
+                url = "https://panda.torve.app/u/token/nzb/movie",
+            ),
+            fallbackAddonName = "Panda",
+            addonBaseUrl = "https://panda.torve.app",
+        )
+
+        assertEquals(false, parsed.isTorrentOrDebridStream())
+        assertEquals(true, parsed.isUsenetStream())
     }
 
     @Test

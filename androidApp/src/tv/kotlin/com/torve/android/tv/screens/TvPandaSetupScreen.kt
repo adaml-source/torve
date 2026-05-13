@@ -31,6 +31,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -66,11 +67,35 @@ fun TvPandaSetupScreen(
 
     val stepIndex = PandaSetupStep.entries.indexOf(state.currentStep)
     val totalSteps = PandaSetupStep.entries.size
-    val contentFocusRequester = remember { FocusRequester() }
+    val stepEntryFocusRequester = remember { FocusRequester() }
+    val closeButtonFocusRequester = remember { FocusRequester() }
+    val backButtonFocusRequester = remember { FocusRequester() }
     val nextButtonFocusRequester = remember { FocusRequester() }
+    val canAdvance = when (state.currentStep) {
+        PandaSetupStep.PROVIDER -> state.selectedProvider != null
+        PandaSetupStep.AUTH -> state.authConnected
+        PandaSetupStep.SOURCES,
+        PandaSetupStep.USENET,
+        PandaSetupStep.QUALITY -> true
+        PandaSetupStep.REVIEW -> false
+    }
 
-    LaunchedEffect(state.currentStep) {
-        runCatching { contentFocusRequester.requestFocus() }
+    LaunchedEffect(state.currentStep, canAdvance) {
+        // Focus must land on an actual focus target. The old implementation
+        // requested focus on the content container, which is not itself a TV
+        // control and could leave the setup flow without a usable focus owner.
+        repeat(6) { attempt ->
+            withFrameNanos { }
+            if (runCatching { stepEntryFocusRequester.requestFocus() }.isSuccess) {
+                return@LaunchedEffect
+            }
+            if (canAdvance && runCatching { nextButtonFocusRequester.requestFocus() }.isSuccess) {
+                return@LaunchedEffect
+            }
+            if (attempt >= 2 && runCatching { closeButtonFocusRequester.requestFocus() }.isSuccess) {
+                return@LaunchedEffect
+            }
+        }
     }
 
     Box(
@@ -104,7 +129,10 @@ fun TvPandaSetupScreen(
                 // back button only walks one step at a time and the
                 // user previously had no obvious way to bail without
                 // pressing the system back button repeatedly.
-                OutlinedButton(onClick = onBack) {
+                OutlinedButton(
+                    onClick = onBack,
+                    modifier = Modifier.focusRequester(closeButtonFocusRequester),
+                ) {
                     Icon(Icons.Filled.Close, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text(stringResource(R.string.tv_panda_close_setup))
@@ -130,13 +158,20 @@ fun TvPandaSetupScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f)
-                    .focusRequester(contentFocusRequester),
+                    .weight(1f),
             ) {
                 when (state.currentStep) {
-                    PandaSetupStep.PROVIDER -> PandaProviderStep(state, viewModel)
+                    PandaSetupStep.PROVIDER -> PandaProviderStep(
+                        state = state,
+                        viewModel = viewModel,
+                        entryFocusRequester = stepEntryFocusRequester,
+                    )
                     PandaSetupStep.AUTH -> PandaAuthStep(state, viewModel)
-                    PandaSetupStep.SOURCES -> PandaSourcesStep(state, viewModel)
+                    PandaSetupStep.SOURCES -> PandaSourcesStep(
+                        state = state,
+                        viewModel = viewModel,
+                        entryFocusRequester = stepEntryFocusRequester,
+                    )
                     PandaSetupStep.USENET -> PandaUsenetStep(state, viewModel)
                     PandaSetupStep.QUALITY -> PandaQualityStep(state, viewModel)
                     PandaSetupStep.REVIEW -> PandaReviewStep(state, viewModel, onComplete)
@@ -155,20 +190,13 @@ fun TvPandaSetupScreen(
                         if (state.currentStep == PandaSetupStep.PROVIDER) onBack()
                         else viewModel.previousStep()
                     },
+                    modifier = Modifier.focusRequester(backButtonFocusRequester),
                 ) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, null, Modifier.size(20.dp))
                     Spacer(Modifier.width(8.dp))
                     Text(stringResource(R.string.common_back))
                 }
 
-                val canAdvance = when (state.currentStep) {
-                    PandaSetupStep.PROVIDER -> state.selectedProvider != null
-                    PandaSetupStep.AUTH -> state.authConnected
-                    PandaSetupStep.SOURCES,
-                    PandaSetupStep.USENET,
-                    PandaSetupStep.QUALITY -> true
-                    PandaSetupStep.REVIEW -> false
-                }
                 if (canAdvance) {
                     Button(
                         onClick = { viewModel.nextStep() },

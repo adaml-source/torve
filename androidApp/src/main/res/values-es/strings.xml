@@ -1902,7 +1902,7 @@
     <string name="stream_group_ranked_for_device">Ordenado para este dispositivo</string>
     <string name="stream_group_more_options">Más opciones</string>
     <string name="stream_group_more_options_subtitle">Alternativas y respaldos extra</string>
-    <string name="stream_filter_torrent">Torrent</string>
+    <string name="stream_filter_torrent">Torrent/RD</string>
     <string name="stream_filter_usenet_nzb">Usenet / NZB</string>
     <string name="stream_seed_count">%1$d semillas</string>
     <string name="detail_cached_count">%1$d en caché</string>

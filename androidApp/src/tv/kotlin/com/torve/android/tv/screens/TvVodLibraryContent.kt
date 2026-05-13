@@ -65,6 +65,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
+import com.torve.android.catalog.VodBootstrapShelf
+import com.torve.android.catalog.VodBootstrapShelfEntry
 import com.torve.android.tv.TvScreenCache
 import com.torve.android.tv.focus.TvScreenFocusHandle
 import com.torve.android.ui.theme.Amber
@@ -75,29 +77,20 @@ import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Steel
-import com.torve.data.mdblist.MdbListApi
-import com.torve.data.mdblist.RatingsEnricher
-import com.torve.domain.integrations.IntegrationSecretKey
-import com.torve.domain.integrations.IntegrationSecretStore
+import com.torve.data.auth.AuthClient
 import com.torve.domain.model.Channel
 import com.torve.domain.model.ChannelContentType
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.MediaType
-import com.torve.domain.model.PlaylistType
 import com.torve.domain.model.stableChannelId
 import com.torve.domain.model.withFallbackTmdbScore
 import com.torve.domain.repository.ChannelRepository
-import com.torve.domain.repository.MetadataRepository
+import com.torve.domain.repository.DeviceLocalSettingsRepository
 import com.torve.domain.repository.PreferencesRepository
-import com.torve.presentation.settings.SettingsViewModel
+import com.torve.domain.repository.VodCategoryTypeCount
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -106,15 +99,12 @@ import kotlinx.serialization.json.Json
 import org.koin.compose.koinInject
 
 private const val VOD_CACHE_KEY = "library_vod_tivimate_v6"
-private const val VOD_SERIES_REPAIR_CACHE_PREFIX = "library_vod_series_repair_v7_"
-private const val VOD_DISPLAY_CACHE_PREFIX = "library_vod_display_cache_v1_"
+private const val VOD_BOOTSTRAP_CATEGORIES_PREFIX = "vod_bootstrap_categories_v1_"
+private const val VOD_BOOTSTRAP_DISPLAY_PREFIX = "vod_bootstrap_display_v1_"
+private const val CHANNELS_BOOTSTRAP_SELECTED_PLAYLIST_PREFIX = "channels_bootstrap_selected_playlist_"
 private const val KEY_CHANNELS_SELECTED_PLAYLIST = "channels_selected_playlist"
-private const val MAX_CATEGORY_ITEMS = 220
-private const val MAX_ALL_ITEMS = 180
 private const val MAX_SEARCH_ITEMS = 160
-private const val VOD_METADATA_PRELOAD_LIMIT = MAX_CATEGORY_ITEMS
-private const val VOD_METADATA_PRELOAD_BATCH_SIZE = 24
-private const val METADATA_MATCH_CONCURRENCY = 4
+private const val MAX_VOD_SHELF_ITEMS = 180
 
 private val VodCategoryColumnWidth = 252.dp
 private val VodContentGap = 26.dp
@@ -134,6 +124,7 @@ private data class TvVodLibraryUiState(
     val error: String? = null,
 )
 
+@Serializable
 private data class TvVodCategory(
     val id: String,
     val label: String,
@@ -165,17 +156,6 @@ private data class TvVodEntry(
     val mediaType: MediaType get() = item.type
 }
 
-@Serializable
-private data class CachedVodDisplayShelf(
-    val entries: List<CachedVodDisplayItem> = emptyList(),
-)
-
-@Serializable
-private data class CachedVodDisplayItem(
-    val sourceId: String,
-    val item: MediaItem,
-)
-
 private enum class VodFocusZone { CATEGORIES, POSTERS }
 
 private enum class VodMediaSection(val label: String, val mediaType: MediaType) {
@@ -204,10 +184,8 @@ internal fun TvVodLibraryContent(
     registerFocusHandle: ((TvScreenFocusHandle?) -> Unit)?,
 ) {
     val channelRepo: ChannelRepository = koinInject()
-    val metadataRepo: MetadataRepository = koinInject()
-    val ratingsEnricher: RatingsEnricher = koinInject()
     val prefsRepo: PreferencesRepository = koinInject()
-    val secretStore: IntegrationSecretStore = koinInject()
+    val localSettingsRepo: DeviceLocalSettingsRepository = koinInject()
     val firstCategoryRequester = remember { FocusRequester() }
     val selectedCategoryRequester = remember { FocusRequester() }
     val firstPosterRequester = remember { FocusRequester() }
@@ -251,33 +229,44 @@ internal fun TvVodLibraryContent(
     }
 
     LaunchedEffect(Unit) {
-        val playlistId = withContext(Dispatchers.IO) { resolveSelectedVodPlaylistId(channelRepo, prefsRepo) }
-        val repairedSeriesCatalog = playlistId?.let { id ->
-            withContext(Dispatchers.IO) { repairXtreamVodSeriesCatalogIfNeeded(channelRepo, prefsRepo, id) }
-        } ?: false
+        val bootstrapUserId = withContext(Dispatchers.IO) { currentBootstrapUserId(localSettingsRepo) }
+        val playlistId = withContext(Dispatchers.IO) {
+            resolveSelectedVodPlaylistId(channelRepo, prefsRepo, localSettingsRepo, bootstrapUserId)
+        }
+        if (playlistId != null && bootstrapUserId != null) {
+            withContext(Dispatchers.IO) {
+                localSettingsRepo.setString(channelsBootstrapSelectedPlaylistKey(bootstrapUserId), playlistId)
+            }
+        }
         val cached = TvScreenCache.get<TvVodLibraryUiState>(VOD_CACHE_KEY)
-        if (!repairedSeriesCatalog && cached != null && cached.playlistId == playlistId && cached.categories.isNotEmpty()) {
+        if (cached != null && cached.playlistId == playlistId && cached.categories.isNotEmpty()) {
             uiState = cached.copy(loading = false)
             return@LaunchedEffect
         }
-        uiState = TvVodLibraryUiState(playlistId = playlistId, loading = true)
-        uiState = try {
-            if (playlistId == null) {
-                TvVodLibraryUiState(loading = false, error = "No IPTV playlist with VOD found")
-            } else {
-                val categories = withContext(Dispatchers.IO) { loadVodCategories(channelRepo, playlistId) }
-                TvVodLibraryUiState(
-                    playlistId = playlistId,
-                    loading = false,
-                    categories = categories,
-                    error = if (categories.isEmpty()) "No VOD movies or shows found" else null,
-                ).also { TvScreenCache.put(VOD_CACHE_KEY, it) }
-            }
-        } catch (t: Throwable) {
+        val bootstrappedCategories = if (playlistId != null && bootstrapUserId != null) {
+            withContext(Dispatchers.IO) { readVodCategoryBootstrap(localSettingsRepo, bootstrapUserId, playlistId) }
+        } else {
+            emptyList()
+        }
+        val categories = if (playlistId != null) bootstrappedCategories else emptyList()
+        if (playlistId != null && categories.isNotEmpty()) {
+            val bootstrappedState = TvVodLibraryUiState(
+                playlistId = playlistId,
+                loading = false,
+                categories = categories,
+                error = null,
+            )
+            uiState = bootstrappedState
+            TvScreenCache.put(VOD_CACHE_KEY, bootstrappedState)
+            return@LaunchedEffect
+        }
+        uiState = if (playlistId == null) {
+            TvVodLibraryUiState(loading = false, error = "No IPTV playlist with VOD found")
+        } else {
             TvVodLibraryUiState(
                 playlistId = playlistId,
                 loading = false,
-                error = t.message ?: "Failed to load VOD library",
+                error = "No locally cached VOD items found yet.",
             )
         }
     }
@@ -321,21 +310,10 @@ internal fun TvVodLibraryContent(
         if (loadedEntriesByCategoryId.containsKey(cacheKey) || cacheKey in loadingCategoryKeys) return
         loadingCategoryKeys = loadingCategoryKeys + cacheKey
         try {
-            val entries = withContext(Dispatchers.IO) {
-                loadEntriesForVodCategory(
-                    channelRepo = channelRepo,
-                    playlistId = playlistId,
-                    category = category,
-                    mediaSection = mediaSection,
-                )
+            val displayEntries = withContext(Dispatchers.IO) {
+                readVodBootstrapShelf(localSettingsRepo, playlistId, cacheKey).orEmpty()
             }
-            val cachedShelf = withContext(Dispatchers.IO) {
-                readVodDisplayShelfCache(prefsRepo, playlistId, cacheKey)
-            }
-            val displayEntries = entries.mergeCachedDisplayItems(cachedShelf?.entries.orEmpty())
-            if (cachedShelf != null) {
-                enrichedVodSourceIds = enrichedVodSourceIds + cachedShelf.entries.map { it.sourceId }
-            }
+            enrichedVodSourceIds = enrichedVodSourceIds + displayEntries.map { it.sourceId }
             if (!loadedEntriesByCategoryId.containsKey(cacheKey)) {
                 loadedEntriesByCategoryId = loadedEntriesByCategoryId + (cacheKey to displayEntries)
             }
@@ -373,18 +351,13 @@ internal fun TvVodLibraryContent(
         val playlistId = uiState.playlistId ?: return@LaunchedEffect
         val category = selectedCategory ?: return@LaunchedEffect
         loadVodCategoryIntoCache(playlistId, category, selectedMediaSection)
-    }
-
-    LaunchedEffect(uiState.playlistId, selectedMediaSection, displayedCategories) {
-        val playlistId = uiState.playlistId ?: return@LaunchedEffect
-        if (displayedCategories.isEmpty()) return@LaunchedEffect
-        kotlinx.coroutines.delay(120)
-        displayedCategories
-            .filter { it.count > 0 }
-            .forEach { category ->
-                loadVodCategoryIntoCache(playlistId, category, selectedMediaSection)
-                kotlinx.coroutines.yield()
-            }
+        val nextCategories = listOfNotNull(
+            displayedCategories.getOrNull(selectedCategoryIndex + 1),
+            displayedCategories.getOrNull(selectedCategoryIndex - 1),
+        )
+        nextCategories.forEach { neighbor ->
+            loadVodCategoryIntoCache(playlistId, neighbor, selectedMediaSection)
+        }
     }
 
     LaunchedEffect(trimmedSearchQuery, selectedMediaSection, uiState.playlistId) {
@@ -411,47 +384,6 @@ internal fun TvVodLibraryContent(
             searchEntries = emptyList()
         } finally {
             searchLoading = false
-        }
-    }
-
-    LaunchedEffect(activeShelfKey, visibleEntryIds) {
-        val shelfKey = activeShelfKey ?: return@LaunchedEffect
-        val candidates = visibleEntries
-            .take(VOD_METADATA_PRELOAD_LIMIT)
-            .filter { entry -> entry.sourceId !in enrichedVodSourceIds && entry.needsDisplayMetadata() }
-        if (candidates.isEmpty()) return@LaunchedEffect
-        val apiKey = withContext(Dispatchers.IO) { resolveRatingsApiKey(secretStore, prefsRepo) }
-        candidates.chunked(VOD_METADATA_PRELOAD_BATCH_SIZE).forEach { batch ->
-            val enriched = withContext(Dispatchers.IO) {
-                matchAndEnrichVodEntries(
-                    entries = batch,
-                    metadataRepo = metadataRepo,
-                    ratingsEnricher = ratingsEnricher,
-                    apiKey = apiKey,
-                )
-            }
-            enrichedVodSourceIds = enrichedVodSourceIds + enriched.map { it.sourceId }
-            val enrichedBySourceId = enriched.associateBy { it.sourceId }
-            if (isSearchActive) {
-                searchEntries = searchEntries.mergeEnrichedEntries(enrichedBySourceId)
-            } else {
-                loadedEntriesByCategoryId[shelfKey]?.let { current ->
-                    val updated = current.mergeEnrichedEntries(enrichedBySourceId)
-                    loadedEntriesByCategoryId = loadedEntriesByCategoryId + (shelfKey to updated)
-                    uiState.playlistId?.let { playlistId ->
-                        withContext(Dispatchers.IO) {
-                            writeVodDisplayShelfCache(prefsRepo, playlistId, shelfKey, updated)
-                        }
-                    }
-                }
-            }
-            focusedEntry?.sourceId?.let { sourceId ->
-                enrichedBySourceId[sourceId]?.let { enrichedFocus ->
-                    focusedEntry = enrichedFocus
-                    onMediaFocused?.invoke(enrichedFocus.item)
-                }
-            }
-            kotlinx.coroutines.yield()
         }
     }
 
@@ -1801,116 +1733,103 @@ private fun TvVodPosterCard(
 private suspend fun resolveSelectedVodPlaylistId(
     channelRepo: ChannelRepository,
     prefsRepo: PreferencesRepository,
+    localSettingsRepo: DeviceLocalSettingsRepository,
+    bootstrapUserId: String?,
 ): String? {
     val playlists = channelRepo.getPlaylists()
     val savedId = prefsRepo.getString(KEY_CHANNELS_SELECTED_PLAYLIST)
+        ?: bootstrapUserId?.let { userId ->
+            localSettingsRepo.getString(channelsBootstrapSelectedPlaylistKey(userId))
+        }
     return savedId?.takeIf { id -> playlists.any { it.id == id } }
         ?: playlists.firstOrNull()?.id
 }
 
-private suspend fun repairXtreamVodSeriesCatalogIfNeeded(
-    channelRepo: ChannelRepository,
-    prefsRepo: PreferencesRepository,
-    playlistId: String,
-): Boolean {
-    val playlist = channelRepo.getPlaylists().firstOrNull { it.id == playlistId } ?: return false
-    if (playlist.type != PlaylistType.XTREAM) return false
-    val repairKey = "$VOD_SERIES_REPAIR_CACHE_PREFIX$playlistId"
-    if (TvScreenCache.get<Boolean>(repairKey) == true || prefsRepo.getString(repairKey) != null) {
-        return false
-    }
-
-    val seriesCount = channelRepo.getChannelsByContentType(playlistId, ChannelContentType.VOD_SERIES).size
-    val movieCount = channelRepo.getChannelsByContentType(playlistId, ChannelContentType.VOD_MOVIE).size
-    val hasEnoughSeries = seriesCount > 10 || (seriesCount > 0 && movieCount <= 100)
-    if (hasEnoughSeries) {
-        prefsRepo.setString(repairKey, "has_series")
-        TvScreenCache.put(repairKey, true)
-        return false
-    }
-
-    if (movieCount == 0) return false
-
-    println("TvVodSeriesRepair: refreshing playlistId=$playlistId movieCount=$movieCount seriesCount=$seriesCount")
-    val refreshed = runCatching {
-        channelRepo.refreshPlaylist(playlistId)
-        true
-    }.getOrDefault(false)
-    prefsRepo.setString(repairKey, if (refreshed) "refreshed" else "attempted")
-    TvScreenCache.put(repairKey, true)
-    return refreshed
+private suspend fun currentBootstrapUserId(
+    localSettingsRepo: DeviceLocalSettingsRepository,
+): String? {
+    return localSettingsRepo
+        .getString(AuthClient.KEY_AUTH_USER_ID)
+        ?.takeIf { it.isNotBlank() }
 }
 
-private suspend fun loadVodCategories(
-    channelRepo: ChannelRepository,
+private fun channelsBootstrapSelectedPlaylistKey(userId: String): String {
+    return "$CHANNELS_BOOTSTRAP_SELECTED_PLAYLIST_PREFIX$userId"
+}
+
+private fun vodCategoryBootstrapKey(userId: String, playlistId: String): String {
+    return "$VOD_BOOTSTRAP_CATEGORIES_PREFIX${userId.hashCode()}_${playlistId.hashCode()}"
+}
+
+private fun vodDisplayShelfBootstrapKey(userId: String, playlistId: String, shelfKey: String): String {
+    return "$VOD_BOOTSTRAP_DISPLAY_PREFIX${userId.hashCode()}_${playlistId.hashCode()}_${shelfKey.hashCode()}"
+}
+
+private suspend fun readVodCategoryBootstrap(
+    localSettingsRepo: DeviceLocalSettingsRepository,
+    userId: String,
     playlistId: String,
 ): List<TvVodCategory> {
-    val nativeMovieChannels = channelRepo
-        .getChannelsByContentType(playlistId, ChannelContentType.VOD_MOVIE)
-        .map { it.channel }
-    val nativeSeriesChannels = channelRepo
-        .getChannelsByContentType(playlistId, ChannelContentType.VOD_SERIES)
-        .map { it.channel }
-    val hasNativeVodTypes = nativeMovieChannels.isNotEmpty() || nativeSeriesChannels.isNotEmpty()
-    val fallbackVodChannels = if (hasNativeVodTypes) {
-        emptyList()
-    } else {
-        channelRepo.getChannels(playlistId).filter(::isVodChannel)
-    }
-    val movieChannels = if (hasNativeVodTypes) {
-        if (nativeSeriesChannels.isEmpty()) {
-            nativeMovieChannels.filter { inferVodMediaType(it) == MediaType.MOVIE }
-        } else {
-            nativeMovieChannels
-        }
-    } else {
-        fallbackVodChannels.filter { inferVodMediaType(it) == MediaType.MOVIE }
-    }
-    val seriesChannels = if (hasNativeVodTypes) {
-        if (nativeSeriesChannels.isEmpty()) {
-            nativeMovieChannels.filter { inferVodMediaType(it) == MediaType.SERIES }
-        } else {
-            nativeSeriesChannels
-        }
-    } else {
-        fallbackVodChannels.filter { inferVodMediaType(it) == MediaType.SERIES }
-    }
-    if (movieChannels.isEmpty() && seriesChannels.isEmpty()) return emptyList()
+    val raw = localSettingsRepo.getString(vodCategoryBootstrapKey(userId, playlistId)) ?: return emptyList()
+    return runCatching {
+        VodDisplayCacheJson.decodeFromString<List<TvVodCategory>>(raw)
+    }.getOrDefault(emptyList())
+}
 
-    val providerCategories = buildVodProviderCategories(
-        movieChannels = movieChannels,
-        seriesChannels = seriesChannels,
-    )
-    val movieTotal = movieChannels.size.toLong()
-    val showTotal = seriesChannels.size.toLong()
-    val favoriteCount = channelRepo.getFavorites()
-        .count { favorite -> favorite.playlistId == playlistId && isVodChannel(favorite) }
-        .toLong()
-    val favoriteMovieCount = channelRepo.getFavorites()
-        .count { favorite ->
-            favorite.playlistId == playlistId &&
-                isVodChannel(favorite) &&
-                inferVodMediaType(favorite) == MediaType.MOVIE
+private suspend fun writeVodCategoryBootstrap(
+    localSettingsRepo: DeviceLocalSettingsRepository,
+    userId: String,
+    playlistId: String,
+    categories: List<TvVodCategory>,
+) {
+    if (categories.isEmpty()) return
+    runCatching {
+        localSettingsRepo.setString(
+            vodCategoryBootstrapKey(userId, playlistId),
+            VodDisplayCacheJson.encodeToString(categories),
+        )
+    }
+}
+
+private fun TvVodCategory.cacheKey(section: VodMediaSection): String = "${section.name}:$id"
+
+private data class TvVodCounts(
+    val rawNames: Set<String> = emptySet(),
+    val movieCount: Long = 0,
+    val showCount: Long = 0,
+)
+
+private fun buildTvVodCategories(typeCounts: List<VodCategoryTypeCount>): List<TvVodCategory> {
+    val grouped = linkedMapOf<String, TvVodCounts>()
+    typeCounts.forEach { row ->
+        val rawName = row.groupTitle.ifBlank { "VOD" }
+        val label = cleanVodCategory(rawName)
+        val existing = grouped[label] ?: TvVodCounts()
+        grouped[label] = when (row.contentType) {
+            ChannelContentType.VOD_MOVIE -> existing.copy(
+                rawNames = existing.rawNames + rawName,
+                movieCount = existing.movieCount + row.count,
+            )
+            ChannelContentType.VOD_SERIES -> existing.copy(
+                rawNames = existing.rawNames + rawName,
+                showCount = existing.showCount + row.count,
+            )
+            else -> existing
         }
-        .toLong()
-    val favoriteShowCount = channelRepo.getFavorites()
-        .count { favorite ->
-            favorite.playlistId == playlistId &&
-                isVodChannel(favorite) &&
-                inferVodMediaType(favorite) == MediaType.SERIES
-        }
-        .toLong()
+    }
+    val movieTotal = grouped.values.sumOf { it.movieCount }
+    val showTotal = grouped.values.sumOf { it.showCount }
     return buildList {
         add(
             TvVodCategory(
                 id = "favorites",
                 label = "Favorites",
                 rawNames = emptyList(),
-                count = favoriteCount,
+                count = 0,
                 type = VodCategoryType.FAVORITES,
                 pinned = true,
-                movieCount = favoriteMovieCount,
-                showCount = favoriteShowCount,
+                movieCount = 0,
+                showCount = 0,
             ),
         )
         if (movieTotal > 0) {
@@ -1918,7 +1837,7 @@ private suspend fun loadVodCategories(
                 TvVodCategory(
                     id = "all_movies",
                     label = "All movies",
-                    rawNames = providerCategories.flatMap { it.rawNames },
+                    rawNames = grouped.values.flatMap { it.rawNames },
                     count = movieTotal,
                     type = VodCategoryType.ALL_MOVIES,
                     pinned = true,
@@ -1932,7 +1851,7 @@ private suspend fun loadVodCategories(
                 TvVodCategory(
                     id = "all_shows",
                     label = "All shows",
-                    rawNames = providerCategories.flatMap { it.rawNames },
+                    rawNames = grouped.values.flatMap { it.rawNames },
                     count = showTotal,
                     type = VodCategoryType.ALL_SHOWS,
                     pinned = true,
@@ -1941,94 +1860,93 @@ private suspend fun loadVodCategories(
                 ),
             )
         }
-        addAll(providerCategories)
+        addAll(
+            grouped.map { (label, counts) ->
+                TvVodCategory(
+                    id = "category:${label.hashCode()}",
+                    label = label,
+                    rawNames = counts.rawNames.toList(),
+                    count = counts.movieCount + counts.showCount,
+                    type = VodCategoryType.PROVIDER,
+                    movieCount = counts.movieCount,
+                    showCount = counts.showCount,
+                )
+            }.filter { it.count > 0 }
+                .sortedBy { it.label.lowercase() },
+        )
     }
 }
 
-private fun buildVodProviderCategories(
-    movieChannels: List<Channel>,
-    seriesChannels: List<Channel>,
-): List<TvVodCategory> {
-    data class Counts(
-        val rawNames: Set<String> = emptySet(),
-        val movieCount: Long = 0,
-        val showCount: Long = 0,
-    )
-
-    val grouped = linkedMapOf<String, Counts>()
-
-    fun add(channel: Channel, section: VodMediaSection) {
-        val rawName = channel.groupTitle ?: "VOD"
-        val normalized = normalizeVodCategory(rawName)
-        val existing = grouped[normalized.label] ?: Counts()
-        grouped[normalized.label] = when (section) {
-            VodMediaSection.MOVIES -> existing.copy(
-                rawNames = existing.rawNames + rawName,
-                movieCount = existing.movieCount + 1,
-            )
-            VodMediaSection.SHOWS -> existing.copy(
-                rawNames = existing.rawNames + rawName,
-                showCount = existing.showCount + 1,
-            )
+private suspend fun loadVodShelfFromDatabase(
+    channelRepo: ChannelRepository,
+    playlistId: String,
+    category: TvVodCategory,
+    section: VodMediaSection,
+): List<TvVodEntry> {
+    val type = section.channelContentType
+    val channels = when (category.type) {
+        VodCategoryType.FAVORITES -> channelRepo.getFavorites()
+            .asSequence()
+            .filter { it.playlistId == playlistId && it.contentType == type }
+            .take(MAX_VOD_SHELF_ITEMS)
+            .toList()
+        VodCategoryType.ALL_MOVIES,
+        VodCategoryType.ALL_SHOWS -> channelRepo.getChannelsForContentType(
+            playlistId = playlistId,
+            type = type,
+            limit = MAX_VOD_SHELF_ITEMS,
+        )
+        VodCategoryType.PROVIDER -> {
+            val loaded = mutableListOf<Channel>()
+            for (rawName in category.rawNames) {
+                val remaining = MAX_VOD_SHELF_ITEMS - loaded.size
+                if (remaining <= 0) break
+                loaded += channelRepo.getChannelsForCategoryContentType(
+                    playlistId = playlistId,
+                    categoryName = rawName,
+                    type = type,
+                    limit = remaining,
+                )
+            }
+            loaded
         }
     }
-
-    movieChannels.forEach { add(it, VodMediaSection.MOVIES) }
-    seriesChannels.forEach { add(it, VodMediaSection.SHOWS) }
-
-    return grouped.map { (label, counts) ->
-        val normalized = normalizeVodCategory(counts.rawNames.firstOrNull() ?: label)
-        TvVodCategory(
-            id = "category:${label.hashCode()}",
-            label = label,
-            rawNames = counts.rawNames.toList(),
-            count = counts.movieCount + counts.showCount,
-            type = VodCategoryType.PROVIDER,
-            language = normalized.language,
-            movieCount = counts.movieCount,
-            showCount = counts.showCount,
-        )
-    }.sortedWith(compareBy<TvVodCategory>({ vodCategorySortBucket(it) }, { it.label.lowercase() }))
+    return channels
+        .distinctBy { (it.kodiProps["vod_stream_id"] ?: it.kodiProps["vod_series_id"] ?: it.url) }
+        .mapIndexed { index, channel -> channel.toVodEntry(index) }
 }
 
-private fun TvVodCategory.cacheKey(section: VodMediaSection): String = "${section.name}:$id"
+private val VodMediaSection.channelContentType: ChannelContentType
+    get() = when (this) {
+        VodMediaSection.MOVIES -> ChannelContentType.VOD_MOVIE
+        VodMediaSection.SHOWS -> ChannelContentType.VOD_SERIES
+    }
 
-private fun vodDisplayShelfCacheKey(playlistId: String, shelfKey: String): String {
-    return "$VOD_DISPLAY_CACHE_PREFIX${playlistId.hashCode()}_${shelfKey.hashCode()}"
-}
-
-private suspend fun readVodDisplayShelfCache(
-    prefsRepo: PreferencesRepository,
+private suspend fun readVodBootstrapShelf(
+    localSettingsRepo: DeviceLocalSettingsRepository,
     playlistId: String,
     shelfKey: String,
-): CachedVodDisplayShelf? {
-    val raw = prefsRepo.getString(vodDisplayShelfCacheKey(playlistId, shelfKey)) ?: return null
+): List<TvVodEntry>? {
+    val userId = currentBootstrapUserId(localSettingsRepo) ?: return null
+    val raw = localSettingsRepo.getString(vodDisplayShelfBootstrapKey(userId, playlistId, shelfKey))
+        ?: return null
     return runCatching {
-        VodDisplayCacheJson.decodeFromString<CachedVodDisplayShelf>(raw)
+        VodDisplayCacheJson.decodeFromString<VodBootstrapShelf>(raw)
+            .entries
+            .map { it.toTvVodEntry() }
     }.getOrNull()
 }
 
-private suspend fun writeVodDisplayShelfCache(
-    prefsRepo: PreferencesRepository,
-    playlistId: String,
-    shelfKey: String,
-    entries: List<TvVodEntry>,
-) {
-    if (entries.isEmpty()) return
-    val payload = CachedVodDisplayShelf(
-        entries = entries.map { entry ->
-            CachedVodDisplayItem(
-                sourceId = entry.sourceId,
-                item = entry.item,
-            )
-        },
+private fun VodBootstrapShelfEntry.toTvVodEntry(): TvVodEntry {
+    return TvVodEntry(
+        sourceId = sourceId,
+        sourceOrder = sourceOrder,
+        channel = channel,
+        item = item,
+        searchTitle = searchTitle,
+        language = language,
+        category = category,
     )
-    runCatching {
-        prefsRepo.setString(
-            vodDisplayShelfCacheKey(playlistId, shelfKey),
-            VodDisplayCacheJson.encodeToString(payload),
-        )
-    }
 }
 
 private fun TvVodLibraryUiState.withFavoriteDelta(delta: Long): TvVodLibraryUiState {
@@ -2075,58 +1993,6 @@ private fun TvVodCategory.countForSection(section: VodMediaSection): Long {
         VodMediaSection.MOVIES -> movieCount
         VodMediaSection.SHOWS -> showCount
     }
-}
-
-private fun TvVodCategory.looksLikeSection(section: VodMediaSection): Boolean {
-    val text = (label + " " + rawNames.joinToString(" ")).lowercase()
-    val isShow = text.contains("series") ||
-        text.contains("shows") ||
-        text.contains("tv show") ||
-        text.contains("staffel") ||
-        text.contains("season") ||
-        Regex("""\bs\d{1,2}\b""").containsMatchIn(text)
-    return when (section) {
-        VodMediaSection.MOVIES -> !isShow
-        VodMediaSection.SHOWS -> isShow
-    }
-}
-
-private suspend fun loadEntriesForVodCategory(
-    channelRepo: ChannelRepository,
-    playlistId: String,
-    category: TvVodCategory,
-    mediaSection: VodMediaSection,
-): List<TvVodEntry> {
-    val limit = if (category.pinned) MAX_ALL_ITEMS else MAX_CATEGORY_ITEMS
-    val channels = mutableListOf<Channel>()
-    if (category.type == VodCategoryType.FAVORITES) {
-        channels += channelRepo.getFavorites()
-            .asSequence()
-            .filter { it.playlistId == playlistId }
-            .filter(::isVodChannel)
-            .filter { inferVodMediaType(it) == mediaSection.mediaType }
-            .take(limit)
-            .toList()
-    }
-    for (rawName in category.rawNames) {
-        val remaining = limit - channels.size
-        if (remaining <= 0) break
-        val loaded = channelRepo.getChannelsForCategory(playlistId, rawName)
-            .filter(::isVodChannel)
-            .filter { channel ->
-                when (category.type) {
-                    VodCategoryType.FAVORITES -> inferVodMediaType(channel) == mediaSection.mediaType
-                    VodCategoryType.ALL_MOVIES -> mediaSection == VodMediaSection.MOVIES && inferVodMediaType(channel) == MediaType.MOVIE
-                    VodCategoryType.ALL_SHOWS -> mediaSection == VodMediaSection.SHOWS && inferVodMediaType(channel) == MediaType.SERIES
-                    VodCategoryType.PROVIDER -> inferVodMediaType(channel) == mediaSection.mediaType
-                }
-            }
-            .take(remaining)
-        channels += loaded
-    }
-    return channels
-        .distinctBy { it.url }
-        .mapIndexed { index, channel -> channel.toVodEntry(index) }
 }
 
 private suspend fun searchVodEntries(
@@ -2187,178 +2053,11 @@ private fun List<TvVodEntry>.filterByYear(filter: VodYearFilter): List<TvVodEntr
     }
 }
 
-private fun TvVodEntry.needsDisplayMetadata(): Boolean {
-    val rating = item.ratings.withFallbackTmdbScore(item.rating)
-    return item.overview.isNullOrBlank() ||
-        item.logoUrl.isNullOrBlank() ||
-        item.backdropUrl.isNullOrBlank() ||
-        rating == null ||
-        item.genres.isEmpty()
-}
-
-private fun List<TvVodEntry>.mergeCachedDisplayItems(
-    cachedEntries: List<CachedVodDisplayItem>,
-): List<TvVodEntry> {
-    if (cachedEntries.isEmpty()) return this
-    val cachedBySourceId = cachedEntries.associateBy { it.sourceId }
-    return map { entry ->
-        val cached = cachedBySourceId[entry.sourceId]?.item ?: return@map entry
-        entry.copy(item = cached.sanitizeCachedVodItem(entry.item))
-    }
-}
-
-private fun MediaItem.sanitizeCachedVodItem(fallback: MediaItem): MediaItem {
-    return copy(
-        type = fallback.type,
-        title = title.ifBlank { fallback.title },
-        posterUrl = posterUrl ?: fallback.posterUrl,
-        rating = rating ?: fallback.rating,
-        ratings = ratings ?: fallback.ratings,
-    )
-}
-
-private fun List<TvVodEntry>.mergeEnrichedEntries(
-    enrichedBySourceId: Map<String, TvVodEntry>,
-): List<TvVodEntry> {
-    if (enrichedBySourceId.isEmpty()) return this
-    return map { entry -> enrichedBySourceId[entry.sourceId] ?: entry }
-}
-
-private suspend fun matchAndEnrichVodEntries(
-    entries: List<TvVodEntry>,
-    metadataRepo: MetadataRepository,
-    ratingsEnricher: RatingsEnricher,
-    apiKey: String,
-): List<TvVodEntry> = coroutineScope {
-    val semaphore = Semaphore(METADATA_MATCH_CONCURRENCY)
-    val matched = entries.map { entry ->
-        async {
-            semaphore.withPermit {
-                entry.copy(item = matchVodMetadata(entry, metadataRepo))
-            }
-        }
-    }.awaitAll()
-
-    val hydrated = ratingsEnricher.hydrateListFromCache(matched.map { it.item })
-    val enrichedItems = ratingsEnricher.enrichList(hydrated, apiKey).associateBy { it.id }
-    matched.map { entry ->
-        enrichedItems[entry.item.id]?.let { entry.copy(item = it) } ?: entry
-    }
-}
-
-private suspend fun matchVodMetadata(
-    entry: TvVodEntry,
-    metadataRepo: MetadataRepository,
-): MediaItem {
-    val query = entry.searchTitle.takeIf { it.length >= 2 } ?: return entry.item
-    val candidates = runCatching {
-        metadataRepo.searchMulti(query, page = 1)
-            .filter { it.type == entry.mediaType }
-    }.getOrDefault(emptyList())
-    if (candidates.isEmpty()) return entry.item
-
-    val rawTitle = normalizeVodTitle(query)
-    val best = candidates.maxByOrNull { candidate ->
-        var score = 0
-        val candidateTitle = normalizeVodTitle(candidate.title)
-        if (candidateTitle == rawTitle) score += 10
-        if (candidateTitle.contains(rawTitle) || rawTitle.contains(candidateTitle)) score += 4
-        val entryYear = entry.item.year
-        val candidateYear = candidate.year
-        if (entryYear != null && candidateYear != null) {
-            if (entryYear == candidateYear) score += 8
-            else if (kotlin.math.abs(entryYear - candidateYear) == 1) score += 3
-        }
-        if (candidate.posterUrl != null) score += 1
-        score
-    } ?: return entry.item
-
-    val bestTitle = normalizeVodTitle(best.title)
-    val matchScore = if (bestTitle == rawTitle) 10 else if (bestTitle.contains(rawTitle) || rawTitle.contains(bestTitle)) 4 else 0
-    if (matchScore < 4 && entry.item.year != best.year) return entry.item
-
-    val detail = best.tmdbId?.let { tmdbId ->
-        runCatching { metadataRepo.getDetail(tmdbTypeName(best.type), tmdbId) }.getOrNull()
-    }
-    val rich = detail ?: best
-
-    return entry.item.copy(
-        id = best.tmdbId?.let { "vod:${best.type.name.lowercase()}:tmdb:$it" }
-            ?: vodDisplayId(best.type, best.title.ifBlank { entry.searchTitle }, best.year ?: entry.item.year, entry.sourceId),
-        tmdbId = best.tmdbId,
-        imdbId = rich.imdbId ?: best.imdbId,
-        title = rich.title.ifBlank { best.title.ifBlank { entry.item.title } },
-        adult = rich.adult ?: best.adult,
-        year = rich.year ?: best.year ?: entry.item.year,
-        overview = rich.overview ?: best.overview ?: entry.item.overview,
-        posterUrl = rich.posterUrl ?: best.posterUrl ?: entry.item.posterUrl,
-        backdropUrl = rich.backdropUrl ?: best.backdropUrl ?: entry.item.backdropUrl,
-        logoUrl = rich.logoUrl ?: best.logoUrl ?: entry.item.logoUrl,
-        rating = rich.rating ?: best.rating ?: entry.item.rating,
-        voteCount = rich.voteCount ?: best.voteCount,
-        runtime = rich.runtime ?: best.runtime,
-        genres = if (rich.genres.isNotEmpty()) rich.genres else best.genres,
-        genreIds = if (rich.genreIds.isNotEmpty()) rich.genreIds else best.genreIds,
-        cast = if (rich.cast.isNotEmpty()) rich.cast else best.cast,
-        director = rich.director ?: best.director,
-        releaseDate = rich.releaseDate ?: best.releaseDate,
-        popularity = rich.popularity ?: best.popularity,
-        ratings = rich.ratings ?: best.ratings ?: entry.item.ratings,
-    )
-}
-
-private fun tmdbTypeName(type: MediaType): String = when (type) {
-    MediaType.MOVIE -> "movie"
-    MediaType.SERIES -> "tv"
-}
-
-private suspend fun resolveRatingsApiKey(
-    secretStore: IntegrationSecretStore,
-    prefsRepo: PreferencesRepository,
-): String {
-    return secretStore.get(IntegrationSecretKey.MDBLIST_API_KEY)
-        ?: prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY)
-        ?: MdbListApi.DEFAULT_API_KEY
-}
-
 private data class ParsedVodTitle(
     val displayTitle: String,
     val searchTitle: String,
     val year: Int?,
 )
-
-private data class NormalizedVodCategory(
-    val label: String,
-    val language: String?,
-)
-
-private fun normalizeVodCategory(rawName: String): NormalizedVodCategory {
-    val strippedVod = rawName
-        .removePrefix("VOD:")
-        .removePrefix("vod:")
-        .trim()
-        .ifBlank { "VOD" }
-    val language = inferLanguageFromText(strippedVod)
-    val readable = strippedVod
-        .replace(Regex("""^\[([A-Za-z]{2,8})]\s*[-|:]?\s*"""), "$1 - ")
-        .replace(Regex("""\s+"""), " ")
-        .trim()
-    return NormalizedVodCategory(
-        label = readable,
-        language = language,
-    )
-}
-
-private fun vodCategorySortBucket(category: TvVodCategory): Int {
-    if (category.pinned) return 0
-    return when (category.language) {
-        "German" -> 1
-        "English" -> 2
-        "Multi" -> 3
-        null -> 5
-        else -> 4
-    }
-}
 
 private fun vodDisplayId(
     mediaType: MediaType,
