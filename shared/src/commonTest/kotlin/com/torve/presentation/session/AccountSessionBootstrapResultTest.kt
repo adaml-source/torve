@@ -67,6 +67,10 @@ class AccountSessionBootstrapResultTest {
             IntegrationSecretKey.DEBRID_API_KEY_TORBOX,
             integrationSecretKeyForRestore("DEBRID_API_KEY_TORBOX"),
         )
+        assertEquals(
+            IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_API_KEY,
+            integrationSecretKeyForRestore("torbox_download_client_api_key"),
+        )
     }
 
     @Test

@@ -43,6 +43,7 @@ import com.torve.domain.repository.WatchlistRepository
 import com.torve.domain.sync.SyncRepository
 import com.torve.platform.NetworkMonitor
 import com.torve.platform.recommendedMaxQuality
+import com.torve.presentation.integrations.syncTorBoxCredentialPair
 import com.torve.presentation.settings.SettingsRefreshNotifier
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -641,11 +642,7 @@ class SettingsViewModel(
             if (result.success) {
                 integrationSecretStore.put(debridSecretKey(provider), apiKey)
                 if (provider == DebridServiceType.TORBOX) {
-                    integrationSecretStore.put(
-                        IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_API_KEY,
-                        apiKey,
-                        subKey = "torbox",
-                    )
+                    integrationSecretStore.syncTorBoxCredentialPair(apiKey)
                 }
                 val updated = _state.value.connectedDebridProviders.toMutableMap()
                 updated[provider] = apiKey
@@ -707,11 +704,7 @@ class SettingsViewModel(
                 if (result.done && result.apiKey != null) {
                     integrationSecretStore.put(debridSecretKey(provider), result.apiKey)
                     if (provider == DebridServiceType.TORBOX) {
-                        integrationSecretStore.put(
-                            IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_API_KEY,
-                            result.apiKey,
-                            subKey = "torbox",
-                        )
+                        integrationSecretStore.syncTorBoxCredentialPair(result.apiKey)
                     }
                     result.oauthTokens?.let { tokens ->
                         integrationSecretStore.put(IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN, tokens.refreshToken)

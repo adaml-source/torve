@@ -28,6 +28,8 @@ import com.torve.domain.repository.MediaFavoritesRepository
 import com.torve.domain.security.SecureStorage
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.settings.SettingsRefreshNotifier
+import com.torve.presentation.integrations.setTorBoxCredentialStorageMode
+import com.torve.presentation.integrations.syncTorBoxCredentialPair
 import com.torve.platform.torveVerboseLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -79,6 +81,9 @@ internal fun integrationSecretKeyForRestore(integrationType: String): Integratio
         "all_debrid", "alldebrid", "ad" -> IntegrationSecretKey.DEBRID_API_KEY_ALL_DEBRID
         "premiumize", "pm" -> IntegrationSecretKey.DEBRID_API_KEY_PREMIUMIZE
         "torbox", "tb" -> IntegrationSecretKey.DEBRID_API_KEY_TORBOX
+        "panda_download_client_api_key",
+        "torbox_download_client",
+        "torbox_download_client_api_key" -> IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_API_KEY
         "trakt" -> IntegrationSecretKey.TRAKT_TOKENS
         "simkl" -> IntegrationSecretKey.SIMKL_ACCESS_TOKEN
         "plex" -> IntegrationSecretKey.PLEX_ACCESS_TOKEN
@@ -807,6 +812,11 @@ class AccountSessionCoordinator(
                 else -> IntegrationStorageMode.DEVICE_ONLY
             }
             integrationSecretStore.setStorageMode(secretKey, mode)
+            if (secretKey == IntegrationSecretKey.DEBRID_API_KEY_TORBOX ||
+                secretKey == IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_API_KEY
+            ) {
+                integrationSecretStore.setTorBoxCredentialStorageMode(mode)
+            }
             if (secretKey == IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID) {
                 integrationSecretStore.setStorageMode(IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN, mode)
                 integrationSecretStore.setStorageMode(IntegrationSecretKey.DEBRID_RD_CLIENT_ID, mode)
@@ -833,6 +843,10 @@ class AccountSessionCoordinator(
                         }
                     }
                     IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID -> integrationSecretStore.hasSecret(IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID)
+                    IntegrationSecretKey.DEBRID_API_KEY_TORBOX,
+                    IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_API_KEY -> {
+                        integrationSecretStore.syncTorBoxCredentialPair()
+                    }
                     IntegrationSecretKey.PANDA_TOKEN -> {
                         // Always re-fetch on restore. The synced bundle
                         // {token, manifest_url, config_id, management_token} only
@@ -931,13 +945,12 @@ class AccountSessionCoordinator(
                     } else {
                         val value = restoredSingleCredentialValue(credsMap)
                         if (!value.isNullOrBlank()) {
-                            integrationSecretStore.put(secretKey, value)
-                            if (secretKey == IntegrationSecretKey.DEBRID_API_KEY_TORBOX) {
-                                integrationSecretStore.put(
-                                    key = IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_API_KEY,
-                                    value = value,
-                                    subKey = "torbox",
-                                )
+                            if (secretKey == IntegrationSecretKey.DEBRID_API_KEY_TORBOX ||
+                                secretKey == IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_API_KEY
+                            ) {
+                                integrationSecretStore.syncTorBoxCredentialPair(value)
+                            } else {
+                                integrationSecretStore.put(secretKey, value)
                             }
                             when (secretKey) {
                                 IntegrationSecretKey.OMDB_API_KEY -> prefsRepo.setString(SettingsViewModel.KEY_OMDB_API_KEY, value)
@@ -953,6 +966,7 @@ class AccountSessionCoordinator(
                 }
             }
         }
+        integrationSecretStore.syncTorBoxCredentialPair()
         restored += ensureUnifiedTraktTokensAfterRestore()
         torveVerboseLog { "[IntegrationRestore] Done: $restored/${integrations.size}" }
         return restored

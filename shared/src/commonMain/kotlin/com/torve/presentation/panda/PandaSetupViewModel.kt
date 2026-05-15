@@ -16,6 +16,8 @@ import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.model.DebridServiceType
 import com.torve.domain.repository.AddonRepository
 import com.torve.presentation.addon.AddonViewModel
+import com.torve.presentation.integrations.findTorBoxCredential
+import com.torve.presentation.integrations.syncTorBoxCredentialPair
 import com.torve.presentation.settings.SettingsRefreshNotifier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
@@ -460,11 +462,7 @@ class PandaSetupViewModel(
                             result.apiKey,
                         )
                         if (debridType == DebridServiceType.TORBOX) {
-                            integrationSecretStore.put(
-                                IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_API_KEY,
-                                result.apiKey,
-                                subKey = "torbox",
-                            )
+                            integrationSecretStore.syncTorBoxCredentialPair(result.apiKey)
                         }
                         result.oauthTokens?.let { tokens ->
                             integrationSecretStore.put(
@@ -509,10 +507,15 @@ class PandaSetupViewModel(
             IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_API_KEY,
             subKey = downloadClient,
         )?.takeIf { it.isNotBlank() && !isRedactedPlaceholder(it) }
-        if (cached != null) return cached
+        if (cached != null) {
+            if (downloadClient == "torbox") {
+                integrationSecretStore.syncTorBoxCredentialPair(cached)
+            }
+            return cached
+        }
         return if (downloadClient == "torbox") {
-            integrationSecretStore.get(IntegrationSecretKey.DEBRID_API_KEY_TORBOX)
-                ?.takeIf { it.isNotBlank() && !isRedactedPlaceholder(it) }
+            integrationSecretStore.syncTorBoxCredentialPair()
+            integrationSecretStore.findTorBoxCredential()
         } else {
             null
         }
@@ -1037,6 +1040,9 @@ class PandaSetupViewModel(
                         DebridServiceType.TORBOX -> IntegrationSecretKey.DEBRID_API_KEY_TORBOX
                     }
                     integrationSecretStore.put(secretKey, s.debridApiKey)
+                    if (debridType == DebridServiceType.TORBOX) {
+                        integrationSecretStore.syncTorBoxCredentialPair(s.debridApiKey)
+                    }
                     prefsRepo.setString("debrid_provider", debridType.name)
                 }
                 prefsRepo.setString("panda_download_client", s.downloadClient)
@@ -1084,10 +1090,7 @@ class PandaSetupViewModel(
                             subKey = s.downloadClient,
                         )
                         if (s.downloadClient == "torbox") {
-                            integrationSecretStore.put(
-                                key = IntegrationSecretKey.DEBRID_API_KEY_TORBOX,
-                                value = s.downloadClientApiKey,
-                            )
+                            integrationSecretStore.syncTorBoxCredentialPair(s.downloadClientApiKey)
                         }
                     }
                     if (s.downloadClientPassword.isNotBlank() &&
@@ -1360,6 +1363,9 @@ class PandaSetupViewModel(
                         val dtype = toDebridServiceType(config.debridService)
                         if (dtype != null) {
                             integrationSecretStore.put(debridSecretKey(dtype), key)
+                            if (dtype == DebridServiceType.TORBOX) {
+                                integrationSecretStore.syncTorBoxCredentialPair(key)
+                            }
                         }
                     }
                     secret(secrets.usenetPassword)?.let { v ->
@@ -1379,10 +1385,7 @@ class PandaSetupViewModel(
                                 subKey = config.downloadClient,
                             )
                             if (config.downloadClient == "torbox") {
-                                integrationSecretStore.put(
-                                    key = IntegrationSecretKey.DEBRID_API_KEY_TORBOX,
-                                    value = v,
-                                )
+                                integrationSecretStore.syncTorBoxCredentialPair(v)
                             }
                         }
                     }
