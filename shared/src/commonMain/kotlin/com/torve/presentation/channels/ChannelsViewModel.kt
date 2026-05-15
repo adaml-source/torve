@@ -183,6 +183,12 @@ class ChannelsViewModel(
                     // here — calling it here cascades into `buildGuideChannels` ->
                     // `ensureFullPlaylistLoaded` which loads tens of thousands of channels
                     // into memory and hangs the home screen on launch.
+                    hydrateInitialCategorySelection(
+                        playlistId = targetPlaylistId,
+                        previousPlaylistId = null,
+                        categories = cachedCategories,
+                        restoreSavedState = true,
+                    )
                     deferredCategoryVerification(targetPlaylistId)
                 } else {
                     // Cache miss or playlist changed — must query DB for categories.
@@ -190,7 +196,7 @@ class ChannelsViewModel(
                     loadPlaylistCatalog(
                         playlistId = targetPlaylistId,
                         restoreSavedState = true,
-                        triggerBackgroundRefresh = false,
+                        triggerBackgroundRefresh = true,
                         showLoadingUntilRefresh = false,
                     )
                     println("STARTUP[${Clock.System.now().toEpochMilliseconds() - initStartMs}ms] db_category_load: triggered")
@@ -231,13 +237,18 @@ class ChannelsViewModel(
                 println("STARTUP_DEFERRED[${verifyMs}ms] category_verify: cache matches DB (${currentCategories.size} categories)")
             }
 
-            // Staleness refresh is explicit/background-worker driven. Do not start
-            // source refresh from ViewModel init; app restarts must render cached
-            // local catalog immediately for the signed-in user.
             val playlist = _state.value.playlists.firstOrNull { it.id == playlistId }
             val lastUpdated = playlist?.lastUpdated ?: 0L
             val ageMs = Clock.System.now().toEpochMilliseconds() - lastUpdated
-            println("REFRESH_GATE: playlistId=$playlistId lastUpdated=$lastUpdated ageMs=$ageMs ageSec=${ageMs / 1000} decision=LOCAL_FIRST_SKIP")
+            val shouldRefresh = ageMs > STALE_THRESHOLD_MS
+            println("REFRESH_GATE: playlistId=$playlistId lastUpdated=$lastUpdated ageMs=$ageMs ageSec=${ageMs / 1000} decision=${if (shouldRefresh) "REFRESH" else "SKIP"}")
+            if (shouldRefresh) {
+                refreshPlaylistInBackground(
+                    playlistId = playlistId,
+                    preserveVisibleCatalog = true,
+                    restoreSavedState = true,
+                )
+            }
         }
     }
 
