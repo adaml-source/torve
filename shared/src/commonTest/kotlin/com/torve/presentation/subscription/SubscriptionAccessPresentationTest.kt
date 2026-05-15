@@ -37,6 +37,21 @@ class SubscriptionAccessPresentationTest {
     }
 
     @Test
+    fun signedInRefreshDoesNotShowFreeWhileAccessStateIsLoading() {
+        val state = SubscriptionUiState(
+            subscription = null,
+            isLoggedIn = true,
+            isLoading = true,
+        )
+
+        val access = state.accessPresentation()
+
+        assertEquals("Checking access...", access.accessStatusLabel)
+        assertFalse(access.hasPremiumEntitlement)
+        assertFalse(access.shouldShowBuy)
+    }
+
+    @Test
     fun activeMonthlyCanStillUpgradeToLifetime() {
         // Monthly subscribers must keep the lifetime buy button visible —
         // it's a legitimate upgrade path. The monthly button is hidden

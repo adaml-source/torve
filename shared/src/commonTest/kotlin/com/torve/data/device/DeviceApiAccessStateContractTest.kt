@@ -137,6 +137,36 @@ class DeviceApiAccessStateContractTest {
     }
 
     @Test
+    fun lifetimeAccessEntitlementTypeResolvesToLifetimeTier() {
+        val access = AccessStateDto(
+            has_premium_access = true,
+            access_tier = null,
+            entitlement_type = "lifetime_access",
+            source = "admin_grant",
+            is_device_activated = true,
+        )
+
+        assertTrue(access.resolvedHasPremiumEntitlement())
+        assertEquals(com.torve.domain.model.SubscriptionTier.LIFETIME, access.resolvedAccessTier())
+        assertTrue(access.resolvedUsablePremiumAccess())
+    }
+
+    @Test
+    fun adminGrantSourceResolvesToLifetimeTierWhenAccessTierIsMissing() {
+        val access = AccessStateDto(
+            has_premium_access = true,
+            access_tier = null,
+            entitlement_type = null,
+            source = "admin_grant",
+            is_device_activated = true,
+        )
+
+        assertTrue(access.resolvedHasPremiumEntitlement())
+        assertEquals(com.torve.domain.model.SubscriptionTier.LIFETIME, access.resolvedAccessTier())
+        assertTrue(access.resolvedUsablePremiumAccess())
+    }
+
+    @Test
     fun flatDeviceLimitResolvesEffectiveLimitAndThreshold() = runTest {
         val api = DeviceApi(
             httpClient = HttpClient(

@@ -184,10 +184,15 @@ fun SubscriptionUiState.accessPresentation(
     val deviceActivated = isDeviceActivated
     val isUsablePremiumOnThisDevice = isPro && hasPremiumEntitlement && deviceActivated
     val isPremiumButBlockedOnThisDevice = hasPremiumEntitlement && !deviceActivated
+    val isCheckingAccess = isLoggedIn &&
+        isLoading &&
+        !hasPremiumEntitlement &&
+        subscription?.isPro != true
     val expiryText = subscription?.expiresAt?.let(::formatSubscriptionAccessDate)
     val blockMessage = deviceBlockMessage(deviceBlockReason, strings)
 
     val accessStatusLabel = when {
+        isCheckingAccess -> strings.checkingAccessLabel()
         isUsablePremiumOnThisDevice && tier == SubscriptionTier.LIFETIME -> strings.lifetimeActive()
         isUsablePremiumOnThisDevice && tier == SubscriptionTier.MONTHLY ->
             expiryText?.let { strings.monthlyActiveUntil(it) } ?: strings.monthlyActive()
@@ -205,6 +210,7 @@ fun SubscriptionUiState.accessPresentation(
     }
 
     val accessHelperText = when {
+        isCheckingAccess -> strings.checkingAccessHelperText()
         isUsablePremiumOnThisDevice && tier == SubscriptionTier.LIFETIME ->
             strings.lifetimeActiveOnDevice()
         isUsablePremiumOnThisDevice && tier == SubscriptionTier.MONTHLY ->
@@ -225,12 +231,12 @@ fun SubscriptionUiState.accessPresentation(
 
     val isAlreadyLifetime = tier == SubscriptionTier.LIFETIME && hasPremiumEntitlement
     val isKnownMonthly = tier == SubscriptionTier.MONTHLY && hasPremiumEntitlement
-    val showBuyMonthly = !hasPremiumEntitlement
+    val showBuyMonthly = !isCheckingAccess && !hasPremiumEntitlement
     // Lifetime is the only product that meaningfully upgrades over an
     // existing monthly entitlement, so show its button whenever the user
     // is known to have monthly. Unknown premium entitlement states hide
     // buy buttons to avoid prompting already-paying users to re-buy.
-    val showBuyLifetime = !hasPremiumEntitlement || (isKnownMonthly && !isAlreadyLifetime)
+    val showBuyLifetime = !isCheckingAccess && (!hasPremiumEntitlement || (isKnownMonthly && !isAlreadyLifetime))
 
     return SubscriptionAccessPresentation(
         hasPremiumEntitlement = hasPremiumEntitlement,

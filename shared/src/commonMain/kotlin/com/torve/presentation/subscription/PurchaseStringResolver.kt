@@ -135,6 +135,7 @@ interface PurchaseStringResolver {
     fun lifetimeOnAccount(): String = "Premium Lifetime on account"
     fun premiumOnAccount(): String = "Premium active on account"
     fun freeLabel(): String = "Free"
+    fun checkingAccessLabel(): String = "Checking access..."
     fun monthlyActiveOnDevice(date: String?): String =
         date?.let { "Premium Monthly is active on this device until $it." }
             ?: "Premium Monthly is active on this device."
@@ -151,6 +152,8 @@ interface PurchaseStringResolver {
         "Premium is active on your account. $blockMessage"
     fun freeHelperText(): String =
         "Torve is free to download. Choose monthly or lifetime access."
+    fun checkingAccessHelperText(): String =
+        "Refreshing your account access from Torve."
     fun deviceNeedsSlot(): String = "This device needs an available activation slot."
     fun deviceNeedsActivation(): String = "This device needs activation."
     fun premiumRequired(): String = "This feature requires Torve Pro."

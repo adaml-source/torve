@@ -351,7 +351,9 @@ fun AccessStateDto.resolvedHasPremiumEntitlement(): Boolean {
 }
 
 fun AccessStateDto.resolvedAccessTier(): SubscriptionTier? {
-    return parseAccessTier(access_tier) ?: parseAccessTier(entitlement_type)
+    return parseAccessTier(access_tier)
+        ?: parseAccessTier(entitlement_type)
+        ?: parseAccessTier(source)
 }
 
 /**
@@ -436,9 +438,12 @@ internal fun parseAccessTier(raw: String?): SubscriptionTier? {
         "premium_monthly",
         "premium_subscription",
         "subscription",
+        "monthly_access",
+        "subscription_access",
         -> SubscriptionTier.MONTHLY
         "lifetime",
         "premium_lifetime",
+        "lifetime_access",
         "rebate_code",
         "admin_grant",
         -> SubscriptionTier.LIFETIME
