@@ -640,6 +640,13 @@ class SettingsViewModel(
             val result = debridClient.verifyApiKey(provider, apiKey)
             if (result.success) {
                 integrationSecretStore.put(debridSecretKey(provider), apiKey)
+                if (provider == DebridServiceType.TORBOX) {
+                    integrationSecretStore.put(
+                        IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_API_KEY,
+                        apiKey,
+                        subKey = "torbox",
+                    )
+                }
                 val updated = _state.value.connectedDebridProviders.toMutableMap()
                 updated[provider] = apiKey
                 _state.update {
@@ -699,6 +706,13 @@ class SettingsViewModel(
                 )
                 if (result.done && result.apiKey != null) {
                     integrationSecretStore.put(debridSecretKey(provider), result.apiKey)
+                    if (provider == DebridServiceType.TORBOX) {
+                        integrationSecretStore.put(
+                            IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_API_KEY,
+                            result.apiKey,
+                            subKey = "torbox",
+                        )
+                    }
                     result.oauthTokens?.let { tokens ->
                         integrationSecretStore.put(IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN, tokens.refreshToken)
                         integrationSecretStore.put(IntegrationSecretKey.DEBRID_RD_CLIENT_ID, tokens.clientId)

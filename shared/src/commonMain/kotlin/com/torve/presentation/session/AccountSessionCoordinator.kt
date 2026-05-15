@@ -70,6 +70,35 @@ internal fun String?.isDeviceLimitRegistrationError(): Boolean {
         "swap limit" in normalized
 }
 
+internal fun integrationSecretKeyForRestore(integrationType: String): IntegrationSecretKey? {
+    val normalized = integrationType.trim()
+    IntegrationSecretKey.entries.firstOrNull { it.name.equals(normalized, ignoreCase = true) }
+        ?.let { return it }
+    return when (normalized.lowercase()) {
+        "real_debrid", "realdebrid", "rd" -> IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID
+        "all_debrid", "alldebrid", "ad" -> IntegrationSecretKey.DEBRID_API_KEY_ALL_DEBRID
+        "premiumize", "pm" -> IntegrationSecretKey.DEBRID_API_KEY_PREMIUMIZE
+        "torbox", "tb" -> IntegrationSecretKey.DEBRID_API_KEY_TORBOX
+        "trakt" -> IntegrationSecretKey.TRAKT_TOKENS
+        "simkl" -> IntegrationSecretKey.SIMKL_ACCESS_TOKEN
+        "plex" -> IntegrationSecretKey.PLEX_ACCESS_TOKEN
+        "jellyfin" -> IntegrationSecretKey.JELLYFIN_API_KEY
+        "omdb" -> IntegrationSecretKey.OMDB_API_KEY
+        "mdblist", "mdb_list" -> IntegrationSecretKey.MDBLIST_API_KEY
+        "panda", "panda_token" -> IntegrationSecretKey.PANDA_TOKEN
+        else -> null
+    }
+}
+
+private fun restoredSingleCredentialValue(credentials: Map<String, String>): String? {
+    return credentials["api_key"]
+        ?: credentials["apiKey"]
+        ?: credentials["access_token"]
+        ?: credentials["accessToken"]
+        ?: credentials["token"]
+        ?: credentials.values.firstOrNull()
+}
+
 // ── Post-login restore progress (user-visible) ─────────────
 
 enum class RestorePhase {
@@ -766,9 +795,7 @@ class AccountSessionCoordinator(
         torveVerboseLog { "[IntegrationRestore] Found ${integrations.size} integrations on backend" }
         var restored = 0
         for (integration in integrations) {
-            val secretKey = runCatching {
-                IntegrationSecretKey.valueOf(integration.integrationType)
-            }.getOrNull()
+            val secretKey = integrationSecretKeyForRestore(integration.integrationType)
             if (secretKey == null) {
                 torveVerboseLog { "[IntegrationRestore] Skipping unknown type: ${integration.integrationType}" }
                 continue
@@ -902,9 +929,16 @@ class AccountSessionCoordinator(
                             }
                         }
                     } else {
-                        val value = credsMap.values.firstOrNull()
+                        val value = restoredSingleCredentialValue(credsMap)
                         if (!value.isNullOrBlank()) {
                             integrationSecretStore.put(secretKey, value)
+                            if (secretKey == IntegrationSecretKey.DEBRID_API_KEY_TORBOX) {
+                                integrationSecretStore.put(
+                                    key = IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_API_KEY,
+                                    value = value,
+                                    subKey = "torbox",
+                                )
+                            }
                             when (secretKey) {
                                 IntegrationSecretKey.OMDB_API_KEY -> prefsRepo.setString(SettingsViewModel.KEY_OMDB_API_KEY, value)
                                 IntegrationSecretKey.MDBLIST_API_KEY -> prefsRepo.setString(SettingsViewModel.KEY_MDBLIST_API_KEY, value)

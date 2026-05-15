@@ -1,7 +1,9 @@
 package com.torve.presentation.session
 
+import com.torve.domain.integrations.IntegrationSecretKey
 import kotlin.test.Test
 import kotlin.test.assertFalse
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class AccountSessionBootstrapResultTest {
@@ -53,5 +55,33 @@ class AccountSessionBootstrapResultTest {
         assertTrue("Device limit reached".isDeviceLimitRegistrationError())
         assertTrue("No activation slots remain".isDeviceLimitRegistrationError())
         assertTrue("swap limit reached".isDeviceLimitRegistrationError())
+    }
+
+    @Test
+    fun restore_maps_website_torbox_integration_alias_to_client_secret_key() {
+        assertEquals(
+            IntegrationSecretKey.DEBRID_API_KEY_TORBOX,
+            integrationSecretKeyForRestore("torbox"),
+        )
+        assertEquals(
+            IntegrationSecretKey.DEBRID_API_KEY_TORBOX,
+            integrationSecretKeyForRestore("DEBRID_API_KEY_TORBOX"),
+        )
+    }
+
+    @Test
+    fun restore_maps_website_service_aliases_to_client_secret_keys() {
+        assertEquals(
+            IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID,
+            integrationSecretKeyForRestore("real_debrid"),
+        )
+        assertEquals(
+            IntegrationSecretKey.TRAKT_TOKENS,
+            integrationSecretKeyForRestore("trakt"),
+        )
+        assertEquals(
+            IntegrationSecretKey.PANDA_TOKEN,
+            integrationSecretKeyForRestore("panda"),
+        )
     }
 }

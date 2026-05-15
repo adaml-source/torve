@@ -63,6 +63,13 @@ class PandaSetupViewModelTest {
     // ── Provider ID mapping ──
 
     @Test
+    fun fallbackSchemaIncludesCloudDownloadClients() {
+        assertTrue("torbox" in FALLBACK_SCHEMA.downloadClients)
+        assertTrue(FALLBACK_SCHEMA.downloadClientFields["torbox"]?.cloud == true)
+        assertTrue("apiKey" in FALLBACK_SCHEMA.downloadClientFields["torbox"]!!.fields)
+    }
+
+    @Test
     fun providerIdToDebridServiceTypeMapping() {
         val mapping = mapOf(
             "realdebrid" to "REAL_DEBRID",

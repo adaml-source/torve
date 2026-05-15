@@ -92,6 +92,7 @@ fun rememberCachedBitmap(url: String?): ImageBitmap? {
         if (imageUrl == null) { value = null; return@produceState }
         val hit = ImageBitmapCache.get(imageUrl)
         if (hit != null) { value = hit; return@produceState }
+        value = null
         value = withContext(Dispatchers.IO) {
             runCatching {
                 val bytes = ImageBitmapCache.readDiskBytes(imageUrl)
@@ -360,16 +361,13 @@ fun V2PosterCard(
     // hover-preview).
     val cardAspect = cardStyle.size.resolvedAspectRatio()
     val isLandscape = cardAspect > 1f
+    val interactionSource = remember { MutableInteractionSource() }
+    val hovered by interactionSource.collectIsHoveredAsState()
     val primaryUrl = if (isLandscape) backdropUrl ?: imageUrl else imageUrl
     val secondaryUrl = if (isLandscape) imageUrl else backdropUrl
     val artwork = rememberCachedBitmap(primaryUrl)
-    // Hover-preview second image. Lazily fetched: rememberCachedBitmap
-    // already dedupes and caches by URL, so pre-loading on every poster
-    // card is cheap once the user scrolls past the same item twice.
-    val backdrop = rememberCachedBitmap(secondaryUrl)
+    val backdrop = rememberCachedBitmap(secondaryUrl?.takeIf { hovered })
     val palette = artPalette(primaryUrl ?: title)
-    val interactionSource = remember { MutableInteractionSource() }
-    val hovered by interactionSource.collectIsHoveredAsState()
     val pri by animateColorAsState(palette.primary, label = "posterPri")
     val sec by animateColorAsState(palette.secondary, label = "posterSec")
     val hoverScaleTarget = if (hovered && cardStyle.hover.enabled)

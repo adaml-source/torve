@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,6 +15,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
@@ -498,8 +501,12 @@ private fun DesktopVodLibraryView(
                     emoji = "TV",
                 )
             } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    playlists.take(6).forEach { playlist ->
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(end = 20.dp),
+                ) {
+                    items(playlists, key = { it.id }) { playlist ->
                         TorveFilterChip(
                             text = playlist.name,
                             selected = playlist.id == selectedPlaylistId,
@@ -526,8 +533,12 @@ private fun DesktopVodLibraryView(
                     placeholder = ds("Title, category, genre"),
                 )
                 if (categories.size > 1) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        categories.take(8).forEach { category ->
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(end = 20.dp),
+                    ) {
+                        items(categories, key = { it }) { category ->
                             TorveFilterChip(
                                 text = category,
                                 selected = category == selectedCategory,
@@ -633,7 +644,7 @@ private fun DesktopVodLibraryView(
                     }
                     else -> selectedCategory
                 },
-                channels = filteredItems.take(60),
+                channels = filteredItems,
                 vodKind = vodKind,
                 onMovieClick = onPlayVodChannel,
                 onSeriesClick = { channel -> openSeriesEpisodes(channel) },
@@ -641,7 +652,7 @@ private fun DesktopVodLibraryView(
 
             if (searchQuery.isBlank() && selectedCategory == "All") {
                 categories.drop(1).take(6).forEach { category ->
-                    val categoryItems = activeItems.filter { it.vodCategoryLabel() == category }.take(24)
+                    val categoryItems = activeItems.filter { it.vodCategoryLabel() == category }
                     if (categoryItems.isNotEmpty()) {
                         DesktopVodShelf(
                             title = category,
@@ -666,28 +677,38 @@ private fun DesktopVodShelf(
     onSeriesClick: (Channel) -> Unit,
 ) {
     if (channels.isEmpty()) return
-    V2Shelf(
-        title = title,
-        modifier = Modifier,
-    ) {
-        channels.forEach { channel ->
-            V2PosterCard(
-                title = channel.name,
-                imageUrl = channel.tvgLogo,
-                modifier = Modifier.width(150.dp),
-                year = channel.vodYear()?.toString(),
-                rating = channel.vodRatingText(),
-                ratings = channel.vodRatingValue()?.let { MediaRatings(tmdbScore = it.toFloat()) },
-                backdropUrl = channel.kodiProps["vod_backdrop"],
-                overview = channel.kodiProps["vod_plot"],
-                onClick = {
-                    if (vodKind == LibraryVodKind.SHOWS || channel.contentType == ChannelContentType.VOD_SERIES) {
-                        onSeriesClick(channel)
-                    } else {
-                        onMovieClick(channel)
-                    }
-                },
-            )
+    val colors = TorveDesktopThemeTokens.colors
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(
+            text = "$title (${channels.size})",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = colors.textPrimary,
+        )
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = PaddingValues(start = 4.dp, end = 24.dp),
+        ) {
+            items(channels, key = { it.vodStableKey() }) { channel ->
+                V2PosterCard(
+                    title = channel.name,
+                    imageUrl = channel.tvgLogo,
+                    modifier = Modifier.width(150.dp),
+                    year = channel.vodYear()?.toString(),
+                    rating = channel.vodRatingText(),
+                    ratings = channel.vodRatingValue()?.let { MediaRatings(tmdbScore = it.toFloat()) },
+                    backdropUrl = channel.kodiProps["vod_backdrop"],
+                    overview = channel.kodiProps["vod_plot"],
+                    onClick = {
+                        if (vodKind == LibraryVodKind.SHOWS || channel.contentType == ChannelContentType.VOD_SERIES) {
+                            onSeriesClick(channel)
+                        } else {
+                            onMovieClick(channel)
+                        }
+                    },
+                )
+            }
         }
     }
 }
@@ -922,6 +943,14 @@ private fun Channel.vodCategoryLabel(): String {
         ?.trim()
         ?.takeIf { it.isNotBlank() }
         ?: "Uncategorized"
+}
+
+private fun Channel.vodStableKey(): String {
+    val providerId = kodiProps["vod_stream_id"]
+        ?: kodiProps["vod_series_id"]
+        ?: kodiProps["vod_episode_id"]
+        ?: url
+    return listOf(playlistId, contentType.name, providerId, url, name).joinToString("|")
 }
 
 private fun Channel.vodRatingValue(): Double? {

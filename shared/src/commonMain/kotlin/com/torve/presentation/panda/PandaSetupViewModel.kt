@@ -152,6 +152,9 @@ internal fun isRedactedPlaceholder(value: String?): Boolean {
 
 private val FALLBACK_DOWNLOAD_CLIENT_FIELDS: Map<String, DownloadClientFieldSpec> = mapOf(
     "none" to DownloadClientFieldSpec(emptyList()),
+    "premiumize" to DownloadClientFieldSpec(listOf("apiKey"), cloud = true),
+    "torbox" to DownloadClientFieldSpec(listOf("apiKey"), cloud = true),
+    "alldebrid" to DownloadClientFieldSpec(listOf("apiKey"), cloud = true),
     "nzbget" to DownloadClientFieldSpec(listOf("url", "username", "password")),
     "sabnzbd" to DownloadClientFieldSpec(listOf("url", "apiKey")),
 )
@@ -163,7 +166,7 @@ internal val FALLBACK_SCHEMA = PandaSchema(
     ),
     usenetProviders = listOf("none", "easynews", "generic"),
     nzbIndexers = listOf("none", "nzbgeek", "scenenzbs", "dognzb", "nzbplanet", "custom"),
-    downloadClients = listOf("none", "nzbget", "sabnzbd"),
+    downloadClients = listOf("none", "premiumize", "torbox", "alldebrid", "nzbget", "sabnzbd"),
     qualityOptions = listOf("2160p", "1080p", "720p", "480p"),
     qualityProfiles = listOf("balanced", "best_quality", "fast_start", "data_saver"),
     releaseLanguages = listOf(
@@ -456,6 +459,13 @@ class PandaSetupViewModel(
                             debridSecretKey(debridType),
                             result.apiKey,
                         )
+                        if (debridType == DebridServiceType.TORBOX) {
+                            integrationSecretStore.put(
+                                IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_API_KEY,
+                                result.apiKey,
+                                subKey = "torbox",
+                            )
+                        }
                         result.oauthTokens?.let { tokens ->
                             integrationSecretStore.put(
                                 IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN,
@@ -492,6 +502,20 @@ class PandaSetupViewModel(
         DebridServiceType.ALL_DEBRID -> IntegrationSecretKey.DEBRID_API_KEY_ALL_DEBRID
         DebridServiceType.PREMIUMIZE -> IntegrationSecretKey.DEBRID_API_KEY_PREMIUMIZE
         DebridServiceType.TORBOX -> IntegrationSecretKey.DEBRID_API_KEY_TORBOX
+    }
+
+    private suspend fun cachedDownloadClientApiKey(downloadClient: String): String? {
+        val cached = integrationSecretStore.get(
+            IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_API_KEY,
+            subKey = downloadClient,
+        )?.takeIf { it.isNotBlank() && !isRedactedPlaceholder(it) }
+        if (cached != null) return cached
+        return if (downloadClient == "torbox") {
+            integrationSecretStore.get(IntegrationSecretKey.DEBRID_API_KEY_TORBOX)
+                ?.takeIf { it.isNotBlank() && !isRedactedPlaceholder(it) }
+        } else {
+            null
+        }
     }
 
     fun setApiKeyInput(key: String) {
@@ -1059,6 +1083,12 @@ class PandaSetupViewModel(
                             value = s.downloadClientApiKey,
                             subKey = s.downloadClient,
                         )
+                        if (s.downloadClient == "torbox") {
+                            integrationSecretStore.put(
+                                key = IntegrationSecretKey.DEBRID_API_KEY_TORBOX,
+                                value = s.downloadClientApiKey,
+                            )
+                        }
                     }
                     if (s.downloadClientPassword.isNotBlank() &&
                         !isRedactedPlaceholder(s.downloadClientPassword)
@@ -1284,10 +1314,7 @@ class PandaSetupViewModel(
                     secret(secrets?.downloadClientPassword) ?: cachedDownloadClientPassword,
                 )
                 val cachedDownloadClientApiKey = if (config.downloadClient != "none") {
-                    integrationSecretStore.get(
-                        IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_API_KEY,
-                        subKey = config.downloadClient,
-                    )
+                    cachedDownloadClientApiKey(config.downloadClient)
                 } else null
                 val cleanDownloadClientApiKey = cleanSecret(
                     config.downloadClientApiKey,
@@ -1351,6 +1378,12 @@ class PandaSetupViewModel(
                                 value = v,
                                 subKey = config.downloadClient,
                             )
+                            if (config.downloadClient == "torbox") {
+                                integrationSecretStore.put(
+                                    key = IntegrationSecretKey.DEBRID_API_KEY_TORBOX,
+                                    value = v,
+                                )
+                            }
                         }
                     }
                     secret(secrets.downloadClientPassword)?.let { v ->
