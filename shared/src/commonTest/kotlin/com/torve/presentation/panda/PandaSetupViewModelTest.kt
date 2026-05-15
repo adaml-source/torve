@@ -139,6 +139,25 @@ class PandaSetupViewModelTest {
         assertTrue("yts" in payload.enabledProviders)
     }
 
+    @Test
+    fun multiDebridConnectionsIncludeEveryVerifiedProvider() {
+        val state = PandaSetupUiState(
+            selectedProvider = PandaProvider("realdebrid", "Real-Debrid", listOf("oauth", "apikey")),
+            debridApiKey = "rd-key",
+            debridApiKeys = mapOf(
+                "realdebrid" to "rd-key",
+                "premiumize" to "pm-key",
+                "torbox" to "tb-key",
+            ),
+        )
+
+        val connections = pandaDebridConnectionsForPayload(state)
+
+        assertEquals(3, connections.size)
+        assertEquals(setOf("realdebrid", "premiumize", "torbox"), connections.map { it.provider }.toSet())
+        assertEquals("rd-key", primaryPandaDebridConnection(state).apiKey)
+    }
+
     // ── Save state ──
 
     @Test

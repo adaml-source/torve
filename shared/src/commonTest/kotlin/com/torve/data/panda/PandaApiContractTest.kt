@@ -267,6 +267,43 @@ class PandaApiContractTest {
         assertTrue(serialized.contains("\"releaseLanguage\":\"german\""))
     }
 
+    @Test
+    fun configPayloadSerializesMultiDebridConnections() {
+        val payload = PandaConfigPayload(
+            debridService = "realdebrid",
+            debridApiKey = "rd-key",
+            debridConnections = listOf(
+                PandaDebridConnection(provider = "realdebrid", apiKey = "rd-key"),
+                PandaDebridConnection(provider = "torbox", apiKey = "tb-key"),
+            ),
+        )
+        val serialized = json.encodeToString(PandaConfigPayload.serializer(), payload)
+        assertTrue(serialized.contains("\"debridConnections\""))
+        assertTrue(serialized.contains("\"provider\":\"realdebrid\""))
+        assertTrue(serialized.contains("\"apiKey\":\"tb-key\""))
+    }
+
+    @Test
+    fun configSecretsDecodeMultiDebridConnections() {
+        val dto = json.decodeFromString<PandaConfigSecrets>(
+            """
+            {
+              "config_id": "cfg123",
+              "debrid_api_key": "legacy-key",
+              "debrid_connections": [
+                {"provider": "realdebrid", "api_key": "rd-key", "enabled": true},
+                {"provider": "torbox", "api_key": "tb-key", "enabled": true}
+              ]
+            }
+            """.trimIndent(),
+        )
+
+        assertEquals("cfg123", dto.configId)
+        assertEquals(2, dto.debridConnections.size)
+        assertEquals("realdebrid", dto.debridConnections[0].provider)
+        assertEquals("tb-key", dto.debridConnections[1].apiKey)
+    }
+
     // ── API Key Request ──
 
     @Test

@@ -35,6 +35,20 @@ sealed class PandaAuthPollResult {
     data class Error(val message: String) : PandaAuthPollResult()
 }
 
+@Serializable
+data class PandaDebridConnection(
+    val provider: String = "none",
+    val apiKey: String = "",
+    val enabled: Boolean = true,
+)
+
+@Serializable
+data class PandaDebridConnectionSecret(
+    val provider: String = "none",
+    @SerialName("api_key") val apiKey: String = "",
+    val enabled: Boolean = true,
+)
+
 class PandaApiException(
     val errorCode: String,
     override val message: String,
@@ -116,6 +130,8 @@ data class NzbIndexerRow(
 data class PandaConfigSecrets(
     @SerialName("config_id") val configId: String? = null,
     @SerialName("debrid_api_key") val debridApiKey: String = "",
+    @SerialName("debrid_connections")
+    val debridConnections: List<PandaDebridConnectionSecret> = emptyList(),
     @SerialName("usenet_password") val usenetPassword: String = "",
     @SerialName("download_client_api_key") val downloadClientApiKey: String = "",
     @SerialName("download_client_password") val downloadClientPassword: String = "",
@@ -142,6 +158,7 @@ data class PandaConfigPayload(
     val releaseLanguages: List<String> = listOf("any"),
     val debridService: String = "none",
     val debridApiKey: String = "",
+    val debridConnections: List<PandaDebridConnection> = emptyList(),
     val putioClientId: String = "",
     val groupByQuality: Boolean = true,
     val sortTorrentsBy: String = "qualitysize",
@@ -185,6 +202,7 @@ data class PandaConfigPayload(
 data class PandaConfigPatch(
     val debridService: String? = null,
     val debridApiKey: String? = null,
+    val debridConnections: List<PandaDebridConnection>? = null,
     val maxQuality: String? = null,
     val qualityProfile: String? = null,
     val releaseLanguage: String? = null,

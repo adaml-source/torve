@@ -8,6 +8,7 @@ import com.torve.data.panda.PandaApiClient
 import com.torve.data.panda.PandaConfigPatch
 import com.torve.data.panda.PandaConfigPayload
 import com.torve.data.panda.PandaConfigSecrets
+import com.torve.data.panda.PandaDebridConnection
 import com.torve.data.panda.PandaProvider
 import com.torve.data.panda.PandaSchema
 import com.torve.data.panda.PandaSourceProvider
@@ -46,6 +47,7 @@ data class PandaSetupUiState(
     val deviceCode: DeviceCodeInfo? = null,
     val apiKeyInput: String = "",
     val debridApiKey: String = "",
+    val debridApiKeys: Map<String, String> = emptyMap(),
     val authLoading: Boolean = false,
     val authConnected: Boolean = false,
     val existingCredentialDetected: Boolean = false,
@@ -152,6 +154,34 @@ internal fun isRedactedPlaceholder(value: String?): Boolean {
     return value.contains("redact", ignoreCase = true)
 }
 
+internal fun cleanCredential(value: String?): String? {
+    val trimmed = value?.trim().orEmpty()
+    if (trimmed.isBlank() || isRedactedPlaceholder(trimmed)) return null
+    return trimmed
+}
+
+internal fun pandaDebridConnectionsForPayload(state: PandaSetupUiState): List<PandaDebridConnection> {
+    val merged = linkedMapOf<String, String>()
+    state.debridApiKeys.forEach { (provider, apiKey) ->
+        cleanCredential(apiKey)?.let { merged[provider] = it }
+    }
+    val selectedId = state.selectedProvider?.id
+    if (!selectedId.isNullOrBlank() && selectedId != "none") {
+        cleanCredential(state.debridApiKey)?.let { merged[selectedId] = it }
+    }
+    return merged.map { (provider, apiKey) ->
+        PandaDebridConnection(provider = provider, apiKey = apiKey, enabled = true)
+    }
+}
+
+internal fun primaryPandaDebridConnection(state: PandaSetupUiState): PandaDebridConnection {
+    val connections = pandaDebridConnectionsForPayload(state)
+    val selectedId = state.selectedProvider?.id
+    return connections.firstOrNull { it.provider == selectedId }
+        ?: connections.firstOrNull()
+        ?: PandaDebridConnection(provider = "none", apiKey = "", enabled = false)
+}
+
 private val FALLBACK_DOWNLOAD_CLIENT_FIELDS: Map<String, DownloadClientFieldSpec> = mapOf(
     "none" to DownloadClientFieldSpec(emptyList()),
     "premiumize" to DownloadClientFieldSpec(listOf("apiKey"), cloud = true),
@@ -245,6 +275,20 @@ class PandaSetupViewModel(
         "torbox" to IntegrationSecretKey.DEBRID_API_KEY_TORBOX,
     )
 
+    private suspend fun readStoredDebridApiKeys(): Map<String, String> {
+        val entries = linkedMapOf<String, String>()
+        for ((providerId, secretKey) in providerSecretKeys) {
+            val key = if (providerId == "torbox") {
+                integrationSecretStore.syncTorBoxCredentialPair()
+                integrationSecretStore.findTorBoxCredential()
+            } else {
+                integrationSecretStore.get(secretKey)
+            }
+            cleanCredential(key)?.let { entries[providerId] = it }
+        }
+        return entries
+    }
+
     init {
         _state.update { it.copy(sourceProviders = allSourceProviders, enabledSources = defaultEnabledSources) }
         loadSchema()
@@ -318,13 +362,24 @@ class PandaSetupViewModel(
                 val merged = listOf(noDebridProvider) +
                     apiProviders.filter { it.id != "none" } +
                     allPandaProviders.filter { it.id !in apiIds && it.id != "none" }
-                _state.update { it.copy(providers = merged, providersLoading = false) }
+                val storedDebridKeys = readStoredDebridApiKeys()
+                _state.update {
+                    it.copy(
+                        providers = merged,
+                        providersLoading = false,
+                        debridApiKeys = it.debridApiKeys + storedDebridKeys,
+                        authConnected = it.authConnected || storedDebridKeys.isNotEmpty(),
+                    )
+                }
             } catch (e: Exception) {
+                val storedDebridKeys = readStoredDebridApiKeys()
                 // Fallback to hardcoded list if API is unreachable
                 _state.update {
                     it.copy(
                         providers = listOf(noDebridProvider) + allPandaProviders,
                         providersLoading = false,
+                        debridApiKeys = it.debridApiKeys + storedDebridKeys,
+                        authConnected = it.authConnected || storedDebridKeys.isNotEmpty(),
                     )
                 }
             }
@@ -359,13 +414,14 @@ class PandaSetupViewModel(
         }
         val defaultAuth = if ("oauth" in provider.authMethods) "oauth" else "apikey"
         _state.update {
+            val existingKey = cleanCredential(it.debridApiKeys[provider.id])
             it.copy(
                 selectedProvider = provider,
                 authMethod = defaultAuth,
-                authConnected = false,
-                existingCredentialDetected = false,
-                debridApiKey = "",
-                apiKeyInput = "",
+                authConnected = it.debridApiKeys.isNotEmpty(),
+                existingCredentialDetected = existingKey != null,
+                debridApiKey = existingKey.orEmpty(),
+                apiKeyInput = existingKey.orEmpty(),
                 deviceCode = null,
                 error = null,
                 currentStep = PandaSetupStep.AUTH,
@@ -381,10 +437,15 @@ class PandaSetupViewModel(
             val existingKey = integrationSecretStore.get(secretKey)
             if (!existingKey.isNullOrBlank()) {
                 _state.update {
+                    val clean = cleanCredential(existingKey) ?: return@update it
+                    val updatedKeys = it.debridApiKeys + (providerId to clean)
+                    val isSelected = it.selectedProvider?.id == providerId
                     it.copy(
-                        debridApiKey = existingKey,
-                        authConnected = true,
-                        existingCredentialDetected = true,
+                        debridApiKeys = updatedKeys,
+                        debridApiKey = if (isSelected) clean else it.debridApiKey,
+                        apiKeyInput = if (isSelected) clean else it.apiKeyInput,
+                        authConnected = updatedKeys.isNotEmpty(),
+                        existingCredentialDetected = isSelected || it.existingCredentialDetected,
                     )
                 }
             }
@@ -411,6 +472,13 @@ class PandaSetupViewModel(
             "torbox" -> DebridServiceType.TORBOX
             else -> null
         }
+    }
+
+    private fun providerIdForDebridType(provider: DebridServiceType): String = when (provider) {
+        DebridServiceType.REAL_DEBRID -> "realdebrid"
+        DebridServiceType.ALL_DEBRID -> "alldebrid"
+        DebridServiceType.PREMIUMIZE -> "premiumize"
+        DebridServiceType.TORBOX -> "torbox"
     }
 
     fun startOAuth() {
@@ -479,9 +547,14 @@ class PandaSetupViewModel(
                             )
                         }
                         _state.update {
+                            val providerId = providerIdForDebridType(debridType)
+                            val updatedKeys = it.debridApiKeys + (providerId to result.apiKey)
+                            val isSelected = it.selectedProvider?.id == providerId
                             it.copy(
-                                debridApiKey = result.apiKey,
-                                authConnected = true,
+                                debridApiKey = if (isSelected) result.apiKey else it.debridApiKey,
+                                apiKeyInput = if (isSelected) result.apiKey else it.apiKeyInput,
+                                debridApiKeys = updatedKeys,
+                                authConnected = updatedKeys.isNotEmpty(),
                                 deviceCode = null,
                             )
                         }
@@ -534,11 +607,20 @@ class PandaSetupViewModel(
             _state.update { it.copy(authLoading = true, error = null) }
             try {
                 pandaClient.validateApiKey(provider.id, key)
+                toDebridServiceType(provider.id)?.let { debridType ->
+                    integrationSecretStore.put(debridSecretKey(debridType), key)
+                    if (debridType == DebridServiceType.TORBOX) {
+                        integrationSecretStore.syncTorBoxCredentialPair(key)
+                    }
+                }
                 _state.update {
+                    val updatedKeys = it.debridApiKeys + (provider.id to key)
                     it.copy(
                         debridApiKey = key,
-                        authConnected = true,
+                        debridApiKeys = updatedKeys,
+                        authConnected = updatedKeys.isNotEmpty(),
                         authLoading = false,
+                        existingCredentialDetected = false,
                     )
                 }
             } catch (e: Exception) {
@@ -562,10 +644,12 @@ class PandaSetupViewModel(
             }
         }
         _state.update {
+            val updatedKeys = it.debridApiKeys - provider.id
             it.copy(
+                debridApiKeys = updatedKeys,
                 debridApiKey = "",
                 apiKeyInput = "",
-                authConnected = false,
+                authConnected = updatedKeys.isNotEmpty(),
                 existingCredentialDetected = false,
                 deviceCode = null,
                 authLoading = false,
@@ -777,7 +861,9 @@ class PandaSetupViewModel(
             try {
                 val s = _state.value
                 println("TORVE PANDA ┃ saveConfigAndInstall start: editMode=${s.isEditMode} hasToken=${s.pandaToken != null} hasConfigId=${!s.configId.isNullOrBlank()} hasMgmtToken=${s.hasManagementToken}")
-                val provider = s.selectedProvider ?: throw Exception("No provider selected")
+                s.selectedProvider ?: throw Exception("No provider selected")
+                val debridConnections = pandaDebridConnectionsForPayload(s)
+                val primaryDebrid = primaryPandaDebridConnection(s)
 
                 // Filter out the blank placeholder rows (type=="none" or empty key)
                 // before emitting. The first surviving row also drives the legacy
@@ -825,7 +911,13 @@ class PandaSetupViewModel(
                     // Send `null` instead so the server keeps what it has.
                     fun keepOrNull(value: String, key: String): String? =
                         if (value.isBlank() && key in s.serverHasSecrets) null else value
-                    val patchedDebridApiKey = keepOrNull(s.debridApiKey, "debrid_api_key")
+                    val hasServerDebridSecret = "debrid_api_key" in s.serverHasSecrets ||
+                        s.serverHasSecrets.any { it.startsWith("debrid_api_key_") }
+                    val patchedDebridApiKey = if (primaryDebrid.apiKey.isBlank() && hasServerDebridSecret) {
+                        null
+                    } else {
+                        keepOrNull(primaryDebrid.apiKey, "debrid_api_key")
+                    }
                     val patchedUsenetPassword = keepOrNull(s.usenetPassword, "usenet_password")
                     val patchedDownloadClientPassword =
                         keepOrNull(s.downloadClientPassword, "download_client_password")
@@ -862,8 +954,9 @@ class PandaSetupViewModel(
                         configId = configId,
                         bearerToken = bearer,
                         patch = PandaConfigPatch(
-                            debridService = provider.id,
+                            debridService = primaryDebrid.provider,
                             debridApiKey = patchedDebridApiKey,
+                            debridConnections = debridConnections.takeIf { it.isNotEmpty() },
                             enabledProviders = s.enabledSources.toList(),
                             maxQuality = s.maxQuality,
                             qualityProfile = s.qualityProfile,
@@ -904,8 +997,9 @@ class PandaSetupViewModel(
                 } else {
                     val configPayload = PandaConfigPayload(
                         enabledProviders = s.enabledSources.toList(),
-                        debridService = provider.id,
-                        debridApiKey = s.debridApiKey,
+                        debridService = primaryDebrid.provider,
+                        debridApiKey = primaryDebrid.apiKey,
+                        debridConnections = debridConnections,
                         maxQuality = s.maxQuality,
                         qualityProfile = s.qualityProfile,
                         // Emit both legacy scalar + preferred array.
@@ -1030,21 +1124,17 @@ class PandaSetupViewModel(
                     }
                 }
 
-                // Also store debrid credentials locally so Torve's streaming services work
-                val debridType = toDebridServiceType(provider.id)
-                if (debridType != null && s.debridApiKey.isNotBlank()) {
-                    val secretKey = when (debridType) {
-                        DebridServiceType.REAL_DEBRID -> IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID
-                        DebridServiceType.ALL_DEBRID -> IntegrationSecretKey.DEBRID_API_KEY_ALL_DEBRID
-                        DebridServiceType.PREMIUMIZE -> IntegrationSecretKey.DEBRID_API_KEY_PREMIUMIZE
-                        DebridServiceType.TORBOX -> IntegrationSecretKey.DEBRID_API_KEY_TORBOX
-                    }
-                    integrationSecretStore.put(secretKey, s.debridApiKey)
+                // Also store every debrid credential locally so Torve's direct
+                // streaming services can use the same keys Panda has.
+                debridConnections.forEach { connection ->
+                    val debridType = toDebridServiceType(connection.provider) ?: return@forEach
+                    val secretKey = debridSecretKey(debridType)
+                    integrationSecretStore.put(secretKey, connection.apiKey)
                     if (debridType == DebridServiceType.TORBOX) {
-                        integrationSecretStore.syncTorBoxCredentialPair(s.debridApiKey)
+                        integrationSecretStore.syncTorBoxCredentialPair(connection.apiKey)
                     }
-                    prefsRepo.setString("debrid_provider", debridType.name)
                 }
+                toDebridServiceType(primaryDebrid.provider)?.let { prefsRepo.setString("debrid_provider", it.name) }
                 prefsRepo.setString("panda_download_client", s.downloadClient)
                 prefsRepo.setString("panda_usenet_provider", if (s.enableUsenet) s.usenetProvider else "none")
                 prefsRepo.setString(
@@ -1229,8 +1319,13 @@ class PandaSetupViewModel(
                     attempts++
                 }
 
-                val matchedProvider = _state.value.providers.find { it.id == config.debridService }
-                    ?: if (config.debridService == "none") noDebridProvider else null
+                val primarySavedProviderId = if (config.debridService != "none") {
+                    config.debridService
+                } else {
+                    config.debridConnections.firstOrNull { it.provider != "none" }?.provider ?: "none"
+                }
+                val matchedProvider = _state.value.providers.find { it.id == primarySavedProviderId }
+                    ?: if (primarySavedProviderId == "none") noDebridProvider else null
 
                 val hasMgmt = !managementToken.isNullOrBlank()
                 // Recovery flow retired (Panda commit 972fa4a, 2026-04-27):
@@ -1294,6 +1389,25 @@ class PandaSetupViewModel(
                     "debrid_api_key",
                     secret(secrets?.debridApiKey),
                 )
+                val localDebridApiKeys = readStoredDebridApiKeys()
+                val secretDebridApiKeys = secrets?.debridConnections.orEmpty()
+                    .mapNotNull { row -> cleanCredential(row.apiKey)?.let { row.provider to it } }
+                    .toMap()
+                val cleanedDebridApiKeys = linkedMapOf<String, String>().apply {
+                    putAll(localDebridApiKeys)
+                    config.debridConnections.forEach { row ->
+                        val key = cleanSecret(
+                            row.apiKey,
+                            "debrid_api_key_${row.provider}",
+                            secretDebridApiKeys[row.provider] ?: localDebridApiKeys[row.provider],
+                        )
+                        cleanCredential(key)?.let { put(row.provider, it) }
+                    }
+                    if (config.debridService != "none") {
+                        cleanCredential(cleanDebridApiKey)?.let { put(config.debridService, it) }
+                    }
+                    putAll(secretDebridApiKeys)
+                }
                 val cachedUsenetPassword = if (config.usenetProvider != "none") {
                     integrationSecretStore.get(
                         IntegrationSecretKey.PANDA_USENET_PASSWORD,
@@ -1368,6 +1482,14 @@ class PandaSetupViewModel(
                             }
                         }
                     }
+                    secrets.debridConnections.forEach { row ->
+                        val key = cleanCredential(row.apiKey) ?: return@forEach
+                        val dtype = toDebridServiceType(row.provider) ?: return@forEach
+                        integrationSecretStore.put(debridSecretKey(dtype), key)
+                        if (dtype == DebridServiceType.TORBOX) {
+                            integrationSecretStore.syncTorBoxCredentialPair(key)
+                        }
+                    }
                     secret(secrets.usenetPassword)?.let { v ->
                         if (config.usenetProvider != "none") {
                             integrationSecretStore.put(
@@ -1432,14 +1554,18 @@ class PandaSetupViewModel(
                         hasManagementToken = hasMgmt,
                         editRequiresRecovery = false,
                         selectedProvider = matchedProvider,
-                        debridApiKey = cleanDebridApiKey,
+                        debridApiKey = cleanedDebridApiKeys[primarySavedProviderId] ?: cleanDebridApiKey,
+                        apiKeyInput = cleanedDebridApiKeys[primarySavedProviderId] ?: cleanDebridApiKey,
+                        debridApiKeys = cleanedDebridApiKeys,
                         // Treat "no debrid" saved configs as "auth satisfied" so the save
                         // button in edit mode stays enabled. A redacted debrid_api_key
                         // (which we cleared above) still counts as "auth connected" —
                         // the server has a key, the user just can't read it.
                         authConnected = config.debridService == "none" ||
+                            cleanedDebridApiKeys.isNotEmpty() ||
                             cleanDebridApiKey.isNotBlank() ||
-                            "debrid_api_key" in secretsOnServer,
+                            "debrid_api_key" in secretsOnServer ||
+                            secretsOnServer.any { key -> key.startsWith("debrid_api_key_") },
                         enabledSources = config.enabledProviders.toSet().ifEmpty { defaultEnabledSources },
                         maxQuality = config.maxQuality,
                         qualityProfile = config.qualityProfile,

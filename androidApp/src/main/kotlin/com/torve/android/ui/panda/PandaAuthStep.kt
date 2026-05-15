@@ -70,6 +70,8 @@ fun PandaAuthStep(
     val provider = state.selectedProvider ?: return
     val context = LocalContext.current
     val supportsOAuth = "oauth" in provider.authMethods
+    val providerConnected = state.debridApiKeys[provider.id]?.isNotBlank() == true ||
+        (state.selectedProvider?.id == provider.id && state.debridApiKey.isNotBlank())
 
     Column(
         modifier = Modifier
@@ -84,8 +86,37 @@ fun PandaAuthStep(
         )
         Spacer(Modifier.height(16.dp))
 
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            state.providers.filter { it.id != "none" }.forEach { item ->
+                val selected = item.id == provider.id
+                val connected = state.debridApiKeys[item.id]?.isNotBlank() == true
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (selected) Amber.copy(alpha = 0.15f) else Gunmetal)
+                        .clickable { viewModel.selectProvider(item) }
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(item.name, color = Snow, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            if (connected) "API key saved" else "Not connected",
+                            color = Silver,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    if (connected) {
+                        Icon(Icons.Default.Check, null, tint = Amber, modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+
         // Connected state
-        if (state.authConnected) {
+        if (providerConnected) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -130,7 +161,7 @@ fun PandaAuthStep(
                     )
                 }
             }
-            return
+            Spacer(Modifier.height(16.dp))
         }
 
         // Auth method toggle (only if provider supports both)
@@ -236,7 +267,9 @@ private fun OAuthSection(
 
     // Auto-start OAuth when entering this section
     LaunchedEffect(state.selectedProvider?.id) {
-        if (deviceCode == null && !state.authLoading && !state.authConnected) {
+        val providerId = state.selectedProvider?.id
+        val providerConnected = providerId != null && state.debridApiKeys[providerId]?.isNotBlank() == true
+        if (deviceCode == null && !state.authLoading && !providerConnected) {
             viewModel.startOAuth()
         }
     }

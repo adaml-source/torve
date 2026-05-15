@@ -246,48 +246,92 @@ private fun ProviderStep(state: PandaSetupUiState, viewModel: PandaSetupViewMode
 
 @Composable
 private fun AuthStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel) {
-    val provider = state.selectedProvider ?: return
+    val provider = state.selectedProvider ?: state.providers.firstOrNull { it.id != "none" } ?: return
+    val debridProviders = state.providers.filter { it.id != "none" }
     val supportsOAuth = "oauth" in provider.authMethods
+    val providerConnected = state.debridApiKeys[provider.id]?.isNotBlank() == true ||
+        (state.selectedProvider?.id == provider.id && state.debridApiKey.isNotBlank())
 
     TorveSectionCard(
-        title = ds("Connect %1\$s").format(provider.name),
-        supportingText = if (state.authConnected) {
-            if (state.existingCredentialDetected) {
-                ds("Using existing %1\$s credentials.").format(provider.name)
-            } else {
-                ds("Connected.")
-            }
-        } else {
-            ds("Authorize Panda to use your %1\$s account.").format(provider.name)
-        },
+        title = ds("Debrid connections"),
+        supportingText = ds("Add every debrid account you want to use. The selected provider remains the primary fallback."),
         trailing = {
-            if (state.authConnected) {
-                TorveBadge(ds("Connected"), tone = TorveBadgeTone.Success)
+            if (state.debridApiKeys.isNotEmpty()) {
+                TorveBadge("${state.debridApiKeys.size} ${ds("connected")}", tone = TorveBadgeTone.Success)
             }
         },
     ) {
-        if (state.authConnected) return@TorveSectionCard
-
-        if (supportsOAuth) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TorveFilterChip(
-                    text = ds("Browser sign-in"),
-                    selected = state.authMethod == "oauth",
-                    onClick = { viewModel.setAuthMethod("oauth") },
-                )
-                TorveFilterChip(
-                    text = ds("API key"),
-                    selected = state.authMethod == "apikey",
-                    onClick = { viewModel.setAuthMethod("apikey") },
-                )
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.Top) {
+            Column(modifier = Modifier.width(260.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                debridProviders.forEach { item ->
+                    val selected = provider.id == item.id
+                    val connected = state.debridApiKeys[item.id]?.isNotBlank() == true
+                    val colors = TorveDesktopThemeTokens.colors
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (selected) colors.accentContainer else colors.fieldSurface)
+                            .clickable { viewModel.selectProvider(item) }
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(item.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                if (connected) ds("API key saved") else ds("Not connected"),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.textMuted,
+                            )
+                        }
+                        if (connected) {
+                            TorveBadge(ds("Ready"), tone = TorveBadgeTone.Success)
+                        }
+                    }
+                }
             }
-            Spacer(Modifier.height(12.dp))
-        }
 
-        if (state.authMethod == "oauth" && supportsOAuth) {
-            OAuthSection(state, viewModel)
-        } else {
-            ApiKeySection(state, viewModel)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(provider.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    if (providerConnected) {
+                        TorveBadge(ds("Connected"), tone = TorveBadgeTone.Success)
+                    }
+                }
+
+                if (providerConnected) {
+                    TorveBanner(
+                        title = ds("Credential saved"),
+                        description = ds("This provider is available to Panda and Torve clients. Verify again to replace the key."),
+                        tone = TorveBannerTone.Success,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TorveSecondaryButton(text = ds("Re-authenticate"), onClick = { viewModel.reconnectSelectedDebrid() })
+                        TorveGhostButton(text = ds("Disconnect"), onClick = { viewModel.disconnectSelectedDebrid() })
+                    }
+                }
+
+                if (supportsOAuth) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TorveFilterChip(
+                            text = ds("Browser sign-in"),
+                            selected = state.authMethod == "oauth",
+                            onClick = { viewModel.setAuthMethod("oauth") },
+                        )
+                        TorveFilterChip(
+                            text = ds("API key"),
+                            selected = state.authMethod == "apikey",
+                            onClick = { viewModel.setAuthMethod("apikey") },
+                        )
+                    }
+                }
+
+                if (state.authMethod == "oauth" && supportsOAuth) {
+                    OAuthSection(state, viewModel)
+                } else {
+                    ApiKeySection(state, viewModel)
+                }
+            }
         }
     }
 }
@@ -295,7 +339,9 @@ private fun AuthStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel) {
 @Composable
 private fun OAuthSection(state: PandaSetupUiState, viewModel: PandaSetupViewModel) {
     LaunchedEffect(state.selectedProvider?.id) {
-        if (state.deviceCode == null && !state.authLoading && !state.authConnected) {
+        val providerId = state.selectedProvider?.id
+        val providerConnected = providerId != null && state.debridApiKeys[providerId]?.isNotBlank() == true
+        if (state.deviceCode == null && !state.authLoading && !providerConnected) {
             viewModel.startOAuth()
         }
     }
