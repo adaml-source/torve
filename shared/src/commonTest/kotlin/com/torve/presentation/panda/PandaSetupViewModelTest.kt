@@ -158,6 +158,74 @@ class PandaSetupViewModelTest {
         assertEquals("rd-key", primaryPandaDebridConnection(state).apiKey)
     }
 
+    @Test
+    fun selectedProviderKeyDoesNotBleedFromAnotherProvider() {
+        val state = PandaSetupUiState(
+            selectedProvider = PandaProvider("torbox", "TorBox", listOf("apikey")),
+            debridApiKey = "tb-key",
+            debridApiKeys = mapOf(
+                "realdebrid" to "rd-key",
+                "torbox" to "tb-key",
+            ),
+        )
+
+        assertEquals("tb-key", state.debridApiKeys[state.selectedProvider?.id])
+        assertFalse(state.debridApiKey == state.debridApiKeys["realdebrid"])
+        assertEquals("torbox", primaryPandaDebridConnection(state).provider)
+    }
+
+    @Test
+    fun selectedProviderReplacementPreservesOtherConnections() {
+        val state = PandaSetupUiState(
+            selectedProvider = PandaProvider("torbox", "TorBox", listOf("apikey")),
+            debridApiKey = "tb-key-new",
+            debridApiKeys = mapOf(
+                "realdebrid" to "rd-key",
+                "torbox" to "tb-key-old",
+            ),
+        )
+
+        val connections = pandaDebridConnectionsForPayload(state).associate { it.provider to it.apiKey }
+
+        assertEquals("rd-key", connections["realdebrid"])
+        assertEquals("tb-key-new", connections["torbox"])
+        assertEquals(2, connections.size)
+    }
+
+    @Test
+    fun removedProviderDropsOnlyThatConnectionFromPayload() {
+        val state = PandaSetupUiState(
+            selectedProvider = PandaProvider("realdebrid", "Real-Debrid", listOf("oauth", "apikey")),
+            debridApiKey = "",
+            debridApiKeys = mapOf(
+                "torbox" to "tb-key",
+                "premiumize" to "pm-key",
+            ),
+        )
+
+        val connections = pandaDebridConnectionsForPayload(state)
+
+        assertEquals(setOf("torbox", "premiumize"), connections.map { it.provider }.toSet())
+        assertFalse(connections.any { it.provider == "realdebrid" })
+    }
+
+    @Test
+    fun redactedDebridKeysAreNeverSentBackInPayload() {
+        val state = PandaSetupUiState(
+            selectedProvider = PandaProvider("realdebrid", "Real-Debrid", listOf("oauth", "apikey")),
+            debridApiKey = "[redacted]",
+            debridApiKeys = mapOf(
+                "realdebrid" to "[redacted]",
+                "torbox" to "tb-key",
+            ),
+        )
+
+        val connections = pandaDebridConnectionsForPayload(state)
+
+        assertEquals(listOf("torbox"), connections.map { it.provider })
+        assertEquals("tb-key", connections.single().apiKey)
+    }
+
     // ── Save state ──
 
     @Test
