@@ -136,6 +136,7 @@ private enum class TvStreamSourceFilter(val label: String) {
 }
 
 private const val TV_USENET_PREPARING_NOTIFICATION_TAG = "tv_usenet_preparing"
+private const val TV_STREAM_RESOLVING_NOTIFICATION_TAG = "tv_stream_resolving"
 
 private sealed class DownloadAction {
     data object None : DownloadAction()
@@ -148,6 +149,7 @@ fun TvDetailsScreen(
     type: String,
     id: Int,
     autoPlay: Boolean,
+    focusEpisodes: Boolean = false,
     railFocusRequester: FocusRequester,
     onBack: () -> Unit,
     onPlayResolved: (
@@ -210,6 +212,7 @@ fun TvDetailsScreen(
     val firstStreamFocusRequester = remember { FocusRequester() }
     var restoreFocusAfterPreparingCancel by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    var episodesFocusHandled by rememberSaveable(type, id, focusEpisodes) { mutableStateOf(false) }
     var tvStreamFilter by remember { mutableStateOf(TvStreamSourceFilter.ALL) }
     val filteredStreams = remember(state.streams, tvStreamFilter) {
         when (tvStreamFilter) {
@@ -316,6 +319,7 @@ fun TvDetailsScreen(
     LaunchedEffect(state.streamsError) {
         state.streamsError?.let { error ->
             TvNotificationQueue.clear(TV_USENET_PREPARING_NOTIFICATION_TAG)
+            TvNotificationQueue.clear(TV_STREAM_RESOLVING_NOTIFICATION_TAG)
             TvNotificationQueue.post(resolveTvDetailMessage(context, error), NotificationType.ERROR)
         }
     }
@@ -323,6 +327,7 @@ fun TvDetailsScreen(
     LaunchedEffect(state.resolveError) {
         state.resolveError?.let { error ->
             TvNotificationQueue.clear(TV_USENET_PREPARING_NOTIFICATION_TAG)
+            TvNotificationQueue.clear(TV_STREAM_RESOLVING_NOTIFICATION_TAG)
             TvNotificationQueue.post(resolveTvDetailMessage(context, error), NotificationType.ERROR)
         }
     }
@@ -375,6 +380,31 @@ fun TvDetailsScreen(
             kotlinx.coroutines.delay(50)
             runCatching { firstStreamFocusRequester.requestFocus() }
         }
+    }
+
+    LaunchedEffect(
+        focusEpisodes,
+        state.mediaItem?.id,
+        state.mediaItem?.seasons?.size,
+        state.seasonDetail?.episodes?.size,
+    ) {
+        val item = state.mediaItem ?: return@LaunchedEffect
+        if (!focusEpisodes || episodesFocusHandled || item.type != MediaType.SERIES || item.seasons.isEmpty()) {
+            return@LaunchedEffect
+        }
+        kotlinx.coroutines.delay(220)
+        val episodesIndex = 1 +
+            (if (!item.tagline.isNullOrBlank()) 1 else 0) +
+            (if (item.genres.isNotEmpty()) 1 else 0) +
+            (if (
+                item.ratings.withFallbackTmdbScore(item.rating) != null &&
+                settingsState.ratingPrefs.showRatingsOnDetailPage
+            ) 2 else 0) +
+            (if (!item.overview.isNullOrBlank()) 1 else 0) +
+            (if (!item.director.isNullOrBlank()) 1 else 0) +
+            (if (item.cast.isNotEmpty()) 1 else 0)
+        runCatching { listState.animateScrollToItem(episodesIndex.coerceAtLeast(0)) }
+        episodesFocusHandled = true
     }
 
     LaunchedEffect(
@@ -444,6 +474,7 @@ fun TvDetailsScreen(
         val resolved = state.resolvedStream ?: return@LaunchedEffect
         val media = state.mediaItem ?: return@LaunchedEffect
         TvNotificationQueue.clear(TV_USENET_PREPARING_NOTIFICATION_TAG)
+        TvNotificationQueue.clear(TV_STREAM_RESOLVING_NOTIFICATION_TAG)
         // Don't navigate to player if this resolve was for a download action
         if (pendingDownloadAction !is DownloadAction.None) return@LaunchedEffect
 
@@ -1012,6 +1043,7 @@ fun TvDetailsScreen(
                         },
                         onFirstContentRequester = onFirstContentRequester,
                         onContentFocused = onContentFocused,
+                        autoFocusFirstSeason = focusEpisodes && episodesFocusHandled,
                     )
                 }
             }
@@ -1323,6 +1355,8 @@ fun TvDetailsScreen(
                                     TvNotificationQueue.post(
                                         context.getString(R.string.stream_resolving),
                                         NotificationType.INFO,
+                                        tag = TV_STREAM_RESOLVING_NOTIFICATION_TAG,
+                                        durationMs = null,
                                     )
                                 }
                                 // USENET_NZBDAV rows go through the shared

@@ -23,4 +23,14 @@ class NetworkErrorSanitizerTest {
         assertEquals("Movies could not be loaded. Please try again.", catalogContentLoadErrorMessage("movie"))
         assertEquals("TV Shows could not be loaded. Please try again.", catalogContentLoadErrorMessage("tv"))
     }
+
+    @Test
+    fun homeMessageExplainsSecureConnectionFailures() {
+        val cause = IllegalStateException("Home content is unavailable. Upstream failures: trending_movies=Chain validation failed")
+
+        assertEquals(
+            "Home could not connect securely. Check the device date and time, then try again.",
+            homeContentLoadErrorMessage(cause),
+        )
+    }
 }

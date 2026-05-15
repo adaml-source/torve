@@ -69,6 +69,7 @@ import com.torve.domain.repository.MetadataRepository
 import com.torve.domain.repository.AddonRepository
 import com.torve.domain.repository.ChannelRepository
 import com.torve.domain.repository.DownloadRepository
+import com.torve.domain.repository.MediaFavoritesRepository
 import com.torve.domain.repository.PreferencesRepository
 import com.torve.domain.repository.StreamRepository
 import com.torve.domain.repository.WatchHistoryRepository
@@ -114,6 +115,7 @@ private data class DesktopRuntime(
     val setupWizardViewModel: SetupWizardViewModel,
     val pandaSetupViewModel: PandaSetupViewModel,
     val watchlistViewModel: WatchlistViewModel,
+    val mediaFavoritesRepository: MediaFavoritesRepository,
     val downloadViewModel: DownloadViewModel,
     val downloadCatalogueViewModel: DownloadCatalogueViewModel,
     val downloadManager: DesktopDownloadManager,
@@ -570,6 +572,7 @@ private fun bootstrapDesktop(): BootstrapState {
         val setupWizardViewModel = koin.get<SetupWizardViewModel>()
         val pandaSetupViewModel = koin.get<PandaSetupViewModel>()
         val watchlistViewModel = koin.get<WatchlistViewModel>()
+        val mediaFavoritesRepository = koin.get<MediaFavoritesRepository>()
         val downloadViewModel = koin.get<DownloadViewModel>()
         val downloadCatalogueViewModel = koin.get<DownloadCatalogueViewModel>()
         val metadataRepository = koin.get<MetadataRepository>()
@@ -668,6 +671,7 @@ private fun bootstrapDesktop(): BootstrapState {
             setupWizardViewModel = setupWizardViewModel,
             pandaSetupViewModel = pandaSetupViewModel,
             watchlistViewModel = watchlistViewModel,
+            mediaFavoritesRepository = mediaFavoritesRepository,
             downloadViewModel = downloadViewModel,
             downloadCatalogueViewModel = downloadCatalogueViewModel,
             downloadManager = downloadManager,
@@ -1025,6 +1029,7 @@ private fun DesktopRuntimePane(
             channelRepository = runtime.channelRepository,
             addonRepository = runtime.addonRepository,
             watchlistViewModel = runtime.watchlistViewModel,
+            mediaFavoritesRepository = runtime.mediaFavoritesRepository,
             downloadViewModel = runtime.downloadViewModel,
             downloadCatalogueViewModel = runtime.downloadCatalogueViewModel,
             downloadManager = runtime.downloadManager,

@@ -66,6 +66,7 @@ import com.torve.desktop.ui.v2.components.rememberCachedBitmap
 import com.torve.domain.model.Episode
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
+import com.torve.domain.model.favoriteMediaKey
 import com.torve.presentation.watchlist.WatchlistUiState
 import java.awt.Desktop
 import java.net.URI
@@ -77,6 +78,7 @@ import java.net.URI
 fun V2DetailPage(
     detailState: DesktopSearchDetailUiState,
     watchlistState: WatchlistUiState,
+    favoriteKeys: Set<String> = emptySet(),
     playerState: DesktopPlayerUiState,
     onBack: () -> Unit,
     onPlay: (MediaItem) -> Unit,
@@ -88,6 +90,7 @@ fun V2DetailPage(
     canDownloadMovies: Boolean = true,
     canDownloadShows: Boolean = true,
     onToggleWatchlist: (MediaItem) -> Unit,
+    onToggleFavorite: (MediaItem) -> Unit = {},
     onSelectSeason: (Int) -> Unit,
     onSelectEpisode: (Episode) -> Unit,
     onOpenRelated: (MediaItem) -> Unit,
@@ -97,6 +100,7 @@ fun V2DetailPage(
     val colors = TorveDesktopThemeTokens.colors
     val item = detailState.detailItem
     val isInWatchlist = item != null && watchlistState.watchlistIds.contains(item.id)
+    val isFavorite = item != null && favoriteKeys.contains(item.favoriteMediaKey())
     var showDownloadMenu by remember(item?.id, detailState.selectedSeasonNumber, detailState.selectedEpisodeNumber) {
         mutableStateOf(false)
     }
@@ -125,6 +129,8 @@ fun V2DetailPage(
         val allEpisodesLabel = ds("All Episodes")
         val watchlistLabel = ds("Watchlist")
         val inWatchlistLabel = ds("In Watchlist")
+        val favoritesLabel = ds("Favorites")
+        val inFavoritesLabel = ds("In Favorites")
         val votesTemplate = ds("%1\$d votes")
         val trailerFallbackTitle = ds("Trailer")
 
@@ -279,6 +285,7 @@ fun V2DetailPage(
                                     }
                                 }
                                 TorveGhostButton(text = if (isInWatchlist) inWatchlistLabel else watchlistLabel, onClick = { onToggleWatchlist(item) })
+                                TorveGhostButton(text = if (isFavorite) inFavoritesLabel else favoritesLabel, onClick = { onToggleFavorite(item) })
                             }
                         }
                     }

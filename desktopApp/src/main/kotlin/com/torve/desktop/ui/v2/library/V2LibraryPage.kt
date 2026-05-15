@@ -55,6 +55,7 @@ import com.torve.domain.model.DownloadGroup
 import com.torve.domain.model.DownloadGroupType
 import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.MediaItem
+import com.torve.domain.model.MediaType
 import com.torve.domain.model.PlaylistType
 import com.torve.domain.repository.ChannelRepository
 import com.torve.presentation.download.DownloadCatalogueUiState
@@ -69,6 +70,7 @@ private enum class LibraryViewTab(
     val label: String,
 ) {
     OVERVIEW("Overview"),
+    FAVORITES("Favorites"),
     VOD("IPTV VOD"),
     STORED("Stored Media"),
     LOCAL("Local Files"),
@@ -87,6 +89,7 @@ fun V2LibraryPage(
     downloadState: DownloadUiState,
     downloadCatalogueState: DownloadCatalogueUiState,
     desktopDownloadState: DesktopDownloadManagerState,
+    favoriteItems: List<MediaItem> = emptyList(),
     scrollState: ScrollState,
     onPlay: (MediaItem) -> Unit,
     onOpenDetail: (MediaItem) -> Unit,
@@ -105,6 +108,7 @@ fun V2LibraryPage(
     val heroBackdropUrl = remember(homeState) {
         homeState.continueWatching.firstOrNull()?.backdropUrl
             ?: homeState.watchlistItems.firstOrNull()?.backdropUrl
+            ?: favoriteItems.firstOrNull()?.backdropUrl
             ?: homeState.recentlyWatched.firstOrNull()?.backdropUrl
     }
     val heroBackdrop = rememberCachedBitmap(heroBackdropUrl)
@@ -156,8 +160,13 @@ fun V2LibraryPage(
                 when (selectedTab) {
                     LibraryViewTab.OVERVIEW -> LibraryOverview(
                         homeState = homeState,
+                        favoriteItems = favoriteItems,
                         onOpenDetail = onOpenDetail,
                         onSeeAll = onSeeAll,
+                    )
+                    LibraryViewTab.FAVORITES -> LibraryFavoritesView(
+                        favoriteItems = favoriteItems,
+                        onOpenDetail = onOpenDetail,
                     )
                     LibraryViewTab.VOD -> DesktopVodLibraryView(
                         channelRepository = channelRepository,
@@ -188,9 +197,30 @@ fun V2LibraryPage(
 @Composable
 private fun LibraryOverview(
     homeState: HomeUiState,
+    favoriteItems: List<MediaItem>,
     onOpenDetail: (MediaItem) -> Unit,
     onSeeAll: (SeeAllRequest) -> Unit,
 ) {
+    if (favoriteItems.isNotEmpty()) {
+        V2Shelf(
+            "Favorites",
+            modifier = Modifier.padding(start = 72.dp),
+        ) {
+            favoriteItems.take(20).forEach { item ->
+                V2PosterCard(
+                    title = item.title,
+                    imageUrl = item.posterUrl,
+                    modifier = Modifier.width(160.dp),
+                    year = item.year?.toString(),
+                    rating = item.rating?.let { String.format("%.1f", it) },
+                    backdropUrl = item.backdropUrl,
+                    overview = item.overview,
+                    onClick = { onOpenDetail(item) },
+                )
+            }
+        }
+    }
+
     if (homeState.continueWatching.isNotEmpty()) {
         V2Shelf(
             "Continue Watching",
@@ -264,6 +294,7 @@ private fun LibraryOverview(
 
     if (homeState.continueWatching.isEmpty() &&
         homeState.watchlistItems.isEmpty() &&
+        favoriteItems.isEmpty() &&
         homeState.recentlyWatched.isEmpty() &&
         !homeState.isLoading
     ) {
@@ -273,6 +304,63 @@ private fun LibraryOverview(
             style = MaterialTheme.typography.bodyLarge,
             color = TorveDesktopThemeTokens.colors.textSecondary,
         )
+    }
+}
+
+@Composable
+private fun LibraryFavoritesView(
+    favoriteItems: List<MediaItem>,
+    onOpenDetail: (MediaItem) -> Unit,
+) {
+    val movies = remember(favoriteItems) { favoriteItems.filter { it.type == MediaType.MOVIE } }
+    val shows = remember(favoriteItems) { favoriteItems.filter { it.type == MediaType.SERIES } }
+
+    Column(
+        modifier = Modifier.padding(start = 72.dp, end = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        if (favoriteItems.isEmpty()) {
+            TorvePlaceholderState(
+                title = ds("No favorites yet"),
+                description = ds("Movies and shows you favorite on any device appear here."),
+                emoji = "FAV",
+            )
+            return@Column
+        }
+
+        if (movies.isNotEmpty()) {
+            V2Shelf(ds("Movies")) {
+                movies.forEach { item ->
+                    V2PosterCard(
+                        title = item.title,
+                        imageUrl = item.posterUrl,
+                        modifier = Modifier.width(160.dp),
+                        year = item.year?.toString(),
+                        rating = item.rating?.let { String.format("%.1f", it) },
+                        backdropUrl = item.backdropUrl,
+                        overview = item.overview,
+                        onClick = { onOpenDetail(item) },
+                    )
+                }
+            }
+        }
+
+        if (shows.isNotEmpty()) {
+            V2Shelf(ds("TV Shows")) {
+                shows.forEach { item ->
+                    V2PosterCard(
+                        title = item.title,
+                        imageUrl = item.posterUrl,
+                        modifier = Modifier.width(160.dp),
+                        year = item.year?.toString(),
+                        rating = item.rating?.let { String.format("%.1f", it) },
+                        backdropUrl = item.backdropUrl,
+                        overview = item.overview,
+                        onClick = { onOpenDetail(item) },
+                    )
+                }
+            }
+        }
     }
 }
 

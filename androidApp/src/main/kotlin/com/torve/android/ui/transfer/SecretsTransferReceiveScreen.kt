@@ -64,6 +64,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.torve.android.R
+import com.torve.android.session.PostSignInRefresh
 import com.torve.domain.transfer.SecretCategory
 import com.torve.domain.transfer.TransferApplyResult
 import com.torve.domain.transfer.TransferDecryptResult
@@ -91,9 +92,11 @@ fun SecretsTransferReceiveScreen(
     onBack: () -> Unit,
     largeQr: Boolean = false,
 ) {
+    val context = LocalContext.current
     val state by viewModel.state.collectAsState()
     val scope = rememberCoroutineScope()
     val closeRequester = remember { FocusRequester() }
+    var fullRefreshStarted by remember { mutableStateOf(false) }
 
     fun closeReceiveScreen() {
         viewModel.cancel()
@@ -105,6 +108,21 @@ fun SecretsTransferReceiveScreen(
         if (largeQr) {
             delay(80)
             runCatching { closeRequester.requestFocus() }
+        }
+    }
+    LaunchedEffect(state) {
+        if (state is ReceiverState.Imported) {
+            val koin = org.koin.java.KoinJavaComponent.getKoin()
+            runCatching {
+                koin.get<com.torve.presentation.settings.SettingsViewModel>().refreshSettings()
+            }
+            runCatching {
+                koin.get<com.torve.presentation.channels.ChannelsViewModel>().loadPlaylists()
+                koin.get<com.torve.presentation.channels.ChannelsViewModel>().loadFavorites()
+            }
+            runCatching {
+                koin.get<com.torve.presentation.watchlist.WatchlistViewModel>().loadWatchlist()
+            }
         }
     }
     DisposableEffect(viewModel) { onDispose { viewModel.cancel() } }
@@ -165,7 +183,31 @@ fun SecretsTransferReceiveScreen(
                     onEnvelopeChanged = viewModel::updateEnvelopeText,
                     onImport = { scope.launch { viewModel.acceptEnvelopeJson() } },
                 )
-                is ReceiverState.Imported -> ImportedBlock(s.result)
+                is ReceiverState.Imported -> ImportedBlock(
+                    result = s.result,
+                    refreshStarted = fullRefreshStarted,
+                    onRefreshAll = {
+                        fullRefreshStarted = true
+                        scope.launch {
+                            val koin = org.koin.java.KoinJavaComponent.getKoin()
+                            runCatching {
+                                koin.get<com.torve.presentation.session.AccountSessionCoordinator>()
+                                    .refreshAccountDataAfterCredentialTransfer()
+                            }
+                            runCatching {
+                                koin.get<com.torve.presentation.settings.SettingsViewModel>().refreshSettings()
+                            }
+                            runCatching {
+                                koin.get<com.torve.presentation.channels.ChannelsViewModel>().loadPlaylists()
+                                koin.get<com.torve.presentation.channels.ChannelsViewModel>().loadFavorites()
+                            }
+                            runCatching {
+                                koin.get<com.torve.presentation.watchlist.WatchlistViewModel>().loadWatchlist()
+                            }
+                            PostSignInRefresh.enqueueContentWarmupAfterAccountActivation(context)
+                        }
+                    },
+                )
                 ReceiverState.Expired -> ExpiredBlock(
                     onRestart = { scope.launch { viewModel.restart() } },
                 )
@@ -409,12 +451,34 @@ private fun AdvancedPasteSection(
 }
 
 @Composable
-private fun ImportedBlock(result: TransferImportResult.Success) {
-    StatusBanner(
-        title = stringResource(R.string.transfer_credentials_imported),
-        body = importDescription(result),
-        tone = TransferBannerTone.Success,
-    )
+private fun ImportedBlock(
+    result: TransferImportResult.Success,
+    refreshStarted: Boolean,
+    onRefreshAll: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        StatusBanner(
+            title = stringResource(R.string.transfer_credentials_imported),
+            body = importDescription(result),
+            tone = TransferBannerTone.Success,
+        )
+        Button(
+            onClick = onRefreshAll,
+            enabled = !refreshStarted,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            if (refreshStarted) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.transfer_refresh_all_after_import_running))
+            } else {
+                Text(stringResource(R.string.transfer_refresh_all_after_import))
+            }
+        }
+    }
 }
 
 @Composable

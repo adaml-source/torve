@@ -32,7 +32,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -42,6 +41,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -64,6 +65,7 @@ import com.torve.presentation.panda.PandaSetupViewModel
 fun PandaAuthStep(
     state: PandaSetupUiState,
     viewModel: PandaSetupViewModel,
+    entryFocusRequester: FocusRequester? = null,
 ) {
     val provider = state.selectedProvider ?: return
     val context = LocalContext.current
@@ -119,6 +121,7 @@ fun PandaAuthStep(
                         text = stringResource(R.string.storage_reauth_action),
                         onClick = { viewModel.reconnectSelectedDebrid() },
                         modifier = Modifier.weight(1f),
+                        entryFocusRequester = entryFocusRequester,
                     )
                     FocusRingOutlinedButton(
                         text = stringResource(R.string.common_disconnect),
@@ -136,23 +139,16 @@ fun PandaAuthStep(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                FilterChip(
+                FocusRingFilterChip(
                     selected = state.authMethod == "oauth",
                     onClick = { viewModel.setAuthMethod("oauth") },
-                    label = { Text(stringResource(R.string.panda_setup_auth_oauth)) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = Amber.copy(alpha = 0.2f),
-                        selectedLabelColor = Amber,
-                    ),
+                    label = stringResource(R.string.panda_setup_auth_oauth),
+                    entryFocusRequester = entryFocusRequester,
                 )
-                FilterChip(
+                FocusRingFilterChip(
                     selected = state.authMethod == "apikey",
                     onClick = { viewModel.setAuthMethod("apikey") },
-                    label = { Text(stringResource(R.string.panda_setup_auth_apikey)) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = Amber.copy(alpha = 0.2f),
-                        selectedLabelColor = Amber,
-                    ),
+                    label = stringResource(R.string.panda_setup_auth_apikey),
                 )
             }
             Spacer(Modifier.height(16.dp))
@@ -161,7 +157,11 @@ fun PandaAuthStep(
         if (state.authMethod == "oauth" && supportsOAuth) {
             OAuthSection(state, viewModel)
         } else {
-            ApiKeySection(state, viewModel)
+            ApiKeySection(
+                state = state,
+                viewModel = viewModel,
+                entryFocusRequester = if (supportsOAuth) null else entryFocusRequester,
+            )
         }
 
         // Error
@@ -177,21 +177,52 @@ private fun FocusRingOutlinedButton(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    entryFocusRequester: FocusRequester? = null,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
     OutlinedButton(
         onClick = onClick,
-        modifier = modifier.border(
-            width = if (isFocused) 2.dp else 1.dp,
-            color = if (isFocused) Amber else Steel.copy(alpha = 0.45f),
-            shape = RoundedCornerShape(12.dp),
-        ),
+        modifier = modifier
+            .then(entryFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
+            .border(
+                width = if (isFocused) 2.dp else 1.dp,
+                color = if (isFocused) Amber else Steel.copy(alpha = 0.45f),
+                shape = RoundedCornerShape(12.dp),
+            ),
         shape = RoundedCornerShape(12.dp),
         interactionSource = interactionSource,
     ) {
         Text(text, color = if (isFocused) Amber else Snow, fontWeight = FontWeight.SemiBold)
     }
+}
+
+@Composable
+private fun FocusRingFilterChip(
+    selected: Boolean,
+    onClick: () -> Unit,
+    label: String,
+    entryFocusRequester: FocusRequester? = null,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label) },
+        modifier = Modifier
+            .then(entryFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
+            .border(
+                width = if (isFocused) 2.dp else 1.dp,
+                color = if (isFocused) Amber else Steel.copy(alpha = 0.45f),
+                shape = RoundedCornerShape(8.dp),
+            ),
+        interactionSource = interactionSource,
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = Amber.copy(alpha = 0.2f),
+            selectedLabelColor = Amber,
+        ),
+    )
 }
 
 @Composable
@@ -305,13 +336,15 @@ private fun OAuthSection(
 private fun ApiKeySection(
     state: PandaSetupUiState,
     viewModel: PandaSetupViewModel,
+    entryFocusRequester: FocusRequester? = null,
 ) {
     Column {
-        OutlinedTextField(
+        PandaEditableOutlinedTextField(
             value = state.apiKeyInput,
             onValueChange = { viewModel.setApiKeyInput(it) },
             placeholder = { Text(stringResource(R.string.panda_setup_auth_enter_key)) },
             modifier = Modifier.fillMaxWidth(),
+            entryFocusRequester = entryFocusRequester,
             singleLine = true,
             shape = RoundedCornerShape(12.dp),
             colors = OutlinedTextFieldDefaults.colors(

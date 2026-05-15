@@ -14,6 +14,8 @@ import androidx.work.workDataOf
 import com.torve.android.background.BackgroundWork
 import com.torve.data.auth.AuthClient
 import com.torve.data.catalog.CatalogTopCacheWorker
+import com.torve.data.panda.NzbIndexerRow
+import com.torve.data.panda.PandaApiClient
 import com.torve.data.usenet.NewznabClient
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
@@ -51,52 +53,132 @@ class CatalogWarmupWorker(
     override suspend fun doWork(): Result {
         return try {
             val authClient: AuthClient = getKoin().get()
-            val user = authClient.getAuthenticatedUser() ?: return Result.success()
+            val user = authClient.getAuthenticatedUser()
+            val userId = user?.id ?: PUBLIC_CATALOG_RAILS_USER_ID
             val lightweight = inputData.getBoolean(KEY_LIGHTWEIGHT, false)
+            val credentialImport = inputData.getBoolean(KEY_CREDENTIAL_IMPORT, false)
+            val missingOnly = inputData.getBoolean(KEY_MISSING_ONLY, false)
+            val visibleProgress = inputData.getBoolean(KEY_VISIBLE_PROGRESS, true)
             val localSettingsRepo: DeviceLocalSettingsRepository = getKoin().get()
-            if (lightweight && isLightweightWarmupFresh(localSettingsRepo, user.id)) {
+            if (lightweight && missingOnly && user == null && hasPublicCatalogWarmupCache(localSettingsRepo)) {
+                println("CATALOG_WARMUP: public catalog cache present, skipping startup warmup")
+                return Result.success()
+            }
+            if (lightweight && missingOnly && user != null && hasLightweightWarmupCache(localSettingsRepo, userId)) {
+                println("CATALOG_WARMUP: lightweight cache present, skipping startup warmup")
+                return Result.success()
+            }
+            if (lightweight && user == null && isPublicCatalogWarmupFresh(localSettingsRepo)) {
+                println("CATALOG_WARMUP: public catalog cache fresh, skipping foreground warmup")
+                return Result.success()
+            }
+            if (lightweight && user != null && isLightweightWarmupFresh(localSettingsRepo, userId)) {
                 println("CATALOG_WARMUP: lightweight cache fresh, skipping foreground warmup")
                 return Result.success()
             }
 
-            publishProgress("Preparing cached content", 0.05f)
+            val blockNavigation = !lightweight
+            suspend fun progress(label: String, progress: Float) {
+                if (visibleProgress) {
+                    publishProgress(label, progress, blockNavigation)
+                }
+            }
+
+            progress("Preparing cached content", 0.05f)
             if (!lightweight) {
-                publishProgress("Refreshing home cache", 0.12f)
+                progress("Refreshing home cache", 0.12f)
                 runCatching { getKoin().get<CatalogTopCacheWorker>().runNow() }
             }
-            publishProgress("Preparing movies and shows", 0.18f)
-            runCatching { warmCatalogRailsBootstrap(user.id) }
-            publishProgress("Preparing live TV", 0.35f)
-            runCatching {
-                warmLiveBootstrap(
-                    userId = user.id,
-                    maxShelfCategories = if (lightweight) IMMEDIATE_LIVE_SHELF_CATEGORIES else FULL_LIVE_SHELF_CATEGORIES,
-                    includeEpg = true,
-                )
-            }
-            publishProgress("Preparing VOD", 0.62f)
-            runCatching {
-                warmVodBootstrap(
-                    userId = user.id,
-                    maxProviderCategories = if (lightweight) IMMEDIATE_VOD_PROVIDER_CATEGORIES else FULL_VOD_PROVIDER_CATEGORIES,
-                    includePinnedShelves = !lightweight,
-                )
-            }
-            if (!lightweight) {
-                publishProgress("Preparing sports", 0.82f)
-                runCatching { warmSportsBootstrap(user.id) }
-            }
-            publishProgress("Cached content ready", 1f)
-            if (lightweight) {
+            progress("Preparing movies and shows", 0.18f)
+            runCatching { warmCatalogRailsBootstrap(userId) }
+            if (user == null) {
+                progress("Cached content ready", 1f)
                 localSettingsRepo.setString(
-                    lightweightWarmupLastSuccessKey(user.id),
+                    lightweightWarmupLastSuccessKey(userId),
                     System.currentTimeMillis().toString(),
                 )
+                return Result.success()
             }
+            if (!lightweight) {
+                progress("Refreshing IPTV and VOD", 0.28f)
+                runCatching { refreshPlaylistsForWarmup(catalogOnly = credentialImport) }
+            }
+            progress("Preparing live TV", 0.42f)
+            val liveShelfLimit = when {
+                lightweight -> IMMEDIATE_LIVE_SHELF_CATEGORIES
+                credentialImport -> CREDENTIAL_IMPORT_LIVE_SHELF_CATEGORIES
+                else -> FULL_LIVE_SHELF_CATEGORIES
+            }
+            runCatching {
+                warmLiveBootstrap(
+                    userId = userId,
+                    maxShelfCategories = liveShelfLimit,
+                    includeEpg = !credentialImport,
+                )
+            }
+            progress("Preparing VOD", 0.66f)
+            val vodCategoryLimit = if (lightweight || credentialImport) {
+                IMMEDIATE_VOD_PROVIDER_CATEGORIES
+            } else {
+                FULL_VOD_PROVIDER_CATEGORIES
+            }
+            runCatching {
+                warmVodBootstrap(
+                    userId = userId,
+                    maxProviderCategories = vodCategoryLimit,
+                    includePinnedShelves = !lightweight && !credentialImport,
+                )
+            }
+            if (!lightweight && !credentialImport) {
+                progress("Preparing Panda integrations", 0.78f)
+                runCatching { hydratePandaSecretsForWarmup(authClient) }
+                progress("Preparing sports", 0.82f)
+                runCatching { warmSportsBootstrap(userId) }
+            } else if (credentialImport) {
+                progress("Preparing integrations", 0.82f)
+                runCatching { hydratePandaSecretsForWarmup(authClient) }
+            }
+            progress("Cached content ready", 1f)
+            localSettingsRepo.setString(
+                lightweightWarmupLastSuccessKey(userId),
+                System.currentTimeMillis().toString(),
+            )
             Result.success()
         } catch (_: Exception) {
             Result.retry()
         }
+    }
+
+    private suspend fun refreshPlaylistsForWarmup(catalogOnly: Boolean) = withContext(Dispatchers.IO) {
+        val channelRepo: ChannelRepository = getKoin().get()
+        val playlists = channelRepo.getPlaylists()
+        if (playlists.isEmpty()) return@withContext
+        val startedAt = System.currentTimeMillis()
+        println("CATALOG_WARMUP: refreshing playlists count=${playlists.size} catalogOnly=$catalogOnly")
+        playlists.forEach { playlist ->
+            val playlistStartedAt = System.currentTimeMillis()
+            runCatching {
+                if (catalogOnly) channelRepo.refreshPlaylistCatalog(playlist.id)
+                else channelRepo.refreshPlaylist(playlist.id)
+            }
+                .onSuccess {
+                    println(
+                        "CATALOG_WARMUP: playlist refresh done id=${playlist.id} type=${playlist.type} " +
+                            "catalogOnly=$catalogOnly durationMs=${System.currentTimeMillis() - playlistStartedAt}",
+                    )
+                }
+                .onFailure { err ->
+                    println(
+                        "CATALOG_WARMUP: playlist refresh failed id=${playlist.id} type=${playlist.type} " +
+                            "error=${err.message}",
+                    )
+                }
+            delay(WORK_YIELD_DELAY_MS)
+        }
+        println(
+            "CATALOG_WARMUP: playlist refresh batch done count=${playlists.size} " +
+                "catalogOnly=$catalogOnly durationMs=${System.currentTimeMillis() - startedAt}",
+        )
     }
 
     private suspend fun warmCatalogRailsBootstrap(userId: String) = withContext(Dispatchers.IO) {
@@ -165,12 +247,12 @@ class CatalogWarmupWorker(
         println("CATALOG_WARMUP: catalog rails saved mediaType=$mediaType rails=${rails.size}")
     }
 
-    private suspend fun publishProgress(label: String, progress: Float) {
+    private suspend fun publishProgress(label: String, progress: Float, blockNavigation: Boolean = true) {
         setProgress(
             workDataOf(
                 BackgroundWork.KEY_LABEL to label,
                 BackgroundWork.KEY_PROGRESS to progress.coerceIn(0f, 1f),
-                BackgroundWork.KEY_BLOCK_NAVIGATION to true,
+                BackgroundWork.KEY_BLOCK_NAVIGATION to blockNavigation,
             ),
         )
     }
@@ -196,6 +278,42 @@ class CatalogWarmupWorker(
             firstLiveCategory != null &&
             localSettingsRepo.getString(liveDisplayShelfBootstrapKey(userId, selectedPlaylistId, firstLiveCategory)) != null
         return hasCatalog && hasLiveCategories && hasFirstLiveShelf
+    }
+
+    private suspend fun hasLightweightWarmupCache(
+        localSettingsRepo: DeviceLocalSettingsRepository,
+        userId: String,
+    ): Boolean {
+        val hasCatalog = localSettingsRepo.getString(catalogRailsBootstrapKey(userId, "movie")) != null &&
+            localSettingsRepo.getString(catalogRailsBootstrapKey(userId, "tv")) != null
+        val hasLiveCategories = localSettingsRepo.getString("channels_bootstrap_categories_$userId") != null
+        val selectedPlaylistId = localSettingsRepo.getString(channelsBootstrapSelectedPlaylistKey(userId))
+        val firstLiveCategory = localSettingsRepo.getString("channels_bootstrap_categories_$userId")
+            ?.lineSequence()
+            ?.mapNotNull { line -> line.substringBefore('\t').takeIf { it.isNotBlank() } }
+            ?.firstOrNull()
+        val hasFirstLiveShelf = selectedPlaylistId != null &&
+            firstLiveCategory != null &&
+            localSettingsRepo.getString(liveDisplayShelfBootstrapKey(userId, selectedPlaylistId, firstLiveCategory)) != null
+        return hasCatalog && hasLiveCategories && hasFirstLiveShelf
+    }
+
+    private suspend fun isPublicCatalogWarmupFresh(
+        localSettingsRepo: DeviceLocalSettingsRepository,
+    ): Boolean {
+        val lastSuccess = localSettingsRepo.getString(lightweightWarmupLastSuccessKey(PUBLIC_CATALOG_RAILS_USER_ID))
+            ?.toLongOrNull()
+            ?: return false
+        val ageMs = System.currentTimeMillis() - lastSuccess
+        if (ageMs > LIGHTWEIGHT_WARMUP_FRESH_MS) return false
+        return hasPublicCatalogWarmupCache(localSettingsRepo)
+    }
+
+    private suspend fun hasPublicCatalogWarmupCache(
+        localSettingsRepo: DeviceLocalSettingsRepository,
+    ): Boolean {
+        return localSettingsRepo.getString(catalogRailsBootstrapKey(PUBLIC_CATALOG_RAILS_USER_ID, "movie")) != null &&
+            localSettingsRepo.getString(catalogRailsBootstrapKey(PUBLIC_CATALOG_RAILS_USER_ID, "tv")) != null
     }
 
     private suspend fun warmLiveBootstrap(
@@ -437,6 +555,85 @@ class CatalogWarmupWorker(
         println("CATALOG_WARMUP: sports bootstrap saved items=${items.size}")
     }
 
+    private suspend fun hydratePandaSecretsForWarmup(authClient: AuthClient) = withContext(Dispatchers.IO) {
+        val secretStore: IntegrationSecretStore = getKoin().get()
+        val prefs: PreferencesRepository = getKoin().get()
+        val pandaClient: PandaApiClient = getKoin().get()
+        val pandaToken = secretStore.get(IntegrationSecretKey.PANDA_TOKEN)
+            ?.takeIf { it.isNotBlank() }
+            ?: return@withContext
+        val torveToken = authClient.getValidAccessToken()?.takeIf { it.isNotBlank() }
+
+        val manifestRecord = runCatching { pandaClient.getConfig(pandaToken) }
+            .onFailure { println("CATALOG_WARMUP: Panda manifest hydrate failed: ${it.message}") }
+            .getOrNull() ?: return@withContext
+        val configId = manifestRecord.configId?.takeIf { it.isNotBlank() } ?: return@withContext
+
+        val record = if (torveToken != null) {
+            runCatching { pandaClient.getConfigAsManager(configId, torveToken) }
+                .onFailure { println("CATALOG_WARMUP: Panda owner hydrate failed: ${it.message}") }
+                .getOrNull() ?: manifestRecord
+        } else {
+            manifestRecord
+        }
+        val config = record.config ?: return@withContext
+        val secrets = if (torveToken != null) {
+            runCatching { pandaClient.getConfigSecrets(configId, torveToken) }
+                .onFailure { println("CATALOG_WARMUP: Panda secrets hydrate failed: ${it.message}") }
+                .getOrNull()
+        } else {
+            null
+        }
+
+        val rows = config.nzbIndexers.ifEmpty {
+            if (config.nzbIndexer != "none") {
+                listOf(
+                    NzbIndexerRow(
+                        type = config.nzbIndexer,
+                        url = config.nzbIndexerUrl,
+                        apiKey = config.nzbIndexerApiKey,
+                    ),
+                )
+            } else {
+                emptyList()
+            }
+        }
+        var cachedIndexerKeys = 0
+        rows.forEach { row ->
+            if (row.type == "none") return@forEach
+            val apiKeyFromServer = secrets?.nzbIndexers
+                ?.firstOrNull { it.type == row.type && it.url == row.url }
+                ?.apiKey
+                ?.takeIf { it.isNotBlank() }
+            val apiKeyFromRow = row.apiKey
+                .takeUnless { isRedactedSecret(it) }
+                ?.takeIf { it.isNotBlank() }
+            val legacyApiKey = secrets?.nzbIndexerApiKey?.takeIf { it.isNotBlank() }
+            val apiKey = apiKeyFromServer ?: apiKeyFromRow ?: legacyApiKey
+            if (apiKey.isNullOrBlank()) return@forEach
+            val subKey = "${row.type}|${row.url}"
+            secretStore.put(IntegrationSecretKey.PANDA_INDEXER_API_KEY, apiKey, subKey)
+            secretStore.put(IntegrationSecretKey.PANDA_INDEXER_API_KEY, apiKey, row.type)
+            cachedIndexerKeys++
+        }
+
+        val firstConfigured = rows.firstOrNull { it.type != "none" }
+        if (firstConfigured != null) {
+            prefs.setString("panda_nzb_indexer", firstConfigured.type)
+            prefs.setString("panda_nzb_indexer_url", firstConfigured.url)
+            val firstKey = secretStore.get(
+                IntegrationSecretKey.PANDA_INDEXER_API_KEY,
+                "${firstConfigured.type}|${firstConfigured.url}",
+            )
+            if (!firstKey.isNullOrBlank()) {
+                prefs.setString("panda_nzb_indexer_api_key", firstKey)
+            }
+        }
+        prefs.setString("panda_download_client", config.downloadClient)
+        prefs.setString("panda_usenet_provider", if (config.enableUsenet) config.usenetProvider else "none")
+        println("CATALOG_WARMUP: Panda hydrated indexerRows=${rows.size} cachedIndexerKeys=$cachedIndexerKeys")
+    }
+
     private suspend fun resolveFirstIndexer(
         secretStore: IntegrationSecretStore,
         prefs: PreferencesRepository,
@@ -466,13 +663,19 @@ class CatalogWarmupWorker(
     }
 
     companion object {
-        private const val WORK_NAME = "catalog_warmup_worker"
-        private const val IMMEDIATE_WORK_NAME = "catalog_warmup_worker_immediate"
+        private const val LEGACY_WORK_NAME = "catalog_warmup_worker"
+        private const val LEGACY_IMMEDIATE_WORK_NAME = "catalog_warmup_worker_immediate"
+        private const val WORK_NAME = "catalog_warmup_worker_silent_v2"
+        private const val IMMEDIATE_WORK_NAME = "catalog_warmup_worker_immediate_v2"
         private const val KEY_LIGHTWEIGHT = "lightweight"
+        private const val KEY_CREDENTIAL_IMPORT = "credential_import"
+        private const val KEY_MISSING_ONLY = "missing_only"
+        private const val KEY_VISIBLE_PROGRESS = "visible_progress"
         private const val CATALOG_RAIL_LIMIT = 24
-        private const val IMMEDIATE_LIVE_SHELF_CATEGORIES = 10_000
-        private const val FULL_LIVE_SHELF_CATEGORIES = 10_000
-        private const val IMMEDIATE_VOD_PROVIDER_CATEGORIES = 16
+        private const val IMMEDIATE_LIVE_SHELF_CATEGORIES = 8
+        private const val CREDENTIAL_IMPORT_LIVE_SHELF_CATEGORIES = 12
+        private const val FULL_LIVE_SHELF_CATEGORIES = 48
+        private const val IMMEDIATE_VOD_PROVIDER_CATEGORIES = 8
         private const val FULL_VOD_PROVIDER_CATEGORIES = 16
         private const val WORK_YIELD_DELAY_MS = 35L
         private const val MAX_CATEGORY_ITEMS = 160
@@ -497,17 +700,25 @@ class CatalogWarmupWorker(
                 6, TimeUnit.HOURS,
             )
                 .setConstraints(periodicConstraints)
-                .addTag(BackgroundWork.TAG_HEAVY_PRELOAD)
+                .setInputData(workDataOf(KEY_VISIBLE_PROGRESS to false))
                 .build()
             val immediate = OneTimeWorkRequestBuilder<CatalogWarmupWorker>()
                 .setConstraints(immediateConstraints)
-                .setInputData(workDataOf(KEY_LIGHTWEIGHT to true))
-                .addTag(BackgroundWork.TAG_HEAVY_PRELOAD)
+                .setInputData(
+                    workDataOf(
+                        KEY_LIGHTWEIGHT to true,
+                        KEY_MISSING_ONLY to true,
+                        KEY_VISIBLE_PROGRESS to false,
+                    ),
+                )
                 .build()
             val manager = WorkManager.getInstance(context)
+            manager.cancelUniqueWork(LEGACY_WORK_NAME)
+            manager.cancelUniqueWork(LEGACY_IMMEDIATE_WORK_NAME)
+            manager.cancelUniqueWork("${LEGACY_IMMEDIATE_WORK_NAME}_refresh")
             manager.enqueueUniquePeriodicWork(
                 WORK_NAME,
-                ExistingPeriodicWorkPolicy.UPDATE,
+                ExistingPeriodicWorkPolicy.KEEP,
                 periodic,
             )
             manager.enqueueUniqueWork(
@@ -517,9 +728,66 @@ class CatalogWarmupWorker(
             )
         }
 
+        fun refreshNow(
+            context: Context,
+            lightweight: Boolean = false,
+            visibleProgress: Boolean = true,
+            missingOnly: Boolean = false,
+        ) {
+            enqueueImmediateRefresh(
+                context = context,
+                lightweight = lightweight,
+                credentialImport = false,
+                visibleProgress = visibleProgress,
+                missingOnly = missingOnly,
+            )
+        }
+
+        fun refreshAfterCredentialImport(context: Context) {
+            enqueueImmediateRefresh(
+                context = context,
+                lightweight = false,
+                credentialImport = true,
+                visibleProgress = true,
+                missingOnly = false,
+            )
+        }
+
+        private fun enqueueImmediateRefresh(
+            context: Context,
+            lightweight: Boolean,
+            credentialImport: Boolean,
+            visibleProgress: Boolean,
+            missingOnly: Boolean,
+        ) {
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .build()
+            val requestBuilder = OneTimeWorkRequestBuilder<CatalogWarmupWorker>()
+                .setConstraints(constraints)
+                .setInputData(
+                    workDataOf(
+                        KEY_LIGHTWEIGHT to lightweight,
+                        KEY_CREDENTIAL_IMPORT to credentialImport,
+                        KEY_MISSING_ONLY to missingOnly,
+                        KEY_VISIBLE_PROGRESS to visibleProgress,
+                    ),
+                )
+            if (visibleProgress) {
+                requestBuilder.addTag(BackgroundWork.TAG_HEAVY_PRELOAD)
+            }
+            val request = requestBuilder.build()
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                "${IMMEDIATE_WORK_NAME}_refresh",
+                ExistingWorkPolicy.REPLACE,
+                request,
+            )
+        }
+
         fun cancel(context: Context) {
             WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
             WorkManager.getInstance(context).cancelUniqueWork(IMMEDIATE_WORK_NAME)
+            WorkManager.getInstance(context).cancelUniqueWork("${IMMEDIATE_WORK_NAME}_refresh")
         }
     }
 }
@@ -529,6 +797,13 @@ private data class WarmIndexer(
     val url: String,
     val apiKey: String,
 )
+
+private fun isRedactedSecret(value: String?): Boolean {
+    val trimmed = value?.trim().orEmpty()
+    return trimmed.isBlank() ||
+        trimmed.equals("[redacted]", ignoreCase = true) ||
+        trimmed.equals("redacted", ignoreCase = true)
+}
 
 private enum class WarmVodMediaSection(val mediaType: MediaType) {
     MOVIES(MediaType.MOVIE),

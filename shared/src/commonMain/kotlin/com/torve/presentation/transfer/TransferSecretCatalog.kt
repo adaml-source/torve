@@ -79,11 +79,15 @@ object TransferSecretCatalog {
         TransferCategorySpec(
             category = SecretCategory.PANDA,
             title = "Panda / Usenet",
-            description = "Panda token and NzbDAV credentials. Indexed sub-key secrets are not included yet.",
+            description = "Panda token, NzbDAV credentials, and locally cached Panda provider keys.",
             keys = listOf(
                 IntegrationSecretKey.PANDA_TOKEN,
                 IntegrationSecretKey.NZBDAV_BASE_URL,
                 IntegrationSecretKey.NZBDAV_API_KEY,
+                IntegrationSecretKey.PANDA_INDEXER_API_KEY,
+                IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_API_KEY,
+                IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_PASSWORD,
+                IntegrationSecretKey.PANDA_USENET_PASSWORD,
             ),
         ),
     )

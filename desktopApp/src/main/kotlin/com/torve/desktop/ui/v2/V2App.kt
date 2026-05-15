@@ -79,8 +79,10 @@ import com.torve.desktop.ui.v2.shows.V2ShowsPage
 import com.torve.presentation.seeall.SeeAllViewModel
 import com.torve.domain.model.Episode
 import com.torve.domain.model.MediaItem
+import com.torve.domain.model.toMediaItem
 import com.torve.domain.repository.AddonRepository
 import com.torve.domain.repository.ChannelRepository
+import com.torve.domain.repository.MediaFavoritesRepository
 import com.torve.domain.repository.MetadataRepository
 import com.torve.presentation.catalog.CatalogViewModel
 import com.torve.presentation.channels.ChannelsViewModel
@@ -110,6 +112,7 @@ fun V2App(
     channelRepository: ChannelRepository,
     addonRepository: AddonRepository,
     watchlistViewModel: WatchlistViewModel,
+    mediaFavoritesRepository: MediaFavoritesRepository,
     downloadViewModel: DownloadViewModel,
     downloadCatalogueViewModel: DownloadCatalogueViewModel,
     downloadManager: DesktopDownloadManager,
@@ -298,6 +301,7 @@ fun V2App(
     val searchDetailState by searchController.state.collectAsState()
     val libraryDetailState by libraryDetailController.state.collectAsState()
     val watchlistState by watchlistViewModel.state.collectAsState()
+    val mediaFavoritesState by mediaFavoritesRepository.state.collectAsState()
     val downloadState by downloadViewModel.state.collectAsState()
     val downloadCatalogueState by downloadCatalogueViewModel.state.collectAsState()
     val desktopDownloadState by downloadManager.state.collectAsState()
@@ -309,7 +313,10 @@ fun V2App(
     // Fetch access-state once per signed-in session so the device-limit overlay
     // can fire when the backend reports `device_cap_reached`.
     LaunchedEffect(authState.user?.id) {
-        if (authState.user != null) deviceGovernanceViewModel.fetchAccessState()
+        if (authState.user != null) {
+            deviceGovernanceViewModel.fetchAccessState()
+            mediaFavoritesRepository.refresh(force = true)
+        }
     }
 
     // EPG prefetch - keep the live guide fresh without the user having to
@@ -1064,7 +1071,7 @@ fun V2App(
                                 DesktopDetailControllerKey.SEARCH -> searchDetailState
                             }
                             V2DetailPage(
-                                detailState = routeState, watchlistState = watchlistState, playerState = playerState,
+                                detailState = routeState, watchlistState = watchlistState, favoriteKeys = mediaFavoritesState.favoriteKeys, playerState = playerState,
                                 onBack = { fullDetailRoute = null },
                                 onPlay = { item ->
                                     val isSeries = item.type == com.torve.domain.model.MediaType.SERIES
@@ -1109,6 +1116,7 @@ fun V2App(
                                     }
                                 },
                                 onToggleWatchlist = { item -> watchlistViewModel.toggleWatchlist(item) },
+                                onToggleFavorite = { item -> mediaFavoritesRepository.toggleFavorite(item) },
                                 onSelectSeason = { detailControllerFor(route.controllerKey).selectSeason(it) },
                                 onSelectEpisode = { episode -> detailControllerFor(route.controllerKey).selectEpisode(episode.episodeNumber) },
                                 onOpenRelated = { detailControllerFor(route.controllerKey).selectResult(it); fullDetailRoute = route.copy(item = it) },
@@ -1247,6 +1255,7 @@ fun V2App(
                                 downloadState = downloadState,
                                 downloadCatalogueState = downloadCatalogueState,
                                 desktopDownloadState = desktopDownloadState,
+                                favoriteItems = mediaFavoritesState.items.map { it.toMediaItem() },
                                 scrollState = libraryScroll,
                                 onPlay = { launchPlayback(it) },
                                 onOpenDetail = { openFullDetail(it) },

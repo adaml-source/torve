@@ -35,6 +35,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -42,6 +43,7 @@ import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import com.torve.android.session.PostSignInRefresh
 import com.torve.android.sync.SyncCoordinator
 import com.torve.data.auth.AuthClient
 import com.torve.presentation.session.AccountSessionCoordinator
@@ -60,6 +62,7 @@ fun LoginScreen(
     syncCoordinator: SyncCoordinator = koinInject(),
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var isRegisterMode by remember { mutableStateOf(false) }
     var isForgotPasswordMode by remember { mutableStateOf(false) }
     var email by remember { mutableStateOf("") }
@@ -215,14 +218,15 @@ fun LoginScreen(
                         } else {
                             authClient.login(email, password)
                         }
-                        isLoading = false
                         if (result.success) {
                             if (isRegisterMode) {
                                 successMessage = accountCreatedText
                                 delay(2000)
                             }
                             val bootstrap = accountSessionCoordinator.bootstrapAfterSignIn()
+                            PostSignInRefresh.enqueueAfterAccountRestore(context, accountSessionCoordinator)
                             syncCoordinator.refreshDevices()
+                            isLoading = false
                             if (bootstrap.deviceLimitReached) {
                                 error = bootstrap.error
                                     ?: deviceLimitText
@@ -234,6 +238,7 @@ fun LoginScreen(
                                 onLoginSuccess(isRegisterMode)
                             }
                         } else {
+                            isLoading = false
                             error = result.error
                         }
                     }

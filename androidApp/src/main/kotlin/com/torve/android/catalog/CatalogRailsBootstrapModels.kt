@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 internal const val CATALOG_RAILS_BOOTSTRAP_PREFIX = "catalog_rails_bootstrap_v1_"
+internal const val PUBLIC_CATALOG_RAILS_USER_ID = "__public_catalog__"
 
 internal val CatalogRailsBootstrapJson = Json {
     ignoreUnknownKeys = true

@@ -90,6 +90,7 @@ internal object TvSettingsItemIds {
     const val ABOUT_BUILD = "settings/about/build"
     const val ABOUT_STATS = "settings/about/stats"
     const val ABOUT_SUPPORT = "settings/about/support"
+    const val ABOUT_REPORT_ISSUE = "settings/about/report_issue"
     const val ABOUT_TERMS = "settings/about/terms"
     const val ABOUT_LEGAL = "settings/about/legal"
 }

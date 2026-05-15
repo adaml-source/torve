@@ -77,14 +77,22 @@ fun TvEpisodePicker(
     onToggleEpisodeWatched: (season: Int, episode: Int) -> Unit = { _, _ -> },
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
+    autoFocusFirstSeason: Boolean = false,
 ) {
     val seasonsLabel = stringResource(R.string.tv_episodes_title)
+    val firstSeasonRequester = remember { FocusRequester() }
     val firstEpisodeRequester = remember { FocusRequester() }
     val episodesListState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     // Reset episode scroll whenever the season changes
     androidx.compose.runtime.LaunchedEffect(selectedSeason) {
         episodesListState.scrollToItem(0)
+    }
+    androidx.compose.runtime.LaunchedEffect(autoFocusFirstSeason) {
+        if (autoFocusFirstSeason) {
+            kotlinx.coroutines.delay(120)
+            runCatching { firstSeasonRequester.requestFocus() }
+        }
     }
     Column(
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -107,7 +115,11 @@ fun TvEpisodePicker(
                 items = seasons.filter { it.seasonNumber > 0 },
                 key = { _, s -> "season_${s.seasonNumber}" },
             ) { index, season ->
-                val requester = remember("season_tab_${season.seasonNumber}") { FocusRequester() }
+                val requester = if (index == 0) {
+                    firstSeasonRequester
+                } else {
+                    remember("season_tab_${season.seasonNumber}") { FocusRequester() }
+                }
                 if (index == 0) {
                     onFirstContentRequester(requester)
                 }

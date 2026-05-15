@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -201,6 +202,8 @@ class ChannelsViewModel(
             loadRecentlyViewedAsync()
         }
         observeSearch()
+        observeAccountSession()
+        observeAccountCatalogClearEvents()
     }
 
     /**
@@ -1538,6 +1541,62 @@ class ChannelsViewModel(
         searchQueryFlow.value = ""
     }
 
+    private fun observeAccountSession() {
+        val coordinator = playlistBackup ?: return
+        scope.launch {
+            coordinator.state
+                .map { it.isSigningOut }
+                .distinctUntilChanged()
+                .collect { isSigningOut ->
+                    if (isSigningOut) {
+                        clearInMemoryCatalogForAccountTransition()
+                    }
+                }
+        }
+    }
+
+    private fun observeAccountCatalogClearEvents() {
+        val notifier = settingsRefreshNotifier ?: return
+        scope.launch {
+            notifier.events.collect {
+                val hasPlaylists = withContext(backgroundDispatcher) {
+                    runCatching { channelRepo.getPlaylists().isNotEmpty() }.getOrDefault(false)
+                }
+                if (!hasPlaylists && _state.value.hasAccountScopedCatalog()) {
+                    clearInMemoryCatalogForAccountTransition()
+                }
+            }
+        }
+    }
+
+    private fun ChannelsUiState.hasAccountScopedCatalog(): Boolean {
+        return playlists.isNotEmpty() ||
+            selectedPlaylistId != null ||
+            channels.isNotEmpty() ||
+            groupedChannels.isNotEmpty() ||
+            categoryChannels.isNotEmpty() ||
+            categories.isNotEmpty() ||
+            allCategories.isNotEmpty() ||
+            guideChannels.isNotEmpty() ||
+            guideProgrammes.isNotEmpty() ||
+            programmes.isNotEmpty() ||
+            selectedChannel != null
+    }
+
+    private fun clearInMemoryCatalogForAccountTransition() {
+        guideJob?.cancel()
+        epgRefreshJob?.cancel()
+        catalogLoadJob?.cancel()
+        startupPhase = "signed_out"
+        searchQueryFlow.value = ""
+        val current = _state.value
+        _state.value = ChannelsUiState(
+            audioPassthroughEnabled = current.audioPassthroughEnabled,
+            preferSurroundCodecs = current.preferSurroundCodecs,
+            liveAudioOutputMode = current.liveAudioOutputMode,
+        )
+    }
+
     // --- Channel detail / EPG ---
 
     fun selectChannel(channel: Channel) {
@@ -1767,7 +1826,7 @@ class ChannelsViewModel(
                         // playlist" overlay forever — refresh either populates
                         // categories/channels (clearing the overlay) or sets
                         // an error (also clearing the overlay).
-                        if (rowCount == 0L || rowCount > 0L) {
+                        if (rowCount == 0L) {
                             recoveryRefreshStarted = true
                             println("CATALOG_LOAD: empty DB for $playlistId — kicking off source refresh to recover")
                             refreshPlaylistInBackground(
@@ -1775,6 +1834,8 @@ class ChannelsViewModel(
                                 preserveVisibleCatalog = false,
                                 restoreSavedState = restoreSavedState,
                             )
+                        } else {
+                            println("CATALOG_LOAD: playlist=$playlistId has $rowCount rows but no live category counts; keeping DB-only state")
                         }
                     }
                 }

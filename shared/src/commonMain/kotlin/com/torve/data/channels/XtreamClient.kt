@@ -1,11 +1,15 @@
 package com.torve.data.channels
 
+import com.torve.data.network.HttpClientFactory
 import com.torve.domain.model.Channel
 import com.torve.domain.model.ChannelContentType
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
 import io.ktor.client.request.parameter
-import io.ktor.client.statement.bodyAsText
+import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsChannel
+import io.ktor.http.HttpHeaders
+import io.ktor.utils.io.readAvailable
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -22,17 +26,40 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.intOrNull
 import kotlinx.datetime.Clock
+
+private const val XTREAM_MAX_JSON_BODY_BYTES = 4 * 1024 * 1024
+private const val XTREAM_ALL_STREAM_MAX_JSON_BODY_BYTES = 16 * 1024 * 1024
+private const val XTREAM_SERIES_INFO_MAX_JSON_BODY_BYTES = 4 * 1024 * 1024
+private const val XTREAM_READ_CHUNK_BYTES = 32 * 1024
+private const val XTREAM_INITIAL_BODY_BUFFER_BYTES = 64 * 1024
+
+class XtreamResponseTooLargeException(
+    val limitBytes: Int,
+    val contentLength: Long? = null,
+) : IllegalStateException(
+    if (contentLength != null) {
+        "Xtream response is too large ($contentLength bytes, limit $limitBytes bytes)."
+    } else {
+        "Xtream response exceeded $limitBytes bytes."
+    },
+)
 
 /**
  * Xtream Codes API client.
  * Uses the player_api.php endpoint to fetch live, VOD, and series content.
  */
 class XtreamClient(
+    @Suppress("unused")
     private val httpClient: HttpClient,
     private val json: Json,
 ) {
+    private val xtreamHttpClient: HttpClient by lazy {
+        HttpClientFactory.createEpgStreamingClient(forceIdentityEncoding = false)
+    }
+
     /**
      * Authenticate and get server info.
      */
@@ -56,8 +83,7 @@ class XtreamClient(
         username: String,
         password: String,
     ): List<XtreamCategory> {
-        return getJsonRows(server, username, password, action = "get_live_categories")
-            .map { it.toXtreamCategory() }
+        return getJsonList(server, username, password, action = "get_live_categories")
     }
 
     /**
@@ -69,13 +95,14 @@ class XtreamClient(
         password: String,
         categoryId: String? = null,
     ): List<XtreamLiveStream> {
-        return getJsonRows(
+        return getJsonList(
             server = server,
             username = username,
             password = password,
             action = "get_live_streams",
             extraParams = categoryId?.let { mapOf("category_id" to it) }.orEmpty(),
-        ).map { it.toXtreamLiveStream() }
+            maxBytes = if (categoryId == null) XTREAM_ALL_STREAM_MAX_JSON_BODY_BYTES else XTREAM_MAX_JSON_BODY_BYTES,
+        )
     }
 
     /**
@@ -86,8 +113,7 @@ class XtreamClient(
         username: String,
         password: String,
     ): List<XtreamCategory> {
-        return getJsonRows(server, username, password, action = "get_vod_categories")
-            .map { it.toXtreamCategory() }
+        return getJsonList(server, username, password, action = "get_vod_categories")
     }
 
     /**
@@ -99,13 +125,14 @@ class XtreamClient(
         password: String,
         categoryId: String? = null,
     ): List<XtreamVodStream> {
-        return getJsonRows(
+        return getJsonList(
             server = server,
             username = username,
             password = password,
             action = "get_vod_streams",
             extraParams = categoryId?.let { mapOf("category_id" to it) }.orEmpty(),
-        ).map { it.toXtreamVodStream() }
+            maxBytes = if (categoryId == null) XTREAM_ALL_STREAM_MAX_JSON_BODY_BYTES else XTREAM_MAX_JSON_BODY_BYTES,
+        )
     }
 
     /**
@@ -116,8 +143,7 @@ class XtreamClient(
         username: String,
         password: String,
     ): List<XtreamCategory> {
-        return getJsonRows(server, username, password, action = "get_series_categories")
-            .map { it.toXtreamCategory() }
+        return getJsonList(server, username, password, action = "get_series_categories")
     }
 
     /**
@@ -129,13 +155,14 @@ class XtreamClient(
         password: String,
         categoryId: String? = null,
     ): List<XtreamSeries> {
-        return getJsonRows(
+        return getJsonList(
             server = server,
             username = username,
             password = password,
             action = "get_series",
             extraParams = categoryId?.let { mapOf("category_id" to it) }.orEmpty(),
-        ).map { it.toXtreamSeries() }
+            maxBytes = if (categoryId == null) XTREAM_ALL_STREAM_MAX_JSON_BODY_BYTES else XTREAM_MAX_JSON_BODY_BYTES,
+        )
     }
 
     /**
@@ -150,13 +177,13 @@ class XtreamClient(
         password: String,
         seriesId: String,
     ): XtreamSeriesInfo {
-        val raw = httpClient.get("${server.trimEnd('/')}/player_api.php") {
+        val raw = xtreamHttpClient.get("${server.trimEnd('/')}/player_api.php") {
             parameter("username", username)
             parameter("password", password)
             parameter("action", "get_series_info")
             parameter("series_id", seriesId)
             parameter("_t", Clock.System.now().toEpochMilliseconds().toString())
-        }.bodyAsText()
+        }.safeXtreamBodyAsText(maxBytes = XTREAM_SERIES_INFO_MAX_JSON_BODY_BYTES)
         val root = json.parseToJsonElement(raw) as? JsonObject
             ?: return XtreamSeriesInfo(seriesId = seriesId)
         val info = (root["info"] as? JsonObject)?.toXtreamSeries()?.copy(seriesId = seriesId)
@@ -174,31 +201,81 @@ class XtreamClient(
         action: String? = null,
         extraParams: Map<String, String> = emptyMap(),
     ): T {
-        val raw = httpClient.get("${server.trimEnd('/')}/player_api.php") {
+        val raw = xtreamHttpClient.get("${server.trimEnd('/')}/player_api.php") {
             parameter("username", username)
             parameter("password", password)
             action?.let { parameter("action", it) }
             extraParams.forEach { (key, value) -> parameter(key, value) }
-        }.bodyAsText()
+        }.safeXtreamBodyAsText()
         return json.decodeFromString(raw)
     }
 
-    private suspend fun getJsonRows(
+    private suspend inline fun <reified T> getJsonList(
         server: String,
         username: String,
         password: String,
         action: String,
         extraParams: Map<String, String> = emptyMap(),
-    ): List<JsonObject> {
-        val raw = httpClient.get("${server.trimEnd('/')}/player_api.php") {
+        maxBytes: Int = XTREAM_MAX_JSON_BODY_BYTES,
+    ): List<T> {
+        val raw = xtreamHttpClient.get("${server.trimEnd('/')}/player_api.php") {
             parameter("username", username)
             parameter("password", password)
             parameter("action", action)
             parameter("_t", Clock.System.now().toEpochMilliseconds().toString())
             extraParams.forEach { (key, value) -> parameter(key, value) }
-        }.bodyAsText()
-        val element = json.parseToJsonElement(raw)
-        return element.flexRows()
+        }.safeXtreamBodyAsText(maxBytes = maxBytes)
+        return decodeFlexibleList<T>(raw)
+    }
+
+    private inline fun <reified T> decodeFlexibleList(raw: String): List<T> {
+        return runCatching {
+            json.decodeFromString<List<T>>(raw)
+        }.getOrElse {
+            val element = json.parseToJsonElement(raw)
+            element.flexRows().mapNotNull { row ->
+                runCatching { json.decodeFromJsonElement<T>(row) }.getOrNull()
+            }
+        }
+    }
+
+    private suspend fun HttpResponse.safeXtreamBodyAsText(
+        maxBytes: Int = XTREAM_MAX_JSON_BODY_BYTES,
+    ): String {
+        val declaredLength = headers[HttpHeaders.ContentLength]?.toLongOrNull()
+        if (declaredLength != null && declaredLength > maxBytes) {
+            throw XtreamResponseTooLargeException(maxBytes, declaredLength)
+        }
+
+        val channel = bodyAsChannel()
+        val chunk = ByteArray(minOf(XTREAM_READ_CHUNK_BYTES, maxBytes + 1))
+        var bytes = ByteArray(minOf(XTREAM_INITIAL_BODY_BUFFER_BYTES, maxBytes))
+        var total = 0
+        while (true) {
+            val remainingBeforeLimit = maxBytes + 1 - total
+            if (remainingBeforeLimit <= 0) {
+                throw XtreamResponseTooLargeException(maxBytes)
+            }
+            val read = channel.readAvailable(chunk, 0, minOf(chunk.size, remainingBeforeLimit))
+            if (read <= 0) break
+            val newTotal = total + read
+            if (newTotal > maxBytes) {
+                throw XtreamResponseTooLargeException(maxBytes)
+            }
+            if (newTotal > bytes.size) {
+                var newSize = bytes.size
+                while (newSize < newTotal && newSize < maxBytes) {
+                    newSize = minOf(maxBytes, newSize * 2)
+                }
+                if (newSize < newTotal) {
+                    throw XtreamResponseTooLargeException(maxBytes)
+                }
+                bytes = bytes.copyOf(newSize)
+            }
+            chunk.copyInto(bytes, destinationOffset = total, startIndex = 0, endIndex = read)
+            total = newTotal
+        }
+        return bytes.decodeToString(0, total)
     }
 
     /**

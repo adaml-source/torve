@@ -250,6 +250,28 @@ internal fun TvSeeAllScreen(
                 return
             }
             val result = when {
+                railKey.startsWith("more_like_") -> {
+                    val parts = railKey.split("_")
+                    val relatedType = parts.getOrNull(2)?.takeIf { it == "movie" || it == "tv" } ?: mediaType
+                    val relatedId = parts.getOrNull(3)?.toIntOrNull()
+                    if (relatedId == null) {
+                        loading = false
+                        return
+                    }
+                    val recommendations = metadataRepo.getRecommendations(relatedType, relatedId, page)
+                    val relatedItems = if (recommendations.isNotEmpty()) {
+                        recommendations
+                    } else {
+                        metadataRepo.getSimilar(relatedType, relatedId, page)
+                    }.filterNot { it.tmdbId == relatedId }
+                    val existingKeys = items.mapTo(mutableSetOf()) { it.seeAllStableKey() }
+                    items.addAll(relatedItems.filter { existingKeys.add(it.seeAllStableKey()) })
+                    currentPage = page
+                    totalPages = if (relatedItems.size < 20 || page >= 5) page else page + 1
+                    loading = false
+                    initialLoad = false
+                    return
+                }
                 railKey.startsWith("trending_") -> metadataRepo.getTrendingPaged(mediaType, page)
                 railKey.startsWith("popular_") -> metadataRepo.getPopularPaged(mediaType, page)
                 railKey.startsWith("top_rated_") -> metadataRepo.getTopRatedPaged(mediaType, page)

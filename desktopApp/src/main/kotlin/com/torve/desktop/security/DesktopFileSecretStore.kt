@@ -54,6 +54,15 @@ class DesktopFileSecretStore : IntegrationSecretStore, SecureStorage {
         }
     }
 
+    override suspend fun getSubKeys(key: IntegrationSecretKey): List<String> {
+        synchronized(lock) {
+            val prefix = "${key.name}:"
+            return properties.stringPropertyNames()
+                .filter { it.startsWith(prefix) }
+                .map { it.removePrefix(prefix) }
+        }
+    }
+
     override suspend fun clearAllSecrets() {
         synchronized(lock) {
             val knownPrefixes = IntegrationSecretKey.entries.map { it.name }.toSet()

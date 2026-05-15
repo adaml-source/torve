@@ -57,6 +57,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -169,6 +170,7 @@ class HomeViewModel(
     // Search
     private val searchQueryFlow = MutableStateFlow("")
     private var homeLoadJob: Job? = null
+    private var homeAutoRetryCount = 0
 
     init {
         scope.launch {
@@ -1239,6 +1241,7 @@ class HomeViewModel(
                 }
 
                 persistHomeSnapshot(_state.value)
+                homeAutoRetryCount = 0
                 loadProviderLogos()
 
                 // Background enrichment: add MDBList multi-source ratings
@@ -1257,10 +1260,24 @@ class HomeViewModel(
                     "HOME_TAB state_transition state=error ${e::class.simpleName}: ${sanitizeNetworkDiagnosticText(e.message)}"
                 }
                 if (!keepContentVisible) {
-                    _state.update { it.copy(isLoading = false, error = homeContentLoadErrorMessage()) }
+                    _state.update { it.copy(isLoading = false, error = homeContentLoadErrorMessage(e)) }
+                    scheduleHomeRetry()
                 } else {
                     _state.update { it.copy(isLoading = false) }
                 }
+            }
+        }
+    }
+
+    private fun scheduleHomeRetry() {
+        if (homeAutoRetryCount >= HOME_LOAD_AUTO_RETRY_DELAYS_MS.size) return
+        val retryDelayMs = HOME_LOAD_AUTO_RETRY_DELAYS_MS[homeAutoRetryCount]
+        homeAutoRetryCount += 1
+        scope.launch {
+            delay(retryDelayMs)
+            val current = _state.value
+            if (!current.hasRenderableContent() && current.error != null && homeLoadJob?.isActive != true) {
+                loadHomeScreen()
             }
         }
     }
@@ -1798,6 +1815,7 @@ class HomeViewModel(
     companion object {
         private const val HOME_SNAPSHOT_KEY = "home_snapshot_v1"
         private const val HOME_SNAPSHOT_MAX_AGE_MS = 6L * 60L * 60L * 1000L
+        private val HOME_LOAD_AUTO_RETRY_DELAYS_MS = longArrayOf(5_000L, 15_000L, 30_000L)
         private const val KEY_RATINGS_CACHE_VERSION = "ratings_cache_version"
 
         // Bump when enrichment semantics change in a way that should

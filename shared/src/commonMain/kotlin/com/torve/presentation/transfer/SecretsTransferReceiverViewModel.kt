@@ -356,6 +356,13 @@ class SecretsTransferReceiverViewModel(
         }
         when (result) {
             is TransferImportResult.Success -> {
+                println(
+                    "[TransferImport] success secrets=${result.applyResult.applied} " +
+                        "config=${result.applyResult.configApplied} " +
+                        "playlists=${result.applyResult.playlistsApplied} " +
+                        "skippedSecrets=${result.applyResult.skippedKeyNames.size} " +
+                        "skippedPlaylists=${result.applyResult.skippedPlaylistIds.size}",
+                )
                 if (manualPaste) {
                     telemetry.emit(
                         TransferTelemetryEvents.MANUAL_PASTE_USED,

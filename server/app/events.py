@@ -97,7 +97,7 @@ class EventBus:
         # deploy where DATABASE_URL uses the SQLAlchemy form.
         # Caught by Backend CI 2026-05-03 (the listener spammed errors
         # in every test setup).
-        dsn = settings.DATABASE_URL.replace("postgresql+psycopg2://", "postgresql://", 1)
+        dsn = _psycopg_dsn()
         while not self._stop_event.is_set():
             conn = None
             try:
@@ -172,7 +172,7 @@ class EventBus:
         """Send NOTIFY to pg channel. All workers will receive it."""
         conn = None
         try:
-            conn = psycopg2.connect(settings.DATABASE_URL)
+            conn = psycopg2.connect(_psycopg_dsn())
             conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
             cur = conn.cursor()
             payload = event.to_notify_payload()
@@ -189,4 +189,8 @@ class EventBus:
 
 
 # Global singleton — each worker starts its own listener
+def _psycopg_dsn() -> str:
+    return settings.DATABASE_URL.replace("postgresql+psycopg2://", "postgresql://", 1)
+
+
 event_bus = EventBus()

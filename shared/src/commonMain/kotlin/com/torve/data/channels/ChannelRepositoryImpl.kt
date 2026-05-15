@@ -23,10 +23,9 @@ import com.torve.domain.repository.VodCategoryTypeCount
 import com.torve.data.network.HttpClientFactory
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.timeout
-import io.ktor.client.request.get
 import io.ktor.client.request.prepareGet
+import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsChannel
-import io.ktor.client.statement.bodyAsText
 import io.ktor.http.contentLength
 import io.ktor.http.encodeURLParameter
 import io.ktor.http.isSuccess
@@ -80,8 +79,10 @@ class ChannelRepositoryImpl(
         private const val EPG_STATE_ERROR = "ERROR"
         private const val EPG_DEBUG_LOG_ENABLED = false
         private const val CHANNEL_DEBUG_LOG_ENABLED = false
-        private const val XTREAM_SERIES_CATEGORY_FALLBACK_SMALL_CATALOG = 10
         private const val PLAYLIST_CACHE_MAX_CHANNELS = 10_000
+        private const val M3U_MAX_BODY_BYTES = 32 * 1024 * 1024
+        private const val M3U_INITIAL_BODY_BUFFER_BYTES = 256 * 1024
+        private const val M3U_READ_CHUNK_BYTES = 64 * 1024
     }
 
     // ── Secure Xtream password storage ────────────────────────
@@ -162,9 +163,17 @@ class ChannelRepositoryImpl(
     private val refreshEpgMutexes = mutableMapOf<String, Mutex>()
     private fun refreshEpgMutexFor(playlistId: String): Mutex =
         refreshEpgMutexes.getOrPut(playlistId) { Mutex() }
+    private val refreshPlaylistMutexes = mutableMapOf<String, Mutex>()
+    private fun refreshPlaylistMutexFor(playlistId: String): Mutex =
+        refreshPlaylistMutexes.getOrPut(playlistId) { Mutex() }
     private val epgHttpClient: HttpClient by lazy {
         HttpClientFactory.createEpgStreamingClient(
             forceIdentityEncoding = EPG_FORCE_IDENTITY_ACCEPT_ENCODING,
+        )
+    }
+    private val playlistHttpClient: HttpClient by lazy {
+        HttpClientFactory.createEpgStreamingClient(
+            forceIdentityEncoding = false,
         )
     }
 
@@ -187,21 +196,8 @@ class ChannelRepositoryImpl(
         // Stream the M3U body so the UI can show real byte-level progress even
         // on large playlists. Falls back to bodyAsText for trivially small
         // responses where streaming overhead isn't worth it.
-        val m3uContent = httpClient.prepareGet(url).execute { response ->
-            val totalBytes = response.contentLength()
-            val channel = response.bodyAsChannel()
-            val sb = StringBuilder()
-            val buffer = ByteArray(64 * 1024)
-            var bytesRead = 0L
-            onProgress?.invoke(PlaylistAddProgress(0L, totalBytes, PlaylistAddProgress.Phase.DOWNLOADING))
-            while (!channel.isClosedForRead) {
-                val n = channel.readAvailable(buffer, 0, buffer.size)
-                if (n <= 0) break
-                sb.append(buffer.decodeToString(0, n))
-                bytesRead += n
-                onProgress?.invoke(PlaylistAddProgress(bytesRead, totalBytes, PlaylistAddProgress.Phase.DOWNLOADING))
-            }
-            sb.toString()
+        val m3uContent = playlistHttpClient.prepareGet(url).execute { response ->
+            readM3uResponseAsText(response, onProgress)
         }
 
         onProgress?.invoke(PlaylistAddProgress(m3uContent.length.toLong(), m3uContent.length.toLong(), PlaylistAddProgress.Phase.PARSING))
@@ -235,6 +231,84 @@ class ChannelRepositoryImpl(
         )
     }
 
+    private suspend fun readM3uResponseAsText(
+        response: HttpResponse,
+        onProgress: ((PlaylistAddProgress) -> Unit)? = null,
+    ): String {
+        if (!response.status.isSuccess()) {
+            throw IllegalStateException("M3U playlist request failed with HTTP ${response.status.value}")
+        }
+        val declaredLength = response.contentLength()
+        if (declaredLength != null && declaredLength > M3U_MAX_BODY_BYTES) {
+            throw IllegalStateException(
+                "M3U playlist is too large ($declaredLength bytes, limit $M3U_MAX_BODY_BYTES bytes).",
+            )
+        }
+
+        val channel = response.bodyAsChannel()
+        val chunk = ByteArray(M3U_READ_CHUNK_BYTES)
+        var bytes = ByteArray(minOf(M3U_INITIAL_BODY_BUFFER_BYTES, M3U_MAX_BODY_BYTES))
+        var total = 0
+        onProgress?.invoke(PlaylistAddProgress(0L, declaredLength, PlaylistAddProgress.Phase.DOWNLOADING))
+        while (true) {
+            val remainingBeforeLimit = M3U_MAX_BODY_BYTES + 1 - total
+            if (remainingBeforeLimit <= 0) {
+                throw IllegalStateException("M3U playlist exceeded $M3U_MAX_BODY_BYTES bytes.")
+            }
+            val read = channel.readAvailable(chunk, 0, minOf(chunk.size, remainingBeforeLimit))
+            if (read <= 0) break
+            val newTotal = total + read
+            if (newTotal > M3U_MAX_BODY_BYTES) {
+                throw IllegalStateException("M3U playlist exceeded $M3U_MAX_BODY_BYTES bytes.")
+            }
+            if (newTotal > bytes.size) {
+                var newSize = bytes.size
+                while (newSize < newTotal && newSize < M3U_MAX_BODY_BYTES) {
+                    newSize = minOf(M3U_MAX_BODY_BYTES, newSize * 2)
+                }
+                if (newSize < newTotal) {
+                    throw IllegalStateException("M3U playlist exceeded $M3U_MAX_BODY_BYTES bytes.")
+                }
+                bytes = bytes.copyOf(newSize)
+            }
+            chunk.copyInto(bytes, destinationOffset = total, startIndex = 0, endIndex = read)
+            total = newTotal
+            onProgress?.invoke(PlaylistAddProgress(total.toLong(), declaredLength, PlaylistAddProgress.Phase.DOWNLOADING))
+        }
+        return bytes.decodeToString(0, total)
+    }
+
+    override suspend fun saveM3uPlaylistConfig(
+        name: String,
+        url: String,
+        epgUrl: String?,
+        id: String?,
+    ): ChannelPlaylist = withContext(Dispatchers.IO) {
+        val playlistId = id ?: "ch_${Clock.System.now().toEpochMilliseconds()}"
+        val now = Clock.System.now().toEpochMilliseconds()
+        val normalizedEpgUrl = epgUrl?.trim()?.takeIf { it.isNotEmpty() }
+        persistPlaylistConfigOnly(
+            playlistId = playlistId,
+            playlistName = name,
+            playlistUrl = url,
+            epgUrl = normalizedEpgUrl,
+            playlistType = "m3u",
+            server = null,
+            username = null,
+            password = null,
+            updatedAt = now,
+        )
+        ChannelPlaylist(
+            id = playlistId,
+            name = name,
+            url = url,
+            epgUrl = normalizedEpgUrl,
+            channelCount = 0,
+            lastUpdated = now,
+            type = PlaylistType.M3U,
+        )
+    }
+
     override suspend fun addXtreamPlaylist(
         name: String,
         server: String,
@@ -251,7 +325,13 @@ class ChannelRepositoryImpl(
 
         // Fetch live categories and streams
         val categories = xtreamClient.getLiveCategories(server, username, password)
-        val liveStreams = xtreamClient.getLiveStreams(server, username, password)
+        val liveStreams = fetchXtreamLiveCatalog(
+            server = server,
+            username = username,
+            password = password,
+            playlistId = id,
+            liveCategories = categories,
+        )
         val channels = xtreamClient.mapLiveToChannels(
             streams = liveStreams,
             categories = categories,
@@ -268,12 +348,13 @@ class ChannelRepositoryImpl(
             channelDebugLog("Xtream VOD category fetch failed for playlist $id: ${t.message}")
             emptyList()
         }
-        val vodStreams = try {
-            xtreamClient.getVodStreams(server, username, password)
-        } catch (t: Exception) {
-            channelDebugLog("Xtream VOD movie fetch failed for playlist $id: ${t.message}")
-            emptyList()
-        }
+        val vodStreams = fetchXtreamVodCatalog(
+            server = server,
+            username = username,
+            password = password,
+            playlistId = id,
+            vodCategories = vodCategories,
+        )
         val vodChannels = xtreamClient.mapVodToChannels(
             streams = vodStreams,
             categories = vodCategories,
@@ -335,6 +416,144 @@ class ChannelRepositoryImpl(
         )
     }
 
+    override suspend fun saveXtreamPlaylistConfig(
+        name: String,
+        server: String,
+        username: String,
+        password: String,
+        id: String?,
+    ): ChannelPlaylist = withContext(Dispatchers.IO) {
+        val playlistId = id ?: "xtream_${Clock.System.now().toEpochMilliseconds()}"
+        val now = Clock.System.now().toEpochMilliseconds()
+        val normalizedServer = server.trimEnd('/')
+        saveXtreamPassword(playlistId, password)
+        persistPlaylistConfigOnly(
+            playlistId = playlistId,
+            playlistName = name,
+            playlistUrl = "$normalizedServer/player_api.php",
+            epgUrl = null,
+            playlistType = "xtream",
+            server = normalizedServer,
+            username = username,
+            password = null,
+            updatedAt = now,
+        )
+        ChannelPlaylist(
+            id = playlistId,
+            name = name,
+            url = "$normalizedServer/player_api.php",
+            epgUrl = null,
+            channelCount = 0,
+            lastUpdated = now,
+            type = PlaylistType.XTREAM,
+            server = normalizedServer,
+            username = username,
+            password = password,
+        )
+    }
+
+    private suspend fun fetchXtreamLiveCatalog(
+        server: String,
+        username: String,
+        password: String,
+        playlistId: String,
+        liveCategories: List<XtreamCategory>,
+    ): List<XtreamLiveStream> {
+        val allStreams = try {
+            xtreamClient.getLiveStreams(server, username, password)
+        } catch (t: XtreamResponseTooLargeException) {
+            println(
+                "XtreamLiveCatalog: playlistId=$playlistId mode=all-too-large " +
+                    "limitBytes=${t.limitBytes} contentLength=${t.contentLength ?: -1}; keeping existing cache if present",
+            )
+            emptyList()
+        } catch (t: Exception) {
+            channelDebugLog("Xtream live fetch failed for playlist $playlistId: ${t.message}")
+            emptyList()
+        }
+        println(
+            "XtreamLiveCatalog: playlistId=$playlistId mode=all rows=${allStreams.size} categories=${liveCategories.size}",
+        )
+        return allStreams.dedupeByProviderId {
+            it.streamId.ifBlank { "${it.name.orEmpty()}:${it.categoryId.orEmpty()}" }
+        }
+    }
+
+    private suspend fun fetchXtreamVodCatalog(
+        server: String,
+        username: String,
+        password: String,
+        playlistId: String,
+        vodCategories: List<XtreamCategory>,
+    ): List<XtreamVodStream> {
+        try {
+            xtreamClient.getVodStreams(server, username, password)
+                .also { streams ->
+                    println(
+                        "XtreamVodCatalog: playlistId=$playlistId mode=all rows=${streams.size} categories=${vodCategories.size}",
+                    )
+                }
+        } catch (t: XtreamResponseTooLargeException) {
+            println(
+                "XtreamVodCatalog: playlistId=$playlistId mode=all-too-large " +
+                    "limitBytes=${t.limitBytes} contentLength=${t.contentLength ?: -1}; falling back to category fetch",
+            )
+            null
+        } catch (t: Exception) {
+            channelDebugLog("Xtream VOD movie fetch failed for playlist $playlistId: ${t.message}; falling back to category fetch")
+            null
+        }?.let { allStreams ->
+            return allStreams.dedupeByProviderId {
+                it.streamId.ifBlank { "${it.name.orEmpty()}:${it.categoryId.orEmpty()}" }
+            }
+        }
+
+        return fetchXtreamVodCatalogByCategory(
+            server = server,
+            username = username,
+            password = password,
+            playlistId = playlistId,
+            vodCategories = vodCategories,
+        ).dedupeByProviderId {
+            it.streamId.ifBlank { "${it.name.orEmpty()}:${it.categoryId.orEmpty()}" }
+        }
+    }
+
+    private suspend fun fetchXtreamVodCatalogByCategory(
+        server: String,
+        username: String,
+        password: String,
+        playlistId: String,
+        vodCategories: List<XtreamCategory>,
+    ): List<XtreamVodStream> {
+        if (vodCategories.isEmpty()) return emptyList()
+        val loaded = mutableListOf<XtreamVodStream>()
+        var failedCategories = 0
+        for (category in vodCategories) {
+            val categoryId = category.categoryId.takeIf { it.isNotBlank() } ?: continue
+            val streams = try {
+                xtreamClient.getVodStreams(server, username, password, categoryId = categoryId)
+            } catch (t: XtreamResponseTooLargeException) {
+                failedCategories++
+                channelDebugLog(
+                    "Xtream VOD category fetch too large playlist=$playlistId " +
+                        "categoryId=$categoryId limitBytes=${t.limitBytes} contentLength=${t.contentLength ?: -1}",
+                )
+                emptyList()
+            } catch (t: Exception) {
+                failedCategories++
+                channelDebugLog("Xtream VOD category fetch failed playlist=$playlistId categoryId=$categoryId: ${t.message}")
+                emptyList()
+            }
+            loaded += streams
+        }
+        println(
+            "XtreamVodCatalog: playlistId=$playlistId mode=category rows=${loaded.size} " +
+                "categories=${vodCategories.size} failedCategories=$failedCategories",
+        )
+        return loaded
+    }
+
     private suspend fun fetchXtreamSeriesCatalog(
         server: String,
         username: String,
@@ -344,39 +563,28 @@ class ChannelRepositoryImpl(
     ): List<XtreamSeries> {
         val unfiltered = try {
             xtreamClient.getSeries(server, username, password)
+        } catch (t: XtreamResponseTooLargeException) {
+            println(
+                "XtreamSeriesCatalog: playlistId=$playlistId mode=all-too-large " +
+                    "limitBytes=${t.limitBytes} contentLength=${t.contentLength ?: -1}; keeping existing cache if present",
+            )
+            emptyList()
         } catch (t: Exception) {
             channelDebugLog("Xtream series fetch failed for playlist $playlistId: ${t.message}")
             emptyList()
         }
 
-        val shouldFetchByCategory = seriesCategories.isNotEmpty() &&
-            (
-                unfiltered.isEmpty() ||
-                    unfiltered.size <= XTREAM_SERIES_CATEGORY_FALLBACK_SMALL_CATALOG ||
-                    unfiltered.size < seriesCategories.size
-                )
-        if (!shouldFetchByCategory) {
-            println("XtreamSeriesCatalog: playlistId=$playlistId mode=all rows=${unfiltered.size} categories=${seriesCategories.size}")
-            return unfiltered.dedupeXtreamSeries()
-        }
+        println("XtreamSeriesCatalog: playlistId=$playlistId mode=all rows=${unfiltered.size} categories=${seriesCategories.size}")
+        return unfiltered.dedupeXtreamSeries()
+    }
 
-        println("XtreamSeriesCatalog: playlistId=$playlistId mode=category-fallback all=${unfiltered.size} categories=${seriesCategories.size}")
-        val byCategory = mutableListOf<XtreamSeries>()
-        seriesCategories.forEach { category ->
-            val categoryId = category.categoryId.takeIf { it.isNotBlank() } ?: return@forEach
-            val rows = try {
-                xtreamClient.getSeries(server, username, password, categoryId = categoryId)
-            } catch (t: Exception) {
-                channelDebugLog(
-                    "Xtream series category fetch failed playlistId=$playlistId categoryId=$categoryId: ${t.message}",
-                )
-                emptyList()
-            }
-            byCategory += rows
+    private inline fun <T> List<T>.dedupeByProviderId(keyOf: (T) -> String): List<T> {
+        val rows = linkedMapOf<String, T>()
+        forEach { row ->
+            val key = keyOf(row).ifBlank { row.hashCode().toString() }
+            rows[key] = row
         }
-        val merged = (unfiltered + byCategory).dedupeXtreamSeries()
-        println("XtreamSeriesCatalog: playlistId=$playlistId category-fallback-result all=${unfiltered.size} byCategory=${byCategory.size} merged=${merged.size} categories=${seriesCategories.size}")
-        return merged
+        return rows.values.toList()
     }
 
     private fun List<XtreamSeries>.dedupeXtreamSeries(): List<XtreamSeries> {
@@ -509,6 +717,18 @@ class ChannelRepositoryImpl(
     }
 
     override suspend fun refreshPlaylist(playlistId: String) {
+        refreshPlaylistMutexFor(playlistId).withLock {
+            refreshPlaylistInternal(playlistId, includeEpg = true)
+        }
+    }
+
+    override suspend fun refreshPlaylistCatalog(playlistId: String) {
+        refreshPlaylistMutexFor(playlistId).withLock {
+            refreshPlaylistInternal(playlistId, includeEpg = false)
+        }
+    }
+
+    private suspend fun refreshPlaylistInternal(playlistId: String, includeEpg: Boolean) {
         repairChannelCatalogIfNeeded(playlistId)
         val playlist = database.torveQueries.getPlaylist(userId = uid(), playlistId = playlistId).executeAsOneOrNull()
             ?: return
@@ -520,7 +740,13 @@ class ChannelRepositoryImpl(
         if (playlist.type == "xtream" && playlist.server != null && playlist.username != null && xtreamPassword != null) {
             // Xtream playlist refresh
             val categories = xtreamClient.getLiveCategories(playlist.server, playlist.username, xtreamPassword)
-            val liveStreams = xtreamClient.getLiveStreams(playlist.server, playlist.username, xtreamPassword)
+            val liveStreams = fetchXtreamLiveCatalog(
+                server = playlist.server,
+                username = playlist.username,
+                password = xtreamPassword,
+                playlistId = playlistId,
+                liveCategories = categories,
+            )
             val channels = xtreamClient.mapLiveToChannels(
                 streams = liveStreams,
                 categories = categories,
@@ -536,12 +762,13 @@ class ChannelRepositoryImpl(
                 channelDebugLog("Xtream VOD category refresh failed for playlist $playlistId: ${t.message}")
                 emptyList()
             }
-            val vodStreams = try {
-                xtreamClient.getVodStreams(playlist.server, playlist.username, xtreamPassword)
-            } catch (t: Exception) {
-                channelDebugLog("Xtream VOD movie refresh failed for playlist $playlistId: ${t.message}")
-                emptyList()
-            }
+            val vodStreams = fetchXtreamVodCatalog(
+                server = playlist.server,
+                username = playlist.username,
+                password = xtreamPassword,
+                playlistId = playlistId,
+                vodCategories = vodCategories,
+            )
             val vodChannels = xtreamClient.mapVodToChannels(
                 streams = vodStreams,
                 categories = vodCategories,
@@ -590,10 +817,14 @@ class ChannelRepositoryImpl(
                 channels = allChannels,
                 updatedAt = now,
             )
-            refreshEpgForPlaylist(playlistId, xtreamEpgUrl)
+            if (includeEpg) {
+                refreshEpgForPlaylist(playlistId, xtreamEpgUrl)
+            }
         } else {
             // M3U playlist refresh
-            val m3uContent = httpClient.get(playlist.url).bodyAsText()
+            val m3uContent = playlistHttpClient.prepareGet(playlist.url).execute { response ->
+                readM3uResponseAsText(response)
+            }
             val parsed = m3uParser.parse(m3uContent, playlistId)
             val resolvedEpgUrl = playlist.epg_url ?: parsed.epgUrl
 
@@ -611,7 +842,9 @@ class ChannelRepositoryImpl(
             )
 
             // Refresh EPG
-            refreshEpgForPlaylist(playlistId, resolvedEpgUrl)
+            if (includeEpg) {
+                refreshEpgForPlaylist(playlistId, resolvedEpgUrl)
+            }
         }
     }
 
@@ -1348,6 +1581,38 @@ class ChannelRepositoryImpl(
         }
         channelDebugLog(
             "ChannelCatalog: committed playlistId=$playlistId generation=$nextGeneration channels=${channels.size}",
+        )
+    }
+
+    private fun persistPlaylistConfigOnly(
+        playlistId: String,
+        playlistName: String,
+        playlistUrl: String,
+        epgUrl: String?,
+        playlistType: String,
+        server: String?,
+        username: String?,
+        password: String?,
+        updatedAt: Long,
+    ) {
+        val existing = database.torveQueries
+            .getPlaylist(userId = uid(), playlistId = playlistId)
+            .executeAsOneOrNull()
+        database.torveQueries.insertPlaylist(
+            user_id = uid(),
+            id = playlistId,
+            name = playlistName,
+            url = playlistUrl,
+            epg_url = epgUrl,
+            channel_count = existing?.channel_count ?: 0L,
+            last_updated = updatedAt,
+            type = playlistType,
+            server = server,
+            username = username,
+            password = password,
+        )
+        channelDebugLog(
+            "ChannelCatalog: saved config-only playlistId=$playlistId type=$playlistType existingChannels=${existing?.channel_count ?: 0L}",
         )
     }
 

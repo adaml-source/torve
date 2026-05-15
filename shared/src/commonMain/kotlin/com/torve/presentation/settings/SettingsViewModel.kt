@@ -951,7 +951,7 @@ class SettingsViewModel(
             }
             return true
         } catch (e: Exception) {
-            val is429 = e.message?.contains("429") == true || e.message?.contains("rate") == true
+            val is429 = isRateLimitedTraktError(e)
             if (is429) {
                 // Don't disconnect on rate limit — tokens are likely valid
                 traktLastValidatedAt = now // prevent immediate retry
@@ -969,6 +969,45 @@ class SettingsViewModel(
                 return true
             } else {
                 val authFailure = isUnauthorizedTraktError(e)
+                if (authFailure) {
+                    val refreshedUser = try {
+                        refreshTraktSessionAndLoadUser()
+                    } catch (refreshError: Exception) {
+                        if (isRateLimitedTraktError(refreshError)) {
+                            traktLastValidatedAt = now
+                            _state.update {
+                                it.copy(
+                                    traktConnected = true,
+                                    traktError = null,
+                                    traktApiStatus = com.torve.presentation.error.UserFacingError.INTEGRATION_RATE_LIMITED.defaultMessage(),
+                                )
+                            }
+                            println("[TraktInit] Token refresh rate limited, keeping existing connection state")
+                            if (syncOnSuccess) {
+                                initialTraktImport()
+                            }
+                            return true
+                        }
+                        null
+                    }
+                    if (refreshedUser != null) {
+                        traktLastValidatedAt = now
+                        _state.update {
+                            it.copy(
+                                traktConnected = true,
+                                traktUser = refreshedUser,
+                                traktError = null,
+                                traktApiStatus = "Online",
+                            )
+                        }
+                        println("[TraktInit] Validation recovered by token refresh")
+                        loadTraktStats()
+                        if (syncOnSuccess) {
+                            initialTraktImport()
+                        }
+                        return true
+                    }
+                }
                 _state.update {
                     it.copy(
                         traktConnected = !authFailure && _state.value.traktAccessToken.isNotBlank(),
@@ -984,6 +1023,38 @@ class SettingsViewModel(
         }
     }
 
+    private suspend fun refreshTraktSessionAndLoadUser(): com.torve.data.trakt.TraktUser? {
+        val refreshToken = traktTokenStore.read()?.refreshToken
+            ?.takeIf { it.isNotBlank() }
+            ?: _state.value.traktRefreshToken.takeIf { it.isNotBlank() }
+            ?: integrationSecretStore.get(IntegrationSecretKey.TRAKT_REFRESH_TOKEN)
+                ?.takeIf { it.isNotBlank() }
+            ?: return null
+        return runCatching {
+            val refreshed = traktClient.refreshToken(refreshToken)
+            traktTokenStore.write(refreshed)
+            integrationSecretStore.put(IntegrationSecretKey.TRAKT_ACCESS_TOKEN, refreshed.accessToken)
+            integrationSecretStore.put(IntegrationSecretKey.TRAKT_REFRESH_TOKEN, refreshed.refreshToken)
+            prefsRepo.remove(KEY_TRAKT_ACCESS_TOKEN)
+            prefsRepo.remove(KEY_TRAKT_REFRESH_TOKEN)
+            _state.update {
+                it.copy(
+                    traktAccessToken = refreshed.accessToken,
+                    traktRefreshToken = refreshed.refreshToken,
+                    traktConnected = true,
+                    traktError = null,
+                )
+            }
+            traktClient.getUser(refreshed.accessToken)
+        }.getOrElse { error ->
+            println("[TraktInit] Token refresh failed: ${error.message}")
+            if (isRateLimitedTraktError(error)) {
+                throw error
+            }
+            null
+        }
+    }
+
     private suspend fun resolveUsableTraktAccessToken(): String {
         val storedTokens = traktTokenStore.read()
         if (storedTokens?.accessToken?.isNotBlank() == true) {
@@ -993,10 +1064,11 @@ class SettingsViewModel(
         val stateAccessToken = _state.value.traktAccessToken
         if (stateAccessToken.isBlank()) return ""
 
-        val refreshToken = storedTokens?.refreshToken
-            ?: _state.value.traktRefreshToken
-            ?: integrationSecretStore.get(IntegrationSecretKey.TRAKT_REFRESH_TOKEN)
-            .orEmpty()
+        val refreshToken = listOfNotNull(
+            storedTokens?.refreshToken,
+            _state.value.traktRefreshToken,
+            integrationSecretStore.get(IntegrationSecretKey.TRAKT_REFRESH_TOKEN),
+        ).firstOrNull { it.isNotBlank() }.orEmpty()
         if (refreshToken.isBlank()) {
             return stateAccessToken
         }
@@ -1015,7 +1087,10 @@ class SettingsViewModel(
                 )
             }
             refreshed.accessToken
-        }.getOrElse {
+        }.getOrElse { error ->
+            if (isRateLimitedTraktError(error)) {
+                throw error
+            }
             stateAccessToken
         }
     }
@@ -1023,6 +1098,13 @@ class SettingsViewModel(
     private fun isUnauthorizedTraktError(error: Throwable): Boolean {
         val message = error.message.orEmpty()
         return "401" in message || "Unauthorized" in message
+    }
+
+    private fun isRateLimitedTraktError(error: Throwable): Boolean {
+        val message = error.message.orEmpty()
+        return "429" in message || message.contains("rate-limit", ignoreCase = true) ||
+            message.contains("rate limiting", ignoreCase = true) ||
+            message.contains("rate-limiting", ignoreCase = true)
     }
 
     fun setTraktScrobbleEnabled(enabled: Boolean) {
@@ -1085,8 +1167,26 @@ class SettingsViewModel(
         scope.launch {
             _state.update { it.copy(traktSyncing = true, traktSyncSuccess = false) }
             try {
+                val tokenSnapshot = traktTokenStore.read()
+                println(
+                    "[TraktInit] Manual sync requested " +
+                        "hasAccess=${tokenSnapshot?.accessToken?.isNotBlank() == true || _state.value.traktAccessToken.isNotBlank()} " +
+                        "hasRefresh=${tokenSnapshot?.refreshToken?.isNotBlank() == true || _state.value.traktRefreshToken.isNotBlank()}",
+                )
+                if (!ensureTraktSessionReady(syncOnSuccess = false)) {
+                    println("[TraktInit] Manual sync aborted: session not ready")
+                    _state.update {
+                        it.copy(
+                            traktSyncing = false,
+                            traktSyncSuccess = false,
+                            traktConnected = false,
+                            traktApiStatus = "Not connected",
+                        )
+                    }
+                    return@launch
+                }
+                println("[TraktInit] Manual sync session ready")
                 initialTraktImport()
-                checkTraktApiStatus()
                 _state.update { it.copy(traktSyncing = false, traktSyncSuccess = true) }
                 delay(3000)
                 _state.update { it.copy(traktSyncSuccess = false) }

@@ -10,13 +10,23 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -44,10 +54,16 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.zIndex
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -57,6 +73,7 @@ import com.torve.android.background.BackgroundWork
 import com.torve.android.deeplink.TorveAppLink
 import com.torve.android.deeplink.TorveAppLinkTarget
 import com.torve.android.premium.rememberEffectivePremiumAccessTier
+import com.torve.android.session.PostSignInRefresh
 import com.torve.android.sync.SyncCoordinator
 import com.torve.android.sync.model.SyncInboundEvent
 import com.torve.android.tv.components.TvFocusDetailsPanel
@@ -98,9 +115,12 @@ import com.torve.android.ui.theme.Ruby
 import com.torve.android.ui.theme.Snow
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
+import com.torve.domain.model.favoriteMediaKey
+import com.torve.domain.model.toMediaItem
 import com.torve.data.auth.AuthClient
 import com.torve.domain.model.WatchProgress
 import com.torve.domain.repository.BackendPremiumResult
+import com.torve.domain.repository.MediaFavoritesRepository
 import com.torve.domain.repository.MetadataRepository
 import com.torve.domain.repository.SubscriptionRepository
 import com.torve.domain.repository.WatchHistoryRepository
@@ -108,8 +128,10 @@ import com.torve.domain.repository.WatchProgressRepository
 import com.torve.domain.sync.SyncPayload
 import com.torve.domain.sync.SyncRepository
 import com.torve.presentation.channels.ChannelsViewModel
+import com.torve.presentation.providerhealth.ProviderHealthRecoveryStateProvider
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.subscription.SubscriptionViewModel
+import com.torve.presentation.transfer.TransferImportCompletionNotifier
 import com.torve.presentation.watchlist.WatchlistViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -119,6 +141,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import org.koin.compose.koinInject
+import androidx.compose.ui.text.font.FontWeight
 
 /** Sub-destinations within the Settings tab — single source of truth. */
 internal enum class TvSettingsDestination {
@@ -157,10 +180,14 @@ internal fun orderedSettingsEntryCandidates(
     ).distinct()
 }
 
-private fun NavHostController.navigateToTvDetails(item: MediaItem, autoPlay: Boolean = false) {
+private fun NavHostController.navigateToTvDetails(
+    item: MediaItem,
+    autoPlay: Boolean = false,
+    focusEpisodes: Boolean = false,
+) {
     val id = item.tmdbId ?: item.id.toIntOrNull() ?: return
     val type = if (item.type == MediaType.SERIES) "tv" else "movie"
-    navigate(TvRoutes.details(type = type, id = id, autoPlay = autoPlay))
+    navigate(TvRoutes.details(type = type, id = id, autoPlay = autoPlay, focusEpisodes = focusEpisodes))
 }
 
 @OptIn(ExperimentalComposeUiApi::class)
@@ -189,6 +216,9 @@ fun TvRoot(
         val subscriptionViewModel: SubscriptionViewModel,
         val subscriptionRepository: SubscriptionRepository,
         val authClient: AuthClient,
+        val mediaFavoritesRepository: MediaFavoritesRepository,
+        val transferRecoveryProvider: ProviderHealthRecoveryStateProvider,
+        val transferImportCompletionNotifier: TransferImportCompletionNotifier,
     )
 
     val deps by produceState<RootDeps?>(initialValue = null) {
@@ -205,6 +235,9 @@ fun TvRoot(
                 subscriptionViewModel = koin.get(),
                 subscriptionRepository = koin.get(),
                 authClient = koin.get(),
+                mediaFavoritesRepository = koin.get(),
+                transferRecoveryProvider = koin.get(),
+                transferImportCompletionNotifier = koin.get(),
             )
         }
     }
@@ -229,9 +262,13 @@ fun TvRoot(
     val subscriptionViewModel = deps!!.subscriptionViewModel
     val subscriptionRepository = deps!!.subscriptionRepository
     val authClient = deps!!.authClient
+    val mediaFavoritesRepository = deps!!.mediaFavoritesRepository
+    val transferRecoveryProvider = deps!!.transferRecoveryProvider
+    val transferImportCompletionNotifier = deps!!.transferImportCompletionNotifier
     val tvAccountCoordinator: com.torve.presentation.session.AccountSessionCoordinator = koinInject()
 
     val authUser by authClient.authUserFlow.collectAsState()
+    val mediaFavoritesState by mediaFavoritesRepository.state.collectAsState()
     val signedInUserId = authUser?.id?.takeIf { it.isNotBlank() }
     val isSignedIn = signedInUserId != null
     val syncState by syncCoordinator.state.collectAsState()
@@ -242,6 +279,31 @@ fun TvRoot(
     )
     val tvPrefs = remember(context) {
         context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE)
+    }
+    val lastCredentialImportEpoch by transferImportCompletionNotifier.lastImportEpochMs.collectAsState()
+    var credentialNudgeDismissed by rememberSaveable(signedInUserId) { mutableStateOf(false) }
+    var showCredentialTransferNudge by rememberSaveable(signedInUserId) { mutableStateOf(false) }
+
+    LaunchedEffect(signedInUserId, lastCredentialImportEpoch, credentialNudgeDismissed) {
+        showCredentialTransferNudge = false
+        if (signedInUserId == null || credentialNudgeDismissed) return@LaunchedEffect
+        delay(1_200L)
+        val shouldShow = withContext(Dispatchers.IO) {
+            runCatching { transferRecoveryProvider.snapshot().shouldShowRecoveryCard }
+                .getOrDefault(false)
+        }
+        showCredentialTransferNudge = shouldShow
+    }
+
+    LaunchedEffect(lastCredentialImportEpoch) {
+        if (lastCredentialImportEpoch <= 0L) return@LaunchedEffect
+        TvScreenCache.clear()
+        settingsViewModel.refreshSettings()
+        runCatching {
+            val channelsViewModel: ChannelsViewModel = org.koin.java.KoinJavaComponent.getKoin().get()
+            channelsViewModel.loadPlaylists()
+            channelsViewModel.loadFavorites()
+        }
     }
 
     /* ── Sub-route tracking (NavHost only handles details/player/see-all/sub-screens) ── */
@@ -361,12 +423,40 @@ fun TvRoot(
     val mediaFavoritesPrefKey = remember(signedInUserId) {
         signedInUserId?.let { "$TV_PREF_KEY_MEDIA_FAVORITES:$it" }
     }
-    var favoriteMediaKeys by remember(mediaFavoritesPrefKey) {
-        mutableStateOf(
-            mediaFavoritesPrefKey
-                ?.let { tvPrefs.getStringSet(it, emptySet())?.toSet() }
-                ?: emptySet(),
-        )
+    val legacyFavoriteMediaKeys = remember(mediaFavoritesPrefKey) {
+        mediaFavoritesPrefKey
+            ?.let { tvPrefs.getStringSet(it, emptySet())?.toSet() }
+            ?: emptySet()
+    }
+    val favoriteMediaKeys = mediaFavoritesState.favoriteKeys
+    val favoriteMediaItems = remember(mediaFavoritesState.items) {
+        mediaFavoritesState.items.map { it.toMediaItem() }
+    }
+
+    LaunchedEffect(signedInUserId) {
+        if (signedInUserId != null) {
+            mediaFavoritesRepository.refresh(force = true)
+        }
+    }
+
+    LaunchedEffect(mediaFavoritesPrefKey, legacyFavoriteMediaKeys) {
+        val prefKey = mediaFavoritesPrefKey ?: return@LaunchedEffect
+        if (legacyFavoriteMediaKeys.isEmpty()) return@LaunchedEffect
+        val items = withContext(Dispatchers.IO) {
+            legacyFavoriteMediaKeys
+                .filterNot { it in favoriteMediaKeys }
+                .mapNotNull { it.toLegacyFavoriteMediaRefOrNull() }
+                .mapNotNull { ref ->
+                    runCatching {
+                        metadataRepo.getDetail(
+                            type = if (ref.type == MediaType.SERIES) "tv" else "movie",
+                            id = ref.tmdbId,
+                        )
+                    }.getOrNull()
+                }
+        }
+        items.forEach { mediaFavoritesRepository.addFavorite(it) }
+        tvPrefs.edit().remove(prefKey).apply()
     }
     val progressByMediaId = remember { mutableStateMapOf<String, Float>() }
 
@@ -477,6 +567,18 @@ fun TvRoot(
         }
     }
 
+    LaunchedEffect(restoreProgress.phase, signedInUserId) {
+        if (signedInUserId == null) return@LaunchedEffect
+        if (
+            restoreProgress.phase == com.torve.presentation.session.RestorePhase.COMPLETED ||
+            restoreProgress.phase == com.torve.presentation.session.RestorePhase.COMPLETED_WITH_ERRORS
+        ) {
+            PostSignInRefresh.enqueueStartupCacheWarmup(context)
+            syncCoordinator.refreshDevices()
+            subscriptionViewModel.loadSubscription()
+        }
+    }
+
     /* ── For focus restoration when returning from sub-routes ───────────────────────────── */
     var rootHasFocus by remember { mutableStateOf(false) }
     var focusRestoreTrigger by remember { mutableStateOf(0) }
@@ -500,12 +602,26 @@ fun TvRoot(
     var previousSettingsDestination by remember { mutableStateOf(settingsDestination) }
     var previousIsRailFocused by remember { mutableStateOf(isRailFocused) }
     var backgroundWorkWasBlocking by remember { mutableStateOf(false) }
+    var backgroundWorkWasVisible by remember { mutableStateOf(false) }
 
     LaunchedEffect(backgroundWorkStatus.blockNavigation) {
         if (backgroundWorkWasBlocking && !backgroundWorkStatus.blockNavigation) {
             focusRestoreTrigger++
         }
         backgroundWorkWasBlocking = backgroundWorkStatus.blockNavigation
+    }
+
+    LaunchedEffect(backgroundWorkStatus.visible) {
+        if (backgroundWorkWasVisible && !backgroundWorkStatus.visible) {
+            TvScreenCache.clear()
+            runCatching {
+                val channelsViewModel: ChannelsViewModel = org.koin.java.KoinJavaComponent.getKoin().get()
+                channelsViewModel.loadPlaylists()
+                channelsViewModel.loadFavorites()
+            }
+            runCatching { settingsViewModel.refreshSettings() }
+        }
+        backgroundWorkWasVisible = backgroundWorkStatus.visible
     }
 
     LaunchedEffect(signedInUserId) {
@@ -532,9 +648,9 @@ fun TvRoot(
     val infoPanelRoutes = remember { setOf(TvRoutes.HOME, TvRoutes.MOVIES, TvRoutes.SHOWS) }
     val showRail = !isPlayerRoute && !isSubRouteActive &&
         !(selectedTopRoute == TvRoutes.IPTV && hideRailForIptv)
-    val showHero = isSignedIn && !isPlayerRoute && !isSubRouteActive && contentTopRoute in heroRoutes
+    val showHero = !isPlayerRoute && !isSubRouteActive && contentTopRoute in heroRoutes
     val showInfoPanel = !isPlayerRoute && !isSubRouteActive && !isRailFocused &&
-        isSignedIn && contentTopRoute in infoPanelRoutes && focusedMediaItem != null
+        contentTopRoute in infoPanelRoutes && focusedMediaItem != null
     val focusedLogoKey = focusedMediaItem?.tmdbId?.let { tmdbId ->
         focusedMediaItem?.let { item -> "${item.type}:$tmdbId" }
     }
@@ -594,8 +710,9 @@ fun TvRoot(
     /* ── Focus restore: try content first, rail is guaranteed fallback ─────────────── */
     // Use a counter (not a boolean) so the effect key doesn't change inside its body,
     // which would cancel the coroutine before delay() completes.
-    LaunchedEffect(focusRestoreTrigger) {
+    LaunchedEffect(focusRestoreTrigger, showCredentialTransferNudge) {
         if (focusRestoreTrigger == 0) return@LaunchedEffect
+        if (showCredentialTransferNudge) return@LaunchedEffect
         val restoreRailEpoch = railInteractionEpoch
         if (pendingFocusBackRestore != null) {
             Log.d("TvFocusRestore", "root_focus_restore_suppressed pendingBackRestore=${pendingFocusBackRestore?.route}")
@@ -697,8 +814,10 @@ fun TvRoot(
     LaunchedEffect(Unit) {
         while (true) {
             delay(1500)
+            if (showCredentialTransferNudge) continue
             if (isPlayerRoute || isSubRouteActive || rootHasFocus || selectedTopRoute == TvRoutes.SETTINGS) continue
             delay(500)
+            if (showCredentialTransferNudge) continue
             if (isSubRouteActive || rootHasFocus || selectedTopRoute == TvRoutes.SETTINGS) continue
             Log.d("TvFocusWatchdog", "Focus lost — restoring to rail")
             com.torve.android.debug.AnrDebugLogger.log("FOCUS_WATCHDOG fired — restoring to rail")
@@ -842,7 +961,9 @@ fun TvRoot(
         selectedTopRoute,
         settingsDestination,
         isRailFocused,
+        showCredentialTransferNudge,
     ) {
+        if (showCredentialTransferNudge) return@LaunchedEffect
         val shouldRequestEntryRestore = shouldRequestSettingsEntryRestore(
             TvSettingsEntryRestoreInputs(
                 previousSelectedTopRoute = previousSelectedTopRoute,
@@ -851,7 +972,7 @@ fun TvRoot(
                 settingsDestination = settingsDestination,
                 previousIsRailFocused = previousIsRailFocused,
                 isRailFocused = isRailFocused,
-                hasSettingsEntryRequester = settingsEntryRequester != null,
+                hasSettingsEntryRequester = true,
                 hasExplicitReturnFocus = false,
                 hasPendingExactRestore = pendingSettingsModalRestoreToken != null,
             ),
@@ -1218,7 +1339,6 @@ fun TvRoot(
         metadataRepo,
     ) {
         val loaded = try {
-            if (!isSignedIn) return@produceState
             when (heroRoute) {
                 TvRoutes.MOVIES -> metadataRepo.getTrending("movie").firstOrNull()
                 TvRoutes.SHOWS -> metadataRepo.getTrending("tv").firstOrNull()
@@ -1267,8 +1387,9 @@ fun TvRoot(
     }
 
     /* ── Navigation helpers ────────────────────────────────────────────────────────────── */
-    val navigateToSeeAll: (String, String, String) -> Unit = remember {
+    val navigateToSeeAll: (String, String, String) -> Unit = remember(navController, selectedTopRoute) {
         { railKey: String, title: String, mediaType: String ->
+            searchSeedQuery = null
             pushFocusReturnEntry(selectedTopRoute)
             navController.navigate(
                 TvRoutes.seeAll(railKey = railKey, mediaType = mediaType, title = title),
@@ -1374,7 +1495,7 @@ fun TvRoot(
             progress < TV_CONTEXT_WATCHED_THRESHOLD
         val isWatched = (progress ?: 0f) >= TV_CONTEXT_WATCHED_THRESHOLD
         val inWatchlist = watchlistViewModel.isInWatchlist(item.id)
-        val isFavorite = item.contextMenuFavoriteKey() in favoriteMediaKeys
+        val isFavorite = item.favoriteMediaKey() in favoriteMediaKeys
         val isShow = item.type == MediaType.SERIES
 
         val resumeLabel = when {
@@ -1429,14 +1550,16 @@ fun TvRoot(
                     isLocked = isFeatureLocked(TvEntitledFeature.WATCHED_STATUS_EDIT),
                 ),
             )
-            add(
-                TvMediaContextMenuAction(
-                    id = TV_CONTEXT_ACTION_MORE_LIKE_THIS,
-                    label = moreLikeThisLabel,
-                    isSecondary = true,
-                    isLocked = isFeatureLocked(TvEntitledFeature.MORE_LIKE_THIS_PREMIUM),
-                ),
-            )
+            if (item.tmdbId != null) {
+                add(
+                    TvMediaContextMenuAction(
+                        id = TV_CONTEXT_ACTION_MORE_LIKE_THIS,
+                        label = moreLikeThisLabel,
+                        isSecondary = true,
+                        isLocked = isFeatureLocked(TvEntitledFeature.MORE_LIKE_THIS_PREMIUM),
+                    ),
+                )
+            }
             add(
                 TvMediaContextMenuAction(
                     id = TV_CONTEXT_ACTION_VIEW_DETAILS,
@@ -1508,10 +1631,13 @@ fun TvRoot(
                         }
                     }
 
-                    TV_CONTEXT_ACTION_GO_TO_SEASONS,
+                    TV_CONTEXT_ACTION_GO_TO_SEASONS -> {
+                        pushFocusReturnEntry(selectedTopRoute)
+                        navController.navigateToTvDetails(item, focusEpisodes = true)
+                    }
+
                     TV_CONTEXT_ACTION_VIEW_DETAILS,
-                    TV_CONTEXT_ACTION_CHOOSE_SOURCE
-                    -> {
+                    TV_CONTEXT_ACTION_CHOOSE_SOURCE -> {
                         pushFocusReturnEntry(selectedTopRoute)
                         navController.navigateToTvDetails(item)
                     }
@@ -1529,13 +1655,9 @@ fun TvRoot(
                     }
 
                     TV_CONTEXT_ACTION_TOGGLE_FAVORITES -> {
-                        val key = item.contextMenuFavoriteKey()
+                        val key = item.favoriteMediaKey()
                         val shouldFavorite = key !in favoriteMediaKeys
-                        val updatedKeys = if (shouldFavorite) favoriteMediaKeys + key else favoriteMediaKeys - key
-                        favoriteMediaKeys = updatedKeys
-                        mediaFavoritesPrefKey?.let { prefKey ->
-                            tvPrefs.edit().putStringSet(prefKey, updatedKeys).apply()
-                        }
+                        mediaFavoritesRepository.toggleFavorite(item)
                         TvNotificationQueue.post(
                             if (shouldFavorite) {
                                 context.getString(R.string.tv_notification_favorites_added, item.title)
@@ -1563,15 +1685,19 @@ fun TvRoot(
                     }
 
                     TV_CONTEXT_ACTION_MORE_LIKE_THIS -> {
-                        searchSeedQuery = item.title
-                        if (isSubRouteActive) {
-                            navController.popBackStack(TvRoutes.SUB_NAV_START, inclusive = false)
+                        val tmdbId = item.tmdbId
+                        if (tmdbId != null) {
+                            val mediaType = if (item.type == MediaType.SERIES) "tv" else "movie"
+                            searchSeedQuery = null
+                            pushFocusReturnEntry(selectedTopRoute)
+                            navController.navigate(
+                                TvRoutes.seeAll(
+                                    railKey = "more_like_${mediaType}_$tmdbId",
+                                    mediaType = mediaType,
+                                    title = "$moreLikeThisLabel: ${item.title}",
+                                ),
+                            )
                         }
-                        val targetRoute = if (item.type == MediaType.SERIES) TvRoutes.SHOWS else TvRoutes.MOVIES
-                        selectedTopRoute = targetRoute
-                        highlightedTopRoute = targetRoute
-                        confirmedTopRoute = targetRoute
-                        pendingContentEntryRoute = targetRoute
                     }
 
                     TV_CONTEXT_ACTION_TRAILER -> {
@@ -1818,7 +1944,6 @@ fun TvRoot(
                 /* ── Layer 1a: Home — always composed, hidden when inactive ── */
                 val isHomeVisible = activeTabRoute == TvRoutes.HOME && tabContentVisible
                 stateHolder.SaveableStateProvider(TvRoutes.HOME) {
-                    if (isSignedIn) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -1948,11 +2073,10 @@ fun TvRoot(
                             shouldAutoFocus = pendingContentEntryRoute == TvRoutes.HOME,
                         )
                     }
-                    }
                 }
 
                 /* ── Layer 1b: Other tabs — composed only when active ───────── */
-                if (activeTabRoute != null && activeTabRoute != TvRoutes.HOME) {
+                if (activeTabRoute != TvRoutes.HOME) {
                     stateHolder.SaveableStateProvider(activeTabRoute) {
                         Box(
                             modifier = Modifier
@@ -2103,6 +2227,7 @@ fun TvRoot(
                                     TvRoutes.LIBRARY -> TvLibraryScreen(
                                         railFocusRequester = railFocusRequester,
                                         headerFocusRequester = heroPrimaryActionRequester,
+                                        favoriteMediaItems = favoriteMediaItems,
                                         heroOverlay = tabHeroOverlay,
                                         onMediaClick = { item ->
                                             pushFocusReturnEntry(TvRoutes.LIBRARY)
@@ -2245,6 +2370,9 @@ fun TvRoot(
                                                 },
                                                 onNavigateToTransferDiagnostics = {
                                                     navController.navigate("transfer_diagnostics_tv")
+                                                },
+                                                onNavigateToReportIssue = {
+                                                    navController.navigate("bug_report_tv")
                                                 },
                                                 onNavigateToPairingSignIn = {
                                                     navController.navigate("pairing_signin_tv")
@@ -2456,11 +2584,19 @@ fun TvRoot(
 
     // ── Import overlay: blocks navigation during heavy playlist restore ──
     if (restoreProgress.isImporting) {
+        val restoreBlockerRequester = remember { FocusRequester() }
+        LaunchedEffect(Unit) {
+            delay(30L)
+            runCatching { restoreBlockerRequester.requestFocus() }
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .zIndex(200f)
-                .background(com.torve.android.ui.theme.Obsidian.copy(alpha = 0.85f)),
+                .background(com.torve.android.ui.theme.Obsidian.copy(alpha = 0.85f))
+                .focusRequester(restoreBlockerRequester)
+                .focusable()
+                .onPreviewKeyEvent { true },
             contentAlignment = Alignment.Center,
         ) {
             androidx.compose.foundation.layout.Column(
@@ -2497,6 +2633,33 @@ fun TvRoot(
 
     TvBackgroundWorkOverlay(backgroundWorkStatus)
 
+    if (showCredentialTransferNudge) {
+        TvCredentialTransferNudge(
+            onGoToSettings = {
+                showCredentialTransferNudge = false
+                credentialNudgeDismissed = true
+                pendingNavJob?.cancel()
+                pendingNavJob = null
+                pendingSettingsAppLinkItemId = TvSettingsItemIds.ACCOUNT_IMPORT_SETUP
+                settingsDestination = TvSettingsDestination.MAIN
+                settingsFocusStateMachine.selectedCategory = TvSettingsCategory.ACCOUNT
+                if (isSubRouteActive) {
+                    navController.popBackStack(TvRoutes.SUB_NAV_START, inclusive = false)
+                }
+                selectedTopRoute = TvRoutes.SETTINGS
+                highlightedTopRoute = TvRoutes.SETTINGS
+                confirmedTopRoute = TvRoutes.SETTINGS
+                pendingContentEntryRoute = TvRoutes.SETTINGS
+                pendingRailEntryRoute = null
+                focusRestoreTrigger++
+            },
+            onDismiss = {
+                showCredentialTransferNudge = false
+                credentialNudgeDismissed = true
+            },
+        )
+    }
+
     activeNotification?.let { notification ->
         val borderColor = when (notification.type) {
             NotificationType.SUCCESS -> Emerald
@@ -2521,9 +2684,105 @@ fun TvRoot(
 private data class TvBackgroundWorkStatus(
     val visible: Boolean = false,
     val label: String = "",
-    val progress: Float = 0f,
     val blockNavigation: Boolean = false,
 )
+
+@Composable
+private fun TvCredentialTransferNudge(
+    onGoToSettings: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val receiveRequester = remember { FocusRequester() }
+    var receiveFocused by remember { mutableStateOf(false) }
+    var closeFocused by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        repeat(8) {
+            withFrameNanos { }
+            delay(40L)
+            runCatching { receiveRequester.requestFocus() }
+            if (receiveFocused) return@LaunchedEffect
+        }
+    }
+
+    Popup(
+        alignment = Alignment.TopEnd,
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(
+            focusable = true,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = false,
+        ),
+    ) {
+        Box(
+            modifier = Modifier
+                .padding(top = 22.dp, end = 22.dp)
+                .focusGroup()
+                .onPreviewKeyEvent { event ->
+                    if (event.type == KeyEventType.KeyDown && event.key == Key.Back) {
+                        onDismiss()
+                        true
+                    } else {
+                        false
+                    }
+                },
+        ) {
+            Surface(
+                modifier = Modifier.width(380.dp),
+                color = Charcoal.copy(alpha = 0.94f),
+                shape = RoundedCornerShape(14.dp),
+                tonalElevation = 0.dp,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .border(1.dp, AmberSubtle, RoundedCornerShape(14.dp))
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.recovery_card_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Snow,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = stringResource(R.string.recovery_card_body),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Snow.copy(alpha = 0.82f),
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        OutlinedButton(
+                            modifier = Modifier
+                                .onFocusChanged { closeFocused = it.isFocused },
+                            onClick = onDismiss,
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = if (closeFocused) Snow.copy(alpha = 0.14f) else Charcoal.copy(alpha = 0.2f),
+                                contentColor = if (closeFocused) Snow else Snow.copy(alpha = 0.82f),
+                            ),
+                        ) {
+                            Text(stringResource(R.string.common_close))
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Button(
+                            modifier = Modifier
+                                .focusRequester(receiveRequester)
+                                .onFocusChanged { receiveFocused = it.isFocused },
+                            onClick = onGoToSettings,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (receiveFocused) Snow else AmberSubtle,
+                                contentColor = if (receiveFocused) Charcoal else Snow,
+                            ),
+                        ) {
+                            Text(stringResource(R.string.credential_transfer_nudge_go_to_settings))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun rememberTvBackgroundWorkStatus(
@@ -2547,14 +2806,11 @@ private fun rememberTvBackgroundWorkStatus(
             value = if (runningInfo == null) {
                 TvBackgroundWorkStatus()
             } else {
-                val progress = runningInfo.progress.getFloat(BackgroundWork.KEY_PROGRESS, 0f)
-                    .coerceIn(0f, 1f)
                 val isRunning = runningInfo.state == androidx.work.WorkInfo.State.RUNNING
                 TvBackgroundWorkStatus(
                     visible = isRunning,
                     label = runningInfo.progress.getString(BackgroundWork.KEY_LABEL)
                         ?: "Preparing cached content",
-                    progress = progress,
                     blockNavigation = isRunning &&
                         runningInfo.progress.getBoolean(BackgroundWork.KEY_BLOCK_NAVIGATION, false),
                 )
@@ -2607,10 +2863,8 @@ private fun TvBackgroundWorkOverlay(status: TvBackgroundWorkStatus) {
                 style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
             )
             androidx.compose.material3.LinearProgressIndicator(
-                progress = { status.progress },
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .then(Modifier),
+                    .fillMaxWidth(),
                 color = com.torve.android.ui.theme.Amber,
                 trackColor = com.torve.android.ui.theme.Steel.copy(alpha = 0.45f),
             )
@@ -2649,7 +2903,15 @@ private fun isRemoteDeviceRevocationReason(reason: String?): Boolean {
     }
 }
 
-private fun MediaItem.contextMenuFavoriteKey(): String {
-    val stableId = tmdbId?.toString() ?: id
-    return "${type.name}:$stableId"
+private data class LegacyFavoriteMediaRef(
+    val type: MediaType,
+    val tmdbId: Int,
+)
+
+private fun String.toLegacyFavoriteMediaRefOrNull(): LegacyFavoriteMediaRef? {
+    val typeRaw = substringBefore(":", missingDelimiterValue = "")
+    val tmdbId = substringAfter(":", missingDelimiterValue = "").toIntOrNull() ?: return null
+    val type = runCatching { MediaType.valueOf(typeRaw) }.getOrNull() ?: return null
+    if (type != MediaType.MOVIE && type != MediaType.SERIES) return null
+    return LegacyFavoriteMediaRef(type = type, tmdbId = tmdbId)
 }

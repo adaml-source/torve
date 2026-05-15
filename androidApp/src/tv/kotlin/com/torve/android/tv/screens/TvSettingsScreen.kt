@@ -68,7 +68,11 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 // LocaleListCompat removed — no longer applying locale inline
 import com.torve.android.R
+import com.torve.android.catalog.CatalogWarmupWorker
+import com.torve.android.epg.EpgWarmupWorker
+import com.torve.android.session.PostSignInRefresh
 import com.torve.android.sync.SyncCoordinator
+import com.torve.android.sync.TraktSyncWorker
 import com.torve.data.account.AccountSettingsRepository
 import com.torve.presentation.session.AccountSessionCoordinator
 import com.torve.android.tv.settings.isTvReduceMotionEnabled
@@ -233,6 +237,7 @@ internal fun TvSettingsScreen(
     onNavigateToSendCredentials: () -> Unit = {},
     onNavigateToReceiveCredentials: () -> Unit = {},
     onNavigateToTransferDiagnostics: () -> Unit = {},
+    onNavigateToReportIssue: () -> Unit = {},
     onNavigateToPairingSignIn: () -> Unit = {},
     onAuthSuccess: () -> Unit = {},
     pairedDevicesFocusRequester: FocusRequester? = null,
@@ -286,6 +291,7 @@ internal fun TvSettingsScreen(
     var authPassword by remember { mutableStateOf("") }
     var authConfirmPassword by remember { mutableStateOf("") }
     var authIsLoading by remember { mutableStateOf(false) }
+    var authIsSigningOut by remember { mutableStateOf(false) }
     var authError by remember { mutableStateOf<String?>(null) }
     var authUser by remember { mutableStateOf<com.torve.data.auth.AuthUser?>(null) }
     var authShowRegister by remember { mutableStateOf(false) }
@@ -1381,11 +1387,19 @@ internal fun TvSettingsScreen(
             focusTargetType = "navigation",
         )
     }
+    val aboutReportIssueTarget = remember {
+        TvSettingsFocusTarget(
+            itemId = TvSettingsItemIds.ABOUT_REPORT_ISSUE,
+            category = TvSettingsCategory.ABOUT,
+            listIndex = 3,
+            focusTargetType = "navigation",
+        )
+    }
     val aboutTermsTarget = remember {
         TvSettingsFocusTarget(
             itemId = TvSettingsItemIds.ABOUT_TERMS,
             category = TvSettingsCategory.ABOUT,
-            listIndex = 3,
+            listIndex = 4,
             focusTargetType = "navigation",
         )
     }
@@ -1393,7 +1407,7 @@ internal fun TvSettingsScreen(
         TvSettingsFocusTarget(
             itemId = TvSettingsItemIds.ABOUT_LEGAL,
             category = TvSettingsCategory.ABOUT,
-            listIndex = 4,
+            listIndex = 5,
             focusTargetType = "navigation",
         )
     }
@@ -1401,7 +1415,7 @@ internal fun TvSettingsScreen(
         TvSettingsFocusTarget(
             itemId = TvSettingsItemIds.ABOUT_STATS,
             category = TvSettingsCategory.ABOUT,
-            listIndex = 5,
+            listIndex = 6,
             focusTargetType = "action",
         )
     }
@@ -2445,7 +2459,9 @@ internal fun TvSettingsScreen(
                 )
                 TvSettingCard(
                     title = stringResource(R.string.tv_settings_log_out),
-                    subtitle = if (confirmSignOut) {
+                    subtitle = if (authIsSigningOut) {
+                        stringResource(R.string.tv_auth_please_wait)
+                    } else if (confirmSignOut) {
                         stringResource(R.string.tv_auth_sign_out_confirm)
                     } else {
                         stringResource(R.string.tv_auth_sign_out_desc)
@@ -2454,25 +2470,35 @@ internal fun TvSettingsScreen(
                     focusRequester = requester,
                     onFocused = { onSettingsRowFocused(authLogoutTarget, requester) },
                     onClick = {
+                        if (authIsSigningOut) return@TvSettingCard
                         if (confirmSignOut) {
                             authScope.launch {
+                                authIsSigningOut = true
                                 settingsFocusController.captureOrigin(
                                     itemId = authLogoutTarget.itemId,
                                     outerListState = settingsListState,
                                     reason = "confirm",
                                 )
                                 pendingAuthTransitionFocusTarget = null
-                                accountSessionCoordinator.signOut()
-                                authClient.logout()
-                                authUser = null
-                                authEmail = ""
-                                authPassword = ""
-                                confirmSignOut = false
-                                subscriptionViewModel.loadSubscription()
-                                TvNotificationQueue.post(
-                                    context.getString(R.string.tv_auth_logged_out),
-                                    NotificationType.INFO,
-                                )
+                                try {
+                                    CatalogWarmupWorker.cancel(context.applicationContext)
+                                    EpgWarmupWorker.cancel(context.applicationContext)
+                                    TraktSyncWorker.cancel(context.applicationContext)
+                                    accountSessionCoordinator.signOut()
+                                    authClient.logout()
+                                    authUser = null
+                                    authEmail = ""
+                                    authPassword = ""
+                                    authConfirmPassword = ""
+                                    confirmSignOut = false
+                                    subscriptionViewModel.loadSubscription()
+                                    TvNotificationQueue.post(
+                                        context.getString(R.string.tv_auth_logged_out),
+                                        NotificationType.INFO,
+                                    )
+                                } finally {
+                                    authIsSigningOut = false
+                                }
                             }
                         } else {
                             confirmSignOut = true
@@ -2481,6 +2507,24 @@ internal fun TvSettingsScreen(
                     rowType = TvSettingRowType.DANGEROUS,
                     focusedHint = stringResource(R.string.tv_auth_sign_out_second_press_hint),
                 )
+                if (authIsSigningOut) {
+                    AlertDialog(
+                        onDismissRequest = {},
+                        containerColor = Charcoal,
+                        title = { Text(stringResource(R.string.tv_settings_log_out), color = Snow) },
+                        text = {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                CircularProgressIndicator(color = Amber, strokeWidth = 3.dp)
+                                Text(stringResource(R.string.tv_auth_please_wait), color = Silver)
+                            }
+                        },
+                        confirmButton = {},
+                        dismissButton = {},
+                    )
+                }
             }
             item(key = "auth_delete_account") {
                 var showDeleteDialog by remember { mutableStateOf(false) }
@@ -2666,7 +2710,6 @@ internal fun TvSettingsScreen(
                                 } else {
                                     authClient.login(authEmail, authPassword)
                                 }
-                                authIsLoading = false
                                 if (result.success) {
                                     settingsFocusController.clearPendingRestore()
                                     settingsFocusController.clearSavedReturnTarget()
@@ -2678,7 +2721,9 @@ internal fun TvSettingsScreen(
                                     subscriptionViewModel.loadSubscription()
                                     // Fetch and apply shared account settings (language, ratings, etc.)
                                     runCatching { accountSessionCoordinator.bootstrapAfterSignIn() }
+                                    PostSignInRefresh.enqueueAfterAccountRestore(context, accountSessionCoordinator)
                                     settingsViewModel.refreshSettings()
+                                    authIsLoading = false
                                     onAuthSuccess()
                                     val msg = if (authShowRegister) {
                                         context.getString(R.string.tv_auth_account_created_verify)
@@ -2687,6 +2732,7 @@ internal fun TvSettingsScreen(
                                     }
                                     TvNotificationQueue.post(msg, NotificationType.SUCCESS)
                                 } else {
+                                    authIsLoading = false
                                     authError = result.error
                                     TvNotificationQueue.post(
                                         result.error ?: context.getString(R.string.tv_auth_failed),
@@ -2764,11 +2810,12 @@ internal fun TvSettingsScreen(
                                         TvNotificationQueue.post(
                                             context.getString(R.string.login_reset_sent),
                                             NotificationType.INFO,
-                                        )
-                                    } else {
-                                        authError = result.error
-                                        TvNotificationQueue.post(
-                                            result.error ?: context.getString(R.string.tv_auth_failed),
+                                    )
+                                } else {
+                                    authIsLoading = false
+                                    authError = result.error
+                                    TvNotificationQueue.post(
+                                        result.error ?: context.getString(R.string.tv_auth_failed),
                                             NotificationType.ERROR,
                                         )
                                     }
@@ -5697,6 +5744,27 @@ internal fun TvSettingsScreen(
                 onClick = {
                     aboutOverlayState = TvAboutOverlayState.Support(originItemId = aboutSupportTarget.itemId)
                 },
+                rowType = TvSettingRowType.NAVIGATION,
+            )
+        }
+
+        item(key = "about_report_issue") {
+            val baseRequester = remember("about_report_issue") { FocusRequester() }
+            val requester = rememberRegisteredTvSettingsFocusRequester(
+                controller = settingsFocusController,
+                target = aboutReportIssueTarget,
+                externalRequester = baseRequester,
+            )
+            TvSettingCard(
+                title = stringResource(R.string.bug_report_title),
+                subtitle = stringResource(R.string.bug_report_tv_settings_subtitle),
+                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                focusRequester = requester,
+                onFocused = {
+                    settingsFocusController.markFocused(aboutReportIssueTarget.itemId, requester)
+                    onContentFocused(requester)
+                },
+                onClick = onNavigateToReportIssue,
                 rowType = TvSettingRowType.NAVIGATION,
             )
         }

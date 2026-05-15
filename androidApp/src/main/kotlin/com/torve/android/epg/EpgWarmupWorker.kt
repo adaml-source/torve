@@ -67,8 +67,10 @@ class EpgWarmupWorker(
     }
 
     companion object {
-        private const val WORK_NAME = "epg_warmup_worker"
-        private const val IMMEDIATE_WORK_NAME = "epg_warmup_worker_immediate"
+        private const val LEGACY_WORK_NAME = "epg_warmup_worker"
+        private const val LEGACY_IMMEDIATE_WORK_NAME = "epg_warmup_worker_immediate"
+        private const val WORK_NAME = "epg_warmup_worker_silent_v2"
+        private const val IMMEDIATE_WORK_NAME = "epg_warmup_worker_immediate_v2"
 
         fun schedule(context: Context) {
             val periodicConstraints = Constraints.Builder()
@@ -76,36 +78,41 @@ class EpgWarmupWorker(
                 .setRequiresBatteryNotLow(true)
                 .setRequiresDeviceIdle(true)
                 .build()
-            val immediateConstraints = Constraints.Builder()
-                .setRequiredNetworkType(NetworkType.CONNECTED)
-                .setRequiresBatteryNotLow(true)
-                .build()
             val periodic = PeriodicWorkRequestBuilder<EpgWarmupWorker>(
                 6, TimeUnit.HOURS,
             )
                 .setConstraints(periodicConstraints)
-                .addTag(BackgroundWork.TAG_HEAVY_PRELOAD)
-                .build()
-            val immediate = OneTimeWorkRequestBuilder<EpgWarmupWorker>()
-                .setConstraints(immediateConstraints)
-                .addTag(BackgroundWork.TAG_HEAVY_PRELOAD)
                 .build()
             val manager = WorkManager.getInstance(context)
+            manager.cancelUniqueWork(LEGACY_WORK_NAME)
+            manager.cancelUniqueWork(LEGACY_IMMEDIATE_WORK_NAME)
+            manager.cancelUniqueWork("${LEGACY_IMMEDIATE_WORK_NAME}_refresh")
             manager.enqueueUniquePeriodicWork(
                 WORK_NAME,
-                ExistingPeriodicWorkPolicy.UPDATE,
+                ExistingPeriodicWorkPolicy.KEEP,
                 periodic,
             )
-            manager.enqueueUniqueWork(
-                IMMEDIATE_WORK_NAME,
-                ExistingWorkPolicy.KEEP,
-                immediate,
+        }
+
+        fun refreshNow(context: Context) {
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .build()
+            val request = OneTimeWorkRequestBuilder<EpgWarmupWorker>()
+                .setConstraints(constraints)
+                .addTag(BackgroundWork.TAG_HEAVY_PRELOAD)
+                .build()
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                "${IMMEDIATE_WORK_NAME}_refresh",
+                ExistingWorkPolicy.REPLACE,
+                request,
             )
         }
 
         fun cancel(context: Context) {
             WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
             WorkManager.getInstance(context).cancelUniqueWork(IMMEDIATE_WORK_NAME)
+            WorkManager.getInstance(context).cancelUniqueWork("${IMMEDIATE_WORK_NAME}_refresh")
         }
     }
 }

@@ -282,16 +282,8 @@ class SecretsTransferSenderViewModel(
         val secrets = mutableListOf<SecretRecord>()
         val emptyCategories = mutableListOf<SecretCategory>()
         for (category in categories.sortedBy { it.name }) {
-            val categorySecrets = TransferSecretCatalog.keysFor(category).mapNotNull { key ->
-                val value = secretStore.get(key)?.takeIf { it.isNotBlank() }
-                value?.let {
-                    SecretRecord(
-                        category = category,
-                        key = key.name,
-                        value = it,
-                    )
-                }
-            }
+            val categorySecrets = TransferSecretCatalog.keysFor(category)
+                .flatMap { key -> snapshotSecretKey(category, key) }
             if (categorySecrets.isEmpty()) emptyCategories += category
             secrets += categorySecrets
         }
@@ -299,6 +291,56 @@ class SecretsTransferSenderViewModel(
             secrets = secrets,
             categoriesWithoutSecrets = emptyCategories,
         )
+    }
+
+    private suspend fun snapshotSecretKey(
+        category: SecretCategory,
+        key: IntegrationSecretKey,
+    ): List<SecretRecord> {
+        val records = mutableListOf<SecretRecord>()
+        secretStore.get(key)
+            ?.takeIf { it.isNotBlank() }
+            ?.let { value ->
+                records += SecretRecord(
+                    category = category,
+                    key = key.name,
+                    value = value,
+                )
+            }
+        if (records.isEmpty()) {
+            legacyTraktPreferenceKey(key)
+                ?.let { prefKey -> prefsRepo.getString(prefKey)?.takeIf { it.isNotBlank() } }
+                ?.let { value ->
+                    records += SecretRecord(
+                        category = category,
+                        key = key.name,
+                        value = value,
+                    )
+                }
+        }
+
+        val subKeys = runCatching { secretStore.getSubKeys(key) }
+            .getOrDefault(emptyList())
+            .distinct()
+            .filter { it.isNotBlank() }
+        subKeys.forEach { subKey ->
+            val value = secretStore.get(key, subKey)?.takeIf { it.isNotBlank() }
+            if (value != null) {
+                records += SecretRecord(
+                    category = category,
+                    key = key.name,
+                    value = value,
+                    subKey = subKey,
+                )
+            }
+        }
+        return records
+    }
+
+    private fun legacyTraktPreferenceKey(key: IntegrationSecretKey): String? = when (key) {
+        IntegrationSecretKey.TRAKT_ACCESS_TOKEN -> "trakt_access_token"
+        IntegrationSecretKey.TRAKT_REFRESH_TOKEN -> "trakt_refresh_token"
+        else -> null
     }
 
     /**

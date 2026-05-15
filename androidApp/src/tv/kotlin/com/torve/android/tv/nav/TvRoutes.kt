@@ -45,14 +45,15 @@ object TvRoutes {
         return "tv_vod_series_details/${Uri.encode(cacheKey)}"
     }
 
-    const val DETAILS = "tv_details/{type}/{id}?autoPlay={autoPlay}&handoffPositionMs={handoffPositionMs}"
+    const val DETAILS = "tv_details/{type}/{id}?autoPlay={autoPlay}&handoffPositionMs={handoffPositionMs}&focusEpisodes={focusEpisodes}"
     fun details(
         type: String,
         id: Int,
         autoPlay: Boolean = false,
         handoffPositionMs: Long = 0L,
+        focusEpisodes: Boolean = false,
     ): String {
-        return "tv_details/$type/$id?autoPlay=$autoPlay&handoffPositionMs=$handoffPositionMs"
+        return "tv_details/$type/$id?autoPlay=$autoPlay&handoffPositionMs=$handoffPositionMs&focusEpisodes=$focusEpisodes"
     }
 
     const val LIVE_PLAYER = "tv_live_player?channelUrl={channelUrl}&channelName={channelName}&groupName={groupName}"

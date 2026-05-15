@@ -21,13 +21,16 @@ import com.torve.domain.model.PlaylistType
 import com.torve.domain.repository.WatchHistoryRepository
 import com.torve.domain.repository.WatchProgressRepository
 import com.torve.domain.repository.WatchlistRepository
+import com.torve.domain.repository.MediaFavoritesRepository
 import com.torve.domain.security.SecureStorage
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.settings.SettingsRefreshNotifier
 import com.torve.platform.torveVerboseLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -37,6 +40,7 @@ import kotlinx.datetime.Clock
 
 data class AccountSessionState(
     val isBootstrapping: Boolean = false,
+    val isSigningOut: Boolean = false,
     val deviceLimitReached: Boolean = false,
     val deviceLimitMessage: String? = null,
     val activeDevices: List<ManagedDeviceDto> = emptyList(),
@@ -106,6 +110,7 @@ class AccountSessionCoordinator(
     private val channelRepo: com.torve.domain.repository.ChannelRepository,
     private val addonSyncService: AddonSyncService,
     private val watchlistRepo: WatchlistRepository,
+    private val mediaFavoritesRepository: MediaFavoritesRepository,
     private val watchProgressRepo: WatchProgressRepository,
     private val watchHistoryRepo: WatchHistoryRepository,
     private val traktSyncRepo: TraktSyncRepository,
@@ -118,6 +123,7 @@ class AccountSessionCoordinator(
     // Use IO dispatcher for background restore — heavy network + disk work
     // must not compete with Compose rendering on the Default (CPU) pool.
     private val backgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var signInRestoreJob: Job? = null
 
     private val _state = MutableStateFlow(AccountSessionState())
     val state: StateFlow<AccountSessionState> = _state.asStateFlow()
@@ -165,6 +171,103 @@ class AccountSessionCoordinator(
     }
 
     /**
+     * Explicit account activation used after device-to-device credential import
+     * or a manual "refresh account data" action. This is intentionally different
+     * from content cache workers: first restore backend account state and
+     * integration credentials, then callers can warm catalog caches once.
+     */
+    suspend fun refreshAccountDataAfterCredentialTransfer(): AccountSessionBootstrapResult {
+        val token = authClient.getValidAccessToken()
+            ?: return AccountSessionBootstrapResult(
+                isReady = false,
+                error = "Sign in required to refresh account data.",
+            )
+
+        signInRestoreJob?.cancel()
+        signInRestoreJob = null
+        _state.update { it.copy(isBootstrapping = true, lastError = null) }
+        _restoreProgress.value = RestoreProgress(
+            phase = RestorePhase.RUNNING,
+            message = "Activating imported credentials...",
+            isImporting = true,
+        )
+
+        return withContext(Dispatchers.IO) {
+            var errors = 0
+
+            _restoreProgress.update { it.copy(message = "Syncing account settings...") }
+            val settingsResult = runCatching {
+                accountSettingsRepository.syncAfterSignIn()
+            }.onFailure { error ->
+                errors++
+                torveVerboseLog { "[AccountRefresh] Account settings FAILED: ${error.message}" }
+            }.getOrNull()
+
+            _restoreProgress.update { it.copy(message = "Restoring integrations...") }
+            val restoredIntegrations = runCatching {
+                restoreIntegrations(token, forceCredentials = true)
+            }.getOrElse { error ->
+                errors++
+                torveVerboseLog { "[AccountRefresh] Integration restore FAILED: ${error.message}" }
+                0
+            }
+
+            _restoreProgress.update { it.copy(message = "Syncing source providers...") }
+            runCatching {
+                addonSyncService.syncAfterSignIn()
+            }.onFailure { error ->
+                errors++
+                torveVerboseLog { "[AccountRefresh] Addon sync FAILED: ${error.message}" }
+            }
+
+            _restoreProgress.update { it.copy(message = "Syncing Trakt...") }
+            val traktSynced = runCatching {
+                syncTraktFromAccountIfConnected()
+            }.getOrElse { error ->
+                errors++
+                torveVerboseLog { "[AccountRefresh] Trakt sync FAILED: ${error.message}" }
+                false
+            }
+
+            _restoreProgress.update { it.copy(message = "Syncing playlists...") }
+            val playlistSync = runCatching {
+                syncPlaylistsFromAccount(token)
+            }.getOrElse { error ->
+                errors++
+                torveVerboseLog { "[AccountRefresh] Playlist sync FAILED: ${error.message}" }
+                PlaylistSyncResult()
+            }
+
+            val now = Clock.System.now().toEpochMilliseconds()
+            settingsRefreshNotifier.notifyRefresh(now)
+            val phase = if (errors > 0) RestorePhase.COMPLETED_WITH_ERRORS else RestorePhase.COMPLETED
+            _restoreProgress.value = RestoreProgress(
+                phase = phase,
+                message = if (errors > 0) {
+                    "Account refresh completed with $errors issue${if (errors == 1) "" else "s"}"
+                } else {
+                    "Account refresh complete"
+                },
+                errorCount = errors,
+                integrationsRestored = restoredIntegrations,
+                isImporting = false,
+            )
+            _state.update {
+                it.copy(
+                    isBootstrapping = false,
+                    lastError = if (errors > 0) "Account refresh completed with issues." else null,
+                )
+            }
+
+            AccountSessionBootstrapResult(
+                isReady = errors == 0 || settingsResult != null || restoredIntegrations > 0 || traktSynced || playlistSync.hasChanges,
+                error = if (errors > 0) "Account refresh completed with issues." else null,
+                settingsResult = settingsResult,
+            )
+        }
+    }
+
+    /**
      * Full teardown of session state.
      */
     suspend fun signOut() {
@@ -181,41 +284,63 @@ class AccountSessionCoordinator(
      * IPTV rows, preferences, and credentials.
      */
     suspend fun clearLocalAccountData(reason: String) {
-        torveVerboseLog { "[SignOut] Local account cleanup started reason=$reason" }
-        integrationSecretStore.clearAllSecrets()
-        torveVerboseLog { "[SignOut] Encrypted secret store cleared" }
-        runCatching { secureStorage.removeByPrefix("xtream_pwd_") }
-        torveVerboseLog { "[SignOut] Xtream secure credential prefix cleared" }
-        for (key in integrationSecretStore.legacyPreferenceSecretKeys) {
-            prefsRepo.remove(key)
+        signInRestoreJob?.cancel()
+        signInRestoreJob = null
+        _state.update {
+            it.copy(
+                isBootstrapping = false,
+                isSigningOut = true,
+                lastError = null,
+            )
         }
-        prefsRepo.remove(SubscriptionEntitlementCacheKeys.VERIFIED_PRINCIPAL)
-        prefsRepo.remove(SubscriptionEntitlementCacheKeys.VERIFIED_AT_MS)
-        prefsRepo.remove(SubscriptionEntitlementCacheKeys.VERIFIED_HAS_ENTITLEMENT)
-        prefsRepo.remove(SubscriptionEntitlementCacheKeys.VERIFIED_IS_DEVICE_ACTIVATED)
-        prefsRepo.remove(SubscriptionEntitlementCacheKeys.VERIFIED_DEVICE_BLOCK_REASON)
-        torveVerboseLog { "[SignOut] Legacy preference secrets cleared" }
-        purgeAccountScopedDatabaseRows()
-        torveVerboseLog { "[SignOut] SQLite account rows cleared" }
-        runCatching { channelRepo.clearAll() }
-        runCatching { watchlistRepo.clear() }
-        runCatching { watchProgressRepo.clearAllProgress() }
-        runCatching { watchHistoryRepo.clearAll() }
-        runCatching { traktSyncRepo.clearLocalData() }
-        torveVerboseLog { "[SignOut] Repository caches cleared" }
-        runCatching { addonSyncService.clearSyncStateOnSignOut() }
-        torveVerboseLog { "[SignOut] Addon sync metadata cleared" }
-        accountSettingsRepository.clearSessionState()
-        _state.value = AccountSessionState()
-        _restoreProgress.value = RestoreProgress()
+        _restoreProgress.value = RestoreProgress(
+            phase = RestorePhase.RUNNING,
+            message = "Signing out...",
+            isImporting = true,
+        )
         settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
-        torveVerboseLog { "[SignOut] Local account cleanup finished reason=$reason" }
+        withContext(Dispatchers.IO) {
+            try {
+                torveVerboseLog { "[SignOut] Local account cleanup started reason=$reason" }
+                integrationSecretStore.clearAllSecrets()
+                torveVerboseLog { "[SignOut] Encrypted secret store cleared" }
+                runCatching { secureStorage.removeByPrefix("xtream_pwd_") }
+                torveVerboseLog { "[SignOut] Xtream secure credential prefix cleared" }
+                for (key in integrationSecretStore.legacyPreferenceSecretKeys) {
+                    prefsRepo.remove(key)
+                }
+                prefsRepo.remove(SubscriptionEntitlementCacheKeys.VERIFIED_PRINCIPAL)
+                prefsRepo.remove(SubscriptionEntitlementCacheKeys.VERIFIED_AT_MS)
+                prefsRepo.remove(SubscriptionEntitlementCacheKeys.VERIFIED_HAS_ENTITLEMENT)
+                prefsRepo.remove(SubscriptionEntitlementCacheKeys.VERIFIED_IS_DEVICE_ACTIVATED)
+                prefsRepo.remove(SubscriptionEntitlementCacheKeys.VERIFIED_DEVICE_BLOCK_REASON)
+                torveVerboseLog { "[SignOut] Legacy preference secrets cleared" }
+                purgeAccountScopedDatabaseRows()
+                torveVerboseLog { "[SignOut] SQLite account rows cleared" }
+                runCatching { channelRepo.clearAll() }
+                runCatching { watchlistRepo.clear() }
+                runCatching { mediaFavoritesRepository.clearSessionState() }
+                runCatching { watchProgressRepo.clearAllProgress() }
+                runCatching { watchHistoryRepo.clearAll() }
+                runCatching { traktSyncRepo.clearLocalData() }
+                torveVerboseLog { "[SignOut] Repository caches cleared" }
+                runCatching { addonSyncService.clearSyncStateOnSignOut() }
+                torveVerboseLog { "[SignOut] Addon sync metadata cleared" }
+                accountSettingsRepository.clearSessionState()
+                torveVerboseLog { "[SignOut] Local account cleanup finished reason=$reason" }
+            } finally {
+                _state.value = AccountSessionState()
+                _restoreProgress.value = RestoreProgress()
+                settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
+            }
+        }
     }
 
     private fun purgeAccountScopedDatabaseRows() {
         val queries = database.torveQueries
         queries.transaction {
-            queries.deleteAllMetadataCache()
+            // Keep public discovery caches (TMDB metadata/catalog tops) intact:
+            // signed-out users can still browse Movies and TV Shows.
             queries.clearAllProgressForAllUsers()
             queries.deleteAllAccountPreferences()
             queries.deleteAllAddonsForAllUsers()
@@ -239,7 +364,6 @@ class AccountSessionCoordinator(
             queries.clearTraktSyncState()
             queries.clearTraktQueue()
             queries.deleteAllRatings()
-            queries.deleteAllCatalogTopItems()
         }
     }
 
@@ -383,16 +507,19 @@ class AccountSessionCoordinator(
 
             // ── Phase B: Background restore (deferred) ────────────
             if (forceSettingsRefresh) {
-                torveVerboseLog { "[Login] Phase B: launching background restore (deferred 5s for home screen)" }
-                backgroundScope.launch {
-                    runCatching { addonSyncService.syncAfterSignIn() }
-                }
-                backgroundScope.launch {
-                    // Wait for home screen to fully load posters before starting heavy
-                    // network/import work. Prevents ANR and incomplete poster loading
-                    // from restore competing with Coil image decoding.
-                    kotlinx.coroutines.delay(5000)
-                    backgroundRestore(token)
+                torveVerboseLog { "[Login] Phase B: launching account restore immediately after sign-in" }
+                if (signInRestoreJob?.isActive == true) {
+                    torveVerboseLog { "[Login] Phase B: sign-in restore already running; skipping duplicate launch" }
+                } else {
+                    _restoreProgress.value = RestoreProgress(
+                        phase = RestorePhase.RUNNING,
+                        message = "Syncing account settings",
+                        isImporting = true,
+                    )
+                    signInRestoreJob = backgroundScope.launch {
+                        runCatching { addonSyncService.syncAfterSignIn() }
+                        backgroundRestore(token)
+                    }
                 }
             } else if (forceStaleRefresh) {
                 backgroundScope.launch {
@@ -508,6 +635,11 @@ class AccountSessionCoordinator(
         val localPlaylists = runCatching { channelRepo.getPlaylists() }.getOrElse { emptyList() }
         val hasLocalData = localPlaylists.isNotEmpty()
         if (hasLocalData) {
+            _restoreProgress.value = RestoreProgress(
+                phase = RestorePhase.RUNNING,
+                message = "Syncing account settings",
+                isImporting = true,
+            )
             torveVerboseLog { "[Restore] Local data exists (${localPlaylists.size} playlists) — skipping heavy restore" }
             val settingsResult = runCatching { accountSettingsRepository.syncAfterSignIn() }.getOrNull()
             val restoredIntegrations = runCatching {
@@ -528,6 +660,12 @@ class AccountSessionCoordinator(
             if (settingsResult?.appliedChanges == true || restoredIntegrations > 0 || traktSynced || playlistSync.hasChanges) {
                 settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
             }
+            _restoreProgress.value = RestoreProgress(
+                phase = RestorePhase.COMPLETED,
+                message = "Account sync complete",
+                integrationsRestored = restoredIntegrations,
+                isImporting = false,
+            )
             return
         }
 
@@ -673,8 +811,15 @@ class AccountSessionCoordinator(
                 )
                 if (credsMap != null && credsMap.isNotEmpty()) {
                     if (secretKey == IntegrationSecretKey.TRAKT_TOKENS) {
-                        val accessTok = credsMap["access_token"] ?: ""
-                        val refreshTok = credsMap["refresh_token"] ?: ""
+                        val accessTok = credsMap["access_token"]
+                            ?: credsMap["accessToken"]
+                            ?: credsMap["access"]
+                            ?: credsMap["token"]
+                            ?: ""
+                        val refreshTok = credsMap["refresh_token"]
+                            ?: credsMap["refreshToken"]
+                            ?: credsMap["refresh"]
+                            ?: ""
                         if (accessTok.isNotBlank()) {
                             val traktTokenStore = com.torve.data.trakt.auth.TraktTokenStore(
                                 integrationSecretStore,
@@ -755,8 +900,35 @@ class AccountSessionCoordinator(
                 }
             }
         }
+        restored += ensureUnifiedTraktTokensAfterRestore()
         torveVerboseLog { "[IntegrationRestore] Done: $restored/${integrations.size}" }
         return restored
+    }
+
+    private suspend fun ensureUnifiedTraktTokensAfterRestore(): Int {
+        val traktTokenStore = com.torve.data.trakt.auth.TraktTokenStore(
+            integrationSecretStore,
+            kotlinx.serialization.json.Json { ignoreUnknownKeys = true },
+        )
+        if (!traktTokenStore.read()?.accessToken.isNullOrBlank()) {
+            return 0
+        }
+        val accessToken = integrationSecretStore.get(IntegrationSecretKey.TRAKT_ACCESS_TOKEN)
+            ?.takeIf { it.isNotBlank() }
+            ?: return 0
+        val refreshToken = integrationSecretStore.get(IntegrationSecretKey.TRAKT_REFRESH_TOKEN)
+            ?.takeIf { it.isNotBlank() }
+            ?: return 0
+        traktTokenStore.write(
+            com.torve.data.trakt.TraktTokens(
+                accessToken = accessToken,
+                refreshToken = refreshToken,
+                expiresIn = 0,
+                createdAt = kotlinx.datetime.Clock.System.now().toEpochMilliseconds(),
+            ),
+        )
+        torveVerboseLog { "[IntegrationRestore] TRAKT_TOKENS synthesized from legacy access/refresh secrets" }
+        return 1
     }
 
     // ── Playlist restore ────────────────────────────────────────
@@ -798,7 +970,7 @@ class AccountSessionCoordinator(
                         continue
                     }
                     torveVerboseLog { "[PlaylistRestore]   Credentials fetched OK" }
-                    channelRepo.addXtreamPlaylist(
+                    channelRepo.saveXtreamPlaylistConfig(
                         name = remote.name,
                         server = server,
                         username = resolvedUsername,
@@ -807,7 +979,7 @@ class AccountSessionCoordinator(
                     )
                     torveVerboseLog { "[PlaylistRestore]   Xtream import OK" }
                 } else if (!remote.url.isNullOrBlank()) {
-                    channelRepo.addPlaylist(
+                    channelRepo.saveM3uPlaylistConfig(
                         name = remote.name,
                         url = remote.url,
                         epgUrl = remote.epgUrl,
@@ -883,7 +1055,7 @@ class AccountSessionCoordinator(
         val remoteUrl = remote.url?.trim()?.takeIf { it.isNotEmpty() } ?: return false
         val remoteEpgUrl = remote.epgUrl.normalizedRemoteValue()
         if (local == null) {
-            channelRepo.addPlaylist(
+            channelRepo.saveM3uPlaylistConfig(
                 name = remote.name,
                 url = remoteUrl,
                 epgUrl = remoteEpgUrl,
@@ -908,7 +1080,7 @@ class AccountSessionCoordinator(
         if (!typeChanged && !urlChanged && epgChanged) {
             channelRepo.updatePlaylistEpgUrl(playlistId, remoteEpgUrl)
         } else {
-            channelRepo.addPlaylist(
+            channelRepo.saveM3uPlaylistConfig(
                 name = remote.name,
                 url = remoteUrl,
                 epgUrl = remoteEpgUrl,
@@ -944,7 +1116,7 @@ class AccountSessionCoordinator(
             }
         }
 
-        channelRepo.addXtreamPlaylist(
+        channelRepo.saveXtreamPlaylistConfig(
             name = remote.name,
             server = server,
             username = username,
@@ -961,8 +1133,16 @@ class AccountSessionCoordinator(
         normalizedRemoteValue()?.trimEnd('/')
 
     private suspend fun syncTraktFromAccountIfConnected(): Boolean {
-        val hasTraktTokens = integrationSecretStore.hasSecret(IntegrationSecretKey.TRAKT_TOKENS)
-        if (!hasTraktTokens) {
+        ensureUnifiedTraktTokensAfterRestore()
+        val traktTokenStore = com.torve.data.trakt.auth.TraktTokenStore(
+            integrationSecretStore,
+            kotlinx.serialization.json.Json { ignoreUnknownKeys = true },
+        )
+        val tokens = traktTokenStore.read()
+        val accessToken = tokens?.accessToken?.takeIf { it.isNotBlank() }
+            ?: integrationSecretStore.get(IntegrationSecretKey.TRAKT_ACCESS_TOKEN)?.takeIf { it.isNotBlank() }
+        if (accessToken.isNullOrBlank()) {
+            torveVerboseLog { "[TraktSync] Skipped account sync: no local Trakt access token" }
             return false
         }
 
@@ -971,6 +1151,9 @@ class AccountSessionCoordinator(
         runCatching { watchHistoryRepo.syncFromTrakt() }
         runCatching { traktSyncRepo.syncRatingsFromTrakt() }
         runCatching { traktSyncRepo.flushPendingWrites() }
+        val now = Clock.System.now().toEpochMilliseconds()
+        prefsRepo.setString(SettingsViewModel.KEY_TRAKT_LAST_SYNC_TIME, now.toString())
+        settingsRefreshNotifier.notifyRefresh(now)
         torveVerboseLog { "[TraktSync] Synced account-backed Trakt data" }
         return true
     }

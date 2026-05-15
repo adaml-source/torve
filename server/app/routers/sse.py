@@ -37,6 +37,7 @@ async def stream_events(
     Event types:
     - EMAIL_VERIFIED: email verification completed (on any device)
     - ACCOUNT_UPDATED: generic account state change
+    - MEDIA_FAVORITES_UPDATED: movie/show favorites changed on any device
 
     Clients must re-fetch authoritative state on receipt, not trust
     the event payload directly.

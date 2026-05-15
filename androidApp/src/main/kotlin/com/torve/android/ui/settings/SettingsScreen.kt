@@ -139,6 +139,7 @@ fun SettingsScreen(
     onPrivacyPolicyClick: () -> Unit = {},
     onTermsClick: () -> Unit = {},
     onHelpClick: () -> Unit = {},
+    onReportIssueClick: () -> Unit = {},
     onStreamingServicesClick: () -> Unit = {},
     onAddonCatalogClick: () -> Unit = {},
     onRegexPatternsClick: () -> Unit = {},
@@ -1765,23 +1766,7 @@ fun SettingsScreen(
                 HorizontalDivider(color = Steel.copy(alpha = 0.3f))
                 SettingsLinkItem(
                     title = stringResource(R.string.settings_report_issue),
-                    onClick = {
-                        val versionName = try {
-                            context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
-                        } catch (_: Exception) { "unknown" }
-                        val payload = buildIssuePayload(
-                            appVersion = versionName,
-                            deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}",
-                            sdkInt = Build.VERSION.SDK_INT,
-                            settingsState = state,
-                        )
-                        val intent = Intent(Intent.ACTION_SEND).apply {
-                            type = "text/plain"
-                            putExtra(Intent.EXTRA_SUBJECT, "Torve issue report")
-                            putExtra(Intent.EXTRA_TEXT, payload)
-                        }
-                        context.startActivity(Intent.createChooser(intent, "Report issue"))
-                    },
+                    onClick = onReportIssueClick,
                 )
                 HorizontalDivider(color = Steel.copy(alpha = 0.3f))
                 // Prompt 26: one-tap support bundle that includes

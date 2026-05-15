@@ -473,6 +473,7 @@
     <string name="tv_pairing_qr_unavailable">QR unavailable</string>
     <string name="tv_pairing_waiting_phone">Waiting for your phone...</string>
     <string name="tv_panda_close_setup">Close setup</string>
+    <string name="tv_panda_exit_setup">Exit setup</string>
     <string name="tv_settings_account_syncing">Syncing account settings...</string>
     <string name="tv_settings_account_sync_failed_retry">Last sync failed. Tap to retry.</string>
     <string name="tv_settings_account_sync_synced">Settings synced via account sign-in.</string>

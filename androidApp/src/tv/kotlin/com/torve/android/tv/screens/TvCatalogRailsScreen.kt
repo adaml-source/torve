@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -80,6 +81,8 @@ import com.torve.android.ui.theme.Steel
 import com.torve.android.ui.components.TorveSearchField
 import com.torve.android.catalog.CatalogRailsBootstrapJson
 import com.torve.android.catalog.CatalogRailsBootstrapPayload
+import com.torve.android.catalog.CatalogRailsBootstrapRail
+import com.torve.android.catalog.PUBLIC_CATALOG_RAILS_USER_ID
 import com.torve.android.catalog.catalogRailsBootstrapKey
 import com.torve.data.ai.KeywordSearchResult
 import com.torve.data.ai.KeywordSearchService
@@ -102,6 +105,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import org.koin.compose.koinInject
 
 private data class CatalogRailsUiState(
@@ -162,6 +166,7 @@ internal fun TvCatalogRailsScreen(
     var searchAiTitle by remember { mutableStateOf<String?>(null) }
     var searchAiFallback by remember { mutableStateOf(false) }
     var restoreSearchEntryFocus by remember { mutableStateOf(false) }
+    var pendingSearchInitialFocusToken by remember { mutableIntStateOf(0) }
     var appliedInitialSearchQuery by rememberSaveable(mediaType) { mutableStateOf<String?>(null) }
     val hasAiSearch = settingsState.activeAiApiKey.isNotBlank()
 
@@ -184,6 +189,7 @@ internal fun TvCatalogRailsScreen(
         searchQuery = normalized
         searchActive = true
         searchMode = CatalogSearchMode.STANDARD
+        pendingSearchInitialFocusToken++
     }
 
     val trendingLabel = if (isMovieCatalog) {
@@ -237,6 +243,7 @@ internal fun TvCatalogRailsScreen(
                 userId = authClient.getAuthenticatedUser()?.id,
                 localSettingsRepo = localSettingsRepo,
                 catalogTopCache = catalogTopCache,
+                metadataRepo = metadataRepo,
                 ratingsEnricher = ratingsEnricher,
                 trendingLabel = trendingLabel,
                 popularLabel = popularLabel,
@@ -473,6 +480,8 @@ internal fun TvCatalogRailsScreen(
                 searchError = null
                 restoreSearchEntryFocus = true
             },
+            initialFocusToken = pendingSearchInitialFocusToken,
+            onInitialFocusConsumed = { pendingSearchInitialFocusToken = 0 },
         )
     } else {
         LaunchedEffect(restoreSearchEntryFocus, searchActive) {
@@ -530,6 +539,7 @@ internal fun TvCatalogRailsScreen(
                         onFocused = { onContentFocused(searchEntryRequester) },
                         onClick = {
                             searchMode = CatalogSearchMode.STANDARD
+                            pendingSearchInitialFocusToken++
                             searchActive = true
                         },
                     )
@@ -633,6 +643,8 @@ private fun TvCatalogContextualSearchSurface(
     onClearMediaFocus: (() -> Unit)?,
     onMediaClick: (MediaItem) -> Unit,
     onClose: () -> Unit,
+    initialFocusToken: Int,
+    onInitialFocusConsumed: () -> Unit,
 ) {
     val inputRequester = remember { FocusRequester() }
     val firstResultRequester = remember { FocusRequester() }
@@ -653,10 +665,12 @@ private fun TvCatalogContextualSearchSurface(
         }
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(initialFocusToken) {
+        if (initialFocusToken <= 0) return@LaunchedEffect
         onFirstContentRequester(inputRequester)
         withFrameNanos { }
         runCatching { inputRequester.requestFocus() }
+        onInitialFocusConsumed()
     }
 
     Column(
@@ -1178,32 +1192,36 @@ private suspend fun loadCachedCatalogRails(
     userId: String?,
     localSettingsRepo: DeviceLocalSettingsRepository,
     catalogTopCache: CatalogTopCacheRepository,
+    metadataRepo: MetadataRepository,
     ratingsEnricher: RatingsEnricher,
     trendingLabel: String,
     popularLabel: String,
     topRatedLabel: String,
 ): CatalogRailsUiState {
-    val fromBootstrap = userId
-        ?.let { id -> localSettingsRepo.getString(catalogRailsBootstrapKey(id, mediaType)) }
-        ?.let { cached ->
-            runCatching {
-                CatalogRailsBootstrapJson.decodeFromString<CatalogRailsBootstrapPayload>(cached)
-            }.getOrNull()
-        }
-        ?.rails
-        ?.mapNotNull { rail ->
-            if (rail.items.isEmpty()) return@mapNotNull null
-            TvContentRail(
-                key = rail.key,
-                title = catalogRailTitle(rail.key, mediaType, genreSpecs, trendingLabel, popularLabel, topRatedLabel),
-                items = rail.items,
-            )
+    val cacheOwnerId = userId ?: PUBLIC_CATALOG_RAILS_USER_ID
+    val fromBootstrap = listOfNotNull(userId, PUBLIC_CATALOG_RAILS_USER_ID)
+        .distinct()
+        .firstNotNullOfOrNull { id ->
+            localSettingsRepo.getString(catalogRailsBootstrapKey(id, mediaType))
+                ?.let { cached ->
+                    runCatching {
+                        CatalogRailsBootstrapJson.decodeFromString<CatalogRailsBootstrapPayload>(cached)
+                    }.getOrNull()
+                }
+                ?.rails
+                ?.mapNotNull { rail ->
+                    if (rail.items.isEmpty()) return@mapNotNull null
+                    TvContentRail(
+                        key = rail.key,
+                        title = catalogRailTitle(rail.key, mediaType, genreSpecs, trendingLabel, popularLabel, topRatedLabel),
+                        items = rail.items,
+                    )
+                }
+                ?.takeIf { it.isNotEmpty() }
         }
         .orEmpty()
 
-    val rails = if (fromBootstrap.isNotEmpty()) {
-        fromBootstrap
-    } else {
+    val fromCatalogTop = if (fromBootstrap.isEmpty()) {
         genreSpecs.mapNotNull { spec ->
             val items = runCatching {
                 catalogTopCache.getTop(mediaType, spec.id, limit = 24)
@@ -1214,7 +1232,76 @@ private suspend fun loadCachedCatalogRails(
                 items = items,
             )
         }
+    } else {
+        emptyList()
     }
+
+    val fromNetwork = if (fromBootstrap.isEmpty() && fromCatalogTop.isEmpty()) {
+        runCatching {
+            buildList {
+                runCatching { metadataRepo.getTrending(mediaType).take(24) }
+                    .getOrDefault(emptyList())
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { add(TvContentRail("trending_$mediaType", trendingLabel, it)) }
+                runCatching { metadataRepo.getPopular(mediaType).take(24) }
+                    .getOrDefault(emptyList())
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { add(TvContentRail("popular_$mediaType", popularLabel, it)) }
+                runCatching { metadataRepo.getTopRated(mediaType).take(24) }
+                    .getOrDefault(emptyList())
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { add(TvContentRail("top_rated_$mediaType", topRatedLabel, it)) }
+                genreSpecs.forEach { spec ->
+                    runCatching {
+                        metadataRepo.discover(
+                            type = mediaType,
+                            withGenres = spec.id.toString(),
+                        ).items.take(24)
+                    }
+                        .getOrDefault(emptyList())
+                        .takeIf { it.isNotEmpty() }
+                        ?.let {
+                            add(
+                                TvContentRail(
+                                    key = "genre_${mediaType}_${spec.id}",
+                                    title = spec.label,
+                                    items = it,
+                                ),
+                            )
+                        }
+                }
+            }.dedupeAcrossRails()
+        }.getOrElse {
+            return CatalogRailsUiState(
+                loading = false,
+                error = catalogContentLoadErrorMessage(mediaType),
+            )
+        }
+    } else {
+        emptyList()
+    }
+
+    if (fromNetwork.isNotEmpty()) {
+        runCatching {
+            localSettingsRepo.setString(
+                catalogRailsBootstrapKey(cacheOwnerId, mediaType),
+                CatalogRailsBootstrapJson.encodeToString(
+                    CatalogRailsBootstrapPayload(
+                        savedAtMs = System.currentTimeMillis(),
+                        mediaType = mediaType,
+                        rails = fromNetwork.map { rail ->
+                            CatalogRailsBootstrapRail(
+                                key = rail.key,
+                                items = rail.items,
+                            )
+                        },
+                    ),
+                ),
+            )
+        }
+    }
+
+    val rails = fromBootstrap.ifEmpty { fromCatalogTop.ifEmpty { fromNetwork } }
 
     return CatalogRailsUiState(
         loading = false,

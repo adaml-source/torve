@@ -114,6 +114,7 @@ import com.torve.android.ui.settings.RatingSettingsScreen
 import com.torve.android.ui.settings.SensitiveMaterialSettingsScreen
 import com.torve.android.ui.settings.StatusRepairScreen
 import com.torve.android.ui.settings.StreamingServicesSettingsScreen
+import com.torve.android.ui.support.BugReportScreen
 import com.torve.android.ui.transfer.providerSettingsRouteFor
 import com.torve.android.ui.stats.StatsScreen
 import com.torve.android.ui.watchlist.WatchlistScreen
@@ -140,6 +141,7 @@ import com.torve.data.contentpolicy.ContentPolicyCacheInvalidationCoordinator
 import com.torve.data.contentpolicy.ContentPolicyRepository
 import com.torve.data.mdblist.RatingsEnricher
 import com.torve.domain.integrations.IntegrationSecretStore
+import com.torve.domain.repository.MediaFavoritesRepository
 import com.torve.domain.repository.MetadataRepository
 import com.torve.presentation.catalog.CatalogViewModel
 import com.torve.presentation.contentpolicy.ContentPolicyFilter
@@ -352,6 +354,7 @@ fun TorveNavGraph(
     val authUser by authClient.authUserFlow.collectAsState()
     val navScope = rememberCoroutineScope()
     val watchlistViewModel: WatchlistViewModel = koinInject()
+    val mediaFavoritesRepository: MediaFavoritesRepository = koinInject()
     val homeViewModel: HomeViewModel = koinInject()
     val searchViewModel: SearchViewModel = koinInject()
     val subscriptionViewModel: SubscriptionViewModel = koinInject()
@@ -644,6 +647,13 @@ fun TorveNavGraph(
 
     LaunchedEffect(Unit) {
         watchlistViewModel.loadWatchlist()
+        mediaFavoritesRepository.refresh(force = true)
+    }
+
+    LaunchedEffect(authUser?.id) {
+        if (!authUser?.id.isNullOrBlank()) {
+            mediaFavoritesRepository.refresh(force = true)
+        }
     }
 
     LaunchedEffect(watchlistState.isLoading, watchlistState.items.size) {
@@ -1054,6 +1064,7 @@ fun TorveNavGraph(
                             onPrivacyPolicyClick = { navController.navigate("legal/privacy") },
                             onTermsClick = { navController.navigate("legal/terms") },
                             onHelpClick = { navController.navigate("legal/help") },
+                            onReportIssueClick = { navController.navigate("report_issue") },
                             onStreamingServicesClick = {
                                 if (isLocked(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT)) {
                                     requestLifetimeUnlock(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT)
@@ -1333,6 +1344,7 @@ fun TorveNavGraph(
                     onPrivacyPolicyClick = { navController.navigate("legal/privacy") },
                     onTermsClick = { navController.navigate("legal/terms") },
                     onHelpClick = { navController.navigate("legal/help") },
+                    onReportIssueClick = { navController.navigate("report_issue") },
                     onStreamingServicesClick = {
                         if (isLocked(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT)) {
                             requestLifetimeUnlock(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT)
@@ -1938,6 +1950,10 @@ fun TorveNavGraph(
                 } else {
                     DiagnosticsScreen(onBack = { navController.popBackStack() })
                 }
+            }
+
+            composable("report_issue") {
+                BugReportScreen(onBack = { navController.popBackStack() })
             }
 
             // Custom Section Editor

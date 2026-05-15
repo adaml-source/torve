@@ -44,6 +44,30 @@ interface ChannelRepository {
         onProgress: ((PlaylistAddProgress) -> Unit)? = null,
     ): ChannelPlaylist
     suspend fun addXtreamPlaylist(name: String, server: String, username: String, password: String, id: String? = null): ChannelPlaylist
+    suspend fun saveM3uPlaylistConfig(
+        name: String,
+        url: String,
+        epgUrl: String? = null,
+        id: String? = null,
+    ): ChannelPlaylist = addPlaylist(
+        name = name,
+        url = url,
+        epgUrl = epgUrl,
+        id = id,
+    )
+    suspend fun saveXtreamPlaylistConfig(
+        name: String,
+        server: String,
+        username: String,
+        password: String,
+        id: String? = null,
+    ): ChannelPlaylist = addXtreamPlaylist(
+        name = name,
+        server = server,
+        username = username,
+        password = password,
+        id = id,
+    )
     suspend fun removePlaylist(id: String)
     suspend fun updatePlaylistEpgUrl(playlistId: String, epgUrl: String?)
     suspend fun getPlaylists(): List<ChannelPlaylist>
@@ -56,6 +80,9 @@ interface ChannelRepository {
         )
     }
     suspend fun refreshPlaylist(playlistId: String)
+    suspend fun refreshPlaylistCatalog(playlistId: String) {
+        refreshPlaylist(playlistId)
+    }
     suspend fun refreshEpg(playlistId: String, hiddenChannelIds: Set<String> = emptySet())
     suspend fun getChannels(playlistId: String): List<Channel>
     suspend fun getChannelsByGroup(playlistId: String): Map<String, List<Channel>>

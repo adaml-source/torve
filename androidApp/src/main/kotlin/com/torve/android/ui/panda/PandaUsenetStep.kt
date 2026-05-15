@@ -44,6 +44,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -63,6 +65,7 @@ import com.torve.presentation.panda.PandaSetupViewModel
 fun PandaUsenetStep(
     state: PandaSetupUiState,
     viewModel: PandaSetupViewModel,
+    entryFocusRequester: FocusRequester? = null,
 ) {
     Column(
         modifier = Modifier
@@ -84,11 +87,24 @@ fun PandaUsenetStep(
         Spacer(Modifier.height(20.dp))
 
         // Enable toggle
+        val enableInteractionSource = remember { MutableInteractionSource() }
+        val enableFocused by enableInteractionSource.collectIsFocusedAsState()
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .then(entryFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
                 .clip(RoundedCornerShape(12.dp))
                 .background(Gunmetal)
+                .border(
+                    width = if (enableFocused) 2.dp else 1.dp,
+                    color = if (enableFocused) Amber else Steel.copy(alpha = 0.35f),
+                    shape = RoundedCornerShape(12.dp),
+                )
+                .clickable(
+                    interactionSource = enableInteractionSource,
+                    indication = null,
+                    onClick = { viewModel.setEnableUsenet(!state.enableUsenet) },
+                )
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -495,7 +511,7 @@ private fun FieldInput(
     // plaintext when they need to verify what they typed.
     var revealed by remember { mutableStateOf(false) }
     val effectiveKeyboardType = if (isPassword) KeyboardType.Password else keyboardType
-    OutlinedTextField(
+    PandaEditableOutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },

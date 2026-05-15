@@ -248,7 +248,19 @@ internal fun TvVodLibraryContent(
         } else {
             emptyList()
         }
-        val categories = if (playlistId != null) bootstrappedCategories else emptyList()
+        val categories = if (playlistId != null) {
+            bootstrappedCategories.ifEmpty {
+                withContext(Dispatchers.IO) {
+                    val databaseCategories = buildTvVodCategories(channelRepo.getVodCategoryTypeCounts(playlistId))
+                    if (bootstrapUserId != null && databaseCategories.isNotEmpty()) {
+                        writeVodCategoryBootstrap(localSettingsRepo, bootstrapUserId, playlistId, databaseCategories)
+                    }
+                    databaseCategories
+                }
+            }
+        } else {
+            emptyList()
+        }
         if (playlistId != null && categories.isNotEmpty()) {
             val bootstrappedState = TvVodLibraryUiState(
                 playlistId = playlistId,
@@ -311,7 +323,12 @@ internal fun TvVodLibraryContent(
         loadingCategoryKeys = loadingCategoryKeys + cacheKey
         try {
             val displayEntries = withContext(Dispatchers.IO) {
-                readVodBootstrapShelf(localSettingsRepo, playlistId, cacheKey).orEmpty()
+                val bootstrapped = readVodBootstrapShelf(localSettingsRepo, playlistId, cacheKey)
+                if (bootstrapped.isNullOrEmpty()) {
+                    loadVodShelfFromDatabase(channelRepo, playlistId, category, mediaSection)
+                } else {
+                    bootstrapped
+                }
             }
             enrichedVodSourceIds = enrichedVodSourceIds + displayEntries.map { it.sourceId }
             if (!loadedEntriesByCategoryId.containsKey(cacheKey)) {

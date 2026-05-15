@@ -10,9 +10,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.torve.android.tv.TvScreenCache
+import com.torve.android.tv.TvNotificationQueue
 import com.torve.android.tv.focus.TvScreenFocusHandle
 import com.torve.android.tv.screens.TvDetailsScreen
 import com.torve.android.tv.screens.TvDeviceLimitReachedScreen
+import com.torve.android.tv.screens.TvBugReportScreen
 import com.torve.android.tv.screens.TvHomeLayoutScreen
 import com.torve.android.tv.screens.TvLivePlayerScreen
 import com.torve.android.tv.screens.TvPandaSetupScreen
@@ -27,6 +29,8 @@ import com.torve.domain.model.MediaType
 import com.torve.domain.repository.WatchProgressRepository
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
+
+private const val TV_STREAM_RESOLVING_NOTIFICATION_TAG = "tv_stream_resolving"
 
 private fun NavHostController.navigateToTvDetails(item: MediaItem, autoPlay: Boolean = false) {
     val id = item.tmdbId ?: item.id.toIntOrNull() ?: return
@@ -141,6 +145,12 @@ internal fun TvNavHost(
             )
         }
 
+        composable("bug_report_tv") {
+            TvBugReportScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+
         composable("pairing_signin_tv") {
             com.torve.android.tv.screens.TvPairingSignInScreen(
                 onBack = { navController.popBackStack() },
@@ -244,16 +254,19 @@ internal fun TvNavHost(
                 navArgument("id") { type = NavType.IntType },
                 navArgument("autoPlay") { type = NavType.BoolType; defaultValue = false },
                 navArgument("handoffPositionMs") { type = NavType.LongType; defaultValue = 0L },
+                navArgument("focusEpisodes") { type = NavType.BoolType; defaultValue = false },
             ),
         ) { backStackEntry ->
             val detailType = backStackEntry.arguments?.getString("type") ?: "movie"
             val detailId = backStackEntry.arguments?.getInt("id") ?: 0
             val autoPlay = backStackEntry.arguments?.getBoolean("autoPlay") ?: false
             val handoffPositionMs = backStackEntry.arguments?.getLong("handoffPositionMs") ?: 0L
+            val focusEpisodes = backStackEntry.arguments?.getBoolean("focusEpisodes") ?: false
             TvDetailsScreen(
                 type = detailType,
                 id = detailId,
                 autoPlay = autoPlay,
+                focusEpisodes = focusEpisodes,
                 railFocusRequester = railFocusRequester,
                 onBack = onDetailsBack,
                 onFirstContentRequester = onFirstContentRequester,
@@ -318,6 +331,9 @@ internal fun TvNavHost(
                 navArgument("groupName") { type = NavType.StringType; defaultValue = "" },
             ),
         ) { backStackEntry ->
+            LaunchedEffect(backStackEntry.id) {
+                TvNotificationQueue.clear(TV_STREAM_RESOLVING_NOTIFICATION_TAG)
+            }
             if (isStreamPlaybackLocked) {
                 LaunchedEffect(Unit) {
                     onRequestLifetimeUnlock(TvEntitledFeature.STREAM_PLAYBACK)

@@ -32,6 +32,8 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.BookmarkBorder
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.Visibility
@@ -109,6 +111,7 @@ import com.torve.domain.model.DownloadStatus
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.MediaType
+import com.torve.domain.model.favoriteMediaKey
 import com.torve.domain.model.AvailabilityOffer
 import com.torve.domain.model.AvailabilityOfferType
 import com.torve.domain.model.hasAnyEnabledDisplayValue
@@ -120,6 +123,7 @@ import kotlinx.coroutines.launch
 import com.torve.domain.lanlibrary.NetworkMode
 import com.torve.domain.lanlibrary.PlaybackRoute
 import com.torve.domain.repository.DownloadRepository
+import com.torve.domain.repository.MediaFavoritesRepository
 import com.torve.platform.NetworkMonitor
 import com.torve.platform.NetworkType
 import com.torve.presentation.detail.DetailViewModel
@@ -151,6 +155,7 @@ fun DetailScreen(
     settingsViewModel: SettingsViewModel = koinInject(),
     downloadViewModel: DownloadViewModel = koinInject(),
     watchlistViewModel: WatchlistViewModel = koinInject(),
+    mediaFavoritesRepository: MediaFavoritesRepository = koinInject(),
     addonViewModel: com.torve.presentation.addon.AddonViewModel = koinInject(),
     downloadRepository: DownloadRepository = koinInject(),
     lanLibraryConsumer: LanLibraryConsumer = koinInject(),
@@ -166,6 +171,7 @@ fun DetailScreen(
     val state by viewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
     val watchlistState by watchlistViewModel.state.collectAsState()
+    val favoritesState by mediaFavoritesRepository.state.collectAsState()
     val addonState by addonViewModel.state.collectAsState()
     val hasAnyAddon = addonState.addons.isNotEmpty()
     val isLocked: (PremiumFeature) -> Boolean = remember(accessTier) {
@@ -173,6 +179,7 @@ fun DetailScreen(
     }
     val streamPlaybackLocked = isLocked(PremiumFeature.STREAM_PLAYBACK)
     val watchlistEditLocked = isLocked(PremiumFeature.WATCHLIST_EDIT)
+    val favoritesEditLocked = isLocked(PremiumFeature.FAVORITES_EDIT)
     val watchedStatusLocked = isLocked(PremiumFeature.WATCHED_STATUS_EDIT)
     val traktListLocked = isLocked(PremiumFeature.TRAKT_LIST_MANAGER)
     val chooseSourceLocked = isLocked(PremiumFeature.CHOOSE_SOURCE_PREMIUM)
@@ -624,6 +631,9 @@ fun DetailScreen(
                             val isInWatchlist = state.mediaItem?.let {
                                 watchlistState.watchlistIds.contains(it.id)
                             } ?: false
+                            val isFavorite = state.mediaItem?.let {
+                                favoritesState.favoriteKeys.contains(it.favoriteMediaKey())
+                            } ?: false
                             val secondaryActions = buildList {
                                 add(
                                     DetailSecondaryActionSpec(
@@ -652,6 +662,37 @@ fun DetailScreen(
                                                 onLockedFeatureClick(PremiumFeature.WATCHLIST_EDIT)
                                             } else {
                                                 state.mediaItem?.let { watchlistViewModel.toggleWatchlist(it) }
+                                            }
+                                        },
+                                    ),
+                                )
+                                add(
+                                    DetailSecondaryActionSpec(
+                                        label = when {
+                                            favoritesEditLocked -> stringResource(R.string.premium_unlock_with_lifetime)
+                                            isFavorite -> "In ${stringResource(R.string.channels_favorites)}"
+                                            else -> stringResource(R.string.channels_favorites)
+                                        },
+                                        icon = when {
+                                            favoritesEditLocked -> Icons.Rounded.Lock
+                                            isFavorite -> Icons.Rounded.Favorite
+                                            else -> Icons.Rounded.FavoriteBorder
+                                        },
+                                        containerColor = when {
+                                            favoritesEditLocked -> Amber.copy(alpha = 0.2f)
+                                            isFavorite -> Amber.copy(alpha = 0.2f)
+                                            else -> Graphite
+                                        },
+                                        contentColor = when {
+                                            favoritesEditLocked -> Amber
+                                            isFavorite -> Amber
+                                            else -> Snow
+                                        },
+                                        onClick = {
+                                            if (favoritesEditLocked) {
+                                                onLockedFeatureClick(PremiumFeature.FAVORITES_EDIT)
+                                            } else {
+                                                state.mediaItem?.let { mediaFavoritesRepository.toggleFavorite(it) }
                                             }
                                         },
                                     ),

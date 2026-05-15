@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -232,6 +232,44 @@ class Device(Base):
         Index("ix_devices_user_id", "user_id"),
         Index("ix_devices_installation_id", "user_id", "installation_id"),
         Index("ix_devices_stable_device_id", "user_id", "stable_device_id"),
+    )
+
+
+class UserMediaFavorite(Base):
+    __tablename__ = "user_media_favorites"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    media_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    media_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    tmdb_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    imdb_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    poster_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    backdrop_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rating: Mapped[float | None] = mapped_column(Float, nullable=True)
+    year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
+    )
+    source_device_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("devices.id", ondelete="SET NULL"), nullable=True
+    )
+
+    user: Mapped["User"] = relationship("User")
+    source_device: Mapped["Device | None"] = relationship("Device")
+
+    __table_args__ = (
+        Index("ix_user_media_favorites_user_id", "user_id"),
+        Index("ix_user_media_favorites_updated_at", "user_id", "updated_at"),
+        Index("uq_user_media_favorites_user_key", "user_id", "media_key", unique=True),
     )
 
 

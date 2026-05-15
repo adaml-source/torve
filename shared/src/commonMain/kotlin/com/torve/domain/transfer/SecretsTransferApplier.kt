@@ -4,6 +4,10 @@ import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.repository.ChannelRepository
 import com.torve.domain.repository.PreferencesRepository
+import kotlinx.datetime.Clock
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 /**
  * Phase 3 — applies a decrypted [SecretsTransferPayload] to the device.
@@ -77,20 +81,21 @@ class SecretsTransferApplier(
         // we never overwrite a working local entry.
         val skippedPlaylistIds = mutableListOf<String>()
         val repo = channelRepo
+        val existingPlaylistIds = if (repo == null) {
+            emptySet()
+        } else {
+            runCatching { repo.getPlaylists() }
+                .getOrDefault(emptyList())
+                .map { it.id }
+                .toSet()
+        }
         val resolvedPlaylists: List<TransferPlaylistDto> = if (repo == null) {
             // No channel repo wired — every playlist becomes "skipped".
             payload.playlists.forEach { skippedPlaylistIds += it.playlistId }
             emptyList()
         } else {
-            val existingIds = runCatching { repo.getPlaylists() }
-                .getOrDefault(emptyList())
-                .map { it.id }
-                .toSet()
             payload.playlists.mapNotNull { p ->
-                if (p.playlistId in existingIds) {
-                    skippedPlaylistIds += p.playlistId
-                    null
-                } else when (p.playlistType.lowercase()) {
+                when (p.playlistType.lowercase()) {
                     "xtream" -> {
                         val ok = !p.server.isNullOrBlank() &&
                             !p.username.isNullOrBlank() &&
@@ -126,8 +131,28 @@ class SecretsTransferApplier(
                         skippedSecretNames = skippedSecretNames,
                         skippedConfigKeys = skippedConfigKeys,
                     )
-                }
+            }
             secretPreImages[addr] = previous
+        }
+        val shouldSnapshotSyntheticTraktBundle =
+            resolvedSecrets.none { it.key == IntegrationSecretKey.TRAKT_TOKENS && it.record.subKey == null } &&
+                resolvedSecrets.any {
+                    it.key == IntegrationSecretKey.TRAKT_ACCESS_TOKEN ||
+                        it.key == IntegrationSecretKey.TRAKT_REFRESH_TOKEN
+                }
+        if (shouldSnapshotSyntheticTraktBundle) {
+            val addr = KeyAddress(IntegrationSecretKey.TRAKT_TOKENS, null)
+            if (addr !in secretPreImages) {
+                val previous = runCatching { secretStore.get(IntegrationSecretKey.TRAKT_TOKENS) }
+                    .getOrElse { t ->
+                        return snapshotFailure(
+                            message = "secret snapshot read failed for TRAKT_TOKENS: ${errMsg(t)}",
+                            skippedSecretNames = skippedSecretNames,
+                            skippedConfigKeys = skippedConfigKeys,
+                        )
+                    }
+                secretPreImages[addr] = previous
+            }
         }
         val configPreImages: MutableMap<String, String?> = LinkedHashMap()
         for (entry in resolvedConfig) {
@@ -182,28 +207,55 @@ class SecretsTransferApplier(
                 )
             }
         }
-        // Playlists last: they can be re-added safely if a later step
-        // fails mid-loop, and they don't carry secrets (everything
-        // sensitive is in the secret-store branch above). channelRepo
-        // is non-null here iff resolvedPlaylists is non-empty.
+        try {
+            synthesizeTraktTokenBundleIfNeeded(
+                tokenBundleImported = resolvedSecrets.any {
+                    it.key == IntegrationSecretKey.TRAKT_TOKENS && it.record.subKey == null
+                },
+                legacyTokenImported = resolvedSecrets.any {
+                    it.key == IntegrationSecretKey.TRAKT_ACCESS_TOKEN ||
+                        it.key == IntegrationSecretKey.TRAKT_REFRESH_TOKEN
+                },
+                written = written,
+                secretPreImages = secretPreImages,
+            )
+        } catch (t: Throwable) {
+            val rollback = rollback(written, secretPreImages, configPreImages)
+            return TransferApplyResult.StoreFailure(
+                message = "trakt token synthesis failed: ${errMsg(t)}",
+                rollbackAttempted = true,
+                rollbackSucceeded = rollback,
+                applied = 0,
+                skippedKeyNames = skippedSecretNames.toList(),
+                skippedConfigKeys = skippedConfigKeys.toList(),
+                skippedPlaylistIds = skippedPlaylistIds.toList(),
+            )
+        }
+        // Playlists last: save only provider configuration here. Full
+        // IPTV/VOD/EPG catalog imports are intentionally delegated to
+        // the platform background refresh pipeline so receiving
+        // credentials cannot freeze the TV UI.
         for (p in resolvedPlaylists) {
             try {
                 when (p.playlistType.lowercase()) {
-                    "xtream" -> channelRepo!!.addXtreamPlaylist(
+                    "xtream" -> channelRepo!!.saveXtreamPlaylistConfig(
                         name = p.name,
                         server = p.server!!,
                         username = p.username!!,
                         password = p.password!!,
                         id = p.playlistId,
                     )
-                    "m3u" -> channelRepo!!.addPlaylist(
+                    "m3u" -> channelRepo!!.saveM3uPlaylistConfig(
                         name = p.name,
                         url = p.url!!,
                         epgUrl = p.epgUrl,
                         id = p.playlistId,
                     )
                 }
-                written += ApplyTarget.Playlist(p.playlistId)
+                written += ApplyTarget.Playlist(
+                    playlistId = p.playlistId,
+                    existedBefore = p.playlistId in existingPlaylistIds,
+                )
             } catch (t: Throwable) {
                 val rollback = rollback(written, secretPreImages, configPreImages)
                 return TransferApplyResult.StoreFailure(
@@ -260,10 +312,12 @@ class SecretsTransferApplier(
                         else prefsRepo.setString(target.key, pre)
                     }
                     is ApplyTarget.Playlist -> {
-                        // Playlist transfer is add-only (idempotent on
-                        // pre-existing rows skipped above), so rollback
-                        // is just removing what we added in this txn.
-                        channelRepo?.removePlaylist(target.playlistId)
+                        // Existing rows were updated in-place and don't
+                        // have a cheap cross-platform pre-image. Only
+                        // remove playlists this transaction created.
+                        if (!target.existedBefore) {
+                            channelRepo?.removePlaylist(target.playlistId)
+                        }
                     }
                 }
             }
@@ -313,6 +367,40 @@ class SecretsTransferApplier(
 
     private fun errMsg(t: Throwable): String = t.message ?: t::class.simpleName ?: "error"
 
+    private suspend fun synthesizeTraktTokenBundleIfNeeded(
+        tokenBundleImported: Boolean,
+        legacyTokenImported: Boolean,
+        written: MutableList<ApplyTarget>,
+        secretPreImages: MutableMap<KeyAddress, String?>,
+    ) {
+        if (tokenBundleImported) return
+        if (!legacyTokenImported) return
+        if (!secretStore.get(IntegrationSecretKey.TRAKT_TOKENS).isNullOrBlank()) return
+
+        val accessToken = secretStore.get(IntegrationSecretKey.TRAKT_ACCESS_TOKEN)
+            ?.takeIf { it.isNotBlank() }
+            ?: return
+        val refreshToken = secretStore.get(IntegrationSecretKey.TRAKT_REFRESH_TOKEN)
+            ?.takeIf { it.isNotBlank() }
+            ?: return
+        val addr = KeyAddress(IntegrationSecretKey.TRAKT_TOKENS, null)
+        if (addr !in secretPreImages) {
+            secretPreImages[addr] = secretStore.get(IntegrationSecretKey.TRAKT_TOKENS)
+        }
+        secretStore.put(
+            IntegrationSecretKey.TRAKT_TOKENS,
+            Json.encodeToString(
+                TransferTraktTokenPayload(
+                    accessToken = accessToken,
+                    refreshToken = refreshToken,
+                    expiresIn = 0,
+                    createdAt = Clock.System.now().toEpochMilliseconds(),
+                ),
+            ),
+        )
+        written += ApplyTarget.Secret(addr)
+    }
+
     private data class KeyAddress(
         val key: IntegrationSecretKey,
         val subKey: String?,
@@ -321,9 +409,20 @@ class SecretsTransferApplier(
     private sealed interface ApplyTarget {
         data class Secret(val addr: KeyAddress) : ApplyTarget
         data class Config(val key: String) : ApplyTarget
-        data class Playlist(val playlistId: String) : ApplyTarget
+        data class Playlist(
+            val playlistId: String,
+            val existedBefore: Boolean,
+        ) : ApplyTarget
     }
 }
+
+@Serializable
+private data class TransferTraktTokenPayload(
+    val accessToken: String,
+    val refreshToken: String,
+    val expiresIn: Int,
+    val createdAt: Long,
+)
 
 /** Outcome of [SecretsTransferApplier.apply]. */
 sealed interface TransferApplyResult {

@@ -484,6 +484,7 @@
     <string name="tv_pairing_qr_unavailable">QR non disponibile</string>
     <string name="tv_pairing_waiting_phone">In attesa del telefono...</string>
     <string name="tv_panda_close_setup">Chiudi configurazione</string>
+    <string name="tv_panda_exit_setup">Esci dalla configurazione</string>
     <string name="tv_settings_account_syncing">Sincronizzazione impostazioni account...</string>
     <string name="tv_settings_account_sync_failed_retry">Ultima sincronizzazione non riuscita. Premi per riprovare.</string>
     <string name="tv_settings_account_sync_synced">Impostazioni sincronizzate tramite accesso account.</string>

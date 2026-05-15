@@ -15,6 +15,7 @@ import io.ktor.http.isSuccess
 import kotlinx.datetime.Clock
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 
 class TraktClient(
@@ -147,7 +148,7 @@ class TraktClient(
                     // Error with a short preview of the body instead of
                     // throwing out to the generic catch (which loses context).
                     try {
-                        val resp: TraktTokenResponse = response.body()
+                        val resp: TraktTokenResponse = decodeTraktBody(response)
                         if (resp.accessToken.isBlank() || resp.refreshToken.isBlank()) {
                             val preview = runCatching { response.bodyAsText().take(200) }
                                 .getOrDefault("")
@@ -194,7 +195,7 @@ class TraktClient(
     }
 
     suspend fun refreshToken(refreshToken: String): TraktTokens {
-        val resp: TraktTokenResponse = httpClient.post("$TRAKT_BASE/oauth/token") {
+        val response = httpClient.post("$TRAKT_BASE/oauth/token") {
             contentType(ContentType.Application.Json)
             setBody(
                 json.encodeToString(
@@ -208,7 +209,8 @@ class TraktClient(
                     ),
                 ),
             )
-        }.body()
+        }
+        val resp: TraktTokenResponse = decodeTraktBody(response)
         return TraktTokens(
             accessToken = resp.accessToken,
             refreshToken = resp.refreshToken,
@@ -222,10 +224,11 @@ class TraktClient(
     // -------------------------------------------------------------------------
 
     suspend fun getUser(accessToken: String): TraktUser {
-        val resp: TraktUserResponse = httpClient.get("$TRAKT_BASE/users/me") {
+        val response = httpClient.get("$TRAKT_BASE/users/me") {
             traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
             parameter("extended", "full")
-        }.body()
+        }
+        val resp: TraktUserResponse = decodeTraktBody(response)
         return TraktUser(
             username = resp.username,
             name = resp.name,
@@ -278,9 +281,10 @@ class TraktClient(
     // -------------------------------------------------------------------------
 
     suspend fun getStats(accessToken: String): TraktStats {
-        val resp: TraktStatsResponse = httpClient.get("$TRAKT_BASE/users/me/stats") {
+        val response = httpClient.get("$TRAKT_BASE/users/me/stats") {
             traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
-        }.body()
+        }
+        val resp: TraktStatsResponse = decodeTraktBody(response)
         return TraktStats(
             moviesWatched = resp.movies?.watched ?: 0,
             episodesWatched = resp.episodes?.watched ?: 0,
@@ -302,9 +306,10 @@ class TraktClient(
     // -------------------------------------------------------------------------
 
     suspend fun getWatchlist(accessToken: String): List<TraktWatchlistItemResponse> {
-        return httpClient.get("$TRAKT_BASE/sync/watchlist") {
+        val response = httpClient.get("$TRAKT_BASE/sync/watchlist") {
             traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
-        }.body()
+        }
+        return decodeTraktBody(response)
     }
 
     suspend fun addToWatchlist(accessToken: String, body: TraktWatchlistBody) {
@@ -328,11 +333,12 @@ class TraktClient(
     // -------------------------------------------------------------------------
 
     suspend fun getRatings(accessToken: String, limit: Int = 100): List<TraktRatingResponse> {
-        return httpClient.get("$TRAKT_BASE/sync/ratings") {
+        val response = httpClient.get("$TRAKT_BASE/sync/ratings") {
             traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
             parameter("page", 1)
             parameter("limit", limit)
-        }.body()
+        }
+        return decodeTraktBody(response)
     }
 
     suspend fun addRatings(accessToken: String, body: TraktRatingsBody) {
@@ -356,11 +362,12 @@ class TraktClient(
     // -------------------------------------------------------------------------
 
     suspend fun getHistory(accessToken: String, limit: Int = 50): List<TraktHistoryResponse> {
-        return httpClient.get("$TRAKT_BASE/sync/history") {
+        val response = httpClient.get("$TRAKT_BASE/sync/history") {
             traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
             parameter("page", 1)
             parameter("limit", limit)
-        }.body()
+        }
+        return decodeTraktBody(response)
     }
 
     // -------------------------------------------------------------------------
@@ -368,9 +375,10 @@ class TraktClient(
     // -------------------------------------------------------------------------
 
     suspend fun getPlaybackProgress(accessToken: String): List<TraktPlaybackResponse> {
-        return httpClient.get("$TRAKT_BASE/sync/playback") {
+        val response = httpClient.get("$TRAKT_BASE/sync/playback") {
             traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
-        }.body()
+        }
+        return decodeTraktBody(response)
     }
 
     // -------------------------------------------------------------------------
@@ -379,9 +387,10 @@ class TraktClient(
 
     suspend fun getCalendar(accessToken: String, days: Int = 7): List<TraktCalendarEpisode> {
         val today = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date
-        val resp: List<TraktCalendarResponse> = httpClient.get("$TRAKT_BASE/calendars/my/shows/$today/$days") {
+        val response = httpClient.get("$TRAKT_BASE/calendars/my/shows/$today/$days") {
             traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
-        }.body()
+        }
+        val resp: List<TraktCalendarResponse> = decodeTraktBody(response)
         return resp.mapNotNull { item ->
             val ep = item.episode ?: return@mapNotNull null
             val show = item.show ?: return@mapNotNull null
@@ -469,5 +478,18 @@ class TraktClient(
                 "Trakt API error $status${if (body.isNotBlank()) ": $body" else ""}"
             }
         }
+    }
+
+    private suspend inline fun <reified T> decodeTraktBody(response: HttpResponse): T {
+        if (!response.status.isSuccess()) {
+            throw Exception(traktErrorMessage(response))
+        }
+        val body = response.bodyAsText()
+        return runCatching { json.decodeFromString<T>(body) }
+            .getOrElse { error ->
+                throw Exception(
+                    "Trakt response could not be decoded: ${error.message ?: error::class.simpleName}",
+                )
+            }
     }
 }

@@ -11,7 +11,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.bootstrap import bootstrap_reviewer_account
 from app.events import event_bus
-from app.routers import acceleration, account, account_settings, addons, admin_billing, admin_promo, admin_users, auth, checkout, content_policy, devices, health, health_integrations, integrations, meta, nzbdav as nzbdav_router, paddle_webhook, pairing_code, pairing_signin, pairings, playlists, purchase_verify, rebate, releases, sse, transfer, watch_state, web_session, web_proxy
+from app.routers import acceleration, account, account_settings, addons, admin_billing, admin_promo, admin_users, auth, checkout, content_policy, devices, health, health_integrations, integrations, media_favorites, meta, nzbdav as nzbdav_router, paddle_webhook, pairing_code, pairing_signin, pairings, playlists, purchase_verify, rebate, releases, sse, transfer, watch_state, web_session, web_proxy
 
 _log = logging.getLogger(__name__)
 
@@ -138,6 +138,7 @@ app.include_router(pairings.router)
 app.include_router(pairing_code.router)
 app.include_router(pairing_signin.router)
 app.include_router(account_settings.router)
+app.include_router(media_favorites.router)
 app.include_router(account.router)
 app.include_router(account.compat_router)
 app.include_router(integrations.router)

@@ -62,14 +62,11 @@ import com.torve.data.integrations.JellyfinBrowseItem
 import com.torve.domain.model.resolveCardStyle
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
+import com.torve.domain.model.toMediaItem
 import com.torve.domain.model.WatchHistoryEntry
 import com.torve.domain.model.WatchProgress
-import com.torve.domain.model.ContentAccessContext
-import com.torve.domain.repository.WatchHistoryRepository
-import com.torve.domain.repository.WatchProgressRepository
-import com.torve.data.contentpolicy.ContentPolicyRepository
+import com.torve.domain.repository.MediaFavoritesRepository
 import com.torve.data.mdblist.RatingsEnricher
-import com.torve.presentation.contentpolicy.ContentPolicyFilter
 import com.torve.presentation.jellyfin.JellyfinBrowserViewModel
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.watchlist.WatchlistViewModel
@@ -86,14 +83,13 @@ fun WatchlistScreen(
     onDownloadsClick: () -> Unit = {},
     onJellyfinItemPlay: (streamUrl: String, title: String) -> Unit = { _, _ -> },
     watchlistViewModel: WatchlistViewModel = koinInject(),
-    watchProgressRepo: WatchProgressRepository = koinInject(),
-    watchHistoryRepo: WatchHistoryRepository = koinInject(),
     settingsViewModel: SettingsViewModel = koinInject(),
     ratingsEnricher: RatingsEnricher = koinInject(),
     jellyfinBrowserViewModel: JellyfinBrowserViewModel = koinInject(),
-    contentPolicyRepository: ContentPolicyRepository = koinInject(),
+    mediaFavoritesRepository: MediaFavoritesRepository = koinInject(),
 ) {
     val watchlistState by watchlistViewModel.state.collectAsState()
+    val favoritesState by mediaFavoritesRepository.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
 
@@ -103,6 +99,7 @@ fun WatchlistScreen(
 
     val tabs = buildList {
         add(stringResource(R.string.watchlist_title))
+        add(stringResource(R.string.channels_favorites))
         add(stringResource(R.string.download_title))
         if (isJellyfinConnected) add(stringResource(R.string.watchlist_jellyfin))
     }
@@ -112,41 +109,7 @@ fun WatchlistScreen(
 
     LaunchedEffect(Unit) {
         watchlistViewModel.loadWatchlist()
-    }
-
-    // Load in-progress and history data
-    var inProgress by remember { mutableIntStateOf(0) }
-    var inProgressItems = remember { mutableListOf<WatchProgress>() }
-    var historyItems = remember { mutableListOf<WatchHistoryEntry>() }
-    var progressLoaded by remember { mutableStateOf(false) }
-    var historyLoaded by remember { mutableStateOf(false) }
-
-    LaunchedEffect(selectedTab) {
-        if (selectedTab == 1 && !progressLoaded) {
-            withContext(Dispatchers.Default) {
-                watchProgressRepo.syncFromTrakt()
-                val items = watchProgressRepo.getInProgress(50)
-                inProgressItems.clear()
-                inProgressItems.addAll(items)
-                progressLoaded = true
-            }
-        }
-        if (selectedTab == 2 && !historyLoaded) {
-            withContext(Dispatchers.Default) {
-                watchHistoryRepo.syncFromTrakt()
-                val rawItems = watchHistoryRepo.getRecent(100)
-                // Apply content policy filtering to watch history
-                val policyFilter = ContentPolicyFilter()
-                val filtered = policyFilter.filterWatchHistory(
-                    policy = contentPolicyRepository.state.value,
-                    context = ContentAccessContext.HISTORY_DERIVED,
-                    items = rawItems,
-                )
-                historyItems.clear()
-                historyItems.addAll(filtered)
-                historyLoaded = true
-            }
-        }
+        mediaFavoritesRepository.refresh(force = true)
     }
 
     var enrichedWatchlist by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
@@ -154,7 +117,7 @@ fun WatchlistScreen(
         val baseItems = watchlistState.items.map { wlItem ->
             MediaItem(
                 id = wlItem.mediaId,
-                tmdbId = wlItem.tmdbId.toInt(),
+                tmdbId = wlItem.tmdbId,
                 imdbId = wlItem.imdbId,
                 title = wlItem.title,
                 posterUrl = wlItem.posterUrl,
@@ -171,6 +134,9 @@ fun WatchlistScreen(
         enrichedWatchlist = withContext(Dispatchers.Default) {
             ratingsEnricher.enrichList(baseItems, apiKey)
         }
+    }
+    val favoriteItems = remember(favoritesState.items) {
+        favoritesState.items.map { it.toMediaItem() }
     }
 
     val defaultCardStyle = resolveCardStyle(
@@ -230,14 +196,23 @@ fun WatchlistScreen(
                 items = enrichedWatchlist,
                 isLoading = watchlistState.isLoading,
                 onMediaClick = onMediaClick,
+                emptyTitle = stringResource(R.string.watchlist_empty),
+                emptyDescription = stringResource(R.string.watchlist_empty_desc),
             )
-            1 -> {
+            1 -> WatchlistTab(
+                items = favoriteItems,
+                isLoading = favoritesState.isLoading,
+                onMediaClick = onMediaClick,
+                emptyTitle = "No favorites yet",
+                emptyDescription = "Movies and shows you favorite appear here.",
+            )
+            2 -> {
                 LaunchedEffect(Unit) {
                     onDownloadsClick()
                     selectedTab = 0
                 }
             }
-            2 -> if (isJellyfinConnected) {
+            3 -> if (isJellyfinConnected) {
                 JellyfinTab(
                     viewModel = jellyfinBrowserViewModel,
                     onItemPlay = onJellyfinItemPlay,
@@ -253,6 +228,8 @@ private fun WatchlistTab(
     items: List<MediaItem>,
     isLoading: Boolean,
     onMediaClick: (MediaItem) -> Unit,
+    emptyTitle: String,
+    emptyDescription: String,
 ) {
     var sortMode by remember { mutableStateOf(com.torve.presentation.seeall.SeeAllSortMode.DEFAULT) }
     var yearFrom by remember { mutableStateOf<Int?>(null) }
@@ -275,14 +252,14 @@ private fun WatchlistTab(
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    stringResource(R.string.watchlist_empty),
+                    emptyTitle,
                     style = MaterialTheme.typography.titleMedium,
                     color = Torve.colors.textSecondary,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    stringResource(R.string.watchlist_empty_desc),
+                    emptyDescription,
                     style = MaterialTheme.typography.bodyMedium,
                     color = Torve.colors.textTertiary,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -368,7 +345,7 @@ private fun WatchlistTab(
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    items(movies, key = { it.id }) { wlItem ->
+                    items(movies, key = { "${it.type}:${it.id}" }) { wlItem ->
                         PosterCard(
                             item = wlItem,
                             onClick = { onMediaClick(wlItem) },
@@ -396,7 +373,7 @@ private fun WatchlistTab(
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    items(shows, key = { it.id }) { wlItem ->
+                    items(shows, key = { "${it.type}:${it.id}" }) { wlItem ->
                         PosterCard(
                             item = wlItem,
                             onClick = { onMediaClick(wlItem) },

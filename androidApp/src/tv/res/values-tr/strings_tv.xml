@@ -484,6 +484,7 @@
     <string name="tv_pairing_qr_unavailable">QR kullan\u0131lam\u0131yor</string>
     <string name="tv_pairing_waiting_phone">Telefonunuz bekleniyor...</string>
     <string name="tv_panda_close_setup">Kurulumu kapat</string>
+    <string name="tv_panda_exit_setup">Kurulumdan \u00e7\u0131k</string>
     <string name="tv_settings_account_syncing">Hesap ayarlar\u0131 senkronize ediliyor...</string>
     <string name="tv_settings_account_sync_failed_retry">Son senkronizasyon ba\u015far\u0131s\u0131z oldu. Tekrar denemek i\u00e7in dokunun.</string>
     <string name="tv_settings_account_sync_synced">Ayarlar hesap giri\u015fiyle senkronize edildi.</string>

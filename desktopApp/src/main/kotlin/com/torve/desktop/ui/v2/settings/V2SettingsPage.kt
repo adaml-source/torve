@@ -124,6 +124,38 @@ private enum class SettingsCategory(
     ABOUT("About", "Version, diagnostics, runtime"),
 }
 
+private fun desktopBugReportEmailBody(diagnosticsZip: java.io.File?): String = buildString {
+    appendLine("Torve bug report")
+    appendLine()
+    appendLine("What happened:")
+    appendLine()
+    appendLine("Steps to reproduce:")
+    appendLine()
+    appendLine("Logs:")
+    appendLine()
+    appendLine("Diagnostics:")
+    if (diagnosticsZip != null) {
+        appendLine("Attach this redacted diagnostics zip: ${diagnosticsZip.absolutePath}")
+    } else {
+        appendLine("Diagnostics export failed. Paste any relevant logs above.")
+    }
+}
+
+private fun openDesktopBugReportEmail(body: String): Boolean {
+    val supportEmail = com.torve.presentation.legal.LegalUrls.SUPPORT_EMAIL
+    val subject = encodeMailtoQuery("Torve bug report")
+    val encodedBody = encodeMailtoQuery(body)
+    return runCatching {
+        java.awt.Desktop.getDesktop().mail(
+            java.net.URI("mailto:$supportEmail?subject=$subject&body=$encodedBody"),
+        )
+    }.isSuccess
+}
+
+private fun encodeMailtoQuery(value: String): String =
+    java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8.name())
+        .replace("+", "%20")
+
 @Composable
 fun V2SettingsPage(
     authState: DesktopAuthUiState,
@@ -2903,6 +2935,8 @@ private fun AboutSection(
         // hygiene. URLs are sourced from the shared LegalUrls module so
         // a copy change is one PR, not seven.
         val openLabel = ds("Open")
+        val bugReportScope = rememberCoroutineScope()
+        var bugReportStatus by remember { mutableStateOf<String?>(null) }
         TorveSectionCard(
             title = ds("Legal & support"),
             supportingText = ds("Privacy, terms, and how to reach us."),
@@ -2955,6 +2989,46 @@ private fun AboutSection(
                     )
                 },
             )
+            TorveListRow(
+                title = ds("Report a problem"),
+                subtitle = ds("Create a redacted diagnostics zip and open a support email."),
+                trailing = {
+                    TorveGhostButton(
+                        text = ds("Report"),
+                        onClick = {
+                            bugReportScope.launch {
+                                bugReportStatus = "Preparing bug report..."
+                                val exported = runCatching {
+                                    val target = com.torve.desktop.diagnostics.DiagnosticsExporter.defaultTargetFile()
+                                    com.torve.desktop.diagnostics.DiagnosticsExporter.exportTo(target)
+                                }
+                                val target = exported.getOrNull()
+                                val body = desktopBugReportEmailBody(target)
+                                runCatching {
+                                    val selection = java.awt.datatransfer.StringSelection(body)
+                                    java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(selection, selection)
+                                }
+                                val mailOpened = openDesktopBugReportEmail(body)
+                                target?.parentFile?.let { folder ->
+                                    runCatching { java.awt.Desktop.getDesktop().open(folder) }
+                                }
+                                bugReportStatus = when {
+                                    exported.isFailure -> "Bug report email prepared, but diagnostics export failed: ${exported.exceptionOrNull()?.message.orEmpty()}"
+                                    mailOpened -> "Support email opened. Diagnostics exported to ${target?.absolutePath.orEmpty()}"
+                                    else -> "Bug report copied. Diagnostics exported to ${target?.absolutePath.orEmpty()}"
+                                }
+                            }
+                        },
+                    )
+                },
+            )
+            bugReportStatus?.let { msg ->
+                Text(
+                    msg,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TorveDesktopThemeTokens.colors.textSecondary,
+                )
+            }
             TorveListRow(
                 title = ds("Email support"),
                 subtitle = com.torve.presentation.legal.LegalUrls.SUPPORT_EMAIL,

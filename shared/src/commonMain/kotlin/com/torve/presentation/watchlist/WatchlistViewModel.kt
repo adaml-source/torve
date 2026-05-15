@@ -72,42 +72,46 @@ class WatchlistViewModel(
 
     fun toggleWatchlist(mediaItem: MediaItem) {
         val mediaId = mediaItem.id
+        val wasInWatchlist = isInWatchlist(mediaId)
+        val optimisticItem = mediaItem.toWatchlistItem()
+        _state.update {
+            if (wasInWatchlist) {
+                it.copy(
+                    items = it.items.filter { item -> item.mediaId != mediaId },
+                    watchlistIds = it.watchlistIds - mediaId,
+                    snackbarMessage = "Removed from Watchlist",
+                )
+            } else {
+                it.copy(
+                    items = listOf(optimisticItem) + it.items.filter { item -> item.mediaId != mediaId },
+                    watchlistIds = it.watchlistIds + mediaId,
+                    snackbarMessage = "Added to Watchlist",
+                )
+            }
+        }
         scope.launch {
             try {
-                if (isInWatchlist(mediaId)) {
+                if (wasInWatchlist) {
                     watchlistRepo.remove(mediaId)
-                    _state.update {
+                } else {
+                    watchlistRepo.add(optimisticItem)
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    if (wasInWatchlist) {
+                        it.copy(
+                            items = listOf(optimisticItem) + it.items.filter { item -> item.mediaId != mediaId },
+                            watchlistIds = it.watchlistIds + mediaId,
+                            snackbarMessage = com.torve.presentation.error.UserFacingError.WATCHLIST_FAILED.defaultMessage(),
+                        )
+                    } else {
                         it.copy(
                             items = it.items.filter { item -> item.mediaId != mediaId },
                             watchlistIds = it.watchlistIds - mediaId,
-                            snackbarMessage = "Removed from Watchlist",
-                        )
-                    }
-                } else {
-                    val item = WatchlistItem(
-                        mediaId = mediaId,
-                        mediaType = mediaItem.type,
-                        tmdbId = mediaItem.tmdbId ?: 0,
-                        imdbId = mediaItem.imdbId,
-                        title = mediaItem.title,
-                        posterUrl = mediaItem.posterUrl,
-                        backdropUrl = mediaItem.backdropUrl,
-                        rating = mediaItem.rating,
-                        year = mediaItem.year,
-                        genres = mediaItem.genres.joinToString(", ") { it.name },
-                        addedAt = Clock.System.now().toEpochMilliseconds(),
-                    )
-                    watchlistRepo.add(item)
-                    _state.update {
-                        it.copy(
-                            items = listOf(item) + it.items,
-                            watchlistIds = it.watchlistIds + mediaId,
-                            snackbarMessage = "Added to Watchlist",
+                            snackbarMessage = com.torve.presentation.error.UserFacingError.WATCHLIST_FAILED.defaultMessage(),
                         )
                     }
                 }
-            } catch (e: Exception) {
-                _state.update { it.copy(snackbarMessage = com.torve.presentation.error.UserFacingError.WATCHLIST_FAILED.defaultMessage()) }
             }
         }
     }
@@ -185,5 +189,21 @@ class WatchlistViewModel(
                 )
             }
         }
+    }
+
+    private fun MediaItem.toWatchlistItem(): WatchlistItem {
+        return WatchlistItem(
+            mediaId = id,
+            mediaType = type,
+            tmdbId = tmdbId ?: 0,
+            imdbId = imdbId,
+            title = title,
+            posterUrl = posterUrl,
+            backdropUrl = backdropUrl,
+            rating = rating,
+            year = year,
+            genres = genres.joinToString(", ") { it.name },
+            addedAt = Clock.System.now().toEpochMilliseconds(),
+        )
     }
 }

@@ -250,12 +250,17 @@ class AndroidProviderHealthInit(
                         if (!prefClient.isNullOrBlank() && prefClient != "none") add(prefClient)
                         addAll(listOf("torbox", "sabnzbd", "nzbget", "nzbvortex"))
                     }.distinct()
+                    val torboxDebridKey = secretStore.get(IntegrationSecretKey.DEBRID_API_KEY_TORBOX)
+                        ?.takeIf { it.isNotBlank() && !it.contains("redact", ignoreCase = true) }
+                        .orEmpty()
                     val downloadClient = knownClients.firstOrNull { c ->
                         secretStore.get(IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_API_KEY, subKey = c)?.isNotBlank() == true ||
-                            secretStore.get(IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_PASSWORD, subKey = c)?.isNotBlank() == true
+                            secretStore.get(IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_PASSWORD, subKey = c)?.isNotBlank() == true ||
+                            (c == "torbox" && torboxDebridKey.isNotBlank())
                     } ?: "none"
                     val downloadClientApiKey = if (downloadClient != "none")
-                        secretStore.get(IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_API_KEY, subKey = downloadClient) ?: ""
+                        secretStore.get(IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_API_KEY, subKey = downloadClient)
+                            ?: if (downloadClient == "torbox") torboxDebridKey else ""
                     else ""
                     val downloadClientPassword = if (downloadClient != "none")
                         secretStore.get(IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_PASSWORD, subKey = downloadClient) ?: ""

@@ -106,10 +106,10 @@ fun TvSportsScreen(
 ) {
     val pandaState by pandaStore.state.collectAsState()
     val scope = rememberCoroutineScope()
-    var localSportsIndexer by remember { mutableStateOf<LocalSportsIndexer?>(null) }
+    var localSportsConfig by remember { mutableStateOf<LocalSportsPandaConfig?>(null) }
     LaunchedEffect(Unit) {
-        localSportsIndexer = withContext(Dispatchers.IO) {
-            resolveLocalSportsIndexer(secretStore, prefsRepo)
+        localSportsConfig = withContext(Dispatchers.IO) {
+            resolveLocalSportsConfig(secretStore, prefsRepo)
         }
     }
 
@@ -130,7 +130,10 @@ fun TvSportsScreen(
     // Resolve indexer + TorBox credentials from the live Panda state.
     // Mirrors the desktop V2SportsPage logic but reads directly from
     // the store rather than hand-threaded params.
-    val activeIndexer = pandaState.nzbIndexers.firstOrNull { it.type != "none" && it.apiKey.isNotBlank() }
+    val activeIndexer = pandaState.nzbIndexers.firstOrNull {
+        it.type != "none" && it.apiKey.isUsableSportsSecret()
+    }
+    val localSportsIndexer = localSportsConfig?.indexer
     val indexerType = activeIndexer?.type
         ?: localSportsIndexer?.type
         ?: pandaState.nzbIndexer.takeIf { it != "none" }
@@ -138,17 +141,20 @@ fun TvSportsScreen(
     val indexerUrl = if (activeIndexer != null) {
         UsenetIndexerUrlResolver.resolve(activeIndexer.type, activeIndexer.url)
     } else if (localSportsIndexer != null) {
-        localSportsIndexer?.url.orEmpty()
+        localSportsIndexer.url
     } else if (pandaState.nzbIndexer != "none") {
         UsenetIndexerUrlResolver.resolve(pandaState.nzbIndexer, "")
     } else ""
     val indexerKey = activeIndexer?.apiKey
         ?: localSportsIndexer?.apiKey
-        ?: pandaState.nzbIndexerApiKey.takeIf { it.isNotBlank() }
+        ?: pandaState.nzbIndexerApiKey.takeIf { it.isUsableSportsSecret() }
         ?: ""
-    val torboxKey = if (pandaState.downloadClient.equals("torbox", ignoreCase = true) &&
-        pandaState.downloadClientApiKey.isNotBlank()
-    ) pandaState.downloadClientApiKey else ""
+    val torboxKey = pandaState.downloadClientApiKey
+        .takeIf {
+            pandaState.downloadClient.equals("torbox", ignoreCase = true) &&
+                it.isUsableSportsSecret()
+        }
+        ?: localSportsConfig?.torboxApiKey.orEmpty()
     val configured = indexerUrl.isNotBlank() && indexerKey.isNotBlank()
 
     val pageKey = "tv_sports"
@@ -640,6 +646,32 @@ private data class LocalSportsIndexer(
     val apiKey: String,
 )
 
+private data class LocalSportsPandaConfig(
+    val indexer: LocalSportsIndexer? = null,
+    val downloadClient: String = "none",
+    val torboxApiKey: String = "",
+)
+
+private suspend fun resolveLocalSportsConfig(
+    secretStore: IntegrationSecretStore,
+    prefsRepo: PreferencesRepository,
+): LocalSportsPandaConfig {
+    val downloadClient = prefsRepo.getString("panda_download_client") ?: "none"
+    val pandaTorboxKey = secretStore
+        .get(IntegrationSecretKey.PANDA_DOWNLOAD_CLIENT_API_KEY, "torbox")
+        ?.takeIf { it.isUsableSportsSecret() }
+        .orEmpty()
+    val debridTorboxKey = secretStore
+        .get(IntegrationSecretKey.DEBRID_API_KEY_TORBOX)
+        ?.takeIf { it.isUsableSportsSecret() }
+        .orEmpty()
+    return LocalSportsPandaConfig(
+        indexer = resolveLocalSportsIndexer(secretStore, prefsRepo),
+        downloadClient = downloadClient,
+        torboxApiKey = pandaTorboxKey.ifBlank { debridTorboxKey },
+    )
+}
+
 private suspend fun resolveLocalSportsIndexer(
     secretStore: IntegrationSecretStore,
     prefsRepo: PreferencesRepository,
@@ -674,6 +706,15 @@ private suspend fun resolveLocalSportsIndexer(
         url = UsenetIndexerUrlResolver.resolve(type, url),
         apiKey = apiKey,
     )
+}
+
+private fun String?.isUsableSportsSecret(): Boolean {
+    val value = this?.trim().orEmpty()
+    if (value.isBlank()) return false
+    if (value.equals("[redacted]", ignoreCase = true)) return false
+    if (value.equals("redacted", ignoreCase = true)) return false
+    if (value.all { it == '*' || it.code == 8226 }) return false
+    return true
 }
 
 @Serializable

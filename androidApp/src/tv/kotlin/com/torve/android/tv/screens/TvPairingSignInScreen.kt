@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -42,6 +43,7 @@ import com.torve.android.ui.theme.Charcoal
 import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Torve
+import com.torve.android.session.PostSignInRefresh
 import com.torve.android.ui.transfer.AndroidTransferQrRenderer
 import com.torve.android.sync.SyncCoordinator
 import com.torve.presentation.pairing.TvPairingSignInViewModel
@@ -66,6 +68,7 @@ fun TvPairingSignInScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     LaunchedEffect(viewModel) { viewModel.start() }
     DisposableEffect(viewModel) { onDispose { viewModel.cancel() } }
@@ -76,6 +79,7 @@ fun TvPairingSignInScreen(
             // device registration, settings + integrations restore,
             // playlist sync, etc.
             runCatching { accountSessionCoordinator.bootstrapAfterSignIn() }
+            PostSignInRefresh.enqueueAfterAccountRestore(context, accountSessionCoordinator)
             // Refresh SyncCoordinator so isAuthenticated updates immediately
             // without requiring an app restart.
             syncCoordinator.refreshDevices()

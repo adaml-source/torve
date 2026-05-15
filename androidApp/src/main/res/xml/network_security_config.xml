@@ -15,4 +15,17 @@
             <certificates src="system" />
         </trust-anchors>
     </base-config>
+
+    <!--
+        Debug-only: Android 7+ apps do not trust user-added CAs by default.
+        Emulator and local QA setups commonly route traffic through host/proxy
+        trust stores, which otherwise makes public catalog TLS fail with
+        "Chain validation failed" and leaves the TV Home surface blank. This
+        block is ignored in non-debuggable release builds.
+    -->
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="user" />
+        </trust-anchors>
+    </debug-overrides>
 </network-security-config>

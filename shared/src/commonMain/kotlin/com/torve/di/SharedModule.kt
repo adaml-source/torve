@@ -5,6 +5,8 @@ import com.torve.data.account.AccountAwarePreferencesRepository
 import com.torve.data.account.AccountSettingsApi
 import com.torve.data.account.AccountSettingsRepository
 import com.torve.data.account.AccountSettingsRepositoryImpl
+import com.torve.data.account.MediaFavoritesApi
+import com.torve.data.account.MediaFavoritesRepositoryImpl
 import com.torve.data.acceleration.AccelerationApi
 import com.torve.data.acceleration.AccelerationInventorySyncService
 import com.torve.data.availability.AvailabilityRepositoryImpl
@@ -79,6 +81,7 @@ import com.torve.domain.repository.DownloadRepository
 import com.torve.domain.repository.ChannelRepository
 import com.torve.domain.repository.DeviceLocalSettingsRepository
 import com.torve.domain.repository.MetadataRepository
+import com.torve.domain.repository.MediaFavoritesRepository
 import com.torve.domain.repository.ProfileRepository
 import com.torve.domain.repository.ShelfConfigRepository
 import com.torve.domain.repository.PreferencesRepository
@@ -290,6 +293,8 @@ val sharedModule = module {
     single<ContentChannelProvider> { get<MutableContentChannelProvider>() }
     single { AccountSettingsApi(get(), baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL }, channelProvider = get()) }
     single<AccountSettingsRepository> { AccountSettingsRepositoryImpl(get(), get(), get(), get()) }
+    single { MediaFavoritesApi(get(), baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL }, channelProvider = get()) }
+    single<MediaFavoritesRepository> { MediaFavoritesRepositoryImpl(get(), get(), get(), get()) }
     single<PreferencesRepository> { AccountAwarePreferencesRepository(get(), get(), get()) }
     single { SettingsRefreshNotifier() }
     single { DeviceRegistrationNotifier() }
@@ -381,7 +386,7 @@ val sharedModule = module {
             authClient = get(),
         )
     }
-    single { AccountSessionCoordinator(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { AccountSessionCoordinator(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
 
     // Provider-health primitives. Repository hydrates from prefs on first
     // load; the coordinator holds in-memory checker registrations and is

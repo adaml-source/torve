@@ -1,5 +1,7 @@
 package com.torve.android.ui.panda
 
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -18,6 +20,7 @@ import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -27,6 +30,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -43,6 +48,7 @@ import com.torve.presentation.panda.PandaSetupViewModel
 fun PandaQualityStep(
     state: PandaSetupUiState,
     viewModel: PandaSetupViewModel,
+    entryFocusRequester: FocusRequester? = null,
 ) {
     Column(
         modifier = Modifier
@@ -63,6 +69,7 @@ fun PandaQualityStep(
             value = state.maxQuality,
             options = state.schema.qualityOptions.map { id -> id to labelForQuality(id) },
             onSelect = { viewModel.setMaxQuality(it) },
+            entryFocusRequester = entryFocusRequester,
         )
         Spacer(Modifier.height(16.dp))
 
@@ -105,13 +112,18 @@ private fun LanguageChips(
     ) {
         available.forEach { code ->
             val isSelected = code in selectedSet
+            val interactionSource = remember { MutableInteractionSource() }
+            val isFocused by interactionSource.collectIsFocusedAsState()
             FilterChip(
                 selected = isSelected,
                 onClick = { onToggle(code, !isSelected) },
                 label = { Text(labelForLanguage(code)) },
+                interactionSource = interactionSource,
                 colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = Amber.copy(alpha = 0.2f),
-                    selectedLabelColor = Amber,
+                    containerColor = if (isFocused) Steel.copy(alpha = 0.28f) else Snow.copy(alpha = 0.06f),
+                    labelColor = if (isFocused) Snow else Silver,
+                    selectedContainerColor = if (isFocused) Amber.copy(alpha = 0.32f) else Amber.copy(alpha = 0.2f),
+                    selectedLabelColor = if (isFocused) Snow else Amber,
                 ),
             )
         }
@@ -125,6 +137,7 @@ private fun DropdownField(
     value: String,
     options: List<Pair<String, String>>,
     onSelect: (String) -> Unit,
+    entryFocusRequester: FocusRequester? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
     val displayValue = options.find { it.first == value }?.second ?: value
@@ -141,7 +154,8 @@ private fun DropdownField(
             readOnly = true,
             modifier = Modifier
                 .fillMaxWidth()
-                .menuAnchor(),
+                .then(entryFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable),
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
             shape = RoundedCornerShape(12.dp),
             colors = OutlinedTextFieldDefaults.colors(
