@@ -11,6 +11,9 @@ import com.torve.data.device.AccessStateDto
 import com.torve.data.device.DeviceApi
 import com.torve.data.device.DeviceListDto
 import com.torve.data.device.ManagedDeviceDto
+import com.torve.data.device.resolvedActiveDeviceCount
+import com.torve.data.device.resolvedDeviceLimit
+import com.torve.data.device.resolvedDeviceLimitActiveDevices
 import com.torve.data.subscription.SubscriptionEntitlementCacheKeys
 import com.torve.data.trakt.repo.TraktSyncRepository
 import com.torve.db.TorveDatabase
@@ -116,10 +119,6 @@ class AccountSessionCoordinator(
     private val traktSyncRepo: TraktSyncRepository,
     private val deviceRegistrationNotifier: DeviceRegistrationNotifier,
 ) {
-    companion object {
-        private const val DEFAULT_MAX_ACTIVE_DEVICES = 5
-    }
-
     // Use IO dispatcher for background restore — heavy network + disk work
     // must not compete with Compose rendering on the Default (CPU) pool.
     private val backgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -502,6 +501,8 @@ class AccountSessionCoordinator(
                 deviceRegistrationNotifier.notifyRegistered(Clock.System.now().toEpochMilliseconds())
             }
 
+            val accessState = runCatching { deviceApi.getAccessState(token) }.getOrNull()
+
             torveVerboseLog { "[Login] Phase A: device registered, entering app" }
             _state.update { it.copy(isBootstrapping = false) }
 
@@ -582,19 +583,36 @@ class AccountSessionCoordinator(
                 }
             }
 
-            // Fetch devices in background too (not critical for app entry)
+            // Fetch devices too: the screen needs the list, while the
+            // effective cap comes from access-state when available.
             val deviceList = runCatching { deviceApi.getDevices(token) }
-                .getOrElse { DeviceListDto(emptyList(), 0, DEFAULT_MAX_ACTIVE_DEVICES, 0) }
-            val maxActiveDevices = deviceList.max_active.takeIf { it > 0 } ?: DEFAULT_MAX_ACTIVE_DEVICES
+                .getOrElse {
+                    DeviceListDto(
+                        devices = accessState?.resolvedDeviceLimitActiveDevices().orEmpty(),
+                        active_count = accessState?.resolvedActiveDeviceCount() ?: 0,
+                        max_active = 0,
+                        swaps_remaining = 0,
+                    )
+                }
+            val maxActiveDevices = accessState?.resolvedDeviceLimit()
+                ?: deviceList.max_active.takeIf { it > 0 }
             val deviceLimitReached = registrationError.isDeviceLimitRegistrationError()
+            val deviceLimitMessage = if (deviceLimitReached) {
+                maxActiveDevices?.let {
+                    "You have reached your $it-device limit. Remove an existing device to continue."
+                } ?: registrationError ?: "Device limit reached. Remove an existing device to continue."
+            } else {
+                null
+            }
+            val activeDevices = accessState?.resolvedDeviceLimitActiveDevices()
+                ?.takeIf { it.isNotEmpty() }
+                ?: deviceList.devices
 
             _state.update {
                 it.copy(
                     deviceLimitReached = deviceLimitReached,
-                    deviceLimitMessage = if (deviceLimitReached) {
-                        "You have reached your $maxActiveDevices-device limit. Remove an existing device to continue."
-                    } else null,
-                    activeDevices = deviceList.devices,
+                    deviceLimitMessage = deviceLimitMessage,
+                    activeDevices = activeDevices,
                     lastError = registrationError,
                 )
             }
@@ -602,8 +620,9 @@ class AccountSessionCoordinator(
             AccountSessionBootstrapResult(
                 isReady = !deviceLimitReached && registrationError == null,
                 deviceLimitReached = deviceLimitReached,
-                activeDevices = deviceList.devices,
+                activeDevices = activeDevices,
                 error = registrationError,
+                accessState = accessState,
             ).also { result ->
                 torveVerboseLog {
                     "AUTH_BOOTSTRAP bootstrap_result isReady=${result.isReady} deviceLimitReached=${result.deviceLimitReached} activeDevices=${result.activeDevices.size} error=${result.error}"

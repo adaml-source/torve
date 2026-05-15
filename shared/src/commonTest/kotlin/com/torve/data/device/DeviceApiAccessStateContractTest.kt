@@ -8,6 +8,9 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.encodeToJsonElement
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -83,7 +86,7 @@ class DeviceApiAccessStateContractTest {
                 platform = "android_tv",
                 device_type = "tv",
             ),
-            device_limit = DeviceLimitDto(
+            device_limit = legacyDeviceLimit(
                 cap_reached = true,
                 swaps_remaining = 0,
                 stale_devices_pruned = 0,
@@ -118,7 +121,7 @@ class DeviceApiAccessStateContractTest {
                 platform = "android",
                 device_type = "phone",
             ),
-            device_limit = DeviceLimitDto(
+            device_limit = legacyDeviceLimit(
                 cap_reached = false,
                 swaps_remaining = 3,
                 stale_devices_pruned = 0,
@@ -131,6 +134,41 @@ class DeviceApiAccessStateContractTest {
 
         assertFalse(access.resolvedHasPremiumEntitlement())
         assertFalse(access.resolvedUsablePremiumAccess())
+    }
+
+    @Test
+    fun flatDeviceLimitResolvesEffectiveLimitAndThreshold() = runTest {
+        val api = DeviceApi(
+            httpClient = HttpClient(
+                MockEngine {
+                    respond(
+                        content = """
+                            {
+                              "user": { "id": "user-20", "email": "user@torve.app" },
+                              "has_premium_access": true,
+                              "access_tier": "monthly",
+                              "device_limit": 20,
+                              "device_cap_override": null,
+                              "active_device_count": 20,
+                              "is_device_activated": false,
+                              "device_block_reason": "device_cap_reached"
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                },
+            ),
+            baseUrlProvider = { "https://api.torve.app" },
+        )
+
+        val access = api.getAccessState(accessToken = "token")
+
+        assertNotNull(access)
+        assertEquals(20, access.resolvedDeviceLimit())
+        assertEquals(20, access.resolvedActiveDeviceCount())
+        assertEquals(null, access.resolvedDeviceCapOverride())
+        assertEquals(true, access.resolvedDeviceLimitCapReached())
     }
 
     private fun accessStateResponse(): String {
@@ -164,5 +202,19 @@ class DeviceApiAccessStateContractTest {
               "device_block_reason": null
             }
         """.trimIndent()
+    }
+
+    private fun legacyDeviceLimit(
+        cap_reached: Boolean,
+        swaps_remaining: Int,
+        stale_devices_pruned: Int,
+    ): JsonElement {
+        return Json.encodeToJsonElement(
+            DeviceLimitDto(
+                cap_reached = cap_reached,
+                swaps_remaining = swaps_remaining,
+                stale_devices_pruned = stale_devices_pruned,
+            ),
+        )
     }
 }

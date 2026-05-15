@@ -60,10 +60,18 @@ struct DeviceLimitReachedScreen: View {
                     .font(.system(size: 40))
                     .foregroundColor(SVColor.amber)
 
-                Text("Your Torve Pro account is already active on \(wrapper.state.maxActiveDevices) devices. Remove one device to activate Torve Pro on this device.")
+                Text(wrapper.state.deviceLimitKnown
+                    ? "Your Torve Pro account is already active on \(wrapper.state.maxActiveDevices) devices. Remove one device to activate Torve Pro on this device."
+                    : "Checking your account device limit. Remove one active device to activate Torve Pro on this device.")
                     .font(.subheadline)
                     .foregroundColor(SVColor.onSurfaceVariant)
                     .multilineTextAlignment(.center)
+
+                if wrapper.state.activeDeviceCountKnown && wrapper.state.deviceLimitKnown {
+                    Text("\(wrapper.state.activeDeviceCount) of \(wrapper.state.maxActiveDevices) devices active")
+                        .font(.headline)
+                        .foregroundColor(SVColor.amber)
+                }
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)

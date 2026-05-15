@@ -134,11 +134,23 @@ fun TvManageDevicesScreen(
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            text = stringResource(R.string.tv_manage_active_count, state.activeDeviceCount, state.maxActiveDevices),
+            text = if (state.activeDeviceCountKnown && state.deviceLimitKnown) {
+                stringResource(R.string.tv_manage_active_count, state.activeDeviceCount, state.maxActiveDevices)
+            } else {
+                stringResource(R.string.tv_manage_active_count_loading)
+            },
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
             color = Amber,
         )
+        if (state.effectiveCapReached && state.deviceLimitKnown) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = stringResource(R.string.tv_manage_limit_reached_warning, state.maxActiveDevices),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
         Spacer(Modifier.height(24.dp))
 
         if (state.isLoading) {
@@ -336,11 +348,24 @@ fun TvDeviceLimitReachedScreen(
         )
         Spacer(Modifier.height(12.dp))
         Text(
-            text = stringResource(R.string.tv_manage_device_limit_desc, state.maxActiveDevices),
+            text = if (state.deviceLimitKnown) {
+                stringResource(R.string.tv_manage_device_limit_desc, state.maxActiveDevices)
+            } else {
+                stringResource(R.string.tv_manage_device_limit_desc_loading)
+            },
             style = MaterialTheme.typography.bodyLarge,
             color = Color.Gray,
             textAlign = TextAlign.Center,
         )
+        if (state.activeDeviceCountKnown && state.deviceLimitKnown) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = stringResource(R.string.tv_manage_active_count, state.activeDeviceCount, state.maxActiveDevices),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = Amber,
+            )
+        }
         Spacer(Modifier.height(24.dp))
 
         if (state.isLoading) {

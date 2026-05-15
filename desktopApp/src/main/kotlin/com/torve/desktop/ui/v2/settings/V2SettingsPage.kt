@@ -48,6 +48,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.torve.data.ai.AiProvider
+import com.torve.data.device.resolvedDeviceCapOverride
+import com.torve.data.device.resolvedDeviceLimit
 import com.torve.data.kodi.KodiHost
 import com.torve.desktop.DesktopReleaseInfo
 import com.torve.desktop.auth.DesktopAuthController
@@ -1005,6 +1007,8 @@ private fun SubscriptionSection() {
     val granted = accessState?.granted_at
     val autoRenew = accessState?.auto_renew
     val source = accessState?.source
+    val deviceLimit = accessState?.resolvedDeviceLimit()
+    val deviceCapOverride = accessState?.resolvedDeviceCapOverride()
 
     TorveSectionCard(
         title = "Subscription",
@@ -1035,6 +1039,14 @@ private fun SubscriptionSection() {
                 subtitle = formatIsoDateForDisplay(granted),
             )
         }
+        TorveListRow(
+            title = "Device limit",
+            subtitle = deviceLimit?.toString() ?: "unknown",
+        )
+        TorveListRow(
+            title = "Device cap override",
+            subtitle = deviceCapOverride?.toString() ?: "null",
+        )
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             if (!hasPremium) {
                 TorvePrimaryButton(

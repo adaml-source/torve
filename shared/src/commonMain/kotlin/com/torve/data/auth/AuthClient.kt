@@ -1,5 +1,7 @@
 package com.torve.data.auth
 
+import com.torve.data.error.deviceLimitReachedMessage
+import com.torve.data.error.parseBackendError
 import com.torve.domain.repository.DeviceLocalSettingsRepository
 import com.torve.domain.security.SecureStorage
 import io.ktor.client.HttpClient
@@ -11,6 +13,7 @@ import io.ktor.client.request.post
 import io.ktor.client.request.prepareGet
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsChannel
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
@@ -344,8 +347,14 @@ class AuthClient(
                 if (resp.status.value == 429) {
                     return AuthResult(success = false, error = "Too many attempts. Please wait a minute and try again.")
                 }
-                val errorBody = try { resp.body<ErrorDto>() } catch (_: Exception) { null }
-                return AuthResult(success = false, error = errorBody?.detail ?: "Login failed (${resp.status.value})")
+                val raw = runCatching { resp.bodyAsText() }.getOrDefault("")
+                val parsed = parseBackendError(raw)
+                return AuthResult(
+                    success = false,
+                    error = parsed.deviceLimitReachedMessage()
+                        ?: parsed.message
+                        ?: "Login failed (${resp.status.value})",
+                )
             }
             val authResp: AuthResponseDto = resp.body()
             validateAuthResponse(authResp, requireRefreshToken = true)?.let { return it }
@@ -382,8 +391,14 @@ class AuthClient(
                 if (resp.status.value == 429) {
                     return AuthResult(success = false, error = "Too many attempts. Please wait a minute and try again.")
                 }
-                val errorBody = try { resp.body<ErrorDto>() } catch (_: Exception) { null }
-                return AuthResult(success = false, error = errorBody?.detail ?: "Registration failed (${resp.status.value})")
+                val raw = runCatching { resp.bodyAsText() }.getOrDefault("")
+                val parsed = parseBackendError(raw)
+                return AuthResult(
+                    success = false,
+                    error = parsed.deviceLimitReachedMessage()
+                        ?: parsed.message
+                        ?: "Registration failed (${resp.status.value})",
+                )
             }
             val authResp: AuthResponseDto = resp.body()
             validateAuthResponse(authResp, requireRefreshToken = true)?.let { return it }

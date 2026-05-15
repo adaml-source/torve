@@ -74,6 +74,7 @@ import com.torve.android.session.PostSignInRefresh
 import com.torve.android.sync.SyncCoordinator
 import com.torve.android.sync.TraktSyncWorker
 import com.torve.data.account.AccountSettingsRepository
+import com.torve.presentation.device.DeviceGovernanceViewModel
 import com.torve.presentation.session.AccountSessionCoordinator
 import com.torve.android.tv.settings.isTvReduceMotionEnabled
 import com.torve.android.tv.settings.setTvReduceMotionEnabled
@@ -259,11 +260,13 @@ internal fun TvSettingsScreen(
     mdbListViewModel: MdbListViewModel = koinInject(),
     subscriptionViewModel: SubscriptionViewModel = koinInject(),
     statsViewModel: StatsViewModel = koinInject(),
+    deviceGovernanceViewModel: DeviceGovernanceViewModel = koinInject(),
 ) {
     val syncState by syncCoordinator.state.collectAsState()
     val accountSettingsState by accountSettingsRepository.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
     val subscriptionState by subscriptionViewModel.state.collectAsState()
+    val deviceGovernanceState by deviceGovernanceViewModel.state.collectAsState()
     val purchaseStrings: com.torve.presentation.subscription.PurchaseStringResolver = org.koin.compose.koinInject()
     val subscriptionAccess = subscriptionState.accessPresentation(purchaseStrings)
     val channelsState by channelsViewModel.state.collectAsState()
@@ -2721,6 +2724,7 @@ internal fun TvSettingsScreen(
                                     subscriptionViewModel.loadSubscription()
                                     // Fetch and apply shared account settings (language, ratings, etc.)
                                     runCatching { accountSessionCoordinator.bootstrapAfterSignIn() }
+                                    deviceGovernanceViewModel.fetchAccessState()
                                     PostSignInRefresh.enqueueAfterAccountRestore(context, accountSessionCoordinator)
                                     settingsViewModel.refreshSettings()
                                     authIsLoading = false
@@ -5943,6 +5947,27 @@ internal fun TvSettingsScreen(
                         emphasis = TvSettingEmphasis.SECONDARY,
                     )
                 }
+            }
+
+            item(key = "debug_device_limit") {
+                val debugDeviceLimitTarget = remember {
+                    TvSettingsFocusTarget(
+                        itemId = "settings/advanced/debug_device_limit",
+                        category = TvSettingsCategory.ADVANCED,
+                        listIndex = 601,
+                        focusTargetType = "action",
+                    )
+                }
+                val deviceLimitRequester = remember { FocusRequester() }
+                TvSettingCard(
+                    title = "Device limit",
+                    subtitle = "device_limit=${deviceGovernanceState.deviceLimitDebugText} device_cap_override=${deviceGovernanceState.deviceCapOverrideDebugText}",
+                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                    focusRequester = deviceLimitRequester,
+                    onFocused = { onSettingsRowFocused(debugDeviceLimitTarget, deviceLimitRequester) },
+                    onClick = { deviceGovernanceViewModel.fetchAccessState() },
+                    emphasis = TvSettingEmphasis.SECONDARY,
+                )
             }
 
             if (syncState.recentEvents.isNotEmpty()) {

@@ -7,6 +7,8 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
@@ -78,6 +80,31 @@ fun parseBackendError(responseBody: String): BackendError {
  */
 fun extractBackendErrorCode(responseBody: String): String? =
     parseBackendError(responseBody).code
+
+fun BackendError.maxDevices(): Int? {
+    val detail = rawDetail as? JsonObject ?: return null
+    return detail["max_devices"]?.jsonPrimitive?.intOrNull
+        ?: detail["device_limit"]?.jsonPrimitive?.intOrNull
+}
+
+fun BackendError.activeDeviceCount(): Int? {
+    val detail = rawDetail as? JsonObject ?: return null
+    detail["active_device_count"]?.jsonPrimitive?.intOrNull?.let { return it }
+    detail["active_devices"]?.let { active ->
+        active.jsonPrimitiveOrNull()?.intOrNull?.let { return it }
+        return runCatching { active.jsonArray.size }.getOrNull()
+    }
+    return null
+}
+
+fun BackendError.deviceLimitReachedMessage(): String? {
+    if (code != "device_cap_reached") return null
+    return maxDevices()?.let { max ->
+        "You have reached your $max-device limit. Remove an existing device to continue."
+    } ?: "Device limit reached. Remove an existing device to continue."
+}
+
+private fun JsonElement.jsonPrimitiveOrNull(): JsonPrimitive? = this as? JsonPrimitive
 
 @Serializable
 private data class ErrorWrapper(

@@ -27,6 +27,7 @@ import com.torve.android.ui.system.configureTorveEdgeToEdge
 import com.torve.android.ui.theme.TorveTheme
 import com.torve.data.auth.AuthEvent
 import com.torve.presentation.home.HomeViewModel
+import com.torve.presentation.device.DeviceGovernanceViewModel
 import com.torve.presentation.settings.AppLanguage
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.data.auth.AuthClient
@@ -77,12 +78,14 @@ class MainActivity : AppCompatActivity() {
             val homeViewModel: HomeViewModel = getKoin().get()
             val authClient: AuthClient = getKoin().get()
             val subscriptionViewModel: SubscriptionViewModel = getKoin().get()
+            val deviceGovernanceViewModel: DeviceGovernanceViewModel = getKoin().get()
             CoroutineScope(Dispatchers.Main).launch {
                 val result = accountSessionCoordinator.onAppForeground()
                 if (result.settingsResult?.appliedChanges == true) {
                     homeViewModel.refresh()
                 }
                 subscriptionViewModel.loadSubscription()
+                deviceGovernanceViewModel.fetchAccessState()
                 // Refresh verification status and ensure SSE is connected
                 // for unverified users returning from email/browser.
                 val user = authClient.getCurrentUser()

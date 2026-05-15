@@ -52,13 +52,23 @@ struct ManageDevicesScreen: View {
     private var headerSection: some View {
         Section {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Your Torve Pro account can be active on up to \(wrapper.state.maxActiveDevices) devices at a time.")
+                Text(wrapper.state.deviceLimitKnown
+                    ? "Your Torve Pro account can be active on up to \(wrapper.state.maxActiveDevices) devices at a time."
+                    : "Checking your account device limit.")
                     .font(.subheadline)
                     .foregroundColor(SVColor.onSurfaceVariant)
 
-                Text("\(wrapper.state.activeDeviceCount) of \(wrapper.state.maxActiveDevices) devices active")
+                Text(wrapper.state.activeDeviceCountKnown && wrapper.state.deviceLimitKnown
+                    ? "\(wrapper.state.activeDeviceCount) of \(wrapper.state.maxActiveDevices) devices active"
+                    : "Checking active devices")
                     .font(.headline)
                     .foregroundColor(SVColor.amber)
+
+                if wrapper.state.effectiveCapReached && wrapper.state.deviceLimitKnown {
+                    Text("You have reached your \(wrapper.state.maxActiveDevices)-device limit.")
+                        .font(.caption)
+                        .foregroundColor(SVColor.error)
+                }
             }
         }
     }

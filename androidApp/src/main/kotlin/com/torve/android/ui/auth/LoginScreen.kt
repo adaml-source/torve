@@ -47,6 +47,7 @@ import com.torve.android.session.PostSignInRefresh
 import com.torve.android.sync.SyncCoordinator
 import com.torve.data.auth.AuthClient
 import com.torve.presentation.session.AccountSessionCoordinator
+import com.torve.presentation.device.DeviceGovernanceViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.seconds
@@ -60,6 +61,7 @@ fun LoginScreen(
     authClient: AuthClient = koinInject(),
     accountSessionCoordinator: AccountSessionCoordinator = koinInject(),
     syncCoordinator: SyncCoordinator = koinInject(),
+    deviceGovernanceViewModel: DeviceGovernanceViewModel = koinInject(),
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -224,6 +226,7 @@ fun LoginScreen(
                                 delay(2000)
                             }
                             val bootstrap = accountSessionCoordinator.bootstrapAfterSignIn()
+                            deviceGovernanceViewModel.fetchAccessState()
                             PostSignInRefresh.enqueueAfterAccountRestore(context, accountSessionCoordinator)
                             syncCoordinator.refreshDevices()
                             isLoading = false

@@ -192,7 +192,7 @@
     <string name="login_forgot_password">Şifreni mi unuttun?</string>
     <string name="login_send_reset_link">Link gönder</string>
     <string name="login_back_to_sign_in">Girişe dön</string>
-    <string name="login_device_limit_reached">5 cihaz sınırına ulaştın. Devam etmek için mevcut bir cihazı kaldır.</string>
+    <string name="login_device_limit_reached">Cihaz sınırına ulaştın. Devam etmek için mevcut bir cihazı kaldır.</string>
     <string name="login_hide_password">Şifreyi gizle</string>
     <string name="login_show_password">Şifreyi göster</string>
     <string name="verify_email_sent">Doğrulama e-postası gönderildi!</string>
@@ -1157,7 +1157,7 @@
     <string name="account_pairing_note">Eşleştirme yalnızca uzaktan kontrol ve oynatma aktarımı içindir. Ayarlar hesap üzerinden senkronize edilir.</string>
     <string name="account_manage_pairings">Eşleştirmeleri Yönet</string>
     <string name="account_devices">Cihazlar</string>
-    <string name="account_devices_note">Oturum açılmış cihazlar ayrı yönetilir ve 5 cihaz limitine dahildir.</string>
+    <string name="account_devices_note">Oturum açılmış cihazlar ayrı yönetilir ve hesap cihaz limitine dahildir.</string>
     <string name="account_manage_signed_in">Oturum Açılmış Cihazları Yönet</string>
     <string name="devices_paired_title">Eşleştirilmiş Cihazlar</string>
     <string name="devices_paired_desc">Uzaktan kontrol ve oynatma aktarımı için TV\'leri veya kontrol cihazlarını eşleştirin. Ayarlar hesap girişi ile senkronize edilir.</string>
@@ -1486,7 +1486,7 @@
     <string name="tv_library_downloaded_shows">İndirilen diziler</string>
     <string name="tv_iptv_open_settings">Ayarları Aç</string>
     <string name="tv_home_layout_instructions">Etkinleştirmek/devre dışı bırakmak için OK. Taşımak için SAĞ, sıralamak için YUKARI/AŞAĞI, bitirmek için SOL.</string>
-    <string name="tv_settings_sign_in_share">Bir satın almayı 5 cihaza kadar paylaşmak için giriş yapın.</string>
+    <string name="tv_settings_sign_in_share">Bir satın almayı hesap cihazların arasında paylaşmak için giriş yapın.</string>
     <string name="storage_how_title">Kimlik bilgileri nasıl saklanır</string>
     <string name="storage_how_body">Entegrasyonları Torve hesabınıza kaydetmeyi veya yalnızca bu cihazda tutmayı seçin.</string>
     <string name="storage_how_options">• Torve hesabı (önerilen) — Başka bir cihazda oturum açtığınızda bu entegrasyonu geri yükler.\n• Yalnızca bu cihaz — Bu entegrasyonu yerel tutar ve senkronize etmez.</string>

@@ -192,7 +192,7 @@
     <string name="login_forgot_password">Esqueceu a senha?</string>
     <string name="login_send_reset_link">Enviar link</string>
     <string name="login_back_to_sign_in">Voltar ao login</string>
-    <string name="login_device_limit_reached">Você atingiu o limite de 5 dispositivos. Remova um dispositivo existente para continuar.</string>
+    <string name="login_device_limit_reached">Limite de dispositivos atingido. Remova um dispositivo existente para continuar.</string>
     <string name="login_hide_password">Ocultar senha</string>
     <string name="login_show_password">Mostrar senha</string>
     <string name="verify_email_sent">Email de verificação enviado!</string>
@@ -1156,7 +1156,7 @@
     <string name="account_pairing_note">O pareamento serve apenas para controle remoto e transferência de reprodução. As configurações são sincronizadas pela conta.</string>
     <string name="account_manage_pairings">Gerenciar Pareamentos</string>
     <string name="account_devices">Dispositivos</string>
-    <string name="account_devices_note">Dispositivos conectados são gerenciados separadamente e contam para o limite de 5 dispositivos.</string>
+    <string name="account_devices_note">Dispositivos conectados são gerenciados separadamente e contam para o limite de dispositivos da sua conta.</string>
     <string name="account_manage_signed_in">Gerenciar Dispositivos Conectados</string>
     <string name="devices_paired_title">Dispositivos Pareados</string>
     <string name="devices_paired_desc">Pareie TVs ou dispositivos de controle para controle remoto e transferência de reprodução. As configurações se sincronizam pelo login da conta.</string>
@@ -1485,7 +1485,7 @@
     <string name="tv_library_downloaded_shows">Séries baixadas</string>
     <string name="tv_iptv_open_settings">Abrir configurações</string>
     <string name="tv_home_layout_instructions">OK para ativar/desativar. DIREITA para mover, CIMA/BAIXO para reordenar, ESQUERDA para terminar.</string>
-    <string name="tv_settings_sign_in_share">Faça login para compartilhar uma compra em até 5 dispositivos.</string>
+    <string name="tv_settings_sign_in_share">Faça login para compartilhar uma compra entre os dispositivos da sua conta.</string>
     <string name="storage_how_title">Como as credenciais são armazenadas</string>
     <string name="storage_how_body">Escolha se deseja salvar integrações na sua conta Torve ou mantê-las apenas neste dispositivo.</string>
     <string name="storage_how_options">• Conta Torve (recomendado) — Restaura esta integração ao fazer login em outro dispositivo.\n• Apenas este dispositivo — Mantém esta integração local e não sincroniza.</string>

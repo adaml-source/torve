@@ -179,7 +179,7 @@ final class TorveAPIClient: ObservableObject {
             throw APIError.unauthorized
         }
         guard (200...299).contains(http.statusCode) else {
-            let detail = (try? JSONDecoder().decode(ErrorDetail.self, from: data))?.detail ?? "Request failed"
+            let detail = (try? JSONDecoder().decode(ErrorDetail.self, from: data))?.messageForUser ?? "Request failed"
             throw APIError.serverError(code: http.statusCode, message: detail)
         }
     }
@@ -226,7 +226,77 @@ enum APIError: LocalizedError {
     }
 }
 
-struct ErrorDetail: Decodable { let detail: String? }
+struct ErrorDetail: Decodable {
+    let detail: Detail
+
+    var messageForUser: String? {
+        if detail.code == "device_cap_reached" {
+            if let maxDevices = detail.maxDevices {
+                return "You have reached your \(maxDevices)-device limit. Remove an existing device to continue."
+            }
+            return "Device limit reached. Remove an existing device to continue."
+        }
+        return detail.message
+    }
+
+    enum Detail: Decodable {
+        case text(String)
+        case object(code: String?, message: String?, maxDevices: Int?)
+        case validation(String)
+
+        var code: String? {
+            if case let .object(code, _, _) = self { return code }
+            return nil
+        }
+
+        var message: String? {
+            switch self {
+            case .text(let value): return value
+            case .object(_, let message, _): return message
+            case .validation(let value): return value
+            }
+        }
+
+        var maxDevices: Int? {
+            if case let .object(_, _, maxDevices) = self { return maxDevices }
+            return nil
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            if let text = try? container.decode(String.self) {
+                self = .text(text)
+                return
+            }
+            if let object = try? container.decode(StructuredDetail.self) {
+                self = .object(
+                    code: object.code,
+                    message: object.message ?? object.msg ?? object.code,
+                    maxDevices: object.max_devices ?? object.device_limit
+                )
+                return
+            }
+            if let validations = try? container.decode([ValidationDetail].self) {
+                let message = validations.compactMap(\.msg).joined(separator: "; ")
+                self = .validation(message.isEmpty ? "Validation error" : message)
+                return
+            }
+            self = .text("Request failed")
+        }
+    }
+
+    private struct StructuredDetail: Decodable {
+        let code: String?
+        let message: String?
+        let msg: String?
+        let max_devices: Int?
+        let device_limit: Int?
+    }
+
+    private struct ValidationDetail: Decodable {
+        let msg: String?
+    }
+}
 
 struct AuthResponse: Decodable {
     let user: UserInfo
@@ -256,10 +326,39 @@ struct PurchaseVerifyResponse: Decodable {
 }
 
 struct AccessState: Decodable {
-    let user: AuthResponse.UserInfo
-    let premium: PremiumState
-    let device: DeviceState
-    let device_limit: DeviceLimitState
+    let user: AuthResponse.UserInfo?
+    let premium: PremiumState?
+    let device: DeviceState?
+    let device_limit: Int?
+    let device_cap_override: Int?
+    let active_device_count: Int?
+    let is_device_activated: Bool?
+    let device_block_reason: String?
+    let legacy_device_limit: DeviceLimitState?
+
+    enum CodingKeys: String, CodingKey {
+        case user
+        case premium
+        case device
+        case device_limit
+        case device_cap_override
+        case active_device_count
+        case is_device_activated
+        case device_block_reason
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        user = try container.decodeIfPresent(AuthResponse.UserInfo.self, forKey: .user)
+        premium = try container.decodeIfPresent(PremiumState.self, forKey: .premium)
+        device = try container.decodeIfPresent(DeviceState.self, forKey: .device)
+        device_cap_override = try container.decodeIfPresent(Int.self, forKey: .device_cap_override)
+        active_device_count = try container.decodeIfPresent(Int.self, forKey: .active_device_count)
+        is_device_activated = try container.decodeIfPresent(Bool.self, forKey: .is_device_activated)
+        device_block_reason = try container.decodeIfPresent(String.self, forKey: .device_block_reason)
+        device_limit = try? container.decode(Int.self, forKey: .device_limit)
+        legacy_device_limit = try? container.decode(DeviceLimitState.self, forKey: .device_limit)
+    }
 
     struct PremiumState: Decodable {
         let has_entitlement: Bool
@@ -307,6 +406,9 @@ struct DeviceActivateResult: Decodable {
     let activated: Bool
     let reason: String
     let active_device_count: Int
+    let device_limit: Int?
+    let max_devices: Int?
+    let device_cap_override: Int?
 }
 
 struct DeviceRemoveResult: Decodable {

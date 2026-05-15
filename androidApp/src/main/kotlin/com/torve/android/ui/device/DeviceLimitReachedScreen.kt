@@ -99,11 +99,25 @@ fun DeviceLimitReachedScreen(
                 )
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    text = stringResource(R.string.device_limit_message, state.maxActiveDevices),
+                    text = if (state.deviceLimitKnown) {
+                        stringResource(R.string.device_limit_message, state.maxActiveDevices)
+                    } else {
+                        stringResource(R.string.device_limit_message_loading)
+                    },
                     style = MaterialTheme.typography.bodyLarge,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                if (state.activeDeviceCountKnown && state.deviceLimitKnown) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.manage_devices_count, state.activeDeviceCount, state.maxActiveDevices),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Amber,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 Spacer(Modifier.height(24.dp))
                 Text(
                     text = stringResource(R.string.device_limit_active_devices),

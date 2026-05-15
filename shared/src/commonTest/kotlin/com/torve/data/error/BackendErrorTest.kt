@@ -51,6 +51,19 @@ class BackendErrorTest {
         assertEquals("device_cap_reached", error.code)
     }
 
+    @Test
+    fun structuredDeviceCapDetailExtractsBackendLimit() {
+        val body = """{"detail": {"code": "device_cap_reached", "message": "Limit", "max_devices": 20, "active_devices": 20}}"""
+        val error = parseBackendError(body)
+
+        assertEquals(20, error.maxDevices())
+        assertEquals(20, error.activeDeviceCount())
+        assertEquals(
+            "You have reached your 20-device limit. Remove an existing device to continue.",
+            error.deviceLimitReachedMessage(),
+        )
+    }
+
     // ── Validation array detail ──
 
     @Test

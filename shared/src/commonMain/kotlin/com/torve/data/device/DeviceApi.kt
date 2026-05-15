@@ -1,6 +1,7 @@
 package com.torve.data.device
 
 import com.torve.data.auth.DeviceRegistrationDto
+import com.torve.data.error.deviceLimitReachedMessage
 import com.torve.data.error.parseBackendError
 import com.torve.domain.device.DeviceType
 import io.ktor.client.HttpClient
@@ -22,7 +23,11 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.intOrNull
 
 /**
  * Backend API client for device governance.
@@ -67,7 +72,7 @@ class DeviceApi(
             }
             json.decodeFromString(AccessStateDto.serializer(), raw).also { decoded ->
                 torveVerboseLog {
-                    "ACCESS_STATE fetch_success hasEntitlement=${decoded.resolvedHasPremiumEntitlement()} deviceActivated=${decoded.resolvedIsDeviceActivated()} needsVerification=${decoded.needs_verification} blockReason=${decoded.resolvedDeviceBlockReason()}"
+                    "ACCESS_STATE fetch_success hasEntitlement=${decoded.resolvedHasPremiumEntitlement()} deviceActivated=${decoded.resolvedIsDeviceActivated()} deviceLimit=${decoded.resolvedDeviceLimit()} deviceCapOverride=${decoded.device_cap_override} activeDeviceCount=${decoded.resolvedActiveDeviceCount()} needsVerification=${decoded.needs_verification} blockReason=${decoded.resolvedDeviceBlockReason()}"
                 }
             }
         } catch (e: Exception) {
@@ -112,7 +117,11 @@ class DeviceApi(
                 }
                 else -> {
                     val parsed = parseBackendError(raw)
-                    throw IllegalStateException(parsed.message ?: "Failed to register device (${response.status.value})")
+                    throw IllegalStateException(
+                        parsed.deviceLimitReachedMessage()
+                            ?: parsed.message
+                            ?: "Failed to register device (${response.status.value})",
+                    )
                 }
             }
         }
@@ -167,7 +176,7 @@ internal fun parseDeviceListPayload(raw: String, currentInstallationId: String? 
                 DeviceListDto(
                     devices = devices,
                     active_count = devices.count { it.is_active },
-                    max_active = DEFAULT_MAX_ACTIVE_DEVICES,
+                    max_active = 0,
                     swaps_remaining = 0,
                 )
             }
@@ -179,7 +188,7 @@ internal fun parseDeviceListPayload(raw: String, currentInstallationId: String? 
                         devices = normalizedDevices,
                         active_count = decoded.active_count.takeIf { it > 0 || normalizedDevices.none { device -> device.is_active } }
                             ?: normalizedDevices.count { it.is_active },
-                        max_active = decoded.max_active.takeIf { it > 0 } ?: DEFAULT_MAX_ACTIVE_DEVICES,
+                        max_active = decoded.max_active.coerceAtLeast(0),
                     )
                 } else {
                     val device = normalizeManagedDevice(
@@ -189,7 +198,7 @@ internal fun parseDeviceListPayload(raw: String, currentInstallationId: String? 
                     DeviceListDto(
                         devices = listOf(device),
                         active_count = if (device.is_active) 1 else 0,
-                        max_active = DEFAULT_MAX_ACTIVE_DEVICES,
+                        max_active = 0,
                         swaps_remaining = 0,
                     )
                 }
@@ -249,8 +258,6 @@ internal fun normalizeManagedDevice(
     )
 }
 
-private const val DEFAULT_MAX_ACTIVE_DEVICES = 5
-
 @Serializable
 private data class ErrorDetailDto(
     val detail: String? = null,
@@ -283,8 +290,8 @@ data class DeviceStateDto(
     val id: String,
     val name: String,
     val is_active: Boolean,
-    val active_device_count: Int,
-    val max_active_devices: Int,
+    val active_device_count: Int = 0,
+    val max_active_devices: Int = 0,
     val platform: String,
     val device_type: String,
 )
@@ -303,7 +310,7 @@ data class AccessStateDto(
     val user: UserDto? = null,
     val premium: PremiumStateDto? = null,
     val device: DeviceStateDto? = null,
-    val device_limit: DeviceLimitDto? = null,
+    val device_limit: JsonElement? = null,
     // Canonical flat fields (new backend format)
     @SerialName("has_premium_access")
     val has_premium_access: Boolean? = null,
@@ -313,6 +320,10 @@ data class AccessStateDto(
     val is_device_activated: Boolean? = null,
     @SerialName("device_block_reason")
     val device_block_reason: String? = null,
+    @SerialName("device_cap_override")
+    val device_cap_override: Int? = null,
+    @SerialName("active_device_count")
+    val active_device_count: Int? = null,
     @SerialName("needs_verification")
     val needs_verification: Boolean = false,
     @SerialName("entitlement_type")
@@ -370,6 +381,47 @@ fun AccessStateDto.resolvedUsablePremiumAccess(): Boolean {
     return resolvedHasPremiumEntitlement() && resolvedIsDeviceActivated()
 }
 
+fun AccessStateDto.resolvedDeviceLimit(): Int? {
+    val flatLimit = (device_limit as? JsonPrimitive)?.intOrNull
+    return flatLimit?.takeIf { it > 0 }
+        ?: device?.max_active_devices?.takeIf { it > 0 }
+}
+
+fun AccessStateDto.resolvedDeviceCapOverride(): Int? {
+    return device_cap_override?.takeIf { it > 0 }
+}
+
+fun AccessStateDto.resolvedActiveDeviceCount(): Int? {
+    return active_device_count
+        ?: device?.active_device_count?.takeIf { it >= 0 }
+}
+
+fun AccessStateDto.resolvedDeviceLimitCapReached(): Boolean? {
+    val count = resolvedActiveDeviceCount()
+    val limit = resolvedDeviceLimit()
+    if (count != null && limit != null) return count >= limit
+    return legacyDeviceLimit()?.cap_reached
+}
+
+fun AccessStateDto.resolvedSwapsRemaining(): Int? {
+    return legacyDeviceLimit()?.swaps_remaining
+}
+
+fun AccessStateDto.resolvedStaleDevicesPruned(): Int? {
+    return legacyDeviceLimit()?.stale_devices_pruned
+}
+
+fun AccessStateDto.resolvedDeviceLimitActiveDevices(): List<ManagedDeviceDto> {
+    return legacyDeviceLimit()?.active_devices.orEmpty()
+}
+
+private fun AccessStateDto.legacyDeviceLimit(): DeviceLimitDto? {
+    val element = device_limit as? JsonObject ?: return null
+    return runCatching {
+        deviceJson().decodeFromJsonElement(DeviceLimitDto.serializer(), element)
+    }.getOrNull()
+}
+
 fun DeviceStateDto.resolvedDeviceType(): DeviceType = DeviceType.fromWireValue(device_type)
 
 fun DeviceStateDto.deviceTypeLabel(): String = resolvedDeviceType().displayLabel
@@ -423,8 +475,8 @@ fun ManagedDeviceDto.deviceTypeLabel(): String = resolvedDeviceType().displayLab
 data class DeviceListDto(
     val devices: List<ManagedDeviceDto>,
     val active_count: Int,
-    val max_active: Int,
-    val swaps_remaining: Int,
+    val max_active: Int = 0,
+    val swaps_remaining: Int = 0,
 )
 
 @Serializable
@@ -434,6 +486,9 @@ data class DeviceActivateDto(
     val active_device_count: Int,
     val stale_devices_pruned: Int,
     val swaps_remaining: Int,
+    val device_limit: Int? = null,
+    val max_devices: Int? = null,
+    val device_cap_override: Int? = null,
 )
 
 @Serializable

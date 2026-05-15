@@ -79,6 +79,7 @@ class TorveApp : Application() {
             }
             launch {
                 runCatching { getKoin().get<AccountSessionCoordinator>().restoreSession() }
+                runCatching { getKoin().get<com.torve.presentation.device.DeviceGovernanceViewModel>().fetchAccessState() }
                 runCatching { EpisodeNotificationWorker.scheduleIfEnabled(this@TorveApp) }
                 runCatching { getKoin().get<AccelerationInventorySyncService>().syncConnectedProviders() }
             }

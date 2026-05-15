@@ -179,7 +179,7 @@
     <string name="login_forgot_password">Passwort vergessen?</string>
     <string name="login_send_reset_link">Link senden</string>
     <string name="login_back_to_sign_in">Zurück zur Anmeldung</string>
-    <string name="login_device_limit_reached">Du hast dein Gerätelimit von 5 erreicht. Entferne ein vorhandenes Gerät, um fortzufahren.</string>
+    <string name="login_device_limit_reached">Gerätelimit erreicht. Entferne ein vorhandenes Gerät, um fortzufahren.</string>
     <string name="login_hide_password">Passwort ausblenden</string>
     <string name="login_show_password">Passwort anzeigen</string>
     <string name="verify_email_sent">Bestätigungsmail gesendet!</string>
@@ -1485,7 +1485,7 @@
     <string name="tv_library_downloaded_shows">Heruntergeladene Serien</string>
     <string name="tv_iptv_open_settings">Einstellungen öffnen</string>
     <string name="tv_home_layout_instructions">OK zum Aktivieren/Deaktivieren. RECHTS zum Verschieben, HOCH/RUNTER zum Sortieren, LINKS zum Beenden.</string>
-    <string name="tv_settings_sign_in_share">Melde dich an, um einen Kauf auf bis zu 5 Geräten zu teilen.</string>
+    <string name="tv_settings_sign_in_share">Melde dich an, um einen Kauf auf deinen Kontogeräten zu teilen.</string>
     <string name="storage_how_title">Wie Zugangsdaten gespeichert werden</string>
     <string name="storage_how_body">Wähle, ob Integrationen in deinem Torve-Konto gespeichert oder nur auf diesem Gerät behalten werden sollen.</string>
     <string name="storage_how_options">• Torve-Konto (empfohlen) — Stellt diese Integration wieder her, wenn du dich auf einem anderen Gerät anmeldest.\n• Nur dieses Gerät — Behält diese Integration lokal und synchronisiert nicht.</string>

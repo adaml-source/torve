@@ -68,12 +68,16 @@ fun V2DeviceLimitReachedScreen(
     ) {
         TorvePageHeader(
             title = ds("Activate this device"),
-            subtitle = ds("You're at %1\$d active devices. Free up a slot to start watching here.")
-                .format(state.maxActiveDevices),
+            subtitle = if (state.deviceLimitKnown) {
+                ds("You have reached your %1\$d-device limit. Free up a slot to start watching here.")
+                    .format(state.maxActiveDevices)
+            } else {
+                ds("Checking your account device limit before activating this device.")
+            },
             trailing = {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TorveBadge(
-                        text = "${state.activeDeviceCount} / ${state.maxActiveDevices}",
+                        text = state.deviceUsageText,
                         tone = TorveBadgeTone.Warning,
                     )
                     TorveGhostButton(text = ds("Not now"), onClick = onDismiss)
@@ -83,8 +87,12 @@ fun V2DeviceLimitReachedScreen(
 
         TorveBanner(
             title = ds("Premium is ready"),
-            description = ds("Your subscription is active, but this device isn't among your %1\$d allowed slots yet. Remove one of the devices below to activate here.")
-                .format(state.maxActiveDevices),
+            description = if (state.deviceLimitKnown) {
+                ds("Your subscription is active, but this device isn't among your %1\$d allowed slots yet. Remove one of the devices below to activate here.")
+                    .format(state.maxActiveDevices)
+            } else {
+                ds("Your subscription is active. Fetching your account device limit from the backend before activation.")
+            },
             tone = TorveBannerTone.Warning,
         )
 

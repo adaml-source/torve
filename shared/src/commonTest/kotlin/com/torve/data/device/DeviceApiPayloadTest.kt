@@ -1,5 +1,7 @@
 package com.torve.data.device
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.encodeToJsonElement
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -29,7 +31,7 @@ class DeviceApiPayloadTest {
         val parsed = parseDeviceListPayload(payload, currentInstallationId = "manual-prod-check-1")
 
         assertEquals(1, parsed.active_count)
-        assertEquals(5, parsed.max_active)
+        assertEquals(0, parsed.max_active)
         assertEquals(1, parsed.devices.size)
 
         val device = parsed.devices.single()
@@ -138,10 +140,12 @@ class DeviceApiPayloadTest {
                 platform = "windows",
                 device_type = "desktop",
             ),
-            device_limit = DeviceLimitDto(
-                cap_reached = false,
-                swaps_remaining = 3,
-                stale_devices_pruned = 0,
+            device_limit = Json.encodeToJsonElement(
+                DeviceLimitDto(
+                    cap_reached = false,
+                    swaps_remaining = 3,
+                    stale_devices_pruned = 0,
+                ),
             ),
         )
 
@@ -153,7 +157,7 @@ class DeviceApiPayloadTest {
         val parsed = parseDeviceListPayload("[]")
 
         assertEquals(0, parsed.active_count)
-        assertEquals(5, parsed.max_active)
+        assertEquals(0, parsed.max_active)
         assertTrue(parsed.devices.isEmpty())
     }
 

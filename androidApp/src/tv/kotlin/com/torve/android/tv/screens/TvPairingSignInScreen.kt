@@ -48,6 +48,7 @@ import com.torve.android.ui.transfer.AndroidTransferQrRenderer
 import com.torve.android.sync.SyncCoordinator
 import com.torve.presentation.pairing.TvPairingSignInViewModel
 import com.torve.presentation.session.AccountSessionCoordinator
+import com.torve.presentation.device.DeviceGovernanceViewModel
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
@@ -65,6 +66,7 @@ fun TvPairingSignInScreen(
     viewModel: TvPairingSignInViewModel = koinInject(),
     accountSessionCoordinator: AccountSessionCoordinator = koinInject(),
     syncCoordinator: SyncCoordinator = koinInject(),
+    deviceGovernanceViewModel: DeviceGovernanceViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
     val scope = rememberCoroutineScope()
@@ -79,6 +81,7 @@ fun TvPairingSignInScreen(
             // device registration, settings + integrations restore,
             // playlist sync, etc.
             runCatching { accountSessionCoordinator.bootstrapAfterSignIn() }
+            deviceGovernanceViewModel.fetchAccessState()
             PostSignInRefresh.enqueueAfterAccountRestore(context, accountSessionCoordinator)
             // Refresh SyncCoordinator so isAuthenticated updates immediately
             // without requiring an app restart.

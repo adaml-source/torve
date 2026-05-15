@@ -333,7 +333,7 @@
     <string name="login_back_to_sign_in">Back to Sign In</string>
     <string name="login_reset_sent">If that email exists, a reset link will be sent.</string>
     <string name="login_account_created">Account created! Please check your email to verify your address.</string>
-    <string name="login_device_limit_reached">You have reached your 5-device limit. Remove an existing device to continue.</string>
+    <string name="login_device_limit_reached">Device limit reached. Remove an existing device to continue.</string>
     <string name="login_hide_password">Hide password</string>
     <string name="login_show_password">Show password</string>
 
@@ -1487,7 +1487,7 @@
     <string name="account_pairing_note">Pairing is only for controller and playback handoff. Shared settings no longer depend on pairing.</string>
     <string name="account_manage_pairings">Manage Pairings</string>
     <string name="account_devices">Devices</string>
-    <string name="account_devices_note">Signed-in devices are managed separately from pairings and count toward your 5-device account limit.</string>
+    <string name="account_devices_note">Signed-in devices are managed separately from pairings and count toward your account device limit.</string>
     <string name="account_manage_signed_in">Manage Signed-In Devices</string>
 
     <!-- Devices Screen (Pairing) -->
@@ -1509,6 +1509,9 @@
     <string name="manage_devices_title">Manage Devices</string>
     <string name="manage_devices_limit_info">Your Torve Pro account can be active on up to %d devices at a time.</string>
     <string name="manage_devices_count">%1$d of %2$d devices active</string>
+    <string name="manage_devices_limit_loading">Checking your account device limit…</string>
+    <string name="manage_devices_count_loading">Checking active devices…</string>
+    <string name="manage_devices_limit_reached_warning">You have reached your %d-device limit.</string>
     <string name="manage_devices_remove_info">Removing a device frees a slot for another device.</string>
     <string name="manage_devices_inactive_info">Inactive devices may stop counting automatically after extended inactivity.</string>
     <string name="manage_devices_this_device">THIS DEVICE</string>
@@ -1521,6 +1524,7 @@
     <!-- Device Limit Reached Screen -->
     <string name="device_limit_title">Device Limit Reached</string>
     <string name="device_limit_message">Your Torve Pro account is already active on %d devices. Remove one device to activate Torve Pro on this device.</string>
+    <string name="device_limit_message_loading">Checking your account device limit. Remove one active device to activate Torve Pro on this device.</string>
     <string name="device_limit_active_devices">Active Devices</string>
     <string name="device_limit_activate_hint">To activate this device, remove one from your account.</string>
     <string name="device_limit_remove_confirm">Remove \"%s\"? This will free a slot and Torve Pro will be activated on your current device.</string>
@@ -1790,6 +1794,8 @@
     <string name="tv_manage_activated_title">Activated Devices</string>
     <string name="tv_manage_activated_desc">Devices using Lifetime Access under this account.</string>
     <string name="tv_manage_active_count">%1$d of %2$d active</string>
+    <string name="tv_manage_active_count_loading">Checking active devices…</string>
+    <string name="tv_manage_limit_reached_warning">You have reached your %d-device limit.</string>
     <string name="tv_manage_no_activated">No activated devices found.</string>
     <string name="tv_manage_revoke_info">Revoking removes Lifetime Access from that device. Removing clears the device record.</string>
     <string name="tv_manage_paired_title">Paired Devices</string>
@@ -1798,6 +1804,7 @@
     <string name="tv_manage_unpair_info">Unpair disconnects control and playback handoff only. Shared settings sync through account sign-in.</string>
     <string name="tv_manage_device_limit_title">Device Limit Reached</string>
     <string name="tv_manage_device_limit_desc">Your Torve Pro account is already active on %d devices. Remove one device to activate Torve Pro on this device.</string>
+    <string name="tv_manage_device_limit_desc_loading">Checking your account device limit. Remove one active device to activate Torve Pro on this device.</string>
     <string name="tv_manage_current_device">CURRENT DEVICE</string>
     <string name="tv_manage_this_tv">THIS TV</string>
     <string name="tv_manage_this_device">THIS DEVICE</string>
@@ -1890,7 +1897,7 @@
     <string name="tv_iptv_epg_not_configured">Program guide not configured. Open Settings &gt; Channels to add a guide data URL.</string>
     <string name="tv_iptv_open_settings">Open Settings</string>
     <string name="tv_home_layout_instructions">Press OK to enable or disable. Press RIGHT to enter move mode, UP or DOWN to reorder, LEFT to finish.</string>
-    <string name="tv_settings_sign_in_share">Sign in to share one purchase across up to 5 devices.</string>
+    <string name="tv_settings_sign_in_share">Sign in to share one purchase across your account devices.</string>
 
     <!-- User-facing error messages (mapped from UserFacingError) -->
     <string name="error_device_cap_reached">Device limit reached. Remove a device to continue.</string>

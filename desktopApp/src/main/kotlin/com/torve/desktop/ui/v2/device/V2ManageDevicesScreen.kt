@@ -65,8 +65,8 @@ fun V2ManageDevicesScreen(
             trailing = {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TorveBadge(
-                        text = "${state.activeDeviceCount} / ${state.maxActiveDevices}",
-                        tone = if (state.capReached) TorveBadgeTone.Warning else TorveBadgeTone.Accent,
+                        text = state.deviceUsageText,
+                        tone = if (state.effectiveCapReached) TorveBadgeTone.Warning else TorveBadgeTone.Accent,
                     )
                     TorveGhostButton(text = ds("Back"), onClick = onBack)
                 }
@@ -88,12 +88,18 @@ fun V2ManageDevicesScreen(
             )
         }
 
-        if (state.capReached) {
+        if (state.effectiveCapReached && state.deviceLimitKnown) {
             TorveBanner(
                 title = ds("Device limit reached"),
-                description = ds("You're at %1\$d active devices. Remove one below to activate another device.")
+                description = ds("You have reached your %1\$d-device limit. Remove one below to activate another device.")
                     .format(state.maxActiveDevices),
                 tone = TorveBannerTone.Warning,
+            )
+        } else if (!state.deviceLimitKnown) {
+            TorveBanner(
+                title = ds("Checking device limit"),
+                description = ds("Fetching your account device limit from the backend."),
+                tone = TorveBannerTone.Info,
             )
         }
 

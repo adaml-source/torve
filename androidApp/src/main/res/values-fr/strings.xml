@@ -192,7 +192,7 @@
     <string name="login_forgot_password">Mot de passe oublié ?</string>
     <string name="login_send_reset_link">Envoyer le lien</string>
     <string name="login_back_to_sign_in">Retour à la connexion</string>
-    <string name="login_device_limit_reached">Vous avez atteint la limite de 5 appareils. Supprimez un appareil existant pour continuer.</string>
+    <string name="login_device_limit_reached">Limite d’appareils atteinte. Supprimez un appareil existant pour continuer.</string>
     <string name="login_hide_password">Masquer le mot de passe</string>
     <string name="login_show_password">Afficher le mot de passe</string>
     <string name="verify_email_sent">E-mail de vérification envoyé !</string>
@@ -1157,7 +1157,7 @@
     <string name="account_pairing_note">L\'appairage sert uniquement au contrôle et au transfert de lecture. Les paramètres sont synchronisés via le compte.</string>
     <string name="account_manage_pairings">Gérer les appairages</string>
     <string name="account_devices">Appareils</string>
-    <string name="account_devices_note">Les appareils connectés sont gérés séparément et comptent pour la limite de 5 appareils.</string>
+    <string name="account_devices_note">Les appareils connectés sont gérés séparément et comptent pour la limite d’appareils de votre compte.</string>
     <string name="account_manage_signed_in">Gérer les appareils connectés</string>
     <string name="devices_paired_title">Appareils appairés</string>
     <string name="devices_paired_desc">Appairez des TV ou appareils de contrôle pour la télécommande et le transfert de lecture. Les paramètres se synchronisent via la connexion au compte.</string>
@@ -1486,7 +1486,7 @@
     <string name="tv_library_downloaded_shows">Séries téléchargées</string>
     <string name="tv_iptv_open_settings">Ouvrir les paramètres</string>
     <string name="tv_home_layout_instructions">OK pour activer/désactiver. DROITE pour déplacer, HAUT/BAS pour réorganiser, GAUCHE pour terminer.</string>
-    <string name="tv_settings_sign_in_share">Connectez-vous pour partager un achat sur 5 appareils maximum.</string>
+    <string name="tv_settings_sign_in_share">Connectez-vous pour partager un achat sur les appareils de votre compte.</string>
     <string name="storage_how_title">Comment les identifiants sont stockés</string>
     <string name="storage_how_body">Choisissez de sauvegarder les intégrations dans votre compte Torve ou uniquement sur cet appareil.</string>
     <string name="storage_how_options">• Compte Torve (recommandé) — Restaure cette intégration lorsque vous vous connectez sur un autre appareil.\n• Cet appareil uniquement — Garde cette intégration locale et ne synchronise pas.</string>

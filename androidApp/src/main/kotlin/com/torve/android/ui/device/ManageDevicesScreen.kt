@@ -88,17 +88,33 @@ fun ManageDevicesScreen(
                 // Header
                 item {
                     Text(
-                        text = stringResource(R.string.manage_devices_limit_info, state.maxActiveDevices),
+                        text = if (state.deviceLimitKnown) {
+                            stringResource(R.string.manage_devices_limit_info, state.maxActiveDevices)
+                        } else {
+                            stringResource(R.string.manage_devices_limit_loading)
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = stringResource(R.string.manage_devices_count, state.activeDeviceCount, state.maxActiveDevices),
+                        text = if (state.activeDeviceCountKnown && state.deviceLimitKnown) {
+                            stringResource(R.string.manage_devices_count, state.activeDeviceCount, state.maxActiveDevices)
+                        } else {
+                            stringResource(R.string.manage_devices_count_loading)
+                        },
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = Amber,
                     )
+                    if (state.effectiveCapReached && state.deviceLimitKnown) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = stringResource(R.string.manage_devices_limit_reached_warning, state.maxActiveDevices),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                     Spacer(Modifier.height(16.dp))
                 }
 
