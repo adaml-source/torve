@@ -31,7 +31,9 @@ import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
@@ -41,6 +43,7 @@ class MediaFavoritesApi(
     private val baseUrlProvider: () -> String,
     private val channelProvider: ContentChannelProvider? = null,
     private val installationIdProvider: () -> String? = { null },
+    private val json: Json = Json { ignoreUnknownKeys = true },
 ) {
     private fun baseUrl() = baseUrlProvider().trimEnd('/')
 
@@ -59,7 +62,7 @@ class MediaFavoritesApi(
         accessToken: String,
         favorite: MediaFavorite,
         sourceDeviceId: String?,
-    ): MediaFavoriteDto {
+    ): MediaFavoriteMutationResultDto {
         val response = httpClient.put("${baseUrl()}/me/media-favorites/${favorite.mediaKey.encodeURLPathPart()}") {
             bearerAuth(accessToken)
             appendBackendHeaders()
@@ -67,9 +70,9 @@ class MediaFavoritesApi(
             setBody(favorite.toUpsertDto(sourceDeviceId))
         }
         if (!response.status.isSuccess()) {
-            throw IllegalStateException("Media favorite save failed: HTTP ${response.status.value} ${response.bodyAsText().take(120)}")
+            throw IllegalStateException("Media favorite save failed: HTTP ${response.status.value}")
         }
-        return response.body()
+        return decodeMutationResult(response.bodyAsText(), favorite)
     }
 
     suspend fun deleteFavorite(accessToken: String, mediaKey: String): MediaFavoriteDeleteDto {
@@ -126,6 +129,41 @@ class MediaFavoritesApi(
         }
     }
 
+    private fun decodeMutationResult(
+        body: String,
+        requestFavorite: MediaFavorite,
+    ): MediaFavoriteMutationResultDto {
+        if (body.isBlank()) {
+            return MediaFavoriteMutationResultDto(favorite = requestFavorite.toDto())
+        }
+        val wrapper = runCatching {
+            json.decodeFromString<MediaFavoriteMutationResponseDto>(body)
+        }.getOrNull()
+        if (wrapper != null) {
+            val candidate = wrapper.favorite
+                ?: wrapper.item
+                ?: wrapper.mediaFavorite
+                ?: wrapper.favorites.firstOrNull { it.mediaKey == requestFavorite.mediaKey }
+                ?: wrapper.items.firstOrNull { it.mediaKey == requestFavorite.mediaKey }
+                ?: requestFavorite.toDto(updatedAt = wrapper.updatedAt)
+            return MediaFavoriteMutationResultDto(
+                favorite = candidate,
+                version = wrapper.version,
+                updatedAt = wrapper.updatedAt ?: candidate.updatedAt,
+            )
+        }
+        val direct = runCatching {
+            json.decodeFromString<MediaFavoriteDto>(body)
+        }.getOrNull()
+        if (direct != null) {
+            return MediaFavoriteMutationResultDto(
+                favorite = direct,
+                updatedAt = direct.updatedAt,
+            )
+        }
+        return MediaFavoriteMutationResultDto(favorite = requestFavorite.toDto())
+    }
+
     private companion object {
         const val MEDIA_FAVORITES_UPDATED_EVENT = "MEDIA_FAVORITES_UPDATED"
     }
@@ -161,7 +199,7 @@ data class MediaFavoriteDto(
 )
 
 @Serializable
-data class MediaFavoriteUpsertDto(
+data class AddMediaFavoriteRequest(
     @SerialName("media_key") val mediaKey: String,
     @SerialName("media_type") val mediaType: String,
     @SerialName("tmdb_id") val tmdbId: Int? = null,
@@ -172,6 +210,26 @@ data class MediaFavoriteUpsertDto(
     val rating: Double? = null,
     val year: Int? = null,
     @SerialName("source_device_id") val sourceDeviceId: String? = null,
+)
+
+typealias MediaFavoriteUpsertDto = AddMediaFavoriteRequest
+
+data class MediaFavoriteMutationResultDto(
+    val favorite: MediaFavoriteDto,
+    val version: String? = null,
+    val updatedAt: String? = null,
+)
+
+@Serializable
+data class MediaFavoriteMutationResponseDto(
+    val favorite: MediaFavoriteDto? = null,
+    val item: MediaFavoriteDto? = null,
+    @SerialName("media_favorite") val mediaFavorite: MediaFavoriteDto? = null,
+    val favorites: List<MediaFavoriteDto> = emptyList(),
+    val items: List<MediaFavoriteDto> = emptyList(),
+    @Serializable(with = NullableStringScalarSerializer::class)
+    val version: String? = null,
+    @SerialName("updated_at") val updatedAt: String? = null,
 )
 
 @Serializable
@@ -196,7 +254,7 @@ fun MediaFavoriteDto.toDomain(): MediaFavorite {
 }
 
 private fun MediaFavorite.toUpsertDto(sourceDeviceId: String?): MediaFavoriteUpsertDto {
-    return MediaFavoriteUpsertDto(
+    return AddMediaFavoriteRequest(
         mediaKey = mediaKey,
         mediaType = mediaType.toMediaFavoriteWireValue(),
         tmdbId = tmdbId,
@@ -207,6 +265,22 @@ private fun MediaFavorite.toUpsertDto(sourceDeviceId: String?): MediaFavoriteUps
         rating = rating,
         year = year,
         sourceDeviceId = sourceDeviceId?.takeIf { it.isUuidLike() },
+    )
+}
+
+private fun MediaFavorite.toDto(updatedAt: String? = null): MediaFavoriteDto {
+    return MediaFavoriteDto(
+        mediaKey = mediaKey,
+        mediaType = mediaType.toMediaFavoriteWireValue(),
+        tmdbId = tmdbId,
+        imdbId = imdbId,
+        title = title,
+        posterUrl = posterUrl,
+        backdropUrl = backdropUrl,
+        rating = rating,
+        year = year,
+        addedAt = addedAt,
+        updatedAt = updatedAt ?: this.updatedAt,
     )
 }
 

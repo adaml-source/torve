@@ -123,22 +123,23 @@ class MediaFavoritesRepositoryImpl(
                     accessToken = token,
                     favorite = favorite,
                     sourceDeviceId = authClient.getServerDeviceId(),
-                ).toDomain()
-            }.onSuccess { saved ->
+                )
+            }.onSuccess { result ->
                 if (!isCurrentUser(userId)) return@onSuccess
+                val saved = result.favorite.toDomain()
                 pendingAdds.remove(saved.canonicalMediaKey())
                 val confirmed = listOf(saved) + _state.value.items.filterNot { it.mediaKey == saved.mediaKey }
                 applyItems(
                     confirmed,
                     isLoading = false,
                     lastError = null,
-                    version = _state.value.version,
-                    updatedAt = saved.updatedAt ?: _state.value.updatedAt,
+                    version = result.version ?: _state.value.version,
+                    updatedAt = result.updatedAt ?: saved.updatedAt ?: _state.value.updatedAt,
                 )
                 cacheItems(confirmed, userId)
             }.onFailure { error ->
                 pendingAdds.remove(favorite.canonicalMediaKey())
-                applySnapshot(previous, error.message ?: "Failed to save favorite", userId)
+                applySnapshot(previous, favoriteUpdateErrorMessage(error), userId)
             }
         }
     }
@@ -181,7 +182,7 @@ class MediaFavoritesRepositoryImpl(
                 pendingRemoves.removeAll(keysToDelete)
             }.onFailure { error ->
                 pendingRemoves.removeAll(keysToDelete)
-                applySnapshot(previous, error.message ?: "Failed to remove favorite", userId)
+                applySnapshot(previous, favoriteUpdateErrorMessage(error), userId)
             }
         }
     }
@@ -216,7 +217,7 @@ class MediaFavoritesRepositoryImpl(
         }.onFailure { error ->
             if (!isCurrentUser(userId)) return@onFailure
             _state.update {
-                it.copy(isLoading = false, lastError = error.message ?: "Failed to load favorites")
+                it.copy(isLoading = false, lastError = favoriteLoadErrorMessage(error))
             }
         }
     }
@@ -312,6 +313,20 @@ class MediaFavoritesRepositoryImpl(
     private fun clearPending() {
         pendingAdds.clear()
         pendingRemoves.clear()
+    }
+
+    private fun favoriteUpdateErrorMessage(error: Throwable): String {
+        return when {
+            error.message?.contains("sign in", ignoreCase = true) == true -> "Sign in to sync favorites"
+            else -> "Could not update favorites. Please try again."
+        }
+    }
+
+    private fun favoriteLoadErrorMessage(error: Throwable): String {
+        return when {
+            error.message?.contains("sign in", ignoreCase = true) == true -> "Sign in to sync favorites"
+            else -> "Could not load favorites. Please try again."
+        }
     }
 
     private fun mediaKeyAliases(mediaKey: String): Set<String> {

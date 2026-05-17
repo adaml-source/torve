@@ -25,6 +25,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 
 class MediaFavoritesApiContractTest {
     private val json = Json { ignoreUnknownKeys = true }
@@ -103,7 +104,85 @@ class MediaFavoritesApiContractTest {
     }
 
     @Test
-    fun listFavoritesParsesBackendFavoritesVersionAndUpdatedAt() = runTest {
+    fun upsertFavoritePrefersWrappedFavoriteResponseWithOpaqueStringVersion() = runTest {
+        val api = api { _ ->
+            respondJson(
+                """
+                {
+                  "favorite": {
+                    "id": "11111111-1111-1111-1111-111111111111",
+                    "media_key": "movie:123",
+                    "media_type": "movie",
+                    "tmdb_id": 123,
+                    "title": "Test Movie",
+                    "updated_at": "2026-05-16T00:00:00Z"
+                  },
+                  "version": "2026-05-16T00:01:00Z",
+                  "updated_at": "2026-05-16T00:01:00Z"
+                }
+                """.trimIndent(),
+            )
+        }
+
+        val result = api.upsertFavorite(
+            accessToken = "token",
+            favorite = MediaFavorite(
+                mediaKey = "movie:123",
+                mediaType = MediaType.MOVIE,
+                tmdbId = 123,
+                title = "Test Movie",
+            ),
+            sourceDeviceId = null,
+        )
+
+        assertEquals("movie:123", result.favorite.mediaKey)
+        assertEquals("Test Movie", result.favorite.title)
+        assertEquals("2026-05-16T00:01:00Z", result.version)
+        assertEquals("2026-05-16T00:01:00Z", result.updatedAt)
+    }
+
+    @Test
+    fun upsertFavoriteAcceptsAcknowledgementResponseWithoutFullFavorite() = runTest {
+        var captured: HttpRequestData? = null
+        val api = api { request ->
+            captured = request
+            respondJson(
+                """
+                {
+                  "ok": true,
+                  "version": 15,
+                  "updated_at": "2026-05-16T00:02:00Z"
+                }
+                """.trimIndent(),
+            )
+        }
+
+        val result = api.upsertFavorite(
+            accessToken = "token",
+            favorite = MediaFavorite(
+                mediaKey = "movie:123",
+                mediaType = MediaType.MOVIE,
+                tmdbId = 123,
+                title = "Test Movie",
+            ),
+            sourceDeviceId = null,
+        )
+
+        assertEquals("movie:123", result.favorite.mediaKey)
+        assertEquals("movie", result.favorite.mediaType)
+        assertEquals("Test Movie", result.favorite.title)
+        assertEquals("15", result.version)
+        assertEquals("2026-05-16T00:02:00Z", result.updatedAt)
+        val body = parseBody(captured ?: error("request not captured"))
+        assertEquals("movie:123", body["media_key"]?.jsonPrimitive?.content)
+        assertEquals("movie", body["media_type"]?.jsonPrimitive?.content)
+        assertEquals("Test Movie", body["title"]?.jsonPrimitive?.content)
+        assertNull(body["access_token"])
+        assertNull(body["refresh_token"])
+    }
+
+    @Test
+    fun listFavoritesParsesBackendFavoritesOpaqueStringVersionAndUpdatedAt() = runTest {
         val api = api { _ ->
             respondJson(
                 """
@@ -118,7 +197,7 @@ class MediaFavoritesApiContractTest {
                       "updated_at": "2026-05-16T00:00:00Z"
                     }
                   ],
-                  "version": 12,
+                  "version": "2026-05-16T00:01:00Z",
                   "updated_at": "2026-05-16T00:01:00Z"
                 }
                 """.trimIndent(),
@@ -127,7 +206,7 @@ class MediaFavoritesApiContractTest {
 
         val dto = api.listFavorites("token")
 
-        assertEquals("12", dto.version)
+        assertEquals("2026-05-16T00:01:00Z", dto.version)
         assertEquals("2026-05-16T00:01:00Z", dto.updatedAt)
         assertEquals("movie:123", dto.favorites.single().mediaKey)
     }
