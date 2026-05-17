@@ -76,6 +76,7 @@ import com.torve.android.sync.TraktSyncWorker
 import com.torve.data.account.AccountSettingsRepository
 import com.torve.presentation.device.DeviceGovernanceViewModel
 import com.torve.presentation.session.AccountSessionCoordinator
+import com.torve.domain.model.PlaylistType
 import com.torve.android.tv.settings.isTvReduceMotionEnabled
 import com.torve.android.tv.settings.setTvReduceMotionEnabled
 import com.torve.android.tv.components.TvClickToEditOutlinedTextField
@@ -105,6 +106,12 @@ import com.torve.presentation.subscription.PurchaseStatusTone
 import com.torve.presentation.subscription.PurchaseVerificationState
 import com.torve.presentation.subscription.SubscriptionViewModel
 import com.torve.presentation.subscription.accessPresentation
+import com.torve.domain.providerhealth.ProviderHealthCategory
+import com.torve.domain.providerhealth.ProviderHealthEntry
+import com.torve.domain.providerhealth.ProviderHealthStatus
+import com.torve.presentation.panda.PandaSetupUiState
+import com.torve.presentation.panda.PandaSetupViewModel
+import com.torve.presentation.providerhealth.ProviderStatusMapper
 import com.torve.android.tv.TvNotificationQueue
 import com.torve.android.tv.NotificationType
 import androidx.compose.runtime.rememberCoroutineScope
@@ -200,10 +207,12 @@ private fun formatTvAccessDate(epochMs: Long?): String {
 }
 
 private fun subscriptionMarketplaceLabel(value: String?): String? {
-    return when (value?.lowercase()) {
-        "google_play" -> "Google Play"
-        "amazon" -> "Amazon Appstore"
-        "apple" -> "Apple App Store"
+    val normalized = value?.lowercase()?.replace('-', '_') ?: return null
+    return when {
+        normalized.contains("google") -> "Google Play"
+        normalized.contains("amazon") -> "Amazon Appstore"
+        normalized.contains("apple") -> "Apple App Store"
+        normalized.contains("stripe") -> "Stripe"
         else -> null
     }
 }
@@ -267,6 +276,8 @@ internal fun TvSettingsScreen(
     val settingsState by settingsViewModel.state.collectAsState()
     val subscriptionState by subscriptionViewModel.state.collectAsState()
     val deviceGovernanceState by deviceGovernanceViewModel.state.collectAsState()
+    val pandaSetupViewModel: PandaSetupViewModel = koinInject()
+    val pandaSetupState by pandaSetupViewModel.state.collectAsState()
     val purchaseStrings: com.torve.presentation.subscription.PurchaseStringResolver = org.koin.compose.koinInject()
     val subscriptionAccess = subscriptionState.accessPresentation(purchaseStrings)
     val channelsState by channelsViewModel.state.collectAsState()
@@ -298,6 +309,7 @@ internal fun TvSettingsScreen(
     var authError by remember { mutableStateOf<String?>(null) }
     var authUser by remember { mutableStateOf<com.torve.data.auth.AuthUser?>(null) }
     var authShowRegister by remember { mutableStateOf(false) }
+    var importedSetupRefreshRunning by remember { mutableStateOf(false) }
     val passwordsMismatchText = stringResource(R.string.tv_auth_passwords_mismatch)
     val authScope = rememberCoroutineScope()
 
@@ -331,18 +343,27 @@ internal fun TvSettingsScreen(
             .map { entry ->
                 entry to com.torve.presentation.providerhealth.ProviderRepairMapper.actionsFor(entry)
             }
-            // Only show rows we can act on with a remote: Transfer or
-            // Diagnostics has a TV destination; the other actions
-            // (Reenter / OpenSettings) don't have first-class TV routes,
-            // so we drop those rows rather than dead-end the user.
+            .sortedWith(compareBy({ it.first.category.ordinal }, { it.first.label }))
+    }
+    val tvRepairRows = remember(tvHealthRows) {
+        tvHealthRows
+            // Only show repair rows we can act on with a remote: Transfer
+            // or Diagnostics has a TV destination. The About health monitor
+            // below intentionally shows every provider row.
             .filter { (_, actions) ->
                 actions.any {
                     it == com.torve.presentation.providerhealth.ProviderRepairAction.TransferFromAnotherDevice ||
                         it == com.torve.presentation.providerhealth.ProviderRepairAction.OpenDiagnostics
                 }
             }
-            .sortedWith(compareBy({ it.first.category.ordinal }, { it.first.label }))
     }
+    val pandaProviderSummary = remember(providerHealthEntries, pandaSetupState) {
+        buildPandaProviderSummary(providerHealthEntries, pandaSetupState)
+    }
+    val debridProviderSummary = remember(providerHealthEntries, pandaSetupState) {
+        buildDebridProviderSummary(providerHealthEntries, pandaSetupState)
+    }
+    var providerHealthAutoRefreshStarted by remember { mutableStateOf(false) }
 
     // Check if already logged in, and sync account settings if so
     LaunchedEffect(Unit) {
@@ -450,6 +471,19 @@ internal fun TvSettingsScreen(
     }
     val selectedCategory = settingsFocusController.selectedCategory
     val settingsListState = rememberLazyListState()
+    LaunchedEffect(selectedCategory, providerHealthAutoRefreshStarted) {
+        if (providerHealthAutoRefreshStarted) return@LaunchedEffect
+        if (selectedCategory != TvSettingsCategory.ADVANCED &&
+            selectedCategory != TvSettingsCategory.ABOUT
+        ) return@LaunchedEffect
+        providerHealthAutoRefreshStarted = true
+        runCatching {
+            org.koin.java.KoinJavaComponent.getKoin()
+                .get<com.torve.android.providerhealth.AndroidProviderHealthInit>()
+                .start()
+        }
+        runCatching { providerHealthCoordinator.runAll().join() }
+    }
     LaunchedEffect(authUser, selectedCategory) {
         if (authUser == null && selectedCategory != TvSettingsCategory.ACCOUNT) {
             settingsFocusController.selectedCategory = TvSettingsCategory.ACCOUNT
@@ -472,6 +506,7 @@ internal fun TvSettingsScreen(
             index += 1 // auth_account
             if (authUser?.isVerified == false) index += 1 // auth_verify
             index += 1 // account_import_setup
+            index += 1 // account_import_refresh
             index += 1 // auth_logout
             index += 1 // auth_delete_account
         }
@@ -1003,6 +1038,14 @@ internal fun TvSettingsScreen(
             focusTargetType = "navigation",
         )
     }
+    val accountImportRefreshTarget = remember {
+        TvSettingsFocusTarget(
+            itemId = TvSettingsItemIds.ACCOUNT_IMPORT_REFRESH,
+            category = TvSettingsCategory.ACCOUNT,
+            listIndex = 13,
+            focusTargetType = "action",
+        )
+    }
     val authEmailTarget = remember {
         TvSettingsFocusTarget(
             itemId = TvSettingsItemIds.ACCOUNT_AUTH_EMAIL,
@@ -1102,11 +1145,19 @@ internal fun TvSettingsScreen(
             focusTargetType = "action",
         )
     }
+    val subscriptionManageBillingTarget = remember {
+        TvSettingsFocusTarget(
+            itemId = TvSettingsItemIds.ACCOUNT_SUBSCRIPTION_MANAGE_BILLING,
+            category = TvSettingsCategory.ACCOUNT,
+            listIndex = 33,
+            focusTargetType = "action",
+        )
+    }
     val subscriptionRefreshTarget = remember {
         TvSettingsFocusTarget(
             itemId = TvSettingsItemIds.ACCOUNT_SUBSCRIPTION_REFRESH,
             category = TvSettingsCategory.ACCOUNT,
-            listIndex = 33,
+            listIndex = 34,
             focusTargetType = "action",
         )
     }
@@ -1114,7 +1165,7 @@ internal fun TvSettingsScreen(
         TvSettingsFocusTarget(
             itemId = TvSettingsItemIds.ACCOUNT_SUBSCRIPTION_RETRY,
             category = TvSettingsCategory.ACCOUNT,
-            listIndex = 34,
+            listIndex = 35,
             focusTargetType = "action",
         )
     }
@@ -1122,7 +1173,7 @@ internal fun TvSettingsScreen(
         TvSettingsFocusTarget(
             itemId = TvSettingsItemIds.ACCOUNT_SUBSCRIPTION_RESTORE,
             category = TvSettingsCategory.ACCOUNT,
-            listIndex = 35,
+            listIndex = 36,
             focusTargetType = "action",
         )
     }
@@ -1444,6 +1495,32 @@ internal fun TvSettingsScreen(
         isLastItemFocused = visibleInCategory.lastOrNull() == target.itemId
         onContentFocused(requester)
     }
+
+    fun refreshImportedSetup() {
+        if (importedSetupRefreshRunning) return
+        authScope.launch {
+            importedSetupRefreshRunning = true
+            try {
+                val result = accountSessionCoordinator.refreshAccountDataAfterCredentialTransfer()
+                settingsViewModel.refreshSettings()
+                channelsViewModel.loadPlaylists(recoverEmptyCatalog = true)
+                channelsViewModel.loadFavorites()
+                runCatching {
+                    org.koin.java.KoinJavaComponent.getKoin()
+                        .get<com.torve.android.providerhealth.AndroidProviderHealthInit>()
+                        .start()
+                }
+                runCatching { providerHealthCoordinator.runAll().join() }
+                PostSignInRefresh.enqueueContentWarmupAfterAccountActivation(context)
+                TvNotificationQueue.post(
+                    result.error ?: context.getString(R.string.tv_settings_account_refreshed),
+                    if (result.error == null) NotificationType.SUCCESS else NotificationType.ERROR,
+                )
+            } finally {
+                importedSetupRefreshRunning = false
+            }
+        }
+    }
     var previousPlaylistCount by remember { mutableIntStateOf(channelsState.playlists.size) }
     var previousShowAddPlaylist by remember { mutableStateOf(showAddPlaylist) }
     LaunchedEffect(isActive, isRailFocused, hasPendingExactSettingsRestore, aboutOverlayState) {
@@ -1494,7 +1571,7 @@ internal fun TvSettingsScreen(
 
     LaunchedEffect(showAddPlaylist) {
         if (previousShowAddPlaylist && !showAddPlaylist) {
-            onContentFocused(addPlaylistCardRequester)
+            onContentFocused(if (channelsState.playlists.isEmpty()) channelsTopRequester else addPlaylistCardRequester)
         }
         if (!previousShowAddPlaylist && showAddPlaylist) {
             // Scroll to form and focus first interactive element
@@ -1517,14 +1594,15 @@ internal fun TvSettingsScreen(
             if (showAddPlaylist) {
                 showAddPlaylist = false
             }
-            onContentFocused(addPlaylistCardRequester)
+            onContentFocused(if (currentCount == 0) channelsTopRequester else addPlaylistCardRequester)
         }
         previousPlaylistCount = currentCount
     }
 
     val selectedPlaylistForEpg = remember(channelsState.playlists, channelsState.selectedPlaylistId) {
         channelsState.playlists.firstOrNull { it.id == channelsState.selectedPlaylistId }
-            ?: channelsState.playlists.firstOrNull()
+            ?.takeIf { it.type == PlaylistType.M3U }
+            ?: channelsState.playlists.firstOrNull { it.type == PlaylistType.M3U }
     }
 
     LaunchedEffect(selectedPlaylistForEpg?.id, showEditSelectedPlaylistEpg) {
@@ -2300,15 +2378,7 @@ internal fun TvSettingsScreen(
                     modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                     focusRequester = requester,
                     onFocused = { onSettingsRowFocused(accountSyncStatusTarget, requester) },
-                    onClick = {
-                        authScope.launch {
-                            accountSettingsRepository.refreshIfStale(force = true)
-                            settingsViewModel.refreshSettings()
-                            TvNotificationQueue.post(
-                                context.getString(R.string.tv_settings_account_refreshed),
-                            )
-                        }
-                    },
+                    onClick = { refreshImportedSetup() },
                     rowType = TvSettingRowType.ACTION,
                 )
             }
@@ -2329,12 +2399,7 @@ internal fun TvSettingsScreen(
                         modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                         focusRequester = requester,
                         onFocused = { onSettingsRowFocused(accountSyncErrorTarget, requester) },
-                        onClick = {
-                            authScope.launch {
-                                accountSettingsRepository.refreshIfStale(force = true)
-                                settingsViewModel.refreshSettings()
-                            }
-                        },
+                        onClick = { refreshImportedSetup() },
                         rowType = TvSettingRowType.ACTION,
                         emphasis = TvSettingEmphasis.SECONDARY,
                     )
@@ -2452,6 +2517,26 @@ internal fun TvSettingsScreen(
                     onFocused = { onSettingsRowFocused(accountImportSetupTarget, requester) },
                     onClick = { onNavigateToReceiveCredentials() },
                     rowType = TvSettingRowType.NAVIGATION,
+                )
+            }
+            item(key = "account_import_refresh") {
+                val requester = rememberRegisteredTvSettingsFocusRequester(
+                    controller = settingsFocusController,
+                    target = accountImportRefreshTarget,
+                    externalRequester = remember("account_import_refresh") { FocusRequester() },
+                )
+                TvSettingCard(
+                    title = if (importedSetupRefreshRunning) {
+                        stringResource(R.string.transfer_refresh_all_after_import_running)
+                    } else {
+                        stringResource(R.string.transfer_refresh_all_after_import)
+                    },
+                    subtitle = stringResource(R.string.tv_settings_import_refresh_subtitle),
+                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                    focusRequester = requester,
+                    onFocused = { onSettingsRowFocused(accountImportRefreshTarget, requester) },
+                    onClick = { refreshImportedSetup() },
+                    rowType = TvSettingRowType.ACTION,
                 )
             }
             item(key = "auth_logout") {
@@ -2862,12 +2947,26 @@ internal fun TvSettingsScreen(
             )
             val billingManager: com.torve.android.billing.BillingManager = koinInject()
             val purchaseResult by billingManager.purchaseResult.collectAsState()
-            val activity = LocalContext.current as? android.app.Activity
+            val billingContext = LocalContext.current
+            val activity = billingContext as? android.app.Activity
             val isAmazonBuild = com.torve.android.BuildConfig.FLAVOR.contains("amazon", ignoreCase = true)
-            val purchasePlatform = if (isAmazonBuild) "amazon_fire_tv" else "google_play_tv"
-            val purchaseStoreLabel = if (isAmazonBuild) "Amazon Appstore" else "Google Play"
+            val useStripeBilling = com.torve.android.billing.isStripeFireTvBillingBuild()
+            val purchasePlatform = when {
+                useStripeBilling -> "stripe_fire_tv"
+                isAmazonBuild -> "amazon_fire_tv"
+                else -> "google_play_tv"
+            }
+            val purchaseStoreLabel = when {
+                useStripeBilling -> "Stripe"
+                isAmazonBuild -> "Amazon Appstore"
+                else -> "Google Play"
+            }
 
-            LaunchedEffect(Unit) { billingManager.initialize() }
+            LaunchedEffect(Unit) {
+                if (!useStripeBilling) {
+                    billingManager.initialize()
+                }
+            }
 
             LaunchedEffect(purchaseResult) {
                 when (val result = purchaseResult) {
@@ -2896,7 +2995,9 @@ internal fun TvSettingsScreen(
                         )
                     }
                     is com.torve.android.billing.BillingManager.PurchaseResult.AlreadyOwned -> {
-                        if (isAmazonBuild) {
+                        if (useStripeBilling) {
+                            subscriptionViewModel.refreshAccess()
+                        } else if (isAmazonBuild) {
                             subscriptionViewModel.restoreAmazonPurchases(platform = purchasePlatform)
                         } else {
                             subscriptionViewModel.restoreStorePurchases(
@@ -2931,16 +3032,40 @@ internal fun TvSettingsScreen(
             }
 
             val billingState by billingManager.billingState.collectAsState()
-            val monthlyOffer = remember(billingState) {
-                billingManager.getOffer(com.torve.android.billing.BillingManager.ProductType.MONTHLY)
+            val monthlyOffer = if (useStripeBilling) {
+                remember {
+                    com.torve.android.billing.BillingManager.BillingOffer(
+                        productType = com.torve.android.billing.BillingManager.ProductType.MONTHLY,
+                        productId = "stripe_monthly",
+                        formattedPrice = "Stripe checkout",
+                        billingDetails = "Opens secure checkout in your browser",
+                    )
+                }
+            } else {
+                remember(billingState) {
+                    billingManager.getOffer(com.torve.android.billing.BillingManager.ProductType.MONTHLY)
+                }
             }
-            val lifetimeOffer = remember(billingState) {
-                billingManager.getOffer(com.torve.android.billing.BillingManager.ProductType.LIFETIME)
+            val lifetimeOffer = if (useStripeBilling) {
+                remember {
+                    com.torve.android.billing.BillingManager.BillingOffer(
+                        productType = com.torve.android.billing.BillingManager.ProductType.LIFETIME,
+                        productId = "stripe_lifetime",
+                        formattedPrice = "Stripe checkout",
+                        billingDetails = "Opens secure checkout in your browser",
+                    )
+                }
+            } else {
+                remember(billingState) {
+                    billingManager.getOffer(com.torve.android.billing.BillingManager.ProductType.LIFETIME)
+                }
             }
-            val billingErrorMessage = (billingState as? com.torve.android.billing.BillingManager.BillingState.Error)?.message
+            val billingErrorMessage = if (useStripeBilling) null else (billingState as? com.torve.android.billing.BillingManager.BillingState.Error)?.message
             val purchaseBlocked = subscriptionState.purchaseVerificationState == PurchaseVerificationState.PENDING
-            val currentTier = subscriptionState.subscription?.tier ?: com.torve.domain.model.SubscriptionTier.FREE
             val currentStatus = subscriptionAccess.accessStatusLabel
+            val currentMarketplace = subscriptionMarketplaceLabel(subscriptionState.subscription?.platform)
+            val showLifetimeForThisStore = subscriptionAccess.shouldShowBuyLifetime &&
+                (!subscriptionAccess.hasPremiumEntitlement || currentMarketplace == purchaseStoreLabel)
             val priceUnavailableLabel = stringResource(R.string.paywall_price)
             val priceLoadingLabel = stringResource(R.string.paywall_price_loading)
 
@@ -2973,7 +3098,7 @@ internal fun TvSettingsScreen(
                     title = stringResource(R.string.tv_settings_monthly_access),
                     subtitle = when {
                         subscriptionState.hasEntitlement -> currentStatus
-                        monthlyOffer != null -> "${monthlyOffer.formattedPrice ?: "$1.99"} · ${monthlyOffer.billingDetails}"
+                        monthlyOffer != null -> "${monthlyOffer.formattedPrice ?: "$1.99"} - ${monthlyOffer.billingDetails}"
                         billingState is com.torve.android.billing.BillingManager.BillingState.Connecting ||
                             billingState is com.torve.android.billing.BillingManager.BillingState.Disconnected ->
                             priceLoadingLabel
@@ -2983,7 +3108,7 @@ internal fun TvSettingsScreen(
                     focusRequester = requester,
                     onFocused = { onSettingsRowFocused(subscriptionMonthlyTarget, requester) },
                     onClick = {
-                        if (!subscriptionState.hasEntitlement) {
+                        if (subscriptionAccess.shouldShowBuyMonthly) {
                             if (monthlyOffer == null) {
                                 TvNotificationQueue.post(
                                     billingErrorMessage ?: priceUnavailableLabel,
@@ -2995,23 +3120,29 @@ internal fun TvSettingsScreen(
                                         ?: context.getString(R.string.tv_purchase_verification_pending),
                                     NotificationType.INFO,
                                 )
-                            } else if (authUser != null) {
-                                activity?.let {
-                                    billingManager.launchPurchase(
-                                        it,
-                                        com.torve.android.billing.BillingManager.ProductType.MONTHLY,
-                                    )
-                                }
                             } else {
-                                subscriptionViewModel.requireAccountForPurchase(purchaseStoreLabel) {
-                                    activity?.let {
-                                        billingManager.launchPurchase(
-                                            it,
-                                            com.torve.android.billing.BillingManager.ProductType.MONTHLY,
-                                        )
+                                if (useStripeBilling) {
+                                    com.torve.android.billing.launchStripeCheckout(
+                                        context = billingContext,
+                                        viewModel = subscriptionViewModel,
+                                        productType = com.torve.android.billing.BillingManager.ProductType.MONTHLY,
+                                    )
+                                } else {
+                                    subscriptionViewModel.requireAccountForPurchase(
+                                        purchaseStoreLabel,
+                                        com.torve.domain.model.SubscriptionTier.MONTHLY,
+                                    ) {
+                                        activity?.let {
+                                            billingManager.launchPurchase(
+                                                it,
+                                                com.torve.android.billing.BillingManager.ProductType.MONTHLY,
+                                            )
+                                        }
                                     }
                                 }
                             }
+                        } else if (subscriptionState.hasEntitlement) {
+                            TvNotificationQueue.post(currentStatus, NotificationType.INFO)
                         }
                     },
                     rowType = TvSettingRowType.ACTION,
@@ -3022,11 +3153,13 @@ internal fun TvSettingsScreen(
                     target = subscriptionLifetimeTarget,
                     externalRequester = remember("subscription_lifetime") { FocusRequester() },
                 )
+                val visibleLifetimeOfferForCard = lifetimeOffer.takeIf { showLifetimeForThisStore }
                 TvSettingCard(
                     title = stringResource(R.string.tv_settings_lifetime_access),
                     subtitle = when {
-                        subscriptionState.hasEntitlement -> currentStatus
-                        lifetimeOffer != null -> "${lifetimeOffer.formattedPrice ?: "$23.99"} · ${lifetimeOffer.billingDetails}"
+                        visibleLifetimeOfferForCard != null -> "${visibleLifetimeOfferForCard.formattedPrice ?: "$23.99"} - ${visibleLifetimeOfferForCard.billingDetails}"
+                        !showLifetimeForThisStore && subscriptionState.hasEntitlement -> currentStatus
+                        lifetimeOffer != null && showLifetimeForThisStore -> "${lifetimeOffer.formattedPrice ?: "$23.99"} - ${lifetimeOffer.billingDetails}"
                         billingState is com.torve.android.billing.BillingManager.BillingState.Connecting ||
                             billingState is com.torve.android.billing.BillingManager.BillingState.Disconnected ->
                             priceLoadingLabel
@@ -3036,7 +3169,7 @@ internal fun TvSettingsScreen(
                     focusRequester = lifetimeRequester,
                     onFocused = { onSettingsRowFocused(subscriptionLifetimeTarget, lifetimeRequester) },
                     onClick = {
-                        if (!subscriptionState.hasEntitlement) {
+                        if (showLifetimeForThisStore) {
                             if (lifetimeOffer == null) {
                                 TvNotificationQueue.post(
                                     billingErrorMessage ?: priceUnavailableLabel,
@@ -3048,27 +3181,56 @@ internal fun TvSettingsScreen(
                                         ?: context.getString(R.string.tv_purchase_verification_pending),
                                     NotificationType.INFO,
                                 )
-                            } else if (authUser != null) {
-                                activity?.let {
-                                    billingManager.launchPurchase(
-                                        it,
-                                        com.torve.android.billing.BillingManager.ProductType.LIFETIME,
-                                    )
-                                }
                             } else {
-                                subscriptionViewModel.requireAccountForPurchase(purchaseStoreLabel) {
-                                    activity?.let {
-                                        billingManager.launchPurchase(
-                                            it,
-                                            com.torve.android.billing.BillingManager.ProductType.LIFETIME,
-                                        )
+                                if (useStripeBilling) {
+                                    com.torve.android.billing.launchStripeCheckout(
+                                        context = billingContext,
+                                        viewModel = subscriptionViewModel,
+                                        productType = com.torve.android.billing.BillingManager.ProductType.LIFETIME,
+                                    )
+                                } else {
+                                    subscriptionViewModel.requireAccountForPurchase(
+                                        purchaseStoreLabel,
+                                        com.torve.domain.model.SubscriptionTier.LIFETIME,
+                                    ) {
+                                        activity?.let {
+                                            billingManager.launchPurchase(
+                                                it,
+                                                com.torve.android.billing.BillingManager.ProductType.LIFETIME,
+                                            )
+                                        }
                                     }
                                 }
                             }
+                        } else if (subscriptionState.hasEntitlement) {
+                            TvNotificationQueue.post(currentStatus, NotificationType.INFO)
                         }
                     },
                     rowType = TvSettingRowType.ACTION,
                 )
+
+                if (useStripeBilling && subscriptionState.canManageStripeBilling) {
+                    val manageBillingRequester = rememberRegisteredTvSettingsFocusRequester(
+                        controller = settingsFocusController,
+                        target = subscriptionManageBillingTarget,
+                        externalRequester = remember("subscription_manage_billing") { FocusRequester() },
+                    )
+                    TvSettingCard(
+                        title = "Manage Stripe billing",
+                        subtitle = "Open Stripe billing for invoices, cards, and cancellation.",
+                        modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                        focusRequester = manageBillingRequester,
+                        onFocused = { onSettingsRowFocused(subscriptionManageBillingTarget, manageBillingRequester) },
+                        onClick = {
+                            com.torve.android.billing.launchStripePortal(
+                                context = billingContext,
+                                viewModel = subscriptionViewModel,
+                            )
+                        },
+                        rowType = TvSettingRowType.ACTION,
+                        emphasis = TvSettingEmphasis.SECONDARY,
+                    )
+                }
 
                 TvStatusSummaryCard(
                     title = subscriptionAccess.accessStatusLabel,
@@ -3142,7 +3304,9 @@ internal fun TvSettingsScreen(
                     onFocused = { onSettingsRowFocused(subscriptionRestoreTarget, restoreRequester) },
                     onClick = {
                         subscriptionViewModel.requireAccountForRestore(purchaseStoreLabel) {
-                            if (isAmazonBuild) {
+                            if (useStripeBilling) {
+                                subscriptionViewModel.refreshAccess()
+                            } else if (isAmazonBuild) {
                                 subscriptionViewModel.restoreAmazonPurchases(platform = purchasePlatform)
                             } else {
                                 subscriptionViewModel.restoreStorePurchases(
@@ -3210,7 +3374,7 @@ internal fun TvSettingsScreen(
                 // first remote-reachable action: Transfer beats
                 // Diagnostics when both apply (matches mapper order).
                 // No-op until an Android checker init exists.
-                tvHealthRows.forEach { (entry, actions) ->
+                tvRepairRows.forEach { (entry, actions) ->
                     item(key = "health:${entry.providerKey}") {
                         val requester = remember("health:${entry.providerKey}") { FocusRequester() }
                         val primary = actions.firstOrNull {
@@ -3651,6 +3815,7 @@ internal fun TvSettingsScreen(
                             isDefaultEntry = true,
                         )
                         val subtitle = when {
+                            pandaProviderSummary != null -> pandaProviderSummary
                             pandaConfigured && pandaEnabled -> stringResource(R.string.tv_settings_panda_configured_enabled)
                             pandaConfigured -> stringResource(R.string.tv_settings_panda_configured_disabled)
                             else -> stringResource(R.string.tv_settings_panda_setup_desc)
@@ -3681,6 +3846,7 @@ internal fun TvSettingsScreen(
                             com.torve.domain.model.DebridServiceType.TORBOX -> "TorBox"
                         }
                         val rdSubtitle = when {
+                            debridProviderSummary != null -> debridProviderSummary
                             settingsState.debridDeviceCode != null -> "$providerLabel authorization is in progress"
                             settingsState.debridConnected -> settingsState.debridUser?.username?.let {
                                 "$providerLabel connected as $it - managed by Panda"
@@ -4651,15 +4817,20 @@ internal fun TvSettingsScreen(
                     isDefaultEntry = true,
                 )
                 TvSettingCard(
-                    title = stringResource(R.string.tv_settings_no_playlists),
-                    subtitle = stringResource(R.string.tv_settings_tap_to_edit),
+                    title = stringResource(R.string.tv_settings_add_playlist),
+                    subtitle = stringResource(R.string.tv_settings_no_playlists),
                     modifier = Modifier.fillMaxWidth().focusProperties {
                         left = railFocusRequester
                         up = categoryRequesters.getValue(TvSettingsCategory.LIBRARY)
                     },
                     focusRequester = requester,
                     onFocused = { onSettingsRowFocused(libraryTopTarget, requester) },
-                    onClick = { showAddPlaylist = true },
+                    onClick = {
+                        if (showAddPlaylist) {
+                            onContentFocused(channelsTopRequester)
+                        }
+                        showAddPlaylist = !showAddPlaylist
+                    },
                     rowType = TvSettingRowType.NAVIGATION,
                 )
             }
@@ -4731,7 +4902,7 @@ internal fun TvSettingsScreen(
                     "${playlist.name} • ${stringResource(R.string.tv_settings_set)}"
                 }
                 TvSettingCard(
-                    title = stringResource(R.string.channels_epg_optional),
+                    title = stringResource(R.string.tv_settings_custom_epg_url),
                     subtitle = subtitle,
                     modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                     focusRequester = requester,
@@ -4748,26 +4919,27 @@ internal fun TvSettingsScreen(
         }
 
         // Add playlist card
-        item(key = "add_playlist") {
-            val requester = rememberSettingsRowRequester(
-                target = libraryAddPlaylistTarget,
-                externalRequester = addPlaylistCardRequester,
-            )
-            TvSettingCard(
-                title = stringResource(R.string.tv_settings_add_playlist),
-                subtitle = if (showAddPlaylist) stringResource(R.string.tv_settings_tap_to_edit)
-                           else stringResource(R.string.tv_settings_tap_to_edit),
-                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
-                focusRequester = requester,
-                onFocused = { onSettingsRowFocused(libraryAddPlaylistTarget, requester) },
-                onClick = {
-                    if (showAddPlaylist) {
-                        onContentFocused(addPlaylistCardRequester)
-                    }
-                    showAddPlaylist = !showAddPlaylist
-                },
-                rowType = TvSettingRowType.NAVIGATION,
-            )
+        if (channelsState.playlists.isNotEmpty()) {
+            item(key = "add_playlist") {
+                val requester = rememberSettingsRowRequester(
+                    target = libraryAddPlaylistTarget,
+                    externalRequester = addPlaylistCardRequester,
+                )
+                TvSettingCard(
+                    title = stringResource(R.string.tv_settings_add_playlist),
+                    subtitle = stringResource(R.string.tv_settings_tap_to_edit),
+                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                    focusRequester = requester,
+                    onFocused = { onSettingsRowFocused(libraryAddPlaylistTarget, requester) },
+                    onClick = {
+                        if (showAddPlaylist) {
+                            onContentFocused(addPlaylistCardRequester)
+                        }
+                        showAddPlaylist = !showAddPlaylist
+                    },
+                    rowType = TvSettingRowType.NAVIGATION,
+                )
+            }
         }
 
         if (showEditSelectedPlaylistEpg && selectedPlaylistForEpg != null) {
@@ -4783,10 +4955,46 @@ internal fun TvSettingsScreen(
                     TvClickToEditOutlinedTextField(
                         value = selectedPlaylistEpgDraft,
                         onValueChange = { selectedPlaylistEpgDraft = it },
-                        label = { Text(stringResource(R.string.channels_epg_optional)) },
+                        label = { Text(stringResource(R.string.tv_settings_custom_epg_url)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    val checkRequester = remember("selected_playlist_epg_check") { FocusRequester() }
+                    val checkTarget = remember(selectedPlaylistForEpg.id) {
+                        TvSettingsFocusTarget(
+                            itemId = "settings/library/playlist_epg/${selectedPlaylistForEpg.id}/check",
+                            category = TvSettingsCategory.LIBRARY,
+                            listIndex = 22,
+                            focusTargetType = "action",
+                        )
+                    }
+                    val registeredCheckRequester = rememberSettingsRowRequester(
+                        target = checkTarget,
+                        externalRequester = checkRequester,
+                    )
+                    TvSettingCard(
+                        title = if (channelsState.isCheckingEpg) {
+                            stringResource(R.string.channels_check_epg_checking)
+                        } else {
+                            stringResource(R.string.channels_check_epg)
+                        },
+                        subtitle = "",
+                        modifier = Modifier.fillMaxWidth(),
+                        focusRequester = registeredCheckRequester,
+                        onFocused = { onSettingsRowFocused(checkTarget, registeredCheckRequester) },
+                        onClick = {
+                            if (!channelsState.isCheckingEpg) {
+                                channelsViewModel.checkEpgUrl(selectedPlaylistEpgDraft)
+                            }
+                        },
+                    )
+                    channelsState.epgCheckMessage?.takeIf { it.isNotBlank() }?.let { message ->
+                        Text(
+                            text = message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (channelsState.epgCheckSuccess == true) Amber else MaterialTheme.colorScheme.error,
+                        )
+                    }
                     val saveRequester = remember("selected_playlist_epg_save") { FocusRequester() }
                     val saveTarget = remember(selectedPlaylistForEpg.id) {
                         TvSettingsFocusTarget(
@@ -5180,9 +5388,38 @@ internal fun TvSettingsScreen(
                         TvClickToEditOutlinedTextField(
                             value = channelsState.newPlaylistEpgUrl,
                             onValueChange = { channelsViewModel.setNewPlaylistEpgUrl(it) },
-                            label = { Text(stringResource(R.string.channels_epg_optional)) },
+                            label = { Text(stringResource(R.string.tv_settings_custom_epg_url)) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
+                        )
+                        val checkRequester = remember { FocusRequester() }
+                        val checkTarget = remember {
+                            TvSettingsFocusTarget(
+                                itemId = "settings/library/playlist_form/check_epg",
+                                category = TvSettingsCategory.LIBRARY,
+                                listIndex = 2999,
+                                focusTargetType = "action",
+                            )
+                        }
+                        val registeredCheckRequester = rememberSettingsRowRequester(
+                            target = checkTarget,
+                            externalRequester = checkRequester,
+                        )
+                        TvSettingCard(
+                            title = if (channelsState.isCheckingEpg) {
+                                stringResource(R.string.channels_check_epg_checking)
+                            } else {
+                                stringResource(R.string.channels_check_epg)
+                            },
+                            subtitle = channelsState.epgCheckMessage.orEmpty(),
+                            modifier = Modifier.fillMaxWidth(),
+                            focusRequester = registeredCheckRequester,
+                            onFocused = { onSettingsRowFocused(checkTarget, registeredCheckRequester) },
+                            onClick = {
+                                if (!channelsState.isCheckingEpg) {
+                                    channelsViewModel.checkNewPlaylistEpgUrl()
+                                }
+                            },
                         )
                     } else {
                         // Xtream fields
@@ -5869,7 +6106,7 @@ internal fun TvSettingsScreen(
                     modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                     focusRequester = requester,
                     onFocused = { onSettingsRowFocused(target, requester) },
-                    onClick = { },
+                    onClick = { refreshImportedSetup() },
                     rowType = TvSettingRowType.ACTION,
                     emphasis = TvSettingEmphasis.SECONDARY,
                 )
@@ -5897,15 +6134,34 @@ internal fun TvSettingsScreen(
                         it == com.torve.presentation.providerhealth.ProviderRepairAction.TransferFromAnotherDevice ||
                             it == com.torve.presentation.providerhealth.ProviderRepairAction.OpenDiagnostics
                     }
+                    val statusView = ProviderStatusMapper.map(entry)
+                    val pandaOwned = entry.category.isPandaOwnedProviderCategory()
                     val (subtitleSuffix, onTap) = when (primary) {
-                        com.torve.presentation.providerhealth.ProviderRepairAction.TransferFromAnotherDevice ->
-                            stringResource(R.string.tv_settings_open_credential_transfer) to { onNavigateToReceiveCredentials() }
-                        com.torve.presentation.providerhealth.ProviderRepairAction.OpenDiagnostics ->
-                            stringResource(R.string.tv_settings_open_diagnostics) to { onNavigateToTransferDiagnostics() }
-                        else -> "" to { }
+                        null -> statusView.primaryActionLabel.orEmpty() to {
+                            providerHealthCoordinator.runCheck(entry.providerKey)
+                            Unit
+                        }
+                        else -> if (pandaOwned) {
+                            stringResource(R.string.tv_settings_open_panda_setup) to { onNavigateToPandaSetup() }
+                        } else {
+                            when (primary) {
+                                com.torve.presentation.providerhealth.ProviderRepairAction.TransferFromAnotherDevice ->
+                                    stringResource(R.string.tv_settings_open_credential_transfer) to { onNavigateToReceiveCredentials() }
+                                com.torve.presentation.providerhealth.ProviderRepairAction.OpenDiagnostics ->
+                                    stringResource(R.string.tv_settings_open_diagnostics) to { onNavigateToTransferDiagnostics() }
+                                else -> "" to {
+                                    providerHealthCoordinator.runCheck(entry.providerKey)
+                                    Unit
+                                }
+                            }
+                        }
                     }
-                    val message = entry.message?.takeIf { it.isNotBlank() }
-                    val combined = if (message != null) "$message - $subtitleSuffix" else subtitleSuffix
+                    val detail = statusView.detail?.takeIf { it.isNotBlank() }
+                    val combined = listOfNotNull(
+                        statusView.headline.takeIf { it.isNotBlank() },
+                        detail,
+                        subtitleSuffix.takeIf { it.isNotBlank() },
+                    ).joinToString(" - ")
                     TvSettingCard(
                         title = entry.label,
                         subtitle = combined,
@@ -6726,6 +6982,137 @@ private fun TvPremiumLockChip(focused: Boolean) {
         )
     }
 }
+
+private fun ProviderHealthCategory.isPandaOwnedProviderCategory(): Boolean = when (this) {
+    ProviderHealthCategory.DEBRID,
+    ProviderHealthCategory.USENET_INDEXER,
+    ProviderHealthCategory.USENET_PROVIDER,
+    ProviderHealthCategory.DOWNLOAD_CLIENT -> true
+    ProviderHealthCategory.IPTV,
+    ProviderHealthCategory.PLEX_JELLYFIN,
+    ProviderHealthCategory.ADDON,
+    ProviderHealthCategory.EPG,
+    ProviderHealthCategory.TRAKT,
+    ProviderHealthCategory.SIMKL,
+    ProviderHealthCategory.PLAYBACK -> false
+}
+
+private fun buildPandaProviderSummary(
+    entries: List<ProviderHealthEntry>,
+    pandaState: PandaSetupUiState,
+): String? {
+    val parts = mutableListOf<String>()
+    connectedDebridLabels(entries, pandaState).takeIf { it.isNotEmpty() }?.let {
+        parts += "Debrid: ${it.joinToString(", ")}"
+    }
+    pandaUsenetProviderLabel(pandaState)?.let {
+        parts += "Usenet: $it"
+    }
+    pandaIndexerLabels(pandaState).takeIf { it.isNotEmpty() }?.let {
+        parts += "Indexer: ${it.joinToString(", ")}"
+    }
+    pandaDownloadClientLabel(pandaState)?.let {
+        parts += "Download: $it"
+    }
+    return parts.takeIf { it.isNotEmpty() }?.joinToString(" | ")
+}
+
+private fun buildDebridProviderSummary(
+    entries: List<ProviderHealthEntry>,
+    pandaState: PandaSetupUiState,
+): String? {
+    val connected = connectedDebridLabels(entries, pandaState)
+    if (connected.isNotEmpty()) {
+        return "Connected: ${connected.joinToString(", ")}"
+    }
+    val anyDebridRows = entries.any { it.category == ProviderHealthCategory.DEBRID }
+    return if (anyDebridRows) {
+        "No debrid services connected. Open Panda to add Real-Debrid, TorBox, AllDebrid, or Premiumize."
+    } else {
+        null
+    }
+}
+
+private fun connectedDebridLabels(
+    entries: List<ProviderHealthEntry>,
+    pandaState: PandaSetupUiState,
+): List<String> {
+    val ids = linkedSetOf<String>()
+    pandaState.debridApiKeys.forEach { (provider, value) ->
+        if (isUsableCredentialForDisplay(value)) ids += provider
+    }
+    pandaState.serverHasSecrets.forEach { key ->
+        if (key.startsWith("debrid_api_key_")) {
+            ids += key.removePrefix("debrid_api_key_")
+        }
+    }
+    val selectedId = pandaState.selectedProvider?.id
+    if (!selectedId.isNullOrBlank() && selectedId != "none" &&
+        (isUsableCredentialForDisplay(pandaState.debridApiKey) || pandaState.authConnected)
+    ) {
+        ids += selectedId
+    }
+    if (pandaState.downloadClient == "torbox" &&
+        (isUsableCredentialForDisplay(pandaState.downloadClientApiKey) ||
+            "download_client_api_key" in pandaState.serverHasSecrets)
+    ) {
+        ids += "torbox"
+    }
+    entries
+        .filter { it.category == ProviderHealthCategory.DEBRID && it.status == ProviderHealthStatus.GREEN }
+        .forEach { ids += it.providerKey.substringAfter("debrid:", it.providerKey) }
+    return ids
+        .filter { it.isNotBlank() && it != "none" }
+        .map { pandaDebridLabel(it) }
+        .distinct()
+}
+
+private fun pandaUsenetProviderLabel(state: PandaSetupUiState): String? {
+    val provider = state.usenetProvider.takeIf { state.enableUsenet && it.isNotBlank() && it != "none" }
+        ?: return null
+    val hasCredential = isUsableCredentialForDisplay(state.usenetPassword) ||
+        "usenet_password" in state.serverHasSecrets
+    return if (hasCredential) prettifyProviderId(provider) else null
+}
+
+private fun pandaIndexerLabels(state: PandaSetupUiState): List<String> =
+    state.nzbIndexers
+        .mapIndexedNotNull { index, row ->
+            val type = row.type.takeIf { it.isNotBlank() && it != "none" } ?: return@mapIndexedNotNull null
+            val hasCredential = isUsableCredentialForDisplay(row.apiKey) ||
+                "indexer_api_key_$index" in state.serverHasSecrets
+            if (hasCredential) prettifyProviderId(type) else null
+        }
+        .distinct()
+
+private fun pandaDownloadClientLabel(state: PandaSetupUiState): String? {
+    val client = state.downloadClient.takeIf { it.isNotBlank() && it != "none" } ?: return null
+    val hasCredential = isUsableCredentialForDisplay(state.downloadClientApiKey) ||
+        isUsableCredentialForDisplay(state.downloadClientPassword) ||
+        "download_client_api_key" in state.serverHasSecrets ||
+        "download_client_password" in state.serverHasSecrets
+    return if (hasCredential) prettifyProviderId(client) else null
+}
+
+private fun isUsableCredentialForDisplay(value: String?): Boolean {
+    val trimmed = value?.trim().orEmpty()
+    return trimmed.isNotBlank() && !trimmed.contains("redact", ignoreCase = true)
+}
+
+private fun pandaDebridLabel(id: String): String = when (id.lowercase()) {
+    "realdebrid", "real_debrid", "real-debrid" -> "Real-Debrid"
+    "alldebrid", "all_debrid", "all-debrid" -> "AllDebrid"
+    "premiumize" -> "Premiumize"
+    "torbox" -> "TorBox"
+    else -> prettifyProviderId(id)
+}
+
+private fun prettifyProviderId(id: String): String =
+    id.replace("-", " ")
+        .replace("_", " ")
+        .split(" ")
+        .filter { it.isNotBlank() }
+        .joinToString(" ") { part -> part.replaceFirstChar { it.uppercase() } }
 
 @Composable
 internal fun TvSettingCard(

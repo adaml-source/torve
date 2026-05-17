@@ -185,6 +185,7 @@ fun DetailScreen(
     val chooseSourceLocked = isLocked(PremiumFeature.CHOOSE_SOURCE_PREMIUM)
     var showActionSheet by remember { mutableStateOf(false) }
     var resolvedUrl by remember { mutableStateOf("") }
+    var resolvedUrlIsTemporary by remember { mutableStateOf(false) }
     var showTrailer by remember { mutableStateOf(false) }
     var sourcePickerState by remember { mutableStateOf<TvSourcePickerState?>(null) }
     var sourcePickerSeason by remember { mutableStateOf<Int?>(null) }
@@ -301,11 +302,13 @@ fun DetailScreen(
             if (url.isBlank()) {
                 resolvedUrl = ""
                 resolvedFallbackUrl = ""
+                resolvedUrlIsTemporary = false
                 viewModel.clearResolvedStream()
                 return@let
             }
             resolvedUrl = url
             resolvedFallbackUrl = fallback
+            resolvedUrlIsTemporary = resolved.isTemporary
             viewModel.clearResolvedStream()
 
             // If this resolution was triggered by an episode download button,
@@ -639,8 +642,8 @@ fun DetailScreen(
                                     DetailSecondaryActionSpec(
                                         label = when {
                                             watchlistEditLocked -> stringResource(R.string.premium_unlock_with_lifetime)
-                                            isInWatchlist -> stringResource(R.string.detail_in_watchlist)
-                                            else -> stringResource(R.string.detail_watchlist)
+                                            isInWatchlist -> stringResource(R.string.detail_remove_watchlist)
+                                            else -> stringResource(R.string.detail_add_watchlist)
                                         },
                                         icon = when {
                                             watchlistEditLocked -> Icons.Rounded.Lock
@@ -670,8 +673,8 @@ fun DetailScreen(
                                     DetailSecondaryActionSpec(
                                         label = when {
                                             favoritesEditLocked -> stringResource(R.string.premium_unlock_with_lifetime)
-                                            isFavorite -> "In ${stringResource(R.string.channels_favorites)}"
-                                            else -> stringResource(R.string.channels_favorites)
+                                            isFavorite -> stringResource(R.string.detail_remove_favorites)
+                                            else -> stringResource(R.string.detail_add_favorites)
                                         },
                                         icon = when {
                                             favoritesEditLocked -> Icons.Rounded.Lock
@@ -1133,7 +1136,7 @@ fun DetailScreen(
                         url = resolvedUrl,
                         title = dlTitle,
                         posterUrl = item?.posterUrl ?: "",
-                        onPlayInApp = { onPlayClick(resolvedUrl, resolvedFallbackUrl, ctxSeason, ctxEpisode, item?.imdbId, false) },
+                        onPlayInApp = { onPlayClick(resolvedUrl, resolvedFallbackUrl, ctxSeason, ctxEpisode, item?.imdbId, resolvedUrlIsTemporary) },
                         onDownload = {
                             if (item != null) {
                                 downloadViewModel.enqueueDownload(
@@ -1158,6 +1161,7 @@ fun DetailScreen(
                         onDismiss = {
                             showActionSheet = false
                             resolvedUrl = ""
+                            resolvedUrlIsTemporary = false
                         },
                     )
                 }

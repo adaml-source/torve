@@ -245,4 +245,36 @@ class DiagnosticsBundleBuilderTest {
         assertFalse(redacted.contains("abc123def456ghi789jkl"))
         assertTrue(redacted.contains("/u/<redacted>/manifest.json"))
     }
+
+    @Test
+    fun `redactor strips source key values from backend diagnostics`() {
+        val redacted = DiagnosticsRedactor.redact(
+            """{"source_key":"https://provider.example/stream?token=abc123","api_key":"secret"}""",
+        )
+
+        assertFalse(redacted.contains("abc123"))
+        assertFalse(redacted.contains("secret"))
+        assertTrue(redacted.contains(""""source_key": "<redacted>""""))
+    }
+
+    @Test
+    fun `redactor strips integrity and playback token fields`() {
+        val redacted = DiagnosticsRedactor.redact(
+            """
+            {
+              "integrity_token": "play-integrity-secret",
+              "provider_token": "provider-secret",
+              "playback_url": "https://cdn.example/movie.mp4?token=stream-secret",
+              "stream_url": "https://debrid.example/file?api_key=debrid-secret"
+            }
+            """.trimIndent(),
+        )
+
+        assertFalse(redacted.contains("play-integrity-secret"))
+        assertFalse(redacted.contains("provider-secret"))
+        assertFalse(redacted.contains("stream-secret"))
+        assertFalse(redacted.contains("debrid-secret"))
+        assertTrue(redacted.contains(""""integrity_token": "<redacted>""""))
+        assertTrue(redacted.contains(""""playback_url": "<redacted>""""))
+    }
 }

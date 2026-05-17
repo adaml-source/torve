@@ -391,6 +391,38 @@ class TestResolveOutcome:
         finally:
             _cleanup(db, user)
 
+    def test_record_success_accepts_long_source_key(self, client, db):
+        user = _make_premium_user(db)
+        long_source_key = (
+            "https://stremio.torbox.app/test/new-stream-url/"
+            + "x" * 900
+            + "/Example.2026.1080p.WEBRip.mkv"
+        )
+        try:
+            r = client.post("/me/acceleration/outcome", headers=_auth(user), json={
+                "content_id": "tmdb:long-source", "provider_type": "real_debrid",
+                "source_key": long_source_key, "success": True,
+                "quality": "1080p",
+            })
+            assert r.status_code == 201
+            assert r.json()["success_count"] == 1
+
+            r = client.post("/me/acceleration/outcome", headers=_auth(user), json={
+                "content_id": "tmdb:long-source", "provider_type": "real_debrid",
+                "source_key": long_source_key, "success": True,
+            })
+            assert r.status_code == 201
+            assert r.json()["success_count"] == 2
+
+            row = db.query(ResolveSuccessMemory).filter(
+                ResolveSuccessMemory.user_id == user.id,
+                ResolveSuccessMemory.content_id == "tmdb:long-source",
+            ).one()
+            assert row.source_key == long_source_key
+            assert len(row.source_key_hash) == 64
+        finally:
+            _cleanup(db, user)
+
     def test_record_failure_unknown(self, client, db):
         user = _make_premium_user(db)
         try:

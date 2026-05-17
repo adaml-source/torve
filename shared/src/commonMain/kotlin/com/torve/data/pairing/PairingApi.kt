@@ -8,6 +8,7 @@ import io.ktor.client.call.body
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.get
+import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.request
 import io.ktor.client.request.setBody
@@ -24,6 +25,7 @@ import kotlinx.serialization.json.JsonObject
 class PairingApi(
     private val httpClient: HttpClient,
     private val baseUrlProvider: () -> String,
+    private val installationIdProvider: () -> String? = { null },
 ) {
     private val json = Json {
         ignoreUnknownKeys = true
@@ -37,6 +39,7 @@ class PairingApi(
     suspend fun listPairings(accessToken: String): PairingListDto {
         val response = httpClient.get("${baseUrl()}/me/pairings") {
             bearerAuth(accessToken)
+            appendInstallationHeader()
         }
         val raw = response.bodyAsText()
         if (!response.status.isSuccess()) {
@@ -56,6 +59,7 @@ class PairingApi(
         val url = "${baseUrl()}/pairing/code"
         val response = httpClient.post(url) {
             accessToken?.takeIf { it.isNotBlank() }?.let { bearerAuth(it) }
+            appendInstallationHeader(device.installation_id)
             setBody(device)
         }
         val raw = response.bodyAsText()
@@ -81,6 +85,7 @@ class PairingApi(
     suspend fun createSigninCode(device: DeviceRegistrationDto): PairingCodeDto {
         val url = "${baseUrl()}/pairing/signin/code"
         val response = httpClient.post(url) {
+            appendInstallationHeader(device.installation_id)
             setBody(device)
         }
         val raw = response.bodyAsText()
@@ -107,6 +112,7 @@ class PairingApi(
         installationId: String,
     ): PairingStatusDto {
         val response = httpClient.post("${baseUrl()}/pairing/signin/status") {
+            appendInstallationHeader(installationId)
             setBody(PairingStatusRequestDto(code = code, installationId = installationId))
         }
         val raw = response.bodyAsText()
@@ -133,6 +139,7 @@ class PairingApi(
     suspend fun claimSigninCode(accessToken: String, code: String): PairingStatusDto {
         val response = httpClient.post("${baseUrl()}/pairing/signin/claim") {
             bearerAuth(accessToken)
+            appendInstallationHeader()
             setBody(PairingSigninClaimDto(code = code))
         }
         val raw = response.bodyAsText()
@@ -152,6 +159,7 @@ class PairingApi(
     suspend fun claimPairingCode(accessToken: String, code: String, device: DeviceRegistrationDto? = null): PairingStatusDto {
         val response = httpClient.post("${baseUrl()}/pairing/claim") {
             bearerAuth(accessToken)
+            appendInstallationHeader(device?.installation_id)
             setBody(PairingClaimDto(
                 code = code,
                 device_id = device?.device_id,
@@ -175,6 +183,7 @@ class PairingApi(
     suspend fun revokePairing(accessToken: String, pairingId: String): PairingStatusDto {
         val response = httpClient.post("${baseUrl()}/me/pairings/$pairingId/revoke") {
             bearerAuth(accessToken)
+            appendInstallationHeader()
         }
         val raw = response.bodyAsText()
         if (response.status.value == 404) {
@@ -212,6 +221,7 @@ class PairingApi(
         installationId: String,
     ): PairingStatusDto {
         val response = httpClient.post("${baseUrl()}/pairing/status") {
+            appendInstallationHeader(installationId)
             setBody(PairingStatusRequestDto(code = code, installationId = installationId))
         }
         val raw = response.bodyAsText()
@@ -241,12 +251,21 @@ class PairingApi(
         val response = httpClient.request(url) {
             method = HttpMethod.Options
             accessToken?.takeIf { it.isNotBlank() }?.let { bearerAuth(it) }
+            appendInstallationHeader()
         }
         return response.status.value != 404
     }
 
     private fun parseErrorDetail(raw: String): String? =
         parseBackendError(raw).message
+
+    private fun HttpRequestBuilder.appendInstallationHeader(
+        installationId: String? = installationIdProvider(),
+    ) {
+        installationId?.takeIf { it.isNotBlank() }?.let {
+            header("X-Torve-Installation-Id", it)
+        }
+    }
 }
 
 internal fun parsePairingListPayload(raw: String): PairingListDto {

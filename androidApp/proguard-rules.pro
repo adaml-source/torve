@@ -1,8 +1,8 @@
-# ──────────────────────────────────────────────────────────────
+# --------------------------------------------------------------
 # Torve ProGuard / R8 Rules
-# ──────────────────────────────────────────────────────────────
+# --------------------------------------------------------------
 
-# ── Kotlinx Serialization ──
+# Kotlinx Serialization
 -keepattributes *Annotation*, InnerClasses
 -dontnote kotlinx.serialization.AnnotationsKt
 
@@ -21,59 +21,53 @@
     kotlinx.serialization.KSerializer serializer(...);
 }
 
-# Keep all @Serializable data classes
--keep @kotlinx.serialization.Serializable class com.torve.** { *; }
-
-# ── Ktor ──
+# Ktor
 -keep class io.ktor.** { *; }
 -dontwarn io.ktor.**
 -keepclassmembers class io.ktor.** { volatile <fields>; }
 -keep class io.ktor.client.engine.** { *; }
 
-# ── SQLDelight ──
+# SQLDelight
 -keep class com.torve.db.** { *; }
 -keep class app.cash.sqldelight.** { *; }
 
-# ── Koin ──
+# Koin
 -keep class org.koin.** { *; }
 -dontwarn org.koin.**
 
-# ── ExoPlayer / Media3 ──
+# ExoPlayer / Media3
 -keep class androidx.media3.** { *; }
 -dontwarn androidx.media3.**
 
-# ── Google Cast ──
+# Google Cast
 -keep class com.google.android.gms.cast.** { *; }
 -dontwarn com.google.android.gms.cast.**
 
-# ── Coil ──
+# Coil
 -keep class coil3.** { *; }
 -dontwarn coil3.**
 
-# ── Domain models (used via reflection in serialization) ──
--keep class com.torve.domain.model.** { *; }
--keep class com.torve.data.debrid.** { *; }
-# Obfuscate field and method names in debrid package (keep class structure only for serialization)
+# Torve serializers: keep generated serializer entry points above, but do
+# not keep the full com.torve package. Release builds should still shrink
+# repositories, view models, resolver code, and DTO implementation names.
+# Keep only explicit @SerialName member names used by debrid payloads.
 -keepclassmembernames class com.torve.data.debrid.** {
     @kotlinx.serialization.SerialName *;
 }
--keep class com.torve.data.trakt.** { *; }
--keep class com.torve.data.addon.StremioModels** { *; }
--keep class com.torve.data.metadata.TmdbModels** { *; }
 
-# ── Coroutines ──
+# Coroutines
 -keepnames class kotlinx.coroutines.internal.MainDispatcherFactory {}
 -keepnames class kotlinx.coroutines.CoroutineExceptionHandler {}
 -keepclassmembers class kotlinx.coroutines.** {
     volatile <fields>;
 }
 
-# ── Amazon IAP ──
+# Amazon IAP runtime entry points.
 -keep class com.amazon.device.iap.** { *; }
 -keep class com.amazon.a.** { *; }
 -dontwarn com.amazon.device.iap.**
 
-# ── General ──
+# General
 -keepattributes Signature
 -keepattributes Exceptions
 -keepattributes SourceFile,LineNumberTable

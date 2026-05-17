@@ -115,6 +115,15 @@ data class TvContentRail(
     val progressByMediaId: Map<String, Float> = emptyMap(),
 )
 
+private fun TvContentRail.progressFor(item: MediaItem): Float? {
+    return progressByMediaId[item.id]
+        ?: item.tmdbId?.let { tmdbId ->
+            progressByMediaId[tmdbId.toString()] ?: progressByMediaId["tmdb:$tmdbId"]
+        }
+}
+
+private const val TV_CARD_WATCHED_THRESHOLD = 0.9f
+
 private data class TvMediaContextMenuState(
     val item: MediaItem,
     val progress: Float?,
@@ -173,6 +182,7 @@ internal fun TvMediaRails(
     leadingContentFocusRequester: FocusRequester? = null,
     shouldAutoFocus: Boolean = true,
     browseLayout: TvBrowseLayout = TvBrowseLayout.INFO_PANEL,
+    progressResolver: ((MediaItem, Float?) -> Float?)? = null,
     contextMenuActionsForItem: ((MediaItem, Float?) -> List<TvMediaContextMenuAction>)? = null,
     onContextMenuAction: ((MediaItem, TvMediaContextMenuAction, Float?) -> Unit)? = null,
     registerFocusHandle: ((TvScreenFocusHandle?) -> Unit)? = null,
@@ -407,7 +417,8 @@ internal fun TvMediaRails(
                                     onFirstContentRequester(focusRequester)
                                 }
 
-                                val progress = row.progressByMediaId[item.id]
+                                val railProgress = row.progressFor(item)
+                                val progress = progressResolver?.invoke(item, railProgress) ?: railProgress
                                 val cardModifier = Modifier
                                     .focusRequester(focusRequester)
                                     .focusProperties {
@@ -542,6 +553,7 @@ private fun TvPosterCard(
     LaunchedEffect(focused, item) {
         if (focused) onFocused()
     }
+    val isWatched = (progress ?: 0f) >= TV_CARD_WATCHED_THRESHOLD
 
     Box(
         modifier = modifier
@@ -661,7 +673,15 @@ private fun TvPosterCard(
             }
         }
 
-        if (progress != null && progress > 0f) {
+        if (isWatched) {
+            TvPosterWatchedBadge(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp),
+            )
+        }
+
+        if (progress != null && progress > 0f && !isWatched) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -682,6 +702,24 @@ private fun TvPosterCard(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun TvPosterWatchedBadge(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(Charcoal.copy(alpha = 0.86f))
+            .border(1.dp, Amber.copy(alpha = 0.58f), RoundedCornerShape(999.dp))
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.tv_watched),
+            style = MaterialTheme.typography.labelSmall,
+            color = AmberLight,
+            fontWeight = FontWeight.SemiBold,
+        )
     }
 }
 

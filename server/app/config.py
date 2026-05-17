@@ -37,6 +37,15 @@ class Settings(BaseSettings):
     PADDLE_SUBSCRIPTION_PRICE_ID: str = ""  # Monthly subscription price
     PADDLE_ADMIN_SECRET: str = ""  # Secret for admin promo endpoints
 
+    # Stripe billing
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    STRIPE_MONTHLY_PRICE_ID: str = ""
+    STRIPE_LIFETIME_PRICE_ID: str = ""
+    STRIPE_CHECKOUT_SUCCESS_URL: str = ""
+    STRIPE_CHECKOUT_CANCEL_URL: str = ""
+    STRIPE_PORTAL_RETURN_URL: str = ""
+
     # In-app purchase verification
     # Google Play
     GOOGLE_PLAY_PACKAGE_NAME: str = ""

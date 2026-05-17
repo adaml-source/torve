@@ -122,7 +122,12 @@ public final class MPVLib {
         observer.logMessage(prefix, level, text);
       }
     }
-    android.util.Log.d("UpstreamMPVLib", prefix + "[" + level + "]: " + text);
+    if (com.torve.android.BuildConfig.DEBUG) {
+      android.util.Log.d(
+          "UpstreamMPVLib",
+          prefix + "[" + level + "]: " +
+              com.torve.domain.diagnostics.DiagnosticsRedactor.INSTANCE.redact(text));
+    }
   }
 
   public interface EventObserver {

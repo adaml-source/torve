@@ -3,7 +3,9 @@ package com.torve.data.account
 import com.torve.data.auth.AuthClient
 import com.torve.domain.model.MediaFavorite
 import com.torve.domain.model.MediaItem
-import com.torve.domain.model.favoriteMediaKey
+import com.torve.domain.model.canonicalMediaKey
+import com.torve.domain.model.extractTmdbIdFromMediaId
+import com.torve.domain.model.matchesMediaItemFavorite
 import com.torve.domain.model.toMediaFavorite
 import com.torve.domain.repository.DeviceLocalSettingsRepository
 import com.torve.domain.repository.MediaFavoritesRepository
@@ -37,6 +39,8 @@ class MediaFavoritesRepositoryImpl(
     private var eventsJob: Job? = null
     private var eventsUserId: String? = null
     private var activeUserId: String? = null
+    private val pendingAdds = LinkedHashMap<String, MediaFavorite>()
+    private val pendingRemoves = LinkedHashSet<String>()
 
     init {
         scope.launch {
@@ -44,11 +48,13 @@ class MediaFavoritesRepositoryImpl(
                 val userId = user?.id?.takeIf { it.isNotBlank() }
                 if (userId == null) {
                     activeUserId = null
+                    clearPending()
                     stopEventsLoop()
                     _state.value = MediaFavoritesState()
                 } else {
                     if (activeUserId != userId) {
                         activeUserId = userId
+                        clearPending()
                         stopEventsLoop()
                         _state.value = MediaFavoritesState()
                     }
@@ -77,9 +83,12 @@ class MediaFavoritesRepositoryImpl(
     }
 
     override fun toggleFavorite(item: MediaItem) {
-        val key = item.favoriteMediaKey()
-        if (key in _state.value.favoriteKeys) {
-            removeFavorite(key)
+        val existingKeys = _state.value.items
+            .filter { it.matchesMediaItemFavorite(item) }
+            .map { it.mediaKey }
+            .distinct()
+        if (existingKeys.isNotEmpty()) {
+            removeFavoriteKeys(existingKeys)
         } else {
             addFavorite(item)
         }
@@ -95,6 +104,8 @@ class MediaFavoritesRepositoryImpl(
         val previous = _state.value
         if (favorite.mediaKey in previous.favoriteKeys) return
         val optimistic = listOf(favorite) + previous.items.filterNot { it.mediaKey == favorite.mediaKey }
+        pendingAdds[favorite.canonicalMediaKey()] = favorite
+        pendingRemoves.removeAll(mediaKeyAliases(favorite.mediaKey))
         applyItems(optimistic, isLoading = false, lastError = null)
 
         scope.launch {
@@ -115,24 +126,41 @@ class MediaFavoritesRepositoryImpl(
                 ).toDomain()
             }.onSuccess { saved ->
                 if (!isCurrentUser(userId)) return@onSuccess
+                pendingAdds.remove(saved.canonicalMediaKey())
                 val confirmed = listOf(saved) + _state.value.items.filterNot { it.mediaKey == saved.mediaKey }
-                applyItems(confirmed, isLoading = false, lastError = null)
+                applyItems(
+                    confirmed,
+                    isLoading = false,
+                    lastError = null,
+                    version = _state.value.version,
+                    updatedAt = saved.updatedAt ?: _state.value.updatedAt,
+                )
                 cacheItems(confirmed, userId)
             }.onFailure { error ->
+                pendingAdds.remove(favorite.canonicalMediaKey())
                 applySnapshot(previous, error.message ?: "Failed to save favorite", userId)
             }
         }
     }
 
     override fun removeFavorite(mediaKey: String) {
+        removeFavoriteKeys(listOf(mediaKey))
+    }
+
+    private fun removeFavoriteKeys(mediaKeys: List<String>) {
         val userId = currentUserIdOrNull()
         if (userId == null) {
             _state.update { it.copy(lastError = "Sign in to sync favorites") }
             return
         }
         val previous = _state.value
-        if (mediaKey !in previous.favoriteKeys) return
-        val optimistic = previous.items.filterNot { it.mediaKey == mediaKey }
+        val keysToDelete = mediaKeys.flatMap { mediaKeyAliases(it) }.toSet()
+        if (keysToDelete.none { it in previous.favoriteKeys }) return
+        pendingRemoves.addAll(keysToDelete)
+        keysToDelete.forEach { key -> pendingAdds.remove(key) }
+        val optimistic = previous.items.filterNot { favorite ->
+            favorite.mediaKey in keysToDelete || favorite.canonicalMediaKey() in keysToDelete
+        }
         applyItems(optimistic, isLoading = false, lastError = null)
 
         scope.launch {
@@ -146,8 +174,13 @@ class MediaFavoritesRepositoryImpl(
                 return@launch
             }
             runCatching {
-                api.deleteFavorite(token, mediaKey)
+                keysToDelete.forEach { key ->
+                    api.deleteFavorite(token, key)
+                }
+            }.onSuccess {
+                pendingRemoves.removeAll(keysToDelete)
             }.onFailure { error ->
+                pendingRemoves.removeAll(keysToDelete)
                 applySnapshot(previous, error.message ?: "Failed to remove favorite", userId)
             }
         }
@@ -156,6 +189,7 @@ class MediaFavoritesRepositoryImpl(
     override suspend fun clearSessionState() {
         stopEventsLoop()
         localSettingsRepository.remove(KEY_CACHE)
+        clearPending()
         _state.value = MediaFavoritesState()
         activeUserId = null
     }
@@ -166,11 +200,19 @@ class MediaFavoritesRepositoryImpl(
         if (!isCurrentUser(userId)) return
         _state.update { it.copy(isLoading = true, lastError = null) }
         runCatching {
-            api.listFavorites(token).items.map { it.toDomain() }
-        }.onSuccess { items ->
+            api.listFavorites(token)
+        }.onSuccess { dto ->
             if (!isCurrentUser(userId)) return@onSuccess
-            applyItems(items, isLoading = false, lastError = null)
-            cacheItems(items, userId)
+            val items = dto.favoriteRows.map { it.toDomain() }
+            val merged = mergePending(items)
+            applyItems(
+                merged,
+                isLoading = false,
+                lastError = null,
+                version = dto.version,
+                updatedAt = dto.updatedAt,
+            )
+            cacheItems(merged, userId)
         }.onFailure { error ->
             if (!isCurrentUser(userId)) return@onFailure
             _state.update {
@@ -235,20 +277,64 @@ class MediaFavoritesRepositoryImpl(
         items: List<MediaFavorite>,
         isLoading: Boolean,
         lastError: String?,
+        version: String? = _state.value.version,
+        updatedAt: String? = _state.value.updatedAt,
     ) {
         val normalized = normalizeItems(items)
         _state.value = MediaFavoritesState(
             items = normalized,
-            favoriteKeys = normalized.map { it.mediaKey }.toSet(),
+            favoriteKeys = normalized
+                .flatMap { favorite -> mediaKeyAliases(favorite.mediaKey) + favorite.canonicalMediaKey() }
+                .toSet(),
             isLoading = isLoading,
             lastError = lastError,
+            version = version,
+            updatedAt = updatedAt,
         )
     }
 
     private fun normalizeItems(items: List<MediaFavorite>): List<MediaFavorite> {
         return items
             .filter { it.mediaKey.isNotBlank() && it.title.isNotBlank() }
-            .distinctBy { it.mediaKey }
+            .distinctBy { it.canonicalMediaKey() }
+    }
+
+    private fun mergePending(items: List<MediaFavorite>): List<MediaFavorite> {
+        val filtered = items.filterNot { favorite ->
+            favorite.mediaKey in pendingRemoves || favorite.canonicalMediaKey() in pendingRemoves
+        }
+        val pending = pendingAdds.values.toList()
+        if (pending.isEmpty()) return filtered
+        val pendingKeys = pending.map { it.canonicalMediaKey() }.toSet()
+        return pending + filtered.filterNot { it.canonicalMediaKey() in pendingKeys }
+    }
+
+    private fun clearPending() {
+        pendingAdds.clear()
+        pendingRemoves.clear()
+    }
+
+    private fun mediaKeyAliases(mediaKey: String): Set<String> {
+        mediaKey.extractTmdbIdFromMediaId()?.let { tmdbId ->
+            val type = when {
+                mediaKey.contains(":movie:", ignoreCase = true) -> "movie"
+                mediaKey.contains(":tv:", ignoreCase = true) ||
+                    mediaKey.contains(":series:", ignoreCase = true) -> "series"
+                else -> null
+            }
+            if (type != null) {
+                return setOf(mediaKey, "$type:$tmdbId", "${type.uppercase()}:$tmdbId")
+            }
+        }
+        val parts = mediaKey.split(":", limit = 2)
+        if (parts.size != 2) return setOf(mediaKey)
+        val idPart = parts[1].takeIf { it.isNotBlank() } ?: return setOf(mediaKey)
+        val canonicalType = when (parts[0].trim().lowercase()) {
+            "movie" -> "movie"
+            "series", "tv" -> "series"
+            else -> return setOf(mediaKey)
+        }
+        return setOf("$canonicalType:$idPart", "${canonicalType.uppercase()}:$idPart")
     }
 
     private fun currentUserIdOrNull(): String? {

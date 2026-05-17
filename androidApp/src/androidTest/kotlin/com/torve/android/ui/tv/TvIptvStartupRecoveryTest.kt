@@ -178,7 +178,14 @@ private class AndroidFakeChannelRepository(
         error("Not used")
     }
 
-    override suspend fun addXtreamPlaylist(name: String, server: String, username: String, password: String, id: String?): ChannelPlaylist {
+    override suspend fun addXtreamPlaylist(
+        name: String,
+        server: String,
+        username: String,
+        password: String,
+        id: String?,
+        epgUrl: String?,
+    ): ChannelPlaylist {
         error("Not used")
     }
 

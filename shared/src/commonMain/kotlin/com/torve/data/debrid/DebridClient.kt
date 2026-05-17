@@ -7,6 +7,7 @@ import com.torve.domain.model.DebridServiceType
 import com.torve.domain.model.ResolvedStream
 import com.torve.domain.model.TranscodeUrls
 import com.torve.domain.model.apiValue
+import com.torve.domain.diagnostics.DiagnosticsRedactor
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.HttpRequestBuilder
@@ -851,7 +852,7 @@ class DebridClient(
                 val cached = adCheckCache(apiKey, listOf(infoHash))[infoHash] == true
                 println("TORVE_AD: hashOnlyCacheCheck hash=${infoHash.redactedHash()} cached=$cached")
             } catch (e: Exception) {
-                println("TORVE_AD: hashOnlyCacheCheck skipped hash=${infoHash.redactedHash()} reason=${e::class.simpleName}: ${e.message}")
+                println("TORVE_AD: hashOnlyCacheCheck skipped hash=${infoHash.redactedHash()} reason=${e::class.simpleName}: ${DiagnosticsRedactor.redact(e.message)}")
             }
         }
 
@@ -982,7 +983,7 @@ class DebridClient(
                 val cached = pmCheckCache(apiKey, listOf(infoHash))[infoHash] == true
                 println("TORVE_PM: hashOnlyCacheCheck hash=${infoHash.redactedHash()} cached=$cached")
             } catch (e: Exception) {
-                println("TORVE_PM: hashOnlyCacheCheck skipped hash=${infoHash.redactedHash()} reason=${e::class.simpleName}: ${e.message}")
+                println("TORVE_PM: hashOnlyCacheCheck skipped hash=${infoHash.redactedHash()} reason=${e::class.simpleName}: ${DiagnosticsRedactor.redact(e.message)}")
             }
         }
 
@@ -1055,7 +1056,7 @@ class DebridClient(
                 val cached = tbCheckCache(apiKey, listOf(infoHash))[infoHash] == true
                 println("TORVE_TB: hashOnlyCacheCheck hash=${infoHash.redactedHash()} cached=$cached")
             } catch (e: Exception) {
-                println("TORVE_TB: hashOnlyCacheCheck skipped hash=${infoHash.redactedHash()} reason=${e::class.simpleName}: ${e.message}")
+                println("TORVE_TB: hashOnlyCacheCheck skipped hash=${infoHash.redactedHash()} reason=${e::class.simpleName}: ${DiagnosticsRedactor.redact(e.message)}")
             }
         }
 
@@ -1170,7 +1171,7 @@ class DebridClient(
             }
         } catch (e: Exception) {
             if (e is RdAuthException || e is DebridServiceUnavailableException) throw e
-            println("TORVE_RD: inventory lookup skipped hash=${infoHash.redactedHash()} reason=${e::class.simpleName}: ${e.message}")
+            println("TORVE_RD: inventory lookup skipped hash=${infoHash.redactedHash()} reason=${e::class.simpleName}: ${DiagnosticsRedactor.redact(e.message)}")
             null
         }
     }

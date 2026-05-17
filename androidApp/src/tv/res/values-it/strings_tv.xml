@@ -183,10 +183,10 @@
     <string name="tv_catalog_shows_preparing">Le serie TV vengono preparate in background</string>
     <string name="tv_search_ai_provider_required">Configura un provider IA nelle Impostazioni prima di usare la ricerca IA.</string>
     <string name="tv_settings_panda_streaming_setup">Configurazione streaming Panda</string>
-    <string name="tv_settings_panda_streaming_setup_desc">Configura debrid, usenet, client download, IPTV e stato provider in un unico posto.</string>
-    <string name="tv_settings_panda_configured_enabled">Configurato e attivo. Riconfigura provider streaming, IPTV e automazione.</string>
+    <string name="tv_settings_panda_streaming_setup_desc">Configura debrid, usenet, client download e stato provider in un unico posto.</string>
+    <string name="tv_settings_panda_configured_enabled">Configurato e attivo. Riconfigura provider streaming e automazione.</string>
     <string name="tv_settings_panda_configured_disabled">Configurato ma disattivato. Apri Panda per attivarlo o riconfigurarlo.</string>
-    <string name="tv_settings_panda_setup_desc">Prepara Torve allo streaming con debrid, usenet, client download e IPTV.</string>
+    <string name="tv_settings_panda_setup_desc">Prepara Torve allo streaming con debrid, usenet e client download.</string>
     <string name="tv_settings_realdebrid_connect">Connetti Real-Debrid</string>
     <string name="tv_settings_realdebrid_connect_panda">Connetti Real-Debrid in Panda</string>
     <string name="tv_settings_realdebrid_managed_authorize">Gestito da Panda. Completa l\'autorizzazione del dispositivo per connettere Real-Debrid.</string>

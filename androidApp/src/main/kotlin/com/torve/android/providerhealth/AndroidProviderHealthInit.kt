@@ -107,6 +107,11 @@ class AndroidProviderHealthInit(
         NotificationManagerCompat.from(context).notify(HEALTH_NOTIF_ID, notification)
     }
 
+    private fun usableCredential(value: String?): String? =
+        value
+            ?.trim()
+            ?.takeIf { it.isNotBlank() && !it.contains("redact", ignoreCase = true) }
+
     suspend fun start() {
         if (started) return
         started = true
@@ -138,14 +143,20 @@ class AndroidProviderHealthInit(
                 DebridProviderHealthChecker(
                     provider = provider,
                     apiKeySource = {
-                        secretStore.get(secretKey(provider))?.takeIf { it.isNotBlank() }
+                        usableCredential(secretStore.get(secretKey(provider)))
                             ?: run {
                                 val state = pandaConfigStateStore.current
-                                val stateProvider = pandaDebridProviderMap[state.selectedProvider?.id]
-                                if (stateProvider == provider &&
-                                    state.debridApiKey.isNotBlank() &&
-                                    !state.debridApiKey.contains("redact", ignoreCase = true)
-                                ) state.debridApiKey else null
+                                val providerId = pandaDebridProviderMap.entries
+                                    .firstOrNull { it.value == provider }
+                                    ?.key
+                                usableCredential(providerId?.let { state.debridApiKeys[it] })
+                                    ?: usableCredential(
+                                        if (providerId != null && state.selectedProvider?.id == providerId) {
+                                            state.debridApiKey
+                                        } else {
+                                            null
+                                        },
+                                    )
                             }
                     },
                     debridClient = debridClient,

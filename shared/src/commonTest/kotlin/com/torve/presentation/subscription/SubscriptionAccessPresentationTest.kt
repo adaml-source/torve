@@ -60,6 +60,7 @@ class SubscriptionAccessPresentationTest {
             subscription = subscription(
                 tier = SubscriptionTier.MONTHLY,
                 expiresAt = 1_776_988_800_000L,
+                platform = "stripe",
             ),
             isPro = true,
             hasEntitlement = true,
@@ -127,6 +128,7 @@ class SubscriptionAccessPresentationTest {
     private fun subscription(
         tier: SubscriptionTier,
         expiresAt: Long? = null,
+        platform: String = "google_play",
     ): Subscription {
         return Subscription(
             id = "sub-1",
@@ -134,7 +136,7 @@ class SubscriptionAccessPresentationTest {
             purchaseToken = "token",
             expiresAt = expiresAt,
             isActive = tier != SubscriptionTier.FREE,
-            platform = "google_play",
+            platform = platform,
             purchasedAt = 1L,
         )
     }

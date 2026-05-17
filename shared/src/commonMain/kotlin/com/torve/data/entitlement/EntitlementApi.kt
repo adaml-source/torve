@@ -1,13 +1,17 @@
 package com.torve.data.entitlement
 
+import com.torve.domain.security.ClientTrustHeaders
+import com.torve.domain.security.ClientIntegrityAttestation
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.get
+import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
@@ -18,14 +22,18 @@ import kotlinx.serialization.Serializable
 class EntitlementApi(
     private val httpClient: HttpClient,
     private val baseUrlProvider: () -> String,
+    private val installationIdProvider: () -> String? = { null },
 ) {
     private fun baseUrl() = baseUrlProvider().trimEnd('/')
 
     // ── Entitlement Queries ──
 
     suspend fun getEntitlements(accessToken: String): EntitlementStateDto {
+        val trustHeaders = ClientTrustHeaders.capture()
         return httpClient.get("${baseUrl()}/me/entitlements") {
             bearerAuth(accessToken)
+            appendInstallationHeader()
+            trustHeaders?.appendTo(this)
         }.body()
     }
 
@@ -37,9 +45,12 @@ class EntitlementApi(
         productId: String,
         platform: String = "ios",
     ): PurchaseVerifyDto {
+        val trustHeaders = ClientTrustHeaders.capture()
         return httpClient.post("${baseUrl()}/purchases/apple/verify") {
             bearerAuth(accessToken)
+            appendInstallationHeader()
             contentType(ContentType.Application.Json)
+            trustHeaders?.appendTo(this)
             setBody(AppleVerifyDto(transactionJws, productId, platform))
         }.body()
     }
@@ -55,10 +66,14 @@ class EntitlementApi(
         // verification and the "google-play" slug (not "google").
         // Evidence: Sentry transaction id
         // "/me/purchases/google-play/verify" on commit 063c936.
+        val trustHeaders = ClientTrustHeaders.capture()
+        val clientIntegrity = ClientTrustHeaders.captureIntegrityAttestation()
         return httpClient.post("${baseUrl()}/me/purchases/google-play/verify") {
             bearerAuth(accessToken)
+            appendInstallationHeader(installationId)
+            trustHeaders?.appendTo(this)
             contentType(ContentType.Application.Json)
-            setBody(GooglePlayVerifyRequest(productId, purchaseToken, platform, installationId))
+            setBody(GooglePlayVerifyRequest(productId, purchaseToken, platform, installationId, clientIntegrity))
         }.body()
     }
 
@@ -70,8 +85,11 @@ class EntitlementApi(
         platform: String = "amazon_fire_tv",
         installationId: String? = null,
     ): PurchaseVerifyDto {
+        val trustHeaders = ClientTrustHeaders.capture()
         return httpClient.post("${baseUrl()}/me/purchases/amazon/verify") {
             bearerAuth(accessToken)
+            appendInstallationHeader(installationId)
+            trustHeaders?.appendTo(this)
             contentType(ContentType.Application.Json)
             setBody(AmazonVerifyRequest(receiptId, amazonUserId, productId, platform, installationId))
         }.body()
@@ -82,8 +100,11 @@ class EntitlementApi(
         store: String,
         platform: String,
     ): EntitlementStateDto {
+        val trustHeaders = ClientTrustHeaders.capture()
         return httpClient.post("${baseUrl()}/purchases/restore") {
             bearerAuth(accessToken)
+            appendInstallationHeader()
+            trustHeaders?.appendTo(this)
             contentType(ContentType.Application.Json)
             setBody(RestoreDto(store, platform))
         }.body()
@@ -98,9 +119,22 @@ class EntitlementApi(
      * token first, then this).
      */
     suspend fun restorePurchasesCanonical(accessToken: String): RestorePurchasesDto {
+        val trustHeaders = ClientTrustHeaders.capture()
         return httpClient.post("${baseUrl()}/me/purchases/restore") {
             bearerAuth(accessToken)
+            appendInstallationHeader()
+            trustHeaders?.appendTo(this)
         }.body()
+    }
+
+    private fun io.ktor.client.request.HttpRequestBuilder.appendInstallationHeader(installationId: String?) {
+        (installationId ?: installationIdProvider())?.takeIf { it.isNotBlank() }?.let {
+            header("X-Torve-Installation-Id", it)
+        }
+    }
+
+    private fun io.ktor.client.request.HttpRequestBuilder.appendInstallationHeader() {
+        appendInstallationHeader(null)
     }
 }
 
@@ -206,6 +240,18 @@ object PurchaseVerifyErrorCode {
 
     /** Verification ran and returned a negative result. */
     const val NOT_VERIFIED = "not_verified"
+
+    /** Backend found an existing active entitlement for this account. */
+    const val DUPLICATE_ACTIVE_ENTITLEMENT = "duplicate_active_entitlement"
+
+    /** Account already has active premium through a different store. */
+    const val CROSS_STORE_CONFLICT = "cross_store_conflict"
+
+    /** Backend reports this entitlement has expired. */
+    const val ENTITLEMENT_EXPIRED = "entitlement_expired"
+
+    /** Backend reports this entitlement has been revoked. */
+    const val ENTITLEMENT_REVOKED = "entitlement_revoked"
 }
 
 @Serializable
@@ -221,6 +267,8 @@ private data class GooglePlayVerifyRequest(
     val purchase_token: String,
     val platform: String,
     val installation_id: String? = null,
+    @SerialName("client_integrity")
+    val clientIntegrity: ClientIntegrityAttestation? = null,
 )
 
 @Serializable

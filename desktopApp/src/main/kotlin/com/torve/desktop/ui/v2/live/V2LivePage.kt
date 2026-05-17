@@ -54,6 +54,8 @@ import com.torve.desktop.ui.components.TorveSectionCard
 import com.torve.desktop.ui.components.TorveSearchField
 import com.torve.desktop.ui.l10n.ds
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
+import com.torve.desktop.ui.v2.recording.recordingFailureNotification
+import com.torve.desktop.ui.v2.recording.recordingFolderValidationError
 import com.torve.domain.model.Channel
 import com.torve.domain.model.ChannelCategory
 import com.torve.domain.model.EnrichedChannel
@@ -71,6 +73,8 @@ fun V2LivePage(
     channelsViewModel: ChannelsViewModel,
     playerController: DesktopPlayerController,
     onPremiumBlocked: (() -> Unit)? = null,
+    onDirectPlaybackStarted: () -> Unit = {},
+    onRecordingEvent: (String) -> Unit = {},
 ) {
     val hasPremium = com.torve.desktop.premium.rememberHasPremium()
     var mode by remember { mutableStateOf(DesktopLiveMode.CHANNELS) }
@@ -155,13 +159,32 @@ fun V2LivePage(
         }
         return configured
     }
+    var knownRecordingFailureIds by remember {
+        mutableStateOf(recordingsState.failed.map { it.id }.toSet())
+    }
+    LaunchedEffect(recordingsState.failed) {
+        val failedIds = recordingsState.failed.map { it.id }.toSet()
+        recordingsState.failed
+            .filter { it.id !in knownRecordingFailureIds && it.status == com.torve.domain.recording.RecordingStatus.FAILED }
+            .forEach { onRecordingEvent(recordingFailureNotification(it)) }
+        knownRecordingFailureIds = failedIds
+    }
+    fun ensureRecordingFolderReady(): Boolean {
+        val error = recordingFolderValidationError(settingsVmForRecording.state.value.recordingDownloadPath)
+        if (error != null) {
+            onRecordingEvent("Recording disabled: $error")
+            com.torve.desktop.desktopNotify("Recording disabled", error)
+            return false
+        }
+        return true
+    }
     val onToggleRecord: (com.torve.domain.model.Channel, com.torve.domain.model.EpgProgramme) -> Unit = { ch, p ->
         val existing = recordingsVm.rowFor(ch.url, p.startTime, p.endTime)
         if (existing != null && (existing.status == com.torve.domain.recording.RecordingStatus.SCHEDULED ||
                     existing.status == com.torve.domain.recording.RecordingStatus.RECORDING)
         ) {
             recordingsVm.cancel(existing.id)
-        } else if (!ensureRecordingFolderConfigured()) {
+        } else if (!ensureRecordingFolderReady()) {
             // No-op: the helper notified the user.
         } else {
             // Apply pre-roll / post-roll buffers from settings so stations
@@ -177,6 +200,7 @@ fun V2LivePage(
                 startMs = p.startTime - recordingPrefs.preRollMs,
                 endMs = p.endTime + recordingPrefs.postRollMs,
             )
+            onRecordingEvent("Recording scheduled: ${p.title}")
         }
     }
     // Variant of onToggleRecord that adds an explicit extra "overrun"
@@ -185,16 +209,19 @@ fun V2LivePage(
     // a submenu (15 / 30 / 60 / 120 min).
     val onScheduleWithOverrun: (com.torve.domain.model.Channel, com.torve.domain.model.EpgProgramme, Int) -> Unit =
         { ch, p, overrunMin ->
-            recordingsVm.schedule(
-                playlistId = channelsState.selectedPlaylistId.orEmpty(),
-                channelId = ch.url,
-                channelName = ch.name,
-                streamUrl = ch.url,
-                programmeTitle = p.title,
-                programmeDescription = p.description,
-                startMs = p.startTime - recordingPrefs.preRollMs,
-                endMs = p.endTime + recordingPrefs.postRollMs + overrunMin * 60_000L,
-            )
+            if (ensureRecordingFolderReady()) {
+                recordingsVm.schedule(
+                    playlistId = channelsState.selectedPlaylistId.orEmpty(),
+                    channelId = ch.url,
+                    channelName = ch.name,
+                    streamUrl = ch.url,
+                    programmeTitle = p.title,
+                    programmeDescription = p.description,
+                    startMs = p.startTime - recordingPrefs.preRollMs,
+                    endMs = p.endTime + recordingPrefs.postRollMs + overrunMin * 60_000L,
+                )
+                onRecordingEvent("Recording scheduled: ${p.title}")
+            }
         }
 
     // ── Live "record what I'm watching" (Prompt 10D) ─────────────
@@ -210,7 +237,7 @@ fun V2LivePage(
         val active = recordingsState.active.firstOrNull { it.streamUrl == ch.url }
         if (active != null) {
             recordingsVm.cancel(active.id)
-        } else if (!ensureRecordingFolderConfigured()) {
+        } else if (!ensureRecordingFolderReady()) {
             // No-op: helper already showed the notification.
         } else {
             // Use the user's configured default duration (Settings →
@@ -226,6 +253,7 @@ fun V2LivePage(
                 startMs = now,
                 endMs = now + recordingPrefs.defaultDurationMs,
             )
+            onRecordingEvent("Recording started: ${ch.name}")
         }
     }
 
@@ -250,6 +278,7 @@ fun V2LivePage(
         if (!hasPremium) { onPremiumBlocked?.invoke(); return }
         channelsViewModel.selectChannel(match.channel)
         channelsViewModel.recordChannelViewed(match.channel)
+        onDirectPlaybackStarted()
         playerController.playDirectStream(
             title = match.channel.name,
             url = match.channel.url,
@@ -291,6 +320,7 @@ fun V2LivePage(
         }
         channelsViewModel.selectChannel(channel)
         channelsViewModel.recordChannelViewed(channel)
+        onDirectPlaybackStarted()
         playerController.playDirectStream(
             title = channel.name,
             url = channel.url,
@@ -395,6 +425,7 @@ fun V2LivePage(
                     }
                     channelsViewModel.selectChannel(channel)
                     channelsViewModel.recordChannelViewed(channel)
+                    onDirectPlaybackStarted()
                     playerController.playDirectStream(
                         title = channel.name,
                         url = url,

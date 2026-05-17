@@ -52,6 +52,10 @@
     <string name="detail_resolving">Resolving…</string>
     <string name="detail_watchlist">Watchlist</string>
     <string name="detail_in_watchlist">In Watchlist</string>
+    <string name="detail_add_watchlist">Add to Watchlist</string>
+    <string name="detail_remove_watchlist">Remove from Watchlist</string>
+    <string name="detail_add_favorites">Add to Favorites</string>
+    <string name="detail_remove_favorites">Remove from Favorites</string>
     <string name="detail_watched">Watched</string>
     <string name="detail_unwatched">Unwatched</string>
     <string name="detail_watch_trailer">Watch Trailer</string>
@@ -506,6 +510,8 @@
     <string name="channels_playlist_name">Source Name</string>
     <string name="channels_m3u_url">Source URL</string>
     <string name="channels_epg_optional">Guide URL (optional)</string>
+    <string name="channels_check_epg">Check EPG</string>
+    <string name="channels_check_epg_checking">Checking EPG...</string>
     <string name="channels_server_url">Server URL</string>
     <string name="channels_username">Username</string>
     <string name="channels_password">Password</string>

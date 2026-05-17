@@ -23,20 +23,31 @@ import io.ktor.http.isSuccess
 import io.ktor.utils.io.readUTF8Line
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
 class MediaFavoritesApi(
     private val httpClient: HttpClient,
     private val baseUrlProvider: () -> String,
     private val channelProvider: ContentChannelProvider? = null,
+    private val installationIdProvider: () -> String? = { null },
 ) {
     private fun baseUrl() = baseUrlProvider().trimEnd('/')
 
     suspend fun listFavorites(accessToken: String): MediaFavoritesListDto {
         val response = httpClient.get("${baseUrl()}/me/media-favorites") {
             bearerAuth(accessToken)
-            appendChannelHeader()
+            appendBackendHeaders()
         }
         if (!response.status.isSuccess()) {
             throw IllegalStateException("Media favorites list failed: HTTP ${response.status.value}")
@@ -51,7 +62,7 @@ class MediaFavoritesApi(
     ): MediaFavoriteDto {
         val response = httpClient.put("${baseUrl()}/me/media-favorites/${favorite.mediaKey.encodeURLPathPart()}") {
             bearerAuth(accessToken)
-            appendChannelHeader()
+            appendBackendHeaders()
             contentType(ContentType.Application.Json)
             setBody(favorite.toUpsertDto(sourceDeviceId))
         }
@@ -64,7 +75,7 @@ class MediaFavoritesApi(
     suspend fun deleteFavorite(accessToken: String, mediaKey: String): MediaFavoriteDeleteDto {
         val response = httpClient.delete("${baseUrl()}/me/media-favorites/${mediaKey.encodeURLPathPart()}") {
             bearerAuth(accessToken)
-            appendChannelHeader()
+            appendBackendHeaders()
         }
         if (!response.status.isSuccess()) {
             throw IllegalStateException("Media favorite delete failed: HTTP ${response.status.value}")
@@ -79,7 +90,7 @@ class MediaFavoritesApi(
         httpClient.prepareGet("${baseUrl()}/me/events") {
             bearerAuth(accessToken)
             header("Accept", "text/event-stream")
-            appendChannelHeader()
+            appendBackendHeaders()
         }.execute { response ->
             if (response.status == HttpStatusCode.Unauthorized || !response.status.isSuccess()) {
                 return@execute
@@ -108,8 +119,11 @@ class MediaFavoritesApi(
         }
     }
 
-    private fun io.ktor.client.request.HttpRequestBuilder.appendChannelHeader() {
+    private fun io.ktor.client.request.HttpRequestBuilder.appendBackendHeaders() {
         channelProvider?.channel?.let { header("X-Torve-Channel", it) }
+        installationIdProvider()?.takeIf { it.isNotBlank() }?.let {
+            header("X-Torve-Installation-Id", it)
+        }
     }
 
     private companion object {
@@ -119,9 +133,15 @@ class MediaFavoritesApi(
 
 @Serializable
 data class MediaFavoritesListDto(
+    val favorites: List<MediaFavoriteDto> = emptyList(),
     val items: List<MediaFavoriteDto> = emptyList(),
+    @Serializable(with = NullableStringScalarSerializer::class)
+    val version: String? = null,
     @SerialName("updated_at") val updatedAt: String? = null,
-)
+) {
+    val favoriteRows: List<MediaFavoriteDto>
+        get() = if (favorites.isNotEmpty()) favorites else items
+}
 
 @Serializable
 data class MediaFavoriteDto(
@@ -142,6 +162,7 @@ data class MediaFavoriteDto(
 
 @Serializable
 data class MediaFavoriteUpsertDto(
+    @SerialName("media_key") val mediaKey: String,
     @SerialName("media_type") val mediaType: String,
     @SerialName("tmdb_id") val tmdbId: Int? = null,
     @SerialName("imdb_id") val imdbId: String? = null,
@@ -176,6 +197,7 @@ fun MediaFavoriteDto.toDomain(): MediaFavorite {
 
 private fun MediaFavorite.toUpsertDto(sourceDeviceId: String?): MediaFavoriteUpsertDto {
     return MediaFavoriteUpsertDto(
+        mediaKey = mediaKey,
         mediaType = mediaType.toMediaFavoriteWireValue(),
         tmdbId = tmdbId,
         imdbId = imdbId,
@@ -184,6 +206,34 @@ private fun MediaFavorite.toUpsertDto(sourceDeviceId: String?): MediaFavoriteUps
         backdropUrl = backdropUrl,
         rating = rating,
         year = year,
-        sourceDeviceId = sourceDeviceId?.takeIf { it.isNotBlank() },
+        sourceDeviceId = sourceDeviceId?.takeIf { it.isUuidLike() },
     )
+}
+
+private fun String.isUuidLike(): Boolean {
+    if (length != 36) return false
+    return indices.all { index ->
+        val c = this[index]
+        when (index) {
+            8, 13, 18, 23 -> c == '-'
+            else -> c in '0'..'9' || c in 'a'..'f' || c in 'A'..'F'
+        }
+    }
+}
+
+private object NullableStringScalarSerializer : KSerializer<String?> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("NullableStringScalar", PrimitiveKind.STRING)
+
+    override fun deserialize(decoder: Decoder): String? {
+        val jsonDecoder = decoder as? JsonDecoder
+            ?: return decoder.decodeString()
+        val element = jsonDecoder.decodeJsonElement()
+        if (element is JsonNull) return null
+        return element.jsonPrimitive.contentOrNull
+    }
+
+    override fun serialize(encoder: Encoder, value: String?) {
+        encoder.encodeString(value.orEmpty())
+    }
 }

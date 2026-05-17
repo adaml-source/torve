@@ -22,10 +22,12 @@ class DeviceApiAccessStateContractTest {
     @Test
     fun getAccessStateIncludesInstallationIdQueryParameter() = runTest {
         var capturedInstallationId: String? = null
+        var capturedInstallationHeader: String? = null
         val api = DeviceApi(
             httpClient = HttpClient(
                 MockEngine { request ->
                     capturedInstallationId = request.url.parameters["installation_id"]
+                    capturedInstallationHeader = request.headers["X-Torve-Installation-Id"]
                     respond(
                         content = accessStateResponse(),
                         status = HttpStatusCode.OK,
@@ -41,15 +43,18 @@ class DeviceApiAccessStateContractTest {
 
         assertNotNull(result)
         assertEquals("install-123", capturedInstallationId)
+        assertEquals("install-123", capturedInstallationHeader)
     }
 
     @Test
     fun getAccessStateStillCallsBackendWithoutInstallationId() = runTest {
         var capturedInstallationId: String? = "not-set"
+        var capturedInstallationHeader: String? = "not-set"
         val api = DeviceApi(
             httpClient = HttpClient(
                 MockEngine { request ->
                     capturedInstallationId = request.url.parameters["installation_id"]
+                    capturedInstallationHeader = request.headers["X-Torve-Installation-Id"]
                     respond(
                         content = accessStateResponse(),
                         status = HttpStatusCode.OK,
@@ -65,6 +70,7 @@ class DeviceApiAccessStateContractTest {
 
         assertNotNull(result)
         assertTrue(capturedInstallationId.isNullOrBlank())
+        assertTrue(capturedInstallationHeader.isNullOrBlank())
     }
 
     @Test

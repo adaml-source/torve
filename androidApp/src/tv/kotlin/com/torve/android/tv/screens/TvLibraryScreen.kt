@@ -83,6 +83,7 @@ internal fun TvLibraryScreen(
     shouldAutoFocus: Boolean = true,
     contextMenuActionsForItem: ((MediaItem, Float?) -> List<TvMediaContextMenuAction>)? = null,
     onContextMenuAction: ((MediaItem, TvMediaContextMenuAction, Float?) -> Unit)? = null,
+    progressResolver: ((MediaItem, Float?) -> Float?)? = null,
     onJellyfinItemPlay: (streamUrl: String, title: String) -> Unit = { _, _ -> },
     onVodItemPlay: (channel: Channel, item: MediaItem) -> Unit = { _, _ -> },
     onVodSeriesOpen: (channel: Channel, item: MediaItem) -> Unit = onVodItemPlay,
@@ -162,6 +163,7 @@ internal fun TvLibraryScreen(
                 shouldAutoFocus = shouldAutoFocus,
                 contextMenuActionsForItem = contextMenuActionsForItem,
                 onContextMenuAction = onContextMenuAction,
+                progressResolver = progressResolver,
                 registerFocusHandle = registerFocusHandle,
             )
             LibraryTab.FAVORITES -> FavoritesContent(
@@ -175,6 +177,7 @@ internal fun TvLibraryScreen(
                 shouldAutoFocus = shouldAutoFocus,
                 contextMenuActionsForItem = contextMenuActionsForItem,
                 onContextMenuAction = onContextMenuAction,
+                progressResolver = progressResolver,
             )
             LibraryTab.DOWNLOADS -> { /* Downloads removed from TV — stream-only */ }
             LibraryTab.VOD -> TvVodLibraryContent(
@@ -215,6 +218,7 @@ private fun WatchlistContent(
     shouldAutoFocus: Boolean,
     contextMenuActionsForItem: ((MediaItem, Float?) -> List<TvMediaContextMenuAction>)?,
     onContextMenuAction: ((MediaItem, TvMediaContextMenuAction, Float?) -> Unit)?,
+    progressResolver: ((MediaItem, Float?) -> Float?)?,
     registerFocusHandle: ((TvScreenFocusHandle?) -> Unit)?,
 ) {
     val watchlistViewModel: WatchlistViewModel = koinInject()
@@ -269,6 +273,7 @@ private fun WatchlistContent(
         onSeeAll = onSeeAll,
         heroOverlay = heroOverlay,
         shouldAutoFocus = shouldAutoFocus,
+        progressResolver = progressResolver,
         contextMenuActionsForItem = contextMenuActionsForItem,
         onContextMenuAction = onContextMenuAction,
         registerFocusHandle = registerFocusHandle,
@@ -287,6 +292,7 @@ private fun FavoritesContent(
     shouldAutoFocus: Boolean,
     contextMenuActionsForItem: ((MediaItem, Float?) -> List<TvMediaContextMenuAction>)?,
     onContextMenuAction: ((MediaItem, TvMediaContextMenuAction, Float?) -> Unit)?,
+    progressResolver: ((MediaItem, Float?) -> Float?)?,
 ) {
     val focusMemory = rememberTvFocusMemory()
     val favoritesLabel = stringResource(R.string.tv_iptv_favorites)
@@ -315,6 +321,7 @@ private fun FavoritesContent(
         onMediaFocused = onMediaFocused,
         onSeeAll = null,
         shouldAutoFocus = shouldAutoFocus,
+        progressResolver = progressResolver,
         contextMenuActionsForItem = contextMenuActionsForItem,
         onContextMenuAction = onContextMenuAction,
     )

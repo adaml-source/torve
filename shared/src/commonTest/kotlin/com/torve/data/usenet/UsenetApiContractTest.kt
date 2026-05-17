@@ -1,281 +1,171 @@
 package com.torve.data.usenet
 
-import com.torve.data.usenet.model.NzbdavStatusResponseDto
-import com.torve.data.usenet.model.NzbdavTestResponseDto
+import com.torve.data.auth.AuthClient
+import com.torve.data.auth.DeviceRegistrationDto
 import com.torve.data.usenet.model.UsenetCandidateDto
-import com.torve.data.usenet.model.UsenetJobStatusResponseDto
-import com.torve.data.usenet.model.UsenetResolveResponseDto
-import com.torve.data.usenet.model.UsenetWarmResponseDto
+import com.torve.domain.repository.DeviceLocalSettingsRepository
+import com.torve.domain.security.SecureStorage
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.headersOf
+import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
-import kotlin.test.assertNotNull
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.test.fail
 
-/**
- * Wire-format contract tests for the backend ↔ app boundary. Aligned to
- * the live contract after the contract-fix sprint: `state`, `failure_code`,
- * `stream`, `results`, and full `UsenetCandidate` payloads. No app-side
- * consumer reads `backend_phase`, `failure_reason`, `resolved`,
- * `warm_hit`, `headers`, or `expires_at_ms` anymore.
- */
 class UsenetApiContractTest {
-    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
-
-    // ── Integrations ────────────────────────────────────────────────────
 
     @Test
-    fun nzbdavTestResponseDecodesOk() {
-        val dto = json.decodeFromString<NzbdavTestResponseDto>(
-            """
-            { "ok": true, "degraded": false, "reason": null }
-            """.trimIndent(),
+    fun resolverCallsIncludeInstallationIdHeader() = runTest {
+        var capturedHeader: String? = null
+        val api = api(
+            engine = MockEngine { request ->
+                capturedHeader = request.headers["X-Torve-Installation-Id"]
+                respondJson("""{"state":"warming","job_id":"job-1"}""")
+            },
         )
-        assertTrue(dto.ok)
-        assertFalse(dto.degraded)
-        assertNull(dto.reason)
+
+        api.resolve(
+            contentId = "tmdb:movie:1",
+            candidate = UsenetCandidateDto(candidateId = "cand-1", hashKey = "hash-1"),
+        )
+
+        assertEquals("install-usenet-1", capturedHeader)
     }
 
     @Test
-    fun nzbdavTestResponseDecodesDegraded() {
-        val dto = json.decodeFromString<NzbdavTestResponseDto>(
-            """
-            { "ok": true, "degraded": true, "reason": "upstream_below_version_floor" }
-            """.trimIndent(),
+    fun resolverErrorsUseStableCodeAndDoNotRetainRawBody() = runTest {
+        val rawSecret = "https://provider.example/tokenized-playback-url?source_key=secret"
+        val api = api(
+            engine = MockEngine {
+                respondJson(
+                    body = """{"detail":{"code":"device_required","message":"$rawSecret"}}""",
+                    status = HttpStatusCode.Forbidden,
+                )
+            },
         )
-        assertTrue(dto.ok)
-        assertTrue(dto.degraded)
-        assertEquals("upstream_below_version_floor", dto.reason)
+
+        try {
+            api.resolve(
+                contentId = "tmdb:movie:1",
+                candidate = UsenetCandidateDto(candidateId = "cand-1", hashKey = "hash-1"),
+            )
+            fail("Expected UsenetApiException")
+        } catch (error: UsenetApiException) {
+            assertEquals("device_required", error.errorCode)
+            assertFalse(error.message.orEmpty().contains(rawSecret))
+            assertFalse(error.body.contains(rawSecret))
+            assertTrue(error.body.contains("code=device_required"))
+        }
     }
 
     @Test
-    fun nzbdavStatusResponseDecodesNotConfigured() {
-        val dto = json.decodeFromString<NzbdavStatusResponseDto>(
-            """
-            { "configured": false, "degraded": false }
-            """.trimIndent(),
+    fun expiredHandoffUsesStableCodeAndKeepsRawUrlOutOfException() = runTest {
+        var capturedHeader: String? = null
+        val rawSecret = "https://upstream.example/movie.mp4?provider_token=secret"
+        val api = api(
+            engine = MockEngine { request ->
+                capturedHeader = request.headers["X-Torve-Installation-Id"]
+                respondJson(
+                    body = """{"detail":{"error_code":"stream_expired","message":"$rawSecret"}}""",
+                    status = HttpStatusCode.Gone,
+                )
+            },
         )
-        assertFalse(dto.configured)
-        assertFalse(dto.degraded)
-        assertNull(dto.isEnabled)
+
+        try {
+            api.getHandoff("opaque-token")
+            fail("Expected UsenetApiException")
+        } catch (error: UsenetApiException) {
+            assertEquals("stream_expired", error.errorCode)
+            assertEquals("install-usenet-1", capturedHeader)
+            assertFalse(error.message.orEmpty().contains(rawSecret))
+            assertFalse(error.body.contains(rawSecret))
+            assertTrue(error.body.contains("code=stream_expired"))
+        }
     }
 
-    @Test
-    fun nzbdavStatusResponseDecodesConnected() {
-        val dto = json.decodeFromString<NzbdavStatusResponseDto>(
-            """
-            {
-              "configured": true,
-              "is_enabled": true,
-              "last_tested_at": "2026-04-22T10:00:00Z",
-              "last_healthy_at": "2026-04-22T10:00:00Z",
-              "degraded": false,
-              "reason": null
-            }
-            """.trimIndent(),
-        )
-        assertTrue(dto.configured)
-        assertEquals(true, dto.isEnabled)
-        assertFalse(dto.degraded)
-    }
-
-    @Test
-    fun nzbdavStatusResponseDecodesDegraded() {
-        val dto = json.decodeFromString<NzbdavStatusResponseDto>(
-            """
-            {
-              "configured": true,
-              "is_enabled": true,
-              "degraded": true,
-              "reason": "upstream_below_version_floor"
-            }
-            """.trimIndent(),
-        )
-        assertTrue(dto.degraded)
-        assertEquals("upstream_below_version_floor", dto.reason)
-    }
-
-    // ── UsenetCandidate (shared body shape) ─────────────────────────────
-
-    @Test
-    fun candidateDecodesAllThreeFields() {
-        val dto = json.decodeFromString<UsenetCandidateDto>(
-            """
-            {
-              "candidate_id": "c1",
-              "hash_key": "abc123",
-              "nzb_url": "https://nzbdav.example.com/nzb/c1.nzb"
-            }
-            """.trimIndent(),
-        )
-        assertEquals("c1", dto.candidateId)
-        assertEquals("abc123", dto.hashKey)
-        assertEquals("https://nzbdav.example.com/nzb/c1.nzb", dto.nzbUrl)
-    }
-
-    @Test
-    fun candidateDecodesWithoutOptionalNzbUrl() {
-        val dto = json.decodeFromString<UsenetCandidateDto>(
-            """
-            { "candidate_id": "c2", "hash_key": "deadbeef" }
-            """.trimIndent(),
-        )
-        assertEquals("c2", dto.candidateId)
-        assertEquals("deadbeef", dto.hashKey)
-        assertNull(dto.nzbUrl)
-    }
-
-    // ── Warm ────────────────────────────────────────────────────────────
-
-    @Test
-    fun warmResponseDecodesResultsArray() {
-        val dto = json.decodeFromString<UsenetWarmResponseDto>(
-            """
-            {
-              "content_id": "tv:1:s1:e1",
-              "results": [
-                { "candidate_id": "c1", "state": "ready" },
-                { "candidate_id": "c2", "state": "warming", "job_id": "job-7" },
-                { "candidate_id": "c3", "state": "failed", "failure_code": "release_unavailable" }
-              ]
-            }
-            """.trimIndent(),
-        )
-        assertEquals("tv:1:s1:e1", dto.contentId)
-        assertEquals(3, dto.results.size)
-        assertEquals("ready", dto.results[0].state)
-        assertEquals("warming", dto.results[1].state)
-        assertEquals("job-7", dto.results[1].jobId)
-        assertEquals("failed", dto.results[2].state)
-        assertEquals("release_unavailable", dto.results[2].failureCode)
-    }
-
-    @Test
-    fun warmResponseCandidatesCarryFallbackSuggestions() {
-        val dto = json.decodeFromString<UsenetWarmResponseDto>(
-            """
-            {
-              "content_id": "movie:1",
-              "results": [
-                {
-                  "candidate_id": "c1",
-                  "state": "failed",
-                  "failure_code": "nzb_corrupt",
-                  "fallback_suggestions": [
-                    { "candidate_id": "c2", "hash_key": "h2" },
-                    { "candidate_id": "c3", "hash_key": "h3", "nzb_url": "https://x" }
-                  ]
+    private fun api(engine: MockEngine): UsenetApi {
+        return UsenetApi(
+            httpClient = HttpClient(engine) {
+                install(ContentNegotiation) {
+                    json(Json { ignoreUnknownKeys = true; explicitNulls = false })
                 }
-              ]
-            }
-            """.trimIndent(),
+            },
+            authClient = authClient(),
+            baseUrlProvider = { "https://api.torve.app" },
+            installationIdProvider = { "install-usenet-1" },
         )
-        val first = dto.results.single()
-        assertEquals(2, first.fallbackSuggestions.size)
-        assertEquals("c2", first.fallbackSuggestions[0].candidateId)
-        assertEquals("h3", first.fallbackSuggestions[1].hashKey)
     }
 
-    // ── Resolve ─────────────────────────────────────────────────────────
-
-    @Test
-    fun resolveResponseDecodesReady() {
-        val dto = json.decodeFromString<UsenetResolveResponseDto>(
-            """
-            {
-              "state": "ready",
-              "stream": {
-                "url": "https://api.torve.app/handoff/opaque-token",
-                "is_direct": true,
-                "supports_range": true,
-                "stream_id": "stream-42"
-              },
-              "fallback_suggestions": []
-            }
-            """.trimIndent(),
+    private fun authClient(): AuthClient {
+        return AuthClient(
+            localSettingsRepository = MapSettings(
+                mutableMapOf(
+                    AuthClient.KEY_AUTH_EMAIL to "user@torve.app",
+                    AuthClient.KEY_AUTH_USER_ID to "user-1",
+                    AuthClient.KEY_AUTH_IS_VERIFIED to "true",
+                ),
+            ),
+            secureStorage = MapSecureStorage(
+                mutableMapOf(
+                    AuthClient.KEY_AUTH_ACCESS_TOKEN to "access-token",
+                    AuthClient.KEY_AUTH_REFRESH_TOKEN to "refresh-token",
+                    "auth_token_expires_at" to "4102444800000",
+                ),
+            ),
+            httpClient = HttpClient(MockEngine { error("Unexpected auth request ${it.url}") }),
+            baseUrlProvider = { "https://api.torve.app" },
+            deviceRegistrationProvider = {
+                DeviceRegistrationDto(
+                    installation_id = "install-usenet-1",
+                    device_name = "Test",
+                    device_type = "desktop",
+                    platform = "desktop",
+                )
+            },
         )
-        assertEquals("ready", dto.state)
-        val stream = assertNotNull(dto.stream)
-        assertEquals("https://api.torve.app/handoff/opaque-token", stream.url)
-        assertTrue(stream.isDirect)
-        assertTrue(stream.supportsRange)
-        assertEquals("stream-42", stream.streamId)
     }
 
-    @Test
-    fun resolveResponseDecodesWarming() {
-        val dto = json.decodeFromString<UsenetResolveResponseDto>(
-            """
-            { "state": "warming", "job_id": "job-42", "fallback_suggestions": [] }
-            """.trimIndent(),
-        )
-        assertEquals("warming", dto.state)
-        assertEquals("job-42", dto.jobId)
-        assertNull(dto.stream)
-        assertNull(dto.failureCode)
+    private fun io.ktor.client.engine.mock.MockRequestHandleScope.respondJson(
+        body: String,
+        status: HttpStatusCode = HttpStatusCode.OK,
+    ) = respond(
+        content = body,
+        status = status,
+        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+    )
+
+    private class MapSettings(
+        private val values: MutableMap<String, String>,
+    ) : DeviceLocalSettingsRepository {
+        override suspend fun getString(key: String): String? = values[key]
+        override suspend fun setString(key: String, value: String) {
+            values[key] = value
+        }
+        override suspend fun remove(key: String) {
+            values.remove(key)
+        }
     }
 
-    @Test
-    fun resolveResponseDecodesFailedWithSuggestions() {
-        val dto = json.decodeFromString<UsenetResolveResponseDto>(
-            """
-            {
-              "state": "failed",
-              "failure_code": "nzb_unavailable",
-              "fallback_suggestions": [
-                { "candidate_id": "c-alt", "hash_key": "h-alt" }
-              ]
-            }
-            """.trimIndent(),
-        )
-        assertEquals("failed", dto.state)
-        assertEquals("nzb_unavailable", dto.failureCode)
-        assertNull(dto.stream)
-        assertEquals(1, dto.fallbackSuggestions.size)
-        assertEquals("c-alt", dto.fallbackSuggestions[0].candidateId)
-    }
-
-    // ── Job status ──────────────────────────────────────────────────────
-
-    @Test
-    fun jobStatusDecodesReadyWithoutStreamField() {
-        // JobOut per the live contract does NOT include `stream`. A caller
-        // seeing state=ready must re-call /resolve to pick up the handoff.
-        val dto = json.decodeFromString<UsenetJobStatusResponseDto>(
-            """
-            {
-              "job_id": "job-42",
-              "content_id": "movie:1",
-              "state": "ready",
-              "fallback_suggestions": []
-            }
-            """.trimIndent(),
-        )
-        assertEquals("job-42", dto.jobId)
-        assertEquals("movie:1", dto.contentId)
-        assertEquals("ready", dto.state)
-        assertNull(dto.failureCode)
-    }
-
-    @Test
-    fun jobStatusDecodesFailedWithFallbacks() {
-        val dto = json.decodeFromString<UsenetJobStatusResponseDto>(
-            """
-            {
-              "job_id": "job-42",
-              "content_id": "movie:1",
-              "state": "failed",
-              "failure_code": "nzb_corrupt",
-              "fallback_suggestions": [
-                { "candidate_id": "c-alt", "hash_key": "h-alt" }
-              ]
-            }
-            """.trimIndent(),
-        )
-        assertEquals("failed", dto.state)
-        assertEquals("nzb_corrupt", dto.failureCode)
-        assertEquals(1, dto.fallbackSuggestions.size)
+    private class MapSecureStorage(
+        private val values: MutableMap<String, String>,
+    ) : SecureStorage {
+        override suspend fun getString(key: String): String? = values[key]
+        override suspend fun putString(key: String, value: String) {
+            values[key] = value
+        }
+        override suspend fun remove(key: String) {
+            values.remove(key)
+        }
     }
 }

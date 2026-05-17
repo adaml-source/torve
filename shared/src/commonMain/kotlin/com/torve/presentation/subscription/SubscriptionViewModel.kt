@@ -3,6 +3,8 @@ package com.torve.presentation.subscription
 import com.torve.presentation.error.defaultMessage
 import com.torve.data.auth.AuthClient
 import com.torve.data.auth.AuthResult
+import com.torve.data.billing.BillingApi
+import com.torve.data.billing.StripePurchaseType
 import com.torve.data.entitlement.EntitlementApi
 import com.torve.data.entitlement.PurchaseVerifyErrorCode
 import com.torve.data.subscription.RebateCodeApi
@@ -19,12 +21,15 @@ import io.ktor.client.plugins.ServerResponseException
 import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
 import kotlinx.datetime.TimeZone
@@ -116,6 +121,7 @@ class SubscriptionViewModel(
     private val authClient: AuthClient,
     private val entitlementApi: EntitlementApi,
     private val prefsRepo: PreferencesRepository,
+    private val billingApi: BillingApi? = null,
     private val strings: PurchaseStringResolver = DefaultPurchaseStringResolver(),
     coroutineScope: CoroutineScope? = null,
     private val resendVerificationEmail: suspend (String) -> AuthResult = authClient::resendVerification,
@@ -125,6 +131,7 @@ class SubscriptionViewModel(
     private val _state = MutableStateFlow(SubscriptionUiState())
     val state: StateFlow<SubscriptionUiState> = _state.asStateFlow()
     private val json = Json { ignoreUnknownKeys = true }
+    private var externalBillingPollJob: Job? = null
 
     init {
         loadPersistedPendingAmazonVerification()
@@ -368,15 +375,195 @@ class SubscriptionViewModel(
         }
     }
 
-    fun requireAccountForPurchase(storeLabel: String, onAllowed: () -> Unit) {
-        scope.launch {
-            val hasSession = authClient.getValidAccessToken() != null || authClient.isLoggedIn()
-            if (hasSession) {
-                _state.update { it.copy(isLoggedIn = true, error = null) }
-                onAllowed()
-            } else {
-                setSignInRequiredStatus(buildPurchaseSignInRequiredStatus(storeLabel))
+    private data class PurchaseGateSnapshot(
+        val decision: SubscriptionEntitlementUiDecision,
+        val tier: SubscriptionTier,
+        val sourceStore: String?,
+    )
+
+    private fun normalizedPurchaseStore(storeLabel: String?): String? {
+        val normalized = storeLabel?.trim()?.lowercase()?.replace('-', '_') ?: return null
+        return when {
+            normalized.contains("google") -> "google_play"
+            normalized.contains("amazon") -> "amazon"
+            normalized.contains("apple") -> "apple"
+            normalized.contains("stripe") -> "stripe"
+            normalized.isBlank() -> null
+            else -> normalized
+        }
+    }
+
+    private fun normalizedSubscriptionStore(value: String?): String? {
+        val normalized = value?.trim()?.lowercase()?.replace('-', '_') ?: return null
+        return when {
+            normalized.contains("google") -> "google_play"
+            normalized.contains("amazon") -> "amazon"
+            normalized.contains("apple") -> "apple"
+            normalized.contains("stripe") -> "stripe"
+            normalized == "backend" || normalized == "admin" -> normalized
+            normalized.isBlank() -> null
+            else -> normalized
+        }
+    }
+
+    private fun displayStoreLabel(value: String?): String? {
+        return when (normalizedSubscriptionStore(value)) {
+            "google_play" -> "Google Play"
+            "amazon" -> "Amazon Appstore"
+            "apple" -> "Apple App Store"
+            "stripe" -> "Stripe"
+            "backend" -> "Torve"
+            "admin" -> "Torve"
+            else -> value?.takeIf { it.isNotBlank() }
+        }
+    }
+
+    private fun purchaseWouldDuplicateEntitlement(
+        requestedTier: SubscriptionTier,
+        snapshot: PurchaseGateSnapshot,
+        requestedStoreLabel: String,
+    ): Boolean {
+        val hasKnownEntitlement = snapshot.decision.hasEntitlement ||
+            snapshot.tier == SubscriptionTier.MONTHLY ||
+            snapshot.tier == SubscriptionTier.LIFETIME
+        if (!hasKnownEntitlement) return false
+        if (requestedTier == SubscriptionTier.MONTHLY) return true
+        if (requestedTier == SubscriptionTier.FREE) return true
+
+        val currentStore = normalizedSubscriptionStore(snapshot.sourceStore)
+        val requestedStore = normalizedPurchaseStore(requestedStoreLabel)
+        val isSameStoreMonthlyUpgrade = snapshot.tier == SubscriptionTier.MONTHLY &&
+            currentStore != null &&
+            currentStore == requestedStore
+
+        return !isSameStoreMonthlyUpgrade
+    }
+
+    private fun buildDuplicatePurchaseBlockedStatus(
+        requestedTier: SubscriptionTier,
+        snapshot: PurchaseGateSnapshot,
+        requestedStoreLabel: String,
+    ): PurchaseStatusMessage {
+        val currentStoreLabel = displayStoreLabel(snapshot.sourceStore)
+        val message = when {
+            snapshot.tier == SubscriptionTier.LIFETIME -> {
+                "Your account already has Lifetime Premium. Torve refreshed access and did not start another purchase."
             }
+            currentStoreLabel != null &&
+                normalizedPurchaseStore(currentStoreLabel) != normalizedPurchaseStore(requestedStoreLabel) -> {
+                "Your account already has Premium through $currentStoreLabel. Torve will not start a second purchase through $requestedStoreLabel."
+            }
+            requestedTier == SubscriptionTier.MONTHLY -> {
+                "Your account already has Premium. Torve refreshed access and did not start another monthly purchase."
+            }
+            else -> {
+                "Your account already has Premium. Torve refreshed access and did not start another purchase."
+            }
+        }
+        return purchaseStatus(
+            kind = PurchaseStatusKind.VERIFIED,
+            title = "Premium already active",
+            message = message,
+            tone = PurchaseStatusTone.INFO,
+        )
+    }
+
+    private suspend fun refreshBackendAccessForPurchaseGate(): PurchaseGateSnapshot {
+        subscriptionRepo.ensureFreeTier()
+        val isLoggedIn = authClient.isLoggedIn()
+        val backendResult = if (isLoggedIn) subscriptionRepo.refreshFromBackendDetailed() else null
+        val sub = subscriptionRepo.getActiveSubscription()
+        val entitlementDecision = resolveSubscriptionEntitlementUiDecision(backendResult)
+        _state.update { current ->
+            val pendingStatus = current.pendingAmazonVerification?.toPurchaseStatusMessage(isLoggedIn, strings)
+            val clearTransientPending = current.pendingAmazonVerification == null &&
+                current.purchaseStatus?.kind == PurchaseStatusKind.PENDING_VERIFICATION &&
+                !entitlementDecision.hasEntitlement
+            current.copy(
+                subscription = sub,
+                isPro = entitlementDecision.isPro,
+                isLoading = false,
+                isLoggedIn = isLoggedIn,
+                hasEntitlement = entitlementDecision.hasEntitlement,
+                isDeviceActivated = entitlementDecision.isDeviceActivated,
+                deviceBlockReason = entitlementDecision.deviceBlockReason,
+                deviceCapReached = entitlementDecision.deviceCapReached,
+                needsVerification = entitlementDecision.needsVerification,
+                showDeviceLimitReached = entitlementDecision.deviceCapReached,
+                purchaseVerificationState = when {
+                    current.pendingAmazonVerification != null -> PurchaseVerificationState.PENDING
+                    clearTransientPending -> PurchaseVerificationState.IDLE
+                    else -> current.purchaseVerificationState
+                },
+                purchaseStatus = when {
+                    pendingStatus != null -> pendingStatus
+                    clearTransientPending -> null
+                    entitlementDecision.isPro && shouldClearPurchaseStatusForActiveSubscription(current.purchaseStatus) -> null
+                    isLoggedIn && current.purchaseStatus?.kind == PurchaseStatusKind.SIGN_IN_REQUIRED -> null
+                    else -> current.purchaseStatus
+                },
+            ).withDerivedBillingPolicy(
+                subscription = sub,
+                hasEntitlement = entitlementDecision.hasEntitlement,
+            )
+        }
+        return PurchaseGateSnapshot(
+            decision = entitlementDecision,
+            tier = sub?.tier ?: SubscriptionTier.FREE,
+            sourceStore = sub?.platform,
+        )
+    }
+
+    fun requireAccountForPurchase(storeLabel: String, onAllowed: () -> Unit) {
+        requireAccountForPurchase(storeLabel = storeLabel, requestedTier = null, onAllowed = onAllowed)
+    }
+
+    fun requireAccountForPurchase(
+        storeLabel: String,
+        requestedTier: SubscriptionTier?,
+        onAllowed: () -> Unit,
+    ) {
+        scope.launch {
+            val accessToken = authClient.getValidAccessToken()
+            if (accessToken.isNullOrBlank()) {
+                setSignInRequiredStatus(buildPurchaseSignInRequiredStatus(storeLabel))
+                return@launch
+            }
+
+            _state.update { it.copy(isLoggedIn = true, isPurchasing = true, error = null) }
+            val snapshot = runCatching { refreshBackendAccessForPurchaseGate() }.getOrElse {
+                _state.update { current ->
+                    current.copy(
+                        isPurchasing = false,
+                        isLoading = false,
+                        error = null,
+                        purchaseStatus = buildBackendUnavailableStatus(showRetryVerification = false),
+                        purchaseVerificationState = PurchaseVerificationState.FAILED,
+                    )
+                }
+                return@launch
+            }
+
+            if (requestedTier != null &&
+                purchaseWouldDuplicateEntitlement(requestedTier, snapshot, storeLabel)
+            ) {
+                _state.update { current ->
+                    current.copy(
+                        isPurchasing = false,
+                        error = null,
+                        purchaseStatus = buildDuplicatePurchaseBlockedStatus(
+                            requestedTier = requestedTier,
+                            snapshot = snapshot,
+                            requestedStoreLabel = storeLabel,
+                        ),
+                        purchaseVerificationState = PurchaseVerificationState.IDLE,
+                    )
+                }
+                return@launch
+            }
+
+            _state.update { it.copy(isPurchasing = false, error = null) }
+            onAllowed()
         }
     }
 
@@ -388,6 +575,235 @@ class SubscriptionViewModel(
                 onAllowed()
             } else {
                 setSignInRequiredStatus(buildRestoreSignInRequiredStatus(storeLabel))
+            }
+        }
+    }
+
+    private fun buildStripeCheckoutOpenedStatus(): PurchaseStatusMessage {
+        return purchaseStatus(
+            kind = PurchaseStatusKind.PENDING_VERIFICATION,
+            title = "Checkout opened",
+            message = "Complete checkout in your browser. Torve will keep refreshing account access and unlock Premium only after the backend confirms it.",
+            tone = PurchaseStatusTone.INFO,
+        )
+    }
+
+    private fun buildStripePortalOpenedStatus(): PurchaseStatusMessage {
+        return purchaseStatus(
+            kind = PurchaseStatusKind.VERIFIED,
+            title = "Billing portal opened",
+            message = "Manage your Stripe billing in the browser. Torve Premium remains controlled by backend access state.",
+            tone = PurchaseStatusTone.INFO,
+        )
+    }
+
+    private fun buildStripeBillingStatus(errorCode: String?, portal: Boolean): PurchaseStatusMessage {
+        val title = if (portal) "Billing portal unavailable" else "Checkout unavailable"
+        val message = when (errorCode) {
+            "stripe_not_configured" ->
+                "Billing is temporarily unavailable. Please try again later."
+            "stripe_checkout_failed" ->
+                "Checkout could not be started. Please try again."
+            "stripe_customer_missing" ->
+                "No Stripe billing customer is linked to this account yet. If you already have Premium through another store, manage billing there."
+            "stripe_portal_failed" ->
+                "The billing portal could not be opened. Please try again."
+            "stripe_invalid_purchase_type" ->
+                "That Premium option is unavailable. Choose monthly or lifetime access."
+            "stripe_duplicate_subscription" ->
+                "A monthly Stripe subscription is already active on this account."
+            "stripe_lifetime_already_owned" ->
+                "Lifetime Premium is already active on this account."
+            "stripe_cross_store_purchase_blocked" ->
+                "Premium is already active through another store. Manage billing there instead of starting a second Stripe purchase."
+            "stripe_upgrade_not_supported",
+            "stripe_purchase_not_allowed",
+            ->
+                "This account is not eligible for that Stripe purchase."
+            else ->
+                if (portal) {
+                    "The billing portal could not be opened. Please try again."
+                } else {
+                    "Checkout could not be started. Please try again."
+                }
+        }
+        return purchaseStatus(
+            kind = PurchaseStatusKind.BACKEND_UNAVAILABLE,
+            title = title,
+            message = message,
+            tone = PurchaseStatusTone.ERROR,
+        )
+    }
+
+    fun beginStripeCheckout(
+        purchaseType: StripePurchaseType,
+        openUrl: (String) -> Unit,
+    ) {
+        scope.launch {
+            val accessToken = authClient.getValidAccessToken()
+            if (accessToken.isNullOrBlank()) {
+                setSignInRequiredStatus(buildPurchaseSignInRequiredStatus("Stripe"))
+                return@launch
+            }
+            val api = billingApi
+            if (api == null) {
+                _state.update {
+                    it.copy(
+                        isPurchasing = false,
+                        error = null,
+                        purchaseStatus = buildStripeBillingStatus("stripe_not_configured", portal = false),
+                        purchaseVerificationState = PurchaseVerificationState.FAILED,
+                    )
+                }
+                return@launch
+            }
+
+            _state.update {
+                it.copy(
+                    isPurchasing = true,
+                    isLoggedIn = true,
+                    error = null,
+                    purchaseStatus = null,
+                )
+            }
+
+            val snapshot = runCatching { refreshBackendAccessForPurchaseGate() }.getOrElse {
+                _state.update { current ->
+                    current.copy(
+                        isPurchasing = false,
+                        purchaseStatus = buildBackendUnavailableStatus(showRetryVerification = false),
+                        purchaseVerificationState = PurchaseVerificationState.FAILED,
+                    )
+                }
+                return@launch
+            }
+            if (purchaseWouldDuplicateEntitlement(purchaseType.tier, snapshot, "Stripe")) {
+                _state.update { current ->
+                    current.copy(
+                        isPurchasing = false,
+                        purchaseStatus = buildDuplicatePurchaseBlockedStatus(
+                            requestedTier = purchaseType.tier,
+                            snapshot = snapshot,
+                            requestedStoreLabel = "Stripe",
+                        ),
+                        purchaseVerificationState = PurchaseVerificationState.IDLE,
+                    )
+                }
+                return@launch
+            }
+
+            try {
+                val url = api.createStripeCheckoutSession(
+                    accessToken = accessToken,
+                    purchaseType = purchaseType,
+                    installationId = currentInstallationIdOrNull(),
+                ).resolvedUrl()
+                    ?: throw IllegalStateException("missing_checkout_url")
+                openUrl(url)
+                _state.update {
+                    it.copy(
+                        isPurchasing = false,
+                        purchaseStatus = buildStripeCheckoutOpenedStatus(),
+                        purchaseVerificationState = PurchaseVerificationState.PENDING,
+                    )
+                }
+                startExternalBillingAccessPolling()
+            } catch (error: Throwable) {
+                val code = (error as? ResponseException)?.let { extractStripeErrorCode(it) }
+                _state.update {
+                    it.copy(
+                        isPurchasing = false,
+                        purchaseStatus = buildStripeBillingStatus(code, portal = false),
+                        purchaseVerificationState = PurchaseVerificationState.FAILED,
+                    )
+                }
+            }
+        }
+    }
+
+    fun beginStripePortal(openUrl: (String) -> Unit) {
+        scope.launch {
+            val accessToken = authClient.getValidAccessToken()
+            if (accessToken.isNullOrBlank()) {
+                setSignInRequiredStatus(buildRestoreSignInRequiredStatus("Stripe"))
+                return@launch
+            }
+            val api = billingApi
+            if (api == null) {
+                _state.update {
+                    it.copy(
+                        isPurchasing = false,
+                        error = null,
+                        purchaseStatus = buildStripeBillingStatus("stripe_not_configured", portal = true),
+                        purchaseVerificationState = PurchaseVerificationState.FAILED,
+                    )
+                }
+                return@launch
+            }
+
+            _state.update { it.copy(isPurchasing = true, isLoggedIn = true, error = null) }
+            try {
+                refreshBackendAccessForPurchaseGate()
+                val url = api.createStripePortalSession(
+                    accessToken = accessToken,
+                    installationId = currentInstallationIdOrNull(),
+                ).resolvedUrl()
+                    ?: throw IllegalStateException("missing_portal_url")
+                openUrl(url)
+                _state.update {
+                    it.copy(
+                        isPurchasing = false,
+                        purchaseStatus = buildStripePortalOpenedStatus(),
+                        purchaseVerificationState = PurchaseVerificationState.IDLE,
+                    )
+                }
+            } catch (error: Throwable) {
+                val code = (error as? ResponseException)?.let { extractStripeErrorCode(it) }
+                _state.update {
+                    it.copy(
+                        isPurchasing = false,
+                        purchaseStatus = buildStripeBillingStatus(code, portal = true),
+                        purchaseVerificationState = PurchaseVerificationState.FAILED,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun startExternalBillingAccessPolling(windowSeconds: Int = 300) {
+        externalBillingPollJob?.cancel()
+        externalBillingPollJob = scope.launch {
+            val deadline = Clock.System.now().toEpochMilliseconds() + windowSeconds * 1000L
+            while (isActive && Clock.System.now().toEpochMilliseconds() < deadline) {
+                delay(3_000L)
+                val snapshot = runCatching { refreshBackendAccessForPurchaseGate() }.getOrNull()
+                if (snapshot?.decision?.hasEntitlement == true) {
+                    _state.update {
+                        it.copy(
+                            isPurchasing = false,
+                            showPaywall = false,
+                            purchaseVerificationState = PurchaseVerificationState.VERIFIED,
+                            purchaseStatus = purchaseStatus(
+                                kind = PurchaseStatusKind.VERIFIED,
+                                title = strings.purchaseVerifiedTitle(),
+                                message = strings.activeOnDevice(strings.premiumGeneric()),
+                                tone = PurchaseStatusTone.SUCCESS,
+                            ),
+                        )
+                    }
+                    return@launch
+                }
+            }
+            _state.update { current ->
+                if (
+                    current.pendingAmazonVerification == null &&
+                    current.purchaseStatus?.kind == PurchaseStatusKind.PENDING_VERIFICATION &&
+                    !current.hasEntitlement
+                ) {
+                    current.copy(purchaseVerificationState = PurchaseVerificationState.IDLE)
+                } else {
+                    current
+                }
             }
         }
     }
@@ -469,6 +885,30 @@ class SubscriptionViewModel(
         return match?.groupValues?.getOrNull(1)?.ifBlank { null }
     }
 
+    private suspend fun extractStripeErrorCode(error: ResponseException): String? {
+        val body = runCatching { error.response.bodyAsText() }.getOrNull().orEmpty()
+        if (body.isBlank()) return null
+        val explicit = Regex("\"error_code\"\\s*:\\s*\"([a-zA-Z_]+)\"")
+            .find(body)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.ifBlank { null }
+        if (explicit != null) return explicit
+        val known = listOf(
+            "stripe_not_configured",
+            "stripe_checkout_failed",
+            "stripe_customer_missing",
+            "stripe_portal_failed",
+            "stripe_invalid_purchase_type",
+            "stripe_duplicate_subscription",
+            "stripe_lifetime_already_owned",
+            "stripe_cross_store_purchase_blocked",
+            "stripe_upgrade_not_supported",
+            "stripe_purchase_not_allowed",
+        )
+        return known.firstOrNull { body.contains(it, ignoreCase = true) }
+    }
+
     /**
      * Map a Google Play verify error_code to a sanitized [PurchaseStatusMessage].
      * All messages are pre-translated string-resolver output — no raw
@@ -514,6 +954,29 @@ class SubscriptionViewModel(
                 kind = PurchaseStatusKind.VERIFICATION_FAILED_TEMPORARILY,
                 title = strings.googleVerifyNotVerifiedTitle(),
                 message = strings.googleVerifyNotVerified(),
+                tone = PurchaseStatusTone.ERROR,
+                showRetryVerification = false,
+            )
+            PurchaseVerifyErrorCode.DUPLICATE_ACTIVE_ENTITLEMENT -> purchaseStatus(
+                kind = PurchaseStatusKind.VERIFIED,
+                title = "Premium already active",
+                message = "Premium is already active on this account. Torve refreshed access and did not start another purchase.",
+                tone = PurchaseStatusTone.INFO,
+                showRetryVerification = false,
+            )
+            PurchaseVerifyErrorCode.CROSS_STORE_CONFLICT -> purchaseStatus(
+                kind = PurchaseStatusKind.PURCHASE_CONFLICT,
+                title = "Premium already active",
+                message = "Premium is already active through another store. Manage billing there instead of starting a second purchase.",
+                tone = PurchaseStatusTone.ERROR,
+                showRetryVerification = false,
+            )
+            PurchaseVerifyErrorCode.ENTITLEMENT_EXPIRED,
+            PurchaseVerifyErrorCode.ENTITLEMENT_REVOKED,
+            -> purchaseStatus(
+                kind = PurchaseStatusKind.VERIFICATION_FAILED_TEMPORARILY,
+                title = strings.googleVerifyNotVerifiedTitle(),
+                message = "This premium entitlement is no longer active. Torve refreshed account access.",
                 tone = PurchaseStatusTone.ERROR,
                 showRetryVerification = false,
             )
@@ -627,6 +1090,9 @@ class SubscriptionViewModel(
                             isLoggedIn && current.purchaseStatus?.kind == PurchaseStatusKind.SIGN_IN_REQUIRED -> null
                             else -> current.purchaseStatus
                         },
+                    ).withDerivedBillingPolicy(
+                        subscription = sub,
+                        hasEntitlement = entitlementDecision.hasEntitlement,
                     )
                 }
                 torveVerboseLog {
@@ -731,30 +1197,47 @@ class SubscriptionViewModel(
      */
     private fun handleVerifySuccess() {
         scope.launch {
-            // Eagerly persist a backend-granted snapshot so any reads
-            // before the access-state refetch returns aren't stuck on
-            // a stale "no entitlement" snapshot.
-            subscriptionRepo.onBackendEntitlementGranted(true)
+            externalBillingPollJob?.cancel()
+            val snapshot = runCatching { refreshBackendAccessForPurchaseGate() }.getOrNull()
+            val decision = snapshot?.decision
+            val activeOnDevice = decision?.isPro == true
+            val verifiedOnAccount = decision?.hasEntitlement == true
             // Refresh state from /me/access-state — replaces purchaseStatus,
             // hasEntitlement, isDeviceActivated, etc. with whatever the
             // server actually says.
-            loadSubscription()
             _state.update {
                 it.copy(
                     isPurchasing = false,
-                    showPaywall = false,
-                    deviceBlockReason = null,
-                    purchaseVerificationState = PurchaseVerificationState.VERIFIED,
-                    purchaseStatus = purchaseStatus(
-                        kind = PurchaseStatusKind.VERIFIED,
-                        title = strings.purchaseVerifiedTitle(),
+                    showPaywall = !activeOnDevice,
+                    purchaseVerificationState = if (verifiedOnAccount) {
+                        PurchaseVerificationState.VERIFIED
+                    } else {
+                        PurchaseVerificationState.PENDING
+                    },
+                    purchaseStatus = when {
+                        activeOnDevice -> purchaseStatus(
+                            kind = PurchaseStatusKind.VERIFIED,
+                            title = strings.purchaseVerifiedTitle(),
                         // Generic celebratory copy — the specific tier and
                         // expiry are shown by the access-status label,
                         // which loadSubscription() refreshes from the
                         // server's recomputed access state.
-                        message = strings.activeOnDevice(strings.premiumGeneric()),
-                        tone = PurchaseStatusTone.SUCCESS,
-                    ),
+                            message = strings.activeOnDevice(strings.premiumGeneric()),
+                            tone = PurchaseStatusTone.SUCCESS,
+                        )
+                        verifiedOnAccount -> purchaseStatus(
+                            kind = PurchaseStatusKind.VERIFIED,
+                            title = strings.purchaseVerifiedTitle(),
+                            message = strings.needsDeviceSlot(strings.premiumGeneric()),
+                            tone = PurchaseStatusTone.INFO,
+                        )
+                        else -> purchaseStatus(
+                            kind = PurchaseStatusKind.PENDING_VERIFICATION,
+                            title = strings.verificationPendingTitle(),
+                            message = "Payment received. Torve is refreshing account access and will unlock Premium only after the backend confirms it.",
+                            tone = PurchaseStatusTone.INFO,
+                        )
+                    },
                 )
             }
         }
@@ -796,24 +1279,29 @@ class SubscriptionViewModel(
                         )
                     },
                 )
-                val hasEntitlement = result.entitlements.isNotEmpty()
-                val deviceAccess = result.premium_access
-                if (deviceAccess) {
-                    subscriptionRepo.onBackendEntitlementGranted(true)
-                }
-                loadSubscription()
+                val backendDecision = runCatching { refreshBackendAccessForPurchaseGate().decision }.getOrNull()
+                val backendHasEntitlement = backendDecision?.hasEntitlement == true
+                val backendDeviceAccess = backendDecision?.isPro == true
                 _state.update {
                     it.copy(
                         isPurchasing = false,
-                        showPaywall = false,
-                        hasEntitlement = hasEntitlement,
-                        isDeviceActivated = deviceAccess,
+                        showPaywall = !backendDeviceAccess,
+                        hasEntitlement = backendHasEntitlement,
+                        isDeviceActivated = backendDeviceAccess,
                         deviceBlockReason = null,
-                        deviceCapReached = hasEntitlement && !deviceAccess,
-                        showDeviceLimitReached = hasEntitlement && !deviceAccess,
-                        purchaseVerificationState = PurchaseVerificationState.VERIFIED,
-                        purchaseStatus = buildVerifiedStatus(resolvedEntitlement, deviceAccess),
-                    )
+                        deviceCapReached = backendHasEntitlement && !backendDeviceAccess,
+                        showDeviceLimitReached = backendHasEntitlement && !backendDeviceAccess,
+                        purchaseVerificationState = if (backendHasEntitlement) {
+                            PurchaseVerificationState.VERIFIED
+                        } else {
+                            PurchaseVerificationState.PENDING
+                        },
+                        purchaseStatus = if (backendHasEntitlement) {
+                            buildVerifiedStatus(resolvedEntitlement, backendDeviceAccess)
+                        } else {
+                            buildTemporaryVerificationStatus(showRetryVerification = false)
+                        },
+                    ).withDerivedBillingPolicy(hasEntitlement = backendHasEntitlement)
                 }
             } catch (e: Exception) {
                 _state.update {
@@ -943,32 +1431,37 @@ class SubscriptionViewModel(
                         )
                     },
                 )
-                val hasEntitlement = result.entitlements.isNotEmpty()
-                val deviceAccess = result.premium_access
-                if (deviceAccess) {
-                    subscriptionRepo.onBackendEntitlementGranted(true)
-                }
+                val backendDecision = runCatching { refreshBackendAccessForPurchaseGate().decision }.getOrNull()
+                val backendHasEntitlement = backendDecision?.hasEntitlement == true
+                val backendDeviceAccess = backendDecision?.isPro == true
                 persistPendingAmazonVerification(null)
-                loadSubscription()
-                val status = buildVerifiedStatus(resolvedEntitlement, deviceAccess)
+                val status = if (backendHasEntitlement) {
+                    buildVerifiedStatus(resolvedEntitlement, backendDeviceAccess)
+                } else {
+                    buildTemporaryVerificationStatus(showRetryVerification = true)
+                }
                 logPurchaseMilestone(
                     milestone = "amazon_verify_success",
-                    detail = "premiumAccess=$deviceAccess entitlements=${result.entitlements.size}",
+                    detail = "premiumAccess=$backendDeviceAccess entitlements=${result.entitlements.size}",
                 )
                 _state.update {
                     it.copy(
                         isPurchasing = false,
-                        showPaywall = false,
+                        showPaywall = !backendDeviceAccess,
                         error = null,
-                        hasEntitlement = hasEntitlement,
-                        isDeviceActivated = deviceAccess,
-                        deviceBlockReason = null,
-                        deviceCapReached = hasEntitlement && !deviceAccess,
-                        showDeviceLimitReached = hasEntitlement && !deviceAccess,
-                        purchaseVerificationState = PurchaseVerificationState.VERIFIED,
+                        hasEntitlement = backendHasEntitlement,
+                        isDeviceActivated = backendDeviceAccess,
+                        deviceBlockReason = backendDecision?.deviceBlockReason,
+                        deviceCapReached = backendHasEntitlement && !backendDeviceAccess,
+                        showDeviceLimitReached = backendHasEntitlement && !backendDeviceAccess,
+                        purchaseVerificationState = if (backendHasEntitlement) {
+                            PurchaseVerificationState.VERIFIED
+                        } else {
+                            PurchaseVerificationState.PENDING
+                        },
                         purchaseStatus = status,
                         pendingAmazonVerification = null,
-                    )
+                    ).withDerivedBillingPolicy(hasEntitlement = backendHasEntitlement)
                 }
             } catch (error: Throwable) {
                 val resolution = classifyAmazonVerificationFailure(error, retryAvailable = true)
@@ -1079,33 +1572,39 @@ class SubscriptionViewModel(
                     },
                 )
                 val hasEntitlement = result.entitlements.isNotEmpty()
-                val deviceAccess = result.premium_access
 
                 if (hasEntitlement) {
-                    if (deviceAccess) {
-                        subscriptionRepo.onBackendEntitlementGranted(true)
-                    }
+                    val backendDecision = runCatching { refreshBackendAccessForPurchaseGate().decision }.getOrNull()
+                    val backendHasEntitlement = backendDecision?.hasEntitlement == true
+                    val backendDeviceAccess = backendDecision?.isPro == true
                     persistPendingAmazonVerification(null)
-                    loadSubscription()
-                    val status = buildRestoredStatus(resolvedEntitlement, deviceAccess)
+                    val status = if (backendHasEntitlement) {
+                        buildRestoredStatus(resolvedEntitlement, backendDeviceAccess)
+                    } else {
+                        buildTemporaryVerificationStatus(showRetryVerification = true)
+                    }
                     logPurchaseMilestone(
                         milestone = "amazon_restore_success",
-                        detail = "premiumAccess=$deviceAccess entitlements=${result.entitlements.size}",
+                        detail = "premiumAccess=$backendDeviceAccess entitlements=${result.entitlements.size}",
                     )
                     _state.update {
                         it.copy(
                             isLoading = false,
                             error = null,
-                            showPaywall = false,
-                            hasEntitlement = true,
-                            isDeviceActivated = deviceAccess,
-                            deviceBlockReason = null,
-                            deviceCapReached = !deviceAccess,
-                            showDeviceLimitReached = !deviceAccess,
-                            purchaseVerificationState = PurchaseVerificationState.RESTORED,
+                            showPaywall = !backendDeviceAccess,
+                            hasEntitlement = backendHasEntitlement,
+                            isDeviceActivated = backendDeviceAccess,
+                            deviceBlockReason = backendDecision?.deviceBlockReason,
+                            deviceCapReached = backendHasEntitlement && !backendDeviceAccess,
+                            showDeviceLimitReached = backendHasEntitlement && !backendDeviceAccess,
+                            purchaseVerificationState = if (backendHasEntitlement) {
+                                PurchaseVerificationState.RESTORED
+                            } else {
+                                PurchaseVerificationState.PENDING
+                            },
                             purchaseStatus = status,
                             pendingAmazonVerification = null,
-                        )
+                        ).withDerivedBillingPolicy(hasEntitlement = backendHasEntitlement)
                     }
                 } else {
                     val status = existingPending?.toPurchaseStatusMessage(isLoggedIn = true, strings = strings)
@@ -1220,26 +1719,32 @@ class SubscriptionViewModel(
                     },
                 )
                 val hasEntitlement = result.entitlements.isNotEmpty()
-                val deviceAccess = result.premium_access
 
                 if (hasEntitlement) {
-                    if (deviceAccess) {
-                        subscriptionRepo.onBackendEntitlementGranted(true)
-                    }
-                    loadSubscription()
+                    val backendDecision = runCatching { refreshBackendAccessForPurchaseGate().decision }.getOrNull()
+                    val backendHasEntitlement = backendDecision?.hasEntitlement == true
+                    val backendDeviceAccess = backendDecision?.isPro == true
                     _state.update {
                         it.copy(
                             isLoading = false,
                             error = null,
-                            showPaywall = false,
-                            hasEntitlement = true,
-                            isDeviceActivated = deviceAccess,
-                            deviceBlockReason = null,
-                            deviceCapReached = !deviceAccess,
-                            showDeviceLimitReached = !deviceAccess,
-                            purchaseVerificationState = PurchaseVerificationState.RESTORED,
-                            purchaseStatus = buildRestoredStatus(resolvedEntitlement, deviceAccess),
-                        )
+                            showPaywall = !backendDeviceAccess,
+                            hasEntitlement = backendHasEntitlement,
+                            isDeviceActivated = backendDeviceAccess,
+                            deviceBlockReason = backendDecision?.deviceBlockReason,
+                            deviceCapReached = backendHasEntitlement && !backendDeviceAccess,
+                            showDeviceLimitReached = backendHasEntitlement && !backendDeviceAccess,
+                            purchaseVerificationState = if (backendHasEntitlement) {
+                                PurchaseVerificationState.RESTORED
+                            } else {
+                                PurchaseVerificationState.PENDING
+                            },
+                            purchaseStatus = if (backendHasEntitlement) {
+                                buildRestoredStatus(resolvedEntitlement, backendDeviceAccess)
+                            } else {
+                                buildTemporaryVerificationStatus(showRetryVerification = false)
+                            },
+                        ).withDerivedBillingPolicy(hasEntitlement = backendHasEntitlement)
                     }
                 } else {
                     _state.update {
@@ -1360,19 +1865,17 @@ class SubscriptionViewModel(
             }.getOrNull()
 
             // ── Step 4: refresh /me/access-state — source of truth ──
-            subscriptionRepo.onBackendEntitlementGranted(
-                restoreResult?.has_premium_access == true,
-            )
-            loadSubscription()
+            val backendDecision = runCatching { refreshBackendAccessForPurchaseGate().decision }.getOrNull()
 
             val anythingRestored = restoreResult?.restored == true ||
-                restoreResult?.has_premium_access == true ||
+                backendDecision?.hasEntitlement == true ||
                 activePlayPurchases.isNotEmpty()
+            val activeOnDevice = backendDecision?.isPro == true
             _state.update {
                 it.copy(
                     isLoading = false,
                     error = null,
-                    showPaywall = false,
+                    showPaywall = !activeOnDevice,
                     purchaseVerificationState = if (anythingRestored) {
                         PurchaseVerificationState.RESTORED
                     } else {
@@ -1382,8 +1885,12 @@ class SubscriptionViewModel(
                         purchaseStatus(
                             kind = PurchaseStatusKind.RESTORED,
                             title = strings.purchaseRestoredTitle(),
-                            message = strings.restoredActiveOnDevice(strings.premiumGeneric()),
-                            tone = PurchaseStatusTone.SUCCESS,
+                            message = if (activeOnDevice) {
+                                strings.restoredActiveOnDevice(strings.premiumGeneric())
+                            } else {
+                                "Purchase restore is being confirmed by Torve. Premium unlocks only after account access refreshes."
+                            },
+                            tone = if (activeOnDevice) PurchaseStatusTone.SUCCESS else PurchaseStatusTone.INFO,
                         )
                     } else {
                         purchaseStatus(

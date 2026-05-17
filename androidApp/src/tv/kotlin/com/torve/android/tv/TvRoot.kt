@@ -283,6 +283,30 @@ fun TvRoot(
     val lastCredentialImportEpoch by transferImportCompletionNotifier.lastImportEpochMs.collectAsState()
     var credentialNudgeDismissed by rememberSaveable(signedInUserId) { mutableStateOf(false) }
     var showCredentialTransferNudge by rememberSaveable(signedInUserId) { mutableStateOf(false) }
+    var lastTvChannelReloadAtMs by remember { mutableStateOf(0L) }
+
+    fun reloadTvChannelShell(
+        reason: String,
+        clearScreenCache: Boolean = false,
+        dedupe: Boolean = true,
+        stagedImport: Boolean = false,
+    ) {
+        val now = System.currentTimeMillis()
+        if (dedupe && now - lastTvChannelReloadAtMs < TV_CHANNEL_RELOAD_DEDUPE_MS) {
+            Log.d("TvRoot", "Skipping duplicate channel shell reload reason=$reason")
+            return
+        }
+        lastTvChannelReloadAtMs = now
+        if (clearScreenCache) {
+            TvScreenCache.clear()
+        }
+        settingsViewModel.refreshSettings()
+        runCatching {
+            val channelsViewModel: ChannelsViewModel = org.koin.java.KoinJavaComponent.getKoin().get()
+            channelsViewModel.loadPlaylists(recoverEmptyCatalog = !stagedImport)
+            channelsViewModel.loadFavorites()
+        }
+    }
 
     LaunchedEffect(signedInUserId, lastCredentialImportEpoch, credentialNudgeDismissed) {
         showCredentialTransferNudge = false
@@ -297,13 +321,12 @@ fun TvRoot(
 
     LaunchedEffect(lastCredentialImportEpoch) {
         if (lastCredentialImportEpoch <= 0L) return@LaunchedEffect
-        TvScreenCache.clear()
-        settingsViewModel.refreshSettings()
-        runCatching {
-            val channelsViewModel: ChannelsViewModel = org.koin.java.KoinJavaComponent.getKoin().get()
-            channelsViewModel.loadPlaylists()
-            channelsViewModel.loadFavorites()
-        }
+        PostSignInRefresh.enqueueAfterCredentialImport(context)
+        reloadTvChannelShell(
+            reason = "credential_import",
+            clearScreenCache = true,
+            stagedImport = true,
+        )
     }
 
     /* ── Sub-route tracking (NavHost only handles details/player/see-all/sub-screens) ── */
@@ -607,18 +630,17 @@ fun TvRoot(
     LaunchedEffect(backgroundWorkStatus.blockNavigation) {
         if (backgroundWorkWasBlocking && !backgroundWorkStatus.blockNavigation) {
             focusRestoreTrigger++
+            reloadTvChannelShell(
+                reason = "background_core_ready",
+                clearScreenCache = true,
+                dedupe = false,
+            )
         }
         backgroundWorkWasBlocking = backgroundWorkStatus.blockNavigation
     }
 
     LaunchedEffect(backgroundWorkStatus.visible) {
         if (backgroundWorkWasVisible && !backgroundWorkStatus.visible) {
-            TvScreenCache.clear()
-            runCatching {
-                val channelsViewModel: ChannelsViewModel = org.koin.java.KoinJavaComponent.getKoin().get()
-                channelsViewModel.loadPlaylists()
-                channelsViewModel.loadFavorites()
-            }
             runCatching { settingsViewModel.refreshSettings() }
         }
         backgroundWorkWasVisible = backgroundWorkStatus.visible
@@ -1220,15 +1242,17 @@ fun TvRoot(
                         }
                         if (result != null) {
                             Log.d("TvRoot", "Import result: $result")
-                            // Refresh SettingsViewModel so TV UI reflects synced integrations
-                            settingsViewModel.refreshSettings()
-                            // Reload channel data so IPTV screen picks up synced playlists/favorites
+                            // Reload account-scoped UI so IPTV picks up synced playlists/favorites.
+                            // The helper also refreshes SettingsViewModel for synced integrations.
                             if (result.playlistsImported > 0 || result.favoritesImported > 0) {
-                                val channelsViewModel = runCatching {
-                                    org.koin.java.KoinJavaComponent.getKoin().get<ChannelsViewModel>()
-                                }.getOrNull()
-                                channelsViewModel?.loadPlaylists()
-                                channelsViewModel?.loadFavorites()
+                                if (result.playlistsImported > 0) {
+                                    PostSignInRefresh.enqueueAfterCredentialImport(context)
+                                }
+                                reloadTvChannelShell(
+                                    reason = "settings_sync_import",
+                                    clearScreenCache = result.playlistsImported > 0,
+                                    stagedImport = result.playlistsImported > 0,
+                                )
                             }
                             val parts = buildList {
                                 if (result.addonsImported > 0) {
@@ -1427,8 +1451,21 @@ fun TvRoot(
     }
 
     fun resolvedProgress(item: MediaItem, railProgress: Float?): Float? {
-        val candidate = railProgress ?: progressByMediaId[item.id]
+        val candidate = railProgress
+            ?: progressByMediaId[item.id]
+            ?: item.tmdbId?.let { tmdbId ->
+                progressByMediaId[tmdbId.toString()] ?: progressByMediaId["tmdb:$tmdbId"]
+            }
         return candidate?.coerceIn(0f, 1f)
+    }
+
+    fun updateWatchedProgressHint(item: MediaItem, watched: Boolean) {
+        val value = if (watched) TV_CONTEXT_WATCHED_THRESHOLD else 0f
+        progressByMediaId[item.id] = value
+        item.tmdbId?.let { tmdbId ->
+            progressByMediaId[tmdbId.toString()] = value
+            progressByMediaId["tmdb:$tmdbId"] = value
+        }
     }
 
     suspend fun persistProgressRatio(item: MediaItem, ratio: Float) {
@@ -1451,6 +1488,10 @@ fun TvRoot(
             ),
         )
         progressByMediaId[item.id] = clampedRatio
+        item.tmdbId?.let { tmdbId ->
+            progressByMediaId[tmdbId.toString()] = clampedRatio
+            progressByMediaId["tmdb:$tmdbId"] = clampedRatio
+        }
     }
 
     val isFeatureLocked: (TvEntitledFeature) -> Boolean = { feature ->
@@ -2059,6 +2100,7 @@ fun TvRoot(
                                 }
                             },
                             onMediaFocused = onBrowseMediaFocused,
+                            progressResolver = ::resolvedProgress,
                             contextMenuActionsForItem = contextMenuActionsForItem,
                             onContextMenuAction = onContextMenuAction,
                             onSeeAll = { railKey, title ->
@@ -2117,6 +2159,7 @@ fun TvRoot(
                                         },
                                         onMediaFocused = onBrowseMediaFocused,
                                         onClearMediaFocus = { focusedMediaItem = null },
+                                        progressResolver = ::resolvedProgress,
                                         contextMenuActionsForItem = contextMenuActionsForItem,
                                         onContextMenuAction = onContextMenuAction,
                                         onSeeAll = { railKey, title -> navigateToSeeAll(railKey, title, "movie") },
@@ -2143,6 +2186,7 @@ fun TvRoot(
                                         },
                                         onMediaFocused = onBrowseMediaFocused,
                                         onClearMediaFocus = { focusedMediaItem = null },
+                                        progressResolver = ::resolvedProgress,
                                         contextMenuActionsForItem = contextMenuActionsForItem,
                                         onContextMenuAction = onContextMenuAction,
                                         onSeeAll = { railKey, title -> navigateToSeeAll(railKey, title, "tv") },
@@ -2243,6 +2287,7 @@ fun TvRoot(
                                             }
                                         },
                                         onMediaFocused = onBrowseMediaFocused,
+                                        progressResolver = ::resolvedProgress,
                                         contextMenuActionsForItem = contextMenuActionsForItem,
                                         onContextMenuAction = onContextMenuAction,
                                         onSeeAll = { railKey, title ->
@@ -2510,6 +2555,9 @@ fun TvRoot(
                             navController.popBackStack()
                         },
                         onRequestLifetimeUnlock = requestLifetimeUnlock,
+                        onWatchedStatusChanged = { item, watched ->
+                            updateWatchedProgressHint(item, watched)
+                        },
                         isStreamPlaybackLocked = TvPremiumAccess.isPremiumLocked(
                             TvEntitledFeature.STREAM_PLAYBACK,
                             accessTier,
@@ -2877,6 +2925,7 @@ private const val TV_CONTEXT_DEFAULT_DURATION_MS = 120L * 60L * 1000L
 private const val TV_CONTEXT_RESUME_THRESHOLD = 0.03f
 private const val TV_CONTEXT_WATCHED_THRESHOLD = 0.9f
 private const val TV_DEVICE_ACCESS_MONITOR_INTERVAL_MS = 30_000L
+private const val TV_CHANNEL_RELOAD_DEDUPE_MS = 4_000L
 
 private const val TV_CONTEXT_ACTION_PLAY = "play"
 private const val TV_CONTEXT_ACTION_RESUME_OR_START_OVER = "resume_or_start_over"

@@ -87,8 +87,10 @@ class TvMainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (hasResumedBefore && composeStarted) {
-            CoroutineScope(Dispatchers.Main).launch {
+            activityScope.launch {
                 val authClient: AuthClient = getKoin().get()
+                val accountSessionCoordinator: AccountSessionCoordinator = getKoin().get()
+                accountSessionCoordinator.onAppForeground()
                 val user = authClient.getCurrentUser()
                 if (user != null && !user.isVerified) {
                     authClient.checkVerificationStatus()

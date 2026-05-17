@@ -229,12 +229,6 @@ object PremiumAccess {
     }
 
     fun isPremiumLocked(feature: PremiumFeature, tier: AccessTier): Boolean {
-        if (
-            com.torve.android.BuildConfig.DEBUG &&
-            com.torve.android.BuildConfig.ALLOW_DEBUG_PREMIUM_BYPASS
-        ) {
-            return false
-        }
         val locked = requiresPremiumAccess(feature) && tier == AccessTier.FREE
         if (com.torve.android.BuildConfig.DEBUG) {
             runCatching { Log.d("PremiumAccess", "PREMIUM_GATE: feature=${feature.name} tier=$tier locked=$locked") }

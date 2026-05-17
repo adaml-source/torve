@@ -58,6 +58,7 @@ fun parseBackendError(responseBody: String): BackendError {
         )
         is JsonObject -> {
             val code = detail["code"]?.jsonPrimitive?.contentOrNull
+                ?: detail["error_code"]?.jsonPrimitive?.contentOrNull
             val message = detail["message"]?.jsonPrimitive?.contentOrNull
                 ?: detail["msg"]?.jsonPrimitive?.contentOrNull
             BackendError(code = code, message = message, rawDetail = detail)

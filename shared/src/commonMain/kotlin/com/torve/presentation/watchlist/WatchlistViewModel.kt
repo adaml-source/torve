@@ -9,6 +9,7 @@ import com.torve.domain.model.ContentSourceType
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.WatchlistItem
+import com.torve.domain.model.stableTmdbIdString
 import com.torve.domain.repository.PreferencesRepository
 import com.torve.domain.repository.WatchlistRepository
 import com.torve.presentation.contentpolicy.ContentPolicyFilter
@@ -67,11 +68,11 @@ class WatchlistViewModel(
     }
 
     fun isInWatchlist(mediaId: String): Boolean {
-        return _state.value.watchlistIds.contains(mediaId)
+        return _state.value.watchlistIds.contains(mediaId.normalizeWatchlistMediaId())
     }
 
     fun toggleWatchlist(mediaItem: MediaItem) {
-        val mediaId = mediaItem.id
+        val mediaId = mediaItem.watchlistMediaId()
         val wasInWatchlist = isInWatchlist(mediaId)
         val optimisticItem = mediaItem.toWatchlistItem()
         _state.update {
@@ -117,7 +118,7 @@ class WatchlistViewModel(
     }
 
     fun addToWatchlist(mediaItem: MediaItem, syncTrakt: Boolean, syncSimkl: Boolean) {
-        val mediaId = mediaItem.id
+        val mediaId = mediaItem.watchlistMediaId()
         scope.launch {
             try {
                 val item = WatchlistItem(
@@ -192,10 +193,11 @@ class WatchlistViewModel(
     }
 
     private fun MediaItem.toWatchlistItem(): WatchlistItem {
+        val stableTmdbId = stableTmdbIdString()?.toIntOrNull()
         return WatchlistItem(
-            mediaId = id,
+            mediaId = watchlistMediaId(),
             mediaType = type,
-            tmdbId = tmdbId ?: 0,
+            tmdbId = tmdbId ?: stableTmdbId ?: 0,
             imdbId = imdbId,
             title = title,
             posterUrl = posterUrl,
@@ -206,4 +208,14 @@ class WatchlistViewModel(
             addedAt = Clock.System.now().toEpochMilliseconds(),
         )
     }
+}
+
+internal fun MediaItem.watchlistMediaId(): String = stableTmdbIdString() ?: id
+
+private fun String.normalizeWatchlistMediaId(): String {
+    val parts = split(":")
+    if (parts.firstOrNull()?.lowercase() != "tmdb") return this
+    return parts.lastOrNull()?.takeIf { part ->
+        part.isNotBlank() && part.all { it in '0'..'9' }
+    } ?: this
 }

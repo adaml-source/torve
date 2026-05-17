@@ -3,12 +3,14 @@ package com.torve.data.auth
 import com.torve.data.error.deviceLimitReachedMessage
 import com.torve.data.error.parseBackendError
 import com.torve.domain.repository.DeviceLocalSettingsRepository
+import com.torve.domain.security.ClientTrustHeaders
 import com.torve.domain.security.SecureStorage
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.delete
 import io.ktor.client.request.get
+import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.prepareGet
 import io.ktor.client.request.setBody
@@ -135,8 +137,11 @@ class AuthClient(
             while (isActive) {
                 try {
                     val token = getValidAccessToken() ?: break
+                    val trustHeaders = clientTrustHeaders()
                     httpClient.prepareGet("${baseUrl()}/me/events") {
                         bearerAuth(token)
+                        appendInstallationHeader()
+                        trustHeaders?.appendTo(this)
                         headers.append("Accept", "text/event-stream")
                     }.execute { response ->
                         if (response.status == HttpStatusCode.Unauthorized) {
@@ -261,8 +266,11 @@ class AuthClient(
     suspend fun checkVerificationStatus(): Boolean {
         val accessToken = getValidAccessToken() ?: return false
         return try {
+            val trustHeaders = clientTrustHeaders()
             val resp = httpClient.get("${baseUrl()}/me") {
                 bearerAuth(accessToken)
+                appendInstallationHeader()
+                trustHeaders?.appendTo(this)
             }
             if (!resp.status.isSuccess()) return false
             val user: UserResponseDto = resp.body()
@@ -333,8 +341,11 @@ class AuthClient(
 
         return try {
             val device = deviceRegistrationProvider()
+            val trustHeaders = clientTrustHeaders()
             val resp = httpClient.post("${baseUrl()}/auth/login") {
                 contentType(ContentType.Application.Json)
+                appendInstallationHeader(device.installation_id)
+                trustHeaders?.appendTo(this)
                 setBody(
                     AuthLoginDto(
                         email = email,
@@ -377,8 +388,11 @@ class AuthClient(
 
         return try {
             val device = deviceRegistrationProvider()
+            val trustHeaders = clientTrustHeaders()
             val resp = httpClient.post("${baseUrl()}/auth/register") {
                 contentType(ContentType.Application.Json)
+                appendInstallationHeader(device.installation_id)
+                trustHeaders?.appendTo(this)
                 setBody(
                     AuthRegisterDto(
                         email = email,
@@ -428,8 +442,10 @@ class AuthClient(
             return AuthResult(success = false, error = "Please enter a valid email address")
         }
         return try {
+            val trustHeaders = clientTrustHeaders()
             val resp = httpClient.post("${baseUrl()}/auth/password-reset/request") {
                 contentType(ContentType.Application.Json)
+                trustHeaders?.appendTo(this)
                 setBody(PasswordResetRequestDto(email.trim()))
             }
             if (!resp.status.isSuccess()) {
@@ -451,9 +467,12 @@ class AuthClient(
     suspend fun resendVerification(email: String): AuthResult {
         return try {
             val accessToken = getValidAccessToken()
+            val trustHeaders = clientTrustHeaders()
             val resp = httpClient.post("${baseUrl()}/auth/resend-verification") {
                 accessToken?.let { bearerAuth(it) }
                 contentType(ContentType.Application.Json)
+                appendInstallationHeader()
+                trustHeaders?.appendTo(this)
                 setBody(ResendVerificationDto(email.trim()))
             }
             if (resp.status.value == 429) {
@@ -474,9 +493,12 @@ class AuthClient(
                 val accessToken = secureStorage.getString(KEY_AUTH_ACCESS_TOKEN)
                 val refreshToken = secureStorage.getString(KEY_AUTH_REFRESH_TOKEN)
                 if (accessToken != null) {
+                    val trustHeaders = clientTrustHeaders()
                     httpClient.post("${baseUrl()}/auth/logout") {
                         bearerAuth(accessToken)
                         contentType(ContentType.Application.Json)
+                        appendInstallationHeader()
+                        trustHeaders?.appendTo(this)
                         setBody(LogoutDto(refreshToken))
                     }
                 }
@@ -491,8 +513,11 @@ class AuthClient(
         val accessToken = getValidAccessToken()
             ?: return AuthResult(success = false, error = "Not signed in")
         return try {
+            val trustHeaders = clientTrustHeaders()
             val response = httpClient.delete("${baseUrl()}/auth/account") {
                 bearerAuth(accessToken)
+                appendInstallationHeader()
+                trustHeaders?.appendTo(this)
             }
             if (response.status.value !in 200..299) {
                 AuthResult(success = false, error = "Could not delete account (HTTP ${response.status.value})")
@@ -585,8 +610,11 @@ class AuthClient(
 
         return try {
             val device = deviceRegistrationProvider()
+            val trustHeaders = clientTrustHeaders()
             val resp = httpClient.post("${baseUrl()}/auth/refresh") {
                 contentType(ContentType.Application.Json)
+                appendInstallationHeader(device.installation_id)
+                trustHeaders?.appendTo(this)
                 setBody(RefreshDto(refresh_token = refreshToken, device = device))
             }
             if (!resp.status.isSuccess()) {
@@ -637,6 +665,18 @@ class AuthClient(
             status == HttpStatusCode.Unauthorized ||
             status == HttpStatusCode.Forbidden
     }
+
+    private fun io.ktor.client.request.HttpRequestBuilder.appendInstallationHeader(
+        installationId: String = deviceRegistrationProvider().installation_id,
+    ) {
+        installationId.takeIf { it.isNotBlank() }?.let {
+            header("X-Torve-Installation-Id", it)
+        }
+    }
+
+    private suspend fun clientTrustHeaders(
+        includeIntegrityToken: Boolean = false,
+    ) = ClientTrustHeaders.capture(includeIntegrityToken)
 
     private suspend fun hasStoredSession(): Boolean {
         return authStateMutex.withLock { hasStoredSessionLocked() }

@@ -193,4 +193,48 @@ class UserFacingErrorTest {
         assert("premium_required" !in msg) { "Raw code leaked: $msg" }
         assert(msg.isNotBlank())
     }
+
+    @Test
+    fun resolverDeviceRequiredCodeMapsToSanitizedMessage() {
+        assertEquals(UserFacingError.DEVICE_REQUIRED, backendReasonToUserFacingError("device_required"))
+        val msg = UserFacingError.DEVICE_REQUIRED.defaultMessage()
+        assert("device_required" !in msg) { "Raw code leaked: $msg" }
+        assert(msg.isNotBlank())
+    }
+
+    @Test
+    fun resolverDeviceNotAuthorizedCodeMapsToSanitizedMessage() {
+        assertEquals(UserFacingError.DEVICE_NOT_AUTHORIZED, backendReasonToUserFacingError("device_not_authorized"))
+        val msg = UserFacingError.DEVICE_NOT_AUTHORIZED.defaultMessage()
+        assert("device_not_authorized" !in msg) { "Raw code leaked: $msg" }
+        assert(msg.isNotBlank())
+    }
+
+    @Test
+    fun resolverRateLimitedCodeMapsToSanitizedMessage() {
+        assertEquals(UserFacingError.RATE_LIMITED, backendReasonToUserFacingError("rate_limited"))
+        val msg = UserFacingError.RATE_LIMITED.defaultMessage()
+        assert("rate_limited" !in msg) { "Raw code leaked: $msg" }
+        assert(msg.isNotBlank())
+    }
+
+    @Test
+    fun expiredHandoffCodeMapsToSanitizedMessage() {
+        assertEquals(UserFacingError.PLAYBACK_LINK_EXPIRED, backendReasonToUserFacingError("stream_expired"))
+        assertEquals(UserFacingError.PLAYBACK_LINK_EXPIRED, backendReasonToUserFacingError("invalid_handoff"))
+        val msg = UserFacingError.PLAYBACK_LINK_EXPIRED.defaultMessage()
+        assert("stream_expired" !in msg) { "Raw code leaked: $msg" }
+        assert("invalid_handoff" !in msg) { "Raw code leaked: $msg" }
+        assert(msg.isNotBlank())
+    }
+
+    @Test
+    fun streamHandoffReferenceCodesMapToSanitizedUnavailableMessage() {
+        assertEquals(UserFacingError.STREAM_RESOLVE_FAILED, backendReasonToUserFacingError("stream_reference_required"))
+        assertEquals(UserFacingError.STREAM_RESOLVE_FAILED, backendReasonToUserFacingError("stream_reference_not_found"))
+        assertEquals(UserFacingError.STREAM_RESOLVE_FAILED, backendReasonToUserFacingError("stream_handoff_unavailable"))
+        val msg = UserFacingError.STREAM_RESOLVE_FAILED.defaultMessage()
+        assert("stream_reference" !in msg) { "Raw code leaked: $msg" }
+        assert("stream_handoff" !in msg) { "Raw code leaked: $msg" }
+    }
 }

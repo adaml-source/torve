@@ -105,7 +105,7 @@ object PostSignInRefresh {
     private fun enqueueCredentialImportRefresh(context: Context, force: Boolean = false) {
         val now = System.currentTimeMillis()
         val previous = lastEnqueueAtMs.get()
-        if (!force && now - previous < DUPLICATE_ENQUEUE_WINDOW_MS) return
+        if (now - previous < DUPLICATE_ENQUEUE_WINDOW_MS) return
         if (force) {
             lastEnqueueAtMs.set(now)
         } else if (!lastEnqueueAtMs.compareAndSet(previous, now)) {
@@ -121,7 +121,7 @@ object PostSignInRefresh {
     private fun enqueueActivatedContentWarmup(context: Context, force: Boolean = false) {
         val now = System.currentTimeMillis()
         val previous = lastEnqueueAtMs.get()
-        if (!force && now - previous < DUPLICATE_ENQUEUE_WINDOW_MS) return
+        if (now - previous < DUPLICATE_ENQUEUE_WINDOW_MS) return
         if (force) {
             lastEnqueueAtMs.set(now)
         } else if (!lastEnqueueAtMs.compareAndSet(previous, now)) {
@@ -129,9 +129,8 @@ object PostSignInRefresh {
         }
 
         val appContext = context.applicationContext
-        android.util.Log.i("PostSignInRefresh", "enqueueActivatedContentWarmup force=$force catalogOnly=true")
+        android.util.Log.i("PostSignInRefresh", "enqueueActivatedContentWarmup force=$force catalogOnly=true stagedEpg=true")
         CatalogWarmupWorker.refreshAfterCredentialImport(appContext)
-        EpgWarmupWorker.refreshNow(appContext)
     }
 
     private fun enqueueFullAppRefresh(

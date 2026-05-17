@@ -60,11 +60,13 @@ import com.torve.desktop.ui.components.TorvePrimaryButton
 import com.torve.desktop.ui.components.TorveSecondaryButton
 import com.torve.desktop.ui.components.TorveDropdownScaffold
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
+import com.torve.desktop.ui.v2.components.DesktopRatingPills
 import com.torve.desktop.ui.v2.components.V2PosterCard
 import com.torve.desktop.ui.v2.components.V2Shelf
 import com.torve.desktop.ui.v2.components.rememberCachedBitmap
 import com.torve.domain.model.Episode
 import com.torve.domain.model.MediaItem
+import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.favoriteMediaKey
 import com.torve.presentation.watchlist.WatchlistUiState
@@ -127,10 +129,10 @@ fun V2DetailPage(
         val episodeMenuTemplate = ds("Episode S%1\$02dE%2\$02d")
         val seasonMenuTemplate = ds("Season %1\$d")
         val allEpisodesLabel = ds("All Episodes")
-        val watchlistLabel = ds("Watchlist")
-        val inWatchlistLabel = ds("In Watchlist")
-        val favoritesLabel = ds("Favorites")
-        val inFavoritesLabel = ds("In Favorites")
+        val addWatchlistLabel = ds("Add to Watchlist")
+        val removeWatchlistLabel = ds("Remove from Watchlist")
+        val addFavoritesLabel = ds("Add to Favorites")
+        val removeFavoritesLabel = ds("Remove from Favorites")
         val votesTemplate = ds("%1\$d votes")
         val trailerFallbackTitle = ds("Trailer")
 
@@ -284,8 +286,8 @@ fun V2DetailPage(
                                         )
                                     }
                                 }
-                                TorveGhostButton(text = if (isInWatchlist) inWatchlistLabel else watchlistLabel, onClick = { onToggleWatchlist(item) })
-                                TorveGhostButton(text = if (isFavorite) inFavoritesLabel else favoritesLabel, onClick = { onToggleFavorite(item) })
+                                TorveGhostButton(text = if (isInWatchlist) removeWatchlistLabel else addWatchlistLabel, onClick = { onToggleWatchlist(item) })
+                                TorveGhostButton(text = if (isFavorite) removeFavoritesLabel else addFavoritesLabel, onClick = { onToggleFavorite(item) })
                             }
                         }
                     }
@@ -441,7 +443,12 @@ fun V2DetailPage(
                                                     if (episode.overview.isNotBlank()) Text(episode.overview, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                                         episode.runtime?.let { TorveBadge("${it}m", tone = TorveBadgeTone.Neutral) }
-                                                        if (episode.rating > 0.0) TorveBadge(String.format("%.1f", episode.rating), tone = TorveBadgeTone.Neutral)
+                                                        if (episode.rating > 0.0) {
+                                                            DesktopRatingPills(
+                                                                ratings = MediaRatings(tmdbScore = episode.rating.toFloat()),
+                                                                showBackground = false,
+                                                            )
+                                                        }
                                                         episode.airDate?.let { TorveBadge(it, tone = TorveBadgeTone.Neutral) }
                                                     }
                                                 }

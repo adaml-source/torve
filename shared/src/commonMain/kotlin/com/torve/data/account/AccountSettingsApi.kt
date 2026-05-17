@@ -24,6 +24,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import com.torve.domain.diagnostics.DiagnosticsRedactor
 import com.torve.platform.torveVerboseLog
 
 private val lenientJson = Json {
@@ -36,13 +37,14 @@ class AccountSettingsApi(
     private val httpClient: HttpClient,
     private val baseUrlProvider: () -> String,
     private val channelProvider: ContentChannelProvider? = null,
+    private val installationIdProvider: () -> String? = { null },
 ) {
     private fun baseUrl() = baseUrlProvider().trimEnd('/')
 
     suspend fun getAccountSettings(accessToken: String): AccountSettingsDto {
         val raw = httpClient.get("${baseUrl()}/me/account-settings") {
             bearerAuth(accessToken)
-            appendChannelHeader()
+            appendBackendHeaders()
         }.bodyAsText()
         return parseAccountSettingsResponse(raw)
     }
@@ -53,12 +55,22 @@ class AccountSettingsApi(
      */
     suspend fun getIntegrations(accessToken: String): List<IntegrationMetadataDto> {
         return try {
-            httpClient.get("${baseUrl()}/me/integrations") {
+            val response = httpClient.get("${baseUrl()}/me/integrations") {
                 bearerAuth(accessToken)
-                appendChannelHeader()
-            }.body()
-        } catch (_: Exception) {
-            emptyList()
+                appendBackendHeaders()
+            }
+            if (!response.status.isSuccess()) {
+                throw AccountApiException(
+                    statusCode = response.status.value,
+                    endpoint = "GET /me/integrations",
+                )
+            }
+            response.body()
+        } catch (e: Exception) {
+            torveVerboseLog {
+                "[IntegrationAPI] GET integrations FAILED: ${e::class.simpleName} ${DiagnosticsRedactor.redact(e.message)}"
+            }
+            throw e
         }
     }
 
@@ -90,12 +102,12 @@ class AccountSettingsApi(
                     "${baseUrl()}/me/integrations/$integrationType/credentials",
                 ) {
                     bearerAuth(accessToken)
-                    appendChannelHeader()
+                    appendBackendHeaders()
                 }
                 val raw = response.bodyAsText()
                 torveVerboseLog {
                     "[IntegrationAPI] GET credentials for $integrationType (attempt ${attempt + 1}): " +
-                        "status=${response.status.value} body=${raw.take(80)}"
+                        "status=${response.status.value}"
                 }
                 if (!response.status.isSuccess()) {
                     if (response.status.value == 404) return null
@@ -114,13 +126,13 @@ class AccountSettingsApi(
                 lastError = e
                 torveVerboseLog {
                     "[IntegrationAPI] GET credentials FAILED for $integrationType " +
-                        "(attempt ${attempt + 1}): ${e.message}"
+                        "(attempt ${attempt + 1}): ${DiagnosticsRedactor.redact(e.message)}"
                 }
             }
         }
         torveVerboseLog {
             "[IntegrationAPI] GET credentials gave up for $integrationType after ${backoffsMs.size} attempts: " +
-                "${lastError?.message}"
+                DiagnosticsRedactor.redact(lastError?.message)
         }
         return null
     }
@@ -141,17 +153,19 @@ class AccountSettingsApi(
             val resp = httpClient.put(url) {
                 bearerAuth(accessToken)
                 contentType(ContentType.Application.Json)
-                appendChannelHeader()
+                appendBackendHeaders()
                 setBody(request)
             }
             val ok = resp.status.isSuccess()
             if (!ok) {
                 val body = try { resp.bodyAsText() } catch (_: Exception) { "" }
-                torveVerboseLog { "[IntegrationAPI] PUT failed: ${resp.status.value} body=$body" }
+                torveVerboseLog {
+                    "[IntegrationAPI] PUT failed: ${resp.status.value} body=${DiagnosticsRedactor.redact(body).take(240)}"
+                }
             }
             ok
         } catch (e: Exception) {
-            torveVerboseLog { "[IntegrationAPI] PUT exception: ${e::class.simpleName} ${e.message}" }
+            torveVerboseLog { "[IntegrationAPI] PUT exception: ${e::class.simpleName} ${DiagnosticsRedactor.redact(e.message)}" }
             false
         }
     }
@@ -178,7 +192,7 @@ class AccountSettingsApi(
             val resp = httpClient.patch(url) {
                 bearerAuth(accessToken)
                 contentType(ContentType.Application.Json)
-                appendChannelHeader()
+                appendBackendHeaders()
                 setBody(PatchCredentialsRequest(credentials = credentials))
             }
             when (resp.status.value) {
@@ -187,12 +201,14 @@ class AccountSettingsApi(
                 403 -> PatchCredentialsOutcome.PremiumRequired
                 else -> {
                     val body = try { resp.bodyAsText() } catch (_: Exception) { "" }
-                    torveVerboseLog { "[IntegrationAPI] PATCH failed: ${resp.status.value} body=$body" }
+                    torveVerboseLog {
+                        "[IntegrationAPI] PATCH failed: ${resp.status.value} body=${DiagnosticsRedactor.redact(body).take(240)}"
+                    }
                     PatchCredentialsOutcome.Error("HTTP ${resp.status.value}")
                 }
             }
         } catch (e: Exception) {
-            torveVerboseLog { "[IntegrationAPI] PATCH exception: ${e::class.simpleName} ${e.message}" }
+            torveVerboseLog { "[IntegrationAPI] PATCH exception: ${e::class.simpleName} ${DiagnosticsRedactor.redact(e.message)}" }
             PatchCredentialsOutcome.Error(e.message ?: "Network failure")
         }
     }
@@ -203,11 +219,14 @@ class AccountSettingsApi(
         return try {
             val response = httpClient.get("${baseUrl()}/me/playlists") {
                 bearerAuth(accessToken)
-                appendChannelHeader()
+                appendBackendHeaders()
             }
             if (!response.status.isSuccess()) {
                 torveVerboseLog { "[PlaylistAPI] GET playlists FAILED: ${response.status.value}" }
-                return emptyList()
+                throw AccountApiException(
+                    statusCode = response.status.value,
+                    endpoint = "GET /me/playlists",
+                )
             }
             val raw = response.bodyAsText()
             val playlists = lenientJson.decodeFromString<List<RemotePlaylistDto>>(raw)
@@ -216,8 +235,8 @@ class AccountSettingsApi(
             }
             playlists
         } catch (e: Exception) {
-            torveVerboseLog { "[PlaylistAPI] GET playlists FAILED: ${e::class.simpleName} ${e.message}" }
-            emptyList()
+            torveVerboseLog { "[PlaylistAPI] GET playlists FAILED: ${e::class.simpleName} ${DiagnosticsRedactor.redact(e.message)}" }
+            throw e
         }
     }
 
@@ -230,7 +249,7 @@ class AccountSettingsApi(
             val resp = httpClient.put("${baseUrl()}/me/playlists/$playlistId") {
                 bearerAuth(accessToken)
                 contentType(ContentType.Application.Json)
-                appendChannelHeader()
+                appendBackendHeaders()
                 setBody(request)
             }
             resp.status.isSuccess()
@@ -239,11 +258,43 @@ class AccountSettingsApi(
         }
     }
 
+    suspend fun validateEpg(
+        accessToken: String,
+        epgUrl: String,
+    ): EpgValidationResponse {
+        return try {
+            val resp = httpClient.post("${baseUrl()}/me/playlists/validate-epg") {
+                bearerAuth(accessToken)
+                contentType(ContentType.Application.Json)
+                appendBackendHeaders()
+                setBody(ValidateEpgRequest(epgUrl = epgUrl))
+            }
+            val raw = resp.bodyAsText()
+            if (raw.isBlank()) {
+                EpgValidationResponse(
+                    success = false,
+                    status = "error",
+                    message = "EPG check failed: HTTP ${resp.status.value}",
+                    httpStatus = resp.status.value,
+                )
+            } else {
+                val parsed = lenientJson.decodeFromString<EpgValidationResponse>(raw)
+                if (parsed.httpStatus == null) parsed.copy(httpStatus = resp.status.value) else parsed
+            }
+        } catch (e: Exception) {
+            EpgValidationResponse(
+                success = false,
+                status = "error",
+                message = e.message ?: "EPG check failed.",
+            )
+        }
+    }
+
     suspend fun deletePlaylist(accessToken: String, playlistId: String): Boolean {
         return try {
             httpClient.delete("${baseUrl()}/me/playlists/$playlistId") {
                 bearerAuth(accessToken)
-                appendChannelHeader()
+                appendBackendHeaders()
             }.status.isSuccess()
         } catch (_: Exception) {
             false
@@ -258,12 +309,11 @@ class AccountSettingsApi(
             try {
                 val response = httpClient.get("${baseUrl()}/me/playlists/$playlistId/credentials") {
                     bearerAuth(accessToken)
-                    appendChannelHeader()
+                    appendBackendHeaders()
                 }
                 if (response.status.isSuccess()) {
                     return response.body()
                 }
-                val raw = runCatching { response.bodyAsText() }.getOrDefault("")
                 if (response.status.value == 429 && attempt < 2) {
                     val delayMs = playlistCredentialRetryDelayMs(
                         retryAfterHeader = response.headers["Retry-After"],
@@ -275,18 +325,18 @@ class AccountSettingsApi(
                     delay(delayMs)
                     return@repeat
                 }
-                torveVerboseLog { "[PlaylistAPI] GET credentials FAILED for $playlistId: ${response.status.value} ${raw.take(160)}" }
+                torveVerboseLog { "[PlaylistAPI] GET credentials FAILED for $playlistId: ${response.status.value}" }
                 return null
             } catch (e: Exception) {
                 if (attempt < 2) {
                     val delayMs = playlistCredentialRetryDelayMs(retryAfterHeader = null, attempt = attempt)
                     torveVerboseLog {
-                        "[PlaylistAPI] GET credentials RETRY for $playlistId: ${e::class.simpleName} ${e.message} delay_ms=$delayMs attempt=${attempt + 1}"
+                        "[PlaylistAPI] GET credentials RETRY for $playlistId: ${e::class.simpleName} ${DiagnosticsRedactor.redact(e.message)} delay_ms=$delayMs attempt=${attempt + 1}"
                     }
                     delay(delayMs)
                     return@repeat
                 }
-                torveVerboseLog { "[PlaylistAPI] GET credentials FAILED for $playlistId: ${e::class.simpleName} ${e.message}" }
+                torveVerboseLog { "[PlaylistAPI] GET credentials FAILED for $playlistId: ${e::class.simpleName} ${DiagnosticsRedactor.redact(e.message)}" }
                 return null
             }
         }
@@ -299,7 +349,7 @@ class AccountSettingsApi(
     ): AccountSettingsDto {
         val raw = httpClient.patch("${baseUrl()}/me/account-settings") {
             bearerAuth(accessToken)
-            appendChannelHeader()
+            appendBackendHeaders()
             setBody(AccountSettingsPatchRequest(settings))
         }.bodyAsText()
         return parseAccountSettingsResponse(raw)
@@ -308,7 +358,7 @@ class AccountSettingsApi(
     suspend fun getAddons(accessToken: String): List<AddonDto> {
         val response = httpClient.get("${baseUrl()}/me/addons") {
             bearerAuth(accessToken)
-            appendChannelHeader()
+            appendBackendHeaders()
         }
         if (!response.status.isSuccess()) {
             error("GET /me/addons failed (${response.status.value})")
@@ -323,7 +373,7 @@ class AccountSettingsApi(
         val response = httpClient.post("${baseUrl()}/me/addons") {
             bearerAuth(accessToken)
             contentType(ContentType.Application.Json)
-            appendChannelHeader()
+            appendBackendHeaders()
             setBody(request)
         }
         if (!response.status.isSuccess()) {
@@ -335,7 +385,7 @@ class AccountSettingsApi(
     suspend fun removeAddon(accessToken: String, serverId: String) {
         val response = httpClient.delete("${baseUrl()}/me/addons/$serverId") {
             bearerAuth(accessToken)
-            appendChannelHeader()
+            appendBackendHeaders()
         }
         if (!response.status.isSuccess()) {
             error("DELETE /me/addons/$serverId failed (${response.status.value})")
@@ -345,7 +395,7 @@ class AccountSettingsApi(
     suspend fun toggleAddon(accessToken: String, serverId: String): AddonDto {
         val response = httpClient.post("${baseUrl()}/me/addons/$serverId/toggle") {
             bearerAuth(accessToken)
-            appendChannelHeader()
+            appendBackendHeaders()
         }
         if (!response.status.isSuccess()) {
             error("POST /me/addons/$serverId/toggle failed (${response.status.value})")
@@ -361,7 +411,7 @@ class AccountSettingsApi(
         val response = httpClient.patch("${baseUrl()}/me/addons/$serverId") {
             bearerAuth(accessToken)
             contentType(ContentType.Application.Json)
-            appendChannelHeader()
+            appendBackendHeaders()
             setBody(request)
         }
         if (!response.status.isSuccess()) {
@@ -370,10 +420,18 @@ class AccountSettingsApi(
         return response.body()
     }
 
-    private fun io.ktor.client.request.HttpRequestBuilder.appendChannelHeader() {
+    private fun io.ktor.client.request.HttpRequestBuilder.appendBackendHeaders() {
         channelProvider?.channel?.let { header("X-Torve-Channel", it) }
+        installationIdProvider()?.takeIf { it.isNotBlank() }?.let {
+            header("X-Torve-Installation-Id", it)
+        }
     }
 }
+
+class AccountApiException(
+    val statusCode: Int,
+    val endpoint: String,
+) : IllegalStateException("$endpoint failed (HTTP $statusCode)")
 
 /**
  * Parse the account-settings response manually to handle null values
@@ -458,7 +516,7 @@ data class RemotePlaylistDto(
     @SerialName("epg_url")
     val epgUrl: String? = null,
     @SerialName("playlist_type")
-    val playlistType: String = "m3u",
+    val playlistType: String,
     val server: String? = null,
     val username: String? = null,
     @SerialName("has_password")
@@ -497,11 +555,43 @@ data class SavePlaylistRequest(
     @SerialName("epg_url")
     val epgUrl: String? = null,
     @SerialName("playlist_type")
-    val playlistType: String = "m3u",
+    val playlistType: String,
     val server: String? = null,
     val username: String? = null,
     val password: String? = null,
 )
+
+@Serializable
+data class ValidateEpgRequest(
+    @SerialName("epg_url")
+    val epgUrl: String,
+)
+
+@Serializable
+data class EpgValidationResponse(
+    val success: Boolean = false,
+    val status: String? = null,
+    val message: String? = null,
+    @SerialName("http_status")
+    val httpStatus: Int? = null,
+    @SerialName("content_type")
+    val contentType: String? = null,
+    @SerialName("channel_count")
+    val channelCount: Int? = null,
+    @SerialName("programme_count")
+    val programmeCount: Int? = null,
+    @SerialName("bytes_checked")
+    val bytesChecked: Long? = null,
+) {
+    fun displayMessage(): String {
+        return message?.takeIf { it.isNotBlank() }
+            ?: if (success) {
+                "EPG data found."
+            } else {
+                "EPG check failed."
+            }
+    }
+}
 
 @Serializable
 data class SaveIntegrationRequest(

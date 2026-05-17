@@ -244,6 +244,7 @@ class SecretsTransferApplier(
                         username = p.username!!,
                         password = p.password!!,
                         id = p.playlistId,
+                        epgUrl = p.epgUrl,
                     )
                     "m3u" -> channelRepo!!.saveM3uPlaylistConfig(
                         name = p.name,

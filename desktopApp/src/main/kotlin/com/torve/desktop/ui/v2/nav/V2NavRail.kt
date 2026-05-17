@@ -182,16 +182,21 @@ private fun NavIcon(
     val containerAlpha by animateFloatAsState(
         targetValue = when {
             selected -> selectedPillAlpha
-            hovered -> 0.42f
+            hovered -> 0.18f
             else -> 0f
         },
         animationSpec = tween(durationMillis = 140),
         label = "navHoverAlpha",
     )
+    val borderAlpha by animateFloatAsState(
+        targetValue = if (hovered || selected) 1f else 0f,
+        animationSpec = tween(durationMillis = 140),
+        label = "navBorderAlpha",
+    )
     Surface(
         modifier = Modifier
             .size(38.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .clip(CircleShape)
             .hoverable(interactionSource = interactionSource)
             .clickable(
                 interactionSource = interactionSource,
@@ -199,7 +204,11 @@ private fun NavIcon(
                 onClick = onClick,
             ),
         color = if (selected) colors.accentContainer.copy(alpha = containerAlpha) else colors.fieldSurface.copy(alpha = containerAlpha),
-        shape = RoundedCornerShape(10.dp),
+        shape = CircleShape,
+        border = androidx.compose.foundation.BorderStroke(
+            if (hovered) 1.5.dp else 1.dp,
+            colors.accent.copy(alpha = borderAlpha),
+        ),
     ) {
         Box(contentAlignment = Alignment.Center) {
             Icon(

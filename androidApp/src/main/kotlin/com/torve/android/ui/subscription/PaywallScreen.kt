@@ -49,6 +49,9 @@ import androidx.compose.ui.unit.dp
 import com.torve.android.BuildConfig
 import com.torve.android.R
 import com.torve.android.billing.BillingManager
+import com.torve.android.billing.isStripeFireTvBillingBuild
+import com.torve.android.billing.launchStripeCheckout
+import com.torve.android.billing.launchStripePortal
 import com.torve.android.premium.PremiumAccess
 import com.torve.android.premium.PremiumFeature
 import com.torve.android.ui.theme.Amber
@@ -79,26 +82,35 @@ fun PaywallScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val purchaseResult by billingManager.purchaseResult.collectAsState()
-    val activity = LocalContext.current as? Activity
+    val context = LocalContext.current
+    val activity = context as? Activity
     val scope = rememberCoroutineScope()
 
     val isAmazonBuild = BuildConfig.FLAVOR.contains("amazon", ignoreCase = true)
     val isTvBuild = BuildConfig.FLAVOR.contains("tv", ignoreCase = true)
+    val useStripeBilling = isStripeFireTvBillingBuild()
     val bypassDeviceGateForMobileDebug = BuildConfig.DEBUG && !isTvBuild
     val platform = when {
+        useStripeBilling -> "stripe_fire_tv"
         isAmazonBuild && isTvBuild -> "amazon_fire_tv"
         isAmazonBuild -> "amazon_appstore_mobile"
         isTvBuild -> "google_play_tv"
         else -> "google_play_mobile"
     }
-    val purchaseStoreLabel = if (isAmazonBuild) "Amazon Appstore" else "Google Play"
+    val purchaseStoreLabel = when {
+        useStripeBilling -> "Stripe"
+        isAmazonBuild -> "Amazon Appstore"
+        else -> "Google Play"
+    }
 
     LaunchedEffect(Unit) {
         viewModel.refreshAccess()
-        // Defensive: ensure billing is initialized when the paywall opens.
-        // BillingManager.initialize() is idempotent and will re-arm the
-        // connection if the app-wide init failed or the service disconnected.
-        billingManager.initialize()
+        if (!useStripeBilling) {
+            // Defensive: ensure billing is initialized when the paywall opens.
+            // BillingManager.initialize() is idempotent and will re-arm the
+            // connection if the app-wide init failed or the service disconnected.
+            billingManager.initialize()
+        }
     }
 
     LaunchedEffect(purchaseResult) {
@@ -131,7 +143,9 @@ fun PaywallScreen(
             }
 
             is BillingManager.PurchaseResult.AlreadyOwned -> {
-                if (isAmazonBuild) {
+                if (useStripeBilling) {
+                    viewModel.refreshAccess()
+                } else if (isAmazonBuild) {
                     viewModel.restoreAmazonPurchases(platform = if (isTvBuild) "amazon_fire_tv" else "amazon_appstore_mobile")
                 } else {
                     viewModel.restoreStorePurchases(
@@ -180,10 +194,13 @@ fun PaywallScreen(
             state = state,
             lockedFeature = lockedFeature,
             purchaseStoreLabel = purchaseStoreLabel,
+            useStripeBilling = useStripeBilling,
             billingManager = billingManager,
             onRestore = {
                 viewModel.requireAccountForRestore(purchaseStoreLabel) {
-                    if (isAmazonBuild) {
+                    if (useStripeBilling) {
+                        viewModel.refreshAccess()
+                    } else if (isAmazonBuild) {
                         viewModel.restoreAmazonPurchases(platform = if (isTvBuild) "amazon_fire_tv" else "amazon_appstore_mobile")
                     } else {
                         // Client-driven Google Play restore. Suspend-query
@@ -217,9 +234,27 @@ fun PaywallScreen(
             onSendVerificationEmail = viewModel::sendVerificationEmail,
             onRefreshAccess = viewModel::refreshAccess,
             onRetryVerification = viewModel::retryPendingAmazonVerification,
+            onManageBilling = {
+                launchStripePortal(
+                    context = context,
+                    viewModel = viewModel,
+                )
+            },
             onPurchase = { productType ->
-                viewModel.requireAccountForPurchase(purchaseStoreLabel) {
-                    activity?.let { billingManager.launchPurchase(it, productType) }
+                val requestedTier = when (productType) {
+                    BillingManager.ProductType.MONTHLY -> SubscriptionTier.MONTHLY
+                    BillingManager.ProductType.LIFETIME -> SubscriptionTier.LIFETIME
+                }
+                viewModel.requireAccountForPurchase(purchaseStoreLabel, requestedTier) {
+                    if (useStripeBilling) {
+                        launchStripeCheckout(
+                            context = context,
+                            viewModel = viewModel,
+                            productType = productType,
+                        )
+                    } else {
+                        activity?.let { billingManager.launchPurchase(it, productType) }
+                    }
                 }
             },
             onRetryBilling = { billingManager.initialize() },
@@ -233,31 +268,59 @@ private fun PaywallContent(
     state: SubscriptionUiState,
     lockedFeature: PremiumFeature?,
     purchaseStoreLabel: String,
+    useStripeBilling: Boolean,
     billingManager: BillingManager,
     onRestore: () -> Unit,
     onManageDevices: () -> Unit,
     onSendVerificationEmail: () -> Unit,
     onRefreshAccess: () -> Unit,
     onRetryVerification: () -> Unit,
+    onManageBilling: () -> Unit,
     onPurchase: (BillingManager.ProductType) -> Unit,
     onRetryBilling: () -> Unit,
     onLogin: () -> Unit,
 ) {
     val billingState by billingManager.billingState.collectAsState()
-    val monthlyOffer = remember(billingState) {
-        billingManager.getOffer(BillingManager.ProductType.MONTHLY)
+    val monthlyOffer = if (useStripeBilling) {
+        remember {
+            BillingManager.BillingOffer(
+                productType = BillingManager.ProductType.MONTHLY,
+                productId = "stripe_monthly",
+                formattedPrice = "Stripe checkout",
+                billingDetails = "Opens secure checkout in your browser",
+            )
+        }
+    } else {
+        remember(billingState) {
+            billingManager.getOffer(BillingManager.ProductType.MONTHLY)
+        }
     }
-    val lifetimeOffer = remember(billingState) {
-        billingManager.getOffer(BillingManager.ProductType.LIFETIME)
+    val lifetimeOffer = if (useStripeBilling) {
+        remember {
+            BillingManager.BillingOffer(
+                productType = BillingManager.ProductType.LIFETIME,
+                productId = "stripe_lifetime",
+                formattedPrice = "Stripe checkout",
+                billingDetails = "Opens secure checkout in your browser",
+            )
+        }
+    } else {
+        remember(billingState) {
+            billingManager.getOffer(BillingManager.ProductType.LIFETIME)
+        }
     }
-    val billingErrorMessage = (billingState as? BillingManager.BillingState.Error)?.message
-    val billingReady = billingState is BillingManager.BillingState.Ready
-    val billingLoading = billingState is BillingManager.BillingState.Connecting ||
+    val billingErrorMessage = if (useStripeBilling) null else (billingState as? BillingManager.BillingState.Error)?.message
+    val billingReady = useStripeBilling || billingState is BillingManager.BillingState.Ready
+    val billingLoading = !useStripeBilling && (billingState is BillingManager.BillingState.Connecting ||
         billingState is BillingManager.BillingState.Connected ||
-        billingState is BillingManager.BillingState.Disconnected
+        billingState is BillingManager.BillingState.Disconnected)
     val purchaseBlocked = state.purchaseVerificationState == PurchaseVerificationState.PENDING
     val purchaseStrings: com.torve.presentation.subscription.PurchaseStringResolver = koinInject()
     val access = state.accessPresentation(purchaseStrings)
+    val currentMarketplace = marketplaceLabel(state.subscription?.platform)
+    val showLifetimeForThisStore = access.shouldShowBuyLifetime &&
+        (!access.hasPremiumEntitlement || currentMarketplace == purchaseStoreLabel)
+    val showAnyBuyForThisStore = access.shouldShowBuyMonthly || showLifetimeForThisStore
 
     Column(
         modifier = Modifier.padding(16.dp),
@@ -348,7 +411,7 @@ private fun PaywallContent(
             )
         }
 
-        if (access.shouldShowBuy) {
+        if (showAnyBuyForThisStore) {
             Spacer(Modifier.height(20.dp))
             when {
                 billingErrorMessage != null && monthlyOffer == null && lifetimeOffer == null -> {
@@ -400,7 +463,7 @@ private fun PaywallContent(
                         Spacer(Modifier.height(12.dp))
                     }
 
-                    if (lifetimeOffer != null && access.shouldShowBuyLifetime) {
+                    if (lifetimeOffer != null && showLifetimeForThisStore) {
                         // When the user already has monthly, surface the
                         // lifetime offer as an explicit upgrade so they
                         // know they're not double-paying.
@@ -474,6 +537,12 @@ private fun PaywallContent(
         if (state.purchaseStatus?.showRetryVerification == true) {
             TextButton(onClick = onRetryVerification) {
                 Text(stringResource(R.string.paywall_retry_verification))
+            }
+        }
+
+        if (useStripeBilling && state.canManageStripeBilling) {
+            TextButton(onClick = onManageBilling) {
+                Text("Manage Stripe billing")
             }
         }
 
@@ -725,10 +794,12 @@ private fun FeatureRow(feature: String, free: Boolean, premium: Boolean) {
 }
 
 private fun marketplaceLabel(value: String?): String? {
-    return when (value?.lowercase()) {
-        "google_play" -> "Google Play"
-        "amazon" -> "Amazon Appstore"
-        "apple" -> "Apple App Store"
+    val normalized = value?.lowercase()?.replace('-', '_') ?: return null
+    return when {
+        normalized.contains("google") -> "Google Play"
+        normalized.contains("amazon") -> "Amazon Appstore"
+        normalized.contains("apple") -> "Apple App Store"
+        normalized.contains("stripe") -> "Stripe"
         else -> null
     }
 }

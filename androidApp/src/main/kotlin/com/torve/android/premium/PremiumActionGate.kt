@@ -1,7 +1,6 @@
 package com.torve.android.premium
 
 import android.content.Context
-import com.torve.android.BuildConfig
 import com.torve.android.R
 import com.torve.domain.repository.PreferencesRepository
 import com.torve.domain.repository.SubscriptionRepository
@@ -9,7 +8,6 @@ import com.torve.domain.repository.SubscriptionRepository
 data class PremiumActionDecision(
     val feature: PremiumFeature,
     val allowed: Boolean,
-    val bypassedForDebug: Boolean = false,
     val message: String,
 )
 
@@ -33,25 +31,12 @@ class PremiumActionGate(
             )
         }
 
-        if (isExplicitDebugBypassEnabled()) {
-            return PremiumActionDecision(
-                feature = feature,
-                allowed = true,
-                bypassedForDebug = true,
-                message = "Debug premium bypass enabled for ${PremiumAccess.titleFor(feature)}.",
-            )
-        }
-
         val allowed = subscriptionRepository.isPro()
         return PremiumActionDecision(
             feature = feature,
             allowed = allowed,
             message = blockedMessageFor(feature),
         )
-    }
-
-    private suspend fun isExplicitDebugBypassEnabled(): Boolean {
-        return BuildConfig.DEBUG && BuildConfig.ALLOW_DEBUG_PREMIUM_BYPASS
     }
 
     private fun blockedMessageFor(feature: PremiumFeature): String {
@@ -67,7 +52,4 @@ class PremiumActionGate(
         }
     }
 
-    companion object {
-        const val KEY_DEBUG_PREMIUM_BYPASS_ENABLED = "torve_debug_premium_bypass_enabled"
-    }
 }

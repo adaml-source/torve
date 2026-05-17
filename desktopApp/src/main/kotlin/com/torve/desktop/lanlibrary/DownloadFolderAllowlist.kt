@@ -48,6 +48,22 @@ class DownloadFolderAllowlist(
     }
 
     /**
+     * Directory-level check for writers that create files after validation.
+     *
+     * [isAllowed] intentionally requires an existing file because it protects
+     * reads. Recording writes need to approve a directory before the target
+     * `.ts` exists, so this accepts a directory when it is either one of the
+     * configured roots or a descendant of one.
+     */
+    fun coversDirectory(path: File): Boolean {
+        val resolved = runCatching { path.canonicalFile }.getOrNull() ?: return false
+        if (!resolved.exists() || !resolved.isDirectory) return false
+        val rs = roots()
+        if (rs.isEmpty()) return false
+        return rs.any { root -> isUnder(resolved, root) }
+    }
+
+    /**
      * Walk parents of [resolved] until we hit [root] or fall off the
      * tree. We compare by canonical absolute path strings to avoid
      * pitfalls of [File.equals] on case-insensitive filesystems.

@@ -12,6 +12,8 @@ data class StartupAccelerationEnvelopeDto(
 
 @Serializable
 data class StartupAccelerationCandidateDto(
+    @SerialName("memory_id")
+    val memoryId: String? = null,
     @SerialName("source_key")
     val sourceKey: String? = null,
     @SerialName("provider_type")
@@ -75,6 +77,27 @@ data class AccelerationOutcomeDto(
     val success: Boolean,
     val infohash: String? = null,
     val quality: String? = null,
+)
+
+@Serializable
+data class StreamHandoffRequestDto(
+    @SerialName("content_id")
+    val contentId: String,
+    @SerialName("memory_id")
+    val memoryId: String,
+)
+
+@Serializable
+data class StreamHandoffResponseDto(
+    val url: String,
+    @SerialName("is_direct")
+    val isDirect: Boolean = false,
+    @SerialName("supports_range")
+    val supportsRange: Boolean = true,
+    @SerialName("stream_id")
+    val streamId: String? = null,
+    @SerialName("expires_in_seconds")
+    val expiresInSeconds: Int? = null,
 )
 
 @Serializable

@@ -437,6 +437,18 @@ DELETE FROM iptv_channel WHERE user_id = :userId AND playlist_id = :playlistId A
 deleteChannelsOlderGenerations:
 DELETE FROM iptv_channel WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id != :generationId;
 
+countChannelsOlderGenerations:
+SELECT COUNT(*) FROM iptv_channel WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id != :generationId;
+
+deleteChannelsOlderGenerationsBatch:
+DELETE FROM iptv_channel
+WHERE rowid IN (
+    SELECT rowid
+    FROM iptv_channel
+    WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id != :generationId
+    LIMIT :batchSize
+);
+
 deleteChannelsForPlaylist:
 DELETE FROM iptv_channel WHERE user_id = :userId AND playlist_id = :playlistId;
 

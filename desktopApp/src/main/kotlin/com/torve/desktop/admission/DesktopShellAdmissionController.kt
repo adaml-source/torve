@@ -7,6 +7,7 @@ import com.torve.domain.repository.ChannelRepository
 import com.torve.domain.repository.PreferencesRepository
 import com.torve.presentation.channels.ChannelsUiState
 import com.torve.presentation.channels.ChannelsViewModel
+import com.torve.presentation.session.AccountSessionCoordinator
 import com.torve.presentation.settings.SettingsUiState
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.setup.SetupUiState
@@ -31,6 +32,7 @@ class DesktopShellAdmissionController(
     private val setupWizardViewModel: SetupWizardViewModel,
     private val prefsRepo: PreferencesRepository,
     private val channelRepository: ChannelRepository,
+    private val accountSessionCoordinator: AccountSessionCoordinator,
 ) {
     companion object {
         private const val KEY_DESKTOP_ONBOARDING_COMPLETED_PREFIX = "desktop_onboarding_completed_"
@@ -249,9 +251,15 @@ class DesktopShellAdmissionController(
         if (url.isBlank()) {
             throw IllegalStateException("Enter a playlist URL or skip Live TV for now.")
         }
-        channelRepository.addPlaylist(
+        val playlist = channelRepository.addPlaylist(
             name = name,
             url = url,
+        )
+        accountSessionCoordinator.savePlaylistToBackend(
+            playlistId = playlist.id,
+            name = playlist.name,
+            url = playlist.url,
+            playlistType = "m3u",
         )
         return true
     }

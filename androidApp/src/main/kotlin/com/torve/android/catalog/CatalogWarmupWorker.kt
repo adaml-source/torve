@@ -12,6 +12,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.torve.android.background.BackgroundWork
+import com.torve.android.epg.EpgWarmupWorker
 import com.torve.data.auth.AuthClient
 import com.torve.data.catalog.CatalogTopCacheWorker
 import com.torve.data.panda.NzbIndexerRow
@@ -77,11 +78,51 @@ class CatalogWarmupWorker(
                 return Result.success()
             }
 
-            val blockNavigation = !lightweight
-            suspend fun progress(label: String, progress: Float) {
+            val defaultBlockNavigation = !lightweight && !credentialImport
+            suspend fun progress(
+                label: String,
+                progress: Float,
+                blockNavigation: Boolean = defaultBlockNavigation,
+            ) {
                 if (visibleProgress) {
                     publishProgress(label, progress, blockNavigation)
                 }
+            }
+
+            if (credentialImport) {
+                progress("Connecting IPTV provider", 0.05f, blockNavigation = true)
+                progress("Loading IPTV catalog", 0.18f, blockNavigation = true)
+                runCatching { refreshPlaylistsForWarmup(catalogOnly = true) }
+
+                progress("IPTV catalog ready", 0.46f, blockNavigation = false)
+                EpgWarmupWorker.refreshNow(applicationContext, blockNavigation = false)
+
+                progress("Preparing live TV shelves", 0.58f, blockNavigation = false)
+                runCatching {
+                    warmLiveBootstrap(
+                        userId = userId,
+                        maxShelfCategories = STAGED_LIVE_SHELF_CATEGORIES,
+                        includeEpg = false,
+                    )
+                }
+                progress("Preparing VOD shelves", 0.72f, blockNavigation = false)
+                runCatching {
+                    warmVodBootstrap(
+                        userId = userId,
+                        maxProviderCategories = STAGED_VOD_PROVIDER_CATEGORIES,
+                        includePinnedShelves = false,
+                    )
+                }
+                progress("Preparing movies and shows", 0.84f, blockNavigation = false)
+                runCatching { warmCatalogRailsBootstrap(userId) }
+                progress("Preparing integrations", 0.92f, blockNavigation = false)
+                runCatching { hydratePandaSecretsForWarmup(authClient) }
+                progress("Cached content ready", 1f, blockNavigation = false)
+                localSettingsRepo.setString(
+                    lightweightWarmupLastSuccessKey(userId),
+                    System.currentTimeMillis().toString(),
+                )
+                return Result.success()
             }
 
             progress("Preparing cached content", 0.05f)
@@ -144,8 +185,21 @@ class CatalogWarmupWorker(
                 System.currentTimeMillis().toString(),
             )
             Result.success()
-        } catch (_: Exception) {
-            Result.retry()
+        } catch (error: Exception) {
+            val visibleProgress = inputData.getBoolean(KEY_VISIBLE_PROGRESS, true)
+            if (visibleProgress) {
+                runCatching {
+                    publishProgress(
+                        label = "Refresh failed",
+                        progress = 1f,
+                        blockNavigation = false,
+                    )
+                }
+                android.util.Log.w("CatalogWarmupWorker", "foreground refresh failed: ${error.message}")
+                Result.failure()
+            } else {
+                Result.retry()
+            }
         }
     }
 
@@ -672,6 +726,8 @@ class CatalogWarmupWorker(
         private const val KEY_MISSING_ONLY = "missing_only"
         private const val KEY_VISIBLE_PROGRESS = "visible_progress"
         private const val CATALOG_RAIL_LIMIT = 24
+        private const val STAGED_LIVE_SHELF_CATEGORIES = 4
+        private const val STAGED_VOD_PROVIDER_CATEGORIES = 4
         private const val IMMEDIATE_LIVE_SHELF_CATEGORIES = 8
         private const val CREDENTIAL_IMPORT_LIVE_SHELF_CATEGORIES = 12
         private const val FULL_LIVE_SHELF_CATEGORIES = 48

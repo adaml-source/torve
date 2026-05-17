@@ -208,7 +208,7 @@ fun V2PersonPage(
                         if (actingOnly.isNotEmpty()) {
                             V2Shelf(title = ds("Acting"), modifier = Modifier.padding(start = 60.dp, end = 16.dp)) {
                                 actingOnly.take(25).forEach { credit ->
-                                    V2PosterCard(credit.title, credit.posterUrl, Modifier.width(160.dp), credit.year?.toString(), credit.rating?.let { String.format("%.1f", it) }, backdropUrl = credit.backdropUrl, overview = credit.overview, onClick = { onOpenDetail(credit) })
+                                    V2PosterCard(credit.title, credit.posterUrl, Modifier.width(160.dp), credit.year?.toString(), credit.rating?.let { String.format("%.1f", it) }, ratings = credit.ratings, backdropUrl = credit.backdropUrl, overview = credit.overview, onClick = { onOpenDetail(credit) })
                                 }
                             }
                         }
@@ -216,7 +216,7 @@ fun V2PersonPage(
                         if (directingCredits.isNotEmpty()) {
                             V2Shelf(title = ds("Directing"), modifier = Modifier.padding(start = 60.dp, end = 16.dp)) {
                                 directingCredits.take(25).forEach { credit ->
-                                    V2PosterCard(credit.title, credit.posterUrl, Modifier.width(160.dp), credit.year?.toString(), credit.rating?.let { String.format("%.1f", it) }, backdropUrl = credit.backdropUrl, overview = credit.overview, onClick = { onOpenDetail(credit) })
+                                    V2PosterCard(credit.title, credit.posterUrl, Modifier.width(160.dp), credit.year?.toString(), credit.rating?.let { String.format("%.1f", it) }, ratings = credit.ratings, backdropUrl = credit.backdropUrl, overview = credit.overview, onClick = { onOpenDetail(credit) })
                                 }
                             }
                         }
@@ -225,7 +225,7 @@ fun V2PersonPage(
                         if (actingOnly.isEmpty() && directingCredits.isEmpty() && state.credits.isNotEmpty()) {
                             V2Shelf(title = ds("Known For"), modifier = Modifier.padding(start = 60.dp, end = 16.dp)) {
                                 state.credits.take(25).forEach { credit ->
-                                    V2PosterCard(credit.title, credit.posterUrl, Modifier.width(160.dp), credit.year?.toString(), credit.rating?.let { String.format("%.1f", it) }, backdropUrl = credit.backdropUrl, overview = credit.overview, onClick = { onOpenDetail(credit) })
+                                    V2PosterCard(credit.title, credit.posterUrl, Modifier.width(160.dp), credit.year?.toString(), credit.rating?.let { String.format("%.1f", it) }, ratings = credit.ratings, backdropUrl = credit.backdropUrl, overview = credit.overview, onClick = { onOpenDetail(credit) })
                                 }
                             }
                         }

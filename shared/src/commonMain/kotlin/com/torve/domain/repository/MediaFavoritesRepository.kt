@@ -9,6 +9,8 @@ data class MediaFavoritesState(
     val favoriteKeys: Set<String> = emptySet(),
     val isLoading: Boolean = false,
     val lastError: String? = null,
+    val version: String? = null,
+    val updatedAt: String? = null,
 )
 
 interface MediaFavoritesRepository {

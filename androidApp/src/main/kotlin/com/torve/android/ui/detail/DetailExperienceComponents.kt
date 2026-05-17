@@ -401,4 +401,4 @@ private fun ParsedStream.isDirectCandidate(): Boolean = directUrl != null
 private fun ParsedStream.isReadyNow(): Boolean = isCached || isDirectCandidate()
 
 internal fun ParsedStream.streamUiKey(): String =
-    accelerationSourceKey ?: directUrl ?: magnetUrl ?: infoHash ?: "$addonName|$title|$quality|${source.orEmpty()}"
+    accelerationMemoryId ?: accelerationSourceKey ?: directUrl ?: magnetUrl ?: infoHash ?: "$addonName|$title|$quality|${source.orEmpty()}"

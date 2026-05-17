@@ -1,10 +1,12 @@
 package com.torve.desktop.di
 
 import com.torve.desktop.platform.DesktopDeviceIdProvider
-import com.torve.desktop.security.DesktopFileSecretStore
+import com.torve.desktop.security.DesktopSecretStore
+import com.torve.desktop.security.DesktopClientTrustSignalProvider
 import com.torve.presentation.subscription.DefaultPurchaseStringResolver
 import com.torve.presentation.subscription.PurchaseStringResolver
 import com.torve.desktop.security.DesktopSyncPayloadEncryptor
+import com.torve.desktop.security.createDesktopSecretStore
 import com.torve.domain.device.DeviceIdProvider
 import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.security.SecureStorage
@@ -16,11 +18,14 @@ import org.koin.dsl.module
 val desktopAppModule = module {
     single { DatabaseDriverFactory() }
     single { NetworkMonitor() }
-    single { DesktopFileSecretStore() }
-    single<IntegrationSecretStore> { get<DesktopFileSecretStore>() }
-    single<SecureStorage> { get<DesktopFileSecretStore>() }
+    single<DesktopSecretStore> { createDesktopSecretStore() }
+    single<IntegrationSecretStore> { get<DesktopSecretStore>() }
+    single<SecureStorage> { get<DesktopSecretStore>() }
     single<SyncPayloadEncryptor> { DesktopSyncPayloadEncryptor(get()) }
     single<DeviceIdProvider> { DesktopDeviceIdProvider() }
+    single<com.torve.domain.security.ClientTrustSignalProvider> {
+        DesktopClientTrustSignalProvider(get())
+    }
     single<PurchaseStringResolver> { DefaultPurchaseStringResolver() }
 
     // ── Phase 3 Slice B + sub-pass 2: credential transfer ────────────

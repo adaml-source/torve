@@ -37,8 +37,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.CastConnected
-import androidx.compose.material.icons.filled.FiberManualRecord
-import androidx.compose.material.icons.filled.StopCircle
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FastForward
@@ -80,6 +78,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
@@ -1328,10 +1327,7 @@ fun VlcComposePlayerSurface(
                             // Record / Stop-recording. Hidden when caller
                             // didn't supply onToggleRecord (e.g. VOD).
                             onToggleRecord?.let { toggleRec ->
-                                PBtn(
-                                    if (isCurrentlyRecording) Icons.Filled.StopCircle
-                                    else Icons.Filled.FiberManualRecord,
-                                ) {
+                                RecordPBtn(isRecording = isCurrentlyRecording) {
                                     toggleRec()
                                     onInteraction()
                                 }
@@ -1844,9 +1840,66 @@ private fun parseJumpTarget(value: String): Long {
 }
 
 @Composable
+private fun RecordPBtn(isRecording: Boolean, onClick: () -> Unit) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val hovered by interactionSource.collectIsHoveredAsState()
+    Surface(
+        Modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .hoverable(interactionSource = interactionSource)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            ),
+        CircleShape,
+        if (isRecording) Color(0xFF8A1F1F) else ChipBg,
+        border = BorderStroke(
+            if (hovered) 1.5.dp else 1.dp,
+            if (hovered) Accent else Color(0xFFFF3B30).copy(alpha = if (isRecording) 0.9f else 0.72f),
+        ),
+    ) {
+        Box(Modifier.fillMaxSize(), Alignment.Center) {
+            if (isRecording) {
+                Box(
+                    Modifier
+                        .size(12.dp)
+                        .background(Color.White, RoundedCornerShape(2.dp)),
+                )
+            } else {
+                Box(
+                    Modifier
+                        .size(16.dp)
+                        .background(Color(0xFFFF2D2D), CircleShape),
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun PBtn(icon: ImageVector, primary: Boolean = false, onClick: () -> Unit) {
     val sz = if (primary) 44.dp else 36.dp; val isz = if (primary) 28.dp else 22.dp
-    Surface(Modifier.size(sz).clickable(onClick = onClick), CircleShape, if (primary) Accent else ChipBg) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val hovered by interactionSource.collectIsHoveredAsState()
+    Surface(
+        Modifier
+            .size(sz)
+            .clip(CircleShape)
+            .hoverable(interactionSource = interactionSource)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            ),
+        CircleShape,
+        if (primary) Accent else ChipBg,
+        border = BorderStroke(
+            if (hovered) 1.5.dp else 0.dp,
+            if (hovered) Accent else Color.Transparent,
+        ),
+    ) {
         Box(Modifier.fillMaxSize(), Alignment.Center) { Icon(icon, null, Modifier.size(isz), if (primary) Color(0xFF060810) else Color.White) }
     }
 }

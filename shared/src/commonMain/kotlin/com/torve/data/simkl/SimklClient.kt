@@ -23,14 +23,16 @@ class SimklClient(
 ) {
     companion object {
         const val BASE_URL = "https://api.simkl.com"
-        const val DEFAULT_CLIENT_ID = "a1ed8e154e3f526ed28d3e5edcfde96f6bbe168f830faa5412563b996e5330aa"
+        // Public OAuth client identifier for SIMKL device-code auth. It is
+        // not a Torve secret and cannot grant premium or resolver access.
+        const val DEFAULT_PUBLIC_CLIENT_ID = "a1ed8e154e3f526ed28d3e5edcfde96f6bbe168f830faa5412563b996e5330aa"
     }
 
-    var clientId: String = DEFAULT_CLIENT_ID
+    var clientId: String = DEFAULT_PUBLIC_CLIENT_ID
         private set
 
     fun setClientId(id: String) {
-        this.clientId = id.ifBlank { DEFAULT_CLIENT_ID }
+        this.clientId = id.ifBlank { DEFAULT_PUBLIC_CLIENT_ID }
     }
 
     // -------------------------------------------------------------------------

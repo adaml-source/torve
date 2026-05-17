@@ -18,8 +18,23 @@ data class MediaFavorite(
 )
 
 fun MediaItem.favoriteMediaKey(): String {
-    val stableId = tmdbId?.toString() ?: id
+    val stableId = stableTmdbIdString() ?: id
+    return "${type.toMediaFavoriteWireValue()}:$stableId"
+}
+
+fun MediaItem.legacyFavoriteMediaKey(): String {
+    val stableId = stableTmdbIdString() ?: id
     return "${type.name}:$stableId"
+}
+
+fun MediaFavorite.canonicalMediaKey(): String {
+    val idPart = tmdbId?.toString() ?: mediaKey.extractTmdbIdFromMediaId() ?: mediaKey.substringAfter(":", mediaKey)
+    return "${mediaType.toMediaFavoriteWireValue()}:$idPart"
+}
+
+fun MediaFavorite.matchesMediaItemFavorite(item: MediaItem): Boolean {
+    val itemKeys = setOf(item.favoriteMediaKey(), item.legacyFavoriteMediaKey())
+    return mediaKey in itemKeys || canonicalMediaKey() in itemKeys
 }
 
 fun MediaItem.toMediaFavorite(
@@ -29,7 +44,7 @@ fun MediaItem.toMediaFavorite(
     return MediaFavorite(
         mediaKey = favoriteMediaKey(),
         mediaType = type,
-        tmdbId = tmdbId,
+        tmdbId = tmdbId ?: id.extractTmdbIdFromMediaId()?.toIntOrNull(),
         imdbId = imdbId,
         title = title,
         posterUrl = posterUrl,
@@ -60,5 +75,17 @@ fun MediaType.toMediaFavoriteWireValue(): String {
     return when (this) {
         MediaType.MOVIE -> "movie"
         MediaType.SERIES -> "series"
+    }
+}
+
+internal fun MediaItem.stableTmdbIdString(): String? {
+    return tmdbId?.toString() ?: id.extractTmdbIdFromMediaId()
+}
+
+internal fun String.extractTmdbIdFromMediaId(): String? {
+    val parts = split(":")
+    if (parts.firstOrNull()?.lowercase() != "tmdb") return null
+    return parts.lastOrNull()?.takeIf { part ->
+        part.isNotBlank() && part.all { it in '0'..'9' }
     }
 }

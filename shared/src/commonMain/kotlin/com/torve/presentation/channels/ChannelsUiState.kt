@@ -50,6 +50,9 @@ data class ChannelsUiState(
     val isLoadingChannels: Boolean = false,
     val isAddingPlaylist: Boolean = false,
     val addPlaylistProgress: PlaylistAddProgress? = null,
+    val isCheckingEpg: Boolean = false,
+    val epgCheckMessage: String? = null,
+    val epgCheckSuccess: Boolean? = null,
     val error: String? = null,
     // Add playlist dialog
     val showAddPlaylist: Boolean = false,

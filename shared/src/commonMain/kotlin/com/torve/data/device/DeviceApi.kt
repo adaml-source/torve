@@ -8,6 +8,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.get
+import io.ktor.client.request.header
 import io.ktor.client.request.patch
 import io.ktor.client.request.parameter
 import io.ktor.client.request.post
@@ -17,6 +18,7 @@ import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import com.torve.domain.model.SubscriptionTier
+import com.torve.domain.security.ClientTrustHeaders
 import com.torve.platform.torveVerboseLog
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -56,9 +58,12 @@ class DeviceApi(
             "ACCESS_STATE fetch_start installationIdPresent=${effectiveInstallationId != null}"
         }
         return try {
+            val trustHeaders = ClientTrustHeaders.capture()
             val response = httpClient.get("${baseUrl()}/me/access-state") {
                 bearerAuth(accessToken)
                 effectiveInstallationId?.let { parameter("installation_id", it) }
+                appendInstallationHeader(effectiveInstallationId)
+                trustHeaders?.appendTo(this)
             }
             if (!response.status.isSuccess()) {
                 torveVerboseLog {
@@ -68,7 +73,7 @@ class DeviceApi(
             }
             val raw = response.bodyAsText()
             torveVerboseLog {
-                "ACCESS_STATE raw_response status=${response.status.value} body=${raw.take(500)}"
+                "ACCESS_STATE response status=${response.status.value} bytes=${raw.length}"
             }
             json.decodeFromString(AccessStateDto.serializer(), raw).also { decoded ->
                 torveVerboseLog {
@@ -85,8 +90,11 @@ class DeviceApi(
     }
 
     suspend fun getDevices(accessToken: String): DeviceListDto {
+        val trustHeaders = ClientTrustHeaders.capture()
         val response = httpClient.get("${baseUrl()}/me/devices") {
             bearerAuth(accessToken)
+            appendInstallationHeader()
+            trustHeaders?.appendTo(this)
         }
         val raw = response.bodyAsText()
         if (!response.status.isSuccess()) {
@@ -101,10 +109,13 @@ class DeviceApi(
         val registrationRoutes = deviceRegistrationRoutes(baseUrl())
         var sawNotFound = false
 
-        registrationRoutes.forEach { route ->
+        for (route in registrationRoutes) {
+            val trustHeaders = ClientTrustHeaders.capture()
             val response = httpClient.post(route) {
                 bearerAuth(accessToken)
                 contentType(ContentType.Application.Json)
+                appendInstallationHeader(device.installation_id)
+                trustHeaders?.appendTo(this)
                 setBody(device)
             }
             val raw = response.bodyAsText()
@@ -131,14 +142,20 @@ class DeviceApi(
     }
 
     suspend fun activateCurrent(accessToken: String): DeviceActivateDto {
+        val trustHeaders = ClientTrustHeaders.capture()
         return httpClient.post("${baseUrl()}/me/devices/activate-current") {
             bearerAuth(accessToken)
+            appendInstallationHeader()
+            trustHeaders?.appendTo(this)
         }.body()
     }
 
     suspend fun removeDevice(accessToken: String, deviceId: String): DeviceRemoveDto {
+        val trustHeaders = ClientTrustHeaders.capture()
         val response = httpClient.post("${baseUrl()}/me/devices/$deviceId/remove") {
             bearerAuth(accessToken)
+            appendInstallationHeader()
+            trustHeaders?.appendTo(this)
         }
         // Backend may return the old DeviceRemoveDto or a plain DeviceOut on success.
         // Treat any 2xx as a successful removal.
@@ -153,12 +170,23 @@ class DeviceApi(
     }
 
     suspend fun renameDevice(accessToken: String, deviceId: String, newName: String): ManagedDeviceDto {
+        val trustHeaders = ClientTrustHeaders.capture()
         val response = httpClient.patch("${baseUrl()}/me/devices/$deviceId") {
             bearerAuth(accessToken)
             contentType(ContentType.Application.Json)
+            appendInstallationHeader()
+            trustHeaders?.appendTo(this)
             setBody(DeviceRenameDto(newName))
         }
         return parseManagedDevicePayload(response.bodyAsText(), currentInstallationIdProvider())
+    }
+
+    private fun io.ktor.client.request.HttpRequestBuilder.appendInstallationHeader(
+        installationId: String? = currentInstallationIdProvider(),
+    ) {
+        installationId?.takeIf { it.isNotBlank() }?.let {
+            header("X-Torve-Installation-Id", it)
+        }
     }
 }
 

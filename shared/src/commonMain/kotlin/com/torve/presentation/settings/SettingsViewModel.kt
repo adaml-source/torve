@@ -32,6 +32,7 @@ import com.torve.data.ratings.OmdbClient
 import com.torve.domain.model.RatingDisplayPrefs
 import com.torve.domain.model.RatingSource
 import com.torve.domain.model.defaultTorveWeights
+import com.torve.domain.diagnostics.DiagnosticsRedactor
 import com.torve.domain.model.StreamPreferences
 import com.torve.domain.model.StreamQuality
 import com.torve.domain.player.DesktopPlaybackHotkeys
@@ -1054,7 +1055,7 @@ class SettingsViewModel(
             }
             traktClient.getUser(refreshed.accessToken)
         }.getOrElse { error ->
-            println("[TraktInit] Token refresh failed: ${error.message}")
+            println("[TraktInit] Token refresh failed: ${DiagnosticsRedactor.redact(error.message)}")
             if (isRateLimitedTraktError(error)) {
                 throw error
             }

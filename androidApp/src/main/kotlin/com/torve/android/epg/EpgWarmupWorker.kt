@@ -13,6 +13,7 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.torve.android.background.BackgroundWork
 import com.torve.data.auth.AuthClient
+import com.torve.domain.diagnostics.DiagnosticsRedactor
 import com.torve.domain.repository.ChannelRepository
 import org.koin.java.KoinJavaComponent.getKoin
 import java.util.concurrent.TimeUnit
@@ -28,6 +29,10 @@ class EpgWarmupWorker(
             if (authClient.getAuthenticatedUser() == null) {
                 return Result.success()
             }
+            val blockNavigation = inputData.getBoolean(
+                BackgroundWork.KEY_BLOCK_NAVIGATION,
+                true,
+            )
 
             val channelRepository: ChannelRepository = getKoin().get()
             val playlists = channelRepository.getPlaylists()
@@ -39,29 +44,55 @@ class EpgWarmupWorker(
                 publishProgress(
                     label = "Refreshing guide data",
                     progress = index.toFloat() / playlists.size.toFloat(),
+                    blockNavigation = blockNavigation,
                 )
                 runCatching {
+                    val channelCount = channelRepository.getTotalChannelCount(playlist.id)
+                    if (channelCount <= 0L) {
+                        android.util.Log.i(
+                            "EpgWarmupWorker",
+                            "skip playlist=${playlist.id} reason=no_catalog_rows",
+                        )
+                        return@runCatching
+                    }
                     android.util.Log.i("EpgWarmupWorker", "refresh playlist=${playlist.id} name=${playlist.name}")
                     channelRepository.refreshEpg(playlist.id)
                     android.util.Log.i("EpgWarmupWorker", "refreshed playlist=${playlist.id}")
                 }.onFailure { error ->
-                    android.util.Log.w("EpgWarmupWorker", "refresh failed playlist=${playlist.id}: ${error.message}")
+                    android.util.Log.w("EpgWarmupWorker", "refresh failed playlist=${playlist.id}: ${DiagnosticsRedactor.redact(error.message)}")
                 }
             }
-            publishProgress("Guide data ready", 1f)
+            publishProgress("Guide data ready", 1f, blockNavigation = blockNavigation)
 
             Result.success()
-        } catch (_: Exception) {
-            Result.retry()
+        } catch (error: Exception) {
+            val immediateRefresh = inputData.getBoolean(KEY_IMMEDIATE_REFRESH, false)
+            if (immediateRefresh) {
+                runCatching {
+                    publishProgress(
+                        label = "Guide refresh failed",
+                        progress = 1f,
+                        blockNavigation = false,
+                    )
+                }
+                android.util.Log.w("EpgWarmupWorker", "foreground refresh failed: ${DiagnosticsRedactor.redact(error.message)}")
+                Result.failure()
+            } else {
+                Result.retry()
+            }
         }
     }
 
-    private suspend fun publishProgress(label: String, progress: Float) {
+    private suspend fun publishProgress(
+        label: String,
+        progress: Float,
+        blockNavigation: Boolean,
+    ) {
         setProgress(
             workDataOf(
                 BackgroundWork.KEY_LABEL to label,
                 BackgroundWork.KEY_PROGRESS to progress.coerceIn(0f, 1f),
-                BackgroundWork.KEY_BLOCK_NAVIGATION to true,
+                BackgroundWork.KEY_BLOCK_NAVIGATION to blockNavigation,
             ),
         )
     }
@@ -71,6 +102,7 @@ class EpgWarmupWorker(
         private const val LEGACY_IMMEDIATE_WORK_NAME = "epg_warmup_worker_immediate"
         private const val WORK_NAME = "epg_warmup_worker_silent_v2"
         private const val IMMEDIATE_WORK_NAME = "epg_warmup_worker_immediate_v2"
+        private const val KEY_IMMEDIATE_REFRESH = "immediate_refresh"
 
         fun schedule(context: Context) {
             val periodicConstraints = Constraints.Builder()
@@ -94,12 +126,21 @@ class EpgWarmupWorker(
             )
         }
 
-        fun refreshNow(context: Context) {
+        fun refreshNow(
+            context: Context,
+            blockNavigation: Boolean = true,
+        ) {
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
                 .build()
             val request = OneTimeWorkRequestBuilder<EpgWarmupWorker>()
                 .setConstraints(constraints)
+                .setInputData(
+                    workDataOf(
+                        BackgroundWork.KEY_BLOCK_NAVIGATION to blockNavigation,
+                        KEY_IMMEDIATE_REFRESH to true,
+                    ),
+                )
                 .addTag(BackgroundWork.TAG_HEAVY_PRELOAD)
                 .build()
             WorkManager.getInstance(context).enqueueUniqueWork(

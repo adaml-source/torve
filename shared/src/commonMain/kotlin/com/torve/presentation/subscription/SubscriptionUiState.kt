@@ -113,6 +113,12 @@ fun PendingAmazonVerification.toPurchaseStatusMessage(
 data class SubscriptionUiState(
     val subscription: Subscription? = null,
     val isPro: Boolean = false,
+    val premiumSource: String? = null,
+    val isLifetime: Boolean = false,
+    val isStripeMonthly: Boolean = false,
+    val canBuyMonthly: Boolean = true,
+    val canBuyLifetime: Boolean = true,
+    val canManageStripeBilling: Boolean = false,
     val isLoading: Boolean = false,
     val isPurchasing: Boolean = false,
     val isLoggedIn: Boolean = false,
@@ -136,6 +142,53 @@ data class SubscriptionUiState(
     val purchaseStatus: PurchaseStatusMessage? = null,
     val pendingAmazonVerification: PendingAmazonVerification? = null,
 )
+
+data class SubscriptionBillingPolicy(
+    val premiumSource: String?,
+    val isLifetime: Boolean,
+    val isStripeMonthly: Boolean,
+    val canBuyMonthly: Boolean,
+    val canBuyLifetime: Boolean,
+    val canManageStripeBilling: Boolean,
+)
+
+internal fun deriveSubscriptionBillingPolicy(
+    subscription: Subscription?,
+    hasEntitlement: Boolean,
+): SubscriptionBillingPolicy {
+    val tier = subscription?.tier ?: SubscriptionTier.FREE
+    val normalizedSource = subscription?.platform
+        ?.trim()
+        ?.lowercase()
+        ?.replace('-', '_')
+    val hasPremium = hasEntitlement || tier == SubscriptionTier.MONTHLY || tier == SubscriptionTier.LIFETIME
+    val isStripe = normalizedSource?.contains("stripe") == true
+    val isLifetime = hasPremium && tier == SubscriptionTier.LIFETIME
+    val isStripeMonthly = hasPremium && tier == SubscriptionTier.MONTHLY && isStripe
+    return SubscriptionBillingPolicy(
+        premiumSource = subscription?.platform,
+        isLifetime = isLifetime,
+        isStripeMonthly = isStripeMonthly,
+        canBuyMonthly = !hasPremium,
+        canBuyLifetime = !hasPremium || isStripeMonthly,
+        canManageStripeBilling = hasPremium && isStripe,
+    )
+}
+
+internal fun SubscriptionUiState.withDerivedBillingPolicy(
+    subscription: Subscription? = this.subscription,
+    hasEntitlement: Boolean = this.hasEntitlement,
+): SubscriptionUiState {
+    val policy = deriveSubscriptionBillingPolicy(subscription, hasEntitlement)
+    return copy(
+        premiumSource = policy.premiumSource,
+        isLifetime = policy.isLifetime,
+        isStripeMonthly = policy.isStripeMonthly,
+        canBuyMonthly = policy.canBuyMonthly,
+        canBuyLifetime = policy.canBuyLifetime,
+        canManageStripeBilling = policy.canManageStripeBilling,
+    )
+}
 
 enum class PremiumSurfaceAction {
     BUY_MONTHLY,
@@ -229,14 +282,9 @@ fun SubscriptionUiState.accessPresentation(
             strings.freeHelperText()
     }
 
-    val isAlreadyLifetime = tier == SubscriptionTier.LIFETIME && hasPremiumEntitlement
-    val isKnownMonthly = tier == SubscriptionTier.MONTHLY && hasPremiumEntitlement
-    val showBuyMonthly = !isCheckingAccess && !hasPremiumEntitlement
-    // Lifetime is the only product that meaningfully upgrades over an
-    // existing monthly entitlement, so show its button whenever the user
-    // is known to have monthly. Unknown premium entitlement states hide
-    // buy buttons to avoid prompting already-paying users to re-buy.
-    val showBuyLifetime = !isCheckingAccess && (!hasPremiumEntitlement || (isKnownMonthly && !isAlreadyLifetime))
+    val billingPolicy = deriveSubscriptionBillingPolicy(subscription, hasPremiumEntitlement)
+    val showBuyMonthly = !isCheckingAccess && billingPolicy.canBuyMonthly
+    val showBuyLifetime = !isCheckingAccess && billingPolicy.canBuyLifetime
 
     return SubscriptionAccessPresentation(
         hasPremiumEntitlement = hasPremiumEntitlement,

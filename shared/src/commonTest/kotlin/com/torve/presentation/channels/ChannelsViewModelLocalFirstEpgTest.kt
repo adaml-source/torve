@@ -278,7 +278,14 @@ private class EpgFakeChannelRepository(
         id: String?,
         onProgress: ((com.torve.domain.repository.PlaylistAddProgress) -> Unit)?,
     ): ChannelPlaylist = error("Not used")
-    override suspend fun addXtreamPlaylist(name: String, server: String, username: String, password: String, id: String?): ChannelPlaylist = error("Not used")
+    override suspend fun addXtreamPlaylist(
+        name: String,
+        server: String,
+        username: String,
+        password: String,
+        id: String?,
+        epgUrl: String?,
+    ): ChannelPlaylist = error("Not used")
     override suspend fun removePlaylist(id: String) { persistedChannels.remove(id) }
     override suspend fun updatePlaylistEpgUrl(playlistId: String, epgUrl: String?) = Unit
     override suspend fun addFavorite(channel: Channel) { favorites[stableChannelId(channel)] = channel }

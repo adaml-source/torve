@@ -16,8 +16,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -52,19 +56,18 @@ fun TorveFilterChip(
     modifier: Modifier = Modifier,
 ) {
     val colors = TorveDesktopThemeTokens.colors
-    val radii = TorveDesktopThemeTokens.radii
     val interactionSource = remember { MutableInteractionSource() }
     val hovered by interactionSource.collectIsHoveredAsState()
     val container by animateColorAsState(
-        if (selected) colors.accentContainer
-        else if (hovered) colors.fieldSurface.copy(alpha = 0.94f)
-        else colors.fieldSurface,
+        if (selected) colors.accentContainerStrong.copy(alpha = 0.86f)
+        else if (hovered) colors.accentContainer.copy(alpha = 0.30f)
+        else colors.fieldSurface.copy(alpha = 0.82f),
         label = "filterChipContainer",
     )
     val border by animateColorAsState(
         if (selected) colors.accent
-        else if (hovered) colors.borderStrong
-        else colors.borderSubtle,
+        else if (hovered) colors.accent.copy(alpha = 0.72f)
+        else colors.borderSubtle.copy(alpha = 0.72f),
         label = "filterChipBorder",
     )
     val textColor by animateColorAsState(
@@ -73,7 +76,7 @@ fun TorveFilterChip(
     )
     Surface(
         modifier = modifier
-            .clip(RoundedCornerShape(radii.md))
+            .clip(CircleShape)
             .hoverable(interactionSource = interactionSource)
             .clickable(
                 interactionSource = interactionSource,
@@ -81,12 +84,12 @@ fun TorveFilterChip(
                 onClick = onClick,
             ),
         color = container,
-        shape = RoundedCornerShape(radii.md),
+        shape = CircleShape,
         border = androidx.compose.foundation.BorderStroke(1.dp, border),
     ) {
         Text(
             text = text,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            modifier = Modifier.padding(horizontal = 15.dp, vertical = 9.dp),
             style = MaterialTheme.typography.labelLarge,
             color = textColor,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
@@ -170,20 +173,19 @@ fun TorveIconButton(
     content: @Composable () -> Unit,
 ) {
     val colors = TorveDesktopThemeTokens.colors
-    val radii = TorveDesktopThemeTokens.radii
     val interactionSource = remember { MutableInteractionSource() }
     val hovered by interactionSource.collectIsHoveredAsState()
     val container by animateColorAsState(
-        if (hovered) colors.fieldSurface.copy(alpha = 0.96f) else colors.fieldSurface.copy(alpha = 0.8f),
+        if (hovered) colors.fieldSurface.copy(alpha = 0.72f) else colors.fieldSurface.copy(alpha = 0.8f),
         label = "iconButtonContainer",
     )
     val border by animateColorAsState(
-        if (hovered) colors.borderStrong else colors.borderSubtle.copy(alpha = 0.55f),
+        if (hovered) colors.accent else colors.borderSubtle.copy(alpha = 0.55f),
         label = "iconButtonBorder",
     )
     Surface(
         modifier = modifier
-            .clip(RoundedCornerShape(radii.md))
+            .clip(CircleShape)
             .hoverable(interactionSource = interactionSource)
             .clickable(
                 interactionSource = interactionSource,
@@ -192,8 +194,8 @@ fun TorveIconButton(
                 onClick = onClick,
             ),
         color = container,
-        shape = RoundedCornerShape(radii.md),
-        border = androidx.compose.foundation.BorderStroke(1.dp, border),
+        shape = CircleShape,
+        border = androidx.compose.foundation.BorderStroke(if (hovered) 1.5.dp else 1.dp, border),
     ) {
         Box(
             modifier = Modifier.padding(10.dp),
@@ -288,6 +290,7 @@ fun TorveTextField(
     visualTransformation: VisualTransformation = VisualTransformation.None,
     onSubmit: (() -> Unit)? = null,
     placeholder: String? = null,
+    leadingIcon: (@Composable () -> Unit)? = null,
     trailingIcon: (@Composable () -> Unit)? = null,
 ) {
     val colors = TorveDesktopThemeTokens.colors
@@ -310,6 +313,7 @@ fun TorveTextField(
         readOnly = readOnly,
         label = { Text(label) },
         placeholder = placeholder?.let { p -> { Text(p) } },
+        leadingIcon = leadingIcon,
         trailingIcon = trailingIcon,
         shape = RoundedCornerShape(radii.md),
         keyboardOptions = keyboardOptions,
@@ -337,11 +341,20 @@ fun TorveSearchField(
     modifier: Modifier = Modifier,
     placeholder: String = "Search Torve",
 ) {
+    val colors = TorveDesktopThemeTokens.colors
     TorveTextField(
         value = value,
         onValueChange = onValueChange,
         label = placeholder,
         modifier = modifier,
+        placeholder = placeholder,
+        leadingIcon = {
+            Icon(
+                Icons.Filled.Search,
+                contentDescription = null,
+                tint = colors.textMuted,
+            )
+        },
     )
 }
 

@@ -103,10 +103,12 @@ import com.torve.domain.repository.AddonRepository
 import com.torve.presentation.channels.EpgState
 import com.torve.presentation.channels.ChannelsUiState
 import com.torve.presentation.channels.ChannelsViewModel
+import com.torve.presentation.session.AccountSessionCoordinator
 import com.torve.presentation.settings.AppLanguage
 import com.torve.presentation.settings.SettingsUiState
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.settings.ThemeMode
+import com.torve.presentation.subscription.accessPresentation
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -164,6 +166,7 @@ fun V2SettingsPage(
     authController: DesktopAuthController,
     settingsState: SettingsUiState,
     settingsViewModel: SettingsViewModel,
+    accountSessionCoordinator: AccountSessionCoordinator,
     channelsState: ChannelsUiState,
     channelsViewModel: ChannelsViewModel,
     addonRepository: AddonRepository,
@@ -307,6 +310,7 @@ fun V2SettingsPage(
                 SettingsCategory.INTEGRATIONS -> IntegrationsSection(
                     settingsState = settingsState,
                     settingsViewModel = settingsViewModel,
+                    accountSessionCoordinator = accountSessionCoordinator,
                     kodiName = kodiName,
                     onKodiNameChange = { kodiName = it },
                     kodiIp = kodiIp,
@@ -991,39 +995,64 @@ private fun RatingsSection(
 private fun SubscriptionSection() {
     val accessState by com.torve.desktop.premium.DesktopPremiumStateHolder.accessState.collectAsState()
     val hasPremium by com.torve.desktop.premium.DesktopPremiumStateHolder.hasPremium.collectAsState()
+    val subscriptionViewModel = remember {
+        org.koin.mp.KoinPlatform.getKoin()
+            .get<com.torve.presentation.subscription.SubscriptionViewModel>()
+    }
+    val subscriptionState by subscriptionViewModel.state.collectAsState()
+    val subscriptionAccess = subscriptionState.accessPresentation()
     val colors = TorveDesktopThemeTokens.colors
+
+    LaunchedEffect(subscriptionViewModel) {
+        subscriptionViewModel.refreshAccess()
+        com.torve.desktop.premium.DesktopPremiumStateHolder.refreshNow()
+    }
 
     val tier = accessState?.access_tier
         ?: accessState?.entitlement_type
-        ?: if (hasPremium) "premium" else "free"
+        ?: subscriptionState.subscription?.tier?.name?.lowercase()
+        ?: if (subscriptionAccess.hasPremiumEntitlement || hasPremium) "premium" else "free"
     val tierLabel = when (tier.lowercase()) {
         "free" -> "Free"
         "premium" -> "Premium"
         "pro" -> "Pro"
+        "premium_lifetime" -> "Lifetime"
+        "lifetime_access" -> "Lifetime"
         "lifetime" -> "Lifetime"
+        "premium_subscription" -> "Monthly"
+        "monthly" -> "Monthly"
         else -> tier.replaceFirstChar { it.uppercase() }
     }
     val expiry = accessState?.expires_at
     val granted = accessState?.granted_at
     val autoRenew = accessState?.auto_renew
-    val source = accessState?.source
+    val source = accessState?.source ?: subscriptionState.subscription?.platform
+    val sourceLabel = desktopBillingSourceLabel(source)
     val deviceLimit = accessState?.resolvedDeviceLimit()
     val deviceCapOverride = accessState?.resolvedDeviceCapOverride()
+    val hasPremiumEntitlement = subscriptionAccess.hasPremiumEntitlement || hasPremium
+    val checkoutBlocked = subscriptionState.isPurchasing ||
+        subscriptionState.isLoading ||
+        subscriptionState.purchaseVerificationState == com.torve.presentation.subscription.PurchaseVerificationState.PENDING
+    val stripeManaged = source?.lowercase()?.contains("stripe") == true
+    val isMonthlyPlan = tier.lowercase() in setOf("premium_subscription", "monthly", "subscription_monthly")
+    val canBuyMonthly = !hasPremiumEntitlement
+    val canBuyLifetime = !hasPremiumEntitlement || (hasPremiumEntitlement && stripeManaged && isMonthlyPlan)
 
     TorveSectionCard(
         title = "Subscription",
-        supportingText = "Your Torve plan, expiry, and renewal status.",
+        supportingText = "Your Torve plan, expiry, and renewal status. Premium is activated only after Torve confirms backend access.",
     ) {
         TorveListRow(
             title = "Plan",
             subtitle = listOfNotNull(
-                source?.let { "via ${it.replaceFirstChar { c -> c.uppercase() }}" },
+                sourceLabel?.let { "via $it" },
                 if (autoRenew == true) "auto-renew on" else if (autoRenew == false) "auto-renew off" else null,
             ).joinToString(" · ").ifBlank { "-" },
             trailing = {
                 TorveBadge(
                     text = tierLabel,
-                    tone = if (hasPremium) TorveBadgeTone.Success else TorveBadgeTone.Neutral,
+                    tone = if (hasPremiumEntitlement) TorveBadgeTone.Success else TorveBadgeTone.Neutral,
                 )
             },
         )
@@ -1047,37 +1076,86 @@ private fun SubscriptionSection() {
             title = "Device cap override",
             subtitle = deviceCapOverride?.toString() ?: "null",
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (!hasPremium) {
+        Text(
+            text = "Torve sells premium software access only. Torve does not sell, host, provide, or bundle third-party content, IPTV subscriptions, playlists, movies, series, or live TV.",
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.textSecondary,
+        )
+        subscriptionState.purchaseStatus?.let { status ->
+            TorveBanner(
+                title = status.title,
+                description = status.message,
+                tone = desktopPurchaseTone(status.tone),
+            )
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (canBuyMonthly) {
                 TorvePrimaryButton(
-                    text = "Upgrade",
+                    text = "Monthly Premium",
+                    enabled = !checkoutBlocked,
                     onClick = {
-                        runCatching {
-                            java.awt.Desktop.getDesktop().browse(
-                                java.net.URI("https://torve.app/app/premium.html"),
-                            )
-                        }
-                        com.torve.desktop.premium.DesktopPremiumStateHolder.pollAggressivelyFor(seconds = 300)
+                        com.torve.desktop.premium.startDesktopStripeCheckout(
+                            com.torve.data.billing.StripePurchaseType.MONTHLY,
+                        )
                     },
                 )
-            } else {
-                TorveGhostButton(
-                    text = "Manage subscription",
+            }
+            if (canBuyLifetime) {
+                TorveSecondaryButton(
+                    text = if (hasPremiumEntitlement) "Upgrade to Lifetime" else "Lifetime Premium",
+                    enabled = !checkoutBlocked,
                     onClick = {
-                        runCatching {
-                            java.awt.Desktop.getDesktop().browse(
-                                java.net.URI("https://torve.app/app/premium.html"),
-                            )
-                        }
+                        com.torve.desktop.premium.startDesktopStripeCheckout(
+                            com.torve.data.billing.StripePurchaseType.LIFETIME,
+                        )
                     },
+                )
+            }
+            if (hasPremiumEntitlement && stripeManaged) {
+                TorveGhostButton(
+                    text = "Manage billing",
+                    enabled = !checkoutBlocked,
+                    onClick = {
+                        com.torve.desktop.premium.startDesktopStripePortal()
+                    },
+                )
+            } else if (!canBuyMonthly && !canBuyLifetime) {
+                TorveBadge(
+                    text = sourceLabel?.let { "Billing managed by $it" } ?: "Premium active",
+                    tone = TorveBadgeTone.Success,
                 )
             }
             TorveGhostButton(
                 text = "Refresh",
-                onClick = { com.torve.desktop.premium.DesktopPremiumStateHolder.refreshNow() },
+                enabled = !subscriptionState.isLoading,
+                onClick = {
+                    subscriptionViewModel.refreshAccess()
+                    com.torve.desktop.premium.DesktopPremiumStateHolder.refreshNow()
+                },
             )
         }
     }
+}
+
+private fun desktopBillingSourceLabel(source: String?): String? {
+    val normalized = source?.trim()?.lowercase()?.replace('-', '_') ?: return null
+    return when {
+        normalized.contains("stripe") -> "Stripe"
+        normalized.contains("google") -> "Google Play"
+        normalized.contains("amazon") -> "Amazon Appstore"
+        normalized.contains("apple") -> "Apple App Store"
+        normalized == "backend" || normalized == "admin" -> "Torve"
+        normalized.isBlank() -> null
+        else -> source.replaceFirstChar { it.uppercase() }
+    }
+}
+
+private fun desktopPurchaseTone(
+    tone: com.torve.presentation.subscription.PurchaseStatusTone,
+): TorveBannerTone = when (tone) {
+    com.torve.presentation.subscription.PurchaseStatusTone.INFO -> TorveBannerTone.Info
+    com.torve.presentation.subscription.PurchaseStatusTone.SUCCESS -> TorveBannerTone.Success
+    com.torve.presentation.subscription.PurchaseStatusTone.ERROR -> TorveBannerTone.Error
 }
 
 private fun formatIsoDateForDisplay(iso: String): String {
@@ -1178,6 +1256,7 @@ private fun AccountSection(
 private fun IntegrationsSection(
     settingsState: SettingsUiState,
     settingsViewModel: SettingsViewModel,
+    accountSessionCoordinator: AccountSessionCoordinator,
     kodiName: String,
     onKodiNameChange: (String) -> Unit,
     kodiIp: String,
@@ -1193,20 +1272,16 @@ private fun IntegrationsSection(
                 title = "Premium required to save integrations",
                 description = "Trakt, Simkl, debrid, Panda, and Kodi credentials sync to your Torve account on a Premium plan. Read-only access to already-saved integrations remains available - saving / connecting new ones is gated. Upgrade at torve.app.",
                 onUpgrade = {
-                    runCatching {
-                        java.awt.Desktop.getDesktop().browse(
-                            java.net.URI("https://torve.app/app/premium.html"),
-                        )
-                    }
+                    com.torve.desktop.premium.startDesktopStripeCheckout()
                 },
             )
         }
         PandaSection(onOpenPandaSetup = onOpenPandaSetup)
         TraktSection(settingsState, settingsViewModel)
         SimklSection(settingsState, settingsViewModel)
-        AiSection(settingsState, settingsViewModel)
-        MetadataKeysSection(settingsState, settingsViewModel)
-        MediaServersSection(settingsState, settingsViewModel)
+        AiSection(settingsState, settingsViewModel, accountSessionCoordinator)
+        MetadataKeysSection(settingsState, settingsViewModel, accountSessionCoordinator)
+        MediaServersSection(settingsState, settingsViewModel, accountSessionCoordinator)
         KodiSection(
             settingsState = settingsState,
             settingsViewModel = settingsViewModel,
@@ -1361,7 +1436,9 @@ private fun SimklSection(
 private fun AiSection(
     settingsState: SettingsUiState,
     settingsViewModel: SettingsViewModel,
+    accountSessionCoordinator: AccountSessionCoordinator,
 ) {
+    val scope = rememberCoroutineScope()
     TorveSectionCard(
         title = ds("AI Services"),
         supportingText = ds("Provider selection and API key validation are available directly on desktop."),
@@ -1383,7 +1460,19 @@ private fun AiSection(
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             TorvePrimaryButton(
                 text = ds("Save and Validate"),
-                onClick = settingsViewModel::saveAndValidateAiApiKey,
+                onClick = {
+                    settingsViewModel.saveAndValidateAiApiKey()
+                    val apiKey = settingsState.activeAiApiKey
+                    if (apiKey.isNotBlank()) {
+                        scope.launch {
+                            accountSessionCoordinator.saveIntegrationToBackend(
+                                integrationType = "${settingsState.aiProvider.name}_API_KEY",
+                                credentials = mapOf("api_key" to apiKey),
+                                displayIdentifier = settingsState.aiProvider.label,
+                            )
+                        }
+                    }
+                },
                 enabled = settingsState.activeAiApiKey.isNotBlank() && !settingsState.aiKeyValidating,
             )
         }
@@ -1404,7 +1493,9 @@ private fun AiSection(
 private fun MetadataKeysSection(
     settingsState: SettingsUiState,
     settingsViewModel: SettingsViewModel,
+    accountSessionCoordinator: AccountSessionCoordinator,
 ) {
+    val scope = rememberCoroutineScope()
     TorveSectionCard(
         title = ds("Metadata APIs"),
         supportingText = ds("OMDb and MDBList keys are editable on desktop instead of being website-only."),
@@ -1419,7 +1510,19 @@ private fun MetadataKeysSection(
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             TorvePrimaryButton(
                 text = ds("Save and Validate OMDb"),
-                onClick = settingsViewModel::saveAndValidateOmdbApiKey,
+                onClick = {
+                    settingsViewModel.saveAndValidateOmdbApiKey()
+                    val apiKey = settingsState.omdbApiKey
+                    if (apiKey.isNotBlank()) {
+                        scope.launch {
+                            accountSessionCoordinator.saveIntegrationToBackend(
+                                integrationType = "OMDB_API_KEY",
+                                credentials = mapOf("api_key" to apiKey),
+                                displayIdentifier = "OMDB",
+                            )
+                        }
+                    }
+                },
                 enabled = settingsState.omdbApiKey.isNotBlank() && !settingsState.omdbValidating,
             )
         }
@@ -1438,9 +1541,25 @@ private fun MetadataKeysSection(
             visualTransformation = PasswordVisualTransformation(),
         )
         Text(
-            text = ds("MDBList is saved directly as you edit the field."),
+            text = ds("MDBList is saved locally as you edit the field."),
             style = MaterialTheme.typography.bodySmall,
             color = TorveDesktopThemeTokens.colors.textSecondary,
+        )
+        TorvePrimaryButton(
+            text = ds("Save MDBList"),
+            onClick = {
+                val apiKey = settingsState.mdblistApiKey
+                if (apiKey.isNotBlank()) {
+                    scope.launch {
+                        accountSessionCoordinator.saveIntegrationToBackend(
+                            integrationType = "MDBLIST_API_KEY",
+                            credentials = mapOf("api_key" to apiKey),
+                            displayIdentifier = "MDBList",
+                        )
+                    }
+                }
+            },
+            enabled = settingsState.mdblistApiKey.isNotBlank(),
         )
     }
 }
@@ -1449,7 +1568,9 @@ private fun MetadataKeysSection(
 private fun MediaServersSection(
     settingsState: SettingsUiState,
     settingsViewModel: SettingsViewModel,
+    accountSessionCoordinator: AccountSessionCoordinator,
 ) {
+    val scope = rememberCoroutineScope()
     val noneLabel = ds("None")
     TorveSectionCard(
         title = ds("Jellyfin and Plex"),
@@ -1471,7 +1592,20 @@ private fun MediaServersSection(
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             TorvePrimaryButton(
                 text = ds("Save and Test Jellyfin"),
-                onClick = settingsViewModel::saveAndTestJellyfinConnection,
+                onClick = {
+                    settingsViewModel.saveAndTestJellyfinConnection()
+                    val apiKey = settingsState.jellyfinApiKey
+                    if (apiKey.isNotBlank()) {
+                        scope.launch {
+                            accountSessionCoordinator.saveIntegrationToBackend(
+                                integrationType = "JELLYFIN_API_KEY",
+                                credentials = mapOf("api_key" to apiKey),
+                                displayIdentifier = "Jellyfin",
+                                config = mapOf("server_url" to settingsState.jellyfinServerUrl),
+                            )
+                        }
+                    }
+                },
                 enabled = settingsState.jellyfinServerUrl.isNotBlank() && settingsState.jellyfinApiKey.isNotBlank(),
             )
         }
@@ -1509,7 +1643,20 @@ private fun MediaServersSection(
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             TorvePrimaryButton(
                 text = ds("Save and Connect Plex"),
-                onClick = settingsViewModel::saveAndConnectPlex,
+                onClick = {
+                    settingsViewModel.saveAndConnectPlex()
+                    val token = settingsState.plexAccessToken
+                    if (token.isNotBlank()) {
+                        scope.launch {
+                            accountSessionCoordinator.saveIntegrationToBackend(
+                                integrationType = "PLEX_ACCESS_TOKEN",
+                                credentials = mapOf("access_token" to token),
+                                displayIdentifier = "Plex",
+                                config = mapOf("server_url" to settingsState.plexServerUrl),
+                            )
+                        }
+                    }
+                },
                 enabled = settingsState.plexServerUrl.isNotBlank() && settingsState.plexAccessToken.isNotBlank() && !settingsState.plexLoading,
             )
             TorveGhostButton(
@@ -1626,11 +1773,7 @@ private fun AddonsSection(
                 title = ds("Premium required to install add-ons"),
                 description = ds("Free accounts can browse and use already-installed add-ons. Installing new add-ons, saving credentials, and cross-device sync need a Torve subscription. Upgrade at torve.app."),
                 onUpgrade = {
-                    runCatching {
-                        java.awt.Desktop.getDesktop().browse(
-                            java.net.URI("https://torve.app/app/premium.html"),
-                        )
-                    }
+                    com.torve.desktop.premium.startDesktopStripeCheckout()
                 },
             )
         }
@@ -1757,7 +1900,9 @@ private fun PlaylistsSection(
     onOpenRecordings: () -> Unit,
 ) {
     val selectedPlaylist = channelsState.playlists.firstOrNull { it.id == channelsState.selectedPlaylistId }
+    val selectedM3uPlaylist = selectedPlaylist?.takeIf { it.type == PlaylistType.M3U }
     val hasPremium = com.torve.desktop.premium.rememberHasPremium()
+    var selectedPlaylistEpgDraft by remember { mutableStateOf("") }
 
     LaunchedEffect(channelsState.playlists, channelsState.selectedPlaylistId) {
         if (channelsState.selectedPlaylistId == null) {
@@ -1769,6 +1914,9 @@ private fun PlaylistsSection(
             channelsViewModel.ensureEpgLoaded()
         }
     }
+    LaunchedEffect(selectedM3uPlaylist?.id, selectedM3uPlaylist?.epgUrl) {
+        selectedPlaylistEpgDraft = selectedM3uPlaylist?.epgUrl.orEmpty()
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         if (!hasPremium) {
@@ -1776,11 +1924,7 @@ private fun PlaylistsSection(
                 title = ds("Premium required to manage playlists"),
                 description = ds("Reading existing playlists is free. Adding, syncing, or storing IPTV credentials needs Torve Premium. Upgrade at torve.app."),
                 onUpgrade = {
-                    runCatching {
-                        java.awt.Desktop.getDesktop().browse(
-                            java.net.URI("https://torve.app/app/premium.html"),
-                        )
-                    }
+                    com.torve.desktop.premium.startDesktopStripeCheckout()
                 },
             )
         }
@@ -1869,6 +2013,29 @@ private fun PlaylistsSection(
                     label = ds("EPG URL"),
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TorveGhostButton(
+                        text = if (channelsState.isCheckingEpg) ds("Checking EPG...") else ds("Check EPG"),
+                        onClick = channelsViewModel::checkNewPlaylistEpgUrl,
+                        enabled = !channelsState.isCheckingEpg && channelsState.newPlaylistEpgUrl.isNotBlank(),
+                    )
+                    if (channelsState.isCheckingEpg) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    }
+                }
+                channelsState.epgCheckMessage?.let { message ->
+                    TorveBanner(
+                        title = if (channelsState.epgCheckSuccess == true) ds("EPG check passed") else ds("EPG check failed"),
+                        description = message,
+                        tone = if (channelsState.epgCheckSuccess == true) TorveBannerTone.Success else TorveBannerTone.Error,
+                    )
+                }
             }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1928,6 +2095,47 @@ private fun PlaylistsSection(
             title = ds("EPG Status"),
             supportingText = ds("EPG loading now starts automatically for the selected playlist and can be retried here."),
         ) {
+            if (selectedM3uPlaylist != null) {
+                TorveTextField(
+                    value = selectedPlaylistEpgDraft,
+                    onValueChange = { selectedPlaylistEpgDraft = it },
+                    label = ds("EPG URL"),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TorvePrimaryButton(
+                        text = ds("Save"),
+                        onClick = {
+                            channelsViewModel.updatePlaylistEpgUrl(
+                                playlistId = selectedM3uPlaylist.id,
+                                epgUrl = selectedPlaylistEpgDraft,
+                            )
+                        },
+                    )
+                    TorveGhostButton(
+                        text = if (channelsState.isCheckingEpg) ds("Checking EPG...") else ds("Check EPG"),
+                        onClick = { channelsViewModel.checkEpgUrl(selectedPlaylistEpgDraft) },
+                        enabled = !channelsState.isCheckingEpg && selectedPlaylistEpgDraft.isNotBlank(),
+                    )
+                    TorveGhostButton(
+                        text = ds("Clear"),
+                        onClick = {
+                            selectedPlaylistEpgDraft = ""
+                            channelsViewModel.updatePlaylistEpgUrl(selectedM3uPlaylist.id, "")
+                        },
+                    )
+                }
+                channelsState.epgCheckMessage?.let { message ->
+                    TorveBanner(
+                        title = if (channelsState.epgCheckSuccess == true) ds("EPG check passed") else ds("EPG check failed"),
+                        description = message,
+                        tone = if (channelsState.epgCheckSuccess == true) TorveBannerTone.Success else TorveBannerTone.Error,
+                    )
+                }
+            }
             TorveListRow(
                 title = selectedPlaylist?.name ?: ds("No playlist selected"),
                 subtitle = describeEpgState(channelsState.epgState),

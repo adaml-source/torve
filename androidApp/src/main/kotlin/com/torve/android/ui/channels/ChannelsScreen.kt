@@ -274,6 +274,9 @@ fun ChannelsScreen(
                 xtreamUsername = state.newXtreamUsername,
                 xtreamPassword = state.newXtreamPassword,
                 isLoading = state.isAddingPlaylist,
+                isCheckingEpg = state.isCheckingEpg,
+                epgCheckMessage = state.epgCheckMessage,
+                epgCheckSuccess = state.epgCheckSuccess,
                 onNameChange = { viewModel.setNewPlaylistName(it) },
                 onUrlChange = { viewModel.setNewPlaylistUrl(it) },
                 onEpgUrlChange = { viewModel.setNewPlaylistEpgUrl(it) },
@@ -281,6 +284,7 @@ fun ChannelsScreen(
                 onXtreamServerChange = { viewModel.setNewXtreamServer(it) },
                 onXtreamUsernameChange = { viewModel.setNewXtreamUsername(it) },
                 onXtreamPasswordChange = { viewModel.setNewXtreamPassword(it) },
+                onCheckEpg = { viewModel.checkNewPlaylistEpgUrl() },
                 onConfirm = { viewModel.addPlaylist() },
                 onDismiss = { viewModel.dismissAddPlaylistDialog() },
             )
@@ -328,6 +332,9 @@ internal fun AddPlaylistDialog(
     xtreamUsername: String,
     xtreamPassword: String,
     isLoading: Boolean,
+    isCheckingEpg: Boolean,
+    epgCheckMessage: String?,
+    epgCheckSuccess: Boolean?,
     onNameChange: (String) -> Unit,
     onUrlChange: (String) -> Unit,
     onEpgUrlChange: (String) -> Unit,
@@ -335,6 +342,7 @@ internal fun AddPlaylistDialog(
     onXtreamServerChange: (String) -> Unit,
     onXtreamUsernameChange: (String) -> Unit,
     onXtreamPasswordChange: (String) -> Unit,
+    onCheckEpg: () -> Unit,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -382,6 +390,36 @@ internal fun AddPlaylistDialog(
                 } else {
                     StyledTextField(value = url, onValueChange = onUrlChange, label = stringResource(R.string.channels_m3u_url))
                     StyledTextField(value = epgUrl, onValueChange = onEpgUrlChange, label = stringResource(R.string.channels_epg_optional))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        TextButton(
+                            onClick = onCheckEpg,
+                            enabled = !isCheckingEpg && epgUrl.isNotBlank(),
+                        ) {
+                            Text(
+                                if (isCheckingEpg) stringResource(R.string.channels_check_epg_checking)
+                                else stringResource(R.string.channels_check_epg),
+                                color = Amber,
+                            )
+                        }
+                        if (isCheckingEpg) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = Amber,
+                            )
+                        }
+                    }
+                    epgCheckMessage?.let { message ->
+                        Text(
+                            text = message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (epgCheckSuccess == true) Amber else MaterialTheme.colorScheme.error,
+                        )
+                    }
                 }
             }
         },

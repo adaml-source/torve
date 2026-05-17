@@ -2,7 +2,10 @@ package com.torve.desktop.ui.v2.library
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.HorizontalScrollbar
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -18,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -32,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -533,19 +538,11 @@ private fun DesktopVodLibraryView(
                     placeholder = ds("Title, category, genre"),
                 )
                 if (categories.size > 1) {
-                    LazyRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        contentPadding = PaddingValues(end = 20.dp),
-                    ) {
-                        items(categories, key = { it }) { category ->
-                            TorveFilterChip(
-                                text = category,
-                                selected = category == selectedCategory,
-                                onClick = { selectedCategory = category },
-                            )
-                        }
-                    }
+                    DesktopVodCategoryFilterRow(
+                        categories = categories,
+                        selectedCategory = selectedCategory,
+                        onSelectCategory = { selectedCategory = it },
+                    )
                 }
 
                 loadError?.let { error ->
@@ -665,6 +662,46 @@ private fun DesktopVodLibraryView(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun DesktopVodCategoryFilterRow(
+    categories: List<String>,
+    selectedCategory: String,
+    onSelectCategory: (String) -> Unit,
+) {
+    val scrollState = rememberScrollState()
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .desktopVodHorizontalDrag(scrollState)
+                .horizontalScroll(scrollState),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            categories.forEach { category ->
+                TorveFilterChip(
+                    text = category,
+                    selected = category == selectedCategory,
+                    onClick = { onSelectCategory(category) },
+                )
+            }
+            Spacer(Modifier.width(20.dp))
+        }
+        if (scrollState.maxValue > 0) {
+            HorizontalScrollbar(
+                modifier = Modifier.fillMaxWidth().height(8.dp),
+                adapter = rememberScrollbarAdapter(scrollState),
+            )
+        }
+    }
+}
+
+private fun Modifier.desktopVodHorizontalDrag(scrollState: ScrollState): Modifier = pointerInput(scrollState) {
+    detectHorizontalDragGestures { _, dragAmount ->
+        if (scrollState.maxValue <= 0) return@detectHorizontalDragGestures
+        scrollState.dispatchRawDelta(-dragAmount)
     }
 }
 

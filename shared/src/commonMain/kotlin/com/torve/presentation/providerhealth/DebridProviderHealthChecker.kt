@@ -32,7 +32,7 @@ class DebridProviderHealthChecker(
         if (key == null) {
             return base().copy(
                 status = ProviderHealthStatus.UNCONFIGURED,
-                message = "Not connected. Connect $label via Settings → Integrations.",
+                message = "Not connected. Connect $label in Panda setup.",
                 nextAction = "Set up $label via Panda",
             )
         }

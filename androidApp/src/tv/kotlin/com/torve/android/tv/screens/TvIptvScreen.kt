@@ -92,6 +92,7 @@ private const val PAGE_DURATION_MS = IPTV_EPG_WINDOW_HOURS * 60L * 60L * 1000L
 private const val MAX_PAGE_OFFSET = MAX_FORWARD_HOURS / IPTV_EPG_WINDOW_HOURS
 private const val IPTV_SCREEN_CACHE_KEY = "tv_iptv_screen_state"
 private const val IPTV_STARTUP_LOG_TAG = "TvStartupRecovery"
+private const val TV_STAGED_SHELF_WARMUP_DELAY_MS = 1_200L
 
 private enum class FocusZone {
     CHANNEL_LIST,
@@ -569,7 +570,9 @@ fun TvIptvScreen(
         }
     }
 
-    LaunchedEffect(state.selectedPlaylistId, state.xxxEnabled, displayCategories) {
+    LaunchedEffect(isActive, state.selectedPlaylistId, state.xxxEnabled, displayCategories) {
+        if (!isActive) return@LaunchedEffect
+        delay(TV_STAGED_SHELF_WARMUP_DELAY_MS)
         val initialCategory = focusedCategory
             ?.takeIf { it.name != allChannelsLabel && it.channels.isEmpty() && it.channelCount > 0 }
             ?: preloadableCategories.firstOrNull()

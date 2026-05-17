@@ -78,6 +78,8 @@ import com.torve.domain.device.DeviceIdProvider
 import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.security.SecureStorage
 import com.torve.domain.security.SyncPayloadEncryptor
+import com.torve.domain.security.ClientTrustSignalProvider
+import com.torve.domain.security.ClientTrustSignalRegistry
 import com.torve.platform.DatabaseDriverFactory
 import com.torve.platform.NetworkMonitor
 import com.torve.presentation.home.HomeViewModel
@@ -116,6 +118,7 @@ private data class DesktopRuntime(
     val pandaSetupViewModel: PandaSetupViewModel,
     val watchlistViewModel: WatchlistViewModel,
     val mediaFavoritesRepository: MediaFavoritesRepository,
+    val accountSessionCoordinator: AccountSessionCoordinator,
     val downloadViewModel: DownloadViewModel,
     val downloadCatalogueViewModel: DownloadCatalogueViewModel,
     val downloadManager: DesktopDownloadManager,
@@ -253,7 +256,9 @@ fun main() {
             com.torve.desktop.launch.showTorveLaunchSplash()
     }
     application {
-    com.torve.platform.TorveRuntimeDebug.verboseLoggingEnabled = true
+    com.torve.platform.TorveRuntimeDebug.verboseLoggingEnabled =
+        System.getProperty("torve.verboseLogs")?.toBooleanStrictOrNull()
+            ?: (System.getenv("TORVE_VERBOSE_LOGS")?.toBooleanStrictOrNull() == true)
     val releaseInfo = DesktopReleaseInfo.current()
     // Launch-guard observability. Logged once at the top of the
     // application lifecycle so cold-launch traces can correlate
@@ -544,6 +549,7 @@ private fun bootstrapDesktop(): BootstrapState {
 
         startKoin(app)
         val koin = app.koin
+        ClientTrustSignalRegistry.setProvider(koin.get<ClientTrustSignalProvider>())
 
         koin.get<DatabaseDriverFactory>()
         koin.get<NetworkMonitor>()
@@ -639,6 +645,7 @@ private fun bootstrapDesktop(): BootstrapState {
                 setupWizardViewModel = setupWizardViewModel,
                 prefsRepo = prefsRepo,
                 channelRepository = channelRepository,
+                accountSessionCoordinator = accountSessionCoordinator,
             ),
             playerController = DesktopPlayerController(
                 metadataRepository = metadataRepository,
@@ -672,6 +679,7 @@ private fun bootstrapDesktop(): BootstrapState {
             pandaSetupViewModel = pandaSetupViewModel,
             watchlistViewModel = watchlistViewModel,
             mediaFavoritesRepository = mediaFavoritesRepository,
+            accountSessionCoordinator = accountSessionCoordinator,
             downloadViewModel = downloadViewModel,
             downloadCatalogueViewModel = downloadCatalogueViewModel,
             downloadManager = downloadManager,
@@ -1030,6 +1038,7 @@ private fun DesktopRuntimePane(
             addonRepository = runtime.addonRepository,
             watchlistViewModel = runtime.watchlistViewModel,
             mediaFavoritesRepository = runtime.mediaFavoritesRepository,
+            accountSessionCoordinator = runtime.accountSessionCoordinator,
             downloadViewModel = runtime.downloadViewModel,
             downloadCatalogueViewModel = runtime.downloadCatalogueViewModel,
             downloadManager = runtime.downloadManager,

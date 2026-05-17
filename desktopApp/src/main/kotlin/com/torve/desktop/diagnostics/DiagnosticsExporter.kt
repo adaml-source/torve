@@ -18,11 +18,11 @@ import java.util.zip.ZipOutputStream
  *  - `system.txt` - OS, JVM, app version, env-var presence (no values)
  *  - Every JSON / Properties file under `desktopDataDir()` that doesn't
  *    look like a secret (so: window state, reminders, library catalogue,
- *    update prefs - but NOT the `desktop-secrets.properties` file)
+ *    update prefs - but NOT desktop secret-store files)
  *  - `feature_inventory.txt` - pointer to the FEATURES.md doc location
  *
  * Excluded by design:
- *  - `desktop-secrets.properties` (debrid keys, addon tokens)
+ *  - desktop secret-store files (tokens, debrid keys, addon tokens)
  *  - SQLDelight DB file (too large, may contain watchlist titles the
  *    user doesn't want to share)
  *  - Coil image cache
@@ -35,6 +35,7 @@ object DiagnosticsExporter {
     /** Files under `desktopDataDir()` that we refuse to include. */
     private val SECRET_FILE_NAMES: Set<String> = setOf(
         "desktop-secrets.properties",
+        "desktop-secrets.dpapi.properties",
     )
 
     private val timestampFormatter = DateTimeFormatter
@@ -127,7 +128,7 @@ object DiagnosticsExporter {
         appendLine("  ${desktopDataDir().absolutePath}")
         appendLine()
         appendLine("# Excluded from this bundle by design")
-        appendLine("  - desktop-secrets.properties (debrid keys, addon tokens)")
+        appendLine("  - desktop secret-store files (tokens, debrid keys, addon tokens)")
         appendLine("  - SQLDelight DB file (could leak watchlist content)")
         appendLine("  - Coil image cache")
         appendLine("  - any file > 4 MB")

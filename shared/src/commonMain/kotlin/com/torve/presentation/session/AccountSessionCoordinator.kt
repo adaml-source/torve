@@ -1,6 +1,7 @@
 package com.torve.presentation.session
 
 import com.torve.data.account.AccountSettingsApi
+import com.torve.data.account.AccountApiException
 import com.torve.data.account.AccountSettingsRefreshResult
 import com.torve.data.account.AccountSettingsRepository
 import com.torve.data.account.RemotePlaylistDto
@@ -14,6 +15,7 @@ import com.torve.data.device.ManagedDeviceDto
 import com.torve.data.device.resolvedActiveDeviceCount
 import com.torve.data.device.resolvedDeviceLimit
 import com.torve.data.device.resolvedDeviceLimitActiveDevices
+import com.torve.data.security.TrustSignalsApi
 import com.torve.data.subscription.SubscriptionEntitlementCacheKeys
 import com.torve.data.trakt.repo.TraktSyncRepository
 import com.torve.db.TorveDatabase
@@ -26,6 +28,7 @@ import com.torve.domain.repository.WatchProgressRepository
 import com.torve.domain.repository.WatchlistRepository
 import com.torve.domain.repository.MediaFavoritesRepository
 import com.torve.domain.security.SecureStorage
+import com.torve.domain.diagnostics.DiagnosticsRedactor
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.settings.SettingsRefreshNotifier
 import com.torve.presentation.integrations.setTorBoxCredentialStorageMode
@@ -152,6 +155,7 @@ class AccountSessionCoordinator(
     private val watchHistoryRepo: WatchHistoryRepository,
     private val traktSyncRepo: TraktSyncRepository,
     private val deviceRegistrationNotifier: DeviceRegistrationNotifier,
+    private val trustSignalsApi: TrustSignalsApi? = null,
 ) {
     // Use IO dispatcher for background restore — heavy network + disk work
     // must not compete with Compose rendering on the Default (CPU) pool.
@@ -227,6 +231,7 @@ class AccountSessionCoordinator(
 
         return withContext(Dispatchers.IO) {
             var errors = 0
+            postTrustSignal(token, "credential_transfer")
 
             _restoreProgress.update { it.copy(message = "Syncing account settings...") }
             val settingsResult = runCatching {
@@ -250,7 +255,7 @@ class AccountSessionCoordinator(
                 addonSyncService.syncAfterSignIn()
             }.onFailure { error ->
                 errors++
-                torveVerboseLog { "[AccountRefresh] Addon sync FAILED: ${error.message}" }
+                torveVerboseLog { "[AccountRefresh] Addon sync FAILED: ${DiagnosticsRedactor.redact(error.message)}" }
             }
 
             _restoreProgress.update { it.copy(message = "Syncing Trakt...") }
@@ -258,7 +263,7 @@ class AccountSessionCoordinator(
                 syncTraktFromAccountIfConnected()
             }.getOrElse { error ->
                 errors++
-                torveVerboseLog { "[AccountRefresh] Trakt sync FAILED: ${error.message}" }
+                torveVerboseLog { "[AccountRefresh] Trakt sync FAILED: ${DiagnosticsRedactor.redact(error.message)}" }
                 false
             }
 
@@ -267,9 +272,11 @@ class AccountSessionCoordinator(
                 syncPlaylistsFromAccount(token)
             }.getOrElse { error ->
                 errors++
-                torveVerboseLog { "[AccountRefresh] Playlist sync FAILED: ${error.message}" }
+                torveVerboseLog { "[AccountRefresh] Playlist sync FAILED: ${DiagnosticsRedactor.redact(error.message)}" }
                 PlaylistSyncResult()
             }
+
+            mediaFavoritesRepository.refresh(force = true)
 
             val now = Clock.System.now().toEpochMilliseconds()
             settingsRefreshNotifier.notifyRefresh(now)
@@ -475,6 +482,9 @@ class AccountSessionCoordinator(
         password: String? = null,
     ): Boolean {
         val token = authClient.getValidAccessToken() ?: return false
+        val normalizedType = playlistType.trim().lowercase().ifBlank { "m3u" }
+        val m3uEpgUrl = epgUrl?.trim()?.takeIf { it.isNotEmpty() }
+            ?.takeIf { normalizedType == "m3u" }
         return accountSettingsApi.savePlaylist(
             accessToken = token,
             playlistId = playlistId,
@@ -482,13 +492,31 @@ class AccountSessionCoordinator(
                 playlistId = playlistId,
                 name = name,
                 url = url,
-                epgUrl = epgUrl,
-                playlistType = playlistType,
+                epgUrl = m3uEpgUrl,
+                playlistType = normalizedType,
                 server = server,
                 username = username,
                 password = password,
             ),
         )
+    }
+
+    suspend fun validatePlaylistEpgUrl(epgUrl: String): com.torve.data.account.EpgValidationResponse {
+        val normalizedUrl = epgUrl.trim()
+        if (normalizedUrl.isBlank()) {
+            return com.torve.data.account.EpgValidationResponse(
+                success = false,
+                status = "empty",
+                message = "Enter an EPG URL to check.",
+            )
+        }
+        val token = authClient.getValidAccessToken()
+            ?: return com.torve.data.account.EpgValidationResponse(
+                success = false,
+                status = "signed_out",
+                message = "Sign in to check EPG URLs.",
+            )
+        return accountSettingsApi.validateEpg(token, normalizedUrl)
     }
 
     suspend fun deletePlaylistFromBackend(playlistId: String): Boolean {
@@ -536,6 +564,10 @@ class AccountSessionCoordinator(
             }
 
             val accessState = runCatching { deviceApi.getAccessState(token) }.getOrNull()
+            postTrustSignal(
+                token = token,
+                eventType = if (forceSettingsRefresh) "login" else "foreground",
+            )
 
             torveVerboseLog { "[Login] Phase A: device registered, entering app" }
             _state.update { it.copy(isBootstrapping = false) }
@@ -567,13 +599,13 @@ class AccountSessionCoordinator(
                     val traktSynced = runCatching {
                         syncTraktFromAccountIfConnected()
                     }.getOrElse {
-                        torveVerboseLog { "[TraktSync] Foreground force refresh FAILED: ${it.message}" }
+                        torveVerboseLog { "[TraktSync] Foreground force refresh FAILED: ${DiagnosticsRedactor.redact(it.message)}" }
                         false
                     }
                     val playlistSync = runCatching {
                         syncPlaylistsFromAccount(token)
                     }.getOrElse {
-                        torveVerboseLog { "[PlaylistSync] Foreground force refresh FAILED: ${it.message}" }
+                        torveVerboseLog { "[PlaylistSync] Foreground force refresh FAILED: ${DiagnosticsRedactor.redact(it.message)}" }
                         PlaylistSyncResult()
                     }
                     if (settingsResult?.appliedChanges == true || restoredIntegrations > 0 || traktSynced || playlistSync.hasChanges) {
@@ -594,13 +626,13 @@ class AccountSessionCoordinator(
                     val traktSynced = runCatching {
                         if (restoredIntegrations > 0) syncTraktFromAccountIfConnected() else false
                     }.getOrElse {
-                        torveVerboseLog { "[TraktSync] Foreground refresh FAILED: ${it.message}" }
+                        torveVerboseLog { "[TraktSync] Foreground refresh FAILED: ${DiagnosticsRedactor.redact(it.message)}" }
                         false
                     }
                     val playlistSync = runCatching {
                         syncPlaylistsFromAccount(token)
                     }.getOrElse {
-                        torveVerboseLog { "[PlaylistSync] Foreground refresh FAILED: ${it.message}" }
+                        torveVerboseLog { "[PlaylistSync] Foreground refresh FAILED: ${DiagnosticsRedactor.redact(it.message)}" }
                         PlaylistSyncResult()
                     }
                     if (settingsResult?.appliedChanges == true || restoredIntegrations > 0 || traktSynced || playlistSync.hasChanges) {
@@ -701,13 +733,13 @@ class AccountSessionCoordinator(
             val traktSynced = runCatching {
                 syncTraktFromAccountIfConnected()
             }.getOrElse {
-                torveVerboseLog { "[TraktSync] Sign-in restore FAILED: ${it.message}" }
+                torveVerboseLog { "[TraktSync] Sign-in restore FAILED: ${DiagnosticsRedactor.redact(it.message)}" }
                 false
             }
             val playlistSync = runCatching {
                 syncPlaylistsFromAccount(token)
             }.getOrElse {
-                torveVerboseLog { "[PlaylistSync] Sign-in restore FAILED: ${it.message}" }
+                torveVerboseLog { "[PlaylistSync] Sign-in restore FAILED: ${DiagnosticsRedactor.redact(it.message)}" }
                 PlaylistSyncResult()
             }
             if (settingsResult?.appliedChanges == true || restoredIntegrations > 0 || traktSynced || playlistSync.hasChanges) {
@@ -762,7 +794,7 @@ class AccountSessionCoordinator(
             restorePlaylists(token)
         }.getOrElse {
             errors++
-            torveVerboseLog { "[Restore] Playlist restore FAILED: ${it.message}" }
+            torveVerboseLog { "[Restore] Playlist restore FAILED: ${DiagnosticsRedactor.redact(it.message)}" }
             0 to 0
         }
         errors += playlistsFailed
@@ -796,7 +828,9 @@ class AccountSessionCoordinator(
         token: String,
         forceCredentials: Boolean = false,
     ): Int {
-        val integrations = accountSettingsApi.getIntegrations(token)
+        val integrations = withAccountApiAuthRetry(token) { freshToken ->
+            accountSettingsApi.getIntegrations(freshToken)
+        }
         torveVerboseLog { "[IntegrationRestore] Found ${integrations.size} integrations on backend" }
         var restored = 0
         for (integration in integrations) {
@@ -1002,7 +1036,9 @@ class AccountSessionCoordinator(
 
     /** Returns (restored, failed) counts. */
     private suspend fun restorePlaylists(token: String): Pair<Int, Int> {
-        val remotePlaylists = accountSettingsApi.getPlaylists(token)
+        val remotePlaylists = withAccountApiAuthRetry(token) { freshToken ->
+            accountSettingsApi.getPlaylists(freshToken)
+        }
         torveVerboseLog { "[PlaylistRestore] Remote playlist count: ${remotePlaylists.size}" }
         _restoreProgress.update { it.copy(totalPlaylists = remotePlaylists.size) }
         var restored = 0
@@ -1059,7 +1095,7 @@ class AccountSessionCoordinator(
                 restored++
             } catch (e: Exception) {
                 failed++
-                torveVerboseLog { "[PlaylistRestore]   FAILED: ${e.message}" }
+                torveVerboseLog { "[PlaylistRestore]   FAILED: ${DiagnosticsRedactor.redact(e.message)}" }
             }
         }
         torveVerboseLog { "[PlaylistRestore] Done: $restored restored, $failed failed" }
@@ -1067,7 +1103,9 @@ class AccountSessionCoordinator(
     }
 
     private suspend fun syncPlaylistsFromAccount(token: String): PlaylistSyncResult {
-        val remotePlaylists = accountSettingsApi.getPlaylists(token)
+        val remotePlaylists = withAccountApiAuthRetry(token) { freshToken ->
+            accountSettingsApi.getPlaylists(freshToken)
+        }
         if (remotePlaylists.isEmpty()) {
             torveVerboseLog { "[PlaylistSync] No remote playlists found — leaving local catalog unchanged" }
             return PlaylistSyncResult()
@@ -1175,9 +1213,7 @@ class AccountSessionCoordinator(
             val sameServer = local.server.normalizedServerValue() == server
             val sameUsername = local.username.normalizedRemoteValue() == username
             val samePassword = local.password.normalizedRemoteValue() == password
-            if (sameType && sameServer && sameUsername && samePassword) {
-                return false
-            }
+            if (sameType && sameServer && sameUsername && samePassword) return false
             if (!sameType) {
                 channelRepo.removePlaylist(playlistId)
             }
@@ -1196,8 +1232,41 @@ class AccountSessionCoordinator(
     private fun String?.normalizedRemoteValue(): String? =
         this?.trim()?.takeIf { it.isNotEmpty() }
 
+    private suspend fun <T> withAccountApiAuthRetry(
+        token: String,
+        block: suspend (String) -> T,
+    ): T {
+        return try {
+            block(token)
+        } catch (e: AccountApiException) {
+            if (e.statusCode != 401) throw e
+            val refreshed = authClient.refreshTokens()
+            val retryToken = if (refreshed.success) authClient.getValidAccessToken() else null
+            if (retryToken.isNullOrBlank()) {
+                runCatching { authClient.logout() }
+                throw AccountApiException(
+                    statusCode = 401,
+                    endpoint = e.endpoint,
+                )
+            }
+            block(retryToken)
+        }
+    }
+
     private fun String?.normalizedServerValue(): String? =
         normalizedRemoteValue()?.trimEnd('/')
+
+    private fun postTrustSignal(token: String, eventType: String) {
+        backgroundScope.launch {
+            val posted = trustSignalsApi?.postCurrentTrustSignal(
+                accessToken = token,
+                eventType = eventType,
+            ) ?: return@launch
+            if (!posted) {
+                torveVerboseLog { "CLIENT_TRUST post_skipped_or_failed event=$eventType" }
+            }
+        }
+    }
 
     private suspend fun syncTraktFromAccountIfConnected(): Boolean {
         ensureUnifiedTraktTokensAfterRestore()

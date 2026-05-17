@@ -37,6 +37,7 @@ object SourceAccelerationMapper {
             seeds = model.seeds,
             score = model.score,
             scoreBreakdown = model.scoreBreakdown,
+            memoryId = model.memoryId,
         )
     }
 
@@ -129,6 +130,7 @@ object SourceAccelerationMapper {
             isCached = model.isCached == true || reasons.contains(StartupConfidenceReasonCode.HASH_CACHED),
             score = normalizedScore,
             recentSuccessCount = if (reasons.contains(StartupConfidenceReasonCode.RECENT_SUCCESS)) 1 else 0,
+            accelerationMemoryId = model.memoryId?.trim()?.takeIf { it.isNotBlank() },
             accelerationSourceKey = sourceKey,
             accelerationProviderType = model.providerType?.trim()?.takeIf { it.isNotBlank() },
             accelerationProvenanceKind = provenance,

@@ -3,6 +3,7 @@ package com.torve.presentation.detail
 import com.torve.data.addon.ParsedStream
 import com.torve.data.addon.StreamSelector
 import com.torve.data.addon.isAddonHostedUrl
+import com.torve.data.acceleration.StreamHandoffApiException
 import com.torve.data.debrid.DebridMissingException
 import com.torve.data.debrid.DebridNeedsReconnectException
 import com.torve.data.debrid.DebridNoCachedStreamException
@@ -37,6 +38,7 @@ import com.torve.domain.model.StreamFetchPolicy
 import com.torve.domain.model.StreamPreferences
 import com.torve.domain.model.StreamQuality
 import com.torve.domain.model.WatchHistoryEntry
+import com.torve.domain.model.WatchProgress
 import com.torve.domain.integrations.LibraryOverlayService
 import com.torve.domain.repository.AddonRepository
 import com.torve.domain.repository.AvailabilityRepository
@@ -150,6 +152,15 @@ class DetailViewModel(
         // alternate source than by watching a spinner indefinitely.
         const val PREPARING_PROBE_INTERVAL_MS = 15_000L
         const val PREPARING_MAX_ATTEMPTS = 20
+        const val MARKED_WATCHED_PROGRESS_RATIO = 0.9f
+        const val MARKED_WATCHED_DURATION_MS = 1_000_000L
+        val STREAM_HANDOFF_BLOCKING_ERROR_CODES = setOf(
+            "device_required",
+            "device_not_registered",
+            "device_not_authorized",
+            "premium_required",
+            "rate_limited",
+        )
     }
     private val _state = MutableStateFlow(DetailUiState())
     val state: StateFlow<DetailUiState> = _state.asStateFlow()
@@ -324,7 +335,19 @@ class DetailViewModel(
                 val rating = item.tmdbId?.let { tmdbId ->
                     runCatching { traktSyncRepo.getUserRating(tmdbId, item.type) }.getOrNull()
                 }
-                _state.update { it.copy(watchProgress = merged, userRating = rating) }
+                val localWholeItemWatched = runCatching {
+                    watchHistoryRepo.getForMedia(item.id).any { history ->
+                        history.seasonNumber == null && history.episodeNumber == null
+                    }
+                }.getOrDefault(false)
+                val progressWatched = (merged?.progressPercent ?: 0f) >= MARKED_WATCHED_PROGRESS_RATIO
+                _state.update {
+                    it.copy(
+                        watchProgress = merged,
+                        userRating = rating,
+                        isMarkedWatched = localWholeItemWatched || progressWatched,
+                    )
+                }
 
                 // Auto-load first season for TV shows
                 if (type == "tv" && item.seasons.isNotEmpty()) {
@@ -1751,7 +1774,8 @@ class DetailViewModel(
 
     private fun Exception.shouldStopAutoResolveAndShowUser(): Boolean {
         val message = this.message.orEmpty()
-        return this is DebridMissingException ||
+        return (this is StreamHandoffApiException && errorCode in STREAM_HANDOFF_BLOCKING_ERROR_CODES) ||
+            this is DebridMissingException ||
             this is DebridNeedsReconnectException ||
             this is DebridServiceUnavailableException ||
             message.contains("Session expired", ignoreCase = true) ||
@@ -1772,6 +1796,25 @@ class DetailViewModel(
     }
 
     private fun streamResolveErrorKey(error: Exception): String {
+        if (error is StreamHandoffApiException) {
+            return when (error.errorCode) {
+                "device_required", "device_not_registered" ->
+                    com.torve.presentation.error.UserFacingError.DEVICE_REQUIRED.messageKey
+                "device_not_authorized" ->
+                    com.torve.presentation.error.UserFacingError.DEVICE_NOT_AUTHORIZED.messageKey
+                "premium_required" ->
+                    com.torve.presentation.error.UserFacingError.PREMIUM_REQUIRED.messageKey
+                "rate_limited" ->
+                    com.torve.presentation.error.UserFacingError.RATE_LIMITED.messageKey
+                "stream_expired", "invalid_handoff" ->
+                    com.torve.presentation.error.UserFacingError.PLAYBACK_LINK_EXPIRED.messageKey
+                "stream_reference_required",
+                "stream_reference_not_found",
+                "stream_handoff_unavailable",
+                -> com.torve.presentation.error.UserFacingError.STREAM_RESOLVE_FAILED.messageKey
+                else -> com.torve.presentation.error.UserFacingError.STREAM_RESOLVE_FAILED.messageKey
+            }
+        }
         val message = error.message.orEmpty()
         return when {
             error is DebridMissingException ->
@@ -1816,6 +1859,16 @@ class DetailViewModel(
                 "Real-Debrid blocked this source. Try another source."
             com.torve.presentation.error.UserFacingError.STREAM_NO_CACHED_SOURCE.messageKey ->
                 "No cached stream is available for this title."
+            com.torve.presentation.error.UserFacingError.DEVICE_REQUIRED.messageKey ->
+                "This device needs to be set up before playback."
+            com.torve.presentation.error.UserFacingError.DEVICE_NOT_AUTHORIZED.messageKey ->
+                "This device is not authorized for playback. Manage your devices in account settings."
+            com.torve.presentation.error.UserFacingError.PREMIUM_REQUIRED.messageKey ->
+                "This feature requires Torve Pro."
+            com.torve.presentation.error.UserFacingError.RATE_LIMITED.messageKey ->
+                "Too many requests. Please wait and try again."
+            com.torve.presentation.error.UserFacingError.PLAYBACK_LINK_EXPIRED.messageKey ->
+                "Playback link expired. Try playing this source again."
             else -> "Could not resolve this stream."
         }
     }
@@ -2169,6 +2222,10 @@ class DetailViewModel(
         scope.launch {
             _state.update { it.copy(isMarkedWatched = true) }
             val tmdbId = item.tmdbId ?: return@launch
+            val localProgressPersisted = saveWholeItemWatchedProgress(item)
+            if (item.type == MediaType.MOVIE && localProgressPersisted) {
+                return@launch
+            }
             // Trakt
             try {
                 val ids = TraktIds(tmdb = tmdbId)
@@ -2200,6 +2257,7 @@ class DetailViewModel(
         val item = _state.value.mediaItem ?: return
         scope.launch {
             _state.update { it.copy(isMarkedWatched = false) }
+            clearWholeItemWatchedState(item)
             val tmdbId = item.tmdbId ?: return@launch
             // Trakt
             try {
@@ -2242,7 +2300,7 @@ class DetailViewModel(
 
     fun markSeasonWatched(seasonNumber: Int) {
         val item = _state.value.mediaItem ?: return
-        val seasonDetail = _state.value.seasonDetail
+        val seasonDetail = _state.value.seasonDetail?.takeIf { it.seasonNumber == seasonNumber }
         val episodeCount = seasonDetail?.episodes?.size
             ?: item.seasons.find { it.seasonNumber == seasonNumber }?.episodeCount
             ?: return
@@ -2273,6 +2331,36 @@ class DetailViewModel(
                 _state.update { it.copy(watchedEpisodes = newWatched) }
                 resolveNextEpisode()
             } catch (_: Exception) { }
+        }
+    }
+
+    private suspend fun saveWholeItemWatchedProgress(item: com.torve.domain.model.MediaItem): Boolean {
+        return try {
+            watchProgressRepo.saveProgress(
+                WatchProgress(
+                    mediaId = item.id,
+                    mediaType = item.type,
+                    title = item.title,
+                    posterUrl = item.posterUrl,
+                    backdropUrl = item.backdropUrl,
+                    positionMs = (MARKED_WATCHED_DURATION_MS * MARKED_WATCHED_PROGRESS_RATIO).toLong(),
+                    durationMs = MARKED_WATCHED_DURATION_MS,
+                    showTitle = if (item.type == MediaType.SERIES) item.title else null,
+                ),
+            )
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private suspend fun clearWholeItemWatchedState(item: com.torve.domain.model.MediaItem) {
+        try {
+            watchProgressRepo.deleteProgress(item.id)
+            watchHistoryRepo.getForMedia(item.id)
+                .filter { it.seasonNumber == null && it.episodeNumber == null }
+                .forEach { watchHistoryRepo.delete(it.id) }
+        } catch (_: Exception) {
         }
     }
 

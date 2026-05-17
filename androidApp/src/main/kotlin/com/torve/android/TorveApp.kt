@@ -12,6 +12,8 @@ import com.torve.android.sync.TraktSyncWorker
 import com.torve.data.acceleration.AccelerationInventorySyncService
 import com.torve.data.contentpolicy.MutableContentChannelProvider
 import com.torve.di.sharedModule
+import com.torve.domain.security.ClientTrustSignalProvider
+import com.torve.domain.security.ClientTrustSignalRegistry
 import com.torve.platform.TorveRuntimeDebug
 import com.torve.presentation.session.AccountSessionCoordinator
 import kotlinx.coroutines.CoroutineScope
@@ -57,6 +59,7 @@ class TorveApp : Application() {
             modules(sharedModule, androidAppModule, storeBillingModule)
         }
         com.torve.android.debug.AnrDebugLogger.log("STARTUP startKoin END")
+        ClientTrustSignalRegistry.setProvider(getKoin().get<ClientTrustSignalProvider>())
         getKoin().get<MutableContentChannelProvider>().update(
             if (BuildConfig.FLAVOR.contains("google", ignoreCase = true)) "google_play" else null,
         )
@@ -70,7 +73,9 @@ class TorveApp : Application() {
 
             // Non-critical deferred work.
             kotlinx.coroutines.delay(NON_CRITICAL_STARTUP_DELAY_MS)
-            launch { runCatching { getKoin().get<BillingManager>().initialize() } }
+            if (!com.torve.android.billing.isStripeFireTvBillingBuild()) {
+                launch { runCatching { getKoin().get<BillingManager>().initialize() } }
+            }
             launch {
                 TraktSyncWorker.schedule(this@TorveApp)
                 EpgWarmupWorker.schedule(this@TorveApp)

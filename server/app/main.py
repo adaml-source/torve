@@ -11,7 +11,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.bootstrap import bootstrap_reviewer_account
 from app.events import event_bus
-from app.routers import acceleration, account, account_settings, addons, admin_billing, admin_promo, admin_users, auth, checkout, content_policy, devices, health, health_integrations, integrations, media_favorites, meta, nzbdav as nzbdav_router, paddle_webhook, pairing_code, pairing_signin, pairings, playlists, purchase_verify, rebate, releases, sse, transfer, watch_state, web_session, web_proxy
+from app.routers import acceleration, account, account_settings, addons, admin_billing, admin_promo, admin_users, auth, checkout, content_policy, devices, health, health_integrations, integrations, media_favorites, meta, nzbdav as nzbdav_router, paddle_webhook, pairing_code, pairing_signin, pairings, playlists, purchase_verify, rebate, releases, sse, stripe_billing, transfer, watch_state, web_session, web_proxy
 
 _log = logging.getLogger(__name__)
 
@@ -148,6 +148,8 @@ app.include_router(sse.router)
 app.include_router(web_session.router)
 app.include_router(web_proxy.router)
 app.include_router(paddle_webhook.router)
+app.include_router(stripe_billing.router)
+app.include_router(stripe_billing.webhook_router)
 app.include_router(checkout.router)
 app.include_router(purchase_verify.router)
 # Compat alias at /purchases/* — accepts pre-sprint Android clients that

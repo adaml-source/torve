@@ -36,6 +36,14 @@ class BackendErrorTest {
     }
 
     @Test
+    fun parsesStructuredDetailWithErrorCodeFallback() {
+        val body = """{"detail": {"error_code": "device_required", "message": "raw backend text"}}"""
+        val error = parseBackendError(body)
+        assertEquals("device_required", error.code)
+        assertEquals("raw backend text", error.message)
+    }
+
+    @Test
     fun parsesStructuredDetailWithMessageOnly() {
         val body = """{"detail": {"message": "Something happened"}}"""
         val error = parseBackendError(body)

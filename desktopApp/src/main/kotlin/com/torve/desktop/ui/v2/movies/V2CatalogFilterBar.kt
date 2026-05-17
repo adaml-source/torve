@@ -6,10 +6,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -21,13 +27,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.torve.data.ai.AiProvider
 import com.torve.data.metadata.TmdbGenres
+import com.torve.desktop.ui.components.TorveBadge
+import com.torve.desktop.ui.components.TorveBadgeTone
+import com.torve.desktop.ui.components.TorveBanner
+import com.torve.desktop.ui.components.TorveBannerTone
 import com.torve.desktop.ui.components.TorveDropdownScaffold
 import com.torve.desktop.ui.components.TorveFilterChip
 import com.torve.desktop.ui.components.TorveGhostButton
+import com.torve.desktop.ui.components.TorvePrimaryButton
 import com.torve.desktop.ui.components.TorveSearchField
 import com.torve.desktop.ui.l10n.ds
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
+import com.torve.desktop.ui.v2.components.V2PosterCard
+import com.torve.domain.model.MediaItem
 import com.torve.presentation.catalog.CatalogViewModel
 import com.torve.presentation.catalog.SortOption
 
@@ -50,10 +64,22 @@ fun V2CatalogFilterBar(
     onSearchQueryChange: (String) -> Unit,
     startPadding: Dp = 72.dp,
     modifier: Modifier = Modifier,
+    aiProvider: AiProvider = AiProvider.CLAUDE,
+    aiProviderConfigured: Boolean = false,
+    aiMode: Boolean = false,
+    aiQuery: String = "",
+    aiLoading: Boolean = false,
+    onAiModeChange: (Boolean) -> Unit = {},
+    onAiQueryChange: (String) -> Unit = {},
+    onRunAiSearch: () -> Unit = {},
+    onOpenAiProviderSettings: (() -> Unit)? = null,
 ) {
     val state by catalogViewModel.state.collectAsState()
     val colors = TorveDesktopThemeTokens.colors
     var sortMenuOpen by remember { mutableStateOf(false) }
+    var searchVisible by remember { mutableStateOf(true) }
+    var filtersVisible by remember { mutableStateOf(true) }
+    var aiNotConfiguredNotice by remember { mutableStateOf(false) }
     val currentSort = state.filter.sortBy
 
     val genres = remember(mediaType) {
@@ -66,6 +92,7 @@ fun V2CatalogFilterBar(
     val activeCount = state.activeFilterCount +
         (if (state.selectedGenreId != null) 1 else 0) +
         (if (state.providerId != null) 1 else 0)
+    val searchActive = searchQuery.isNotBlank() || aiQuery.isNotBlank()
 
     // Year filter choices. Each maps to (year, yearTo) range that
     // gets applied to the catalog filter. "Any" clears the range.
@@ -114,24 +141,95 @@ fun V2CatalogFilterBar(
                 color = colors.accent,
             )
         }
-        // Row 1: Search field + year filter dropdown
-        // Aligned to CenterVertically so the year button's baseline
-        // matches the search field's text baseline -- otherwise the
-        // taller text-field box and the shorter ghost button looked
-        // misaligned at the top.
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TorveSearchField(
-                value = searchQuery,
-                onValueChange = onSearchQueryChange,
-                placeholder = ds(
-                    if (mediaType == CatalogMediaType.MOVIE) "Search movies on this page"
-                    else "Search shows on this page",
-                ),
-                modifier = Modifier.width(380.dp),
+            TorveFilterChip(
+                text = if (searchVisible) ds("Hide search") else ds("Show search"),
+                selected = searchVisible || searchActive || aiMode,
+                onClick = { searchVisible = !searchVisible },
             )
+            TorveFilterChip(
+                text = if (filtersVisible) ds("Hide filters") else {
+                    val suffix = if (activeCount > 0) " ($activeCount)" else ""
+                    ds("Show filters") + suffix
+                },
+                selected = filtersVisible || activeCount > 0,
+                onClick = { filtersVisible = !filtersVisible },
+            )
+            if (searchVisible || aiMode) {
+                TorveSearchField(
+                    value = if (aiMode) aiQuery else searchQuery,
+                    onValueChange = if (aiMode) onAiQueryChange else onSearchQueryChange,
+                    placeholder = if (aiMode) {
+                        ds("Ask Torve in plain English...")
+                    } else {
+                        ds(
+                            if (mediaType == CatalogMediaType.MOVIE) "Search movies on this page"
+                            else "Search shows on this page",
+                        )
+                    },
+                    modifier = Modifier.width(420.dp),
+                )
+                if (aiMode) {
+                    TorvePrimaryButton(
+                        text = if (aiLoading) ds("Asking...") else ds("Ask"),
+                        onClick = onRunAiSearch,
+                        enabled = !aiLoading && aiQuery.isNotBlank(),
+                    )
+                }
+            }
+            TorveFilterChip(
+                text = if (aiMode) "AI on" else "AI off",
+                selected = aiMode,
+                onClick = {
+                    if (aiMode) {
+                        onAiModeChange(false)
+                        aiNotConfiguredNotice = false
+                    } else if (aiProviderConfigured) {
+                        searchVisible = true
+                        onAiModeChange(true)
+                        aiNotConfiguredNotice = false
+                    } else {
+                        aiNotConfiguredNotice = true
+                    }
+                },
+            )
+            TorveBadge(
+                text = if (aiProviderConfigured) "${aiProvider.label} ready" else ds("AI not set up"),
+                tone = if (aiProviderConfigured) TorveBadgeTone.Success else TorveBadgeTone.Warning,
+            )
+        }
+
+        if (!searchVisible && !aiMode) {
+            // Search is intentionally hidden; keep the rest of the bar compact.
+        }
+
+        if (aiNotConfiguredNotice && !aiProviderConfigured) {
+            TorveBanner(
+                title = ds("AI search needs a provider"),
+                description = ds("Set up an AI provider in Settings before turning AI search on."),
+                tone = TorveBannerTone.Warning,
+            )
+            onOpenAiProviderSettings?.let { open ->
+                TorveGhostButton(
+                    text = ds("Open AI provider settings"),
+                    onClick = {
+                        aiNotConfiguredNotice = false
+                        open()
+                    },
+                )
+            }
+        }
+
+        if (!searchVisible && !filtersVisible && !aiMode) return@Column
+        if (!filtersVisible || aiMode) return@Column
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Box {
                 TorveGhostButton(
                     text = "${ds("Year")}: $currentYearLabel",
@@ -238,6 +336,63 @@ fun V2CatalogFilterBar(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun V2CatalogAiResultsGrid(
+    items: List<MediaItem>,
+    isLoading: Boolean,
+    error: String?,
+    onOpenDetail: (MediaItem) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = TorveDesktopThemeTokens.colors
+    if (error != null) {
+        TorveBanner(
+            title = ds("AI search failed"),
+            description = error,
+            tone = TorveBannerTone.Error,
+            modifier = Modifier.padding(start = 72.dp, end = 24.dp),
+        )
+    }
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(minSize = 150.dp),
+        contentPadding = PaddingValues(start = 72.dp, end = 24.dp, top = 8.dp, bottom = 24.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        if (isLoading) {
+            item {
+                Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = colors.accent)
+                }
+            }
+        }
+        if (!isLoading && items.isEmpty() && error == null) {
+            item {
+                Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = ds("Ask for a mood, sport, actor, title, or genre."),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.textSecondary,
+                    )
+                }
+            }
+        }
+        items(items, key = { it.id }) { item ->
+            V2PosterCard(
+                item.title,
+                item.posterUrl,
+                Modifier.width(150.dp),
+                item.year?.toString(),
+                item.rating?.let { r -> String.format("%.1f", r) },
+                ratings = item.ratings,
+                backdropUrl = item.backdropUrl,
+                overview = item.overview,
+            ) { onOpenDetail(item) }
         }
     }
 }

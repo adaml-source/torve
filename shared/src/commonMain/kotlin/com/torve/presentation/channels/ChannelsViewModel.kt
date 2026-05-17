@@ -17,6 +17,7 @@ import com.torve.domain.model.stableChannelId
 import com.torve.domain.player.LiveAudioOutputMode
 import com.torve.data.channels.CatchupResolver
 import com.torve.data.auth.AuthClient
+import com.torve.domain.diagnostics.DiagnosticsRedactor
 import com.torve.domain.repository.ChannelRepository
 import com.torve.domain.repository.DeviceLocalSettingsRepository
 import com.torve.domain.repository.PreferencesRepository
@@ -411,7 +412,7 @@ class ChannelsViewModel(
         }
     }
 
-    fun loadPlaylists() {
+    fun loadPlaylists(recoverEmptyCatalog: Boolean = true) {
         scope.launch {
             _state.update { it.copy(isLoading = it.categories.isEmpty(), error = null) }
             try {
@@ -433,6 +434,7 @@ class ChannelsViewModel(
                         restoreSavedState = true,
                         triggerBackgroundRefresh = false,
                         showLoadingUntilRefresh = false,
+                        recoverEmptyCatalog = recoverEmptyCatalog,
                     )
                 }
             } catch (e: Exception) {
@@ -861,7 +863,7 @@ class ChannelsViewModel(
                     try {
                         withContext(backgroundDispatcher) { channelRepo.refreshEpg(playlistId, _state.value.hiddenChannels) }
                     } catch (e: Exception) {
-                        println("ChannelsEPG: refresh failed playlistId=$playlistId error=${e.message}")
+                        println("ChannelsEPG: refresh failed playlistId=$playlistId error=${DiagnosticsRedactor.redact(e.message)}")
                     }
                 }
 
@@ -897,7 +899,7 @@ class ChannelsViewModel(
                 }
             } catch (oom: OutOfMemoryError) {
                 val message = "EPG is too large for device memory. Reduce provider EPG days and retry."
-                println("ChannelsEPG: load failed playlistId=$playlistId source=$epgSourceUrl error=$message")
+                println("ChannelsEPG: load failed playlistId=$playlistId sourceConfigured=${epgSourceUrl.isNotBlank()} error=$message")
                 _state.update {
                     it.copy(
                         guideChannels = guide,
@@ -909,7 +911,7 @@ class ChannelsViewModel(
                 }
             } catch (e: Exception) {
                 val message = e.message ?: "Failed to load EPG"
-                println("ChannelsEPG: load failed playlistId=$playlistId source=$epgSourceUrl error=$message")
+                println("ChannelsEPG: load failed playlistId=$playlistId sourceConfigured=${epgSourceUrl.isNotBlank()} error=${DiagnosticsRedactor.redact(message)}")
                 _state.update {
                     it.copy(
                         guideChannels = guide,
@@ -1035,7 +1037,7 @@ class ChannelsViewModel(
                     )
                 }
             } catch (e: Exception) {
-                println("ChannelsEPG: background refresh failed playlistId=$playlistId error=${e.message}")
+                println("ChannelsEPG: background refresh failed playlistId=$playlistId error=${DiagnosticsRedactor.redact(e.message)}")
                 // Don't overwrite visible EPG data — stale data is better than no data.
             }
         }
@@ -1205,6 +1207,9 @@ class ChannelsViewModel(
                 newXtreamPassword = "",
                 isAddingPlaylist = false,
                 addPlaylistProgress = null,
+                isCheckingEpg = false,
+                epgCheckMessage = null,
+                epgCheckSuccess = null,
             )
         }
     }
@@ -1218,18 +1223,95 @@ class ChannelsViewModel(
     }
 
     fun setNewPlaylistEpgUrl(url: String) {
-        _state.update { it.copy(newPlaylistEpgUrl = url) }
+        _state.update {
+            it.copy(
+                newPlaylistEpgUrl = url,
+                epgCheckMessage = null,
+                epgCheckSuccess = null,
+            )
+        }
+    }
+
+    fun checkNewPlaylistEpgUrl() {
+        checkEpgUrl(_state.value.newPlaylistEpgUrl)
+    }
+
+    fun checkEpgUrl(epgUrl: String) {
+        val normalizedUrl = epgUrl.trim()
+        if (normalizedUrl.isBlank()) {
+            _state.update {
+                it.copy(
+                    isCheckingEpg = false,
+                    epgCheckMessage = "Enter an EPG URL to check.",
+                    epgCheckSuccess = false,
+                )
+            }
+            return
+        }
+        scope.launch {
+            _state.update {
+                it.copy(
+                    isCheckingEpg = true,
+                    epgCheckMessage = null,
+                    epgCheckSuccess = null,
+                )
+            }
+            val result = withContext(backgroundDispatcher) {
+                playlistBackup?.validatePlaylistEpgUrl(normalizedUrl)
+                    ?: com.torve.data.account.EpgValidationResponse(
+                        success = false,
+                        status = "unavailable",
+                        message = "Sign in to check EPG URLs.",
+                    )
+            }
+            _state.update {
+                it.copy(
+                    isCheckingEpg = false,
+                    epgCheckMessage = result.displayMessage(),
+                    epgCheckSuccess = result.success,
+                )
+            }
+        }
     }
 
     fun updatePlaylistEpgUrl(playlistId: String, epgUrl: String) {
         scope.launch {
             try {
-                val normalizedUrl = epgUrl.trim().ifBlank { "" }
+                val normalizedUrl = epgUrl.trim().takeIf { it.isNotEmpty() }
+                val playlistsBefore = withContext(backgroundDispatcher) { channelRepo.getPlaylists() }
+                val playlistBefore = playlistsBefore.firstOrNull { it.id == playlistId }
+                if (playlistBefore?.type != PlaylistType.M3U) {
+                    val message = "Guide URL editing is only available for M3U sources."
+                    _state.update {
+                        it.copy(
+                            guideError = message,
+                            epgState = EpgState.Error(message),
+                        )
+                    }
+                    return@launch
+                }
                 val playlists = withContext(backgroundDispatcher) {
-                    channelRepo.updatePlaylistEpgUrl(playlistId, normalizedUrl.ifBlank { null })
+                    channelRepo.updatePlaylistEpgUrl(playlistId, normalizedUrl)
                     channelRepo.getPlaylists()
                 }
                 _state.update { it.copy(playlists = playlists) }
+                val updatedPlaylist = playlists.firstOrNull { it.id == playlistId }
+                if (updatedPlaylist != null) {
+                    runCatching {
+                        playlistBackup?.savePlaylistToBackend(
+                            playlistId = updatedPlaylist.id,
+                            name = updatedPlaylist.name,
+                            url = if (updatedPlaylist.type == PlaylistType.M3U) updatedPlaylist.url else null,
+                            epgUrl = if (updatedPlaylist.type == PlaylistType.M3U) normalizedUrl else null,
+                            playlistType = updatedPlaylist.type.name.lowercase(),
+                            server = updatedPlaylist.server,
+                            username = updatedPlaylist.username,
+                            password = if (updatedPlaylist.type == PlaylistType.XTREAM) updatedPlaylist.password else null,
+                        )
+                    }.onFailure { e ->
+                        println("[PlaylistSync] Backend EPG update failed for '${updatedPlaylist.id}': ${DiagnosticsRedactor.redact(e.message)}")
+                    }
+                }
                 if (_state.value.selectedPlaylistId == playlistId) {
                     buildGuideChannels(forceRefreshEpg = true)
                 }
@@ -1246,7 +1328,13 @@ class ChannelsViewModel(
     }
 
     fun setNewPlaylistType(type: String) {
-        _state.update { it.copy(newPlaylistType = type) }
+        _state.update {
+            it.copy(
+                newPlaylistType = type,
+                epgCheckMessage = null,
+                epgCheckSuccess = null,
+            )
+        }
     }
 
     fun setNewXtreamServer(server: String) {
@@ -1277,7 +1365,7 @@ class ChannelsViewModel(
         scope.launch {
             _state.update { it.copy(isAddingPlaylist = true, addPlaylistProgress = null, error = null) }
             try {
-                val epg = st.newPlaylistEpgUrl.ifBlank { null }
+                val epg = st.newPlaylistEpgUrl.trim().takeIf { it.isNotEmpty() }
                 val playlist = withContext(backgroundDispatcher) {
                     channelRepo.addPlaylist(
                         name = st.newPlaylistName,
@@ -1298,7 +1386,7 @@ class ChannelsViewModel(
                         playlistType = "m3u",
                     ) ?: false
                 }.getOrElse { e ->
-                    println("[PlaylistSync] Backend save FAILED for M3U '${playlist.id}': ${e.message}")
+                    println("[PlaylistSync] Backend save FAILED for M3U '${playlist.id}': ${DiagnosticsRedactor.redact(e.message)}")
                     false
                 }
                 if (backendOk) println("[PlaylistSync] Backend save OK for M3U '${playlist.id}'")
@@ -1345,7 +1433,7 @@ class ChannelsViewModel(
                         password = st.newXtreamPassword,
                     ) ?: false
                 }.getOrElse { e ->
-                    println("[PlaylistSync] Backend save FAILED for Xtream '${playlist.id}': ${e.message}")
+                    println("[PlaylistSync] Backend save FAILED for Xtream '${playlist.id}': ${DiagnosticsRedactor.redact(e.message)}")
                     false
                 }
                 if (backendOk) println("[PlaylistSync] Backend save OK for Xtream '${playlist.id}'")
@@ -1733,6 +1821,7 @@ class ChannelsViewModel(
         restoreSavedState: Boolean,
         triggerBackgroundRefresh: Boolean,
         showLoadingUntilRefresh: Boolean,
+        recoverEmptyCatalog: Boolean = true,
     ) {
         println("CATALOG_LOAD: playlistId=$playlistId triggerRefresh=$triggerBackgroundRefresh")
         // Cache-first: if the requested playlist is already loaded with categories,
@@ -1837,7 +1926,7 @@ class ChannelsViewModel(
                         // playlist" overlay forever — refresh either populates
                         // categories/channels (clearing the overlay) or sets
                         // an error (also clearing the overlay).
-                        if (rowCount == 0L) {
+                        if (rowCount == 0L && recoverEmptyCatalog) {
                             recoveryRefreshStarted = true
                             println("CATALOG_LOAD: empty DB for $playlistId — kicking off source refresh to recover")
                             refreshPlaylistInBackground(
@@ -1845,6 +1934,8 @@ class ChannelsViewModel(
                                 preserveVisibleCatalog = false,
                                 restoreSavedState = restoreSavedState,
                             )
+                        } else if (rowCount == 0L) {
+                            println("CATALOG_LOAD: empty DB for $playlistId - staged import is waiting for background catalog warmup")
                         } else {
                             println("CATALOG_LOAD: playlist=$playlistId has $rowCount rows but no live category counts; keeping DB-only state")
                         }
@@ -2090,7 +2181,7 @@ class ChannelsViewModel(
                     epgStateOverride = null,
                 )
             } catch (e: Exception) {
-                println("ensureFullPlaylistLoaded failed: ${e.message}")
+                println("ensureFullPlaylistLoaded failed: ${DiagnosticsRedactor.redact(e.message)}")
             }
         }
     }
@@ -2338,13 +2429,21 @@ class ChannelsViewModel(
         playlistId: String,
         preserveVisibleCatalog: Boolean,
         restoreSavedState: Boolean,
+        includeEpg: Boolean = false,
     ) {
         scope.launch {
             try {
                 println(
-                    "StartupRecovery: background refresh start playlistId=$playlistId preserveVisibleCatalog=$preserveVisibleCatalog",
+                    "StartupRecovery: background refresh start playlistId=$playlistId " +
+                        "preserveVisibleCatalog=$preserveVisibleCatalog includeEpg=$includeEpg",
                 )
-                withContext(backgroundDispatcher) { channelRepo.refreshPlaylist(playlistId) }
+                withContext(backgroundDispatcher) {
+                    if (includeEpg) {
+                        channelRepo.refreshPlaylist(playlistId)
+                    } else {
+                        channelRepo.refreshPlaylistCatalog(playlistId)
+                    }
+                }
                 if (_state.value.selectedPlaylistId != playlistId) return@launch
                 val refreshedLiveCounts = withContext(backgroundDispatcher) { liveCategoryCounts(playlistId) }
                 if (refreshedLiveCounts.isNotEmpty()) {

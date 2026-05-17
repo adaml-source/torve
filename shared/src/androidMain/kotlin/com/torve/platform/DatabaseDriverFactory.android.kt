@@ -13,6 +13,11 @@ actual class DatabaseDriverFactory(private val context: Context) {
             context = context,
             name = "torve.db",
             callback = object : AndroidSqliteDriver.Callback(TorveDatabase.Schema) {
+                override fun onConfigure(db: SupportSQLiteDatabase) {
+                    super.onConfigure(db)
+                    runCatching { db.enableWriteAheadLogging() }
+                }
+
                 override fun onOpen(db: SupportSQLiteDatabase) {
                     super.onOpen(db)
                     // Only run the expensive ensureAllTables() migration on

@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import and_, desc, func
 from sqlalchemy.orm import Session
 
-from app.models import ResolveSuccessMemory
+from app.models import ResolveSuccessMemory, source_key_digest
 
 _log = logging.getLogger(__name__)
 
@@ -60,6 +60,7 @@ def record_success(
     """
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(days=retention_days)
+    source_hash = source_key_digest(source_key)
 
     # Try to find existing row for this exact combination.
     # The unique index uq_rsm_user_content_source ensures at most one.
@@ -70,6 +71,7 @@ def record_success(
         ResolveSuccessMemory.user_id == user_id,
         ResolveSuccessMemory.content_id == content_id,
         ResolveSuccessMemory.provider_type == provider_type,
+        ResolveSuccessMemory.source_key_hash == source_hash,
         ResolveSuccessMemory.source_key == source_key,
     ]
     if season is not None:
@@ -143,8 +145,8 @@ def record_success(
     db.add(row)
     db.flush()
     _log.info(
-        "RESOLVE_MEMORY_SUCCESS_NEW user=%s content=%s s=%s e=%s provider=%s source=%s",
-        user_id, content_id, season, episode, provider_type, source_key,
+        "RESOLVE_MEMORY_SUCCESS_NEW user=%s content=%s s=%s e=%s provider=%s source_hash=%s",
+        user_id, content_id, season, episode, provider_type, source_hash,
     )
     return row
 
@@ -166,11 +168,13 @@ def record_failure(
     Returns the updated row, or None if no memory existed.
     """
     now = datetime.now(timezone.utc)
+    source_hash = source_key_digest(source_key)
 
     filters = [
         ResolveSuccessMemory.user_id == user_id,
         ResolveSuccessMemory.content_id == content_id,
         ResolveSuccessMemory.provider_type == provider_type,
+        ResolveSuccessMemory.source_key_hash == source_hash,
         ResolveSuccessMemory.source_key == source_key,
     ]
     if season is not None:
@@ -189,8 +193,8 @@ def record_failure(
     existing.last_failure_at = now
     db.flush()
     _log.info(
-        "RESOLVE_MEMORY_FAILURE user=%s content=%s s=%s e=%s provider=%s source=%s",
-        user_id, content_id, season, episode, provider_type, source_key,
+        "RESOLVE_MEMORY_FAILURE user=%s content=%s s=%s e=%s provider=%s source_hash=%s",
+        user_id, content_id, season, episode, provider_type, source_hash,
     )
     return existing
 

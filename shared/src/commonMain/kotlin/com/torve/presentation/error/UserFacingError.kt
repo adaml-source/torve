@@ -22,6 +22,8 @@ enum class UserFacingError(
     DEVICE_ACTIVATE_FAILED("error_device_activate_failed"),
     DEVICE_RENAME_FAILED("error_device_rename_failed"),
     DEVICE_FETCH_FAILED("error_device_fetch_failed"),
+    DEVICE_REQUIRED("error_device_required"),
+    DEVICE_NOT_AUTHORIZED("error_device_not_authorized"),
 
     // ── Auth / session ──
     NOT_LOGGED_IN("error_not_logged_in"),
@@ -43,6 +45,7 @@ enum class UserFacingError(
     NETWORK_FAILURE("error_network_failure"),
     TIMEOUT("error_timeout"),
     SERVER_ERROR("error_server_error"),
+    RATE_LIMITED("error_rate_limited"),
 
     // ── Sync ──
     SYNC_FAILED("error_sync_failed"),
@@ -73,6 +76,7 @@ enum class UserFacingError(
     STREAM_REAL_DEBRID_REFRESH_FAILED("error_stream_real_debrid_refresh_failed"),
     STREAM_REAL_DEBRID_SOURCE_BLOCKED("error_stream_real_debrid_source_blocked"),
     STREAM_NO_CACHED_SOURCE("error_stream_no_cached_source"),
+    PLAYBACK_LINK_EXPIRED("error_playback_link_expired"),
     WATCHLIST_FAILED("error_watchlist_failed"),
     DOWNLOAD_FAILED("error_download_failed"),
     CHANNEL_LOAD_FAILED("error_channel_load_failed"),
@@ -107,8 +111,11 @@ fun Throwable.toUserFacingError(): UserFacingError {
         msg.contains("resource already registered") ||
             msg.contains("already registered") -> UserFacingError.ALREADY_REGISTERED
         msg.contains("premium_required") || msg.contains("premium required") -> UserFacingError.PREMIUM_REQUIRED
+        msg.contains("device_required") || msg.contains("device_not_registered") -> UserFacingError.DEVICE_REQUIRED
+        msg.contains("device_not_authorized") -> UserFacingError.DEVICE_NOT_AUTHORIZED
+        msg.contains("stream_expired") || msg.contains("invalid_handoff") -> UserFacingError.PLAYBACK_LINK_EXPIRED
         msg.contains("device_cap_reached") || msg.contains("device cap reached") -> UserFacingError.DEVICE_CAP_REACHED
-        msg.contains("429") || msg.contains("rate") && msg.contains("limit") -> UserFacingError.INTEGRATION_RATE_LIMITED
+        msg.contains("429") || msg.contains("rate_limited") || msg.contains("rate") && msg.contains("limit") -> UserFacingError.RATE_LIMITED
         msg.contains("5") && msg.matches(Regex(".*\\b5\\d{2}\\b.*")) -> UserFacingError.SERVER_ERROR
         else -> UserFacingError.UNKNOWN
     }
@@ -121,11 +128,19 @@ fun backendReasonToUserFacingError(reason: String?): UserFacingError {
     return when (reason?.trim()?.lowercase()) {
         "device_cap_reached", "activation_slot_exhausted", "no_activation_slots" ->
             UserFacingError.DEVICE_CAP_REACHED
+        "device_required", "device_not_registered" -> UserFacingError.DEVICE_REQUIRED
+        "device_not_authorized" -> UserFacingError.DEVICE_NOT_AUTHORIZED
         "swap_limit_reached" -> UserFacingError.DEVICE_SWAP_LIMIT
         "already_removed" -> UserFacingError.DEVICE_ALREADY_REMOVED
         "not_found" -> UserFacingError.DEVICE_REMOVE_FAILED
         "no_entitlement" -> UserFacingError.NO_ENTITLEMENT
         "premium_required" -> UserFacingError.PREMIUM_REQUIRED
+        "rate_limited" -> UserFacingError.RATE_LIMITED
+        "stream_expired", "invalid_handoff" -> UserFacingError.PLAYBACK_LINK_EXPIRED
+        "stream_reference_required",
+        "stream_reference_not_found",
+        "stream_handoff_unavailable",
+        -> UserFacingError.STREAM_RESOLVE_FAILED
         "already_registered" -> UserFacingError.ALREADY_REGISTERED
         else -> UserFacingError.UNKNOWN
     }
@@ -145,6 +160,8 @@ val defaultUserFacingMessages: Map<String, String> = mapOf(
     "error_device_activate_failed" to "Could not activate this device. Please try again.",
     "error_device_rename_failed" to "Could not rename device.",
     "error_device_fetch_failed" to "Could not load devices. Please try again.",
+    "error_device_required" to "This device needs to be set up before playback.",
+    "error_device_not_authorized" to "This device is not authorized for playback. Manage your devices in account settings.",
     // Auth
     "error_not_logged_in" to "Please sign in to continue.",
     "error_unauthorized" to "Your session has expired. Please sign in again.",
@@ -162,6 +179,7 @@ val defaultUserFacingMessages: Map<String, String> = mapOf(
     "error_network_failure" to "Could not connect. Please check your internet connection.",
     "error_timeout" to "The request timed out. Please try again.",
     "error_server_error" to "Something went wrong on our end. Please try again later.",
+    "error_rate_limited" to "Too many requests. Please wait and try again.",
     // Sync
     "error_sync_failed" to "Settings sync failed. Please try again.",
     // Integrations
@@ -188,6 +206,7 @@ val defaultUserFacingMessages: Map<String, String> = mapOf(
     "error_stream_real_debrid_refresh_failed" to "Real-Debrid could not refresh your session. Reconnect it in Settings > Advanced > Panda.",
     "error_stream_real_debrid_source_blocked" to "Real-Debrid blocked this source. Try another source.",
     "error_stream_no_cached_source" to "No cached stream is available for this title.",
+    "error_playback_link_expired" to "Playback link expired. Try playing this source again.",
     "error_watchlist_failed" to "Watchlist update failed. Please try again.",
     "error_download_failed" to "Download action failed. Please try again.",
     "error_channel_load_failed" to "Could not load channels. Please try again.",

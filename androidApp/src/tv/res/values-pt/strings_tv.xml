@@ -183,10 +183,10 @@
     <string name="tv_catalog_shows_preparing">S\u00e9ries est\u00e3o sendo preparadas em segundo plano</string>
     <string name="tv_search_ai_provider_required">Configure um provedor de IA nas Configura\u00e7\u00f5es antes de usar a Pesquisa IA.</string>
     <string name="tv_settings_panda_streaming_setup">Configura\u00e7\u00e3o de streaming do Panda</string>
-    <string name="tv_settings_panda_streaming_setup_desc">Configure debrid, usenet, clientes de download, IPTV e sa\u00fade dos provedores em um s\u00f3 lugar.</string>
-    <string name="tv_settings_panda_configured_enabled">Configurado e ativado. Reconfigure provedores de streaming, IPTV e automa\u00e7\u00e3o.</string>
+    <string name="tv_settings_panda_streaming_setup_desc">Configure debrid, usenet, clientes de download e sa\u00fade dos provedores em um s\u00f3 lugar.</string>
+    <string name="tv_settings_panda_configured_enabled">Configurado e ativado. Reconfigure provedores de streaming e automa\u00e7\u00e3o.</string>
     <string name="tv_settings_panda_configured_disabled">Configurado, mas desativado. Abra o Panda para ativar ou reconfigurar.</string>
-    <string name="tv_settings_panda_setup_desc">Prepare o Torve para streaming com debrid, usenet, clientes de download e IPTV.</string>
+    <string name="tv_settings_panda_setup_desc">Prepare o Torve para streaming com debrid, usenet e clientes de download.</string>
     <string name="tv_settings_realdebrid_connect">Conectar Real-Debrid</string>
     <string name="tv_settings_realdebrid_connect_panda">Conectar Real-Debrid no Panda</string>
     <string name="tv_settings_realdebrid_managed_authorize">Gerenciado pelo Panda. Conclua a autoriza\u00e7\u00e3o do dispositivo para conectar o Real-Debrid.</string>

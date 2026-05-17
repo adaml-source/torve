@@ -110,9 +110,140 @@ class SubscriptionViewModelTest {
         }
     }
 
+    @Test
+    fun purchaseGateBlocksMonthlyWhenBackendEntitlementAlreadyExists() = runTest(dispatcher) {
+        val repo = FakeSubscriptionRepository(
+            backendResult = BackendPremiumResult.Active,
+            activeSubscription = testSubscription(
+                tier = SubscriptionTier.MONTHLY,
+                platform = "stripe",
+            ),
+        )
+        val vmScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
+        try {
+            val vm = buildViewModel(subscriptionRepo = repo, coroutineScope = vmScope)
+            advanceUntilIdle()
+
+            var allowed = false
+            vm.requireAccountForPurchase("Google Play", SubscriptionTier.MONTHLY) {
+                allowed = true
+            }
+            advanceUntilIdle()
+
+            assertFalse(allowed)
+            assertEquals("Premium already active", vm.state.value.purchaseStatus?.title)
+            assertTrue(repo.refreshDetailedCalls >= 1)
+        } finally {
+            vmScope.cancel()
+        }
+    }
+
+    @Test
+    fun purchaseGateBlocksLifetimeUpgradeAcrossDifferentStores() = runTest(dispatcher) {
+        val repo = FakeSubscriptionRepository(
+            backendResult = BackendPremiumResult.Active,
+            activeSubscription = testSubscription(
+                tier = SubscriptionTier.MONTHLY,
+                platform = "stripe",
+            ),
+        )
+        val vmScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
+        try {
+            val vm = buildViewModel(subscriptionRepo = repo, coroutineScope = vmScope)
+            advanceUntilIdle()
+
+            var allowed = false
+            vm.requireAccountForPurchase("Google Play", SubscriptionTier.LIFETIME) {
+                allowed = true
+            }
+            advanceUntilIdle()
+
+            assertFalse(allowed)
+            assertTrue(vm.state.value.purchaseStatus?.message.orEmpty().contains("Stripe"))
+        } finally {
+            vmScope.cancel()
+        }
+    }
+
+    @Test
+    fun purchaseGateAllowsLifetimeUpgradeWithinSameStore() = runTest(dispatcher) {
+        val repo = FakeSubscriptionRepository(
+            backendResult = BackendPremiumResult.Active,
+            activeSubscription = testSubscription(
+                tier = SubscriptionTier.MONTHLY,
+                platform = "google_play",
+            ),
+        )
+        val vmScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
+        try {
+            val vm = buildViewModel(subscriptionRepo = repo, coroutineScope = vmScope)
+            advanceUntilIdle()
+
+            var allowed = false
+            vm.requireAccountForPurchase("Google Play", SubscriptionTier.LIFETIME) {
+                allowed = true
+            }
+            advanceUntilIdle()
+
+            assertTrue(allowed)
+            assertEquals(null, vm.state.value.purchaseStatus)
+        } finally {
+            vmScope.cancel()
+        }
+    }
+
+    @Test
+    fun googlePurchaseSuccessWaitsForBackendAccessStateBeforeUnlockingPremium() = runTest(dispatcher) {
+        val repo = FakeSubscriptionRepository(
+            backendResult = BackendPremiumResult.NoEntitlement,
+            activeSubscription = null,
+        )
+        val entitlementApi = EntitlementApi(
+            httpClient = HttpClient(
+                MockEngine { request ->
+                    assertEquals("/me/purchases/google-play/verify", request.url.encodedPath)
+                    respond(
+                        content = """{"verified":true,"entitlement_granted":true,"premium_access":true}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                },
+            ) {
+                install(ContentNegotiation) {
+                    json(Json { ignoreUnknownKeys = true; explicitNulls = false })
+                }
+            },
+            baseUrlProvider = { "https://api.torve.app" },
+        )
+        val vmScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
+        try {
+            val vm = buildViewModel(
+                subscriptionRepo = repo,
+                entitlementApi = entitlementApi,
+                coroutineScope = vmScope,
+            )
+            advanceUntilIdle()
+
+            vm.verifyGooglePurchase(
+                productId = "torve.monthly",
+                purchaseToken = "purchase-token",
+                platform = "google_play_mobile",
+            )
+            advanceUntilIdle()
+
+            assertEquals(0, repo.backendGrantCalls)
+            assertFalse(vm.state.value.isPro)
+            assertFalse(vm.state.value.hasEntitlement)
+            assertEquals(PurchaseVerificationState.PENDING, vm.state.value.purchaseVerificationState)
+        } finally {
+            vmScope.cancel()
+        }
+    }
+
     private fun buildViewModel(
         subscriptionRepo: FakeSubscriptionRepository = FakeSubscriptionRepository(),
         authClient: AuthClient = buildAuthClient(),
+        entitlementApi: EntitlementApi? = null,
         coroutineScope: CoroutineScope? = null,
         resendVerificationEmail: suspend (String) -> AuthResult = authClient::resendVerification,
     ): SubscriptionViewModel {
@@ -122,7 +253,7 @@ class SubscriptionViewModelTest {
             rebateCodeApi = RebateCodeApi(unusedClient),
             deviceIdProvider = FakeDeviceIdProvider(),
             authClient = authClient,
-            entitlementApi = EntitlementApi(
+            entitlementApi = entitlementApi ?: EntitlementApi(
                 httpClient = unusedClient,
                 baseUrlProvider = { "https://api.torve.app" },
             ),
@@ -185,19 +316,28 @@ class SubscriptionViewModelTest {
     }
 }
 
+private fun testSubscription(
+    tier: SubscriptionTier = SubscriptionTier.LIFETIME,
+    platform: String = "backend",
+): Subscription = Subscription(
+    id = "sub-1",
+    tier = tier,
+    purchaseToken = "backend_entitlement",
+    expiresAt = null,
+    isActive = true,
+    platform = platform,
+    purchasedAt = 1L,
+)
+
 private class FakeSubscriptionRepository(
     var backendResult: BackendPremiumResult = BackendPremiumResult.NoEntitlement,
+    var activeSubscription: Subscription? = testSubscription(),
 ) : SubscriptionRepository {
+    var refreshDetailedCalls: Int = 0
+    var backendGrantCalls: Int = 0
+
     override suspend fun getActiveSubscription(): Subscription? {
-        return Subscription(
-            id = "sub-1",
-            tier = SubscriptionTier.LIFETIME,
-            purchaseToken = "backend_entitlement",
-            expiresAt = null,
-            isActive = true,
-            platform = "backend",
-            purchasedAt = 1L,
-        )
+        return activeSubscription
     }
 
     override suspend fun isPro(): Boolean = backendResult == BackendPremiumResult.Active
@@ -212,9 +352,14 @@ private class FakeSubscriptionRepository(
 
     override suspend fun refreshFromBackend(): Boolean = backendResult == BackendPremiumResult.Active
 
-    override suspend fun refreshFromBackendDetailed(): BackendPremiumResult = backendResult
+    override suspend fun refreshFromBackendDetailed(): BackendPremiumResult {
+        refreshDetailedCalls += 1
+        return backendResult
+    }
 
-    override suspend fun onBackendEntitlementGranted(isPremium: Boolean) = Unit
+    override suspend fun onBackendEntitlementGranted(isPremium: Boolean) {
+        backendGrantCalls += 1
+    }
 }
 
 private class FakeDeviceIdProvider : DeviceIdProvider {

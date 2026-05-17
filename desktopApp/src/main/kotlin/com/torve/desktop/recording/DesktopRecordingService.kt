@@ -17,6 +17,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileNotFoundException
+import java.io.IOException
 import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -135,13 +137,29 @@ class DesktopRecordingService(
             )
             return
         }
+        if (!ensureWritableDirectory(root)) {
+            scheduler.markFailed(
+                rec.id,
+                RecordingFailureReason.FILE_WRITE_ERROR,
+                "Recordings folder is unavailable or not writable: ${root.absolutePath}",
+            )
+            return
+        }
         val relative = RecordingFileNaming.relativePath(
             channelName = rec.channelName,
             programmeTitle = rec.programmeTitle,
             startEpochMs = rec.startMs,
         )
         val target = File(root, relative)
-        target.parentFile?.mkdirs()
+        val parent = target.parentFile
+        if (parent == null || !ensureWritableDirectory(parent)) {
+            scheduler.markFailed(
+                rec.id,
+                RecordingFailureReason.FILE_WRITE_ERROR,
+                "Could not create recording folder: ${parent?.absolutePath ?: root.absolutePath}",
+            )
+            return
+        }
         // The file doesn't exist yet, so allowlist.isAllowed(File) needs
         // the parent root + checking the resolved path stays under it.
         // We use the canonical-prefix containment helper directly.
@@ -153,10 +171,10 @@ class DesktopRecordingService(
             )
             return
         }
-        // The configured root must itself be in the allowlist -
-        // catches misconfiguration where the user pointed at something
-        // outside their declared download folders.
-        if (allowlist.roots().none { it.canonicalPath.equals(root.canonicalPath, ignoreCase = pathIsCaseInsensitive()) }) {
+        // The configured root must be covered by the storage allowlist.
+        // Use directory containment instead of exact equality so a user can
+        // choose a Recordings folder under a broader configured media root.
+        if (!allowlist.coversDirectory(root)) {
             scheduler.markFailed(
                 rec.id,
                 RecordingFailureReason.OUT_OF_ALLOWLIST,
@@ -206,12 +224,24 @@ class DesktopRecordingService(
     }
 
     private suspend fun writeStreamToFile(rec: Recording, target: File): Long {
-        val stream = openConnection(rec.streamUrl)
+        val output = try {
+            target.outputStream()
+        } catch (t: FileNotFoundException) {
+            throw RecordingFileWriteException(t)
+        } catch (t: IOException) {
+            throw RecordingFileWriteException(t)
+        }
+        val stream = try {
+            openConnection(rec.streamUrl)
+        } catch (t: Throwable) {
+            runCatching { output.close() }
+            throw t
+        }
         var written = 0L
         try {
             stream.input.use { input ->
-                target.outputStream().use { output ->
-                    copyUntil(input, output, deadlineMs = rec.endMs) { written += it }
+                output.use { out ->
+                    copyUntil(input, out, deadlineMs = rec.endMs) { written += it }
                 }
             }
         } finally {
@@ -240,10 +270,22 @@ class DesktopRecordingService(
         if (t == null) return RecordingFailureReason.UNKNOWN to "Unknown error."
         val msg = t.message?.take(160).orEmpty()
         return when (t) {
+            is RecordingFileWriteException -> RecordingFailureReason.FILE_WRITE_ERROR to
+                (t.cause?.message?.take(160) ?: msg)
             is java.io.IOException -> RecordingFailureReason.NETWORK_ERROR to msg
             is java.net.SocketTimeoutException -> RecordingFailureReason.NETWORK_ERROR to "Stream stalled."
             else -> RecordingFailureReason.UNKNOWN to msg
         }
+    }
+
+    private fun ensureWritableDirectory(dir: File): Boolean {
+        return runCatching {
+            if (dir.exists()) {
+                dir.isDirectory && dir.canWrite()
+            } else {
+                dir.mkdirs() && dir.isDirectory && dir.canWrite()
+            }
+        }.getOrDefault(false)
     }
 
     private fun isWithinRoot(target: File, root: File): Boolean {
@@ -283,6 +325,8 @@ class DesktopRecordingService(
         }
     }
 }
+
+private class RecordingFileWriteException(cause: Throwable) : IOException(cause.message, cause)
 
 /**
  * Test-friendly seam - the production path uses

@@ -23,6 +23,8 @@ import com.torve.data.auth.AuthClient
 import com.torve.data.auth.UserIdProvider
 import com.torve.data.ai.AiSuggestClient
 import com.torve.data.ai.KeywordSearchService
+import com.torve.data.billing.BillingApi
+import com.torve.data.billing.KtorBillingApi
 import com.torve.data.contentpolicy.AddonPolicyRepository
 import com.torve.data.contentpolicy.ContentPolicyApi
 import com.torve.data.contentpolicy.ContentPolicyCacheInvalidationCoordinator
@@ -179,20 +181,20 @@ val sharedModule = module {
             val refreshToken = secretStore.get(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN)
             val clientId = secretStore.get(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_RD_CLIENT_ID)
             val clientSecret = secretStore.get(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_RD_CLIENT_SECRET)
-            println("TORVE_RD: refresh attempt — hasRefreshToken=${refreshToken != null} hasClientId=${clientId != null} hasClientSecret=${clientSecret != null}")
+            torveVerboseLog { "TORVE_RD: refresh attempt hasRefreshToken=${refreshToken != null} hasClientId=${clientId != null} hasClientSecret=${clientSecret != null}" }
             if (refreshToken == null || clientId == null || clientSecret == null) {
-                println("TORVE_RD: refresh aborted — missing credentials, user must reconnect RD")
+                torveVerboseLog { "TORVE_RD: refresh aborted missing credentials, user must reconnect RD" }
                 return@RdTokenRefresher null
             }
             try {
                 val tokens = client.rdRefreshAccessToken(refreshToken, clientId, clientSecret)
-                println("TORVE_RD: refresh succeeded, new token length=${tokens.accessToken.length}")
+                torveVerboseLog { "TORVE_RD: refresh succeeded newTokenLength=${tokens.accessToken.length}" }
                 secretStore.put(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID, tokens.accessToken)
                 secretStore.put(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN, tokens.refreshToken)
                 settingsRefreshNotifier.notifyRefresh(kotlinx.datetime.Clock.System.now().toEpochMilliseconds())
                 tokens.accessToken
             } catch (e: Exception) {
-                println("TORVE_RD: refresh failed — ${e.message}")
+                torveVerboseLog { "TORVE_RD: refresh failed ${e.message}" }
                 null
             }
         }
@@ -249,6 +251,14 @@ val sharedModule = module {
         EntitlementApi(
             httpClient = get(),
             baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
+            installationIdProvider = { get<com.torve.domain.device.DeviceIdProvider>().getDeviceId() },
+        )
+    }
+    single<BillingApi> {
+        KtorBillingApi(
+            httpClient = get(),
+            baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
+            installationIdProvider = { get<com.torve.domain.device.DeviceIdProvider>().getDeviceId() },
         )
     }
     single {
@@ -256,6 +266,13 @@ val sharedModule = module {
             httpClient = get(),
             baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
             currentInstallationIdProvider = { get<com.torve.domain.device.DeviceIdProvider>().getDeviceId() },
+        )
+    }
+    single {
+        com.torve.data.security.TrustSignalsApi(
+            httpClient = get(),
+            baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
+            installationIdProvider = { get<com.torve.domain.device.DeviceIdProvider>().getDeviceId() },
         )
     }
 
@@ -291,9 +308,23 @@ val sharedModule = module {
     single<DeviceLocalSettingsRepository> { PreferencesRepositoryImpl(get(), get()) }
     single { MutableContentChannelProvider() }
     single<ContentChannelProvider> { get<MutableContentChannelProvider>() }
-    single { AccountSettingsApi(get(), baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL }, channelProvider = get()) }
+    single {
+        AccountSettingsApi(
+            get(),
+            baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
+            channelProvider = get(),
+            installationIdProvider = { get<com.torve.domain.device.DeviceIdProvider>().getDeviceId() },
+        )
+    }
     single<AccountSettingsRepository> { AccountSettingsRepositoryImpl(get(), get(), get(), get()) }
-    single { MediaFavoritesApi(get(), baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL }, channelProvider = get()) }
+    single {
+        MediaFavoritesApi(
+            get(),
+            baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
+            channelProvider = get(),
+            installationIdProvider = { get<com.torve.domain.device.DeviceIdProvider>().getDeviceId() },
+        )
+    }
     single<MediaFavoritesRepository> { MediaFavoritesRepositoryImpl(get(), get(), get(), get()) }
     single<PreferencesRepository> { AccountAwarePreferencesRepository(get(), get(), get()) }
     single { SettingsRefreshNotifier() }
@@ -372,7 +403,13 @@ val sharedModule = module {
 
     // Sync Repository
     single<SyncRepository> { SyncRepositoryImpl(get(), get(), get(), get()) }
-    single { PairingApi(get(), baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL }) }
+    single {
+        PairingApi(
+            get(),
+            baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
+            installationIdProvider = { get<com.torve.domain.device.DeviceIdProvider>().getDeviceId() },
+        )
+    }
 
     // Cross-platform Newznab + TorBox usenet plumbing for the shared
     // Sports surface (and future Adult / NZB-Movies surfaces). Both
@@ -386,7 +423,7 @@ val sharedModule = module {
             authClient = get(),
         )
     }
-    single { AccountSessionCoordinator(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { AccountSessionCoordinator(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
 
     // Provider-health primitives. Repository hydrates from prefs on first
     // load; the coordinator holds in-memory checker registrations and is
@@ -809,6 +846,7 @@ val sharedModule = module {
             httpClient = get(),
             authClient = get(),
             baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
+            installationIdProvider = { get<com.torve.domain.device.DeviceIdProvider>().getDeviceId() },
         )
     }
     single<com.torve.data.usenet.UsenetRepository> {
@@ -868,6 +906,7 @@ val sharedModule = module {
             deviceIdProvider = get(),
             authClient = get(),
             entitlementApi = get(),
+            billingApi = get(),
             prefsRepo = get(),
             strings = get(),
             deviceRegistrationNotifier = get(),

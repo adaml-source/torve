@@ -22,6 +22,7 @@ data class StartupCandidateBackendModel(
     val seeds: Int? = null,
     val score: Double? = null,
     val scoreBreakdown: Map<String, Double> = emptyMap(),
+    val memoryId: String? = null,
 )
 
 data class InventoryMatchBackendModel(

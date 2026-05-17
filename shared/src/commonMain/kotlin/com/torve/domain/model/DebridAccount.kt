@@ -35,6 +35,11 @@ data class ResolvedStream(
     val fileSize: Long? = null,
     val mimeType: String? = null,
     val transcodeUrls: TranscodeUrls? = null,
+    val isTemporary: Boolean = false,
+    val isDirect: Boolean = true,
+    val supportsRange: Boolean = true,
+    val streamId: String? = null,
+    val expiresInSeconds: Int? = null,
 )
 
 @Serializable

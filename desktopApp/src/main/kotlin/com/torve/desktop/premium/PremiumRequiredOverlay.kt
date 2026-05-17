@@ -101,16 +101,7 @@ fun PremiumRequiredOverlay(
                     TorvePrimaryButton(
                         text = "Upgrade",
                         onClick = {
-                            runCatching {
-                                java.awt.Desktop.getDesktop().browse(
-                                    java.net.URI("https://torve.app/app/premium.html"),
-                                )
-                            }
-                            // Switch to fast-poll for the next 5 minutes
-                            // so the moment the backend records the
-                            // entitlement, gating clears without the
-                            // user having to relaunch or wait 60s.
-                            DesktopPremiumStateHolder.pollAggressivelyFor(seconds = 300)
+                            startDesktopStripeCheckout()
                         },
                     )
                     TorveGhostButton(

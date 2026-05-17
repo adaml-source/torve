@@ -75,15 +75,39 @@ fun TvEpisodePicker(
     onEpisodeSelected: (season: Int, episode: Int) -> Unit,
     onSeasonDownload: ((Int) -> Unit)? = null,
     onToggleEpisodeWatched: (season: Int, episode: Int) -> Unit = { _, _ -> },
+    onMarkSeasonWatched: (season: Int) -> Unit = {},
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
     autoFocusFirstSeason: Boolean = false,
 ) {
     val seasonsLabel = stringResource(R.string.tv_episodes_title)
-    val firstSeasonRequester = remember { FocusRequester() }
+    val seasonNumbers = remember(seasons) {
+        seasons.filter { it.seasonNumber > 0 }.map { it.seasonNumber }
+    }
+    val seasonRequesters = remember(seasonNumbers) {
+        seasonNumbers.associateWith { FocusRequester() }
+    }
+    val fallbackSeasonRequester = remember { FocusRequester() }
+    val firstSeasonRequester = seasonNumbers.firstOrNull()
+        ?.let { seasonRequesters[it] }
+        ?: fallbackSeasonRequester
+    val selectedSeasonRequester = seasonRequesters[selectedSeason] ?: firstSeasonRequester
     val firstEpisodeRequester = remember { FocusRequester() }
     val episodesListState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val selectedSeasonEpisodeCount = seasonDetail
+        ?.takeIf { it.seasonNumber == selectedSeason }
+        ?.episodes
+        ?.size
+        ?: seasons.firstOrNull { it.seasonNumber == selectedSeason }?.episodeCount
+        ?: 0
+    val selectedSeasonWatchedCount = remember(selectedSeason, selectedSeasonEpisodeCount, watchedEpisodes) {
+        (1..selectedSeasonEpisodeCount).count { episode ->
+            "s${selectedSeason}e$episode" in watchedEpisodes
+        }
+    }
+    val selectedSeasonFullyWatched = selectedSeasonEpisodeCount > 0 &&
+        selectedSeasonWatchedCount >= selectedSeasonEpisodeCount
     // Reset episode scroll whenever the season changes
     androidx.compose.runtime.LaunchedEffect(selectedSeason) {
         episodesListState.scrollToItem(0)
@@ -115,11 +139,7 @@ fun TvEpisodePicker(
                 items = seasons.filter { it.seasonNumber > 0 },
                 key = { _, s -> "season_${s.seasonNumber}" },
             ) { index, season ->
-                val requester = if (index == 0) {
-                    firstSeasonRequester
-                } else {
-                    remember("season_tab_${season.seasonNumber}") { FocusRequester() }
-                }
+                val requester = seasonRequesters[season.seasonNumber] ?: fallbackSeasonRequester
                 if (index == 0) {
                     onFirstContentRequester(requester)
                 }
@@ -140,6 +160,7 @@ fun TvEpisodePicker(
                         },
                     onFocused = { onContentFocused(requester) },
                     onClick = { onSeasonSelected(season.seasonNumber) },
+                    onLongClick = { onMarkSeasonWatched(season.seasonNumber) },
                 )
             }
 
@@ -161,6 +182,29 @@ fun TvEpisodePicker(
                         onClick = { onSeasonDownload(selectedSeason) },
                     )
                 }
+            }
+
+            item(key = "mark_season_watched_$selectedSeason") {
+                val requester = remember("mark_season_watched_$selectedSeason") { FocusRequester() }
+                TvSeasonWatchedActionChip(
+                    seasonNumber = selectedSeason,
+                    isComplete = selectedSeasonFullyWatched,
+                    enabled = selectedSeasonEpisodeCount > 0 && !selectedSeasonFullyWatched,
+                    modifier = Modifier
+                        .focusRequester(requester)
+                        .onPreviewKeyEvent { keyEvent ->
+                            if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.DirectionDown) {
+                                scope.launch {
+                                    episodesListState.scrollToItem(0)
+                                    kotlinx.coroutines.delay(80)
+                                    runCatching { firstEpisodeRequester.requestFocus() }
+                                }
+                                true
+                            } else false
+                        },
+                    onFocused = { onContentFocused(requester) },
+                    onClick = { onMarkSeasonWatched(selectedSeason) },
+                )
             }
         }
 
@@ -205,7 +249,9 @@ fun TvEpisodePicker(
                             progress = episodeProgress,
                             onClick = { onEpisodeSelected(selectedSeason, episode.episodeNumber) },
                             onLongClick = { onToggleEpisodeWatched(selectedSeason, episode.episodeNumber) },
-                            modifier = if (index == 0) Modifier.focusRequester(firstEpisodeRequester) else Modifier,
+                            modifier = Modifier
+                                .then(if (index == 0) Modifier.focusRequester(firstEpisodeRequester) else Modifier)
+                                .focusProperties { up = selectedSeasonRequester },
                         )
                     }
                 }
@@ -224,14 +270,17 @@ fun TvEpisodePicker(
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun TvSeasonChip(
     seasonNumber: Int,
     isSelected: Boolean,
     modifier: Modifier = Modifier,
     onFocused: () -> Unit,
     onClick: () -> Unit,
+    onLongClick: () -> Unit = {},
 ) {
     var focused by remember { mutableStateOf(false) }
+    var longPressHandled by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(targetValue = if (focused) 1.05f else 1f, label = "seasonScale")
     val borderColor by animateColorAsState(
         targetValue = when {
@@ -258,10 +307,36 @@ private fun TvSeasonChip(
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
             }
-            .clickable(
+            .onPreviewKeyEvent { keyEvent ->
+                val kc = keyEvent.nativeKeyEvent.keyCode
+                if (kc == android.view.KeyEvent.KEYCODE_DPAD_CENTER || kc == android.view.KeyEvent.KEYCODE_ENTER) {
+                    when {
+                        keyEvent.nativeKeyEvent.action == android.view.KeyEvent.ACTION_DOWN &&
+                            keyEvent.nativeKeyEvent.repeatCount == 0 -> {
+                            longPressHandled = false
+                            false
+                        }
+                        keyEvent.nativeKeyEvent.action == android.view.KeyEvent.ACTION_DOWN &&
+                            keyEvent.nativeKeyEvent.repeatCount >= 20 && !longPressHandled -> {
+                            longPressHandled = true
+                            onLongClick()
+                            true
+                        }
+                        keyEvent.nativeKeyEvent.action == android.view.KeyEvent.ACTION_UP && longPressHandled -> {
+                            longPressHandled = false
+                            true
+                        }
+                        else -> false
+                    }
+                } else {
+                    false
+                }
+            }
+            .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick,
+                onLongClick = onLongClick,
             )
             .padding(horizontal = 16.dp, vertical = 10.dp),
     ) {
@@ -270,6 +345,62 @@ private fun TvSeasonChip(
             style = MaterialTheme.typography.titleMedium,
             color = if (isSelected || focused) Snow else Silver,
             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+        )
+    }
+}
+
+@Composable
+@OptIn(ExperimentalFoundationApi::class)
+private fun TvSeasonWatchedActionChip(
+    seasonNumber: Int,
+    isComplete: Boolean,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onFocused: () -> Unit = {},
+    onClick: () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(targetValue = if (focused) 1.04f else 1f, label = "seasonWatchedScale")
+    val borderColor by animateColorAsState(
+        targetValue = when {
+            focused -> AmberLight
+            isComplete -> Amber.copy(alpha = 0.42f)
+            else -> Steel.copy(alpha = 0.4f)
+        },
+        label = "seasonWatchedBorder",
+    )
+    val label = if (isComplete) {
+        stringResource(R.string.tv_season_watched, seasonNumber)
+    } else {
+        stringResource(R.string.tv_season_mark_watched, seasonNumber)
+    }
+
+    Row(
+        modifier = modifier
+            .zIndex(if (focused) 1f else 0f)
+            .scale(scale)
+            .border(2.dp, borderColor, RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (focused) Gunmetal else Charcoal)
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused()
+            }
+            .combinedClickable(
+                enabled = enabled,
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+                onLongClick = onClick,
+            )
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleMedium,
+            color = if (enabled || isComplete) Snow else Silver,
+            fontWeight = if (isComplete) FontWeight.SemiBold else FontWeight.Normal,
         )
     }
 }

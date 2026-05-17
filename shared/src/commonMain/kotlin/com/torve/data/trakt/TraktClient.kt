@@ -1,5 +1,6 @@
 package com.torve.data.trakt
 
+import com.torve.domain.diagnostics.DiagnosticsRedactor
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.get
@@ -24,22 +25,25 @@ class TraktClient(
 ) {
     companion object {
         const val TRAKT_BASE = "https://api.trakt.tv"
-        const val DEFAULT_CLIENT_ID = "1e8d7696fb3bae585a4036fd03569e68426aa4b540b2911180ec9f540688ac6a"
-        const val DEFAULT_CLIENT_SECRET = "4fd2e66df137b876575ff390a1c8d46f27c9b4a4db08f40d4c9867ce6d65e6a3"
+        // Trakt's device-code flow calls this pair client_id/client_secret,
+        // but for native clients it is public OAuth app configuration. It
+        // never grants Torve premium, resolver access, or backend access.
+        const val DEFAULT_PUBLIC_CLIENT_ID = "1e8d7696fb3bae585a4036fd03569e68426aa4b540b2911180ec9f540688ac6a"
+        const val DEFAULT_PUBLIC_CLIENT_SECRET = "4fd2e66df137b876575ff390a1c8d46f27c9b4a4db08f40d4c9867ce6d65e6a3"
         // Sent on every Trakt request. Required by Trakt's API guide
         // and also keeps us out of Cloudflare's "no-UA = bot" filter
         // (which surfaces as 429 / Cloudflare error 1015).
         private const val USER_AGENT = "Torve/1.0 (+https://torve.app)"
     }
 
-    var clientId: String = DEFAULT_CLIENT_ID
+    var clientId: String = DEFAULT_PUBLIC_CLIENT_ID
         private set
-    var clientSecret: String = DEFAULT_CLIENT_SECRET
+    var clientSecret: String = DEFAULT_PUBLIC_CLIENT_SECRET
         private set
 
     fun setCredentials(clientId: String, clientSecret: String) {
-        this.clientId = clientId.ifBlank { DEFAULT_CLIENT_ID }
-        this.clientSecret = clientSecret.ifBlank { DEFAULT_CLIENT_SECRET }
+        this.clientId = clientId.ifBlank { DEFAULT_PUBLIC_CLIENT_ID }
+        this.clientSecret = clientSecret.ifBlank { DEFAULT_PUBLIC_CLIENT_SECRET }
     }
 
     private fun traktHeaders(accessToken: String? = null): Map<String, String> {
@@ -150,7 +154,9 @@ class TraktClient(
                     try {
                         val resp: TraktTokenResponse = decodeTraktBody(response)
                         if (resp.accessToken.isBlank() || resp.refreshToken.isBlank()) {
-                            val preview = runCatching { response.bodyAsText().take(200) }
+                            val preview = runCatching {
+                                DiagnosticsRedactor.redact(response.bodyAsText()).take(200)
+                            }
                                 .getOrDefault("")
                             TraktPollResult.Error("Trakt returned empty tokens. body=$preview")
                         } else {
@@ -164,7 +170,9 @@ class TraktClient(
                             )
                         }
                     } catch (parseErr: Exception) {
-                        val preview = runCatching { response.bodyAsText().take(200) }
+                        val preview = runCatching {
+                            DiagnosticsRedactor.redact(response.bodyAsText()).take(200)
+                        }
                             .getOrDefault("")
                         TraktPollResult.Error(
                             "Parse error: ${parseErr.message ?: parseErr::class.simpleName}. body=$preview",
@@ -180,7 +188,9 @@ class TraktClient(
                 // 5xx is retryable — Trakt sometimes blips mid-flight.
                 in 500..599 -> TraktPollResult.TransientError("Server error ${response.status.value}")
                 else -> {
-                    val preview = runCatching { response.bodyAsText().take(200) }
+                    val preview = runCatching {
+                        DiagnosticsRedactor.redact(response.bodyAsText()).take(200)
+                    }
                         .getOrDefault("")
                     TraktPollResult.Error("HTTP ${response.status.value}: $preview")
                 }

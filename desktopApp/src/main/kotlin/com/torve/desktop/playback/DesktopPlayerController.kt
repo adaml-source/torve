@@ -3,6 +3,7 @@ package com.torve.desktop.playback
 import com.torve.data.addon.ParsedStream
 import com.torve.data.addon.StremioSubtitle
 import com.torve.data.addon.SubtitleAggregator
+import com.torve.data.addon.canUseGenericStreamHandoff
 import com.torve.data.addon.isAddonHostedUrl
 import com.torve.domain.model.DebridServiceType
 import com.torve.domain.model.MediaItem
@@ -115,6 +116,7 @@ data class DesktopPlaybackSourceCandidate(
     val size: String? = null,
     val infoHash: String? = null,
     val directUrl: String? = null,
+    val accelerationMemoryId: String? = null,
     // The originating addon's manifest URL. Required so the resolver can tell
     // an addon-hosted stream (Panda's /u/<token>/...) from a hoster URL that
     // needs debrid unrestrict - without this, every Panda Usenet/NZB stream
@@ -1316,7 +1318,12 @@ class DesktopPlayerController(
             }
         }
 
-        if (orderedProviders.isEmpty() && !selectedCandidate.toParsedStream().isAddonHostedUrl()) {
+        val parsedSelectedForPolicy = selectedCandidate.toParsedStream()
+        if (
+            orderedProviders.isEmpty() &&
+            !parsedSelectedForPolicy.isAddonHostedUrl() &&
+            !parsedSelectedForPolicy.canUseGenericStreamHandoff()
+        ) {
             startupTrace?.complete("resolution-failed:NO_DEBRID_ACCOUNT")
             failRuntime(
                 code = "NO_DEBRID_ACCOUNT",
@@ -1342,7 +1349,7 @@ class DesktopPlayerController(
         val resolvedStream = runCatching {
             withContext(Dispatchers.IO) {
                 streamRepository.resolveStreamWithFallback(
-                    stream = selectedCandidate.toParsedStream(),
+                    stream = parsedSelectedForPolicy,
                     providers = orderedProviders,
                 )
             }
@@ -1362,7 +1369,7 @@ class DesktopPlayerController(
         // VLC produces an opaque "VLC encountered a playback error" - instead,
         // probe the URL and, when Preparing, drive a polling overlay that
         // ticks every 15 s until Ready / Failed / cancelled.
-        val parsedSelected = selectedCandidate.toParsedStream()
+        val parsedSelected = parsedSelectedForPolicy
         var playableUrl = resolvedStream.url
         if (parsedSelected.isAddonHostedUrl() && playableUrl.isNotBlank()) {
             val readyUrl = awaitStreamReady(
@@ -1976,7 +1983,7 @@ private fun ParsedStream.toDesktopSourceCandidate(
         candidateId = buildString {
             append(addonName)
             append('|')
-            append(infoHash ?: directUrl ?: title)
+            append(accelerationMemoryId ?: infoHash ?: directUrl ?: title)
             append('|')
             append(fileIdx ?: index)
             append('|')
@@ -1994,6 +2001,7 @@ private fun ParsedStream.toDesktopSourceCandidate(
         size = size,
         infoHash = infoHash,
         directUrl = directUrl,
+        accelerationMemoryId = accelerationMemoryId,
         addonBaseUrl = addonBaseUrl,
         languages = languages,
     )
@@ -2007,6 +2015,7 @@ private fun DesktopPlaybackSourceCandidate.toParsedStream(): ParsedStream {
         infoHash = infoHash,
         fileIdx = fileIdx,
         directUrl = directUrl,
+        accelerationMemoryId = accelerationMemoryId,
         size = size,
         codec = codec,
         source = source,

@@ -17,6 +17,7 @@ import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.model.DebridServiceType
 import com.torve.domain.repository.AddonRepository
 import com.torve.presentation.addon.AddonViewModel
+import com.torve.domain.diagnostics.DiagnosticsRedactor
 import com.torve.presentation.integrations.findTorBoxCredential
 import com.torve.presentation.integrations.syncTorBoxCredentialPair
 import com.torve.presentation.settings.SettingsRefreshNotifier
@@ -1205,10 +1206,11 @@ class PandaSetupViewModel(
                 }
 
                 settingsRefreshNotifier.notifyRefresh(kotlinx.datetime.Clock.System.now().toEpochMilliseconds())
-                println("TORVE PANDA ┃ saveConfigAndInstall succeeded; saveCompletionToken=${_state.value.saveCompletionToken}")
+                println("TORVE PANDA ┃ saveConfigAndInstall succeeded")
             } catch (e: Exception) {
-                println("TORVE PANDA ┃ saveConfigAndInstall failed: ${e.message}")
-                _state.update { it.copy(isSaving = false, saveError = e.message ?: "Save failed") }
+                val safeMessage = DiagnosticsRedactor.redact(e.message).ifBlank { "Save failed" }
+                println("TORVE PANDA ┃ saveConfigAndInstall failed: $safeMessage")
+                _state.update { it.copy(isSaving = false, saveError = safeMessage) }
             }
         }
     }
@@ -1248,7 +1250,7 @@ class PandaSetupViewModel(
                         pandaAddon = installed
                         println("TORVE PANDA ┃ checkExistingConfig: re-installed missing Panda addon for restored token")
                     }.onFailure { err ->
-                        println("TORVE PANDA ┃ checkExistingConfig: re-install failed: ${err.message}")
+                        println("TORVE PANDA ┃ checkExistingConfig: re-install failed: ${DiagnosticsRedactor.redact(err.message)}")
                     }
                 }
 
@@ -1279,7 +1281,7 @@ class PandaSetupViewModel(
                     if (viaJwt.isSuccess) {
                         println("TORVE PANDA ┃ checkExistingConfig: hydrated via Torve JWT")
                     } else {
-                        println("TORVE PANDA ┃ checkExistingConfig: Torve JWT path failed: ${viaJwt.exceptionOrNull()?.message}")
+                        println("TORVE PANDA ┃ checkExistingConfig: Torve JWT path failed: ${DiagnosticsRedactor.redact(viaJwt.exceptionOrNull()?.message)}")
                     }
                     viaJwt.getOrNull()
                         ?: managementToken?.takeIf { it.isNotBlank() }?.let { mgmt ->
@@ -1289,7 +1291,7 @@ class PandaSetupViewModel(
                             if (viaMgmt.isSuccess) {
                                 println("TORVE PANDA ┃ checkExistingConfig: hydrated via management_token")
                             } else {
-                                println("TORVE PANDA ┃ checkExistingConfig: management_token path failed: ${viaMgmt.exceptionOrNull()?.message}")
+                                println("TORVE PANDA ┃ checkExistingConfig: management_token path failed: ${DiagnosticsRedactor.redact(viaMgmt.exceptionOrNull()?.message)}")
                             }
                             viaMgmt.getOrNull()
                         }
@@ -1304,7 +1306,7 @@ class PandaSetupViewModel(
                     if (viaMgmt.isSuccess) {
                         println("TORVE PANDA ┃ checkExistingConfig: hydrated via management_token (no JWT available)")
                     } else {
-                        println("TORVE PANDA ┃ checkExistingConfig: management_token path failed: ${viaMgmt.exceptionOrNull()?.message}; falling back to manifest read")
+                        println("TORVE PANDA ┃ checkExistingConfig: management_token path failed: ${DiagnosticsRedactor.redact(viaMgmt.exceptionOrNull()?.message)}; falling back to manifest read")
                     }
                     viaMgmt.getOrNull() ?: manifestRecord
                 } else {

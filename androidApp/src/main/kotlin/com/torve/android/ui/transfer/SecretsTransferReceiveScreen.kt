@@ -117,7 +117,11 @@ fun SecretsTransferReceiveScreen(
                 koin.get<com.torve.presentation.settings.SettingsViewModel>().refreshSettings()
             }
             runCatching {
-                koin.get<com.torve.presentation.channels.ChannelsViewModel>().loadPlaylists()
+                if (largeQr) {
+                    PostSignInRefresh.enqueueAfterCredentialImport(context)
+                }
+                koin.get<com.torve.presentation.channels.ChannelsViewModel>()
+                    .loadPlaylists(recoverEmptyCatalog = !largeQr)
                 koin.get<com.torve.presentation.channels.ChannelsViewModel>().loadFavorites()
             }
             runCatching {
@@ -189,22 +193,27 @@ fun SecretsTransferReceiveScreen(
                     onRefreshAll = {
                         fullRefreshStarted = true
                         scope.launch {
-                            val koin = org.koin.java.KoinJavaComponent.getKoin()
-                            runCatching {
-                                koin.get<com.torve.presentation.session.AccountSessionCoordinator>()
-                                    .refreshAccountDataAfterCredentialTransfer()
+                            try {
+                                val koin = org.koin.java.KoinJavaComponent.getKoin()
+                                runCatching {
+                                    koin.get<com.torve.presentation.session.AccountSessionCoordinator>()
+                                        .refreshAccountDataAfterCredentialTransfer()
+                                }
+                                runCatching {
+                                    koin.get<com.torve.presentation.settings.SettingsViewModel>().refreshSettings()
+                                }
+                                runCatching {
+                                    koin.get<com.torve.presentation.channels.ChannelsViewModel>()
+                                        .loadPlaylists(recoverEmptyCatalog = !largeQr)
+                                    koin.get<com.torve.presentation.channels.ChannelsViewModel>().loadFavorites()
+                                }
+                                runCatching {
+                                    koin.get<com.torve.presentation.watchlist.WatchlistViewModel>().loadWatchlist()
+                                }
+                                PostSignInRefresh.enqueueContentWarmupAfterAccountActivation(context)
+                            } finally {
+                                fullRefreshStarted = false
                             }
-                            runCatching {
-                                koin.get<com.torve.presentation.settings.SettingsViewModel>().refreshSettings()
-                            }
-                            runCatching {
-                                koin.get<com.torve.presentation.channels.ChannelsViewModel>().loadPlaylists()
-                                koin.get<com.torve.presentation.channels.ChannelsViewModel>().loadFavorites()
-                            }
-                            runCatching {
-                                koin.get<com.torve.presentation.watchlist.WatchlistViewModel>().loadWatchlist()
-                            }
-                            PostSignInRefresh.enqueueContentWarmupAfterAccountActivation(context)
                         }
                     },
                 )

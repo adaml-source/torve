@@ -59,6 +59,7 @@ internal fun TvNavHost(
     onDetailsBack: () -> Unit = { navController.popBackStack() },
     onBeforeDetailsNavigateFromSeeAll: () -> Unit = {},
     onRequestLifetimeUnlock: (TvEntitledFeature) -> Unit = {},
+    onWatchedStatusChanged: (MediaItem, Boolean) -> Unit = { _, _ -> },
     isStreamPlaybackLocked: Boolean = false,
     onFirstContentRequester: (FocusRequester) -> Unit = {},
     onContentFocused: (FocusRequester) -> Unit = {},
@@ -278,6 +279,7 @@ internal fun TvNavHost(
                     onSettingsClick()
                 },
                 onRequestLifetimeUnlock = onRequestLifetimeUnlock,
+                onWatchedStatusChanged = onWatchedStatusChanged,
                 onCastClick = { castId, castName ->
                     navController.navigate(
                         TvRoutes.seeAll(

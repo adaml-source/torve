@@ -63,7 +63,8 @@ class ChannelsViewModelStartupTest {
         assertEquals("News One HD", viewModel.state.value.categoryChannels.first().channel.name)
         assertEquals("News", viewModel.state.value.selectedGroup)
         assertEquals(stableChannelId(channel), stableChannelId(viewModel.state.value.selectedChannel!!))
-        assertEquals(1, repo.refreshCalls)
+        assertEquals(0, repo.refreshCalls)
+        assertEquals(1, repo.catalogRefreshCalls)
     }
 
     @Test
@@ -85,7 +86,8 @@ class ChannelsViewModelStartupTest {
         assertEquals(1, viewModel.state.value.categoryChannels.size)
         assertEquals("Sports One", viewModel.state.value.categoryChannels.first().channel.name)
         assertFalse(viewModel.state.value.isLoadingChannels)
-        assertEquals(1, repo.refreshCalls)
+        assertEquals(0, repo.refreshCalls)
+        assertEquals(1, repo.catalogRefreshCalls)
     }
 
     @Test
@@ -106,7 +108,8 @@ class ChannelsViewModelStartupTest {
         assertEquals(1, viewModel.state.value.categoryChannels.size)
         assertEquals("Movie Max", viewModel.state.value.categoryChannels.first().channel.name)
         assertFalse(viewModel.state.value.isLoadingChannels)
-        assertEquals(1, repo.refreshCalls)
+        assertEquals(0, repo.refreshCalls)
+        assertEquals(1, repo.catalogRefreshCalls)
     }
 
     @Test
@@ -227,6 +230,8 @@ private class FakeChannelRepository(
     private val recents = linkedMapOf<String, Channel>()
     var refreshCalls: Int = 0
         private set
+    var catalogRefreshCalls: Int = 0
+        private set
 
     override suspend fun addPlaylist(
         name: String,
@@ -238,7 +243,14 @@ private class FakeChannelRepository(
         error("Not used")
     }
 
-    override suspend fun addXtreamPlaylist(name: String, server: String, username: String, password: String, id: String?): ChannelPlaylist {
+    override suspend fun addXtreamPlaylist(
+        name: String,
+        server: String,
+        username: String,
+        password: String,
+        id: String?,
+        epgUrl: String?,
+    ): ChannelPlaylist {
         error("Not used")
     }
 
@@ -252,6 +264,15 @@ private class FakeChannelRepository(
 
     override suspend fun refreshPlaylist(playlistId: String) {
         refreshCalls++
+        refreshFromRemote(playlistId)
+    }
+
+    override suspend fun refreshPlaylistCatalog(playlistId: String) {
+        catalogRefreshCalls++
+        refreshFromRemote(playlistId)
+    }
+
+    private fun refreshFromRemote(playlistId: String) {
         if (playlistId in refreshFailures) {
             throw IllegalStateException("refresh failed")
         }

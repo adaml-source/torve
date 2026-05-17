@@ -1,7 +1,8 @@
+import hashlib
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, event
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -10,6 +11,10 @@ from app.database import Base
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def source_key_digest(source_key: str) -> str:
+    return hashlib.sha256(source_key.encode("utf-8")).hexdigest()
 
 
 class User(Base):
@@ -778,7 +783,8 @@ class ResolveSuccessMemory(Base):
     episode: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Source identification
     provider_type: Mapped[str] = mapped_column(String(50), nullable=False)  # e.g. "real_debrid", "torrentio"
-    source_key: Mapped[str] = mapped_column(String(500), nullable=False)  # canonical source identifier
+    source_key: Mapped[str] = mapped_column(Text, nullable=False)  # canonical source identifier
+    source_key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     infohash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     file_name: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     # Quality metadata
@@ -822,12 +828,22 @@ class ResolveSuccessMemory(Base):
         # Upsert dedup key
         Index(
             "uq_rsm_user_content_source", "user_id", "content_id",
-            "season", "episode", "provider_type", "source_key",
+            "season", "episode", "provider_type", "source_key_hash",
             unique=True,
         ),
         # Expiry cleanup
         Index("ix_rsm_expires_at", "expires_at"),
     )
+
+
+@event.listens_for(ResolveSuccessMemory, "before_insert")
+@event.listens_for(ResolveSuccessMemory, "before_update")
+def _populate_resolve_success_source_key_hash(
+    _mapper,
+    _connection,
+    target: ResolveSuccessMemory,
+) -> None:
+    target.source_key_hash = source_key_digest(target.source_key)
 
 
 class HashAvailabilityMemory(Base):

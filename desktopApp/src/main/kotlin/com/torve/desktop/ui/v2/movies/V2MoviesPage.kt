@@ -44,6 +44,10 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.CircularProgressIndicator
+import com.torve.data.ai.AiProvider
+import com.torve.data.ai.KeywordSearchService
+import com.torve.data.metadata.TmdbApiClient
+import com.torve.data.metadata.TmdbMappers
 import com.torve.desktop.ui.components.TorveGhostButton
 import com.torve.desktop.ui.components.TorvePrimaryButton
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
@@ -54,6 +58,7 @@ import com.torve.desktop.ui.v2.seeall.SeeAllRequest
 import com.torve.domain.model.MediaItem
 import com.torve.domain.repository.MetadataRepository
 import com.torve.presentation.catalog.CatalogViewModel
+import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
 
 @Composable
@@ -72,6 +77,11 @@ fun V2MoviesPage(
     nzbIndexerType: String = "",
     nzbIndexerUrl: String = "",
     nzbIndexerApiKey: String = "",
+    aiProvider: AiProvider = AiProvider.CLAUDE,
+    aiApiKey: String = "",
+    onOpenAiProviderSettings: (() -> Unit)? = null,
+    keywordSearch: (() -> KeywordSearchService)? = null,
+    tmdb: (() -> TmdbApiClient)? = null,
 ) {
     val state by catalogViewModel.state.collectAsState()
     val colors = TorveDesktopThemeTokens.colors
@@ -79,8 +89,21 @@ fun V2MoviesPage(
     // Local in-page search filter. Stays UI-side: filters the visible
     // grid/items by title without firing a network search.
     var pageSearchQuery by remember { mutableStateOf("") }
+    val aiProviderConfigured = aiApiKey.isNotBlank() && keywordSearch != null && tmdb != null
+    var aiMode by remember { mutableStateOf(false) }
+    var aiQuery by remember { mutableStateOf("") }
+    var aiLoading by remember { mutableStateOf(false) }
+    var aiError by remember { mutableStateOf<String?>(null) }
+    var aiItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
 
     LaunchedEffect(Unit) { if (!state.shelvesLoaded) catalogViewModel.loadCatalog() }
+    LaunchedEffect(aiProviderConfigured) {
+        if (!aiProviderConfigured) {
+            aiMode = false
+            aiItems = emptyList()
+            aiError = null
+        }
+    }
     LaunchedEffect(nzbCatalogService, nzbIndexerType, nzbIndexerUrl, nzbIndexerApiKey) {
         if (nzbCatalogService != null && nzbIndexerUrl.isNotBlank() && nzbIndexerApiKey.isNotBlank()) {
             nzbCatalogService.ensureLoaded(
@@ -95,6 +118,41 @@ fun V2MoviesPage(
     val nzbReleases: List<com.torve.desktop.adult.NzbCatalogService.MatchedRelease> =
         if (nzbStateFlow != null) nzbStateFlow.collectAsState().value else emptyList()
     val extraRails = rememberExtraRails(metadataRepository, "movie")
+
+    fun runAiSearch(prompt: String) {
+        val search = keywordSearch ?: return
+        val tmdbClient = tmdb ?: return
+        if (prompt.isBlank() || !aiProviderConfigured) return
+        nzbScope.launch {
+            aiLoading = true
+            aiError = null
+            try {
+                val result = search().searchWithAi(aiProvider, aiApiKey, prompt)
+                val specific = result.specificItems
+                    .filter { it.mediaType != "tv" }
+                    .mapNotNull { item ->
+                        runCatching {
+                            TmdbMappers.movieToMediaItem(tmdbClient().getMovieDetail(item.tmdbId))
+                        }.getOrNull()
+                    }
+                aiItems = specific.ifEmpty {
+                    tmdbClient().discoverMovies(
+                        page = 1,
+                        sortBy = result.sortBy,
+                        withGenres = result.genreIds.takeIf { it.isNotEmpty() }?.joinToString(","),
+                        minRating = result.minRating,
+                        year = result.yearFrom,
+                        yearTo = result.yearTo,
+                    ).results.map(TmdbMappers::movieToMediaItem)
+                }
+            } catch (t: Throwable) {
+                aiError = t.message ?: "AI search failed."
+                aiItems = emptyList()
+            } finally {
+                aiLoading = false
+            }
+        }
+    }
 
     val heroItem = remember(state.trendingItems) { state.trendingItems.firstOrNull() }
     val backdrop = rememberCachedBitmap(heroItem?.backdropUrl)
@@ -125,7 +183,8 @@ fun V2MoviesPage(
             val isFilteredView = state.selectedGenreId != null ||
                 state.filter.isActive ||
                 state.providerId != null ||
-                pageSearchQuery.isNotBlank()
+                pageSearchQuery.isNotBlank() ||
+                aiMode
 
             // Filtered path: no parent verticalScroll. The earlier
             // structure nested LazyVerticalGrid inside a vertically-
@@ -142,13 +201,38 @@ fun V2MoviesPage(
                         mediaType = CatalogMediaType.MOVIE,
                         searchQuery = pageSearchQuery,
                         onSearchQueryChange = { pageSearchQuery = it },
+                        aiProvider = aiProvider,
+                        aiProviderConfigured = aiProviderConfigured,
+                        aiMode = aiMode,
+                        aiQuery = aiQuery,
+                        aiLoading = aiLoading,
+                        onAiModeChange = { enabled ->
+                            aiMode = enabled
+                            if (!enabled) {
+                                aiItems = emptyList()
+                                aiError = null
+                            }
+                        },
+                        onAiQueryChange = { aiQuery = it },
+                        onRunAiSearch = { runAiSearch(aiQuery) },
+                        onOpenAiProviderSettings = onOpenAiProviderSettings,
                     )
-                    FilteredCatalogGrid(
-                        catalogViewModel = catalogViewModel,
-                        onOpenDetail = onOpenDetail,
-                        searchQuery = pageSearchQuery,
-                        modifier = Modifier.weight(1f).fillMaxWidth(),
-                    )
+                    if (aiMode) {
+                        V2CatalogAiResultsGrid(
+                            items = aiItems,
+                            isLoading = aiLoading,
+                            error = aiError,
+                            onOpenDetail = onOpenDetail,
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                        )
+                    } else {
+                        FilteredCatalogGrid(
+                            catalogViewModel = catalogViewModel,
+                            onOpenDetail = onOpenDetail,
+                            searchQuery = pageSearchQuery,
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                        )
+                    }
                 }
                 return@Box
             }
@@ -183,6 +267,15 @@ fun V2MoviesPage(
                     mediaType = CatalogMediaType.MOVIE,
                     searchQuery = pageSearchQuery,
                     onSearchQueryChange = { pageSearchQuery = it },
+                    aiProvider = aiProvider,
+                    aiProviderConfigured = aiProviderConfigured,
+                    aiMode = aiMode,
+                    aiQuery = aiQuery,
+                    aiLoading = aiLoading,
+                    onAiModeChange = { enabled -> aiMode = enabled },
+                    onAiQueryChange = { aiQuery = it },
+                    onRunAiSearch = { runAiSearch(aiQuery) },
+                    onOpenAiProviderSettings = onOpenAiProviderSettings,
                 )
 
                 // Filtered path is handled above (separate Column without

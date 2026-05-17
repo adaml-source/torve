@@ -33,16 +33,20 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.torve.android.R
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.AmberLight
 import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.domain.model.MediaItem
+
+private const val TV_BACKDROP_WATCHED_THRESHOLD = 0.9f
 
 @Composable
 fun TvBackdropCard(
@@ -63,6 +67,7 @@ fun TvBackdropCard(
     LaunchedEffect(focused, item) {
         if (focused) onFocused()
     }
+    val isWatched = (progress ?: 0f) >= TV_BACKDROP_WATCHED_THRESHOLD
 
     Box(
         modifier = modifier
@@ -150,7 +155,26 @@ fun TvBackdropCard(
             }
         }
 
-        if (progress != null && progress > 0f) {
+        if (isWatched) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(10.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Obsidian.copy(alpha = 0.82f))
+                    .border(1.dp, Amber.copy(alpha = 0.58f), RoundedCornerShape(999.dp))
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.tv_watched),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AmberLight,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+
+        if (progress != null && progress > 0f && !isWatched) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()

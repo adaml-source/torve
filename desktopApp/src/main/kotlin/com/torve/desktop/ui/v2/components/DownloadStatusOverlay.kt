@@ -46,7 +46,7 @@ fun DownloadStatusOverlay(
 
     // Toast - shows whenever lastEvent changes, auto-dismisses after 4s.
     var toastMessage by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(state.lastEvent) {
+    LaunchedEffect(state.lastEvent, state.lastEventNonce) {
         val event = state.lastEvent?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
         toastMessage = event
         delay(4_000)

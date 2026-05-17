@@ -52,6 +52,9 @@ object DiagnosticsRedactor {
             "refresh_token", "refreshToken",
             "auth_token", "authToken",
             "session_token", "sessionToken",
+            "integrity_token", "integrityToken",
+            "play_integrity_token", "playIntegrityToken",
+            "provider_token", "providerToken",
             "token",
             "key",
             "password", "pwd", "pass",
@@ -90,6 +93,9 @@ object DiagnosticsRedactor {
             "refresh_token", "refreshToken",
             "auth_token", "authToken",
             "session_token", "sessionToken",
+            "integrity_token", "integrityToken",
+            "play_integrity_token", "playIntegrityToken",
+            "provider_token", "providerToken",
             "client_secret", "clientSecret",
             "password", "pwd", "passwd",
             "secret",
@@ -110,6 +116,10 @@ object DiagnosticsRedactor {
             "newznab_api_key", "newznabApiKey",
             "iptv_password", "iptvPassword",
             "iptv_username", "iptvUsername",
+            "source_key", "sourceKey",
+            "playback_url", "playbackUrl",
+            "stream_url", "streamUrl",
+            "debrid_url", "debridUrl",
         )
         secretFieldNames.forEach { name ->
             add(

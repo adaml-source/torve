@@ -2189,6 +2189,15 @@ private fun LiveTvSettingsSection(
 
     val channelsViewModel: ChannelsViewModel = koinInject()
     val channelsState by channelsViewModel.state.collectAsState()
+    var editingEpgPlaylistId by remember { mutableStateOf<String?>(null) }
+    var editingEpgUrl by remember { mutableStateOf("") }
+
+    LaunchedEffect(editingEpgPlaylistId, channelsState.playlists) {
+        val playlist = channelsState.playlists.firstOrNull { it.id == editingEpgPlaylistId }
+        if (playlist != null) {
+            editingEpgUrl = playlist.epgUrl.orEmpty()
+        }
+    }
 
     SectionHeader(title = stringResource(R.string.settings_live_tv))
     Spacer(Modifier.height(8.dp))
@@ -2206,6 +2215,12 @@ private fun LiveTvSettingsSection(
                 )
             } else {
                 channelsState.playlists.forEach { playlist ->
+                    val channelCountText = stringResource(R.string.settings_channels_count, playlist.channelCount)
+                    val guideStatusText = if (playlist.epgUrl.isNullOrBlank()) {
+                        stringResource(R.string.tv_settings_not_set)
+                    } else {
+                        stringResource(R.string.tv_settings_set)
+                    }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -2219,10 +2234,18 @@ private fun LiveTvSettingsSection(
                                 color = Snow,
                             )
                             Text(
-                                text = stringResource(R.string.settings_channels_count, playlist.channelCount),
+                                text = "$channelCountText - $guideStatusText",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Torve.colors.textTertiary,
                             )
+                        }
+                        TextButton(
+                            onClick = {
+                                editingEpgPlaylistId = playlist.id
+                                editingEpgUrl = playlist.epgUrl.orEmpty()
+                            },
+                        ) {
+                            Text(stringResource(R.string.channels_epg_optional), color = Amber)
                         }
                         IconButton(
                             onClick = { channelsViewModel.deletePlaylist(playlist.id) },
@@ -2233,6 +2256,58 @@ private fun LiveTvSettingsSection(
                                 tint = Ruby,
                                 modifier = Modifier.size(20.dp),
                             )
+                        }
+                    }
+                }
+            }
+
+            val editingPlaylist = channelsState.playlists.firstOrNull { it.id == editingEpgPlaylistId }
+            if (editingPlaylist != null) {
+                Spacer(Modifier.height(8.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Gunmetal, RoundedCornerShape(10.dp))
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        text = editingPlaylist.name,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Snow,
+                    )
+                    SettingsTextField(
+                        value = editingEpgUrl,
+                        onValueChange = { editingEpgUrl = it },
+                        label = stringResource(R.string.channels_epg_optional),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = {
+                                channelsViewModel.updatePlaylistEpgUrl(editingPlaylist.id, editingEpgUrl)
+                                editingEpgPlaylistId = null
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Amber,
+                                contentColor = Obsidian,
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                        ) {
+                            Text(stringResource(R.string.common_save), fontWeight = FontWeight.SemiBold)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                editingEpgUrl = ""
+                                channelsViewModel.updatePlaylistEpgUrl(editingPlaylist.id, "")
+                                editingEpgPlaylistId = null
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                        ) {
+                            Text(stringResource(R.string.common_clear))
+                        }
+                        TextButton(onClick = { editingEpgPlaylistId = null }) {
+                            Text(stringResource(R.string.common_cancel), color = Torve.colors.textTertiary)
                         }
                     }
                 }
@@ -2267,6 +2342,9 @@ private fun LiveTvSettingsSection(
             xtreamUsername = channelsState.newXtreamUsername,
             xtreamPassword = channelsState.newXtreamPassword,
             isLoading = channelsState.isAddingPlaylist,
+            isCheckingEpg = channelsState.isCheckingEpg,
+            epgCheckMessage = channelsState.epgCheckMessage,
+            epgCheckSuccess = channelsState.epgCheckSuccess,
             onNameChange = { channelsViewModel.setNewPlaylistName(it) },
             onUrlChange = { channelsViewModel.setNewPlaylistUrl(it) },
             onEpgUrlChange = { channelsViewModel.setNewPlaylistEpgUrl(it) },
@@ -2274,6 +2352,7 @@ private fun LiveTvSettingsSection(
             onXtreamServerChange = { channelsViewModel.setNewXtreamServer(it) },
             onXtreamUsernameChange = { channelsViewModel.setNewXtreamUsername(it) },
             onXtreamPasswordChange = { channelsViewModel.setNewXtreamPassword(it) },
+            onCheckEpg = { channelsViewModel.checkNewPlaylistEpgUrl() },
             onConfirm = { channelsViewModel.addPlaylist() },
             onDismiss = { channelsViewModel.dismissAddPlaylistDialog() },
         )

@@ -119,6 +119,7 @@ class SourceAccelerationMapperTest {
     fun backendCandidate_mapsToParsedStreamWithAccelerationSignals() {
         val stream = SourceAccelerationMapper.backendCandidateToParsedStream(
             StartupAccelerationCandidateDto(
+                memoryId = "mem-abc",
                 sourceKey = "torrentio:abc",
                 providerType = "real_debrid",
                 title = "Movie 2026",
@@ -133,6 +134,7 @@ class SourceAccelerationMapperTest {
         )
 
         assertNotNull(stream)
+        assertEquals("mem-abc", stream.accelerationMemoryId)
         assertEquals("torrentio:abc", stream.accelerationSourceKey)
         assertEquals("real_debrid", stream.accelerationProviderType)
         assertEquals(92, stream.score)
@@ -140,6 +142,24 @@ class SourceAccelerationMapperTest {
         assertTrue(StartupConfidenceReasonCode.RECENT_SUCCESS in stream.accelerationConfidenceReasons)
         assertTrue(StartupConfidenceReasonCode.HASH_CACHED in stream.accelerationConfidenceReasons)
         assertTrue(StartupConfidenceReasonCode.CONNECTED_SERVICE_MATCH in stream.accelerationConfidenceReasons)
+    }
+
+    @Test
+    fun startupCandidateModelPreservesMemoryIdForPresentationState() {
+        val candidate = SourceAccelerationMapper.toStartupCandidate(
+            StartupCandidateBackendModel(
+                streamKey = "source-key",
+                title = "Movie 2026",
+                qualityLabel = "1080p",
+                addonName = "Panda",
+                sourceLabel = "TorBox",
+                readinessState = ReadinessState.READY_NOW,
+                provenanceKind = CandidateProvenanceKind.STARTUP_FETCH,
+                memoryId = "mem-456",
+            ),
+        )
+
+        assertEquals("mem-456", candidate.memoryId)
     }
 
     @Test

@@ -1619,11 +1619,12 @@ fun PlayerScreen(
             }
 
             override fun onError(message: String) {
+                val safeUrl = com.torve.domain.diagnostics.DiagnosticsRedactor.redact(currentUrl)
                 if (message.isNonFatalRecoveryMessage()) {
-                    android.util.Log.i("Player", "Ignoring non-fatal playback recovery notice for URL: $currentUrl - $message")
+                    android.util.Log.i("Player", "Ignoring non-fatal playback recovery notice for URL: $safeUrl - $message")
                     return
                 }
-                android.util.Log.e("Player", "Playback error for URL: $currentUrl — $message")
+                android.util.Log.e("Player", "Playback error for URL: $safeUrl — $message")
                 val seekSuppressed = isSeekSuppressionActive()
                 if (!seekSuppressed) {
                     currentStreamHostKey?.let { StreamRuntimeTelemetry.recordFatalError(it) }
@@ -4169,7 +4170,12 @@ private suspend fun List<ParsedStream>.firstResolvedOrNull(
 }
 
 private fun playerStreamKey(stream: ParsedStream): String {
-    return stream.accelerationSourceKey ?: stream.directUrl ?: stream.magnetUrl ?: stream.infoHash ?: "${stream.addonName}:${stream.title}"
+    return stream.accelerationMemoryId
+        ?: stream.accelerationSourceKey
+        ?: stream.directUrl
+        ?: stream.magnetUrl
+        ?: stream.infoHash
+        ?: "${stream.addonName}:${stream.title}"
 }
 
 private suspend fun resolveAndPlayNextEpisode(

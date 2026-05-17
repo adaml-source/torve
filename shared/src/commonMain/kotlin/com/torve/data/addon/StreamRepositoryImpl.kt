@@ -2,6 +2,8 @@ package com.torve.data.addon
 
 import com.torve.data.acceleration.AccelerationApi
 import com.torve.data.acceleration.AccelerationOutcomeDto
+import com.torve.data.acceleration.StreamHandoffApiException
+import com.torve.data.acceleration.StreamHandoffResponseDto
 import com.torve.data.debrid.DebridClient
 import com.torve.data.debrid.DebridMissingException
 import com.torve.data.debrid.DebridNoCachedStreamException
@@ -281,6 +283,10 @@ class StreamRepositoryImpl(
         apiKey: String,
     ): ResolvedStream {
         return try {
+            resolveGenericStreamHandoffIfAvailable(stream)?.let { resolved ->
+                reportPlaybackOutcome(stream, provider, success = true)
+                return resolved.requirePlayableUrl()
+            }
             // Priority: addon-hosted URLs ALWAYS bypass debrid, regardless of
             // whether the stream also carries an infoHash. Panda's Usenet/NZB
             // streams set both fields (the hash identifies the release; the
@@ -348,10 +354,14 @@ class StreamRepositoryImpl(
         }
     }
 
-    override suspend fun resolveStreamWithFallback(
+override suspend fun resolveStreamWithFallback(
         stream: ParsedStream,
         providers: Map<DebridServiceType, String>,
     ): ResolvedStream {
+        if (stream.canUseGenericStreamHandoff()) {
+            return resolveStream(stream, provider = null, apiKey = "")
+        }
+
         // Addon-hosted streams (Panda's /u/<token>/nzb/..., /u/<token>/easynews/..., …)
         // bypass debrid entirely. The infoHash field, when present, just identifies
         // the release — the addon's own server handles fetching it. Skip the chain.
@@ -385,6 +395,22 @@ class StreamRepositoryImpl(
         )
     }
 
+    private suspend fun resolveGenericStreamHandoffIfAvailable(stream: ParsedStream): ResolvedStream? {
+        if (!stream.canUseGenericStreamHandoff()) return null
+        val memoryId = stream.accelerationMemoryId?.trim()?.takeIf { it.isNotBlank() }
+            ?: return null
+        val request = memoryMutex.withLock { lastRequestByStreamKey[streamMemoryKey(stream)] }
+        val contentId = request?.contentId
+            ?: request?.imdbId?.takeIf { it.isNotBlank() }?.let { "imdb:$it" }
+            ?: throw StreamHandoffApiException(
+                errorCode = "stream_reference_required",
+                message = "This stream reference is no longer available.",
+            )
+        return accelerationApi
+            .requestStreamHandoff(contentId = contentId, memoryId = memoryId)
+            .toResolvedStream()
+    }
+
     override suspend fun reportPlaybackOutcome(
         stream: ParsedStream,
         provider: DebridServiceType?,
@@ -395,6 +421,7 @@ class StreamRepositoryImpl(
             ?: request?.imdbId?.takeIf { it.isNotBlank() }?.let { "imdb:$it" }
             ?: return
         val sourceKey = stream.accelerationSourceKey
+            ?: stream.accelerationMemoryId
             ?: stream.directUrl
             ?: stream.magnetUrl
             ?: stream.infoHash
@@ -619,7 +646,7 @@ class StreamRepositoryImpl(
             addon_name = stream.addonName,
             stream_title = stream.title,
             info_hash = stream.infoHash,
-            direct_url = stream.directUrl,
+            direct_url = stream.directUrlForResolveMemory(),
             quality = stream.quality,
             source_name = stream.source,
             is_cached = if (stream.isCached) 1L else 0L,
@@ -672,7 +699,7 @@ class StreamRepositoryImpl(
             else -> ReadinessState.LOOKUP_ONLY
         }
         return StartupCandidateBackendModel(
-            streamKey = accelerationSourceKey ?: streamMemoryKey(this),
+            streamKey = accelerationMemoryId ?: accelerationSourceKey ?: streamMemoryKey(this),
             title = title,
             qualityLabel = quality,
             addonName = addonName,
@@ -691,6 +718,7 @@ class StreamRepositoryImpl(
             seeds = seeds,
             score = accelerationScore,
             scoreBreakdown = accelerationScoreBreakdown,
+            memoryId = accelerationMemoryId,
         )
     }
 
@@ -783,7 +811,8 @@ class StreamRepositoryImpl(
 }
 
 private fun startupIdentityKey(stream: ParsedStream): String {
-    return stream.accelerationSourceKey
+    return stream.accelerationMemoryId
+        ?: stream.accelerationSourceKey
         ?: stream.directUrl
         ?: stream.magnetUrl
         ?: stream.infoHash
@@ -791,10 +820,26 @@ private fun startupIdentityKey(stream: ParsedStream): String {
 }
 
 private fun streamMemoryKey(stream: ParsedStream): String {
-    return stream.directUrl
+    return stream.accelerationMemoryId
+        ?: stream.directUrl
         ?: stream.magnetUrl
         ?: stream.infoHash
         ?: "${stream.addonName}|${stream.title}|${stream.quality}|${stream.source.orEmpty()}"
+}
+
+internal fun ParsedStream.directUrlForResolveMemory(): String? =
+    if (canUseGenericStreamHandoff()) null else directUrl
+
+internal fun StreamHandoffResponseDto.toResolvedStream(): ResolvedStream {
+    return ResolvedStream(
+        url = url,
+        service = null,
+        isTemporary = true,
+        isDirect = isDirect,
+        supportsRange = supportsRange,
+        streamId = streamId,
+        expiresInSeconds = expiresInSeconds,
+    )
 }
 
 private fun debridSignature(accounts: Map<DebridServiceType, String>): String {

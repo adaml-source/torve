@@ -480,7 +480,7 @@ private fun FullscreenTrailerLayout(
             Row(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(12.dp)
+                    .padding(top = 14.dp, end = 128.dp)
                     .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(8.dp)),
             ) {
                 IconButton(onClick = onExitFullscreen) {

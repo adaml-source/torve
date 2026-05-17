@@ -98,6 +98,33 @@ class DesktopRecordingServiceTest {
     }
 
     @Test
+    fun `runNow allows recordings folder under a broader allowlisted root`() = runBlocking {
+        val mediaRoot = tmpDir("torve-media-root")
+        val recordingsRoot = File(mediaRoot, "Recordings").apply { mkdirs() }
+        val repo = com.torve.desktop.recording.FileBackedRecordingRepository(tmpDir("repo"))
+        val scheduler = RecordingScheduler(repo, nowMs = { 1000L })
+        val payload = ByteArray(128) { 7 }
+        val service = DesktopRecordingService(
+            scheduler = scheduler,
+            repository = repo,
+            allowlist = DownloadFolderAllowlist { listOf(mediaRoot) },
+            recordingsRootProvider = { recordingsRoot },
+            nowMs = { 1000L },
+            openConnection = { fakeStream(payload) },
+        )
+        val rec = mkRecording("rec-subfolder", startMs = 1000L, endMs = 4000L)
+        repo.upsert(rec)
+
+        service.runNow(rec)
+
+        val final = waitFor(repo, "rec-subfolder") {
+            it.status == RecordingStatus.COMPLETED || it.status == RecordingStatus.FAILED
+        }
+        assertEquals(RecordingStatus.COMPLETED, final.status)
+        assertTrue(File(final.filePath!!).canonicalPath.startsWith(recordingsRoot.canonicalPath))
+    }
+
+    @Test
     fun `runNow refuses when recordings root is outside the allowlist`() = runBlocking {
         val allowedRoot = tmpDir("torve-allowed")
         val outsideRoot = tmpDir("torve-outside")

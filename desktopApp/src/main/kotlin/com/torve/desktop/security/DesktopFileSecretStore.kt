@@ -2,21 +2,23 @@ package com.torve.desktop.security
 
 import com.torve.desktop.platform.desktopDataDir
 import com.torve.domain.integrations.IntegrationSecretKey
-import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.integrations.IntegrationStorageMode
-import com.torve.domain.security.SecureStorage
 import java.io.File
 import java.util.Properties
 
 /**
- * Preview-only desktop secret store.
+ * Insecure fallback desktop secret store.
  *
  * This is intentionally a bounded local file store so desktop bootstrap can
  * start cleanly without introducing OS-specific credential vault work yet.
+ *
+ * Windows uses [DesktopSecureSecretStore]. This fallback remains for
+ * unsupported desktop platforms and explicitly opted-in development runs.
  */
-class DesktopFileSecretStore : IntegrationSecretStore, SecureStorage {
+class InsecureDesktopFileSecretStore(
+    private val storeFile: File = File(desktopDataDir(), INSECURE_DESKTOP_SECRET_FILE_NAME),
+) : DesktopSecretStore {
     private val lock = Any()
-    private val storeFile = File(desktopDataDir(), "desktop-secrets.properties")
     private val properties = Properties()
 
     init {
@@ -122,3 +124,8 @@ class DesktopFileSecretStore : IntegrationSecretStore, SecureStorage {
         }
     }
 }
+
+@Deprecated("Use DesktopSecretStore from DI; Windows binds DesktopSecureSecretStore.")
+typealias DesktopFileSecretStore = InsecureDesktopFileSecretStore
+
+internal const val INSECURE_DESKTOP_SECRET_FILE_NAME = "desktop-secrets.properties"

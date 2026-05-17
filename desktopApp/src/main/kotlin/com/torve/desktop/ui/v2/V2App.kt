@@ -71,6 +71,8 @@ import com.torve.desktop.ui.v2.movies.V2MoviesPage
 import com.torve.desktop.ui.v2.nav.V2Destination
 import com.torve.desktop.ui.v2.nav.V2NavRail
 import com.torve.desktop.ui.v2.person.V2PersonPage
+import com.torve.desktop.ui.v2.recording.recordingFailureNotification
+import com.torve.desktop.ui.v2.recording.recordingFolderValidationError
 import com.torve.desktop.ui.v2.search.V2SearchPage
 import com.torve.desktop.ui.v2.seeall.SeeAllRequest
 import com.torve.desktop.ui.v2.seeall.V2SeeAllPage
@@ -92,9 +94,15 @@ import com.torve.presentation.download.DownloadViewModel
 import com.torve.presentation.home.HomeViewModel
 import com.torve.presentation.search.SearchViewModel
 import com.torve.presentation.panda.PandaSetupViewModel
+import com.torve.presentation.session.AccountSessionCoordinator
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.watchlist.WatchlistViewModel
 import kotlinx.coroutines.launch
+
+private sealed interface V2DetailStackEntry {
+    data class Detail(val route: DesktopFullDetailRoute) : V2DetailStackEntry
+    data class Person(val personId: Int) : V2DetailStackEntry
+}
 
 @Composable
 fun V2App(
@@ -113,6 +121,7 @@ fun V2App(
     addonRepository: AddonRepository,
     watchlistViewModel: WatchlistViewModel,
     mediaFavoritesRepository: MediaFavoritesRepository,
+    accountSessionCoordinator: AccountSessionCoordinator,
     downloadViewModel: DownloadViewModel,
     downloadCatalogueViewModel: DownloadCatalogueViewModel,
     downloadManager: DesktopDownloadManager,
@@ -222,7 +231,7 @@ fun V2App(
     var keyboardHelpOpen by remember { mutableStateOf(false) }
 
     // Detail / playback state
-    var fullDetailRoute by remember { mutableStateOf<DesktopFullDetailRoute?>(null) }
+    var detailStack by remember { mutableStateOf<List<V2DetailStackEntry>>(emptyList()) }
     var sourcePickerRoute by remember { mutableStateOf<DesktopSourcePickerRoute?>(null) }
     var playbackOrigin by remember { mutableStateOf<DesktopPlaybackOrigin?>(null) }
     var dockDismissed by remember { mutableStateOf(false) }
@@ -286,8 +295,20 @@ fun V2App(
     }
 
     // Person page state
-    var personRouteId by remember { mutableStateOf<Int?>(null) }
-    val personViewModel = remember { PersonViewModel(metadataRepository) }
+    val personViewModel = remember {
+        PersonViewModel(
+            metadataRepo = metadataRepository,
+            ratingsEnricher = org.koin.java.KoinJavaComponent.get<com.torve.data.mdblist.RatingsEnricher>(
+                com.torve.data.mdblist.RatingsEnricher::class.java,
+            ),
+            prefsRepo = org.koin.java.KoinJavaComponent.get<com.torve.domain.repository.PreferencesRepository>(
+                com.torve.domain.repository.PreferencesRepository::class.java,
+            ),
+            integrationSecretStore = org.koin.java.KoinJavaComponent.get<com.torve.domain.integrations.IntegrationSecretStore>(
+                com.torve.domain.integrations.IntegrationSecretStore::class.java,
+            ),
+        )
+    }
 
     // See-all page state
     var seeAllRoute by remember { mutableStateOf<SeeAllRequest?>(null) }
@@ -336,8 +357,7 @@ fun V2App(
             settingsOpen = false
             pandaSetupOpen = false
             manageDevicesOpen = false
-            fullDetailRoute = null
-            personRouteId = null
+            detailStack = emptyList()
             seeAllRoute = null
         }
     }
@@ -379,9 +399,10 @@ fun V2App(
     // Derive active hero backdrop URL for adaptive nav rail luminance
     val activeHeroBackdropUrl: String? = when {
         settingsOpen -> null
-        personRouteId != null -> personViewModel.state.collectAsState().value.credits.firstOrNull { !it.backdropUrl.isNullOrBlank() }?.backdropUrl
-        fullDetailRoute != null -> {
-            val rs = when (fullDetailRoute!!.controllerKey) { DesktopDetailControllerKey.LIBRARY -> libraryDetailState; DesktopDetailControllerKey.SEARCH -> searchDetailState }
+        detailStack.lastOrNull() is V2DetailStackEntry.Person -> personViewModel.state.collectAsState().value.credits.firstOrNull { !it.backdropUrl.isNullOrBlank() }?.backdropUrl
+        detailStack.lastOrNull() is V2DetailStackEntry.Detail -> {
+            val route = (detailStack.last() as V2DetailStackEntry.Detail).route
+            val rs = when (route.controllerKey) { DesktopDetailControllerKey.LIBRARY -> libraryDetailState; DesktopDetailControllerKey.SEARCH -> searchDetailState }
             rs.detailItem?.backdropUrl ?: rs.detailItem?.posterUrl
         }
         else -> when (destination) {
@@ -419,7 +440,21 @@ fun V2App(
     }
 
     fun restoreOrigin(origin: DesktopPlaybackOrigin) {
-        restorePlaybackOrigin(origin, libraryDetailController, libraryDetailState, searchController, searchDetailState, { fullDetailRoute = it }, { fullDetailRoute = null })
+        restorePlaybackOrigin(
+            origin,
+            libraryDetailController,
+            libraryDetailState,
+            searchController,
+            searchDetailState,
+            { detailStack = listOf(V2DetailStackEntry.Detail(it)) },
+            { detailStack = emptyList() },
+        )
+    }
+
+    fun clearPlaybackRestoreTarget() {
+        playbackOrigin = null
+        sourcePickerRoute = null
+        downloadIntent = false
     }
 
     /**
@@ -522,9 +557,9 @@ fun V2App(
             premiumGateReason = "Playing content is a Premium feature. Trailers stay free."
             return
         }
+        captureOrigin(item, surface, controllerKey, sn, ep)
         // NZB short-circuit (movies + TV).
         if (maybePlayNzbHint(item, sn, ep)) return
-        captureOrigin(item, surface, controllerKey, sn, ep)
         sourcePickerRoute = null
         playerController.open(item.toDesktopPlaybackRequest(sourceSurface = playbackSourceSurfaceLabel(v2DestToOld(), surface), seasonNumber = sn, episodeNumber = ep))
         playerController.play()
@@ -550,8 +585,8 @@ fun V2App(
         // explicitly clicked from "Latest on Usenet". Download intent
         // still goes through the standard picker (we'd need separate
         // download wiring for NZB sources).
-        if (!forDownload && maybePlayNzbHint(item, sn, ep)) return
         val origin = captureOrigin(item, surface, controllerKey, sn, ep)
+        if (!forDownload && maybePlayNzbHint(item, sn, ep)) return
         val request = item.toDesktopPlaybackRequest(sourceSurface = playbackSourceSurfaceLabel(v2DestToOld(), surface), seasonNumber = sn, episodeNumber = ep)
         sourcePickerRoute = DesktopSourcePickerRoute(request = request, origin = origin)
         downloadIntent = forDownload
@@ -564,7 +599,22 @@ fun V2App(
 
     fun openFullDetail(item: MediaItem, controllerKey: DesktopDetailControllerKey = DesktopDetailControllerKey.LIBRARY) {
         detailControllerFor(controllerKey).selectResult(item)
-        fullDetailRoute = DesktopFullDetailRoute(destination = v2DestToOld(), controllerKey = controllerKey, item = item)
+        detailStack = listOf(V2DetailStackEntry.Detail(DesktopFullDetailRoute(destination = v2DestToOld(), controllerKey = controllerKey, item = item)))
+    }
+
+    fun pushFullDetail(item: MediaItem, controllerKey: DesktopDetailControllerKey = DesktopDetailControllerKey.LIBRARY) {
+        detailControllerFor(controllerKey).selectResult(item)
+        detailStack = detailStack + V2DetailStackEntry.Detail(DesktopFullDetailRoute(destination = v2DestToOld(), controllerKey = controllerKey, item = item))
+    }
+
+    fun pushPersonDetail(personId: Int) {
+        detailStack = detailStack + V2DetailStackEntry.Person(personId)
+    }
+
+    fun popDetailStack() {
+        if (detailStack.isNotEmpty()) {
+            detailStack = detailStack.dropLast(1)
+        }
     }
 
     // Push top Continue-Watching items into the tray menu and handle clicks
@@ -661,6 +711,7 @@ fun V2App(
         if (!isLiveTvPlayback) return
         val channel = channelsViewModel.selectAdjacentChannel(direction) ?: return
         channelsViewModel.recordChannelViewed(channel)
+        clearPlaybackRestoreTarget()
         playerController.playDirectStream(
             title = channel.name,
             url = channel.url,
@@ -693,8 +744,7 @@ fun V2App(
         if (!liveTvNavigationPending) return@LaunchedEffect
         if (channelsState.error != null || !liveTvSyncBlocking) {
             settingsOpen = false
-            fullDetailRoute = null
-            personRouteId = null
+            detailStack = emptyList()
             seeAllRoute = null
             destination = V2Destination.LIVE_TV
             liveTvNavigationPending = false
@@ -709,8 +759,7 @@ fun V2App(
         if (liveTvNavigationPending) {
             println("V2App: liveTvNavigationPending overlay timed out - proceeding without data")
             settingsOpen = false
-            fullDetailRoute = null
-            personRouteId = null
+            detailStack = emptyList()
             seeAllRoute = null
             destination = V2Destination.LIVE_TV
             liveTvNavigationPending = false
@@ -744,7 +793,7 @@ fun V2App(
             else -> null
         }
         if (next != null) {
-            settingsOpen = false; fullDetailRoute = null; personRouteId = null; seeAllRoute = null
+            settingsOpen = false; detailStack = emptyList(); seeAllRoute = null
             manageDevicesOpen = false; deviceLimitReachedOpen = false
             destination = next
             com.torve.desktop.diagnostics.SentryBootstrap.breadcrumb(
@@ -766,15 +815,14 @@ fun V2App(
             return true
         }
         if (k == androidx.compose.ui.input.key.Key.Comma) {
-            settingsOpen = true; fullDetailRoute = null; personRouteId = null; seeAllRoute = null
+            settingsOpen = true; detailStack = emptyList(); seeAllRoute = null
             return true
         }
         if (k == androidx.compose.ui.input.key.Key.W) {
             // Close topmost overlay.
             when {
-                personRouteId != null -> { personRouteId = null; return true }
+                detailStack.isNotEmpty() -> { popDetailStack(); return true }
                 seeAllRoute != null -> { seeAllRoute = null; return true }
-                fullDetailRoute != null -> { fullDetailRoute = null; return true }
                 manageDevicesOpen -> { manageDevicesOpen = false; return true }
                 settingsOpen -> { settingsOpen = false; return true }
             }
@@ -894,16 +942,33 @@ fun V2App(
                         val isCurrentlyRecording = isLiveTvPlayback &&
                             currentLiveStreamUrl != null &&
                             recordingsState.active.any { it.streamUrl == currentLiveStreamUrl }
+                        var knownPlayerRecordingFailureIds by remember {
+                            mutableStateOf(recordingsState.failed.map { it.id }.toSet())
+                        }
+                        LaunchedEffect(recordingsState.failed, currentLiveStreamUrl) {
+                            val failedIds = recordingsState.failed.map { it.id }.toSet()
+                            recordingsState.failed
+                                .filter { row ->
+                                    row.id !in knownPlayerRecordingFailureIds &&
+                                        row.status == com.torve.domain.recording.RecordingStatus.FAILED &&
+                                        row.streamUrl == currentLiveStreamUrl
+                                }
+                                .forEach { row -> downloadManager.publishEvent(recordingFailureNotification(row)) }
+                            knownPlayerRecordingFailureIds = failedIds
+                        }
                         val onToggleRecord: (() -> Unit)? = if (isLiveTvPlayback && currentLiveStreamUrl != null) {
                             {
                                 val active = recordingsState.active
                                     .firstOrNull { it.streamUrl == currentLiveStreamUrl }
                                 if (active != null) {
                                     recordingsVm.cancel(active.id)
-                                } else if (settingsState.recordingDownloadPath.isBlank()) {
+                                } else if (recordingFolderValidationError(settingsState.recordingDownloadPath) != null) {
+                                    val error = recordingFolderValidationError(settingsState.recordingDownloadPath)
+                                        ?: "Set a Recordings Folder under Settings > Preferences > Downloads first."
+                                    downloadManager.publishEvent("Recording disabled: $error")
                                     com.torve.desktop.desktopNotify(
                                         "Recording disabled",
-                                        "Set a Recordings Folder under Settings → Preferences → Downloads first.",
+                                        error,
                                     )
                                 } else {
                                     val now = System.currentTimeMillis()
@@ -917,6 +982,7 @@ fun V2App(
                                         startMs = now,
                                         endMs = now + playerRecordingPrefs.defaultDurationMs,
                                     )
+                                    downloadManager.publishEvent("Recording started: $playerTitle")
                                 }
                             }
                         } else null
@@ -982,8 +1048,7 @@ fun V2App(
                     }
                 } else {
                     // ── Normal shell content ──
-                    val route = fullDetailRoute
-                    val personId = personRouteId
+                    val activeDetail = detailStack.lastOrNull()
                     val seeAll = seeAllRoute
                     when {
                         deviceLimitReachedOpen -> com.torve.desktop.ui.v2.device.V2DeviceLimitReachedScreen(
@@ -1013,6 +1078,7 @@ fun V2App(
                             onPlayLocal = { recording ->
                                 val path = recording.filePath
                                 if (!path.isNullOrBlank()) {
+                                    clearPlaybackRestoreTarget()
                                     playerController.playDirectStream(
                                         title = recording.programmeTitle,
                                         url = "file://$path",
@@ -1033,6 +1099,7 @@ fun V2App(
                         settingsOpen -> V2SettingsPage(
                             authState = authState, authController = authController,
                             settingsState = settingsState, settingsViewModel = settingsViewModel,
+                            accountSessionCoordinator = accountSessionCoordinator,
                             channelsState = channelsState, channelsViewModel = channelsViewModel,
                             addonRepository = addonRepository,
                             homeViewModel = homeViewModel,
@@ -1053,26 +1120,26 @@ fun V2App(
                             initialCategoryName = settingsLandingCategory,
                         )
 
-                        personId != null -> {
+                        activeDetail is V2DetailStackEntry.Person -> {
                             V2PersonPage(
-                                personId = personId,
+                                personId = activeDetail.personId,
                                 personViewModel = personViewModel,
-                                onBack = { personRouteId = null },
+                                onBack = { popDetailStack() },
                                 onOpenDetail = { item ->
-                                    personRouteId = null
-                                    openFullDetail(item)
+                                    pushFullDetail(item)
                                 },
                             )
                         }
 
-                        route != null -> {
+                        activeDetail is V2DetailStackEntry.Detail -> {
+                            val route = activeDetail.route
                             val routeState = when (route.controllerKey) {
                                 DesktopDetailControllerKey.LIBRARY -> libraryDetailState
                                 DesktopDetailControllerKey.SEARCH -> searchDetailState
                             }
                             V2DetailPage(
                                 detailState = routeState, watchlistState = watchlistState, favoriteKeys = mediaFavoritesState.favoriteKeys, playerState = playerState,
-                                onBack = { fullDetailRoute = null },
+                                onBack = { popDetailStack() },
                                 onPlay = { item ->
                                     val isSeries = item.type == com.torve.domain.model.MediaType.SERIES
                                     val sn = if (isSeries) routeState.selectedSeasonNumber else null
@@ -1119,8 +1186,8 @@ fun V2App(
                                 onToggleFavorite = { item -> mediaFavoritesRepository.toggleFavorite(item) },
                                 onSelectSeason = { detailControllerFor(route.controllerKey).selectSeason(it) },
                                 onSelectEpisode = { episode -> detailControllerFor(route.controllerKey).selectEpisode(episode.episodeNumber) },
-                                onOpenRelated = { detailControllerFor(route.controllerKey).selectResult(it); fullDetailRoute = route.copy(item = it) },
-                                onOpenPerson = { id -> personRouteId = id },
+                                onOpenRelated = { pushFullDetail(it, route.controllerKey) },
+                                onOpenPerson = { id -> pushPersonDetail(id) },
                                 windowState = windowState,
                             )
                         }
@@ -1159,7 +1226,7 @@ fun V2App(
                                 metadataRepository = metadataRepository,
                                 onBack = { seeAllRoute = null },
                                 onOpenDetail = { item -> openFullDetail(item) },
-                                onOpenPerson = { id -> personRouteId = id },
+                                onOpenPerson = { id -> pushPersonDetail(id) },
                             )
                         }
 
@@ -1207,6 +1274,22 @@ fun V2App(
                                     nzbIndexerType = nzb.type,
                                     nzbIndexerUrl = nzb.url,
                                     nzbIndexerApiKey = nzb.apiKey,
+                                    aiProvider = settingsState.aiProvider,
+                                    aiApiKey = settingsState.activeAiApiKey,
+                                    onOpenAiProviderSettings = {
+                                        settingsLandingCategory = "INTEGRATIONS"
+                                        settingsOpen = true
+                                    },
+                                    keywordSearch = {
+                                        org.koin.java.KoinJavaComponent.get(
+                                            com.torve.data.ai.KeywordSearchService::class.java,
+                                        )
+                                    },
+                                    tmdb = {
+                                        org.koin.java.KoinJavaComponent.get(
+                                            com.torve.data.metadata.TmdbApiClient::class.java,
+                                        )
+                                    },
                                 )
                             }
                             V2Destination.TV_SHOWS -> {
@@ -1223,6 +1306,22 @@ fun V2App(
                                     nzbIndexerType = nzb.type,
                                     nzbIndexerUrl = nzb.url,
                                     nzbIndexerApiKey = nzb.apiKey,
+                                    aiProvider = settingsState.aiProvider,
+                                    aiApiKey = settingsState.activeAiApiKey,
+                                    onOpenAiProviderSettings = {
+                                        settingsLandingCategory = "INTEGRATIONS"
+                                        settingsOpen = true
+                                    },
+                                    keywordSearch = {
+                                        org.koin.java.KoinJavaComponent.get(
+                                            com.torve.data.ai.KeywordSearchService::class.java,
+                                        )
+                                    },
+                                    tmdb = {
+                                        org.koin.java.KoinJavaComponent.get(
+                                            com.torve.data.metadata.TmdbApiClient::class.java,
+                                        )
+                                    },
                                 )
                             }
                             V2Destination.SEARCH -> V2SearchPage(
@@ -1272,6 +1371,7 @@ fun V2App(
                                     if (!hasPremium) {
                                         premiumGateReason = "Playing local library files is a Premium feature."
                                     } else {
+                                        clearPlaybackRestoreTarget()
                                         playerController.playLocalFile(
                                             title = title,
                                             absolutePath = filePath,
@@ -1285,6 +1385,7 @@ fun V2App(
                                     if (!hasPremium) {
                                         premiumGateReason = "IPTV VOD playback is a Premium feature."
                                     } else {
+                                        clearPlaybackRestoreTarget()
                                         playerController.playDirectStream(
                                             title = channel.name,
                                             url = channel.url,
@@ -1301,12 +1402,15 @@ fun V2App(
                                 onPremiumBlocked = {
                                     premiumGateReason = "Live TV playback is a Premium feature."
                                 },
+                                onDirectPlaybackStarted = { clearPlaybackRestoreTarget() },
+                                onRecordingEvent = downloadManager::publishEvent,
                             )
                             V2Destination.RECORDINGS -> com.torve.desktop.ui.v2.recording.V2RecordingsPage(
                                 onBack = { destination = V2Destination.HOME },
                                 onPlayLocal = { recording ->
                                     val path = recording.filePath
                                     if (!path.isNullOrBlank()) {
+                                        clearPlaybackRestoreTarget()
                                         playerController.playDirectStream(
                                             title = recording.programmeTitle,
                                             url = "file://$path",
@@ -1372,6 +1476,7 @@ fun V2App(
                                         if (!hasPremium) {
                                             premiumGateReason = "Playing content is a Premium feature. Trailers stay free."
                                         } else {
+                                            clearPlaybackRestoreTarget()
                                             playerController.openPreResolvedStream(
                                                 streamUrl = url,
                                                 title = title,
@@ -1446,6 +1551,7 @@ fun V2App(
                                         if (!hasPremium) {
                                             premiumGateReason = "Playing content is a Premium feature. Trailers stay free."
                                         } else {
+                                            clearPlaybackRestoreTarget()
                                             playerController.openPreResolvedStream(
                                                 streamUrl = url,
                                                 title = title,
@@ -1524,8 +1630,7 @@ fun V2App(
                                 manageDevicesOpen = false
                                 statsOpen = false
                                 deviceLimitReachedOpen = false
-                                fullDetailRoute = null
-                                personRouteId = null
+                                detailStack = emptyList()
                                 seeAllRoute = null
                                 destination = nextDestination
                             }
@@ -1536,8 +1641,7 @@ fun V2App(
                             manageDevicesOpen = false
                             statsOpen = false
                             deviceLimitReachedOpen = false
-                            fullDetailRoute = null
-                            personRouteId = null
+                            detailStack = emptyList()
                             seeAllRoute = null
                         },
                         isSettingsActive = settingsOpen,
@@ -1784,7 +1888,7 @@ fun V2App(
                                     settingsOpen = false; pandaSetupOpen = false
                                     manageDevicesOpen = false; statsOpen = false
                                     deviceLimitReachedOpen = false
-                                    fullDetailRoute = null; personRouteId = null; seeAllRoute = null
+                                    detailStack = emptyList(); seeAllRoute = null
                                     destination = dest
                                 },
                             ),

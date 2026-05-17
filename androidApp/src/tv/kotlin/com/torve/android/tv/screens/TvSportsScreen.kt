@@ -285,12 +285,9 @@ fun TvSportsScreen(
             }
         }
         if (!restoredFromCache && NzbBrowseStateHolder.get(pageKey).items.isEmpty()) {
-            NzbBrowseStateHolder.update(pageKey) {
-                it.copy(
-                    loading = false,
-                    progress = null,
-                    errorText = "Sports releases are being prepared in the background.",
-                )
+            val current = NzbBrowseStateHolder.get(pageKey)
+            if (!current.loading && !NzbBrowseStateHolder.isFetching(pageKey)) {
+                startFetch()
             }
         }
     }

@@ -16,11 +16,13 @@ import com.torve.domain.model.channelMatchesIdentity
 import com.torve.domain.model.canonicalEpgChannelKey
 import com.torve.domain.model.epgChannelLookupKeys
 import com.torve.domain.model.stableChannelId
+import com.torve.domain.diagnostics.DiagnosticsRedactor
 import com.torve.domain.repository.ChannelRepository
 import com.torve.domain.repository.ChannelPlaylistSummary
 import com.torve.domain.repository.PlaylistAddProgress
 import com.torve.domain.repository.VodCategoryTypeCount
 import com.torve.data.network.HttpClientFactory
+import com.torve.platform.torveVerboseLog
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.timeout
 import io.ktor.client.request.prepareGet
@@ -80,6 +82,7 @@ class ChannelRepositoryImpl(
         private const val EPG_DEBUG_LOG_ENABLED = false
         private const val CHANNEL_DEBUG_LOG_ENABLED = false
         private const val PLAYLIST_CACHE_MAX_CHANNELS = 10_000
+        private const val STALE_CHANNEL_DELETE_BATCH_SIZE = 2_000L
         private const val M3U_MAX_BODY_BYTES = 32 * 1024 * 1024
         private const val M3U_INITIAL_BODY_BUFFER_BYTES = 256 * 1024
         private const val M3U_READ_CHUNK_BYTES = 64 * 1024
@@ -93,18 +96,18 @@ class ChannelRepositoryImpl(
 
     private suspend fun saveXtreamPassword(playlistId: String, password: String) {
         secureStorage.putString(xtreamPasswordKey(playlistId), password)
-        println("[XtreamCred] Password saved securely for playlist $playlistId")
+        torveVerboseLog { "[XtreamCred] Password saved securely for playlist $playlistId" }
     }
 
     private suspend fun loadXtreamPassword(playlistId: String): String? {
         val pw = secureStorage.getString(xtreamPasswordKey(playlistId))
-        if (pw == null) println("[XtreamCred] No secure password found for playlist $playlistId")
+        if (pw == null) torveVerboseLog { "[XtreamCred] No secure password found for playlist $playlistId" }
         return pw
     }
 
     private suspend fun removeXtreamPassword(playlistId: String) {
         secureStorage.remove(xtreamPasswordKey(playlistId))
-        println("[XtreamCred] Password removed for playlist $playlistId")
+        torveVerboseLog { "[XtreamCred] Password removed for playlist $playlistId" }
     }
 
     /** Migrate any plaintext passwords from SQLite to secure storage. Idempotent. */
@@ -115,7 +118,7 @@ class ChannelRepositoryImpl(
                 val existing = secureStorage.getString(xtreamPasswordKey(row.id))
                 if (existing == null) {
                     secureStorage.putString(xtreamPasswordKey(row.id), row.password!!)
-                    println("[XtreamCred] Migrated plaintext password for playlist ${row.id}")
+                    torveVerboseLog { "[XtreamCred] Migrated plaintext password for playlist ${row.id}" }
                 }
                 // Null out plaintext password in SQLite
                 database.torveQueries.insertPlaylist(
@@ -315,18 +318,21 @@ class ChannelRepositoryImpl(
         username: String,
         password: String,
         id: String?,
+        epgUrl: String?,
     ): ChannelPlaylist {
         val id = id ?: "xtream_${Clock.System.now().toEpochMilliseconds()}"
         val now = Clock.System.now().toEpochMilliseconds()
-        val xtreamEpgUrl = buildXtreamEpgUrl(server, username, password)
+        val normalizedServer = server.trimEnd('/')
+        val xtreamEpgUrl = epgUrl?.trim()?.takeIf { it.isNotEmpty() }
+            ?: buildXtreamEpgUrl(normalizedServer, username, password)
 
         // Authenticate first
-        xtreamClient.authenticate(server, username, password)
+        xtreamClient.authenticate(normalizedServer, username, password)
 
         // Fetch live categories and streams
-        val categories = xtreamClient.getLiveCategories(server, username, password)
+        val categories = xtreamClient.getLiveCategories(normalizedServer, username, password)
         val liveStreams = fetchXtreamLiveCatalog(
-            server = server,
+            server = normalizedServer,
             username = username,
             password = password,
             playlistId = id,
@@ -335,7 +341,7 @@ class ChannelRepositoryImpl(
         val channels = xtreamClient.mapLiveToChannels(
             streams = liveStreams,
             categories = categories,
-            server = server,
+            server = normalizedServer,
             username = username,
             password = password,
             playlistId = id,
@@ -343,13 +349,13 @@ class ChannelRepositoryImpl(
 
         // Also fetch VOD
         val vodCategories = try {
-            xtreamClient.getVodCategories(server, username, password)
+            xtreamClient.getVodCategories(normalizedServer, username, password)
         } catch (t: Exception) {
             channelDebugLog("Xtream VOD category fetch failed for playlist $id: ${t.message}")
             emptyList()
         }
         val vodStreams = fetchXtreamVodCatalog(
-            server = server,
+            server = normalizedServer,
             username = username,
             password = password,
             playlistId = id,
@@ -358,19 +364,19 @@ class ChannelRepositoryImpl(
         val vodChannels = xtreamClient.mapVodToChannels(
             streams = vodStreams,
             categories = vodCategories,
-            server = server,
+            server = normalizedServer,
             username = username,
             password = password,
             playlistId = id,
         )
         val seriesCategories = try {
-            xtreamClient.getSeriesCategories(server, username, password)
+            xtreamClient.getSeriesCategories(normalizedServer, username, password)
         } catch (t: Exception) {
             channelDebugLog("Xtream series category fetch failed for playlist $id: ${t.message}")
             emptyList()
         }
         val series = fetchXtreamSeriesCatalog(
-            server = server,
+            server = normalizedServer,
             username = username,
             password = password,
             playlistId = id,
@@ -379,7 +385,7 @@ class ChannelRepositoryImpl(
         val seriesChannels = xtreamClient.mapSeriesToChannels(
             series = series,
             categories = seriesCategories,
-            server = server,
+            server = normalizedServer,
             username = username,
             password = password,
             playlistId = id,
@@ -391,10 +397,10 @@ class ChannelRepositoryImpl(
         persistPlaylistSnapshot(
             playlistId = id,
             playlistName = name,
-            playlistUrl = "$server/player_api.php",
+            playlistUrl = "$normalizedServer/player_api.php",
             epgUrl = xtreamEpgUrl,
             playlistType = "xtream",
-            server = server,
+            server = normalizedServer,
             username = username,
             password = null, // never persist plaintext in SQLite
             channels = allChannels,
@@ -405,12 +411,12 @@ class ChannelRepositoryImpl(
         return ChannelPlaylist(
             id = id,
             name = name,
-            url = "$server/player_api.php",
+            url = "$normalizedServer/player_api.php",
             epgUrl = xtreamEpgUrl,
             channelCount = allChannels.size,
             lastUpdated = now,
             type = PlaylistType.XTREAM,
-            server = server,
+            server = normalizedServer,
             username = username,
             password = password, // in-memory only for immediate use
         )
@@ -422,16 +428,19 @@ class ChannelRepositoryImpl(
         username: String,
         password: String,
         id: String?,
+        epgUrl: String?,
     ): ChannelPlaylist = withContext(Dispatchers.IO) {
         val playlistId = id ?: "xtream_${Clock.System.now().toEpochMilliseconds()}"
         val now = Clock.System.now().toEpochMilliseconds()
         val normalizedServer = server.trimEnd('/')
+        val normalizedEpgUrl = epgUrl?.trim()?.takeIf { it.isNotEmpty() }
+            ?: buildXtreamEpgUrl(normalizedServer, username, password)
         saveXtreamPassword(playlistId, password)
         persistPlaylistConfigOnly(
             playlistId = playlistId,
             playlistName = name,
             playlistUrl = "$normalizedServer/player_api.php",
-            epgUrl = null,
+            epgUrl = normalizedEpgUrl,
             playlistType = "xtream",
             server = normalizedServer,
             username = username,
@@ -442,7 +451,7 @@ class ChannelRepositoryImpl(
             id = playlistId,
             name = name,
             url = "$normalizedServer/player_api.php",
-            epgUrl = null,
+            epgUrl = normalizedEpgUrl,
             channelCount = 0,
             lastUpdated = now,
             type = PlaylistType.XTREAM,
@@ -663,7 +672,23 @@ class ChannelRepositoryImpl(
             playlistId = playlistId,
         )
         epgCache.remove(playlistId)
-        refreshEpgForPlaylist(playlistId, normalizedEpg)
+        val fallbackXtreamEpg = if (
+            normalizedEpg == null &&
+            playlist.type == "xtream" &&
+            playlist.server != null &&
+            playlist.username != null
+        ) {
+            loadXtreamPassword(playlistId)?.let { password ->
+                buildXtreamEpgUrl(
+                    server = playlist.server,
+                    username = playlist.username,
+                    password = password,
+                )
+            }
+        } else {
+            null
+        }
+        refreshEpgForPlaylist(playlistId, normalizedEpg ?: fallbackXtreamEpg)
 
         database.torveQueries.insertPlaylist(
             user_id = uid(),
@@ -1347,7 +1372,7 @@ class ChannelRepositoryImpl(
         for (p in playlists) {
             if (p.type == "xtream") removeXtreamPassword(p.id)
         }
-        println("[XtreamCred] Cleared ${playlists.count { it.type == "xtream" }} secure passwords on sign-out")
+        torveVerboseLog { "[XtreamCred] Cleared ${playlists.count { it.type == "xtream" }} secure passwords on sign-out" }
         database.torveQueries.deleteAllChannels(userId = uid())
         database.torveQueries.deleteAllFavorites(userId = uid())
         database.torveQueries.clearRecentChannels(userId = uid())
@@ -1429,7 +1454,7 @@ class ChannelRepositoryImpl(
                 seriesId = seriesId,
             )
         }.getOrElse { error ->
-            println("XtreamSeriesPlayback: failed seriesId=$seriesId playlistId=${channel.playlistId}: ${error.message}")
+            println("XtreamSeriesPlayback: failed seriesId=$seriesId playlistId=${channel.playlistId}: ${DiagnosticsRedactor.redact(error.message)}")
             return emptyList()
         }
         val episodes = seriesInfo.episodes
@@ -1570,9 +1595,15 @@ class ChannelRepositoryImpl(
             )
             setActiveChannelGeneration(playlistId, nextGeneration)
             database.torveQueries.setPreference(user_id = uid(), key = channelLastSyncPrefKey(playlistId), value_ = updatedAt.toString())
-            database.torveQueries.deleteChannelsOlderGenerations(userId = uid(), playlistId = playlistId, generationId = nextGeneration)
         }
         clearStagedChannelGeneration(playlistId)
+        runCatching {
+            pruneOlderChannelGenerations(playlistId, nextGeneration)
+        }.onFailure { error ->
+            channelDebugLog(
+                "ChannelCatalog: stale generation cleanup failed playlistId=$playlistId generation=$nextGeneration error=${error.message}",
+            )
+        }
 
         if (channels.size <= PLAYLIST_CACHE_MAX_CHANNELS) {
             playlistCache[playlistId] = channels
@@ -1582,6 +1613,33 @@ class ChannelRepositoryImpl(
         channelDebugLog(
             "ChannelCatalog: committed playlistId=$playlistId generation=$nextGeneration channels=${channels.size}",
         )
+    }
+
+    private fun pruneOlderChannelGenerations(playlistId: String, activeGeneration: Long) {
+        var remaining = database.torveQueries
+            .countChannelsOlderGenerations(
+                userId = uid(),
+                playlistId = playlistId,
+                generationId = activeGeneration,
+            )
+            .executeAsOne()
+        while (remaining > 0L) {
+            database.torveQueries.deleteChannelsOlderGenerationsBatch(
+                userId = uid(),
+                playlistId = playlistId,
+                generationId = activeGeneration,
+                batchSize = minOf(remaining, STALE_CHANNEL_DELETE_BATCH_SIZE),
+            )
+            val nextRemaining = database.torveQueries
+                .countChannelsOlderGenerations(
+                    userId = uid(),
+                    playlistId = playlistId,
+                    generationId = activeGeneration,
+                )
+                .executeAsOne()
+            if (nextRemaining >= remaining) break
+            remaining = nextRemaining
+        }
     }
 
     private fun persistPlaylistConfigOnly(

@@ -60,6 +60,8 @@
     <string name="tv_episodes_title">Episodes</string>
     <string name="tv_no_episodes">No episodes available</string>
     <string name="tv_watched">Watched</string>
+    <string name="tv_season_mark_watched">Mark S%1$d watched</string>
+    <string name="tv_season_watched">S%1$d watched</string>
 
     <!-- See All -->
     <string name="tv_see_all">See All</string>
@@ -181,6 +183,7 @@
     <string name="tv_settings_playlist_name">Playlist Name</string>
     <string name="tv_settings_playlist_url">Playlist URL</string>
     <string name="tv_settings_playlist_save">Save Playlist</string>
+    <string name="tv_settings_custom_epg_url">Custom EPG URL (optional)</string>
     <string name="tv_settings_playlist_type_m3u">M3U Playlist</string>
     <string name="tv_settings_playlist_type_xtream">Provider Login</string>
     <string name="tv_settings_xtream_server">Server URL</string>
@@ -417,10 +420,12 @@
     <string name="tv_live_search_query">Search: %s</string>
     <string name="tv_live_search_clear_hint">Backspace to clear</string>
     <string name="tv_settings_panda_streaming_setup">Panda streaming setup</string>
-    <string name="tv_settings_panda_streaming_setup_desc">Configure debrid, usenet, download clients, IPTV, and provider health in one place.</string>
-    <string name="tv_settings_panda_configured_enabled">Configured and enabled. Reconfigure streaming providers, IPTV, and automation.</string>
+    <string name="tv_settings_panda_streaming_setup_desc">Configure debrid, Usenet, download clients, and provider health in one place.</string>
+    <string name="tv_settings_panda_configured_enabled">Configured and enabled. Reconfigure streaming providers and automation.</string>
     <string name="tv_settings_panda_configured_disabled">Configured but disabled. Open Panda to enable or reconfigure it.</string>
-    <string name="tv_settings_panda_setup_desc">Set up Torve for streaming with debrid, usenet, download clients, and IPTV.</string>
+    <string name="tv_settings_panda_setup_desc">Set up Torve for streaming with debrid, Usenet, and download clients.</string>
+    <string name="tv_settings_import_refresh_subtitle">Refresh account setup, playlists, provider credentials, favorites, and Panda health.</string>
+    <string name="tv_settings_open_panda_setup">Open Panda setup</string>
     <string name="tv_settings_realdebrid_connect">Connect Real-Debrid</string>
     <string name="tv_settings_realdebrid_connect_panda">Connect Real-Debrid in Panda</string>
     <string name="tv_settings_realdebrid_managed_authorize">Managed by Panda. Finish device authorization to connect Real-Debrid.</string>

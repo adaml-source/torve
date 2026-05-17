@@ -57,6 +57,7 @@ data class DesktopDownloadManagerState(
     val activeDownloadTitle: String? = null,
     val activeProgress: Float = 0f,
     val lastEvent: String? = null,
+    val lastEventNonce: Long = 0L,
     val scannedGroups: List<DesktopLocalMediaGroup> = emptyList(),
 )
 
@@ -94,7 +95,7 @@ class DesktopDownloadManager(
 
     /** Surface a one-off event to the top-of-window status overlay. */
     fun publishEvent(message: String) {
-        _state.update { it.copy(lastEvent = message) }
+        _state.update { it.copy(lastEvent = message, lastEventNonce = it.lastEventNonce + 1L) }
     }
 
     fun queueMovieDownload(session: DesktopPlaybackSession) {
@@ -741,6 +742,7 @@ private fun DesktopPlaybackSourceCandidate.toParsedStream(): ParsedStream {
         infoHash = infoHash,
         fileIdx = fileIdx,
         directUrl = directUrl,
+        accelerationMemoryId = accelerationMemoryId,
         size = size,
         codec = codec,
         source = source,

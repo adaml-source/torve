@@ -105,6 +105,7 @@ import com.torve.domain.model.MediaType
 import com.torve.domain.model.RatingSource
 import com.torve.domain.model.allowsTmdbRatingProvider
 import com.torve.domain.model.deriveProvidersToRender
+import com.torve.domain.model.favoriteMediaKey
 import com.torve.domain.model.hasAnyEnabledDisplayValue
 import com.torve.domain.model.withFallbackTmdbScore
 import com.torve.android.tv.components.TvSourcePickerSheet
@@ -113,6 +114,7 @@ import com.torve.data.addon.isUsenetStream
 import com.torve.domain.lanlibrary.NetworkMode
 import com.torve.domain.lanlibrary.PlaybackRoute
 import com.torve.domain.repository.DownloadRepository
+import com.torve.domain.repository.MediaFavoritesRepository
 import com.torve.platform.NetworkMonitor
 import com.torve.platform.NetworkType
 import com.torve.presentation.detail.DetailViewModel
@@ -167,6 +169,7 @@ fun TvDetailsScreen(
     onCastClick: (castId: Int, castName: String) -> Unit = { _, _ -> },
     onSettingsClick: () -> Unit = {},
     onRequestLifetimeUnlock: (TvEntitledFeature) -> Unit = {},
+    onWatchedStatusChanged: (MediaItem, Boolean) -> Unit = { _, _ -> },
 ) {
     val detailViewModel: DetailViewModel = koinInject()
     val settingsViewModel: SettingsViewModel = koinInject()
@@ -175,6 +178,7 @@ fun TvDetailsScreen(
     val bulkDownloadManager: BulkDownloadManager = koinInject()
     val subscriptionViewModel: SubscriptionViewModel = koinInject()
     val downloadRepository: DownloadRepository = koinInject()
+    val mediaFavoritesRepository: MediaFavoritesRepository = koinInject()
     val lanLibraryConsumer: LanLibraryConsumer = koinInject()
     val networkMonitor: NetworkMonitor = koinInject()
     // Kick the LAN-library consumer once so the badge resolves on
@@ -184,6 +188,7 @@ fun TvDetailsScreen(
     val watchlistState by watchlistViewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
     val subscriptionState by subscriptionViewModel.state.collectAsState()
+    val mediaFavoritesState by mediaFavoritesRepository.state.collectAsState()
     val state by detailViewModel.state.collectAsState()
     val accessTier = rememberEffectivePremiumAccessTier(
         subscriptionTier = subscriptionState.subscription?.tier,
@@ -204,6 +209,7 @@ fun TvDetailsScreen(
 
     val playFocusRequester = remember { FocusRequester() }
     val watchlistFocusRequester = remember { FocusRequester() }
+    val favoritesFocusRequester = remember { FocusRequester() }
     val markWatchedFocusRequester = remember { FocusRequester() }
     val rateFocusRequester = remember { FocusRequester() }
     val trailerFocusRequester = remember { FocusRequester() }
@@ -276,6 +282,7 @@ fun TvDetailsScreen(
 
     LaunchedEffect(type, id) {
         detailViewModel.loadDetail(type, id)
+        mediaFavoritesRepository.refresh(force = true)
     }
 
     // Refresh watch state and restore focus when returning from player (lifecycle ON_RESUME).
@@ -342,6 +349,12 @@ fun TvDetailsScreen(
         watchlistState.snackbarMessage?.let { message ->
             TvNotificationQueue.post(message, NotificationType.SUCCESS)
             watchlistViewModel.clearSnackbar()
+        }
+    }
+
+    LaunchedEffect(mediaFavoritesState.lastError) {
+        mediaFavoritesState.lastError?.takeIf { it.isNotBlank() }?.let { message ->
+            TvNotificationQueue.post(message, NotificationType.ERROR)
         }
     }
 
@@ -494,7 +507,7 @@ fun TvDetailsScreen(
             media,
             state.streamContextSeason,
             state.streamContextEpisode,
-            state.autoPlayStream != null,
+            state.autoPlayStream != null || resolved.isTemporary,
             epName,
         )
         detailViewModel.clearResolvedStream()
@@ -534,6 +547,7 @@ fun TvDetailsScreen(
 
     val mediaItem = state.mediaItem
     val isInWatchlist = mediaItem?.let { watchlistViewModel.isInWatchlist(it.id) } == true
+    val isFavorite = mediaItem?.favoriteMediaKey()?.let { it in mediaFavoritesState.favoriteKeys } == true
     val isBusy = state.isLoadingStreams || state.isResolving
 
     if (state.isLoading && mediaItem == null) {
@@ -615,6 +629,10 @@ fun TvDetailsScreen(
                                 style = MaterialTheme.typography.titleMedium,
                                 color = Silver,
                             )
+                        }
+
+                        if (state.isMarkedWatched) {
+                            TvWatchedStatusPill()
                         }
 
                         // â"€â"€ Library status indicator â"€â"€
@@ -789,6 +807,39 @@ fun TvDetailsScreen(
                                 },
                             )
 
+                            val favoritesLocked = isLockedFeature(TvEntitledFeature.FAVORITES_EDIT)
+                            TvActionButton(
+                                text = if (isFavorite) {
+                                    if (favoritesLocked) {
+                                        "${stringResource(R.string.tv_action_remove_favorites)} (Locked)"
+                                    } else {
+                                        stringResource(R.string.tv_action_remove_favorites)
+                                    }
+                                } else {
+                                    if (favoritesLocked) {
+                                        "${stringResource(R.string.tv_action_add_favorites)} (Locked)"
+                                    } else {
+                                        stringResource(R.string.tv_action_add_favorites)
+                                    }
+                                },
+                                modifier = Modifier.focusRequester(favoritesFocusRequester),
+                                onFocused = { onContentFocused(favoritesFocusRequester) },
+                                onClick = {
+                                    runPremiumAction(TvEntitledFeature.FAVORITES_EDIT) {
+                                        val shouldFavorite = !isFavorite
+                                        mediaFavoritesRepository.toggleFavorite(item)
+                                        TvNotificationQueue.post(
+                                            if (shouldFavorite) {
+                                                context.getString(R.string.tv_notification_favorites_added, item.title)
+                                            } else {
+                                                context.getString(R.string.tv_notification_favorites_removed, item.title)
+                                            },
+                                            NotificationType.SUCCESS,
+                                        )
+                                    }
+                                },
+                            )
+
                             // â"€â"€ Mark Watched + Rate (Trakt only) â"€â"€
                             if (settingsState.traktConnected) {
                                 TvActionButton(
@@ -803,8 +854,10 @@ fun TvDetailsScreen(
                                         runPremiumAction(TvEntitledFeature.WATCHED_STATUS_EDIT) {
                                             if (state.isMarkedWatched) {
                                                 detailViewModel.markUnwatched()
+                                                onWatchedStatusChanged(item, false)
                                             } else {
                                                 detailViewModel.markWatched()
+                                                onWatchedStatusChanged(item, true)
                                             }
                                         }
                                     },
@@ -1040,6 +1093,13 @@ fun TvDetailsScreen(
                         onSeasonDownload = { },
                         onToggleEpisodeWatched = { season, episode ->
                             detailViewModel.toggleEpisodeWatched(season, episode)
+                        },
+                        onMarkSeasonWatched = { season ->
+                            detailViewModel.markSeasonWatched(season)
+                            TvNotificationQueue.post(
+                                context.getString(R.string.tv_season_watched, season),
+                                NotificationType.SUCCESS,
+                            )
                         },
                         onFirstContentRequester = onFirstContentRequester,
                         onContentFocused = onContentFocused,
@@ -1848,6 +1908,32 @@ private fun TvRatingChip(label: String, value: String, iconRes: Int? = null) {
         Text(
             text = value,
             style = MaterialTheme.typography.labelLarge,
+            color = Snow,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+@Composable
+private fun TvWatchedStatusPill() {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(Amber.copy(alpha = 0.18f))
+            .border(1.dp, Amber.copy(alpha = 0.52f), RoundedCornerShape(999.dp))
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.CloudDone,
+            contentDescription = null,
+            tint = AmberLight,
+            modifier = Modifier.size(16.dp),
+        )
+        Text(
+            text = stringResource(R.string.tv_watched),
+            style = MaterialTheme.typography.labelMedium,
             color = Snow,
             fontWeight = FontWeight.SemiBold,
         )

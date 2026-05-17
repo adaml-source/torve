@@ -1,5 +1,6 @@
 package com.torve.android.tv.screens
 
+import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -102,6 +103,9 @@ import com.torve.data.mdblist.RatingsEnricher
 import com.torve.presentation.home.HomeViewModel
 import com.torve.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
@@ -113,6 +117,9 @@ private data class CatalogRailsUiState(
     val rails: List<TvContentRail> = emptyList(),
     val error: String? = null,
 )
+
+private const val TV_CATALOG_RAIL_ITEM_LIMIT = 24
+private val TV_CATALOG_RAIL_RETRY_DELAYS_MS = listOf(0L, 2_500L, 5_000L, 10_000L, 20_000L)
 
 private data class GenreSpec(val id: Int, val label: String)
 
@@ -140,6 +147,7 @@ internal fun TvCatalogRailsScreen(
     initialSearchQuery: String? = null,
     maxContentRating: ContentRating? = null,
     browseLayout: TvBrowseLayout = TvBrowseLayout.INFO_PANEL,
+    progressResolver: ((MediaItem, Float?) -> Float?)? = null,
     contextMenuActionsForItem: ((MediaItem, Float?) -> List<TvMediaContextMenuAction>)? = null,
     onContextMenuAction: ((MediaItem, TvMediaContextMenuAction, Float?) -> Unit)? = null,
     registerFocusHandle: ((TvScreenFocusHandle?) -> Unit)? = null,
@@ -236,21 +244,46 @@ internal fun TvCatalogRailsScreen(
     LaunchedEffect(mediaType) {
         if (uiState.rails.isNotEmpty()) return@LaunchedEffect
         uiState = CatalogRailsUiState(loading = true)
-        val cachedState = withContext(Dispatchers.IO) {
-            loadCachedCatalogRails(
-                mediaType = mediaType,
-                genreSpecs = genreSpecs,
-                userId = authClient.getAuthenticatedUser()?.id,
-                localSettingsRepo = localSettingsRepo,
-                catalogTopCache = catalogTopCache,
-                metadataRepo = metadataRepo,
-                ratingsEnricher = ratingsEnricher,
-                trendingLabel = trendingLabel,
-                popularLabel = popularLabel,
-                topRatedLabel = topRatedLabel,
+
+        var lastState = CatalogRailsUiState(loading = true)
+        TV_CATALOG_RAIL_RETRY_DELAYS_MS.forEachIndexed { attempt, delayMs ->
+            if (delayMs > 0L) delay(delayMs)
+            val loadedState = withContext(Dispatchers.IO) {
+                loadCachedCatalogRails(
+                    mediaType = mediaType,
+                    genreSpecs = genreSpecs,
+                    userId = authClient.getAuthenticatedUser()?.id,
+                    localSettingsRepo = localSettingsRepo,
+                    catalogTopCache = catalogTopCache,
+                    metadataRepo = metadataRepo,
+                    ratingsEnricher = ratingsEnricher,
+                    trendingLabel = trendingLabel,
+                    popularLabel = popularLabel,
+                    topRatedLabel = topRatedLabel,
+                )
+            }
+            if (loadedState.rails.isNotEmpty()) {
+                uiState = loadedState
+                TvScreenCache.put(cacheKey, loadedState)
+                return@LaunchedEffect
+            }
+            lastState = loadedState
+            Log.i(
+                "TvCatalogRails",
+                "empty rails mediaType=$mediaType attempt=${attempt + 1}/${TV_CATALOG_RAIL_RETRY_DELAYS_MS.size} " +
+                    "error=${loadedState.error ?: "none"}",
             )
+            if (attempt < TV_CATALOG_RAIL_RETRY_DELAYS_MS.lastIndex) {
+                uiState = CatalogRailsUiState(loading = true)
+            }
         }
-        uiState = cachedState.also { TvScreenCache.put(cacheKey, it) }
+
+        val finalState = lastState.copy(
+            loading = false,
+            error = lastState.error ?: catalogContentLoadErrorMessage(mediaType),
+        )
+        uiState = finalState
+        TvScreenCache.put(cacheKey, finalState)
     }
 
     /*
@@ -547,6 +580,7 @@ internal fun TvCatalogRailsScreen(
             },
             shouldAutoFocus = shouldAutoFocus,
             browseLayout = browseLayout,
+            progressResolver = progressResolver,
             contextMenuActionsForItem = contextMenuActionsForItem,
             onContextMenuAction = onContextMenuAction,
             registerFocusHandle = registerFocusHandle,
@@ -1237,48 +1271,23 @@ private suspend fun loadCachedCatalogRails(
     }
 
     val fromNetwork = if (fromBootstrap.isEmpty() && fromCatalogTop.isEmpty()) {
-        runCatching {
-            buildList {
-                runCatching { metadataRepo.getTrending(mediaType).take(24) }
-                    .getOrDefault(emptyList())
-                    .takeIf { it.isNotEmpty() }
-                    ?.let { add(TvContentRail("trending_$mediaType", trendingLabel, it)) }
-                runCatching { metadataRepo.getPopular(mediaType).take(24) }
-                    .getOrDefault(emptyList())
-                    .takeIf { it.isNotEmpty() }
-                    ?.let { add(TvContentRail("popular_$mediaType", popularLabel, it)) }
-                runCatching { metadataRepo.getTopRated(mediaType).take(24) }
-                    .getOrDefault(emptyList())
-                    .takeIf { it.isNotEmpty() }
-                    ?.let { add(TvContentRail("top_rated_$mediaType", topRatedLabel, it)) }
-                genreSpecs.forEach { spec ->
-                    runCatching {
-                        metadataRepo.discover(
-                            type = mediaType,
-                            withGenres = spec.id.toString(),
-                        ).items.take(24)
-                    }
-                        .getOrDefault(emptyList())
-                        .takeIf { it.isNotEmpty() }
-                        ?.let {
-                            add(
-                                TvContentRail(
-                                    key = "genre_${mediaType}_${spec.id}",
-                                    title = spec.label,
-                                    items = it,
-                                ),
-                            )
-                        }
-                }
-            }.dedupeAcrossRails()
-        }.getOrElse {
-            return CatalogRailsUiState(
-                loading = false,
-                error = catalogContentLoadErrorMessage(mediaType),
-            )
-        }
+        loadLiveCatalogRails(
+            mediaType = mediaType,
+            genreSpecs = genreSpecs,
+            metadataRepo = metadataRepo,
+            trendingLabel = trendingLabel,
+            popularLabel = popularLabel,
+            topRatedLabel = topRatedLabel,
+        )
     } else {
         emptyList()
+    }
+
+    if (fromBootstrap.isEmpty() && fromCatalogTop.isEmpty() && fromNetwork.isEmpty()) {
+        return CatalogRailsUiState(
+            loading = false,
+            error = catalogContentLoadErrorMessage(mediaType),
+        )
     }
 
     if (fromNetwork.isNotEmpty()) {
@@ -1309,6 +1318,86 @@ private suspend fun loadCachedCatalogRails(
             .dedupeAcrossRails()
             .hydrateRailsFromRatingCache(ratingsEnricher),
     )
+}
+
+private suspend fun loadLiveCatalogRails(
+    mediaType: String,
+    genreSpecs: List<GenreSpec>,
+    metadataRepo: MetadataRepository,
+    trendingLabel: String,
+    popularLabel: String,
+    topRatedLabel: String,
+): List<TvContentRail> = coroutineScope {
+    val coreRails = listOf(
+        async {
+            fetchCatalogRailOrNull(
+                mediaType = mediaType,
+                key = "trending_$mediaType",
+                title = trendingLabel,
+            ) {
+                metadataRepo.getTrending(mediaType).take(TV_CATALOG_RAIL_ITEM_LIMIT)
+            }
+        },
+        async {
+            fetchCatalogRailOrNull(
+                mediaType = mediaType,
+                key = "popular_$mediaType",
+                title = popularLabel,
+            ) {
+                metadataRepo.getPopular(mediaType).take(TV_CATALOG_RAIL_ITEM_LIMIT)
+            }
+        },
+        async {
+            fetchCatalogRailOrNull(
+                mediaType = mediaType,
+                key = "top_rated_$mediaType",
+                title = topRatedLabel,
+            ) {
+                metadataRepo.getTopRated(mediaType).take(TV_CATALOG_RAIL_ITEM_LIMIT)
+            }
+        },
+    ).awaitAll().filterNotNull().dedupeAcrossRails()
+
+    if (coreRails.isNotEmpty()) {
+        Log.i("TvCatalogRails", "live core rails loaded mediaType=$mediaType rails=${coreRails.size}")
+        return@coroutineScope coreRails
+    }
+
+    val genreRails = genreSpecs.map { spec ->
+        async {
+            fetchCatalogRailOrNull(
+                mediaType = mediaType,
+                key = "genre_${mediaType}_${spec.id}",
+                title = spec.label,
+            ) {
+                metadataRepo.discover(
+                    type = mediaType,
+                    withGenres = spec.id.toString(),
+                ).items.take(TV_CATALOG_RAIL_ITEM_LIMIT)
+            }
+        }
+    }.awaitAll().filterNotNull().dedupeAcrossRails()
+
+    if (genreRails.isNotEmpty()) {
+        Log.i("TvCatalogRails", "live genre rails loaded mediaType=$mediaType rails=${genreRails.size}")
+    } else {
+        Log.w("TvCatalogRails", "live rails empty mediaType=$mediaType")
+    }
+    genreRails
+}
+
+private suspend fun fetchCatalogRailOrNull(
+    mediaType: String,
+    key: String,
+    title: String,
+    loadItems: suspend () -> List<MediaItem>,
+): TvContentRail? {
+    val items = runCatching { loadItems() }
+        .onFailure { error ->
+            Log.w("TvCatalogRails", "live rail failed mediaType=$mediaType key=$key error=${error::class.simpleName}")
+        }
+        .getOrDefault(emptyList())
+    return if (items.isEmpty()) null else TvContentRail(key, title, items)
 }
 
 private fun catalogRailTitle(

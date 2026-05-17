@@ -6,6 +6,7 @@ import com.torve.android.device.AndroidDeviceIdProvider
 import com.torve.android.i18n.AndroidPurchaseStringResolver
 import com.torve.android.premium.PremiumActionGate
 import com.torve.android.security.AndroidKeystoreSecretStore
+import com.torve.android.security.AndroidClientTrustSignalProvider
 import com.torve.android.security.AndroidSyncPayloadEncryptor
 import com.torve.android.security.AndroidTransferCryptoEngine
 import com.torve.android.sync.SyncCoordinator
@@ -28,6 +29,9 @@ val androidAppModule = module {
     single<SecureStorage> { get<AndroidKeystoreSecretStore>() }
     single<SyncPayloadEncryptor> { AndroidSyncPayloadEncryptor(get()) }
     single<DeviceIdProvider> { AndroidDeviceIdProvider(androidContext()) }
+    single<com.torve.domain.security.ClientTrustSignalProvider> {
+        AndroidClientTrustSignalProvider(androidContext(), get())
+    }
     single<PurchaseStringResolver> { AndroidPurchaseStringResolver(androidContext()) }
     single { PremiumActionGate(get(), get(), androidContext()) }
     single { TorveSyncApiClient(httpClient = get()) }

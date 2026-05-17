@@ -1,5 +1,7 @@
 package com.torve.platform
 
+import com.torve.domain.diagnostics.DiagnosticsRedactor
+
 object TorveRuntimeDebug {
     @Volatile
     var verboseLoggingEnabled: Boolean = false
@@ -7,6 +9,6 @@ object TorveRuntimeDebug {
 
 internal inline fun torveVerboseLog(message: () -> String) {
     if (TorveRuntimeDebug.verboseLoggingEnabled) {
-        println(message())
+        println(DiagnosticsRedactor.redact(message()))
     }
 }

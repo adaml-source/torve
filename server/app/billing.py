@@ -12,6 +12,7 @@ Premium access = any active lifetime OR any active non-expired subscription.
 """
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_ as sa_and, or_ as sa_or
@@ -33,6 +34,103 @@ SOURCE_GOOGLE_PLAY = "google_play"
 SOURCE_AMAZON = "amazon"
 SOURCE_ADMIN = "admin_grant"
 SOURCE_REBATE = "rebate_code"
+SOURCE_STRIPE = "stripe"
+
+STRIPE_PURCHASE_MONTHLY = "monthly"
+STRIPE_PURCHASE_LIFETIME = "lifetime"
+
+
+@dataclass(frozen=True)
+class StripePurchaseEligibility:
+    allowed: bool
+    error_code: str | None = None
+    message: str | None = None
+
+
+def _active_entitlements_for_user(db: Session, user_id: uuid.UUID) -> list[UserEntitlement]:
+    now = datetime.now(timezone.utc)
+    return db.query(UserEntitlement).filter(
+        UserEntitlement.user_id == user_id,
+        UserEntitlement.status == "active",
+        sa_or(
+            UserEntitlement.expires_at.is_(None),
+            UserEntitlement.expires_at > now,
+        ),
+    ).all()
+
+
+def evaluate_stripe_purchase_eligibility(
+    db: Session,
+    user_id: uuid.UUID,
+    purchase_type: str,
+) -> StripePurchaseEligibility:
+    """Check whether Stripe checkout is allowed for the current user.
+
+    This is the server-side source of truth for purchase blocking. Clients
+    may hide buttons, but checkout session creation must enforce the same
+    policy before touching Stripe.
+    """
+    normalized_purchase = (purchase_type or "").strip().lower()
+    if normalized_purchase not in {STRIPE_PURCHASE_MONTHLY, STRIPE_PURCHASE_LIFETIME}:
+        return StripePurchaseEligibility(
+            allowed=False,
+            error_code="stripe_invalid_purchase_type",
+            message="This purchase type is not supported.",
+        )
+
+    active = _active_entitlements_for_user(db, user_id)
+    if not active:
+        return StripePurchaseEligibility(allowed=True)
+
+    lifetime = [
+        ent for ent in active
+        if ent.entitlement_type == ENTITLEMENT_LIFETIME
+    ]
+    if lifetime:
+        if any(ent.source == SOURCE_STRIPE for ent in lifetime):
+            return StripePurchaseEligibility(
+                allowed=False,
+                error_code="stripe_lifetime_already_owned",
+                message="Lifetime premium is already active for this account.",
+            )
+        return StripePurchaseEligibility(
+            allowed=False,
+            error_code="stripe_cross_store_purchase_blocked",
+            message="Premium is already active from another purchase source.",
+        )
+
+    subscriptions = [
+        ent for ent in active
+        if ent.entitlement_type == ENTITLEMENT_SUBSCRIPTION
+    ]
+    if not subscriptions:
+        # Be conservative for any unknown active entitlement shape.
+        return StripePurchaseEligibility(
+            allowed=False,
+            error_code="stripe_purchase_not_allowed",
+            message="This account is not eligible for Stripe checkout.",
+        )
+
+    non_stripe_subscriptions = [
+        ent for ent in subscriptions
+        if ent.source != SOURCE_STRIPE
+    ]
+    if non_stripe_subscriptions:
+        return StripePurchaseEligibility(
+            allowed=False,
+            error_code="stripe_cross_store_purchase_blocked",
+            message="Premium is already active from another purchase source.",
+        )
+
+    # At this point the active paid source is Stripe monthly.
+    if normalized_purchase == STRIPE_PURCHASE_MONTHLY:
+        return StripePurchaseEligibility(
+            allowed=False,
+            error_code="stripe_duplicate_subscription",
+            message="A Stripe monthly subscription is already active.",
+        )
+
+    return StripePurchaseEligibility(allowed=True)
 
 
 def grant_entitlement(

@@ -48,9 +48,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.torve.android.R
+import com.torve.android.ui.components.MultiRatingPills
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Torve
 import com.torve.domain.model.Episode
+import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.Season
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -320,14 +322,24 @@ private fun EpisodeCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            episode.runtime?.let { rt ->
-                if (rt > 0) {
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        text = "${rt}m",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Torve.colors.textTertiary,
-                    )
+            val episodeRatings = episode.rating.takeIf { it > 0.0 }
+                ?.let { MediaRatings(tmdbScore = it.toFloat()) }
+            if ((episode.runtime ?: 0) > 0 || episodeRatings != null) {
+                Spacer(Modifier.height(2.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    episode.runtime?.takeIf { it > 0 }?.let { rt ->
+                        Text(
+                            text = "${rt}m",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Torve.colors.textTertiary,
+                        )
+                    }
+                    episodeRatings?.let { ratings ->
+                        MultiRatingPills(ratings = ratings)
+                    }
                 }
             }
         }

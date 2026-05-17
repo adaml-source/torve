@@ -19,6 +19,8 @@ import com.torve.platform.torveVerboseLog
 import kotlinx.datetime.Clock
 import com.torve.presentation.subscription.PremiumEntitlementRecord
 import com.torve.presentation.subscription.resolvePremiumEntitlement
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 internal object SubscriptionEntitlementCacheKeys {
     const val VERIFIED_PRINCIPAL = "subscription_backend_verified_principal"
@@ -66,18 +68,20 @@ class SubscriptionRepositoryImpl(
     private fun isSignedIn(): Boolean = authClient.authUserFlow.value != null
 
     override suspend fun getActiveSubscription(): Subscription? {
-        if (!isSignedIn()) return null
-        val row = database.torveQueries.getActiveSubscription(userId = uid()).executeAsOneOrNull()
-            ?: return null
-        return Subscription(
-            id = row.id,
-            tier = SubscriptionTier.valueOf(row.tier),
-            purchaseToken = row.purchase_token,
-            expiresAt = row.expires_at,
-            isActive = row.is_active == 1L,
-            platform = row.platform,
-            purchasedAt = row.purchased_at,
-        )
+        return withContext(Dispatchers.IO) {
+            if (!isSignedIn()) return@withContext null
+            val row = database.torveQueries.getActiveSubscription(userId = uid()).executeAsOneOrNull()
+                ?: return@withContext null
+            Subscription(
+                id = row.id,
+                tier = SubscriptionTier.valueOf(row.tier),
+                purchaseToken = row.purchase_token,
+                expiresAt = row.expires_at,
+                isActive = row.is_active == 1L,
+                platform = row.platform,
+                purchasedAt = row.purchased_at,
+            )
+        }
     }
 
     override suspend fun isPro(): Boolean {
@@ -100,17 +104,19 @@ class SubscriptionRepositoryImpl(
         if (!isSignedIn()) return
         val uid = uid()
         val now = Clock.System.now().toEpochMilliseconds()
-        database.torveQueries.deactivateAllSubscriptions(userId = uid)
-        database.torveQueries.insertSubscription(
-            user_id = uid,
-            id = "sub_$now",
-            tier = tier.name,
-            purchase_token = purchaseToken,
-            expires_at = null,
-            is_active = 1,
-            platform = "android",
-            purchased_at = now,
-        )
+        withContext(Dispatchers.IO) {
+            database.torveQueries.deactivateAllSubscriptions(userId = uid)
+            database.torveQueries.insertSubscription(
+                user_id = uid,
+                id = "sub_$now",
+                tier = tier.name,
+                purchase_token = purchaseToken,
+                expires_at = null,
+                is_active = 1,
+                platform = "android",
+                purchased_at = now,
+            )
+        }
     }
 
     override suspend fun ensureFreeTier() {
@@ -224,22 +230,14 @@ class SubscriptionRepositoryImpl(
 
     override suspend fun onBackendEntitlementGranted(isPremium: Boolean) {
         if (isPremium) {
-            cacheBackendAccessSnapshot(
-                hasPremiumEntitlement = true,
-                isDeviceActivated = true,
-                deviceBlockReason = null,
-            )
-            persistVerifiedPremiumTier()
+            // Store callbacks and Stripe redirects are not entitlement
+            // state. Re-read /me/access-state and persist only the
+            // backend's current answer.
+            refreshFromBackendDetailed()
         } else {
             clearCachedBackendPremiumAccess()
             persistFreeTier()
         }
-    }
-
-    private suspend fun persistVerifiedPremiumTier() {
-        val existing = getActiveSubscription()
-        if (existing?.isPro == true) return
-        activateSubscription(SubscriptionTier.LIFETIME, "backend_entitlement")
     }
 
     private suspend fun persistResolvedTier(resolved: com.torve.presentation.subscription.ResolvedPremiumEntitlement) {
@@ -250,34 +248,38 @@ class SubscriptionRepositoryImpl(
         if (!isSignedIn()) return
         val uid = uid()
         val now = Clock.System.now().toEpochMilliseconds()
-        database.torveQueries.deactivateAllSubscriptions(userId = uid)
-        database.torveQueries.insertSubscription(
-            user_id = uid,
-            id = "sub_backend_${resolved.tier.name.lowercase()}",
-            tier = resolved.tier.name,
-            purchase_token = "backend_entitlement",
-            expires_at = resolved.expiresAtEpochMs,
-            is_active = 1,
-            platform = resolved.sourceStore ?: "backend",
-            purchased_at = now,
-        )
+        withContext(Dispatchers.IO) {
+            database.torveQueries.deactivateAllSubscriptions(userId = uid)
+            database.torveQueries.insertSubscription(
+                user_id = uid,
+                id = "sub_backend_${resolved.tier.name.lowercase()}",
+                tier = resolved.tier.name,
+                purchase_token = "backend_entitlement",
+                expires_at = resolved.expiresAtEpochMs,
+                is_active = 1,
+                platform = resolved.sourceStore ?: "backend",
+                purchased_at = now,
+            )
+        }
     }
 
     private suspend fun persistFreeTier() {
         if (!isSignedIn()) return
         val uid = uid()
         val now = Clock.System.now().toEpochMilliseconds()
-        database.torveQueries.deactivateAllSubscriptions(userId = uid)
-        database.torveQueries.insertSubscription(
-            user_id = uid,
-            id = "sub_free",
-            tier = SubscriptionTier.FREE.name,
-            purchase_token = null,
-            expires_at = null,
-            is_active = 1,
-            platform = "android",
-            purchased_at = now,
-        )
+        withContext(Dispatchers.IO) {
+            database.torveQueries.deactivateAllSubscriptions(userId = uid)
+            database.torveQueries.insertSubscription(
+                user_id = uid,
+                id = "sub_free",
+                tier = SubscriptionTier.FREE.name,
+                purchase_token = null,
+                expires_at = null,
+                is_active = 1,
+                platform = "android",
+                purchased_at = now,
+            )
+        }
     }
 
     private suspend fun cacheBackendAccessSnapshot(

@@ -55,6 +55,7 @@ data class ParsedStream(
     val languages: List<String> = emptyList(),
     val recentSuccessCount: Int = 0,
     val lastSuccessfulResolveAt: Long? = null,
+    val accelerationMemoryId: String? = null,
     val accelerationSourceKey: String? = null,
     val accelerationProviderType: String? = null,
     val accelerationProvenanceKind: CandidateProvenanceKind? = null,
@@ -119,6 +120,9 @@ fun ParsedStream.isTorrentOrDebridStream(): Boolean =
             title.containsKnownTorrentProviderMarker() ||
             (isPandaStream() && directUrl != null)
         )
+
+fun ParsedStream.canUseGenericStreamHandoff(): Boolean =
+    !accelerationMemoryId.isNullOrBlank() && !isUsenetStream()
 
 fun String?.containsUsenetMarker(): Boolean {
     val value = this ?: return false

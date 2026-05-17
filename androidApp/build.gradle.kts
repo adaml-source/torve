@@ -101,14 +101,10 @@ android {
     }
 
     buildTypes {
-        debug {
-            buildConfigField("Boolean", "ALLOW_DEBUG_PREMIUM_BYPASS", "false")
-        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             signingConfig = signingConfigs.getByName("release")
-            buildConfigField("Boolean", "ALLOW_DEBUG_PREMIUM_BYPASS", "false")
             manifestPlaceholders["torveAllowBackup"] = "false"
             // Bundle native debug symbols (libmpv, FFmpeg) so Play Console
             // can symbolicate native crashes and ANRs. FULL includes full
@@ -274,8 +270,12 @@ dependencies {
 
     // Google Play Billing — Google flavor only
     "googleImplementation"("com.android.billingclient:billing-ktx:7.1.1")
+    // Google Play Integrity — Google flavor only. Used as a backend-verifiable
+    // trust signal; failures never grant or block access locally.
+    "googleImplementation"("com.google.android.play:integrity:1.4.0")
 
-    // Amazon Appstore IAP — Amazon flavor only
+    // Amazon Appstore IAP - excluded from the sideloaded Fire TV variant
+    // below because that build uses Stripe checkout.
     "amazonImplementation"("com.amazon.device:amazon-appstore-sdk:3.0.5")
 
     // Coroutines
@@ -293,4 +293,10 @@ dependencies {
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
+}
+
+configurations.configureEach {
+    if (name.startsWith("amazonTv", ignoreCase = true) && name.contains("RuntimeClasspath")) {
+        exclude(group = "com.amazon.device", module = "amazon-appstore-sdk")
+    }
 }

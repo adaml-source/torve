@@ -50,7 +50,12 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.CircularProgressIndicator
+import com.torve.data.ai.AiProvider
+import com.torve.data.ai.KeywordSearchService
+import com.torve.data.metadata.TmdbApiClient
+import com.torve.data.metadata.TmdbMappers
 import com.torve.desktop.ui.v2.movies.CatalogMediaType
+import com.torve.desktop.ui.v2.movies.V2CatalogAiResultsGrid
 import com.torve.desktop.ui.v2.movies.V2CatalogFilterBar
 import com.torve.desktop.ui.v2.seeall.SeeAllRequest
 import com.torve.desktop.ui.v2.movies.rememberExtraRails
@@ -58,6 +63,7 @@ import com.torve.desktop.ui.v2.movies.tvExtraRails
 import com.torve.domain.model.MediaItem
 import com.torve.domain.repository.MetadataRepository
 import com.torve.presentation.catalog.CatalogViewModel
+import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
 
 @Composable
@@ -74,13 +80,31 @@ fun V2ShowsPage(
     nzbIndexerType: String = "",
     nzbIndexerUrl: String = "",
     nzbIndexerApiKey: String = "",
+    aiProvider: AiProvider = AiProvider.CLAUDE,
+    aiApiKey: String = "",
+    onOpenAiProviderSettings: (() -> Unit)? = null,
+    keywordSearch: (() -> KeywordSearchService)? = null,
+    tmdb: (() -> TmdbApiClient)? = null,
 ) {
     val state by catalogViewModel.state.collectAsState()
     val colors = TorveDesktopThemeTokens.colors
     val nzbScope = rememberCoroutineScope()
     var pageSearchQuery by remember { mutableStateOf("") }
+    val aiProviderConfigured = aiApiKey.isNotBlank() && keywordSearch != null && tmdb != null
+    var aiMode by remember { mutableStateOf(false) }
+    var aiQuery by remember { mutableStateOf("") }
+    var aiLoading by remember { mutableStateOf(false) }
+    var aiError by remember { mutableStateOf<String?>(null) }
+    var aiItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
 
     LaunchedEffect(Unit) { if (!state.shelvesLoaded) catalogViewModel.loadCatalog() }
+    LaunchedEffect(aiProviderConfigured) {
+        if (!aiProviderConfigured) {
+            aiMode = false
+            aiItems = emptyList()
+            aiError = null
+        }
+    }
     LaunchedEffect(nzbTvCatalogService, nzbIndexerType, nzbIndexerUrl, nzbIndexerApiKey) {
         if (nzbTvCatalogService != null && nzbIndexerUrl.isNotBlank() && nzbIndexerApiKey.isNotBlank()) {
             nzbTvCatalogService.ensureLoaded(
@@ -95,6 +119,41 @@ fun V2ShowsPage(
     val nzbShows: List<com.torve.desktop.adult.NzbTvCatalogService.ShowCard> =
         if (nzbStateFlow != null) nzbStateFlow.collectAsState().value else emptyList()
     val extraRails = rememberExtraRails(metadataRepository, "tv")
+
+    fun runAiSearch(prompt: String) {
+        val search = keywordSearch ?: return
+        val tmdbClient = tmdb ?: return
+        if (prompt.isBlank() || !aiProviderConfigured) return
+        nzbScope.launch {
+            aiLoading = true
+            aiError = null
+            try {
+                val result = search().searchWithAi(aiProvider, aiApiKey, prompt)
+                val specific = result.specificItems
+                    .filter { it.mediaType == "tv" }
+                    .mapNotNull { item ->
+                        runCatching {
+                            TmdbMappers.tvToMediaItem(tmdbClient().getTvDetail(item.tmdbId))
+                        }.getOrNull()
+                    }
+                aiItems = specific.ifEmpty {
+                    tmdbClient().discoverTv(
+                        page = 1,
+                        sortBy = result.sortBy,
+                        withGenres = result.genreIds.takeIf { it.isNotEmpty() }?.joinToString(","),
+                        minRating = result.minRating,
+                        year = result.yearFrom,
+                        yearTo = result.yearTo,
+                    ).results.map(TmdbMappers::tvToMediaItem)
+                }
+            } catch (t: Throwable) {
+                aiError = t.message ?: "AI search failed."
+                aiItems = emptyList()
+            } finally {
+                aiLoading = false
+            }
+        }
+    }
 
     val heroItem = remember(state.trendingItems) { state.trendingItems.firstOrNull() }
     val backdrop = rememberCachedBitmap(heroItem?.backdropUrl)
@@ -125,7 +184,8 @@ fun V2ShowsPage(
             val isFilteredView = state.selectedGenreId != null ||
                 state.filter.isActive ||
                 state.providerId != null ||
-                pageSearchQuery.isNotBlank()
+                pageSearchQuery.isNotBlank() ||
+                aiMode
 
             if (isFilteredView) {
                 Column(Modifier.fillMaxSize()) {
@@ -135,13 +195,38 @@ fun V2ShowsPage(
                         mediaType = CatalogMediaType.TV,
                         searchQuery = pageSearchQuery,
                         onSearchQueryChange = { pageSearchQuery = it },
+                        aiProvider = aiProvider,
+                        aiProviderConfigured = aiProviderConfigured,
+                        aiMode = aiMode,
+                        aiQuery = aiQuery,
+                        aiLoading = aiLoading,
+                        onAiModeChange = { enabled ->
+                            aiMode = enabled
+                            if (!enabled) {
+                                aiItems = emptyList()
+                                aiError = null
+                            }
+                        },
+                        onAiQueryChange = { aiQuery = it },
+                        onRunAiSearch = { runAiSearch(aiQuery) },
+                        onOpenAiProviderSettings = onOpenAiProviderSettings,
                     )
-                    FilteredShowsGrid(
-                        catalogViewModel = catalogViewModel,
-                        onOpenDetail = onOpenDetail,
-                        searchQuery = pageSearchQuery,
-                        modifier = Modifier.weight(1f).fillMaxWidth(),
-                    )
+                    if (aiMode) {
+                        V2CatalogAiResultsGrid(
+                            items = aiItems,
+                            isLoading = aiLoading,
+                            error = aiError,
+                            onOpenDetail = onOpenDetail,
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                        )
+                    } else {
+                        FilteredShowsGrid(
+                            catalogViewModel = catalogViewModel,
+                            onOpenDetail = onOpenDetail,
+                            searchQuery = pageSearchQuery,
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                        )
+                    }
                 }
                 return@Box
             }
@@ -176,6 +261,15 @@ fun V2ShowsPage(
                     mediaType = CatalogMediaType.TV,
                     searchQuery = pageSearchQuery,
                     onSearchQueryChange = { pageSearchQuery = it },
+                    aiProvider = aiProvider,
+                    aiProviderConfigured = aiProviderConfigured,
+                    aiMode = aiMode,
+                    aiQuery = aiQuery,
+                    aiLoading = aiLoading,
+                    onAiModeChange = { enabled -> aiMode = enabled },
+                    onAiQueryChange = { aiQuery = it },
+                    onRunAiSearch = { runAiSearch(aiQuery) },
+                    onOpenAiProviderSettings = onOpenAiProviderSettings,
                 )
 
                 // Filtered path is handled above (separate Column without
